@@ -65,6 +65,43 @@ HTTP responses from a real spawned server, and
 `serve_media_never_builds_a_response_body_itself` keeps the funnel from growing
 a second exit.
 
+## The per-user cache directory is a validated id, never a path
+
+Layout: `<app_data_dir>/media-cache/<user_id>/<hash>.<ext>.enc`, with `_anon/`
+for the pre-sign-in window. The `<user_id>` segment is the id the Delivery
+Service returned from `verify-otp` — a server-chosen string on the **untrusted**
+side of the security model — and `set_pin`, `unlock` and `logout` hand it to
+`commands::r2::clear_media_cache(CacheScope::User(id))`, which empties that
+directory with `remove_dir_all` per entry. `Path::join` with an absolute
+component *replaces* the base and `..` walks out of it, so a DS answering
+`{"user_id": "/home/alice"}` used to have the mandatory set-PIN step empty the
+home directory.
+
+Two layers stop it, and they are the same check so they cannot drift:
+
+- **Chokepoint.** `commands::auth::accept_server_user_id` validates the id the
+  moment it is decoded — `util::is_safe_id`: `[A-Za-z0-9_-]{1,64}`, one plain
+  path component, so no separator, no `.`/`..`, no empty string. A malformed id
+  ends the sign-in before anything is written to `accounts.json` or the
+  keystore. It is a shape check rather than a strict ULID parse so accounts
+  whose id predates the ULID scheme keep working.
+- **At the join.** `r2::user_cache_dir(root, user)` is the only way an id
+  becomes a cache path (`media_cache_dir`, `clear_media_cache`,
+  `find_cached_file_for_user` all go through it) and returns `None` for
+  anything `is_safe_id` rejects — "no such directory", which every caller
+  already treats as "nothing there". `remove_dir_contents` and
+  `enforce_cache_cap_to` additionally canonicalize their target and refuse to
+  delete anywhere that is not the cache root (wipe-everything) or strictly
+  inside it (per-user wipe, eviction), so a future caller building its own path
+  cannot re-open the hole. `db::local::user_db_path` applies the same check to
+  `pollis_<user_id>.db`.
+
+`commands::r2::tests` drives `clear_media_cache` with `"/tmp/…"`, `"../…"`,
+`""`, `".."` against a real root and checks a sibling directory outside it
+survives; `commands::auth::server_user_id_is_not_a_path` runs `verify_otp`
+against an in-process hostile DS and checks the sign-in ends with nothing
+persisted (plus a positive control that a plain id gets past the check).
+
 ## The cache cap is enforced on writes, never on window focus (#930)
 
 The cache is capped at 500 MB and evicted oldest-mtime-first

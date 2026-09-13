@@ -22,7 +22,8 @@ reach:
 | `query-store-boundary.test.ts` | no `queryFn` writes to a MobX store; the exports #929 deleted stay deleted |
 | `message-window.test.ts` | no px load-more constant in `MessageList` (#934) |
 | `ui-inventory.test.ts` | `.codesight/wiki/ui.md`'s inventory is regenerated, not hand-patched (#933) |
-| `commands::r2::tests` (Rust) | the media-cache sweep never returns to window focus (#930) |
+| `commands::r2::tests` (Rust) | the media-cache sweep never returns to window focus (#930); a wipe or eviction never deletes outside the cache root, whatever `user_id` it is handed |
+| `commands::auth::server_user_id_is_not_a_path` (Rust) | a DS-minted `user_id` that is not one plain path component ends the sign-in before anything is persisted |
 | `no-plaintext-temp-files.test.ts` | the renderer never writes a user's file to a temp dir; `writeFile` is only ever aimed at a save-dialog path; a queued attachment's bytes are a user file **or** staged, never a path this app invented (#1000) |
 | `media_server::tests::serve_media_never_builds_a_response_body_itself` (Rust) | every response carrying decrypted media goes through the one builder that attaches `Cache-Control: no-store` (#1000) |
 

@@ -34,6 +34,24 @@ pub const MEDIA_CACHE_MAX_FILE_BYTES: u64 = 100 * 1024 * 1024;
 /// Set once at app startup from the Tauri shim (`app_data_dir()`).
 static MEDIA_CACHE_DIR: OnceLock<PathBuf> = OnceLock::new();
 
+/// The private temporary directory the test cache root lives in — held for the
+/// life of the process, since the root itself is a `OnceLock`.
+///
+/// A `TempDir` rather than a name under `std::env::temp_dir()`: the root's
+/// PARENT is a directory this process owns, so a test that hands the wipe a
+/// `".."` or an absolute sibling path can only ever reach into this directory,
+/// never into the shared temp dir (or anything else on the machine) — even if
+/// the guards it is testing were broken.
+#[cfg(test)]
+static TEST_CACHE_TEMP: OnceLock<tempfile::TempDir> = OnceLock::new();
+
+#[cfg(test)]
+pub(crate) fn test_cache_temp() -> &'static Path {
+    TEST_CACHE_TEMP
+        .get_or_init(|| tempfile::tempdir().expect("create private temp dir for the cache root"))
+        .path()
+}
+
 /// The one cache root every test in this binary shares.
 ///
 /// [`MEDIA_CACHE_DIR`] is a `OnceLock` — production installs it once at
@@ -41,9 +59,7 @@ static MEDIA_CACHE_DIR: OnceLock<PathBuf> = OnceLock::new();
 /// using their own user directory underneath this one instead.
 #[cfg(test)]
 pub(crate) fn test_cache_root() -> &'static Path {
-    let root = MEDIA_CACHE_DIR.get_or_init(|| {
-        std::env::temp_dir().join(format!("pollis-cache-root-{}", std::process::id()))
-    });
+    let root = MEDIA_CACHE_DIR.get_or_init(|| test_cache_temp().join("media-cache"));
     let _ = crate::private_fs::create_dir_all(root);
     root
 }
@@ -87,9 +103,61 @@ fn media_cache_dir() -> Result<PathBuf> {
         .ok()
         .and_then(|g| g.clone())
         .unwrap_or_else(|| "_anon".to_string());
-    let path = root.join(user);
+    let path = user_cache_dir(root, &user).ok_or_else(|| {
+        Error::Other(anyhow::anyhow!("media cache user is not a valid id; refusing to scope the cache"))
+    })?;
     let _ = crate::private_fs::create_dir_all(&path);
     Ok(path)
+}
+
+/// `<root>/<user>` — the ONLY way a user id becomes a cache directory.
+///
+/// `Path::join` with an absolute right-hand side replaces the base and `..`
+/// walks out of it, and the id arrives from the Delivery Service (`verify-otp`)
+/// by way of `accounts.json`. `commands::auth` rejects a malformed one at that
+/// chokepoint; this is the same check at the join, so an id that is not one
+/// plain path component never becomes a path at all and nothing below — the
+/// wipe, the cap sweep, the `create_dir_all` + chmod — can be pointed outside
+/// the root. `None` means "this user has no cache directory", which every
+/// caller already handles as "nothing there".
+fn user_cache_dir(root: &Path, user: &str) -> Option<PathBuf> {
+    if !crate::util::is_safe_id(user) {
+        return None;
+    }
+    let path = root.join(user);
+    // `is_safe_id` rules out separators, so this cannot fail; it is the
+    // structural statement of what the charset check is for.
+    if path.parent() != Some(root) {
+        return None;
+    }
+    Some(path)
+}
+
+/// Where `dir` sits relative to the cache root, as the filesystem sees it —
+/// after resolving `..` and symlinks on both sides. Both paths have to exist to
+/// be canonicalized; a `dir` that does not exist holds nothing to delete or
+/// evict, so `Outside` is the right answer for it too.
+#[derive(Debug, PartialEq, Eq)]
+enum CacheRootRelation {
+    /// `dir` IS the root.
+    Root,
+    /// `dir` is a strict descendant of the root.
+    Inside,
+    /// Anything else, including "cannot tell".
+    Outside,
+}
+
+fn relation_to_cache_root(root: &Path, dir: &Path) -> CacheRootRelation {
+    let (Ok(root), Ok(dir)) = (root.canonicalize(), dir.canonicalize()) else {
+        return CacheRootRelation::Outside;
+    };
+    if dir == root {
+        CacheRootRelation::Root
+    } else if dir.starts_with(&root) {
+        CacheRootRelation::Inside
+    } else {
+        CacheRootRelation::Outside
+    }
 }
 
 /// Map a MIME type to a file extension. Falls back to `bin`. Kept small —
@@ -167,7 +235,7 @@ pub fn find_cached_file(content_hash: &str) -> Option<(PathBuf, String)> {
 /// directory, nor `_anon` because the ambient user happened to be unset.
 pub(crate) fn find_cached_file_for_user(user_id: &str, content_hash: &str) -> Option<(PathBuf, String)> {
     let root = MEDIA_CACHE_DIR.get()?;
-    find_cached_file_in(&root.join(user_id), content_hash)
+    find_cached_file_in(&user_cache_dir(root, user_id)?, content_hash)
 }
 
 fn find_cached_file_in(dir: &Path, content_hash: &str) -> Option<(PathBuf, String)> {
@@ -232,6 +300,15 @@ fn enforce_cache_cap(dir: &Path) {
 /// and by the pre-write headroom check in `get_media_url`.
 fn enforce_cache_cap_to(dir: &Path, target_bytes: u64) {
     note_cache_dir_walk();
+    // Eviction deletes files. Only a per-user directory under the cache root
+    // is ever a legitimate target — the root itself holds directories, and
+    // anything else is a path this module must not have been handed.
+    let Some(root) = MEDIA_CACHE_DIR.get() else {
+        return;
+    };
+    if relation_to_cache_root(root, dir) != CacheRootRelation::Inside {
+        return;
+    }
     let entries = match std::fs::read_dir(dir) {
         Ok(rd) => rd,
         Err(_) => return,
@@ -341,13 +418,30 @@ pub fn clear_media_cache(scope: CacheScope<'_>) {
         None => return,
     };
     match scope {
-        CacheScope::User(user_id) => remove_dir_contents(&root.join(user_id)),
-        CacheScope::Everything => remove_dir_contents(root),
+        CacheScope::User(user_id) => {
+            // An id that is not one plain path component names no cache
+            // directory, so there is nothing to wipe. Joining it anyway is how
+            // a DS-chosen `"/home/alice"` used to become the target: `join`
+            // with an absolute component REPLACES the root.
+            if let Some(dir) = user_cache_dir(root, user_id) {
+                remove_dir_contents(root, &dir);
+            }
+        }
+        CacheScope::Everything => remove_dir_contents(root, root),
     }
 }
 
 /// Empty a directory of both files and subdirectories, keeping the directory.
-fn remove_dir_contents(dir: &Path) {
+///
+/// Refuses any `dir` that does not resolve to the cache `root` or a directory
+/// under it. `remove_dir_all` is the most destructive call in the client, and
+/// the callers above build `dir` from data that was, at some point, chosen by a
+/// server — so the proof that it is inside the root is made here, at the
+/// deletion, rather than trusted from the call site.
+fn remove_dir_contents(root: &Path, dir: &Path) {
+    if relation_to_cache_root(root, dir) == CacheRootRelation::Outside {
+        return;
+    }
     let entries = match std::fs::read_dir(dir) {
         Ok(rd) => rd,
         Err(_) => return,
@@ -1212,17 +1306,34 @@ mod tests {
 
     static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
 
-    /// A private directory for one test. Not `tempfile` — pollis-core does not
-    /// depend on it, and one `create_dir_all` is the whole requirement.
+    /// A private per-user directory for one test, under the shared cache root
+    /// — the cap sweep refuses to evict anywhere else.
     fn scratch_dir(tag: &str) -> PathBuf {
         let n = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!(
-            "pollis-r2-{tag}-{}-{n}",
-            std::process::id(),
-        ));
+        let dir = test_cache_root().join(format!("r2-{tag}-{n}"));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create scratch dir");
         dir
+    }
+
+    /// A directory OUTSIDE the cache root, holding a file and a populated
+    /// subdirectory — what `/home/alice` looks like to the wipe. Returns the
+    /// directory and the two paths that must still exist afterwards.
+    ///
+    /// A SIBLING of the root inside the private `test_cache_temp()`, never a
+    /// real shared directory: these tests hand the wipe paths that point at
+    /// it, and a test of a guard must not be able to do damage if the guard
+    /// is ever broken.
+    fn outside_dir(tag: &str) -> (PathBuf, PathBuf, PathBuf) {
+        let n = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
+        let dir = test_cache_temp().join(format!("outside-{tag}-{n}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("Documents")).expect("create outside dir");
+        let file = dir.join("notes.txt");
+        let nested = dir.join("Documents").join("thesis.txt");
+        std::fs::write(&file, b"not cache").expect("seed outside file");
+        std::fs::write(&nested, b"not cache either").expect("seed outside nested file");
+        (dir, file, nested)
     }
 
     /// Write `bytes` bytes to `<dir>/<name>`, then stamp its mtime so
@@ -1425,5 +1536,96 @@ mod tests {
             test_cache_root().exists(),
             "the cache root itself must stay so the next sign-in need not recreate it"
         );
+    }
+
+    // ── A server-chosen user id is not a path ─────────────────────────────
+    //
+    // `user_id` comes from the Delivery Service's verify-otp response and is
+    // persisted in `accounts.json`; `set_pin`, `unlock` and `logout` then pass
+    // it straight to `clear_media_cache(CacheScope::User(..))`. With
+    // `root.join(user_id)` that made the DS the author of the directory the
+    // wipe emptied: `Path::join` with an absolute component replaces the root,
+    // `..` walks out of it, and `""` names the root itself.
+
+    /// The wipe scoped to an id that is not one plain path component deletes
+    /// nothing — not outside the root, and not the other users' caches either.
+    #[test]
+    fn a_user_id_that_is_not_a_plain_component_wipes_nothing() {
+        let _serial = serialise_sweeps();
+        let (outside, file, nested) = outside_dir("wipe");
+        let other = seed_cache_entry("wipe-user-f", "ffff.png.enc");
+        let outside_name = outside.file_name().unwrap().to_str().unwrap().to_string();
+
+        // `root.join(abs)` == `abs`: the finding's `"/home/alice"`.
+        clear_media_cache(CacheScope::User(outside.to_str().unwrap()));
+        // `root.join("../<sibling>")`: walks out of the root.
+        clear_media_cache(CacheScope::User(&format!("../{outside_name}")));
+        clear_media_cache(CacheScope::User(&format!("wipe-user-f/../../{outside_name}")));
+        // `root.join("")` and `root.join("..")`: the root itself and its parent.
+        clear_media_cache(CacheScope::User(""));
+        clear_media_cache(CacheScope::User(".."));
+        clear_media_cache(CacheScope::User("."));
+
+        assert!(file.exists(), "the wipe deleted a file outside the cache root");
+        assert!(nested.exists(), "the wipe recursed into a directory outside the cache root");
+        assert!(
+            other.exists(),
+            "a malformed user id must not fall back to wiping every user's cache"
+        );
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    /// The deletion primitive itself refuses a directory outside the root, so
+    /// a future caller that builds its own path cannot re-open the hole.
+    #[test]
+    fn remove_dir_contents_refuses_anything_outside_the_root() {
+        let _serial = serialise_sweeps();
+        let (outside, file, nested) = outside_dir("primitive");
+
+        remove_dir_contents(test_cache_root(), &outside);
+        // The root's own parent (the private temp dir), which is where
+        // `root.join("..")` used to land.
+        remove_dir_contents(test_cache_root(), test_cache_temp());
+
+        assert!(file.exists());
+        assert!(nested.exists());
+        assert!(test_cache_root().exists(), "the parent sweep removed the root itself");
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    /// Eviction is a deletion too: pointed outside the root, or at the root
+    /// itself, it evicts nothing.
+    #[test]
+    fn the_cap_refuses_to_evict_outside_a_per_user_directory() {
+        let _serial = serialise_sweeps();
+        let (outside, file, nested) = outside_dir("cap");
+        write_aged(&outside, "old.png.enc", 400, 300);
+        let in_root = test_cache_root().join("loose.png.enc");
+        std::fs::write(&in_root, vec![0u8; 400]).expect("seed a file at the root");
+
+        enforce_cache_cap_to(&outside, 0);
+        enforce_cache_cap_to(test_cache_root(), 0);
+
+        assert!(file.exists());
+        assert!(nested.exists());
+        assert!(outside.join("old.png.enc").exists(), "the cap evicted outside the cache root");
+        assert!(in_root.exists(), "the cap swept the root itself");
+        let _ = std::fs::remove_dir_all(&outside);
+        let _ = std::fs::remove_file(&in_root);
+    }
+
+    /// The join is the chokepoint: only a plain id produces a directory, and
+    /// the one it produces is a direct child of the root.
+    #[test]
+    fn only_a_plain_id_resolves_to_a_cache_directory() {
+        let root = Path::new("/srv/pollis/media-cache");
+        assert_eq!(
+            user_cache_dir(root, "01JCACHEUSERLIFECYCLE0000"),
+            Some(root.join("01JCACHEUSERLIFECYCLE0000"))
+        );
+        assert_eq!(user_cache_dir(root, "_anon"), Some(root.join("_anon")));
+        for bad in ["", "/home/alice", "..", ".", "../x", "a/b", "a\\b", "a.b", "a b"] {
+            assert_eq!(user_cache_dir(root, bad), None, "{bad:?} must not resolve");
+        }
     }
 }

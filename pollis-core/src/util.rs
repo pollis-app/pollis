@@ -56,9 +56,66 @@ pub fn mask_email(email: &str) -> String {
     }
 }
 
+/// Longest string [`is_safe_id`] accepts. A ULID — what the Delivery Service
+/// mints for `user_id` and `device_id` — is 26 characters; the bound leaves room
+/// for any id shape the DS has ever handed out while keeping an id far too short
+/// to be anything but one filename.
+pub const MAX_SAFE_ID_LEN: usize = 64;
+
+/// Is `id` safe to use as a single path component?
+///
+/// Accepts `[A-Za-z0-9_-]{1,64}` and nothing else — no separators (`/`, `\`),
+/// no `.` (so neither `.` nor `..`), no whitespace, no NUL, nothing the OS could
+/// interpret. The point is where an id ends up: `media-cache/<user_id>/` and
+/// `pollis_<user_id>.db` are built with `Path::join`, and `Path::join` with an
+/// ABSOLUTE right-hand side replaces the base while `..` walks out of it. Every
+/// id a server hands the client (`verify-otp`'s `user_id` first of all) goes
+/// through this before it is persisted or joined onto anything, so a malicious
+/// or compromised Delivery Service cannot name `/home/alice` as an account and
+/// have the media-cache wipe empty it.
+///
+/// Deliberately a shape check rather than a strict ULID parse: the property the
+/// filesystem needs is "one plain component", and tightening to 26 Crockford
+/// characters would strand any account whose id predates the ULID scheme.
+pub fn is_safe_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= MAX_SAFE_ID_LEN
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What the DS actually mints, plus the shapes older or test accounts use.
+    #[test]
+    fn plain_ids_are_safe() {
+        assert!(is_safe_id("01JCACHEUSERLIFECYCLE0000"));
+        assert!(is_safe_id(&ulid::Ulid::new().to_string()));
+        assert!(is_safe_id("wipe-user-a"));
+        assert!(is_safe_id("u1"));
+        assert!(is_safe_id("_anon"));
+        assert!(is_safe_id(&"a".repeat(MAX_SAFE_ID_LEN)));
+    }
+
+    /// Everything `Path::join` could turn into a different directory.
+    #[test]
+    fn anything_that_could_be_a_path_is_not() {
+        assert!(!is_safe_id(""));
+        assert!(!is_safe_id("/home/alice"));
+        assert!(!is_safe_id("C:\\Users\\alice"));
+        assert!(!is_safe_id(".."));
+        assert!(!is_safe_id("."));
+        assert!(!is_safe_id("../../.."));
+        assert!(!is_safe_id("user/../.."));
+        assert!(!is_safe_id("user.db"));
+        assert!(!is_safe_id("user id"));
+        assert!(!is_safe_id("user\0id"));
+        assert!(!is_safe_id("üser"));
+        assert!(!is_safe_id(&"a".repeat(MAX_SAFE_ID_LEN + 1)));
+    }
 
     /// The same cases `pollis_delivery::redact`'s own tests pin, so the two
     /// copies cannot drift into disagreeing about what a masked address is.

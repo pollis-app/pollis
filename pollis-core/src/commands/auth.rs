@@ -204,7 +204,7 @@ async fn verify_otp_ds(
     let v =
         crate::commands::mls::decode_response::<pollis_api::otp::VerifyOtpBody>(resp).await?;
 
-    let user_id = v.user_id;
+    let user_id = accept_server_user_id(v.user_id)?;
     let username = v.username;
     let has_identity = v.has_identity;
     let session_token = v.session_token;
@@ -390,6 +390,31 @@ async fn reconcile_account_identity(
     {
         eprintln!("[auth] wipe_local_account_identity (non-fatal): {e}");
     }
+}
+
+/// The chokepoint where a Delivery-Service-minted `user_id` enters the client.
+///
+/// `verify-otp` is the only response whose `user_id` the client has not seen
+/// before, and everything downstream treats that string as a directory name:
+/// `accounts.json` → `set_pin` / `unlock` / `logout` →
+/// `r2::clear_media_cache(CacheScope::User(id))` → `root.join(id)` →
+/// `remove_dir_all` per entry, plus `pollis_<id>.db` and the per-user keystore
+/// slots. `Path::join` with an absolute id REPLACES the cache root, so a DS
+/// answering `{"user_id": "/home/alice", ...}` used to have the mandatory
+/// set-PIN step empty the home directory. The server is untrusted for exactly
+/// this kind of thing, so the id is checked here, before it is persisted or
+/// joined onto anything, and a bad one ends the sign-in. `r2` and `db::local`
+/// re-check at the join as defense in depth.
+fn accept_server_user_id(user_id: String) -> Result<String> {
+    if !crate::util::is_safe_id(&user_id) {
+        // Deliberately not echoing the value: it is attacker-chosen bytes.
+        return Err(anyhow::anyhow!(
+            "verify-otp returned a malformed user_id ({} bytes); refusing to sign in",
+            user_id.len()
+        )
+        .into());
+    }
+    Ok(user_id)
 }
 
 /// Resolve this device's stable `device_id` for `user_id`, persisting `candidate`
@@ -1155,12 +1180,11 @@ pub async fn logout(state: &Arc<AppState>, delete_data: bool) -> Result<()> {
             let _ = state.keystore.delete_for_user(DEVICE_ID_KEY, uid).await;
             let _ = state.keystore.delete_for_user(LOGIN_EMAIL_KEY, uid).await;
             let data_dir = crate::db::local::dirs_path();
-            let db_path = data_dir.join(format!("pollis_{uid}.db"));
-            if db_path.exists() {
+            if let Ok(db_path) = crate::db::local::user_db_path(&data_dir, uid) {
                 let _ = std::fs::remove_file(&db_path);
+                let _ = std::fs::remove_file(db_path.with_extension("db-wal"));
+                let _ = std::fs::remove_file(db_path.with_extension("db-shm"));
             }
-            let _ = std::fs::remove_file(data_dir.join(format!("pollis_{uid}.db-wal")));
-            let _ = std::fs::remove_file(data_dir.join(format!("pollis_{uid}.db-shm")));
             let _ = crate::accounts::remove_account(uid);
         }
     } else {
@@ -1241,12 +1265,11 @@ pub async fn delete_account(
     state.unload_user_db().await;
     {
         let data_dir = crate::db::local::dirs_path();
-        let db_path = data_dir.join(format!("pollis_{user_id}.db"));
-        if db_path.exists() {
+        if let Ok(db_path) = crate::db::local::user_db_path(&data_dir, &user_id) {
             let _ = std::fs::remove_file(&db_path);
+            let _ = std::fs::remove_file(db_path.with_extension("db-wal"));
+            let _ = std::fs::remove_file(db_path.with_extension("db-shm"));
         }
-        let _ = std::fs::remove_file(data_dir.join(format!("pollis_{user_id}.db-wal")));
-        let _ = std::fs::remove_file(data_dir.join(format!("pollis_{user_id}.db-shm")));
     }
 
     // Clear all keystore entries.
@@ -2065,6 +2088,125 @@ mod tests {
 /// The pure half of the account-creation contract. The DB-touching half lives in
 /// `tests/auth_account_creation.rs`, which needs its own process (libsql's local
 /// backend cannot initialise SQLite after rusqlite already has).
+/// The `user_id` a Delivery Service answers verify-otp with is a directory name
+/// to everything downstream, so a DS that chooses it maliciously must be
+/// stopped at the response — before `accounts.json`, before the keystore.
+#[cfg(test)]
+mod server_user_id_is_not_a_path {
+    use super::*;
+    use crate::config::Config;
+    use crate::keystore::{InMemoryKeystore, Keystore};
+    use pollis_api::DsRequest as _;
+
+    const HOSTILE_ID: &str = "/home/alice";
+
+    /// A Delivery Service that answers verify-otp with whatever `user_id` it
+    /// likes. Only that route exists: a sign-in that gets PAST the id check
+    /// fails on the next bootstrap post with a 404, which is how the tests tell
+    /// "refused at the chokepoint" from "refused for some other reason".
+    async fn hostile_ds(user_id: &'static str) -> String {
+        use axum::{routing::post, Json, Router};
+        let app = Router::new().route(
+            pollis_api::otp::VerifyOtpBody::PATH,
+            post(move || async move {
+                Json(pollis_api::otp::VerifyOtpResponse {
+                    user_id: user_id.to_string(),
+                    username: "alice".to_string(),
+                    is_new_account: true,
+                    has_identity: false,
+                    session_token: "otp-session".to_string(),
+                    session_expires_at: i64::MAX,
+                    account_id_pub: None,
+                })
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind loopback");
+        let port = listener.local_addr().expect("local addr").port();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve hostile DS");
+        });
+        format!("http://127.0.0.1:{port}")
+    }
+
+    async fn state_against(ds_url: String) -> (Arc<AppState>, Arc<dyn Keystore>) {
+        let mut config = Config::for_test().expect("test config");
+        config.pollis_delivery_url = Some(ds_url);
+        let keystore: Arc<dyn Keystore> = Arc::new(InMemoryKeystore::new());
+        (
+            Arc::new(AppState::new_with_parts(config, keystore.clone())),
+            keystore,
+        )
+    }
+
+    /// The finding: `{"user_id": "/home/alice"}` used to be accepted, written to
+    /// `accounts.json` as `last_active_user`, and handed to the media-cache
+    /// wipe at the mandatory set-PIN step. Now the sign-in ends here, and
+    /// nothing under that id exists anywhere on the device.
+    #[tokio::test]
+    async fn a_path_like_user_id_ends_the_sign_in_before_anything_is_persisted() {
+        let (state, keystore) = state_against(hostile_ds(HOSTILE_ID).await).await;
+
+        let err = verify_otp(&state, "alice@example.com".to_string(), "123456".to_string())
+            .await
+            .err()
+            .expect("a path-like user_id must be refused");
+        assert!(
+            err.to_string().contains("malformed user_id"),
+            "refused for the wrong reason: {err}"
+        );
+        assert!(
+            !err.to_string().contains(HOSTILE_ID),
+            "the attacker-chosen id must not be echoed into the error: {err}"
+        );
+
+        // Nothing was persisted under the hostile id: no device slot in the
+        // keystore, no account, and it is not who the next launch unlocks as.
+        assert!(keystore
+            .load_for_user(DEVICE_ID_KEY, HOSTILE_ID)
+            .await
+            .expect("keystore read")
+            .is_none());
+        assert!(state.device_id.lock().await.is_none());
+        let index = crate::accounts::read_accounts_index().unwrap_or_default();
+        assert!(!index.accounts.iter().any(|a| a.user_id == HOSTILE_ID));
+        assert_ne!(index.last_active_user.as_deref(), Some(HOSTILE_ID));
+    }
+
+    /// Positive control: the same hostile DS answering with a well-formed id
+    /// gets past the check — the sign-in then fails on `establish-identity`,
+    /// which this DS does not serve. Without this the test above could pass
+    /// because verify-otp was broken for everyone.
+    #[tokio::test]
+    async fn a_well_formed_user_id_gets_past_the_check() {
+        let (state, _keystore) = state_against(hostile_ds("01JWELLFORMEDULIDFORTEST00").await).await;
+
+        let err = verify_otp(&state, "alice@example.com".to_string(), "123456".to_string())
+            .await
+            .err()
+            .expect("the fake DS serves no establish-identity, so bootstrap fails");
+        assert!(
+            !err.to_string().contains("malformed user_id"),
+            "a plain id was refused as malformed: {err}"
+        );
+    }
+
+    #[test]
+    fn the_chokepoint_accepts_exactly_what_is_safe_id_accepts() {
+        assert_eq!(
+            accept_server_user_id("01JCACHEUSERLIFECYCLE0000".to_string()).ok().as_deref(),
+            Some("01JCACHEUSERLIFECYCLE0000")
+        );
+        for bad in ["", "/home/alice", "..", "../../..", "a/b", "a.b"] {
+            assert!(
+                accept_server_user_id(bad.to_string()).is_err(),
+                "{bad:?} must be refused"
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod canonical_email_tests {
     use super::*;
