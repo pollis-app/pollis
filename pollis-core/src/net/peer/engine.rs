@@ -27,11 +27,14 @@
 //!
 //! # Rate limiting
 //!
-//! Per-IP limits are disabled here and per-account limits do the work. Every
-//! stream arrives through the bridge, so its source address is loopback and
-//! identifies nothing; keying limits on it would lump every account behind one
-//! bucket. This is the same reasoning (and the same outcome) as Phase A's
-//! `admit_account_only` for streams that arrive via `Extend`.
+//! Per-IP limits are lifted here and per-account limits do the work. Every
+//! stream — and every connection — arrives through the bridge, so its source
+//! address is loopback and identifies nothing; keying limits on it would lump
+//! every account behind one bucket. The global connection cap
+//! ([`MAX_CONCURRENT_CONNECTIONS`]) is the bound on what the bridge may carry.
+//! (A first-party node does the opposite and keys layered streams on the
+//! previous hop's address too, because there an opening `Layer` can come from
+//! anyone; here nothing but the bridge can reach the engine at all.)
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
@@ -180,6 +183,9 @@ impl PeerEngine {
         config.allow_extend = true;
         config.revocations = revocations;
         config.max_concurrent_connections = MAX_CONCURRENT_CONNECTIONS;
+        // Every connection arrives from loopback, so a per-IP connection cap
+        // would just be a second, lower global cap — the global one is the one.
+        config.max_connections_per_ip = u32::MAX;
         config.rate_limits = RateLimitConfig {
             // Loopback source addresses identify nothing behind the bridge; the
             // per-account limits below are the real bound (see the module docs).
@@ -417,7 +423,9 @@ mod tests {
     ) {
         let mut config = RelayConfig::new(
             "127.0.0.1:0".parse().unwrap(),
-            Allowlist::from_patterns([ORIGIN_NAME]),
+            // The test origin listens on a random port, so the entry says so
+            // — a bare host would mean 443 only.
+            Allowlist::from_patterns([format!("{ORIGIN_NAME}:*")]),
         )
         .unwrap();
         config.revocations = crate::net::testing::healthy_revocations();

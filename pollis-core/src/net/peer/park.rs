@@ -651,7 +651,8 @@ mod tests {
     fn spawn_first_party_relay() -> (SocketAddr, CertificateDer<'static>, JoinHandle<()>) {
         let mut config = RelayConfig::new(
             "127.0.0.1:0".parse().unwrap(),
-            Allowlist::from_patterns([ORIGIN_NAME]),
+            // The test origin listens on a random port; a bare host means 443.
+            Allowlist::from_patterns([format!("{ORIGIN_NAME}:*")]),
         )
         .unwrap();
         config.revocations = crate::net::testing::healthy_revocations();

@@ -70,7 +70,10 @@ pub use proto::{ClientFrame, DeviceCertMaterial, Park, RejectReason, VerifiedCli
 // Re-exported so consumers (pollis-core's `net::overlay`) can name the pinned
 // relay leaf type without taking a direct `rustls`/`rustls-pki-types` dependency.
 pub use rustls::pki_types::CertificateDer;
-pub use ratelimit::{RateLimitConfig, RateLimiter};
-pub use server::{Allowlist, HostPattern, PeerObserver, RelayConfig, RelayServer, RelayStats};
+pub use ratelimit::{ConnectionLimiter, RateLimitConfig, RateLimiter};
+pub use server::{
+    Allowlist, HostPattern, PeerObserver, PortPattern, RelayConfig, RelayServer, RelayStats,
+    DEFAULT_ALLOWED_PORT,
+};
 pub use shim::{OverlayHandle, OverlayShim};
 pub use stream::{BoxedStream, RelayStream};

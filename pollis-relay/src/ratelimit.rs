@@ -11,6 +11,21 @@
 //! counters on drop, so the accounting self-heals when a pipe closes for any
 //! reason. On breach the caller returns a clean `Rejected(RateLimited)` rather
 //! than dropping the stream.
+//!
+//! Every admission is keyed on an IP. There is no account-only path: a stream
+//! that reaches this node inside an onion layer is keyed on the address of the
+//! QUIC peer that carried it — the previous relay, or whoever is *claiming* to be
+//! one, since an opening `Layer` frame is unauthenticated and any client can send
+//! it. An account-only path would let that client escape every per-IP bound by
+//! prefixing one frame, and with self-minted accounts the per-account bound is
+//! not a bound at all (`docs/relay-operations.md` §2). The cost is that a busy
+//! guard's fan-in to one exit is bounded per IP too; operators size
+//! `max_concurrent_per_ip` / `new_circuits_per_min_per_ip` for that fan-in.
+//!
+//! A second, coarser limiter — [`ConnectionLimiter`] — bounds **QUIC
+//! connections** per source IP before any stream exists. A connection is the
+//! unit of an unauthenticated attacker's cost: it needs no handshake frame, only
+//! keep-alives, so nothing above the transport would ever see it.
 
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -137,39 +152,7 @@ impl RateLimiter {
 
         Some(CircuitGuard {
             limiter: self.clone(),
-            ip: Some(ip),
-            account,
-        })
-    }
-
-    /// Admit a circuit that reached this relay through **another relay** (a
-    /// multi-hop `Extend`), applying only the per-account limits.
-    ///
-    /// The per-IP limits are deliberately skipped: the source address of such a
-    /// stream belongs to the previous hop, not to a client, so keying on it would
-    /// make one busy guard's traffic throttle every account behind it — and it
-    /// identifies nothing worth limiting. The per-account limits still apply and
-    /// are the ones that matter, since they bound what a single captured device
-    /// can do to the first-party services at the end of the circuit.
-    pub fn admit_account_only(self: &Arc<Self>, account: [u8; 32]) -> Option<CircuitGuard> {
-        if !self.reserve_account(account) {
-            return None;
-        }
-        let now = Instant::now();
-        let account_ok = self
-            .account_buckets
-            .lock()
-            .unwrap()
-            .entry(account)
-            .or_insert_with(|| TokenBucket::new(self.cfg.new_circuits_per_min_per_account, now))
-            .try_take(now);
-        if !account_ok {
-            self.release_account(account);
-            return None;
-        }
-        Some(CircuitGuard {
-            limiter: self.clone(),
-            ip: None,
+            ip,
             account,
         })
     }
@@ -216,20 +199,82 @@ impl RateLimiter {
 }
 
 /// Held for a circuit's lifetime; frees the per-IP and per-account concurrency
-/// slots when dropped. `ip` is `None` for a circuit admitted via
-/// [`RateLimiter::admit_account_only`], which reserved no per-IP slot.
+/// slots when dropped. Every guard holds a per-IP slot — there is no way to
+/// build one without an address, which is what makes "a circuit that no per-IP
+/// limit counts" unrepresentable rather than merely avoided.
 pub struct CircuitGuard {
     limiter: Arc<RateLimiter>,
-    ip: Option<IpAddr>,
+    ip: IpAddr,
     account: [u8; 32],
 }
 
 impl Drop for CircuitGuard {
     fn drop(&mut self) {
-        if let Some(ip) = self.ip {
-            self.limiter.release_ip(ip);
-        }
+        self.limiter.release_ip(self.ip);
         self.limiter.release_account(self.account);
+    }
+}
+
+/// Bounds simultaneously-open **QUIC connections** per source IP.
+///
+/// Applied at accept, after QUIC address validation has proved the source can
+/// receive at that address (so a spoofed Initial never reaches it), and before
+/// the handshake runs — so the cost of holding a slot is borne by the address
+/// that holds it. Every slot is released by dropping its [`ConnectionSlot`].
+pub struct ConnectionLimiter {
+    max_per_ip: u32,
+    active: Mutex<HashMap<IpAddr, u32>>,
+}
+
+impl ConnectionLimiter {
+    pub fn new(max_per_ip: u32) -> Arc<Self> {
+        Arc::new(ConnectionLimiter {
+            // Zero would refuse every connection; the accept loop treats the cap
+            // as "at least one", the same way it treats the global cap.
+            max_per_ip: max_per_ip.max(1),
+            active: Mutex::new(HashMap::new()),
+        })
+    }
+
+    /// Take a connection slot for `ip`, or `None` if it is at its cap.
+    pub fn acquire(self: &Arc<Self>, ip: IpAddr) -> Option<ConnectionSlot> {
+        let mut map = self.active.lock().unwrap();
+        let n = map.entry(ip).or_insert(0);
+        if *n >= self.max_per_ip {
+            return None;
+        }
+        *n += 1;
+        Some(ConnectionSlot {
+            limiter: self.clone(),
+            ip,
+        })
+    }
+
+    /// Connections currently holding a slot for `ip`.
+    pub fn active(&self, ip: IpAddr) -> u32 {
+        self.active.lock().unwrap().get(&ip).copied().unwrap_or(0)
+    }
+
+    fn release(&self, ip: IpAddr) {
+        let mut map = self.active.lock().unwrap();
+        if let Some(n) = map.get_mut(&ip) {
+            *n = n.saturating_sub(1);
+            if *n == 0 {
+                map.remove(&ip);
+            }
+        }
+    }
+}
+
+/// One QUIC connection's per-IP slot; released on drop.
+pub struct ConnectionSlot {
+    limiter: Arc<ConnectionLimiter>,
+    ip: IpAddr,
+}
+
+impl Drop for ConnectionSlot {
+    fn drop(&mut self) {
+        self.limiter.release(self.ip);
     }
 }
 
@@ -286,5 +331,39 @@ mod tests {
         let _g1 = rl.admit(ip(), [1u8; 32]).expect("acct 1");
         // A different account is unaffected by acct 1's concurrency use.
         assert!(rl.admit(ip(), [2u8; 32]).is_some());
+    }
+
+    #[test]
+    fn per_ip_cap_binds_across_accounts() {
+        let cfg = RateLimitConfig {
+            max_concurrent_per_ip: 1,
+            ..Default::default()
+        };
+        let rl = RateLimiter::new(cfg);
+        let _g1 = rl.admit(ip(), [1u8; 32]).expect("first from this IP");
+        // A fresh (self-minted) account buys nothing: the IP is at its cap.
+        assert!(rl.admit(ip(), [2u8; 32]).is_none(), "IP cap must not be escapable by account");
+    }
+
+    #[test]
+    fn connection_limiter_caps_per_ip_and_frees_on_drop() {
+        let cl = ConnectionLimiter::new(2);
+        let other = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+        let s1 = cl.acquire(ip()).expect("1st");
+        let _s2 = cl.acquire(ip()).expect("2nd");
+        assert!(cl.acquire(ip()).is_none(), "3rd connection from one IP is over the cap");
+        assert_eq!(cl.active(ip()), 2);
+        // Another address is independent.
+        let _o = cl.acquire(other).expect("other IP unaffected");
+        drop(s1);
+        assert_eq!(cl.active(ip()), 1);
+        assert!(cl.acquire(ip()).is_some(), "slot frees on drop");
+    }
+
+    #[test]
+    fn connection_limiter_zero_means_one() {
+        let cl = ConnectionLimiter::new(0);
+        let _held = cl.acquire(ip()).expect("a zero cap must not refuse everyone");
+        assert!(cl.acquire(ip()).is_none());
     }
 }

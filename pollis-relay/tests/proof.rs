@@ -94,7 +94,8 @@ struct TestRelay {
 fn spawn_relay(allow: &[&str], overrides: &[(&str, IpAddr)]) -> TestRelay {
     let mut config = RelayConfig::new(
         "127.0.0.1:0".parse().unwrap(),
-        Allowlist::from_patterns(allow.iter().copied()),
+        // Test origins listen on random ports; a bare host would mean 443.
+        Allowlist::from_patterns(allow.iter().map(|h| format!("{h}:*"))),
     )
     .unwrap();
     for (host, ip) in overrides {
@@ -544,7 +545,8 @@ async fn t6_off_mode_client_is_direct() {
 #[tokio::test]
 async fn t7_rate_limit_trips_to_rejected() {
     let (echo_addr, _c) = spawn_echo().await;
-    let allow = [echo_addr.ip().to_string()];
+    // Exact host:port — the shape a deployed allowlist entry has.
+    let allow = [format!("{}:{}", echo_addr.ip(), echo_addr.port())];
     let mut config = RelayConfig::new(
         "127.0.0.1:0".parse().unwrap(),
         Allowlist::from_patterns(allow.iter().map(|s| s.as_str())),
@@ -610,7 +612,8 @@ async fn t8_graceful_shutdown_drains() {
     use tokio::sync::oneshot;
 
     let (echo_addr, _c) = spawn_echo().await;
-    let allow = [echo_addr.ip().to_string()];
+    // Exact host:port — the shape a deployed allowlist entry has.
+    let allow = [format!("{}:{}", echo_addr.ip(), echo_addr.port())];
     let config = RelayConfig::new(
         "127.0.0.1:0".parse().unwrap(),
         Allowlist::from_patterns(allow.iter().map(|s| s.as_str())),
