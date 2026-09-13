@@ -94,3 +94,9 @@ variable "revocation_url" {
   type        = string
   default     = ""
 }
+
+variable "directory_url" {
+  description = "URL of the signed relay directory — the SAME artifact clients pin. A node extends a circuit only to an address the current directory lists, so this is required (with directory_key_b64) for this node to be a middle hop. Empty = single-hop only, which is honest rather than fail-open."
+  type        = string
+  default     = ""
+}

@@ -11,9 +11,12 @@
 //!   against the **static allowlist** (policy, not protocol — design §14.0),
 //!   TCP-dials the target, and pipes bytes until either side closes. It never
 //!   terminates the inner TLS — it forwards opaque bytes only (design §8).
-//! - **`Extend`** (v4+) — this node is a middle hop. It checks the next hop
-//!   against the live **revocation** store (#813 Phase C — fail-closed, and a
-//!   node with no directory key configured admits nothing, so it cannot extend
+//! - **`Extend`** (v4+) — this node is a middle hop. It checks the named
+//!   address against the **signed directory** ([`crate::nexthop`] — a next hop
+//!   the pool never published, a private/loopback address, or this node itself
+//!   is refused before any socket is opened) and against the live
+//!   **revocation** store (#813 Phase C — fail-closed, and a node with no
+//!   directory key configured admits nothing, so it cannot extend
 //!   at all), opens a QUIC connection to the named next relay (pinning the
 //!   fingerprint the frame carries), re-checks the identity the peer actually
 //!   presented, announces itself with a `Layer` frame, and splices the two
@@ -46,9 +49,9 @@
 //!
 //! The allowlist is enforced on `Connect` at whichever node receives it, which is
 //! by construction the last hop — so the closed-overlay guarantee (§1.2) holds
-//! for every path length. `Extend` is not an allowlist bypass: it reaches relays,
-//! never destinations, and the only thing that comes back out of it is more
-//! ciphertext.
+//! for every path length. `Extend` is not an allowlist bypass: it reaches relays
+//! the signed directory published and nothing else, never destinations, and the
+//! only thing that comes back out of it is more ciphertext.
 //!
 //! Deployability (Slice 2a): a global concurrent-connection cap, in-memory rate
 //! limiting, and **graceful shutdown** (stop accepting, drain in-flight pipes to
@@ -77,6 +80,7 @@ use tokio::task::JoinHandle;
 use tokio_rustls::TlsAcceptor;
 
 use crate::anchor::AnchorPolicy;
+use crate::nexthop::NextHopDirectory;
 use crate::onion;
 use crate::park::{ParkedPeer, ParkedPeers, Tunnel};
 use crate::policy::{RelayIdentity, RevocationStore};
@@ -400,6 +404,23 @@ pub struct RelayConfig {
     /// and the existing per-account limits cap how many a device may hold open.
     /// An operator who wants a node to be last-hop-only sets this `false`.
     pub allow_extend: bool,
+    /// Which addresses this node will open a next leg to (see
+    /// [`crate::nexthop`]). Defaults to [`NextHopDirectory::unconfigured`],
+    /// which permits **nothing** — a node that cannot check a next hop against
+    /// the signed directory is not a middle hop, exactly as one that cannot
+    /// evaluate revocation is not. `allow_extend` is the coarse switch ("never
+    /// be a middle hop"); this is "be one only for hops the pool published".
+    pub next_hops: NextHopDirectory,
+    /// Let an `Extend` name a loopback/private/link-local address that the
+    /// directory lists. **Test rigs and lab pools only** — a public pool's
+    /// relays are on public addresses, and leaving this `false` is what stops a
+    /// mis-signed directory from turning every node into an intranet dialer.
+    pub allow_private_next_hops: bool,
+    /// How long opening the next leg — the dial (or parked-peer splice), its
+    /// QUIC handshake, and the `Layer` acknowledgement — may take before the
+    /// `Extend` is refused. Without it a client can park a task, a circuit slot
+    /// and an outbound socket on this node by naming an address that blackholes.
+    pub extend_dial_timeout: Duration,
     /// Live relay revocation (#813 Phase C), consulted before this node hands a
     /// circuit to a next hop.
     ///
@@ -445,6 +466,11 @@ impl RelayConfig {
             max_connections_per_ip: crate::config::DEFAULT_MAX_CONNECTIONS_PER_IP,
             first_frame_timeout: Duration::from_secs(crate::config::DEFAULT_FIRST_FRAME_TIMEOUT_SECS),
             allow_extend: true,
+            next_hops: NextHopDirectory::unconfigured(),
+            allow_private_next_hops: false,
+            extend_dial_timeout: Duration::from_secs(
+                crate::config::DEFAULT_EXTEND_DIAL_TIMEOUT_SECS,
+            ),
             revocations: RevocationStore::unconfigured(),
             anchor: AnchorPolicy::Ignore,
             parked: ParkedPeers::new(),
@@ -467,6 +493,12 @@ struct RelayInner {
     first_frame_timeout: Duration,
     stats: Arc<RelayStats>,
     allow_extend: bool,
+    next_hops: NextHopDirectory,
+    allow_private_next_hops: bool,
+    extend_dial_timeout: Duration,
+    /// This node's own QUIC leaf, so its own directory entry is recognisable —
+    /// a hop to ourselves is a loop, never a next hop.
+    own_leaf_der: Vec<u8>,
     revocations: RevocationStore,
     anchor: AnchorPolicy,
     parked: Arc<ParkedPeers>,
@@ -562,6 +594,10 @@ impl RelayServer {
             first_frame_timeout: config.first_frame_timeout,
             stats: config.stats,
             allow_extend: config.allow_extend,
+            next_hops: config.next_hops,
+            allow_private_next_hops: config.allow_private_next_hops,
+            extend_dial_timeout: config.extend_dial_timeout,
+            own_leaf_der: config.identity.cert_der.as_ref().to_vec(),
             revocations: config.revocations,
             anchor: config.anchor,
             parked: config.parked,
@@ -1122,6 +1158,28 @@ async fn serve_extend<S: DuplexStream>(
 
     let parked = inner.parked.lookup(&extend.next_cert_sha256);
 
+    // The address bound (#813). A parked peer is exempt because there is no
+    // dial to bound: the frame's fingerprint selected a connection that peer
+    // ALREADY opened to this node, and the leg rides a loopback tunnel onto it.
+    // For every other `Extend` this is the same kind of check the allowlist
+    // makes on a `Connect` — the frame carries an arbitrary address, and the
+    // node decides what it is willing to open a socket to.
+    if parked.is_none() {
+        let verdict = inner.next_hops.verdict(
+            extend.addr,
+            &inner.own_leaf_der,
+            proto::now_unix(),
+            inner.allow_private_next_hops,
+        );
+        if !verdict.allowed() {
+            // The reason is a class, never the address: a relay records nothing
+            // about who asked it for what (§5.2, §11.7).
+            tracing::debug!("relay: refusing to extend — {}", verdict.reason());
+            reject(&mut stream, &inner.stats, RejectReason::ExtendFailed, version).await;
+            return Ok(());
+        }
+    }
+
     // Live revocation (#813 Phase C), BEFORE the dial or the splice, so a seized
     // next hop is never even contacted. `admitted()` is the single fail-closed
     // encoding: `Unevaluable` — no list held, expired at USE time, or no
@@ -1146,7 +1204,16 @@ async fn serve_extend<S: DuplexStream>(
     let spliced = parked.is_some();
     // `_tunnel` is held for the life of the splice: dropping the last handle
     // tears down the loopback pump the tunnelled QUIC is riding on.
-    let (mut next, _tunnel) = match open_extend_leg(&inner, &extend, parked).await {
+    // Bounded: an address that swallows packets must cost this node one refusal
+    // after a deadline, not a task, a circuit slot and an outbound socket held
+    // for as long as the client keeps its own stream open.
+    let leg = tokio::time::timeout(
+        inner.extend_dial_timeout,
+        open_extend_leg(&inner, &extend, parked),
+    )
+    .await
+    .unwrap_or_else(|_| Err(anyhow::anyhow!("next hop did not answer in time")));
+    let (mut next, _tunnel) = match leg {
         Ok(leg) => leg,
         Err(e) => {
             tracing::debug!("relay: extend to {} failed: {e}", extend.addr);

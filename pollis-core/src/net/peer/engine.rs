@@ -18,29 +18,47 @@
 //! empty, and the allowlist is checked on the `Connect` frame — the only frame
 //! that names a destination — *before* any socket is opened. So a peer that is
 //! handed a `Connect` refuses it with `NotAllowed` and never dials anything, no
-//! matter who sent it or what path selection intended. `allow_extend` stays
-//! `true`: extending to another **relay** is the peer's whole job, and `Extend`
-//! carries a relay address plus a pinned cert fingerprint, never a destination.
-//! `o1_*` in `pollis-relay/tests/onion.rs` proves the same property for
-//! first-party middles; [`tests::a_peer_cannot_be_a_circuits_exit`] proves it for
-//! this configuration.
+//! matter who sent it or what path selection intended. `o1_*` in
+//! `pollis-relay/tests/onion.rs` proves the same property for first-party
+//! middles; [`tests::a_peer_cannot_be_a_circuits_exit`] proves it for this
+//! configuration.
+//!
+//! # …and it is not a dialer either
+//!
+//! Extending to another **relay** is the peer's whole job, so `allow_extend` is
+//! on — but only when the device can say what a relay *is*. `Extend` carries a
+//! bare address the client chose, so an engine that honoured it unconditionally
+//! would let anyone make a volunteer's laptop open a QUIC connection to any
+//! address, inside that volunteer's own network. The engine therefore takes a
+//! [`NextHopDirectory`] and turns `allow_extend` on **only** when it is
+//! configured: no signed directory, no middle-hop role. On top of that the
+//! address must be public unicast — the peer's next hop is a first-party relay
+//! on a public address, never something on the volunteer's LAN.
 //!
 //! # Rate limiting
 //!
-//! Per-IP limits are lifted here and per-account limits do the work. Every
-//! stream — and every connection — arrives through the bridge, so its source
-//! address is loopback and identifies nothing; keying limits on it would lump
-//! every account behind one bucket. The global connection cap
-//! ([`MAX_CONCURRENT_CONNECTIONS`]) is the bound on what the bridge may carry.
-//! (A first-party node does the opposite and keys layered streams on the
-//! previous hop's address too, because there an opening `Layer` can come from
-//! anyone; here nothing but the bridge can reach the engine at all.)
+//! Per-IP limits do no *discriminating* here and per-account limits do the
+//! work. Every stream — and every connection — arrives through the bridge, so
+//! its source address is loopback and identifies nothing; keying limits on it
+//! would lump every account behind one bucket. (A first-party node does the
+//! opposite and keys layered streams on the previous hop's address too, because
+//! there an opening `Layer` can come from anyone; here nothing but the bridge
+//! can reach the engine at all.)
+//!
+//! They are still **finite**, sized so the loopback bucket can never be what
+//! refuses legitimate traffic: `u32::MAX` would have been a bound that stops
+//! existing the moment something other than the bridge reaches the engine, and
+//! a limit that is only correct because of a fact stated in a comment is the
+//! kind that quietly stops holding. The global connection cap
+//! ([`MAX_CONCURRENT_CONNECTIONS`]) is still the bound on what the bridge may
+//! carry.
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use pollis_relay::nexthop::NextHopDirectory;
 use pollis_relay::server::{Allowlist, RelayConfig, RelayServer, RelayStats};
 use pollis_relay::tls;
 use pollis_relay::CertificateDer;
@@ -70,6 +88,17 @@ const DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 /// Concurrent QUIC connections the engine will carry. A volunteer's laptop is
 /// not a datacentre; the cap bounds what consenting costs.
 const MAX_CONCURRENT_CONNECTIONS: u32 = 32;
+
+/// Concurrent circuits the engine will carry from one source address. Every
+/// connection arrives from loopback, so in practice this is a second global cap
+/// — set above what [`MAX_CONCURRENT_CONNECTIONS`] connections can produce
+/// (a connection may hold a handful of streams) so it never binds before the
+/// real one does, and finite so the bound does not evaporate if anything but
+/// the bridge ever reaches the engine.
+const MAX_CIRCUITS_PER_IP: u32 = 256;
+
+/// New circuits per minute from one source address, on the same terms.
+const NEW_CIRCUITS_PER_MIN_PER_IP: u32 = 600;
 
 /// Live counters for the status surface.
 ///
@@ -161,15 +190,17 @@ impl PeerEngine {
     /// pin, and nothing publishes it yet, so persisting one would be storing a
     /// credential with no reader.
     ///
-    /// `revocations` is not optional by accident. A peer's whole job is to
-    /// `Extend` to the next hop, and a node that cannot evaluate revocation
-    /// refuses to extend (#813 phase C, enforced in `serve_extend`) — so an
-    /// engine handed [`RevocationStore::unconfigured`] forwards nothing at all.
-    /// Taking it as a parameter makes that a decision at the call site instead
-    /// of a silent default that looks like it works.
+    /// `revocations` and `next_hops` are not optional by accident. A peer's
+    /// whole job is to `Extend` to the next hop; a node that cannot evaluate
+    /// revocation refuses to extend (#813 phase C, enforced in `serve_extend`)
+    /// and one that cannot check the address against the signed directory
+    /// refuses too — so an engine handed the unconfigured form of either
+    /// forwards nothing at all. Taking them as parameters makes that a decision
+    /// at the call site instead of a silent default that looks like it works.
     pub fn start(
         counters: Arc<PeerCounters>,
         revocations: pollis_relay::policy::RevocationStore,
+        next_hops: NextHopDirectory,
     ) -> anyhow::Result<PeerEngine> {
         let identity = tls::generate_self_signed(tls::RELAY_SERVER_NAME)?;
         // Empty allowlist — permits nothing. See the module docs: this is what
@@ -179,18 +210,28 @@ impl PeerEngine {
             Allowlist::default(),
             identity,
         );
-        // Forwarding to the next relay is the entire job.
-        config.allow_extend = true;
+        // Forwarding to the next relay is the entire job — but only for hops
+        // the signed directory names, so a device that cannot check one is not
+        // a middle hop at all rather than an open dialer (see the module docs).
+        config.allow_extend = next_hops.is_configured();
+        config.next_hops = next_hops;
+        // A peer's next hop is a first-party relay on a public address, so a
+        // private one is never legitimate here. This crate's own tests stand the
+        // whole pool up on loopback, and that relaxation is compiled only into
+        // the test build — never into a shipped client.
+        config.allow_private_next_hops = cfg!(test);
         config.revocations = revocations;
         config.max_concurrent_connections = MAX_CONCURRENT_CONNECTIONS;
-        // Every connection arrives from loopback, so a per-IP connection cap
-        // would just be a second, lower global cap — the global one is the one.
-        config.max_connections_per_ip = u32::MAX;
+        // Every connection arrives from loopback, so a per-IP connection cap is
+        // in practice a second global cap. It matches the global one rather than
+        // being lifted: `u32::MAX` is not a bound.
+        config.max_connections_per_ip = MAX_CONCURRENT_CONNECTIONS;
         config.rate_limits = RateLimitConfig {
-            // Loopback source addresses identify nothing behind the bridge; the
-            // per-account limits below are the real bound (see the module docs).
-            new_circuits_per_min_per_ip: u32::MAX,
-            max_concurrent_per_ip: u32::MAX,
+            // Loopback source addresses identify nothing behind the bridge, so
+            // the per-account limits are what discriminate; these sit above what
+            // the global connection cap can produce and still bound it.
+            new_circuits_per_min_per_ip: NEW_CIRCUITS_PER_MIN_PER_IP,
+            max_concurrent_per_ip: MAX_CIRCUITS_PER_IP,
             ..RateLimitConfig::default()
         };
         // Production nodes never record who connects to them (§5.2, §11.7), and
@@ -429,12 +470,17 @@ mod tests {
         )
         .unwrap();
         config.revocations = crate::net::testing::healthy_revocations();
+        config.next_hops = crate::net::testing::test_directory();
+        config.allow_private_next_hops = true;
         config
             .resolve_overrides
             .insert(ORIGIN_NAME.to_string(), IpAddr::V4(Ipv4Addr::LOCALHOST));
         let cert = config.server_cert();
         let stats = config.stats.clone();
         let (task, addr) = RelayServer::spawn(config).unwrap();
+        // The peer under test extends to this node, and it extends only to
+        // addresses the signed directory names. See net::testing.
+        crate::net::testing::publish_hop(addr);
         (addr, cert, stats, task)
     }
 
@@ -466,7 +512,7 @@ mod tests {
     async fn a_peer_cannot_be_a_circuits_exit() {
         let (origin, connections) = spawn_echo().await;
         let counters = PeerCounters::new();
-        let peer = PeerEngine::start(counters, crate::net::testing::healthy_revocations()).unwrap();
+        let peer = PeerEngine::start(counters, crate::net::testing::healthy_revocations(), crate::net::testing::test_directory()).unwrap();
 
         let circuit = Circuit::build_single_hop(
             Hop::new(peer.quic_addr(), peer.cert_der().clone()),
@@ -489,7 +535,7 @@ mod tests {
     async fn a_peer_refuses_named_destinations_too() {
         let (origin, connections) = spawn_echo().await;
         let counters = PeerCounters::new();
-        let peer = PeerEngine::start(counters, crate::net::testing::healthy_revocations()).unwrap();
+        let peer = PeerEngine::start(counters, crate::net::testing::healthy_revocations(), crate::net::testing::test_directory()).unwrap();
 
         let circuit = Circuit::build_single_hop(
             Hop::new(peer.quic_addr(), peer.cert_der().clone()),
@@ -501,6 +547,59 @@ mod tests {
         assert_eq!(connections.load(Ordering::Relaxed), 0);
     }
 
+    /// A volunteer's device is not a dialer. With no signed directory to check a
+    /// next hop against, the engine does not act as a middle hop at all — so an
+    /// `Extend` naming any address, including one that is a real relay, is
+    /// refused and nothing is dialled.
+    #[tokio::test]
+    async fn without_a_directory_a_peer_extends_to_nothing() {
+        let (origin, connections) = spawn_echo().await;
+        let (fp_addr, fp_cert, fp_stats, _fp_task) = spawn_first_party_relay();
+        let counters = PeerCounters::new();
+        let peer = PeerEngine::start(
+            counters.clone(),
+            crate::net::testing::healthy_revocations(),
+            pollis_relay::nexthop::NextHopDirectory::unconfigured(),
+        )
+        .unwrap();
+
+        let circuit = Circuit::build(
+            vec![
+                Hop::new(peer.quic_addr(), peer.cert_der().clone()),
+                Hop::new(fp_addr, fp_cert),
+            ],
+            client_identity(),
+        )
+        .unwrap();
+        let err = match circuit.connect(ORIGIN_NAME, origin.port()).await {
+            Ok(_) => panic!("a peer with no directory must not extend"),
+            Err(e) => format!("{e:?}"),
+        };
+        assert!(err.contains("ExtendFailed"), "expected a typed refusal, got: {err}");
+
+        assert_eq!(peer.stats().extends(), 0);
+        assert_eq!(peer.stats().dials(), 0);
+        assert_eq!(fp_stats.layers(), 0, "the next hop was never contacted");
+        assert_eq!(connections.load(Ordering::Relaxed), 0);
+    }
+
+    /// Nothing the engine bounds is bounded by `u32::MAX`. Loopback carries every
+    /// stream, so the per-IP limits do no discriminating — but a limit that is
+    /// only correct because of where the traffic happens to come from stops being
+    /// a limit the moment that changes.
+    #[test]
+    fn the_engines_per_ip_bounds_are_finite() {
+        const {
+            assert!(MAX_CIRCUITS_PER_IP < u32::MAX);
+            assert!(NEW_CIRCUITS_PER_MIN_PER_IP < u32::MAX);
+            assert!(MAX_CONCURRENT_CONNECTIONS < u32::MAX);
+            // ...and sized so the loopback bucket never binds before the global
+            // cap. Const-evaluated, so raising one of these back to `u32::MAX`
+            // fails the build rather than a test run.
+            assert!(MAX_CIRCUITS_PER_IP >= MAX_CONCURRENT_CONNECTIONS);
+        }
+    }
+
     /// The job a peer *does* do: forward to the next relay without ever seeing
     /// the destination. The peer's allowlist is empty throughout, so if it had
     /// been the node that parsed the `Connect`, the circuit would have failed.
@@ -509,7 +608,7 @@ mod tests {
         let (origin, connections) = spawn_echo().await;
         let (fp_addr, fp_cert, fp_stats, _fp_task) = spawn_first_party_relay();
         let counters = PeerCounters::new();
-        let peer = PeerEngine::start(counters.clone(), crate::net::testing::healthy_revocations()).unwrap();
+        let peer = PeerEngine::start(counters.clone(), crate::net::testing::healthy_revocations(), crate::net::testing::test_directory()).unwrap();
 
         let circuit = Circuit::build(
             vec![
@@ -545,7 +644,7 @@ mod tests {
         let (origin, connections) = spawn_echo().await;
         let (fp_addr, fp_cert, _fp_stats, _fp_task) = spawn_first_party_relay();
         let counters = PeerCounters::new();
-        let peer = PeerEngine::start(counters.clone(), crate::net::testing::healthy_revocations()).unwrap();
+        let peer = PeerEngine::start(counters.clone(), crate::net::testing::healthy_revocations(), crate::net::testing::test_directory()).unwrap();
 
         // Tunnel: client bridge ⇄ link ⇄ peer engine. Nothing dials the peer's
         // loopback endpoint from outside this process.
@@ -590,7 +689,7 @@ mod tests {
     async fn a_peer_reached_over_a_link_still_refuses_to_exit() {
         let (origin, connections) = spawn_echo().await;
         let counters = PeerCounters::new();
-        let peer = PeerEngine::start(counters.clone(), crate::net::testing::healthy_revocations()).unwrap();
+        let peer = PeerEngine::start(counters.clone(), crate::net::testing::healthy_revocations(), crate::net::testing::test_directory()).unwrap();
 
         let (client_end, peer_end) = loopback_pair();
         peer.serve_link(peer_end);
@@ -610,7 +709,7 @@ mod tests {
     #[tokio::test]
     async fn link_counters_return_to_zero_when_a_link_ends() {
         let counters = PeerCounters::new();
-        let peer = PeerEngine::start(counters.clone(), crate::net::testing::healthy_revocations()).unwrap();
+        let peer = PeerEngine::start(counters.clone(), crate::net::testing::healthy_revocations(), crate::net::testing::test_directory()).unwrap();
 
         let (client_end, peer_end) = loopback_pair();
         peer.serve_link(peer_end);
@@ -642,7 +741,7 @@ mod tests {
             f.fetch_add(1, Ordering::Relaxed);
         }));
 
-        let peer = PeerEngine::start(counters.clone(), crate::net::testing::healthy_revocations()).unwrap();
+        let peer = PeerEngine::start(counters.clone(), crate::net::testing::healthy_revocations(), crate::net::testing::test_directory()).unwrap();
         let (client_end, peer_end) = loopback_pair();
         peer.serve_link(peer_end);
         for _ in 0..50 {
@@ -658,7 +757,7 @@ mod tests {
     #[tokio::test]
     async fn shutdown_stops_the_node() {
         let counters = PeerCounters::new();
-        let mut peer = PeerEngine::start(counters, crate::net::testing::healthy_revocations()).unwrap();
+        let mut peer = PeerEngine::start(counters, crate::net::testing::healthy_revocations(), crate::net::testing::test_directory()).unwrap();
         let addr = peer.quic_addr();
         peer.shutdown().await;
 

@@ -9,9 +9,11 @@
 //!
 //! # Two things are refreshed here, for two different reasons
 //!
-//! - **The directory** decides *where* to park. Membership churns (the hosted
-//!   pool runs on Spot instances), so a stale set means parking at a node that
-//!   no longer exists.
+//! - **The directory** decides *where* to park, and — installed into the
+//!   engine's [`NextHopDirectory`] — *where the engine may extend to*.
+//!   Membership churns (the hosted pool runs on Spot instances), so a stale set
+//!   means parking at a node that no longer exists; an expired one means a
+//!   device that has stopped forwarding, which is the fail-closed direction.
 //! - **The revocation list** decides whether this peer may forward *at all*.
 //!   `PeerEngine` is handed the store built here, and `serve_extend` refuses
 //!   when it cannot evaluate revocation (#813 phase C/E2). The artifact carries
@@ -43,6 +45,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use pollis_relay::nexthop::NextHopDirectory;
 use pollis_relay::policy::RevocationStore;
 use pollis_relay::CertificateDer;
 use tokio::task::JoinHandle;
@@ -92,6 +95,11 @@ pub struct ReachabilityConfig {
     /// from the same cell, so a list installed here is observed immediately by
     /// every in-flight `Extend`.
     pub revocations: RevocationStore,
+    /// The engine's next-hop directory, on the same terms: this loop is already
+    /// fetching and verifying the signed directory to decide where to park, and
+    /// that same artifact is the only statement of which addresses the engine
+    /// may extend a circuit to.
+    pub next_hops: NextHopDirectory,
     /// This device's relay leaf — the `Park` frame's payload.
     pub leaf_der: CertificateDer<'static>,
     pub acceptor: Arc<dyn LinkAcceptor>,
@@ -150,6 +158,18 @@ async fn refresh(
     let bytes = directory::fetch_directory(url).await?;
     let now = pollis_relay::proto::now_unix();
     let dir = directory::verify_directory(&bytes, key, now)?;
+
+    // The engine checks every `Extend` against this, so it is installed from the
+    // SAME verified bytes that decide where to park — there is no second source
+    // of truth for "which addresses are relays", and no window where the device
+    // would park somewhere it would not forward to. A failure here is not fatal
+    // to parking: the engine simply keeps refusing to extend.
+    if let Err(e) = config.next_hops.install(&bytes, now) {
+        eprintln!(
+            "[peer-relay] next-hop directory unusable ({e}) — this device stays parked but \
+             forwards nothing until it recovers"
+        );
+    }
 
     // Renew the peer's own revocation evidence. Best-effort by design: a failure
     // here leaves the engine unable to admit a next hop, which is the safe

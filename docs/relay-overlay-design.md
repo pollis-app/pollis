@@ -46,6 +46,8 @@ General-purpose onion routing (Tor) has to solve a hard, open-ended problem: for
 
 This is the whole argument for building something *bespoke and small* rather than embedding Tor: the closed destination set removes ~80% of what makes anonymity networks hard and dangerous to operate. What remains is the genuinely useful core — **breaking the link between a user's IP and a first-party service** — without inheriting the exit-node liability.
 
+**The same closure applies to the hop *before* the destination.** The allowlist bounds `Connect`, which names a destination; `Extend`, which names the next relay, is bounded by the **signed directory**: a node opens a next leg only to an address the current, verified directory lists, only if that address is public unicast (never loopback/RFC1918/CGNAT/link-local/multicast), and never to itself. Without that, "no exits" would have been true of `Connect` and false of `Extend` — the frame carries a client-chosen `addr`, so honouring it unconditionally makes every relay, and every volunteer's device, a dial-anything primitive pointed at whatever network it sits in. Fail-closed: a node with no key or no fresh directory extends to nothing. Implementation and operator knobs: `pollis-relay/src/nexthop.rs`, `docs/relay-operations.md` → "Where a circuit may be extended to".
+
 **Honest caveat.** "No exit problem" is not "no abuse problem." A relay still consumes a peer's bandwidth and could be used to amplify traffic *toward Pollis's own services* (a relay-assisted DoS on Turso/DS). That is a first-party capacity/rate-limiting problem the operator already has to solve for direct clients; it does not create third-party liability. See §7 (Sybil) and §11 (risks).
 
 ---
@@ -210,6 +212,7 @@ Layered (onion) encryption: the client wraps the payload in one encryption layer
 - **Wins:** **unlinkability even against a single malicious/curious relay operator.** No one relay knows both who you are (IP) and what you're doing (which first-party host). Defeats the §4.3 single-relay attack and much of §4.4 (given good path selection + first-party last hop, §4.4).
 - **Costs:** each hop adds a full network RTT and a crypto layer. For the control plane (libSQL CRUD, DS submission) this is tolerable — those are already async, retryable, non-interactive (`messages.rs` send is fire-and-forget with offline catch-up per whitepaper §6.6). For anything interactive it's painful.
 - **Build cost:** materially more than v0 — circuit construction, per-hop key agreement, onion encryption, path selection, guard relays. This is where "reuse a library" (§9) matters most.
+- **What a hop will forward to:** the `Extend` frame names the next relay by address plus a pinned cert fingerprint. The fingerprint bounds who may *answer*; the **signed directory** bounds who gets *dialled* (§1.2), and the leg is opened under a ~5s deadline. Both checks run before any socket is opened, alongside the revocation check that was already there.
 
 ### 6.3 Option C — Mixnet-style batching (v2)
 

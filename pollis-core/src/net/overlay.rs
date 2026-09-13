@@ -1312,12 +1312,16 @@ mod tests {
         for (host, ip) in overrides {
             config.resolve_overrides.insert((*host).to_string(), *ip);
         }
-        // Without a current list this relay refuses every Extend, so multi-hop
-        // tests fail with ExtendFailed. See net::testing.
+        // Without a current list, or an address the signed directory names, this
+        // relay refuses every Extend and multi-hop tests fail with ExtendFailed.
+        // See net::testing.
         config.revocations = crate::net::testing::healthy_revocations();
+        config.next_hops = crate::net::testing::test_directory();
+        config.allow_private_next_hops = true;
         let cert = config.server_cert();
         let stats = config.stats.clone();
         let (task, addr) = RelayServer::spawn(config).unwrap();
+        crate::net::testing::publish_hop(addr);
         TestRelay { addr, cert, stats, _task: task }
     }
 

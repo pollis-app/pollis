@@ -182,8 +182,9 @@ What an attacker can do to a node **before** any handshake is bounded on its own
   restarts keep the same pinned identity — or delete the files to rotate to a
   fresh identity. No user data, no metadata, ever persisted.
 - **Config file (TOML).** `--config <path>` / `POLLIS_RELAY_CONFIG` sets bind
-  address, destination allowlist, identity path, rate-limit params, and the
-  concurrent-connection cap; CLI flags and env vars override the file (see
+  address, destination allowlist, identity path, rate-limit params, the
+  concurrent-connection cap, and the directory/revocation URLs and pinned key
+  that decide whether this node may be a middle hop; CLI flags and env vars override the file (see
   `pollis_relay::config` module docs for the format). There is **no devices
   file** — trust flows from the cert the client presents, not an operator table.
 - **Graceful shutdown.** On SIGTERM/SIGINT the node stops accepting new
@@ -309,6 +310,45 @@ keeps its list current by fetching `revocation_url` every ~60s with backoff
 (`pollis_relay::revocation_sync`); a wedged fetch degrades the node to
 "no longer a middle hop", never to "still trusting a stale list", because expiry
 is checked when `admit` is called rather than when a list is installed.
+
+### Where a circuit may be extended to
+
+Revocation is a **blocklist**; it says who has stopped being a relay, never who
+is one. On its own that left `Extend` as an arbitrary-dial primitive: the frame
+carries a bare `addr` the client chose (the pinned SHA-256 beside it bounds who
+may answer, not who gets dialled), so an authenticated client could make any
+node — or any volunteer's laptop, which runs the same server — open a QUIC
+connection to any address, inside that machine's own network.
+
+So a node also holds the **signed directory** and checks the address against it
+before opening anything (`pollis_relay::nexthop`, gated in `serve_extend`). An
+`Extend` is refused unless:
+
+1. a **verified, unexpired** directory lists that exact `host:port` — the same
+   artifact clients pick paths from, so this refuses exactly the hops no honest
+   client would name. Its `peers[].parked_at` entries count too;
+2. the address is **public unicast** — never loopback, RFC1918, CGNAT
+   (100.64/10), link-local, unique-local, multicast, broadcast or `0.0.0.0`.
+   Redundant while (1) holds, and deliberately so: it bounds a mis-signed
+   directory to "relays that do not answer" instead of an intranet scanner;
+3. the address is **not this node's own** directory entry (recognised by its
+   leaf cert) — a hop to yourself is a loop.
+
+Opening the next leg is also **deadlined** (`extend_dial_timeout_secs`, default
+5), so an address that swallows packets costs one refusal rather than a held
+task, circuit slot and socket.
+
+Configure `directory_url` (default `https://relays.pollis.com/v1/directory.json`)
+alongside `directory_key_b64`; the node refreshes it on the same 60s cadence and
+backoff as the revocation list (`pollis_relay::nexthop::spawn`). **Fail-closed
+throughout: no key, no directory yet, or an expired one ⇒ the node extends to
+nothing** and serves only circuits that terminate on it. A parked peer is exempt
+from (1)–(3) because there is no dial to bound — the fingerprint selects a
+connection that peer already opened, and the leg rides a loopback tunnel onto it.
+
+`allow_private_next_hops = true` relaxes (2) **only**, for a lab pool on private
+addresses. It never lets an unlisted address through, and a node that has it on
+logs a warning at startup.
 
 ### Account anchoring (#813 Phase E2)
 

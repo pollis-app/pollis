@@ -45,8 +45,20 @@
 //!
 //! # Act as a MIDDLE HOP of a multi-hop circuit: honour `Extend` by dialing the
 //! # next relay (design §6.2). Default true. Set false to make this node
-//! # last-hop-only — it will still serve circuits that terminate here.
+//! # last-hop-only — it will still serve circuits that terminate here. Being a
+//! # middle hop ALSO needs `directory_key_b64` + a reachable `directory_url`:
+//! # an `Extend` may only name a relay the signed directory published.
 //! allow_extend = true
+//!
+//! # Seconds the next leg of a circuit (dial, QUIC handshake, `Layer` ack) may
+//! # take before the `Extend` is refused. Default 5.
+//! extend_dial_timeout_secs = 5
+//!
+//! # Let an `Extend` name a loopback/private/link-local address the directory
+//! # lists. Default false. TEST RIGS AND LAB POOLS ONLY — a public pool's relays
+//! # are on public addresses, and leaving this off is what keeps a mis-signed
+//! # directory from turning this node into an intranet dialer.
+//! allow_private_next_hops = false
 //!
 //! # Opt-in HTTP/1.1 health/version endpoint (TCP). Orchestrators/load-balancers
 //! # probe this (the relay itself is QUIC/UDP-only). Omitted ⇒ NOT started.
@@ -62,6 +74,12 @@
 //! # Where the signed revocation list is published. Only used when
 //! # `directory_key_b64` is set.
 //! revocation_url = "https://relays.pollis.com/revocations.json"
+//!
+//! # Where the signed relay directory is published — the SAME artifact clients
+//! # pin, and the only statement of which addresses this node may extend a
+//! # circuit to. Only used when `directory_key_b64` is set; without a fresh
+//! # directory this node refuses every `Extend`.
+//! directory_url = "https://relays.pollis.com/v1/directory.json"
 //!
 //! # Hex of the account-key transparency log's ML-DSA-44 public key (what
 //! # https://verify.pollis.com/v1/account-keys/public_key.json serves, and what
@@ -100,6 +118,12 @@ pub const DEFAULT_FIRST_FRAME_TIMEOUT_SECS: u64 = 10;
 /// Where the signed relay revocation list is published by default. Matches the
 /// client-side `POLLIS_OVERLAY_REVOCATION_URL` default (`infra/relay-hydra`).
 pub const DEFAULT_REVOCATION_URL: &str = "https://relays.pollis.com/revocations.json";
+/// Where the signed relay directory is published by default — the same artifact
+/// the client's `POLLIS_OVERLAY_DIRECTORY_URL` points at.
+pub const DEFAULT_DIRECTORY_URL: &str = "https://relays.pollis.com/v1/directory.json";
+/// How long opening a circuit's next leg may take before the `Extend` is
+/// refused, by default.
+pub const DEFAULT_EXTEND_DIAL_TIMEOUT_SECS: u64 = 5;
 
 /// The relay bin's on-disk config, as parsed from TOML. Optional fields let the
 /// binary layer env / CLI overrides on top (env overrides file).
@@ -119,6 +143,12 @@ pub struct RelayFileConfig {
     /// Whether this node acts as a middle hop (honours `Extend`). `None` ⇒ the
     /// [`crate::server::RelayConfig`] default, which is `true`.
     pub allow_extend: Option<bool>,
+    /// Seconds the next leg may take to open before the `Extend` is refused.
+    /// `None` ⇒ [`DEFAULT_EXTEND_DIAL_TIMEOUT_SECS`].
+    pub extend_dial_timeout_secs: Option<u64>,
+    /// Permit an `Extend` to a directory-listed loopback/private address. `None`
+    /// ⇒ `false`. Test rigs and lab pools only.
+    pub allow_private_next_hops: Option<bool>,
     /// TCP bind for the opt-in HTTP health/version endpoint. `None` ⇒ not started.
     pub health_bind: Option<String>,
     /// Base64 of the pinned Ed25519 directory/revocation signing key. `None` ⇒
@@ -126,6 +156,8 @@ pub struct RelayFileConfig {
     pub directory_key_b64: Option<String>,
     /// Where the signed revocation list lives. `None` ⇒ [`DEFAULT_REVOCATION_URL`].
     pub revocation_url: Option<String>,
+    /// Where the signed relay directory lives. `None` ⇒ [`DEFAULT_DIRECTORY_URL`].
+    pub directory_url: Option<String>,
     /// Hex of the account-key transparency log's ML-DSA-44 public key. `None` ⇒
     /// this node makes no anchoring claim (#813 Phase E2).
     pub transparency_key_hex: Option<String>,
@@ -167,6 +199,13 @@ impl RelayFileConfig {
         self.revocation_url
             .clone()
             .unwrap_or_else(|| DEFAULT_REVOCATION_URL.to_string())
+    }
+
+    /// Where to fetch the signed relay directory from.
+    pub fn directory_url(&self) -> String {
+        self.directory_url
+            .clone()
+            .unwrap_or_else(|| DEFAULT_DIRECTORY_URL.to_string())
     }
 
     /// Bound on a presented tree head's age.
