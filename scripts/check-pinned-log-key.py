@@ -90,6 +90,10 @@ COPIES: list[tuple[str, str, str]] = [
     (".github/workflows/verifier-release.yml", SIGNER, FULL),
     # 9. Prose naming the key by its id.
     ("website/assurance.html", SIGNER, KEY_ID),
+    # 10. The auditor CLI's own pin (#1108). `pollis-verify` refuses any served
+    #     key that is not this one, so a rotation that missed this copy would
+    #     make every auditor reject the freshly-rotated real log.
+    ("verifiable-log-serve/src/pinned.rs", SIGNER, FULL),
 ]
 
 # Files that may contain a 2624-hex literal without being a pinned-key copy.
@@ -100,6 +104,11 @@ SWEEP_EXEMPT: set[str] = set()
 SWEEP_SKIP_DIRS = {
     ".git", "target", "node_modules", "dist", "build", ".next",
     "Pods", ".venv", "venv", "__pycache__", ".pnpm-store",
+    # Gitignored agent worktrees: full copies of the repo, so every registered
+    # copy reappears under a path that is not the registered one. CI never sees
+    # them (clean checkout), but they made this guard unrunnable locally — and a
+    # guard you cannot run before pushing is one you find out about from CI.
+    ".claude",
 }
 
 # Only text we could plausibly hand-edit. A 2624-hex run inside a lockfile or a

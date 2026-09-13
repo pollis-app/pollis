@@ -39,6 +39,7 @@ FILES=(
   "README.md"
   ".github/workflows/rebuild-verify.yml"
   ".github/workflows/verifier-release.yml"
+  "verifiable-log-serve/src/pinned.rs"
 )
 
 # Build a pristine copy of the tree under $work/pristine.
@@ -118,7 +119,8 @@ for target in \
   "SECURITY.md" \
   "README.md" \
   ".github/workflows/rebuild-verify.yml" \
-  ".github/workflows/verifier-release.yml"
+  ".github/workflows/verifier-release.yml" \
+  "verifiable-log-serve/src/pinned.rs"
 do
   tree="$(fresh_tree "$(echo "$target" | tr '/.' '__')")"
   corrupt_copy "$tree" "$target" full

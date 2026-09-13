@@ -27,7 +27,17 @@ name = "verifiable-log-serve"
 # rebuild verdict classification (`environment_drift` vs a real divergence), which
 # needs `pollis-verify release --json` to surface `toolchain.runner_image`. The
 # monitor CLI was reworked alongside both. Cut `pollis-verify-v0.7.0`.
-version = "0.7.0"
+#
+# 0.8.0 (#1108): a SECURITY release — nothing in the served bundle changed, so
+# this verifies a 0.7.0 tree unchanged, but the VERDICT changes. Up to 0.7.0 the
+# verifier fetched `public_key.json` and checked STH signatures against whatever
+# key the server advertised, so a hostile or man-in-the-middled log could serve
+# its own key plus a self-consistent forged history and still print "OK: all
+# checks passed" — the opposite of the pinning the docs promise. `pinned.rs` now
+# compiles the log key in and refuses any served key that is not it (matched on
+# the id recomputed from the served key bytes, never the id the server supplies).
+# Auditors on 0.7.0 or earlier should upgrade. Cut `pollis-verify-v0.8.0`.
+version = "0.8.0"
 edition.workspace = true
 rust-version.workspace = true
 description = "Serve layer for the verifiable log (Key Transparency #330): turns a signed monitor bundle into an immutable static artifact tree, a dev HTTP server, and a fetch-over-HTTP remote verifier. Slice 3."
