@@ -240,6 +240,13 @@ pub async fn apply_create_group(
         }
     }
 
+    // #1095: a group name reaches every member's notification banner. A 403 is
+    // the answer this function already gives a malformed request (see the
+    // duplicate-claim branch above).
+    if !crate::profile::is_valid_display_name(&body.name) {
+        return Ok(WriteOutcome::Forbidden);
+    }
+
     let tx = conn.transaction().await?;
     // Claim the ids in the SAME transaction as the rows they name, so a claim
     // the registry refuses takes the whole creation with it.
@@ -336,6 +343,10 @@ pub async fn apply_update_group(
         return Ok(WriteOutcome::Forbidden);
     }
     if let Some(n) = &body.name {
+        // #1095: same bound on rename as on create, or the rule is a formality.
+        if !crate::profile::is_valid_display_name(n) {
+            return Ok(WriteOutcome::Forbidden);
+        }
         conn.execute(
             "UPDATE groups SET name = ?1 WHERE id = ?2",
             libsql::params![n.clone(), body.group_id.clone()],

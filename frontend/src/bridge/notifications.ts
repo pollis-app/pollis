@@ -11,6 +11,7 @@
  */
 
 import { invoke } from "./invoke";
+import { escapeNotificationText } from "../utils/notificationText";
 
 export async function isPermissionGranted(): Promise<boolean> {
   const result = await invoke<boolean | null>(
@@ -43,6 +44,9 @@ export async function sendNotification(
   // Tauri's plugin-notification expects { options: { title, body } } via the
   // raw IPC. Match exactly what utils/notify.ts used to send.
   await invoke("plugin:notification|notify", {
-    options: { title: opts.title, body: opts.body },
+    options: {
+      title: escapeNotificationText(opts.title),
+      body: opts.body === undefined ? undefined : escapeNotificationText(opts.body),
+    },
   });
 }

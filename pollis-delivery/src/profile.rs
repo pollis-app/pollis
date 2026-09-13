@@ -140,6 +140,44 @@ pub fn is_valid_username(s: &str) -> bool {
 pub const USERNAME_INVALID: &str =
     "username must be 3-32 characters of a-z, 0-9, '_', '.' or '-'";
 
+/// Upper bound on a human display name — a `preferred_name` or a group name
+/// (#1095). Generous on purpose: this is a label people choose, and the point is
+/// that it is *bounded*, not short.
+pub const DISPLAY_NAME_MAX_LEN: usize = 100;
+
+/// Whether `s` is acceptable as a human display name.
+///
+/// Deliberately NOT the username charset: a display name is rendered, never
+/// resolved, so spaces, punctuation and non-Latin scripts must all pass — a rule
+/// that rejected `Café déjà vu` or `研究チーム` would be a bug, not hardening.
+/// What is refused is what turns a label into a weapon:
+///
+/// * anything longer than [`DISPLAY_NAME_MAX_LEN`] — an unbounded name is the
+///   payload space the #1095 notification markup needed, and breaks layout;
+/// * control characters, newlines included — one name should not be able to
+///   impersonate several lines of UI;
+/// * Unicode bidi overrides/isolates and the LRM/RLM marks — display-order
+///   spoofing, where the name a person reads is not the name that was stored;
+/// * `<` and `>`. The notification sink escapes these (that is the actual fix for
+///   #1095); refusing them here means a stored name never carries a tag to begin
+///   with. `&` is deliberately allowed — "Alice & Bob" is a real group name, and
+///   the sink escapes it correctly.
+pub fn is_valid_display_name(s: &str) -> bool {
+    !s.trim().is_empty()
+        && s.chars().count() <= DISPLAY_NAME_MAX_LEN
+        && !s.chars().any(|c| {
+            c.is_control()
+                || matches!(c,
+                    '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{200E}' | '\u{200F}')
+                || c == '<'
+                || c == '>'
+        })
+}
+
+/// The message a rejected display name is refused with.
+pub const DISPLAY_NAME_INVALID: &str =
+    "name must be 1-100 characters, without control characters, bidi overrides, '<' or '>'";
+
 /// What the profile-domain `apply_*` fns decide. [`WriteOutcome`] plus one
 /// refusal it lacks: a body that is well-formed JSON but names an impossible
 /// value. That is the caller's mistake (400), not a permission problem, and
@@ -191,6 +229,12 @@ pub async fn apply_update_profile(
         let grandfathered = unchanged && !username.contains('@');
         if !grandfathered && !is_valid_username(username) {
             return Ok(ProfileOutcome::Invalid(USERNAME_INVALID));
+        }
+    }
+    // #1095: a preferred_name reaches other people's notification banners.
+    if let Some(preferred) = body.preferred_name.as_deref() {
+        if !is_valid_display_name(preferred) {
+            return Ok(ProfileOutcome::Invalid(DISPLAY_NAME_INVALID));
         }
     }
     conn.execute(
@@ -892,4 +936,70 @@ pub async fn apply_leave_dm(
     }
     tx.commit().await?;
     Ok((WriteOutcome::Ok, torn_down))
+}
+
+#[cfg(test)]
+mod display_name_tests {
+    use super::{is_valid_display_name, DISPLAY_NAME_MAX_LEN};
+
+    /// A display name is rendered, not resolved — a rule that rejected real
+    /// names would be a bug, not hardening.
+    #[test]
+    fn real_names_are_accepted() {
+        for ok in [
+            "Alice",
+            "Bob's laptop",
+            "Café déjà vu",
+            "研究チーム",
+            "Ops & Infra",
+            "team-1.0_v2",
+            "  padded  ",
+        ] {
+            assert!(is_valid_display_name(ok), "{ok:?} must be accepted");
+        }
+    }
+
+    /// #1095's payload: markup that a Linux notification daemon would render.
+    #[test]
+    fn markup_characters_are_refused() {
+        for bad in [
+            "<img src=\"http://attacker.test/p.png\">",
+            "<a href=\"http://x\">x</a>",
+            "team <b>",
+            "a > b",
+        ] {
+            assert!(!is_valid_display_name(bad), "{bad:?} must be refused");
+        }
+    }
+
+    #[test]
+    fn control_characters_and_newlines_are_refused() {
+        for bad in ["two\nlines", "tab\there", "nul\0byte", "bell\u{7}"] {
+            assert!(!is_valid_display_name(bad), "{bad:?} must be refused");
+        }
+    }
+
+    /// Display-order spoofing: the name a person reads is not the name stored.
+    #[test]
+    fn bidi_overrides_are_refused() {
+        for bad in ["admin\u{202E}gpj.exe", "x\u{202A}y", "x\u{2066}y", "x\u{200F}y"] {
+            assert!(!is_valid_display_name(bad), "{bad:?} must be refused");
+        }
+    }
+
+    #[test]
+    fn the_bound_is_on_characters_not_bytes() {
+        // 100 non-ASCII characters is 100 characters, not 300 bytes.
+        let wide = "é".repeat(DISPLAY_NAME_MAX_LEN);
+        assert!(is_valid_display_name(&wide), "exactly the cap is allowed");
+        let too_wide = "é".repeat(DISPLAY_NAME_MAX_LEN + 1);
+        assert!(!is_valid_display_name(&too_wide), "one over the cap is refused");
+    }
+
+    #[test]
+    fn an_empty_or_whitespace_name_is_refused() {
+        for bad in ["", "   ", "\u{00a0}"] {
+            assert!(!is_valid_display_name(bad), "{bad:?} must be refused");
+        }
+    }
 }
