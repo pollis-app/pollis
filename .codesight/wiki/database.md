@@ -662,7 +662,7 @@ that class of bug.
 - `cert_issued_at` TEXT _(migration 13)_
 - `cert_identity_version` INTEGER _(migration 13)_
 - `mls_signature_pub` BLOB _(migration 13; the device's raw 32-byte **Ed25519** MLS leaf key — the one the retired classic suite's leaves signed with. No longer the DS request-auth credential since #668, and since #669 no live suite mints a leaf under it; still generated, still published, and still bound by the v2 cert, because `load_or_create_device_signer` is keyed by signature *scheme* and a group persisted under an older code point must stay readable.)_
-- `mls_signature_pub_pq` BLOB _(post-baseline 000011, #668; the device's raw 1312-byte **ML-DSA-44** MLS leaf key — the one `CS_PQ` leaves sign with, and the credential `X-Pollis-Signature` is verified against (`pollis-delivery/src/auth.rs`). A separate column and not an overload of `mls_signature_pub`: overwriting that one with a 1312-byte key would break auth for every already-shipped client the instant the migration ran. Nullable — NULL means the device predates #668; such a row is skipped by `resign_stale_device_certs`, treated as `AbsentRetry` by `verify_added_devices`, and self-heals on that device's next `ensure_device_cert`.)_
+- `mls_signature_pub_pq` BLOB _(post-baseline 000011, #668; the device's raw 1312-byte **ML-DSA-44** MLS leaf key — the one `CS_PQ` leaves sign with, and the credential `X-Pollis-Signature` is verified against (`pollis-delivery/src/auth.rs`). A separate column and not an overload of `mls_signature_pub`: overwriting that one with a 1312-byte key would break auth for every already-shipped client the instant the migration ran. Nullable — NULL means the device predates #668; such a row is skipped by `resign_stale_device_certs`, verdicts `Unverifiable` in `IdentityDirectory::leaf_verdict`, and self-heals on that device's next `ensure_device_cert`.)_
 - `pq_capable` INTEGER NOT NULL DEFAULT 0 _(post-baseline 000010; **DEAD since #669** — retired in place, not dropped, because migrations must stay additive. Nothing writes it (`devices.rs::mark_pq_capable` and both `UPDATE user_device SET pq_capable = 1` statements are gone) and nothing reads it. Under #454 P2 the DS publish/replenish endpoints set it to 1 when a device published a hybrid KeyPackage pool — server-derived from what landed in `mls_key_package`, never a client UPDATE — and #454 P5 read it two ways: per-roster by `roster_is_fully_pq_capable`, and deployment-wide by `fleet_is_fully_pq_capable` (no row with `revoked_at IS NULL` and `last_seen` inside 90 days still at 0). Both had to pass before a group was born on or migrated to the hybrid suite. #669 retired the classic suite, so there is no classic-only device for the flag to distinguish; all three readers are deleted — see `.codesight/wiki/mls.md`.)_
 
 ### mls_key_package _(migration 3 + 11 + post-baseline 000010)_
@@ -681,8 +681,8 @@ that class of bug.
 - `sender_id` TEXT NOT NULL FK users
 - `commit_data` BLOB NOT NULL _(TLS-serialized MLS Commit)_
 - `created_at` TEXT NOT NULL DEFAULT now
-- `added_user_id` TEXT _(migration 14, NULL if no adds)_
-- `added_device_ids` TEXT _(migration 14, comma-separated)_
+- `added_user_id` TEXT _(migration 14, NULL if no adds; comma-separated — every distinct user the commit added, in add order. A **prefetch hint** the DS uses to fold cert rows into the commit batch, never what a replaying member verifies: it reads the added leaves off the commit's own Add proposals)_
+- `added_device_ids` TEXT _(migration 14, comma-separated; same hint status)_
 - `generation` INTEGER NOT NULL DEFAULT 0 _(commit-log-DB migration 000004, #454 P4 — the **suite generation**)_
 - UNIQUE INDEX `idx_mls_commit_conv_gen_epoch` on `(conversation_id, generation, epoch)` _(migration 000004, replacing `idx_mls_commit_conv_epoch`)_
 

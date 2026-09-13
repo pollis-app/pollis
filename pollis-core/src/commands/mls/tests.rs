@@ -1200,6 +1200,7 @@ fn reconcile(
         actor_user_id,
         actor_device_id,
         None,
+        None,
     )
     .unwrap()
 }
@@ -2720,7 +2721,7 @@ fn already_merged_epoch_commit_recovers() {
     let (commit2, _w2) = two_members_plus_valid_commit(conv, &alice_db, &bob_db, &carol_db);
 
     // Bob applies commit2 normally: epoch 1 → 2.
-    assert!(matches!(apply_one(&bob_db, conv, 1, &commit2), CommitApply::Applied));
+    assert!(matches!(apply_one(&bob_db, conv, 1, &commit2), CommitApply::Applied { .. }));
     assert_eq!(member_epoch(&bob_db, conv), 2);
 
     // Re-feeding the stale epoch-1 commit at epoch 2 must recover, not wedge.
@@ -2817,7 +2818,7 @@ fn own_pending_commit_is_adopted_and_converges() {
     // applied.
     let outcome = apply_one(&alice_db, conv, 1, &own_commit);
     assert!(
-        matches!(outcome, CommitApply::Applied),
+        matches!(outcome, CommitApply::Applied { .. }),
         "own commit replay must be adopted (Applied), got {outcome:?}",
     );
     assert_eq!(member_epoch(&alice_db, conv), 2, "alice must advance to the real merged epoch");

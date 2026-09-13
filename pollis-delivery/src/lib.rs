@@ -453,6 +453,7 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route(<account_reads::DevicesBody as DsRequest>::PATH, post(account_reads::devices))
         .route(<account_reads::KeyPackagesBody as DsRequest>::PATH, post(account_reads::key_packages))
         .route(<account_reads::RegisteredDevicesBody as DsRequest>::PATH, post(account_reads::registered_devices))
+        .route(<account_reads::RosterIdentitiesBody as DsRequest>::PATH, post(account_reads::roster_identities))
         .route(<account_reads::EnrollmentRequestBody as DsRequest>::PATH, post(account_reads::enrollment))
         .route(<account_reads::PendingEnrollmentsBody as DsRequest>::PATH, post(account_reads::pending_enrollments))
         .route(<account_reads::RecoveryBlobBody as DsRequest>::PATH, post(account_reads::recovery_blob))

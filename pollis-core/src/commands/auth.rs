@@ -1427,7 +1427,7 @@ pub async fn revoke_device(
 
     // Drop the revoked device's unclaimed key packages (one-time-use, useless
     // now) and tombstone its row (issue #372 — a tombstone, not a hard-delete,
-    // so other members' `verify_added_devices` can tell "revoked, drop rejoin"
+    // so other members' leaf cross-signing check (`IdentityDirectory::leaf_verdict`) can tell "revoked, drop rejoin"
     // from "lagging, keep commits" and the row stays available for historical
     // cert verification). Routed through the DS (#419 domains E+G) as one
     // transaction when configured — the CURRENT device drives this and is fully
@@ -1534,7 +1534,7 @@ pub async fn revoke_device(
 ///
 /// The `revoked_at IS NULL` predicate is load-bearing (#685). Since #372
 /// revocation is a TOMBSTONE, not a hard delete — the row is deliberately
-/// retained so `verify_added_devices` can tell "revoked, drop rejoin" from
+/// retained so `IdentityDirectory::leaf_verdict` can tell "revoked, drop rejoin" from
 /// "lagging, keep commits", and so historical certs stay verifiable. A bare
 /// existence check therefore returns `true` for a revoked device, which silently
 /// disabled the entire graceful sign-out path: `revoke_device` publishes a

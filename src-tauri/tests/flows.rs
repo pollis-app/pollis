@@ -15,6 +15,8 @@ mod harness;
 mod adversarial;
 #[path = "flows/auth.rs"]
 mod auth;
+#[path = "flows/cross_signing.rs"]
+mod cross_signing;
 #[path = "flows/dms.rs"]
 mod dms;
 #[path = "flows/ds_surface.rs"]

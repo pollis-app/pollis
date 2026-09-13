@@ -96,6 +96,51 @@ where
     Ok((ref_hex, kp_bytes))
 }
 
+/// Test-harness only: a KeyPackage in the current suite whose credential claims
+/// `claimed_user_id:claimed_device_id` but whose leaf is signed by a FRESH key
+/// nobody's account ever certified. This is the KeyPackage a malicious Delivery
+/// Service would hand a committer at claim time in place of the real device's;
+/// `KeyPackageIn::validate` accepts it (it is self-consistent) and the credential
+/// string matches, so only the cross-signing check can tell it apart.
+///
+/// The forged signer is not stored anywhere — a device that could not sign as
+/// this leaf later is the point: the test only needs the package bytes.
+#[cfg(feature = "test-harness")]
+pub async fn forge_key_package_for(
+    state: &Arc<AppState>,
+    claimed_user_id: &str,
+    claimed_device_id: &str,
+) -> Result<(String, Vec<u8>)> {
+    use openmls_basic_credential::SignatureKeyPair;
+
+    let guard = state.local_db.lock().await;
+    let db = guard.as_ref().ok_or_else(|| {
+        crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
+    })?;
+    let provider = PollisProvider::new(db.conn());
+    let suite = current_suite();
+    let scheme = signature_scheme(suite);
+    let sig_keys = SignatureKeyPair::new(scheme)
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("forged signer: {e}")))?;
+    let sig_pub = OpenMlsSignaturePublicKey::new(sig_keys.public().into(), scheme)
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig pub key: {e}")))?;
+    let cred_with_key = CredentialWithKey {
+        credential: make_credential(claimed_user_id, claimed_device_id),
+        signature_key: sig_pub.into(),
+    };
+    let bundle = KeyPackage::builder()
+        .build(suite, &provider, &sig_keys, cred_with_key)
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("kp build: {e}")))?;
+    let kp = bundle.key_package();
+    let hash_ref = kp
+        .hash_ref(provider.crypto())
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("kp hash_ref: {e}")))?;
+    let kp_bytes = kp
+        .tls_serialize_detached()
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("kp serialize: {e}")))?;
+    Ok((hex::encode(hash_ref.as_slice()), kp_bytes))
+}
+
 /// Build one fresh `KeyPackage` for this device in `suite`, backed by the current
 /// local DB. Locks the local DB for the (sync) openmls work, dropping the guard
 /// before returning.

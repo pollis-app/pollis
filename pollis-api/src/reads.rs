@@ -183,7 +183,7 @@ pub struct ConversationState {
 }
 
 /// A user's cross-signing root plus the device rows a commit's `added_device_ids`
-/// name — the INPUTS to `verify_added_devices`, never its verdict.
+/// name — the INPUTS to `IdentityDirectory::leaf_verdict`, never its verdict.
 ///
 /// Folded into the commit batch rather than fetched per commit (#987 §5): cert
 /// verification runs once per add-carrying commit during replay, so a cold

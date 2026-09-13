@@ -42,11 +42,13 @@ Steps:
 1. **Build roster** from `group_member` + `group_invite` (or `dm_channel_member`)
 2. **TOFU-pin every roster peer's `account_id_pub`** via `batch_check_and_pin_account_keys` (one Turso query). First-seen keys are pinned silently; an existing pin that no longer matches the server flips `verified=0`, refreshes the pin in place, and emits a `KeyChanged` realtime event. The actor's own user id is excluded. This closes the historical group MITM hole — see `.codesight/wiki/safety.md`.
 3. **Find devices** with unclaimed KeyPackages for roster users — filtered to `revoked_at IS NULL`, so a revoked device's leftover KeyPackages are never claimed
+3b. **Read the roster's cross-signing material** — one `POST /v1/read/roster-identities` (`ds_reads::roster_identities`): every roster user's `account_id_pub` plus all their `user_device` cert rows, revoked included. `reconcile::load_pinned_identities` then pins it: the actor's own account key is replaced by the one in the device keystore, and a peer whose reported key differs from the local `contact_verification` pin has its key **dropped** (every leaf of theirs verdicts `Unverifiable`). The result is a `device::IdentityDirectory`; a failed read is an error, never a partial directory
 4. **Peek at tree** to see who's already a member (avoids wasting KPs)
 5. **Claim KPs** only for devices not in the tree
-6. **Diff**: desired set vs actual tree → compute adds and removes. The desired set (`desired_set`) is the union of two sources — devices with an available KeyPackage (the adds) and existing leaves whose user is still on the roster (the retentions, which is what stops the committer evicting itself). **Both** are gated on `valid_devices`, the `revoked_at IS NULL` snapshot from `registered_devices`. Gating only the retention half was #679: a revoked device rode back in through its own leftover KeyPackage, so it never reached `to_remove` and its leaf survived. `valid_devices = None` (snapshot unreadable) disables the gate; `Some(empty)` means nothing is valid — the two are deliberately different states, so a transient `user_device` read failure cannot empty a group.
+5b. **Verify every claimed KeyPackage's leaf** (`stage_reconcile_commit`) — beyond `KeyPackageIn::validate` (self-consistency), suite equality and the credential string, the leaf's signature key must be [`LeafVerdict::Certified`](#leaf-cross-signing): the device key the claimed user's `account_id_pub` certified in its `device_cert`. Anything else is **refused** — the package is burnt (claimed, discarded) and reported in `ReconcileOutcome::refused_uncertified`. This is the committer-side half of cross-signing: the DS is untrusted at claim time, and a self-consistent KeyPackage only proves that *someone* holds the leaf key
+6. **Diff**: desired set vs actual tree → compute adds and removes. The desired set (`desired_set`) is the union of two sources — devices with an available KeyPackage (the adds) and existing leaves whose user is still on the roster (the retentions, which is what stops the committer evicting itself). **Both** are gated on `valid_devices`, the `revoked_at IS NULL` snapshot from `registered_devices`. Gating only the retention half was #679: a revoked device rode back in through its own leftover KeyPackage, so it never reached `to_remove` and its leaf survived. `valid_devices = None` (snapshot unreadable) disables the gate; `Some(empty)` means nothing is valid — the two are deliberately different states, so a transient `user_device` read failure cannot empty a group. A third gate uses the identity directory: a leaf already in the tree whose signature key is **positively** not its user's certified key (`LeafVerdict::Uncertified` — revoked, cert invalid, or a key that is not the certified one) is evicted like a revoked device, and left out of `actual` so the device's genuine KeyPackage (if any) can be added in the same commit. `Unverifiable` leaves are retained: absence of a row is not evidence. Our own leaf is never judged. This is how a rogue leaf grafted in by a malicious or pre-fix committer leaves the tree — append-only, on the next honest member's reconcile.
 7. **Build and stage commit** with both add and remove proposals — do NOT `merge_pending_commit` yet
-8. **Submit the commit bundle to the DS on a fresh connection**: commit + GroupInfo + Welcome(s) are one **atomic** `POST /v1/commits` — the DS writes all three in a single libsql transaction (see "MLS durability hardening" below), so a recipient never sees a commit with no matching Welcome
+8. **Submit the commit bundle to the DS on a fresh connection**: commit + GroupInfo + Welcome(s) are one **atomic** `POST /v1/commits` — the DS writes all three in a single libsql transaction (see "MLS durability hardening" below), so a recipient never sees a commit with no matching Welcome. The body also names **every** added user (`added_user_id`, CSV) and device (`added_device_ids`, CSV). These are a *prefetch hint* — the DS folds the named users' cert rows into the commit batch replaying members fetch — not what they verify, which is the commit itself (below)
 9. **On success**: `merge_pending_commit` locally → advance the local epoch
 10. **On failure**: `clear_pending_commit` → leave local state at the prior epoch; caller can retry
 11. **Publish GroupInfo** so external-join works
@@ -67,7 +69,7 @@ When device A commits a membership change:
 2. A `membership_changed` LiveKit event notifies online devices (convenience, not required). Like every realtime wake-up ping it carries **no sender/actor identity** — just the routing handle (see "Metadata-minimized signalling" below)
 3. Other devices call `process_pending_commits_inner` which:
    - Fetches commits from `mls_commit_log` at `epoch >= local_epoch`
-   - Applies them sequentially via `apply_one_commit`
+   - Applies them sequentially via `apply_one_commit`, which returns the leaves each commit **added, read off the staged commit's own Add proposals** (`AddedLeaf`: credential `user:device`, leaf signature key, scheme). Every added leaf is checked against the batch's `IdentityDirectory` (built from the snapshot's `added_identities`); a leaf that is not `Certified` is logged, written to this user's own audit log as an `uncertified_mls_leaf` `security_event` (the Security page lists it), and answered with a detached eviction reconcile (`report_uncertified_leaves`). The commit is still merged: it won the epoch CAS and is canonical, and a `StagedCommit` cannot be dropped and re-processed later (its ratchet generation is consumed), so the remedy is eviction, not refusal. Because the leaves come from the commit and not from the `added_*` columns, a committer that NULLs or shortens the hint can only make its own honest add look *unverifiable* (which the eviction reconcile, reading the whole roster's material, then finds certified and keeps) — never make a rogue add look verified. See [Leaf cross-signing](#leaf-cross-signing)
    - If no local group exists → external-joins using published GroupInfo
    - If the group was evicted (user was kicked) → deletes it, then external-joins
    - Publishes updated GroupInfo after processing
@@ -609,19 +611,52 @@ query-SHAPE changes only — no cache, no new trust:
 - **DM TOFU re-check** (`messages/ingest.rs`, `dm.rs`): one Turso query per peer
   on EVERY ingest pass → `safety::batch_check_and_pin_account_keys`, which
   already existed and was already used by `mls::reconcile`.
-- **`verify_added_devices`** (`mls/device.rs`): one query per added device,
-  called once per add-carrying commit inside the replay. Now one
-  `device_id IN (…)`. The verification loop is unchanged and still
-  short-circuits in `device_ids` order, so outcomes and log lines are identical.
+- **Added-leaf verification** (`mls/device.rs::IdentityDirectory`): the cert
+  rows for every user the batch's add hints name arrive WITH the commit batch
+  (`added_identities`), one directory per replay pass, instead of one query per
+  added device.
 
-**Deliberately NOT cached: `account_id_pub`.** `verify_added_devices` re-reads
-the added user's account key from Turso for every add-commit in a replay, and
-memoizing it across the pass would remove one query per commit. It is not done,
-because the invalidation story does not hold: a rotation exists precisely because
-the old account key may be compromised, and a cached pre-rotation key would
-verify a cert forged under it — a wrong ACCEPT, widened from one commit's
-verification to a whole catch-up pass. A read per commit is the price of that
-being impossible.
+**Deliberately NOT cached across passes: `account_id_pub`.** The directory is
+rebuilt from the DS snapshot on every replay pass and by every reconcile, and
+memoizing it across passes would save a read. It is not done, because the
+invalidation story does not hold: a rotation exists precisely because the old
+account key may be compromised, and a cached pre-rotation key would verify a
+cert forged under it — a wrong ACCEPT, widened from one pass's verification to
+every later one. A read per pass is the price of that being impossible.
+
+### Leaf cross-signing
+
+`device::IdentityDirectory::leaf_verdict(user, device, leaf_signature_key, scheme)`
+is the ONE function that decides whether a leaf belongs to the user it claims,
+on both the committing side (every claimed KeyPackage, every retained leaf) and
+the replaying side (every leaf a commit added). Inputs come from the DS
+(`AddedIdentity` / `DeviceCertRow`); the verdict is computed on the client,
+because it is a signature check over a chain rooted in the user's own
+`account_id_pub` and the DS is outside the trust boundary.
+
+| verdict | when | committer, on a KeyPackage | committer, on a tree leaf | replaying member |
+|---|---|---|---|---|
+| `Certified` | device row live, `device_cert` verifies under the user's account key, **and the leaf key equals the certified key for the scheme** (`mls_signature_pub_pq` for ML-DSA-44, `mls_signature_pub` for Ed25519) | add | keep | — |
+| `Unverifiable` | user not in directory, no account key, no device row, or cert columns NULL | **refuse** (burn) | keep | flag + eviction reconcile (which re-reads and keeps it if certified) |
+| `Uncertified` | device revoked, cert fails, or the leaf key is not the certified key | **refuse** (burn) | **evict** | flag + eviction reconcile evicts |
+
+The key-equality clause is the load-bearing one: the previous check
+(`verify_added_devices`, removed) verified the *row* and never compared the leaf
+in the tree to it, so a valid cert for the real device vouched for an attacker's
+leaf carrying the same `user:device` credential. It also keyed off the
+committer-written `added_user_id` / `added_device_ids` columns (NULL → skipped,
+multi-user add → first user only), which now serve only as the DS's prefetch
+hint. Pinned by `device::leaf_verdict_tests` (unit) and
+`src-tauri/tests/flows/cross_signing.rs` (the DS substitutes a forged
+KeyPackage: the committer refuses; a committer that adds it anyway is flagged
+and evicted by every honest member).
+
+**Residual.** A rogue leaf that a malicious or pre-fix committer DID add holds
+the group's key schedule from that epoch until the eviction commit lands —
+bounded by one honest member's reconcile (kicked immediately on detection),
+not by anything the attacker controls. Refusing to merge instead would strand
+the refusing device behind the canonical log with no honest way back (the
+ELECTRON-epoch-11 incident); eviction is the append-only answer.
 
 `MlsStore` (`signal/mls_storage.rs`) counts its own statements under
 `test-harness` (`mls_storage::counters`, thread-local so concurrent tests do not

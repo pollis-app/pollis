@@ -667,7 +667,7 @@ async fn the_suite_boundary_evicts_a_stolen_pre_migration_leaf() {
 /// This is also where "does the cross-signing cert survive the suite change"
 /// gets answered, and it is answered by consequence rather than by a separate
 /// assertion: an externally-joined device whose device cert failed
-/// `verify_added_devices` is removed by the next reconcile, so alice could not
+/// `IdentityDirectory::leaf_verdict` is removed by the next reconcile, so alice could not
 /// then decrypt bob's message and bob would not appear exactly once on the
 /// roster. Both are asserted below.
 #[tokio::test(flavor = "multi_thread")]

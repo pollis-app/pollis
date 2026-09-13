@@ -174,6 +174,28 @@ pub struct RegisteredDevicesResponse {
     pub pairs: Vec<DevicePair>,
 }
 
+// ── POST /v1/read/roster-identities ──────────────────────────────────────────
+
+/// Every roster user's cross-signing root plus ALL of their `user_device` rows
+/// (revoked ones included — "revoked" is a verdict, "absent" a retry).
+///
+/// The committer-side input to the leaf cross-signing check: before a claimed
+/// KeyPackage becomes an Add proposal, and before an existing leaf is retained,
+/// reconcile proves the leaf's signature key is the one the user's own
+/// `account_id_pub` certified. Batched over the roster so a reconcile costs one
+/// round trip, not one per member. INPUTS ONLY — the verdict is a signature
+/// check over a chain rooted in the user's identity key, which the DS is not
+/// trusted to evaluate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RosterIdentitiesBody {
+    pub user_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RosterIdentitiesResponse {
+    pub identities: Vec<crate::reads::AddedIdentity>,
+}
+
 // ── POST /v1/read/enrollment ─────────────────────────────────────────────────
 
 /// Poll one device-enrollment request, or list the caller's pending ones.

@@ -541,180 +541,285 @@ pub async fn resign_stale_device_certs(
     Ok(count)
 }
 
-// ── Inbound cert verification helper ────────────────────────────────────────
+// ── Leaf cross-signing ───────────────────────────────────────────────────────
 
-/// Verify that every `device_id` in `device_ids` has a valid
-/// cross-signing cert that chains to the `account_id_pub` of
-/// `target_user_id`. Returns `Ok(true)` if all devices check out,
-/// `Ok(false)` if any single device fails, `Err` on a database
-/// lookup error.
+/// One leaf an MLS commit adds, as read off the commit's OWN Add proposals.
 ///
-/// Called from `process_pending_commits_inner` against the metadata
-/// columns on `mls_commit_log` BEFORE handing the commit to
-/// `process_message`. This is the inbound complement to the outbound
-/// cert verification in `reconcile_group_mls_impl`.
-/// Outcome of verifying every device in a commit's added-devices list.
-///
-/// The three variants tell the caller (`process_pending_commits_locked`)
-/// how to treat the offending commit. NOTE: none of them delete the
-/// `mls_commit_log` row — a commit that won the epoch CAS is canonical and
-/// immutable, and deleting it forks the group (the ELECTRON-epoch-11
-/// incident; see `group_state.rs::VerifyOutcome::Revoked`). Log-DB migration
-/// 000005 (#691) now also enforces this at the schema layer: deleting a
-/// canonical commit is never safe, so the head-protection and immutability
-/// triggers make the old delete physically impossible. See issue #372 for the
-/// full rationale.
-#[derive(Debug, PartialEq, Eq)]
-pub(super) enum VerifyOutcome {
-    /// Every added device verified — apply the commit normally.
-    Verified,
-    /// At least one added device is confirmed REVOKED (tombstoned via
-    /// `user_device.revoked_at`), OR the cert chain itself failed
-    /// verification (bad signature, wrong identity_version). The commit is
-    /// illegitimate, but the caller still APPLIES it to stay on the one
-    /// canonical branch (it won the epoch CAS and other members may already
-    /// have advanced past it); the revoked device is evicted the
-    /// append-only way by a later `reconcile` remove commit. We do NOT delete
-    /// the row — that broke the append-only invariant (ELECTRON epoch 11).
-    Revoked,
-    /// At least one added device is ABSENT — the row doesn't exist
-    /// anywhere yet, or required cert columns are NULL. This is the
-    /// race / replication-lag case (#372): the device may be
-    /// legitimately joining but its `user_device` row hasn't reached
-    /// this client's view of Turso yet. The commit must NOT be
-    /// deleted; the caller should leave it in place so a later
-    /// catch-up can retry verification once the row appears.
-    AbsentRetry,
+/// Derived from the `KeyPackage` inside each `AddProposal` of the staged commit
+/// — never from the `added_user_id` / `added_device_ids` columns the committing
+/// client wrote next to it. Those columns are a prefetch hint the DS uses to
+/// fold cert rows into the commit batch; a committer that NULLs or shortens them
+/// changes what is prefetched, not what is verified.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AddedLeaf {
+    pub user_id: String,
+    pub device_id: String,
+    /// The leaf node's signature public key — the key that will sign every
+    /// message and commit this leaf produces, and the one the device cert has to
+    /// certify.
+    pub signature_key: Vec<u8>,
+    /// The signature scheme of the KeyPackage's suite: decides which certified
+    /// device key `signature_key` has to equal.
+    pub scheme: SignatureScheme,
 }
 
-/// Decide whether the devices a commit adds are legitimately added, from rows
-/// the Delivery Service supplied.
+/// Verdict on one leaf (an added KeyPackage or a leaf already in the tree)
+/// against the claimed user's cross-signing material.
 ///
-/// **The decision stays here.** Since #987 the client holds no database
-/// credential, so the ROWS arrive over HTTP — but the loop below is a signature
-/// check over a cert chain rooted in the user's own `account_id_pub`, and the DS
-/// is explicitly outside the trust boundary (`docs/security-whitepaper.md`). A
-/// DS that answered "Verified" would be a DS that could add devices to groups.
-/// So it answers with columns and this function answers with a verdict, exactly
-/// as when the columns came from a `SELECT`.
+/// Three-valued on purpose. `Unverifiable` and `Uncertified` are both refusals
+/// for a leaf about to be ADDED — a committer never grafts a leaf it cannot
+/// prove is the user's — but only `Uncertified` evicts a leaf ALREADY in the
+/// tree: it is positive evidence, where `Unverifiable` may be a row the DS did
+/// not return.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LeafVerdict {
+    /// The leaf's signature key is the device key the user's `account_id_pub`
+    /// certified, and the device is not revoked.
+    Certified,
+    /// The inputs to decide are missing: unknown user, no account key, no device
+    /// row, or cert columns not yet published.
+    Unverifiable(&'static str),
+    /// The inputs are present and the leaf is NOT the user's: the device is
+    /// revoked, the cert chain fails, or the leaf key is not the certified key.
+    Uncertified(String),
+}
+
+/// The cross-signing material of a set of users, indexed for leaf verdicts.
 ///
-/// `identity` is `None` when the batch named this user but the DS had no
-/// `users` row for them — the same replication-lag case a missing row used to
-/// be, and treated identically ([`VerifyOutcome::AbsentRetry`]). Every outcome
-/// and every log line below is byte-for-byte what the direct-read version
-/// produced for the same inputs.
-pub(super) fn verify_added_devices(
-    identity: Option<&pollis_api::reads::AddedIdentity>,
-    target_user_id: &str,
-    device_ids: &[String],
-) -> crate::error::Result<VerifyOutcome> {
-    if device_ids.is_empty() {
-        return Ok(VerifyOutcome::Verified);
+/// Built from the DS's `AddedIdentity` rows (`/v1/mls/conversation-state` on
+/// the inbound side, `/v1/read/roster-identities` on the committing side). The
+/// DS supplies INPUTS; every verdict is computed here, because it is a signature
+/// check over a chain rooted in the user's own identity key and the DS is
+/// outside the trust boundary (`docs/security-whitepaper.md`). A DS that
+/// answered "Certified" would be a DS that could add devices to groups.
+pub struct IdentityDirectory {
+    by_user: std::collections::HashMap<String, pollis_api::reads::AddedIdentity>,
+}
+
+impl IdentityDirectory {
+    pub fn new(identities: Vec<pollis_api::reads::AddedIdentity>) -> Self {
+        let by_user = identities
+            .into_iter()
+            .map(|i| (i.user_id.clone(), i))
+            .collect();
+        Self { by_user }
     }
 
-    // A missing `users` row or NULL account_id_pub falls into AbsentRetry: the
-    // row may simply not have replicated yet.
-    let Some(identity) = identity else {
-        eprintln!("[mls] verify_added_devices: user {target_user_id} not found — retry");
-        return Ok(VerifyOutcome::AbsentRetry);
-    };
-    let Some(account_id_pub) = identity
-        .account_id_pub
-        .as_deref()
-        .map(|s| super::ds_reads::decode_b64("account_id_pub", s))
-        .transpose()?
-    else {
-        eprintln!("[mls] verify_added_devices: {target_user_id} has no account_id_pub — retry");
-        return Ok(VerifyOutcome::AbsentRetry);
-    };
-
-    // The map is READ, never drained: `added_device_ids` is a CSV column the DS
-    // writes, so a repeated id in it is a shape this function has to survive.
-    // Taking rows out would make the second mention of a device look absent,
-    // turn a legitimate commit into a permanent `AbsentRetry`, and wedge the
-    // replay.
-    let mut by_device: std::collections::HashMap<&str, &pollis_api::reads::DeviceCertRow> =
-        std::collections::HashMap::with_capacity(identity.devices.len());
-    for row in &identity.devices {
-        by_device.insert(row.device_id.as_str(), row);
+    /// Replace one user's account key with a locally-trusted value, or drop it.
+    ///
+    /// The committing side pins here: a peer whose DS-reported key differs from
+    /// the local TOFU pin is set to `None` (every one of their leaves becomes
+    /// `Unverifiable`), and the actor's own key is overwritten with the one in
+    /// the device keystore, so the DS cannot substitute a root for either.
+    pub fn set_account_key(&mut self, user_id: &str, account_id_pub: Option<Vec<u8>>) {
+        use base64::Engine as _;
+        if let Some(identity) = self.by_user.get_mut(user_id) {
+            identity.account_id_pub = account_id_pub
+                .map(|k| base64::engine::general_purpose::STANDARD.encode(k));
+        }
     }
 
-    for did in device_ids {
-        let row = match by_device.get(did.as_str()) {
-            Some(r) => *r,
-            None => {
-                // Row absent. Could be (a) revoked + hard-deleted by an
-                // older app version (pre-#372 deployment), or (b) just not
-                // replicated yet. We can't tell, so default to the safer
-                // AbsentRetry — never destroy a commit on ambiguous state.
-                eprintln!(
-                    "[mls] verify_added_devices: device {did} not registered for {target_user_id} — retry (issue #372)"
-                );
-                return Ok(VerifyOutcome::AbsentRetry);
-            }
+    /// The DS-reported account key for `user_id`, decoded, if present.
+    pub fn account_key(&self, user_id: &str) -> Option<Vec<u8>> {
+        let identity = self.by_user.get(user_id)?;
+        let encoded = identity.account_id_pub.as_deref()?;
+        super::ds_reads::decode_b64("account_id_pub", encoded).ok()
+    }
+
+    /// Is the leaf `(user_id, device_id, signature_key)` the device the user's
+    /// account key certified?
+    ///
+    /// `scheme` is the group's signature scheme and picks which certified key
+    /// the leaf must equal: ML-DSA-44 leaves must present `mls_signature_pub_pq`,
+    /// Ed25519 leaves `mls_signature_pub`. Both keys are bound by the ONE v2
+    /// cert, so the cert check is the same either way; the equality is what
+    /// stops a valid cert for the real device vouching for an attacker's leaf
+    /// that merely claims the same `user:device` credential.
+    pub fn leaf_verdict(
+        &self,
+        user_id: &str,
+        device_id: &str,
+        signature_key: &[u8],
+        scheme: SignatureScheme,
+    ) -> LeafVerdict {
+        let Some(identity) = self.by_user.get(user_id) else {
+            return LeafVerdict::Unverifiable("user not in directory");
+        };
+        let Some(account_id_pub) = identity
+            .account_id_pub
+            .as_deref()
+            .and_then(|s| super::ds_reads::decode_b64("account_id_pub", s).ok())
+        else {
+            return LeafVerdict::Unverifiable("no account_id_pub");
+        };
+        let Some(row) = identity.devices.iter().find(|d| d.device_id == device_id) else {
+            return LeafVerdict::Unverifiable("device not registered");
         };
 
-        // Tombstone wins — a revoked device is unambiguously not allowed
-        // to add itself, regardless of cert column state.
-        if row.revoked_at.is_some() {
-            let revoked_at = &row.revoked_at;
-            eprintln!(
-                "[mls] verify_added_devices: device {did} is REVOKED (revoked_at={revoked_at:?})"
-            );
-            return Ok(VerifyOutcome::Revoked);
+        // Tombstone wins — a revoked device is unambiguously not allowed into a
+        // tree, regardless of cert column state.
+        if let Some(revoked_at) = &row.revoked_at {
+            return LeafVerdict::Uncertified(format!("device revoked at {revoked_at}"));
         }
 
-        let (cert, issued_at_str, cert_identity_version, mls_sig_pub, mls_sig_pub_pq) = match (
+        let (cert, issued_at_str, cert_identity_version, ed_pub, pq_pub) = match (
             row.device_cert.as_deref(),
             row.cert_issued_at.as_deref(),
             row.cert_identity_version,
             row.mls_signature_pub.as_deref(),
             row.mls_signature_pub_pq.as_deref(),
         ) {
-            (Some(c), Some(t), Some(v), Some(p), Some(q)) => (
-                super::ds_reads::decode_b64("device_cert", c)?,
-                t,
-                v,
-                super::ds_reads::decode_b64("mls_signature_pub", p)?,
-                super::ds_reads::decode_b64("mls_signature_pub_pq", q)?,
-            ),
-            _ => {
-                // Cert columns NULL on a non-revoked row is the
-                // "device row inserted but cert publish hasn't landed
-                // yet" race. Same treatment as fully absent.
-                eprintln!(
-                    "[mls] verify_added_devices: device {did} has no cert columns populated — retry"
+            (Some(c), Some(t), Some(v), Some(p), Some(q)) => {
+                let decoded = (
+                    super::ds_reads::decode_b64("device_cert", c),
+                    super::ds_reads::decode_b64("mls_signature_pub", p),
+                    super::ds_reads::decode_b64("mls_signature_pub_pq", q),
                 );
-                return Ok(VerifyOutcome::AbsentRetry);
+                match decoded {
+                    (Ok(c), Ok(p), Ok(q)) => (c, t, v, p, q),
+                    _ => {
+                        return LeafVerdict::Uncertified("cert columns not base64".to_string());
+                    }
+                }
+            }
+            // NULL cert columns on a live row: the cert publish has not landed.
+            _ => {
+                return LeafVerdict::Unverifiable("cert not published");
             }
         };
 
         let issued_at: u64 = match issued_at_str.parse() {
             Ok(v) => v,
             Err(e) => {
-                // Malformed timestamp is a hard format error, not a race —
-                // treat as Revoked so the bad row gets cleaned up.
-                eprintln!(
-                    "[mls] verify_added_devices: device {did} cert_issued_at unparseable '{issued_at_str}': {e}"
-                );
-                return Ok(VerifyOutcome::Revoked);
+                return LeafVerdict::Uncertified(format!(
+                    "cert_issued_at unparseable '{issued_at_str}': {e}"
+                ));
             }
         };
 
         if let Err(e) = crate::commands::account_identity::verify_device_cert(
             &account_id_pub,
-            did,
-            &mls_sig_pub,
-            &mls_sig_pub_pq,
+            device_id,
+            &ed_pub,
+            &pq_pub,
             cert_identity_version as u32,
             issued_at,
             &cert,
         ) {
-            // Cert chain itself failed — unambiguous bad data, not a race.
-            eprintln!("[mls] verify_added_devices: device {did} cert verification failed: {e}");
-            return Ok(VerifyOutcome::Revoked);
+            return LeafVerdict::Uncertified(format!("device cert invalid: {e}"));
         }
+
+        // The cert is the user's and it certifies (ed_pub, pq_pub). The leaf has
+        // to BE one of those keys — the one this group's suite signs with.
+        let certified: &[u8] = match scheme {
+            SignatureScheme::ED25519 => &ed_pub,
+            _ => &pq_pub,
+        };
+        if certified != signature_key {
+            return LeafVerdict::Uncertified(
+                "leaf signature key is not the certified device key".to_string(),
+            );
+        }
+        LeafVerdict::Certified
+    }
+}
+
+#[cfg(test)]
+mod leaf_verdict_tests {
+    use super::*;
+    use crate::commands::account_identity::{device_cert_signed_payload, AccountSigningKey};
+    use ml_dsa::{Keypair as _, Signer as _};
+    use pollis_api::reads::{AddedIdentity, DeviceCertRow};
+
+    const DID: &str = "01DEVICE000000000000000000";
+    const UID: &str = "01USER0000000000000000000";
+
+    fn b64(b: &[u8]) -> String {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD.encode(b)
     }
 
-    Ok(VerifyOutcome::Verified)
+    /// A real account key, a real v2 cert over `(ed_pub, pq_pub)`, and the
+    /// directory that describes them.
+    fn certified_identity() -> (IdentityDirectory, Vec<u8>, Vec<u8>) {
+        let account = AccountSigningKey::from_seed(&[42u8; 32].into());
+        let ed_pub = vec![7u8; 32];
+        let pq_pub = AccountSigningKey::from_seed(&[8u8; 32].into())
+            .verifying_key()
+            .encode()
+            .to_vec();
+        let payload =
+            device_cert_signed_payload(DID, &ed_pub, &pq_pub, 1, 1_700_000_000).unwrap();
+        let cert = account.sign(&payload).encode().to_vec();
+        let dir = IdentityDirectory::new(vec![AddedIdentity {
+            user_id: UID.to_string(),
+            account_id_pub: Some(b64(&account.verifying_key().encode())),
+            devices: vec![DeviceCertRow {
+                device_id: DID.to_string(),
+                device_cert: Some(b64(&cert)),
+                cert_issued_at: Some("1700000000".to_string()),
+                cert_identity_version: Some(1),
+                mls_signature_pub: Some(b64(&ed_pub)),
+                revoked_at: None,
+                mls_signature_pub_pq: Some(b64(&pq_pub)),
+            }],
+        }]);
+        (dir, ed_pub, pq_pub)
+    }
+
+    #[test]
+    fn the_certified_key_is_certified() {
+        let (dir, ed_pub, pq_pub) = certified_identity();
+        assert_eq!(
+            dir.leaf_verdict(UID, DID, &pq_pub, SignatureScheme::MLDSA44),
+            LeafVerdict::Certified
+        );
+        assert_eq!(
+            dir.leaf_verdict(UID, DID, &ed_pub, SignatureScheme::ED25519),
+            LeafVerdict::Certified
+        );
+    }
+
+    /// The finding's attack: a leaf that claims the real `user:device`
+    /// credential but carries the attacker's key. The device row, the cert and
+    /// the account key are all genuine — only the leaf key differs — and that
+    /// alone must be a refusal. The old check never compared the leaf key.
+    #[test]
+    fn a_valid_cert_does_not_vouch_for_a_different_leaf_key() {
+        let (dir, _, _) = certified_identity();
+        let attacker_key = vec![0xAAu8; 1312];
+        assert!(matches!(
+            dir.leaf_verdict(UID, DID, &attacker_key, SignatureScheme::MLDSA44),
+            LeafVerdict::Uncertified(_)
+        ));
+    }
+
+    #[test]
+    fn a_cert_from_the_wrong_account_key_is_uncertified() {
+        let (mut dir, _, pq_pub) = certified_identity();
+        let other = AccountSigningKey::from_seed(&[99u8; 32].into());
+        dir.set_account_key(UID, Some(other.verifying_key().encode().to_vec()));
+        assert!(matches!(
+            dir.leaf_verdict(UID, DID, &pq_pub, SignatureScheme::MLDSA44),
+            LeafVerdict::Uncertified(_)
+        ));
+    }
+
+    #[test]
+    fn missing_inputs_are_unverifiable_not_certified() {
+        let (mut dir, _, pq_pub) = certified_identity();
+        assert!(matches!(
+            dir.leaf_verdict("nobody", DID, &pq_pub, SignatureScheme::MLDSA44),
+            LeafVerdict::Unverifiable(_)
+        ));
+        assert!(matches!(
+            dir.leaf_verdict(UID, "otherdevice", &pq_pub, SignatureScheme::MLDSA44),
+            LeafVerdict::Unverifiable(_)
+        ));
+        dir.set_account_key(UID, None);
+        assert!(matches!(
+            dir.leaf_verdict(UID, DID, &pq_pub, SignatureScheme::MLDSA44),
+            LeafVerdict::Unverifiable(_)
+        ));
+    }
 }
