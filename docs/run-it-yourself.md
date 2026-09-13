@@ -302,8 +302,17 @@ Running it is the setup; the proof is in what your own infrastructure *can't* do
      work and not the transport, compare against what a normal (non-E2EE) SFU
      deployment would expose — there, the same capture yields clean audio.
    - **Membership binding:** remove one client from the group mid-call; MLS
-     advances the epoch, the voice key rotates, and the removed client can no
-     longer decrypt the next frame — without the server doing anything.
+     advances the epoch, the remaining clients derive the new epoch's key,
+     install it in key-ring slot `epoch mod 16`, and move their sender
+     `FrameCryptor`s onto that slot, so the very next frame they publish is
+     encrypted under a key the removed client never receives — without the
+     server doing anything. To watch it happen, run a remaining client from a
+     terminal and look for `[voice-e2ee] rotated key for <group> to epoch N
+     (ring slot S, K sender cryptor(s) moved)` the moment the removal lands,
+     followed ~10 s later by `retired ring slot` for the previous epoch. On
+     the removed client, audio from the others goes silent and its LiveKit
+     log reports `MissingKey` for the new slot; frames it keeps sending under
+     the old key stop decoding on everyone else once the old slot is retired.
 
 3. **The R2 objects are encrypted blobs.** Upload a file in the app, then
    download the object straight from your bucket. It's AES-256-GCM ciphertext,

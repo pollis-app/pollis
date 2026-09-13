@@ -97,6 +97,9 @@ pub mod voice_e2ee;
 #[cfg(not(feature = "media"))]
 #[path = "voice_e2ee_stub.rs"]
 pub mod voice_e2ee;
+// Epoch → libwebrtc key-ring slot arithmetic for voice E2EE. Pure integer
+// code, outside the media gate so the mapping is unit-tested on every target.
+pub mod voice_key_ring;
 #[cfg(feature = "media")]
 pub mod voice_denoiser;
 #[cfg(feature = "media")]

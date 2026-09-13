@@ -534,7 +534,7 @@ voice_key = MlsGroup::export_secret(
 )
 ```
 
-Both peers compute the same 32-byte key because both hold the same exporter secret at the same epoch. The key is handed to LiveKit's `FrameCryptor` (AES-128-GCM, libwebrtc-native) via `RoomOptions::encryption` so the SFU only ever sees ciphertext audio. On every commit merge in `process_pending_commits_inner` the key rotates without a reconnect — see `voice_e2ee::on_mls_epoch_changed` and [audio-processing.md](./audio-processing.md#end-to-end-encryption).
+Both peers compute the same 32-byte key because both hold the same exporter secret at the same epoch. The key is handed to LiveKit's `FrameCryptor` (AES-128-GCM, libwebrtc-native) via `RoomOptions::encryption` so the SFU only ever sees ciphertext audio. On every commit merge in `process_pending_commits_inner` the key rotates without a reconnect: the new key is installed in ring slot `epoch % 16` and every local sender cryptor is moved onto that slot with `set_key_index` (installing alone never moves a cryptor) — see `voice_e2ee::on_mls_epoch_changed`, `voice_key_ring.rs`, and [audio-processing.md](./audio-processing.md#end-to-end-encryption).
 
 ## Message Encrypt/Decrypt
 

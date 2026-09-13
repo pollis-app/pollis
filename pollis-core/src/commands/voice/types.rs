@@ -326,6 +326,11 @@ pub struct VoiceState {
     /// MLS epoch the current voice key was derived at. Suppresses duplicate
     /// rotations and lets the rotation hook skip when nothing has changed.
     pub e2ee_epoch: u64,
+    /// Key-ring slot (`voice_key_ring::voice_key_index(e2ee_epoch)`) every
+    /// local sender `FrameCryptor` must encrypt with. Re-applied to each newly
+    /// published local track, because libwebrtc creates every cryptor on slot
+    /// 0 and never moves it on its own.
+    pub e2ee_key_index: i32,
     /// Where a screen share capturing system audio parks its echo
     /// canceller so the mixer can feed it the signal about to hit the
     /// speaker. See `commands::screenshare::self_echo` for why the shared
@@ -365,6 +370,7 @@ impl VoiceState {
             e2ee_key_provider: None,
             e2ee_mls_group_id: None,
             e2ee_epoch: 0,
+            e2ee_key_index: 0,
             shared_audio_render: Arc::new(Mutex::new(None)),
         }
     }

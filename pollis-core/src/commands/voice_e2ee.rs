@@ -13,6 +13,27 @@
 //!     `MlsGroup::export_secret("pollis/voice/v1", epoch_be_bytes, 32)`.
 //!   - On every MLS epoch advance, `on_mls_epoch_changed` re-derives and
 //!     rotates the key in the live `KeyProvider` without reconnecting.
+//!
+//! Key-ring mechanics (why rotation is two calls, not one):
+//!   - libwebrtc keeps a 16-slot key ring per participant. A sender encrypts
+//!     with the slot its `FrameCryptor::key_index` points at and writes that
+//!     index into the frame trailer; a receiver decrypts with whatever key it
+//!     holds in the slot the trailer names. Installing a key in a slot does
+//!     NOT move any cryptor onto it — `KeyProvider::with_shared_key` seeds slot
+//!     0 and every cryptor is born on slot 0, and the SDK never calls
+//!     `set_key_index` itself.
+//!   - So the key for epoch `e` goes in slot `voice_key_index(e)` (= `e % 16`,
+//!     never out of range), and on every rotation — and on every newly
+//!     published local track — each local sender cryptor is pointed at that
+//!     slot with `set_key_index`. Receivers need no pointing: the trailer
+//!     carries the slot.
+//!   - The previous epoch's slot stays populated for
+//!     `VOICE_KEY_SLOT_GRACE_SECS` so in-flight frames and slower peers still
+//!     decrypt, then is overwritten with random bytes so an ex-member holding
+//!     the old key cannot keep injecting frames under the old index. Residual:
+//!     two epochs exactly 16 apart share a slot, so the ring wrapping inside
+//!     one grace window would retire the older key early — 16 commits in ten
+//!     seconds, and the cost is a few dropped frames, never plaintext exposure.
 
 use std::sync::Arc;
 
@@ -20,10 +41,16 @@ use livekit::e2ee::{
     key_provider::{KeyProvider, KeyProviderOptions},
     E2eeOptions, EncryptionType,
 };
+use livekit::prelude::Room;
 use openmls::prelude::*;
 use openmls_traits::OpenMlsProvider;
+use rand::rngs::OsRng;
+use rand::RngCore;
 
 use crate::commands::mls::MlsProvider;
+use crate::commands::voice_key_ring::{
+    slot_reused_since, voice_key_index, VOICE_KEY_RING_SIZE, VOICE_KEY_SLOT_GRACE_SECS,
+};
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
@@ -284,27 +311,119 @@ where
         .export_secret(provider.crypto(), VOICE_KEY_LABEL, &context, VOICE_KEY_LEN)
         .map_err(|e| Error::Other(anyhow::anyhow!("mls export_secret: {e}")))?;
 
-    let key_index = (epoch & 0x7FFF_FFFF) as i32;
+    let key_index = voice_key_index(epoch);
     Ok((key, key_index, epoch))
 }
 
-/// Build LiveKit `E2eeOptions` backed by a shared symmetric key. Defaults
-/// match `livekit-client` JS (`LKFrameEncryptionKey` salt, 16-key ring,
-/// PBKDF2 derivation) so peers across SDKs interop.
-pub fn build_e2ee_options(key: Vec<u8>) -> E2eeOptions {
-    let kp = KeyProvider::with_shared_key(KeyProviderOptions::default(), key);
+/// Build LiveKit `E2eeOptions` backed by a shared symmetric key, with the
+/// join-epoch key installed in its own ring slot (`key_index`). Defaults
+/// otherwise match `livekit-client` JS (`LKFrameEncryptionKey` salt, 16-key
+/// ring, PBKDF2 derivation) so peers across SDKs interop.
+///
+/// `with_shared_key` can only seed slot 0. When the join epoch does not map
+/// to slot 0 that seed is scrubbed straight away — no frame has been sent yet,
+/// and leaving the key there would let anyone holding it (a member removed
+/// after we joined) inject frames tagged with index 0 that we would decrypt.
+pub fn build_e2ee_options(key: Vec<u8>, key_index: i32) -> E2eeOptions {
+    let options = KeyProviderOptions {
+        key_ring_size: VOICE_KEY_RING_SIZE,
+        ..KeyProviderOptions::default()
+    };
+    let kp = KeyProvider::with_shared_key(options, key.clone());
+    if key_index != 0 {
+        // Scrub first, install second, so `latest_key_index` ends on the live
+        // slot.
+        scrub_slot(&kp, 0);
+        install_shared_key(&kp, key, key_index);
+    }
     E2eeOptions {
         encryption_type: EncryptionType::Gcm,
         key_provider: kp,
     }
 }
 
+/// Install `key` in ring slot `key_index` and confirm it landed. The SDK
+/// wrapper discards libwebrtc's `bool` (false when the index is outside the
+/// ring), so the read-back is the only way to observe a rejected install.
+/// `voice_key_index` keeps the index in range by construction; this is the
+/// tripwire for that invariant, not the enforcement of it.
+fn install_shared_key(kp: &KeyProvider, key: Vec<u8>, key_index: i32) -> bool {
+    kp.set_shared_key(key, key_index);
+    let landed = kp.get_shared_key(key_index).is_some();
+    if !landed {
+        eprintln!(
+            "[voice-e2ee] key install at ring slot {key_index} was rejected (ring size {VOICE_KEY_RING_SIZE}) — frames at this index will not decrypt"
+        );
+    }
+    landed
+}
+
+/// Overwrite ring slot `key_index` with random bytes. libwebrtc has no
+/// "remove key" call, so a fresh random key is the closest thing to an empty
+/// slot: frames tagged with this index fail authentication instead of
+/// decrypting under a retired epoch's key.
+///
+/// Side effect to know about: `set_shared_key` also moves the provider's
+/// `latest_key_index` onto the slot it writes. The SDK reads that only when
+/// encrypting data-channel packets, and the voice room never publishes any
+/// (signalling rides the separate `state.livekit` realtime rooms), so it is
+/// harmless here; a caller that has the live key to hand re-installs it
+/// afterwards anyway (see `build_e2ee_options`) to keep the field truthful.
+fn scrub_slot(kp: &KeyProvider, key_index: i32) {
+    let mut junk = vec![0u8; VOICE_KEY_LEN];
+    OsRng.fill_bytes(&mut junk);
+    kp.set_shared_key(junk, key_index);
+}
+
+/// Point every LOCAL sender `FrameCryptor` in `room` at ring slot
+/// `key_index`. Returns how many were updated.
+///
+/// Receivers are left alone: they take the slot from each frame's trailer, so
+/// pointing them anywhere is meaningless. Senders are the whole problem —
+/// libwebrtc creates every cryptor on slot 0 and nothing in the SDK ever
+/// moves it, so without this call a "rotated" key is written into a slot no
+/// outgoing frame is ever encrypted with.
+pub fn apply_sender_key_index(room: &Room, key_index: i32) -> usize {
+    let local = room.local_participant().identity();
+    let mut updated = 0;
+    for ((identity, _sid), cryptor) in room.e2ee_manager().frame_cryptors() {
+        if identity != local {
+            continue;
+        }
+        cryptor.set_key_index(key_index);
+        updated += 1;
+    }
+    updated
+}
+
+/// Re-point the active room's local sender cryptors at the current epoch's
+/// slot. Called from the room event loop on every `LocalTrackPublished`
+/// (microphone, screen-share video/audio, camera): each new publication gets
+/// a brand-new cryptor on slot 0, which would otherwise encrypt under
+/// whatever that slot holds — the scrubbed join seed or a retired epoch's
+/// key — with a trailer nobody decodes correctly.
+pub async fn sync_local_sender_key_index(state: &Arc<AppState>) {
+    let voice = state.voice.lock().await;
+    let Some(room) = voice.room.as_ref() else {
+        return;
+    };
+    if voice.e2ee_key_provider.is_none() {
+        return;
+    }
+    let n = apply_sender_key_index(room, voice.e2ee_key_index);
+    eprintln!(
+        "[voice-e2ee] local track published: {n} sender cryptor(s) on ring slot {}",
+        voice.e2ee_key_index
+    );
+}
+
 /// Called from `mls::process_pending_commits_inner` after any commit is
 /// merged. If the changed group is the one currently backing the active
-/// voice room, re-derive the voice key for the new epoch and rotate it on
-/// the live `KeyProvider`. Live frames published after this call use the
-/// new key; libwebrtc's key ring keeps the previous key available for
-/// in-flight frames during the changeover.
+/// voice room, re-derive the voice key for the new epoch, install it in the
+/// new epoch's ring slot, and move every local sender cryptor onto that slot.
+/// Live frames published after this call use the new key; the previous slot
+/// keeps the old key for `VOICE_KEY_SLOT_GRACE_SECS` so in-flight frames and
+/// peers still applying the commit decrypt, then is scrubbed.
 pub async fn on_mls_epoch_changed(state: &Arc<AppState>, mls_group_id: &str) {
     let (provider, prev_epoch) = {
         let voice = state.voice.lock().await;
@@ -330,13 +449,51 @@ pub async fn on_mls_epoch_changed(state: &Arc<AppState>, mls_group_id: &str) {
         return;
     }
 
-    provider.set_shared_key(key.clone(), key_index);
+    if !install_shared_key(&provider, key.clone(), key_index) {
+        return;
+    }
 
-    let channel = {
+    let (channel, senders_moved) = {
         let mut voice = state.voice.lock().await;
+        // A rotation for a group this state no longer backs (left and rejoined
+        // elsewhere while the derive above ran) must not be recorded on it.
+        if voice.e2ee_mls_group_id.as_deref() != Some(mls_group_id) {
+            return;
+        }
         voice.e2ee_epoch = epoch;
-        voice.channel.clone()
+        voice.e2ee_key_index = key_index;
+        let moved = voice
+            .room
+            .as_ref()
+            .map(|room| apply_sender_key_index(room, key_index))
+            .unwrap_or(0);
+        (voice.channel.clone(), moved)
     };
+
+    // Retire the previous epoch's slot once nothing legitimate can still be
+    // using it. One-shot delay, not a poll: it fires once per rotation.
+    let prev_index = voice_key_index(prev_epoch);
+    if prev_index != key_index {
+        let scrub_state = Arc::clone(state);
+        let scrub_group = mls_group_id.to_string();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(VOICE_KEY_SLOT_GRACE_SECS)).await;
+            let voice = scrub_state.voice.lock().await;
+            // Skip if the call ended or moved groups (the provider we hold is
+            // dead either way), or if a newer epoch has since re-occupied the
+            // slot — wiping it then would destroy a live key.
+            if voice.e2ee_mls_group_id.as_deref() != Some(scrub_group.as_str()) {
+                return;
+            }
+            if voice.e2ee_epoch < epoch || slot_reused_since(prev_index, epoch, voice.e2ee_epoch) {
+                return;
+            }
+            scrub_slot(&provider, prev_index);
+            eprintln!(
+                "[voice-e2ee] retired ring slot {prev_index} (epoch {prev_epoch}) after grace period"
+            );
+        });
+    }
 
     // Notify the renderer so the screen-share view client's
     // ExternalE2EEKeyProvider can rotate too. Without this, the JS-side
@@ -352,6 +509,6 @@ pub async fn on_mls_epoch_changed(state: &Arc<AppState>, mls_group_id: &str) {
     }
 
     eprintln!(
-        "[voice-e2ee] rotated key for {mls_group_id} to epoch {epoch} (idx {key_index})"
+        "[voice-e2ee] rotated key for {mls_group_id} to epoch {epoch} (ring slot {key_index}, {senders_moved} sender cryptor(s) moved)"
     );
 }
