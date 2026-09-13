@@ -561,34 +561,145 @@ pub async fn register_push_token(
     State(state): State<AppState>,
     req: RawRequest,
 ) -> Result<Response, AppError> {
-    let (authed, parsed) = match gate_and_parse::<PushTokenBody>(&state, &req).await? {
+    // #1090: the binding needs the SERVER-VERIFIED device, so this endpoint
+    // gates with `gate_or_session_kind` rather than `gate_and_parse` — the
+    // device id comes from the credential, never from the body.
+    let (authed, cred) = match crate::writes::gate_or_session_kind(&state, &req).await? {
         Ok(v) => v,
         Err(resp) => return Ok(resp),
     };
+    let parsed: PushTokenBody = match serde_json::from_slice(&req.body) {
+        Ok(b) => b,
+        Err(_) => return Ok(crate::writes::bad_request("invalid body")),
+    };
+    let device_id = match &cred {
+        crate::writes::GateCredential::Signature { device_id }
+        | crate::writes::GateCredential::Session { device_id } => Some(device_id.as_str()),
+        crate::writes::GateCredential::None => None,
+    };
     let conn = state.db.conn().await?;
-    outcome_response::<PushTokenBody>(apply_register_push_token(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response::<PushTokenBody>(
+        apply_register_push_token(&conn, authed.as_deref(), device_id, &parsed).await?,
+    )
+}
+
+/// Push tokens kept per user (#1090). A person has a phone and maybe a tablet;
+/// anything past this is churn from reinstalls, and every stale row multiplies
+/// one message into another Expo call.
+pub const PUSH_TOKENS_PER_USER: i64 = 10;
+
+/// Whether `token` is shaped like the Expo push token this fan-out can actually
+/// deliver to (`push::EXPO_ENDPOINT` takes nothing else).
+///
+/// Shape-only, and that is the point: a token is a routing address, so the DS
+/// cannot tell a live one from a dead one — but it can refuse the strings that
+/// were never tokens at all, which is what stops the table being used as free
+/// per-user storage or padded with junk to inflate fan-out.
+pub fn is_expo_push_token(token: &str) -> bool {
+    let inner = token
+        .strip_prefix("ExponentPushToken[")
+        .or_else(|| token.strip_prefix("ExpoPushToken["))
+        .and_then(|rest| rest.strip_suffix(']'));
+    match inner {
+        // Expo's opaque id: non-empty, bounded, and no structural characters.
+        Some(id) => {
+            !id.is_empty()
+                && id.len() <= 128
+                && id
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':'))
+        }
+        None => false,
+    }
 }
 
 /// Upsert the push token with `user_id = actor`. Authz: owner-scoped — the token
 /// is bound to the actor, so a caller can never register a token under another
 /// user (the body's `user_id`, if present, must equal the signer).
+///
+/// #1090, three bounds on top of that:
+///
+/// * **Shape.** A string that is not an Expo push token is refused outright, so
+///   the table cannot be padded with junk that inflates every fan-out.
+/// * **Device binding.** `token` is the primary key and the conflict branch used
+///   to reassign `user_id` unconditionally, so anyone holding a victim's token
+///   string could point it at their own account: the victim's phone then got the
+///   attacker's notifications and none of its own. The row now records the
+///   SERVER-VERIFIED registering device, and a re-register is only honoured from
+///   that same device. This keeps the case the original design wanted —
+///   switching accounts on one phone, where the same install re-registers under
+///   a new user — while refusing the one it did not: a different device
+///   presenting a stolen token. A legacy row with no binding adopts the first
+///   device to re-register it.
+/// * **Cap.** At most [`PUSH_TOKENS_PER_USER`], oldest evicted first, so a
+///   reinstall loop cannot grow one message into an unbounded number of Expo
+///   calls.
 pub async fn apply_register_push_token(
     conn: &Connection,
     authed: Option<&str>,
+    device_id: Option<&str>,
     body: &PushTokenBody,
 ) -> anyhow::Result<WriteOutcome> {
     let actor = match resolve_actor(authed, body.user_id.as_deref()) {
         Ok(a) => a,
         Err(o) => return Ok(o),
     };
+    if !is_expo_push_token(&body.token) {
+        return Ok(WriteOutcome::Forbidden);
+    }
+
+    // Who, if anyone, already holds this token.
+    let mut rows = conn
+        .query(
+            "SELECT user_id, device_id FROM push_token WHERE token = ?1",
+            libsql::params![body.token.clone()],
+        )
+        .await?;
+    let existing: Option<(String, Option<String>)> = match rows.next().await? {
+        Some(row) => Some((row.get(0)?, row.get::<Option<String>>(1)?)),
+        None => None,
+    };
+    drop(rows);
+
+    if let Some((owner, bound_device)) = &existing {
+        // A different account may only take the token over from the device that
+        // registered it. `None` is a pre-#1090 row with no binding: adopt it.
+        let same_device = match (bound_device.as_deref(), device_id) {
+            (Some(bound), Some(asking)) => bound == asking,
+            (None, _) => true,
+            (Some(_), None) => false,
+        };
+        if owner != &actor && !same_device {
+            return Ok(WriteOutcome::Forbidden);
+        }
+    }
+
     conn.execute(
-        "INSERT INTO push_token (token, user_id, platform, updated_at) \
-         VALUES (?1, ?2, ?3, ?4) \
+        "INSERT INTO push_token (token, user_id, platform, updated_at, device_id) \
+         VALUES (?1, ?2, ?3, ?4, ?5) \
          ON CONFLICT(token) DO UPDATE SET \
              user_id = excluded.user_id, \
              platform = excluded.platform, \
-             updated_at = excluded.updated_at",
-        libsql::params![body.token.clone(), actor, body.platform.clone(), body.updated_at.clone()],
+             updated_at = excluded.updated_at, \
+             device_id = COALESCE(excluded.device_id, push_token.device_id)",
+        libsql::params![
+            body.token.clone(),
+            actor.clone(),
+            body.platform.clone(),
+            body.updated_at.clone(),
+            device_id.map(|d| d.to_string()),
+        ],
+    )
+    .await?;
+
+    // Cap with oldest-first eviction. Ordered by `updated_at` then `token` so the
+    // victim is deterministic when several rows share a stamp.
+    conn.execute(
+        "DELETE FROM push_token WHERE user_id = ?1 AND token NOT IN ( \
+             SELECT token FROM push_token WHERE user_id = ?1 \
+             ORDER BY updated_at DESC, token DESC LIMIT ?2 \
+         )",
+        libsql::params![actor, PUSH_TOKENS_PER_USER],
     )
     .await?;
     Ok(WriteOutcome::Ok)

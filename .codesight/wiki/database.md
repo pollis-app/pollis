@@ -916,8 +916,15 @@ global ordering + a UNIQUE index enforcing the per-subject invariant).
 - `updated_at` TEXT NOT NULL
 - Mobile only — desktop never registers, so the fanout is a no-op for desktop-only users.
 - **Content bound:** the notification this routes carries only `{conversationId, kind}` — never plaintext, sender, or any content. Consulted solely by `commands::push::notify_new_message`.
+- `device_id` TEXT _(#1090 — the **server-verified** `X-Pollis-Device` of the registering request, never a body field)_
 - `token` is the PK so a re-register from the same device upserts rather than duplicating.
 - Retention: rows unrefreshed for `POLLIS_DS_PUSH_TOKEN_RETENTION_DAYS` are swept by the DS.
+
+**Ownership (#1090).** The conflict branch used to reassign `user_id` unconditionally, so anyone holding a victim's token string could point it at their own account: the victim's phone then received the attacker's notifications and none of its own. Refusing every reassignment would have broken what the PK comment above describes — switching accounts on one phone re-registers the same token under a new user — so the row records the registering device and a takeover is honoured only from that same device. A pre-#1090 row has no binding and is adopted by the first device to re-register it. Migration `000024` adds the column.
+
+**Two further bounds (#1090).** The token must be shaped like an Expo token (`devices::is_expo_push_token`), so the table cannot be padded with junk that inflates every fan-out; and a user keeps at most `PUSH_TOKENS_PER_USER` (10), oldest evicted first, so a reinstall loop cannot grow one message into an unbounded number of Expo calls.
+
+The payload's `conversationId`/`kind` disclosure to Expo/APNs/FCM is tracked separately in #1122 — it needs an opaque handle and a client-protocol change.
 
 ### user_groups / user_dms _(migration 000009 — created, then unused)_
 Backfilled-then-stale, unread tables. Created by migration `000009` as the directory index for the per-conversation-DB split (#261 Phase 2). #261 was dropped (not-planned), and the maintenance + reads were reverted — but the migration is append-only history and the tables were already applied to prod/dev/test, so they remain **unreferenced**. Note they are not empty: the migration backfills them from current membership at the bottom of the file, so they hold a frozen snapshot of the roster as of the moment it was applied — stale, and misleading if anyone assumes otherwise. No code writes or reads them. Left in place; a future tightening migration can `DROP` them if desired. They **are** now cleared by account/group teardown — that frozen snapshot is real membership metadata about real users, so it has to go when they do.
