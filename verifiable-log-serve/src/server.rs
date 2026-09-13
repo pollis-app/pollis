@@ -65,6 +65,22 @@ impl DevServer {
             .to_ip()
             .ok_or_else(|| ServeError::Http("server bound to a non-IP address".into()))?;
 
+        // Debug/dev + test convenience: trust the key of the log we are about to
+        // serve, so `cargo run serve` against a local dev log (and the crate's
+        // own tests) verify without the production pin. Compiled out of release
+        // builds — the shipped auditor never widens trust from a served key.
+        #[cfg(debug_assertions)]
+        for rel in ["v1/public_key.json", "v1/account-keys/public_key.json"] {
+            if let Ok(txt) = std::fs::read_to_string(root.join(rel)) {
+                if let Ok(doc) = serde_json::from_str::<crate::bundle::PublicKeyDoc>(&txt) {
+                    crate::pinned::trust_hex_for_dev(&doc.public_key);
+                    for k in &doc.keys {
+                        crate::pinned::trust_hex_for_dev(&k.public_key);
+                    }
+                }
+            }
+        }
+
         let server = Arc::new(server);
         let base_url = Arc::new(format!("http://{addr}"));
         let stop = Arc::new(AtomicBool::new(false));

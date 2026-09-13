@@ -15,6 +15,15 @@ Everywhere below, `<base-url>` is wherever the static log is published. In
 production that is **https://verify.pollis.com**; locally it is a dev server you
 run yourself.
 
+`pollis-verify` trusts **only its compiled-in pinned public key** — it never
+verifies against the key a server hands it, so a hostile or man-in-the-middled
+log cannot substitute its own key and self-sign a forged history. Verifying a
+**non-production** log you run yourself (which is signed by your own key, not
+the pinned one) is the one case you must opt into: set
+`POLLIS_VERIFY_PINNED_KEYS_HEX` to that log's public key(s) (comma-separated hex,
+1312 bytes each) — it is additive to the pinned key, and only you (not the
+server) can set it. Against production, leave it unset.
+
 ## 1. Get the verifier
 
 The auditor CLI is **`pollis-verify`**. You can download a prebuilt binary or

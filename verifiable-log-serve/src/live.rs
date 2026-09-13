@@ -34,6 +34,9 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use verifiable_log::SigningKey;
+// `verifying_key()` on a signing key comes from this trait (debug-only pin seam).
+#[cfg(debug_assertions)]
+use ml_dsa::Keypair as _;
 use tiny_http::{Method, Request, Response, Server};
 use verifiable_log_builder::{build_bundle, source};
 
@@ -189,6 +192,13 @@ impl LiveServer {
         ttl: Duration,
         signing_key: SigningKey,
     ) -> Result<LiveServer> {
+        // Debug/dev + test convenience: trust this live server's own signing key
+        // so a local `serve live` (and the crate's tests) verify without the
+        // production pin. Compiled out of release — the shipped auditor never
+        // widens trust from a served key.
+        #[cfg(debug_assertions)]
+        crate::pinned::trust_hex_for_dev(&hex::encode(signing_key.verifying_key().encode()));
+
         let runtime = tokio::runtime::Runtime::new()
             .map_err(|e| ServeError::Config(format!("failed to start async runtime: {e}")))?;
 

@@ -186,6 +186,17 @@ pub fn verify_remote(base_url: &str) -> Result<Report> {
             "public_key.json has no usable key (all expired or malformed)".to_string(),
         ));
     }
+    // H-1: trust ONLY the pinned key, never the served one. Drop any served
+    // candidate that is not pinned; a log serving its own key (equivocation /
+    // MITM) is then left with no key to verify under and fails closed.
+    let candidates = crate::pinned::retain_pinned(candidates, &mut |ok, label| {
+        report.check(ok, label);
+    });
+    if candidates.is_empty() {
+        return Err(ServeError::BadBundle(
+            "served public_key.json does not match the pinned log key — refusing to trust the served log".to_string(),
+        ));
+    }
 
     // 1. Fetch every advertised STH and verify its signature. Keyed by size so
     //    later proof checks can look the right head up.

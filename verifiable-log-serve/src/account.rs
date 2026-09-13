@@ -199,6 +199,14 @@ pub fn verify_account_in_bundle_at(
     //    though the same key signed it: the context, not the key, separates the
     //    trees. Expiry is applied here, not trusted from the server.
     let candidates = bundle.key_candidates(now_ms);
+    // H-1: keep only pinned keys; a served-but-unpinned key is equivocation.
+    let candidates = crate::pinned::retain_pinned(candidates, &mut |ok, _label| {
+        if !ok {
+            violations.push(
+                "served public key does not match the pinned log key — refusing to trust the served log".to_string(),
+            );
+        }
+    });
     let latest = bundle.sths.iter().max_by_key(|s| s.tree_size);
     let (sth_tree_size, root_hex, sth_sig_ok) = match latest {
         Some(sth) => (

@@ -42,6 +42,7 @@ pub mod bundle;
 pub mod error;
 pub mod group;
 pub mod layout;
+pub mod pinned;
 /// The live, lazily-refreshed server that reads the commit log straight out of
 /// Turso. Behind `live` — the only part of this crate that needs a database — so
 /// a verification-only consumer does not link `libsql` (#987). See the feature's
