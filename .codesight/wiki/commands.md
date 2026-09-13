@@ -608,7 +608,7 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 - **`terminal`** — `get_terminal_enabled`, `set_terminal_enabled`, `terminal_ack`, `terminal_close`, `terminal_open`, `terminal_resize`, `terminal_write`
 - **`transparency`** — `audit_peer_account_key`, `self_audit_account_key`, `verify_own_build`
 - **`tray`** — `tray_set_close_to_tray`, `tray_set_enabled`, `tray_set_unread`, `tray_set_voice_state`
-- **`update`** — `is_update_required`, `mark_update_required`
+- **`update`** — `get_update_check_plan`, `is_update_required`, `mark_update_required`
 - **`user`** — `get_preferences`, `get_user_profile`, `save_preferences`, `search_user_by_username`, `update_user_profile`
 - **`vault`** — `delete_vault_message`, `edit_vault_message`, `get_vault_messages`, `search_vault_messages`, `send_vault_message`, `set_vault_message_pinned`
 - **`voice`** — `get_last_join_timings`, `get_voice_gate_state`, `join_voice_channel`, `leave_voice_channel`, `list_audio_devices`, `prepare_voice_connection`, `release_voice_ptt`, `set_remote_user_volume`, `set_voice_audio_processing`, `set_voice_input_device`, `set_voice_input_mode`, `set_voice_output_device`, `set_voice_ptt_held`, `subscribe_voice_events`, `toggle_voice_deafen`, `toggle_voice_mute`
@@ -676,7 +676,7 @@ than hand-edit.
 
 **`staging`** (2) — `discard_staged_attachment`, `stage_attachment`
 
-**`update`** (2) — `is_update_required`, `mark_update_required`
+**`update`** (3) — `get_update_check_plan`, `is_update_required`, `mark_update_required`
 
 **`install_kind`** (1) — `detect_managed_install`
 

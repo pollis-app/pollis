@@ -505,11 +505,55 @@ Every outbound path in `pollis-core` (+ shells), from the surface audit:
 | Transparency **verify** | `ureq` (sync, in `verifiable-log-serve`) | `.proxy()` via `*_via` ✅ | **overlay** (closed §14.4) |
 | Push register (Expo) | `reqwest` — `push.rs:139` | `.proxy()` ✅ | see §14.4 (non-first-party host) |
 | LiveKit signaling (WS) + media (RTP) | `livekit` crate | ❌ none | **direct** — plane split (§6.4) |
+| Auto-update manifest + artifact (`cdn.pollis.com`) | `tauri-plugin-updater`'s own `reqwest` | `.proxy()` on `check` ✅ | **overlay**, or skipped — see below |
+| Remote media in an unfurled link | the WEBVIEW's own `<img>` / `<video>` | ❌ none possible | **click-to-load only** — see below |
 
 The 10 bare `reqwest::Client::new()` sites confirm there is **no shared HTTP client builder** today.
 v0's first refactor is a `state`-aware `http_client()` helper that all sites call; it applies the
 proxy when the overlay is on and is a no-op passthrough when off. This both wires the overlay and
 removes the per-call-`Client::new()` anti-pattern (connection-pool win for free).
+
+#### The two callers that are not `http_client`'s
+
+Two first-party requests do not and cannot go through
+`pollis_relay::http::http_client`, so each carries its own rule.
+
+**1. The auto-updater.** `tauri-plugin-updater` builds its `reqwest` client
+inside the plugin, so with the overlay on every other request rode the relay and
+this one went straight to `cdn.pollis.com` — on every window focus, and in
+`strict` too, which is exactly the silent-direct §10.1 forbids.
+
+It is not an exception any more. `pollis-core/src/commands/update.rs` exposes
+`get_update_check_plan`, which the renderer's `bridge/updater.ts` consults before
+every check:
+
+| overlay state | plan |
+| --- | --- |
+| `off` | `direct` — byte-for-byte the pre-overlay path |
+| `prefer` or `strict`, shim up | `proxy` — `socks5h://<shim>`, passed to the plugin's `check` |
+| `prefer`, no circuit | `direct` — which is what Prefer means |
+| `strict`, no circuit | `blocked` — the check does not happen at all |
+
+The proxy reaches the artifact download too, not only the manifest fetch: the
+plugin stores it on the `Update` that `check` returns. Two mechanical details
+keep this working — `src-tauri/Cargo.toml` declares `reqwest 0.13` with the
+`socks` feature purely so cargo unifies it into the plugin's copy (`pollis-core`
+is on 0.12, a different major, so its `socks` does not reach there), and
+`plan_update_check`'s unit tests pin all four rows above.
+
+The residual: in `strict` with no circuit a device stops learning about updates
+until the overlay comes up. That is the right trade — an update check is the one
+first-party request that can always wait, and the alternative is announcing the
+address the mode exists to hide.
+
+**2. Remote media in a message.** An `<img src="https://…">` the renderer paints
+is the WEBVIEW's request, not `reqwest`'s, so no proxy setting can reach it and
+the overlay cannot cover it. It is therefore **never** automatic: every remote
+image and video in message text renders as a click-to-load placeholder
+(`frontend/src/components/Message/MediaLinkUnfurl.tsx`). There is no host
+allowlist — an exception for `cdn.pollis.com` was removed, because the hostname
+comes out of message text and is the sender's to choose, and because the CDN is
+one of the hosts the overlay exists to hide the address from.
 
 ### 14.3 v0 slices (each independently reviewable + headless-gated)
 

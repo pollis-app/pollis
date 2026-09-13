@@ -6583,6 +6583,7 @@ dependencies = [
  "pollis-delivery",
  "pollis-sqlcipher",
  "proptest",
+ "reqwest 0.13.2",
  "rusqlite",
  "serde",
  "serde_json",

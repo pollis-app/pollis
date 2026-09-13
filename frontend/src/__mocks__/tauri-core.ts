@@ -945,6 +945,12 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'set_terminal_enabled':
       return null;
 
+    // The overlay's verdict on the auto-updater (`bridge/updater.ts`). The
+    // browser suite runs with no overlay, so a direct check is the honest
+    // answer — see pollis-core/src/commands/update.rs.
+    case 'get_update_check_plan':
+      return { kind: 'direct' };
+
     // The OS save picker, which the export's button opens before anything is
     // written. Driven from Rust now (`pick_save_path`) so the chosen path is
     // recorded in the path scope before the renderer ever sees it — see

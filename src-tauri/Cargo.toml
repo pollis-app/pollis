@@ -100,6 +100,18 @@ tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-clipboard-manager = "2"
 
+# Present ONLY to turn a feature on in a crate this one does not otherwise call.
+# `tauri-plugin-updater` builds its own reqwest client, and it is the single
+# first-party HTTP caller that does not go through
+# `pollis_relay::http::http_client`. Routing it through the relay overlay means
+# handing its `check` a `socks5h://` proxy, which reqwest silently ignores
+# unless the `socks` feature is on — and cargo unifies features per MAJOR
+# version, so declaring it here switches it on inside the plugin's copy. Note
+# the 0.13: pollis-core and pollis-relay are on 0.12, a different major, so
+# their `socks` does not reach the updater. It is a pure cfg flag (`socks = []`
+# upstream), so this pulls in no new crate.
+reqwest = { version = "0.13", default-features = false, features = ["socks"] }
+
 # Used by lib.rs's clipboard helpers and by the #[tauri::command] shim
 # wrappers. Everything else (libsql, rusqlite, openmls, livekit,
 # libwebrtc, cpal, keyring, …) is owned by pollis-core now.

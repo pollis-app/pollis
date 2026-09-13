@@ -656,6 +656,7 @@ pub fn run() {
             commands::r2::get_media_url,
             commands::update::mark_update_required,
             commands::update::is_update_required,
+            commands::update::get_update_check_plan,
             commands::install_kind::detect_managed_install,
             commands::voice::subscribe_voice_events,
             commands::voice::list_audio_devices,
