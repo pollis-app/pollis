@@ -69,6 +69,26 @@ async fn seed_member(db: &common::TempDb, conversation_id: &str, user_id: &str) 
     .unwrap();
 }
 
+/// Give `conv` a commit log whose head in `generation` is `head_epoch`, so a
+/// keystate naming that epoch is at or below the head.
+///
+/// The keystate CAS is ceilinged at the commit log (a member must not be able to
+/// freeze the row at an epoch nobody can ever exceed), so a test that re-wraps at
+/// epoch 7 has to be a test about a conversation that actually reached epoch 7.
+async fn seed_head(db: &common::TempDb, conv: &str, generation: i64, head_epoch: i64) {
+    let conn = db.conn().await.unwrap();
+    for epoch in 0..head_epoch {
+        conn.execute(
+            "INSERT INTO mls_commit_log \
+                 (conversation_id, generation, epoch, sender_id, commit_data) \
+             VALUES (?1, ?2, ?3, 'alice', X'00')",
+            libsql::params![conv, generation, epoch],
+        )
+        .await
+        .unwrap();
+    }
+}
+
 fn keystate(conv: &str, actor: &str, generation: i64, epoch: i64, mint: bool) -> UpsertPinKeystateBody {
     UpsertPinKeystateBody {
         conversation_id: conv.to_string(),
@@ -147,9 +167,10 @@ async fn a_second_mint_is_refused_even_at_a_newer_epoch() {
     let db = fresh().await;
     seed_member(&db, "conv1", "alice").await;
     seed_member(&db, "conv1", "bob").await;
+    seed_head(&db, "conv1", 0, 5).await;
     let conn = db.conn().await.unwrap();
 
-    let out = apply_upsert_keystate(&conn, Some("alice"), &keystate("conv1", "alice", 0, 4, true))
+    let out = apply_upsert_keystate(&conn, &conn, Some("alice"), &keystate("conv1", "alice", 0, 4, true))
         .await
         .unwrap();
     assert!(matches!(out, KeystateOutcome::Ok { updated: true }));
@@ -157,7 +178,7 @@ async fn a_second_mint_is_refused_even_at_a_newer_epoch() {
     // Bob mints too — different key material, HIGHER epoch. Must lose.
     let mut second = keystate("conv1", "bob", 0, 5, true);
     second.wrapped_kpin = b64(&[0xCD; 48]);
-    let out = apply_upsert_keystate(&conn, Some("bob"), &second).await.unwrap();
+    let out = apply_upsert_keystate(&conn, &conn, Some("bob"), &second).await.unwrap();
     assert!(
         matches!(out, KeystateOutcome::Ok { updated: false }),
         "a second mint must be refused — accepting it forks the key lineage"
@@ -174,19 +195,20 @@ async fn a_second_mint_is_refused_even_at_a_newer_epoch() {
 async fn rewrap_is_lexicographically_monotone() {
     let db = fresh().await;
     seed_member(&db, "conv1", "alice").await;
+    seed_head(&db, "conv1", 0, 7).await;
     let conn = db.conn().await.unwrap();
-    apply_upsert_keystate(&conn, Some("alice"), &keystate("conv1", "alice", 0, 4, true))
+    apply_upsert_keystate(&conn, &conn, Some("alice"), &keystate("conv1", "alice", 0, 4, true))
         .await
         .unwrap();
 
     // Forward: accepted.
-    let out = apply_upsert_keystate(&conn, Some("alice"), &keystate("conv1", "alice", 0, 7, false))
+    let out = apply_upsert_keystate(&conn, &conn, Some("alice"), &keystate("conv1", "alice", 0, 7, false))
         .await
         .unwrap();
     assert!(matches!(out, KeystateOutcome::Ok { updated: true }));
 
     // Stale: refused, row keeps epoch 7.
-    let out = apply_upsert_keystate(&conn, Some("alice"), &keystate("conv1", "alice", 0, 5, false))
+    let out = apply_upsert_keystate(&conn, &conn, Some("alice"), &keystate("conv1", "alice", 0, 5, false))
         .await
         .unwrap();
     assert!(matches!(out, KeystateOutcome::Ok { updated: false }));
@@ -195,14 +217,16 @@ async fn rewrap_is_lexicographically_monotone() {
 
     // Equal: refused (an idempotent retry has nothing to do — the row already
     // carries a wrap the current exporter opens).
-    let out = apply_upsert_keystate(&conn, Some("alice"), &keystate("conv1", "alice", 0, 7, false))
+    let out = apply_upsert_keystate(&conn, &conn, Some("alice"), &keystate("conv1", "alice", 0, 7, false))
         .await
         .unwrap();
     assert!(matches!(out, KeystateOutcome::Ok { updated: false }));
 
     // Successor lineage at epoch 0 — NUMERICALLY below 7 — must win, or a
-    // suite migration strands the keystate forever.
-    let out = apply_upsert_keystate(&conn, Some("alice"), &keystate("conv1", "alice", 1, 0, false))
+    // suite migration strands the keystate forever. The lineage has to have been
+    // OPENED for a wrap to name it, which is what the opening commit does.
+    seed_head(&db, "conv1", 1, 1).await;
+    let out = apply_upsert_keystate(&conn, &conn, Some("alice"), &keystate("conv1", "alice", 1, 0, false))
         .await
         .unwrap();
     assert!(matches!(out, KeystateOutcome::Ok { updated: true }));
@@ -218,6 +242,7 @@ async fn a_non_member_cannot_touch_the_keystate() {
     seed_member(&db, "conv1", "alice").await;
     let conn = db.conn().await.unwrap();
     let out = apply_upsert_keystate(
+        &conn,
         &conn,
         Some("mallory"),
         &keystate("conv1", "mallory", 0, 9, true),
@@ -239,21 +264,21 @@ async fn a_malformed_keystate_envelope_is_a_client_error() {
     let mut bad = keystate("conv1", "alice", 0, 1, true);
     bad.nonce = b64(&[1u8; 11]);
     assert!(matches!(
-        apply_upsert_keystate(&conn, Some("alice"), &bad).await.unwrap(),
+        apply_upsert_keystate(&conn, &conn, Some("alice"), &bad).await.unwrap(),
         KeystateOutcome::Invalid(_)
     ));
 
     let mut bad = keystate("conv1", "alice", 0, 1, true);
     bad.wrapped_kpin = "not base64!!!".into();
     assert!(matches!(
-        apply_upsert_keystate(&conn, Some("alice"), &bad).await.unwrap(),
+        apply_upsert_keystate(&conn, &conn, Some("alice"), &bad).await.unwrap(),
         KeystateOutcome::Invalid(_)
     ));
 
     let mut bad = keystate("conv1", "alice", 0, 1, true);
     bad.wrapped_kpin = b64(&[0u8; 4096]);
     assert!(matches!(
-        apply_upsert_keystate(&conn, Some("alice"), &bad).await.unwrap(),
+        apply_upsert_keystate(&conn, &conn, Some("alice"), &bad).await.unwrap(),
         KeystateOutcome::Invalid(_)
     ));
 }
@@ -358,11 +383,12 @@ async fn membership_gates_writes_and_any_member_may_unpin() {
 async fn reads_are_membership_gated() {
     let db = fresh().await;
     seed_member(&db, "conv1", "alice").await;
+    seed_head(&db, "conv1", 0, 1).await;
     let conn = db.conn().await.unwrap();
     apply_pin_message(&conn, Some("alice"), &pin("conv1", "m1", "alice", CIPHERTEXT))
         .await
         .unwrap();
-    apply_upsert_keystate(&conn, Some("alice"), &keystate("conv1", "alice", 0, 1, true))
+    apply_upsert_keystate(&conn, &conn, Some("alice"), &keystate("conv1", "alice", 0, 1, true))
         .await
         .unwrap();
 

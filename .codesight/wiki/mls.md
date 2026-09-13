@@ -773,7 +773,30 @@ GroupInfo is published (upserted to `mls_group_info`) after:
 - `process_pending_commits_inner` (after applying commits)
 - `external_join_group` (after self-joining)
 
-The UPSERT only overwrites if the new epoch is strictly greater than the stored epoch.
+The UPSERT only overwrites if the new `(generation, epoch)` is lexicographically
+greater than the stored pair — and, since the head-bound hardening, only if that
+pair is at or below the commit log's own head
+(`writes::refuse_above_head`): `generation` must be a lineage the log has
+opened, and `epoch` at or below that lineage's `MAX(epoch) + 1`, which is exactly
+the epoch a caught-up member publishes from. Monotone alone was unbounded ABOVE:
+one member publishing `generation = 2^62` froze the row for the life of the
+conversation, so every later republish lost the CAS and every external-joining
+device read a tree for a lineage that does not exist. A refusal is a 409 carrying
+the head, the same shape a stale `POST /v1/commits` gets. The blob is capped at
+`GROUP_INFO_MAX_BYTES` (1 MiB).
+
+The wrapped pin key (`pin_keystate`) is ceilinged by the same rule and for a
+sharper reason: a frozen keystate refuses every re-wrap, so a member removed after
+the freeze keeps a KEK that still opens the stored `Kpin`.
+
+`POST /v1/welcomes/resubmit` carries three more gates beside "the caller is a
+member": the RECIPIENT must be a current member (otherwise any member could park
+an invitation for an outsider), the named lineage must exist, and a resubmit may
+not overwrite an UNDELIVERED Welcome published by somebody else. The publisher is
+recorded in `mls_welcome.submitted_by` (commit-log-DB migration 000006, stamped by
+the submit bundle and by resubmit); overriding another member's pending Welcome
+takes the head commit's author — the party that actually performed the Add — or an
+admin of the conversation's group.
 
 ---
 _Back to [index.md](./index.md)_

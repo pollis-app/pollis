@@ -226,6 +226,36 @@ the invariant that makes it unrepresentable.
 - *Result:* "an envelope no current member can decrypt" is unrepresentable on
   the wire; the accepted losses stay exactly the three in `CLAUDE.md`.
 
+### I9 — No control-plane row claims a `(generation, epoch)` the log has not reached
+- `mls_group_info` and `pin_keystate` are ONE mutable row per conversation,
+  guarded by a lexicographic `(generation, epoch)` compare-and-set: strictly
+  greater wins. Monotone — and, until this was closed, unbounded ABOVE. Any
+  current member could publish `generation = 2^62`; nothing can ever exceed it,
+  so the row is frozen for the life of the conversation. Every device that
+  external-joins afterwards reads a GroupInfo for a lineage that does not exist,
+  and every pin re-wrap is refused, so a member removed after the freeze keeps a
+  KEK that still opens the stored `Kpin`. One request, permanent, from inside the
+  roster.
+- The commit log is the only thing that decides which epochs exist, under I1's
+  head+1 CAS. So it is also the CEILING: `writes::refuse_above_head` requires
+  `generation <= head_generation` and `epoch <= head_epoch_in(generation)` —
+  `MAX(epoch) + 1`, exactly the epoch a caught-up member publishes from. For
+  `mls_group_info` the ceiling read and the CAS share one IMMEDIATE transaction
+  on the log DB; `pin_keystate` lives on the main DB, so its read is a separate
+  statement, which is sound in the only direction that matters: the head is
+  monotone, so a head observed a moment ago can only make the check stricter.
+  A refusal is a 409 carrying the head, the same shape a stale submit gets.
+- The same rule bounds `mls_welcome`: a resubmit may not name a lineage the log
+  never opened, may not address a NON-member, and may not overwrite an
+  UNDELIVERED Welcome published by somebody else — `mls_welcome.submitted_by`
+  (commit-log-DB migration 000006) is what makes an honest resend distinguishable
+  from a hijack, and only the head commit's author or a group admin may override.
+- Blob size is part of the same argument: a single mutable slot per conversation
+  is not somewhere to park storage, so a GroupInfo is capped at
+  `GROUP_INFO_MAX_BYTES`.
+- *Result:* "a control-plane row nobody can ever advance" is unrepresentable, and
+  the join and pin paths of a conversation cannot be wedged by one write.
+
 ## Enforcement layers, summarized
 
 | Invariant | DB constraint/trigger | Rust type | Protocol | Test |
@@ -238,6 +268,7 @@ the invariant that makes it unrepresentable.
 | I6 one schema | `schema_migrations` integrity | — | single apply path | test==prod schema check |
 | I7 one id, one conversation | `conversation` PK + `kind` CHECK, claimed in the creating txn (#880); guard triggers on all three tables (#948, migration 000017) | `ConversationKind` | `conversation_id_taken` → 403 | guard vs registry vs DB-trigger layers (`conversation_namespace.rs`) |
 | I8 no envelope behind the head | — (two DB handles; insert-then-verify) | `Sealed { generation, epoch }` asserted from the ciphertext | `epoch_behind` → 409 + committer pre-merge sweep | `epoch_gate_tests` (DS) + `dms::message_sealed_*` (flows, fail with the gate/sweep off) |
+| I9 no control-plane row above the head | — (the ceiling read shares the GroupInfo write's transaction) | `HeadBoundedOutcome` / `KeystateOutcome::AheadOfHead` | `refuse_above_head` → 409 with the head; `submitted_by` gates a Welcome overwrite | `control_plane_head_bounds.rs` (each test fails with the ceiling off) |
 
 ## Roadmap (phased)
 

@@ -762,6 +762,7 @@ branches:
 - `created_at` TEXT NOT NULL DEFAULT now
 - `recipient_device_id` TEXT _(migration 11)_
 - `generation` INTEGER NOT NULL DEFAULT 0 _(migration 000004, #454 P4)_ — the lineage this Welcome **admits into**, so a recipient can tell "added to the group you're in" from "moved to the successor group" BEFORE applying the blob. It needs that before, not after: `max_past_epochs = 0` means it must finish draining its current lineage first.
+- `submitted_by` TEXT _(commit-log-DB migration 000006)_ — who published this Welcome: the commit bundle's `sender_id`, or the actor of a `/v1/welcomes/resubmit`. NULL for rows written before the column existed. The tuple below is UNIQUE, so a resubmit IS an overwrite; without an owner the DS could not tell an honest resend from one member replacing the pending Welcome the real adder had just written. Overriding somebody else's UNDELIVERED Welcome takes the head commit's author or a group admin.
 - UNIQUE INDEX `idx_mls_welcome_recipient` on `(conversation_id, recipient_id, recipient_device_id)` _(commit-log-DB migration 000002, #430 P2)_ — one live Welcome per recipient device. It is the conflict target the DS submit bundle's and `/v1/welcomes/resubmit`'s idempotent `ON CONFLICT … DO UPDATE` upserts key on, so a re-sent Welcome refreshes the blob and re-arms delivery (`delivered = 0`) instead of stacking a duplicate row. The migration collapses any pre-existing duplicates (keeping the newest per tuple) before adding the index.
 
 `mls_welcome`, `mls_commit_log`, and `mls_group_info` live on the **separate

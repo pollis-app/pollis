@@ -25,6 +25,34 @@ async fn fresh_db() -> common::TempDb {
     db
 }
 
+/// Make `recipient` a current member of `conv` and open `generation` in the
+/// commit log.
+///
+/// `/v1/welcomes/resubmit` now refuses a Welcome addressed to a NON-member, and
+/// refuses a lineage the commit log never opened: a Welcome that admits nobody
+/// into a group that does not exist is a row an attacker parks, not a recovery.
+/// Both checks apply on the no-auth path too, because they are properties of the
+/// row being written rather than of the caller's credential.
+async fn seed_conversation(db: &Db, conv: &str, recipient: &str, generation: i64) {
+    let conn = db.conn().await.unwrap();
+    conn.execute(
+        "INSERT OR IGNORE INTO group_member (group_id, user_id) VALUES (?1, ?2)",
+        libsql::params![conv, recipient],
+    )
+    .await
+    .unwrap();
+    for g in 0..=generation {
+        conn.execute(
+            "INSERT INTO mls_commit_log \
+                 (conversation_id, generation, epoch, sender_id, commit_data) \
+             VALUES (?1, ?2, 0, ?3, X'00')",
+            libsql::params![conv, g, recipient],
+        )
+        .await
+        .unwrap();
+    }
+}
+
 /// A resubmit body carrying an explicit suite generation.
 fn resubmit_req_at(
     conv: &str,
@@ -86,7 +114,9 @@ async fn welcome_row(db: &Db, conv: &str, recipient: &str, device: &str) -> (i64
 #[tokio::test(flavor = "multi_thread")]
 async fn resubmit_re_drives_a_missing_welcome() {
     let db = fresh_db().await;
-    // Auth off: the no-auth path skips the membership gate (as submit does).
+    // Auth off: the no-auth path skips the CALLER's membership gate (as submit
+    // does) — the recipient's is checked either way.
+    seed_conversation(&db, "conv1", "alice", 0).await;
     let router = build_router_with_state(AppState::new(Arc::clone(&db), false));
 
     let resp = router
@@ -106,6 +136,7 @@ async fn resubmit_re_drives_a_missing_welcome() {
 #[tokio::test(flavor = "multi_thread")]
 async fn resubmit_is_idempotent_and_refreshes_blob() {
     let db = fresh_db().await;
+    seed_conversation(&db, "conv1", "alice", 0).await;
     let router = build_router_with_state(AppState::new(Arc::clone(&db), false));
 
     let r1 = router
@@ -131,6 +162,7 @@ async fn resubmit_is_idempotent_and_refreshes_blob() {
 #[tokio::test(flavor = "multi_thread")]
 async fn an_omitted_generation_is_the_classic_lineage() {
     let db = fresh_db().await;
+    seed_conversation(&db, "conv1", "alice", 0).await;
     let router = build_router_with_state(AppState::new(Arc::clone(&db), false));
 
     let resp = router
@@ -150,6 +182,7 @@ async fn an_omitted_generation_is_the_classic_lineage() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_resubmit_refreshes_the_generation_too() {
     let db = fresh_db().await;
+    seed_conversation(&db, "conv1", "alice", 1).await;
     let router = build_router_with_state(AppState::new(Arc::clone(&db), false));
 
     let r1 = router
