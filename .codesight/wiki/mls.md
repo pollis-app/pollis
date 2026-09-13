@@ -10,7 +10,7 @@ Source: `pollis-core/src/commands/mls.rs`
 - **Commit**: an MLS operation that changes the group tree (add/remove members). Serialized to `mls_commit_log`.
 - **Welcome**: an MLS message that lets a new member join at a specific epoch. Serialized to `mls_welcome`.
 - **GroupInfo**: a snapshot of the group tree at a specific epoch. Stored in `mls_group_info`. Used for external-join.
-- **KeyPackage**: a one-time-use cryptographic token published by each device. Consumed when the device is added to a group. Each device publishes ONE pool, in `CS_PQ`. #454 P2 published TWO disjoint pools — classic and post-quantum hybrid — so that a peer on either suite could always claim one; #669 retired the classic pool with the classic suite. `ensure_mls_key_package` rotates the pool on login and `replenish_key_packages` tops it up, both through the one `PollisProvider`, signing each leaf with the suite's scheme (ML-DSA-44).
+- **KeyPackage**: a one-time-use cryptographic token published by each device. Consumed when the device is added to a group — and consumption is now BOUNDED: claiming is cross-account by construction (it is how you add someone), so the DS gates it on the product's reachability rule (not blocked either way, the same rule `/v1/dm/create` applies) and on a durable per-(claimer, target) and per-target-device budget recorded in `mls_key_package_claim`. Without one, any authenticated account could loop until a target's pool was empty and hold that user out of every group they were invited to. Each device publishes ONE pool, in `CS_PQ`. #454 P2 published TWO disjoint pools — classic and post-quantum hybrid — so that a peer on either suite could always claim one; #669 retired the classic pool with the classic suite. `ensure_mls_key_package` rotates the pool on login and `replenish_key_packages` tops it up, both through the one `PollisProvider`, signing each leaf with the suite's scheme (ML-DSA-44).
 - **External Join**: a device adds itself to a group using published GroupInfo, without needing a Welcome from an existing member.
 - **Ciphersuite**: fixed per group at creation — RFC 9420 does not permit changing it in place (see **Suite generations** below for how a group moves anyway). Pollis runs exactly one: `CS_PQ` (`MLS_128_MLKEM768X25519_CHACHA20POLY1305_SHA384_MLDSA44`, code point `0x0052`, KEM = X-Wing = X25519 + ML-KEM-768, signature = ML-DSA-44). #454 introduced it as a *second* suite beside the classic `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519` (`0x0001`) so a fleet mid-upgrade could still add each other; #668 moved it in place from `0x004D`, which was post-quantum in *confidentiality* only (same KEM, Ed25519 leaves); #669 deleted the classic suite — and with it the code that chose between the two — so `CS_HYBRID` was renamed `CS_PQ` and is now the sole suite. The point is provisional (`draft-ietf-mls-pq-ciphersuites` has renumbered once already) and moving it again is a wire break for every group on the suite — treat it as a migration, see `docs/pq-hybrid-mls-design.md` §7. Every new group is born on `CS_PQ` (`init_mls_group`); there is no selection step. The suite is still an explicit argument to the only two functions that mint suite-bound material — `create_mls_group_in_suite` and `build_key_package_in_suite` (#454 P1b) — so a code-point change stays a one-constant edit; one backend (`PollisProvider`, RustCrypto) serves it, so there is no suite→provider routing. Signing is still a function of the suite (`provider::signature_scheme`) rather than a constant, because a stored group persisted under an older code point must be read under *its* scheme; `CS_PQ` leaves sign ML-DSA-44. A device holds ONE signing key **per scheme** (`load_or_create_device_signer`, scheme-scoped) — published as `user_device.mls_signature_pub` (Ed25519) and `mls_signature_pub_pq` (ML-DSA-44), and both bound by the single v2 `device_cert` so no leaf is ever uncertified. A key package's suite is still stored in `mls_key_package.ciphersuite` and claims still narrow on it: the DS cannot read the suite out of the opaque blob, and the column is what keeps a package published under a retired code point from ever being served for a current group. `user_device.pq_capable` is **dead** since #669 — nothing reads or writes it (see [database.md](./database.md#user_device-migration-11--13--post-baseline-000011)).
 
@@ -73,7 +73,7 @@ When device A commits a membership change:
    - If no local group exists → external-joins using published GroupInfo
    - If the group was evicted (user was kicked) → deletes it, then external-joins
    - Publishes updated GroupInfo after processing
-   - Reports this device's now-current applied epoch to the DS (`ds_report_commit_since` → **device-signed** `POST /v1/commits/since`) so the server can compute the commit-log **retention floor** (#539, below). The report is authenticated (#681): it raises the floor, so it must be bound to the reporting device — reads (`GET /v1/commits/:id`) stay open, but recording a high-water does not. The report is fully best-effort and bounded by a short (5s) timeout inside `ds_report_commit_since`, so a black-holed DS can never stall catch-up — nor the suite-migration path (`migrate.rs`), which awaits it inline
+   - Reports this device's now-current applied epoch to the DS (`ds_report_commit_since` → **device-signed** `POST /v1/commits/since`) so the server can compute the commit-log **retention floor** (#539, below). The report is authenticated (#681): it raises the floor, so it must be bound to the reporting device. The open `GET /v1/commits/:id` it replaced is retired outright — catch-up reads go through the signed, membership-gated `POST /v1/mls/conversation-state`, so no control-plane read is unauthenticated any more. The report is fully best-effort and bounded by a short (5s) timeout inside `ds_report_commit_since`, so a black-holed DS can never stall catch-up — nor the suite-migration path (`migrate.rs`), which awaits it inline
 
 ### Commit-apply recovery: no silent wedge (#680)
 
@@ -773,7 +773,30 @@ GroupInfo is published (upserted to `mls_group_info`) after:
 - `process_pending_commits_inner` (after applying commits)
 - `external_join_group` (after self-joining)
 
-The UPSERT only overwrites if the new epoch is strictly greater than the stored epoch.
+The UPSERT only overwrites if the new `(generation, epoch)` is lexicographically
+greater than the stored pair — and, since the head-bound hardening, only if that
+pair is at or below the commit log's own head
+(`writes::refuse_above_head`): `generation` must be a lineage the log has
+opened, and `epoch` at or below that lineage's `MAX(epoch) + 1`, which is exactly
+the epoch a caught-up member publishes from. Monotone alone was unbounded ABOVE:
+one member publishing `generation = 2^62` froze the row for the life of the
+conversation, so every later republish lost the CAS and every external-joining
+device read a tree for a lineage that does not exist. A refusal is a 409 carrying
+the head, the same shape a stale `POST /v1/commits` gets. The blob is capped at
+`GROUP_INFO_MAX_BYTES` (1 MiB).
+
+The wrapped pin key (`pin_keystate`) is ceilinged by the same rule and for a
+sharper reason: a frozen keystate refuses every re-wrap, so a member removed after
+the freeze keeps a KEK that still opens the stored `Kpin`.
+
+`POST /v1/welcomes/resubmit` carries three more gates beside "the caller is a
+member": the RECIPIENT must be a current member (otherwise any member could park
+an invitation for an outsider), the named lineage must exist, and a resubmit may
+not overwrite an UNDELIVERED Welcome published by somebody else. The publisher is
+recorded in `mls_welcome.submitted_by` (commit-log-DB migration 000006, stamped by
+the submit bundle and by resubmit); overriding another member's pending Welcome
+takes the head commit's author — the party that actually performed the Add — or an
+admin of the conversation's group.
 
 ---
 _Back to [index.md](./index.md)_

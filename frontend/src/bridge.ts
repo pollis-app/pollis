@@ -9,9 +9,9 @@
  *                                 LogicalSize / LogicalPosition / hideWindow
  *  - `bridge/image.ts`          — Image.fromBytes (used by useBadge)
  *  - `bridge/dialog.ts`         — dialogOpen / dialogSave
- *  - `bridge/fs.ts`             — writeFile / readFile / stat
+ *  - `bridge/fs.ts`             — readFile / stat (reads only)
  *  - `bridge/shell.ts`          — shellOpen
- *  - `bridge/app.ts`            — getVersion / relaunch / exit / convertFileSrc
+ *  - `bridge/app.ts`            — getVersion / relaunch / exit
  *  - `bridge/notifications.ts`  — isPermissionGranted / requestPermission /
  *                                 sendNotification
  *  - `bridge/clipboard.ts`      — readClipboardFiles / readClipboardImage /
@@ -63,13 +63,13 @@ export {
 } from "./bridge/dialog";
 
 // Filesystem.
-export { writeFile, readFile, stat, type FileInfo } from "./bridge/fs";
+export { readFile, stat, type FileInfo } from "./bridge/fs";
 
 // Shell.
 export { shellOpen } from "./bridge/shell";
 
 // App / path / process.
-export { getVersion, relaunch, exit, convertFileSrc } from "./bridge/app";
+export { getVersion, relaunch, exit } from "./bridge/app";
 
 // Notifications.
 export {

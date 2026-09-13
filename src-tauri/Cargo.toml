@@ -82,9 +82,15 @@ pollis-capture-proto = { path = "../pollis-capture-proto" }
 
 # default-features off so a headless build drops wry. The five tauri default
 # features (wry, compression, common-controls-v6, dynamic-acl, x11) are moved
-# into `native-shell`; the three extras below stay unconditional (protocol-asset
-# / tray-icon / image-png compile without wry and are used by the shims + tray).
-tauri = { version = "2", default-features = false, features = ["protocol-asset", "tray-icon", "image-png"] }
+# into `native-shell`; the two extras below stay unconditional (tray-icon /
+# image-png compile without wry and are used by the shims + tray).
+#
+# `protocol-asset` is deliberately absent. The asset protocol is a second,
+# separately-scoped way to read an arbitrary native path out of the webview, and
+# it bypasses `crate::pathscope` entirely; `assetProtocol.enable` is false in
+# `tauri.conf.json` and tauri-build fails the build if the feature and the
+# config disagree, so the two can never drift apart.
+tauri = { version = "2", default-features = false, features = ["tray-icon", "image-png"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
@@ -93,6 +99,18 @@ tauri-plugin-os = "2"
 tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-clipboard-manager = "2"
+
+# Present ONLY to turn a feature on in a crate this one does not otherwise call.
+# `tauri-plugin-updater` builds its own reqwest client, and it is the single
+# first-party HTTP caller that does not go through
+# `pollis_relay::http::http_client`. Routing it through the relay overlay means
+# handing its `check` a `socks5h://` proxy, which reqwest silently ignores
+# unless the `socks` feature is on — and cargo unifies features per MAJOR
+# version, so declaring it here switches it on inside the plugin's copy. Note
+# the 0.13: pollis-core and pollis-relay are on 0.12, a different major, so
+# their `socks` does not reach the updater. It is a pure cfg flag (`socks = []`
+# upstream), so this pulls in no new crate.
+reqwest = { version = "0.13", default-features = false, features = ["socks"] }
 
 # Used by lib.rs's clipboard helpers and by the #[tauri::command] shim
 # wrappers. Everything else (libsql, rusqlite, openmls, livekit,

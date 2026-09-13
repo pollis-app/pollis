@@ -109,6 +109,11 @@ pub const POST_BASELINE_LOG_MIGRATIONS: &[(u32, &str, &str)] = &[
         "mls_commit_log_triggers",
         include_str!("../migrations-log/000005_mls_commit_log_triggers.sql"),
     ),
+    (
+        6,
+        "mls_welcome_submitted_by",
+        include_str!("../migrations-log/000006_mls_welcome_submitted_by.sql"),
+    ),
 ];
 
 /// Migrations applied on top of the baseline, in version order. CI's
@@ -216,6 +221,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         21,
         "username_shape",
         include_str!("../migrations/000021_username_shape.sql"),
+    ),
+    (
+        22,
+        "key_package_claim_audit",
+        include_str!("../migrations/000022_key_package_claim_audit.sql"),
     ),
 ];
 

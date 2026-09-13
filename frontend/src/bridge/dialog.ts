@@ -1,15 +1,20 @@
 /**
  * File-dialog bridge — `dialogOpen` / `dialogSave` route to the OS picker.
  *
- * Both are the one-line `invoke` the plugin's own `open()` / `save()` make,
- * issued through OUR `invoke` rather than by importing
- * `@tauri-apps/plugin-dialog`. Under Playwright that matters: vite
- * pre-bundles the plugin, and the alias inside that bundle resolves to a
- * SECOND copy of the IPC mock with its own store and counters, so a picker
- * result and the export it drives would be recorded in different worlds.
+ * These no longer invoke the dialog plugin's own IPC commands. Its `dialog:*`
+ * ACL permissions are gone from `src-tauri/capabilities/default.json` and the
+ * renderer cannot reach the plugin at all; `pick_open_paths` / `pick_save_path`
+ * drive the same OS picker from Rust instead.
  *
- * Opts shape matches Tauri's plugin-dialog so call sites don't need to be
- * rewritten:
+ * The reason is not the dialog — it is what happens to the path afterwards.
+ * `upload_media`, `upload_group_emoji`, `export_archive` and
+ * `fetch_export_attachments` all take a path off the IPC and act on it with the
+ * app's full authority, so Rust records what the picker returned and refuses
+ * anything else (`src-tauri/src/pathscope.rs`). Recording has to happen where
+ * the path is produced: a "now register this path for me" call the renderer
+ * makes would be a call a compromised renderer makes with `~/.ssh/id_rsa`.
+ *
+ * Opts shape is unchanged, so call sites did not have to be rewritten:
  *   open: { multiple?, directory?, title?, defaultPath?, filters? }
  *   save: { defaultPath?, title?, filters? }
  *   filters: Array<{ name: string; extensions: string[] }>
@@ -41,12 +46,18 @@ export interface SaveDialogOptions {
 export async function dialogOpen(
   opts?: OpenDialogOptions,
 ): Promise<string | string[] | null> {
-  // Tauri returns `string | string[] | null` depending on `multiple`.
-  return invoke<string | string[] | null>("plugin:dialog|open", { options: opts ?? {} });
+  const options = opts ?? {};
+  // Rust always answers with a list — one shape there means one code path
+  // recording the grants. Narrow it back to what the call sites expect.
+  const picked = await invoke<string[]>("pick_open_paths", { options });
+  if (!picked || picked.length === 0) {
+    return null;
+  }
+  return options.multiple ? picked : picked[0];
 }
 
 export async function dialogSave(
   opts?: SaveDialogOptions,
 ): Promise<string | null> {
-  return invoke<string | null>("plugin:dialog|save", { options: opts ?? {} });
+  return invoke<string | null>("pick_save_path", { options: opts ?? {} });
 }

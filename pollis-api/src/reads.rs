@@ -24,8 +24,8 @@
 //! **One batch.** A non-contiguous commit batch is read by the client as a
 //! permanent gap, and its response is destructive — `forget_local_mls_group_at`
 //! drops the device's MLS crypto state. So `head`, `head_generation` and
-//! `commits` come from the same transaction as each other (which today's
-//! `GET /v1/commits/:id` handler does NOT do — three separate queries on a bare
+//! `commits` come from the same transaction as each other (which the retired
+//! `GET /v1/commits/:id` handler did NOT do — three separate queries on a bare
 //! connection), and the handler additionally *verifies* contiguity before
 //! answering, refusing rather than serving a torn batch. [`pruned_below`] is what
 //! keeps a genuine retention prune (#539) distinguishable from a torn read.

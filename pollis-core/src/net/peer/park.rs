@@ -656,11 +656,14 @@ mod tests {
         )
         .unwrap();
         config.revocations = crate::net::testing::healthy_revocations();
+        config.next_hops = crate::net::testing::test_directory();
+        config.allow_private_next_hops = true;
         config
             .resolve_overrides
             .insert(ORIGIN_NAME.to_string(), IpAddr::V4(Ipv4Addr::LOCALHOST));
         let cert = config.server_cert();
         let (task, addr) = RelayServer::spawn(config).unwrap();
+        crate::net::testing::publish_hop(addr);
         (addr, cert, task)
     }
 
@@ -712,6 +715,7 @@ mod tests {
             PeerEngine::start(
                 PeerCounters::new(),
                 crate::net::testing::healthy_revocations(),
+                crate::net::testing::test_directory(),
             )
             .unwrap(),
         );
@@ -773,6 +777,7 @@ mod tests {
             PeerEngine::start(
                 PeerCounters::new(),
                 crate::net::testing::healthy_revocations(),
+                crate::net::testing::test_directory(),
             )
             .unwrap(),
         );
@@ -816,6 +821,7 @@ mod tests {
             PeerEngine::start(
                 PeerCounters::new(),
                 crate::net::testing::healthy_revocations(),
+                crate::net::testing::test_directory(),
             )
             .unwrap(),
         );
@@ -854,6 +860,7 @@ mod tests {
             PeerEngine::start(
                 PeerCounters::new(),
                 crate::net::testing::healthy_revocations(),
+                crate::net::testing::test_directory(),
             )
             .unwrap(),
         );
@@ -886,6 +893,7 @@ mod tests {
             PeerEngine::start(
                 PeerCounters::new(),
                 crate::net::testing::healthy_revocations(),
+                crate::net::testing::test_directory(),
             )
             .unwrap(),
         );
@@ -925,6 +933,7 @@ mod tests {
             PeerEngine::start(
                 PeerCounters::new(),
                 crate::net::testing::healthy_revocations(),
+                crate::net::testing::test_directory(),
             )
             .unwrap(),
         );

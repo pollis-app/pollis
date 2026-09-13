@@ -243,6 +243,25 @@ tree can never stand in for another:
   workflows; `scripts/test-check-build-recipe.sh` re-creates each shape of the
   mistake and asserts it is named.
 
+  **Every third-party action is SHA-pinned.** A `uses: owner/action@v4` names a
+  mutable tag, so whoever can move that tag runs code in our jobs — including the
+  release jobs that hold the Apple/Windows signing identities, the `cdn.pollis.com`
+  write key and the transparency log's append credential (the tj-actions retag,
+  CVE-2025-30066, is exactly this). Every `uses:` in `.github/workflows/**` and in
+  the composite actions under `.github/actions/**` therefore carries a full commit
+  SHA with the resolved version as a trailing comment
+  (`actions/checkout@11d5960… # v4.4.0`); `scripts/check-action-pins.py` fails
+  `scripts-check.yml` on a tag, a branch, a short SHA, a bare SHA with no version
+  comment, or a `docker://` image with no `@sha256:` digest, and
+  `scripts/test-check-action-pins.sh` re-creates each of those shapes and asserts
+  it is named. Local `./.github/actions/...` references are exempt: they ship in
+  the same reviewed commit as their caller. `.github/dependabot.yml` bumps the pins
+  weekly so pinning does not mean rotting — a dependabot PR rewrites both the SHA
+  and its comment. The three `dtolnay/rust-toolchain` pins are branch heads
+  (`stable`, `1.96.0`, `master`), which dependabot cannot bump; those are refreshed
+  by hand. Repository/organization settings the pins cannot cover — rulesets,
+  release environments, dispatch restrictions — are listed in `docs/ci-trust.md`.
+
   Two adjacent defects in the same class, also fixed: `attest-and-log` now requires
   `provenance` to have succeeded *and* proves each leaf's `provenance_uri` resolves
   before appending (v1.9.0/v1.9.1 baked permanent 404s), and the R2 retention prune

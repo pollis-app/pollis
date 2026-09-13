@@ -218,6 +218,7 @@ resource "aws_launch_template" "relay" {
     identity_cert_param = var.identity_cert_param
     directory_key_b64   = var.directory_key_b64
     revocation_url      = var.revocation_url
+    directory_url       = var.directory_url
   }))
 
   tag_specifications {

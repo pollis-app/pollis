@@ -103,6 +103,13 @@ pub enum KeystateOutcome {
     Ok { updated: bool },
     Forbidden,
     Invalid(&'static str),
+    /// The named `(generation, epoch)` sits ABOVE the commit log's head — an
+    /// exporter nobody can have derived yet. Answered with the head, like a
+    /// stale commit submit.
+    AheadOfHead {
+        head_generation: i64,
+        head_epoch: i64,
+    },
 }
 
 pub async fn upsert_keystate(
@@ -114,13 +121,20 @@ pub async fn upsert_keystate(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
+    // Two databases: membership lives on the main DB, the commit log that
+    // ceilings the CAS lives on the log DB (#420 split them).
+    let log_conn = state.log_db.conn().await?;
     Ok(
-        match apply_upsert_keystate(&conn, authed.as_deref(), &parsed).await? {
+        match apply_upsert_keystate(&conn, &log_conn, authed.as_deref(), &parsed).await? {
             KeystateOutcome::Ok { updated } => {
                 ok_response::<UpsertPinKeystateBody>(PinKeystateUpserted::Ok { updated })
             }
             KeystateOutcome::Forbidden => AuthRejection::Forbidden.into_response(),
             KeystateOutcome::Invalid(why) => bad_request(why),
+            KeystateOutcome::AheadOfHead {
+                head_generation,
+                head_epoch,
+            } => crate::writes::epoch_behind_response(head_generation, head_epoch),
         },
     )
 }
@@ -135,8 +149,17 @@ pub async fn upsert_keystate(
 /// `updated: false` (zero rows) is the race answer, not an error: it tells a
 /// minting loser to refetch and adopt the winner's key, and a re-wrapping
 /// device that somebody newer already covered it.
+///
+/// And, like `mls_group_info`, the CAS is CEILINGED at the commit log's head
+/// (`writes::refuse_above_head`). Monotone-but-unbounded is not a bound: one
+/// member publishing `generation = 2^62` would freeze the row for the life of
+/// the conversation, so every later re-wrap is refused and every member removed
+/// after that point keeps a KEK that still opens the stored `Kpin`. The pair the
+/// wrap names must be an exporter that actually exists, which is exactly "at or
+/// below the head of the lineage it claims".
 pub async fn apply_upsert_keystate(
     conn: &Connection,
+    log_conn: &Connection,
     authed: Option<&str>,
     body: &UpsertPinKeystateBody,
 ) -> anyhow::Result<KeystateOutcome> {
@@ -159,8 +182,27 @@ pub async fn apply_upsert_keystate(
     if nonce.len() != PIN_NONCE_LEN {
         return Ok(KeystateOutcome::Invalid("nonce must be 12 bytes"));
     }
-    if body.generation < 0 || body.epoch < 0 {
-        return Ok(KeystateOutcome::Invalid("generation/epoch out of range"));
+    match crate::writes::refuse_above_head(
+        log_conn,
+        &body.conversation_id,
+        body.generation,
+        body.epoch,
+    )
+    .await?
+    {
+        Some(crate::writes::HeadBoundedOutcome::Invalid(why)) => {
+            return Ok(KeystateOutcome::Invalid(why));
+        }
+        Some(crate::writes::HeadBoundedOutcome::AheadOfHead {
+            head_generation,
+            head_epoch,
+        }) => {
+            return Ok(KeystateOutcome::AheadOfHead {
+                head_generation,
+                head_epoch,
+            });
+        }
+        Some(crate::writes::HeadBoundedOutcome::Ok { .. }) | None => {}
     }
 
     // A MINT is insert-only: if any row exists, the caller lost the race and

@@ -21,6 +21,10 @@
 //!   refused (#813 Phase C).
 //! - `--revocation-url <url>` / `POLLIS_RELAY_REVOCATION_URL` — where the signed
 //!   revocation list is published.
+//! - `--directory-url <url>` / `POLLIS_RELAY_DIRECTORY_URL` — where the signed
+//!   relay directory is published. **Also required to be a middle hop:** an
+//!   `Extend` may only name an address the current directory lists, so a node
+//!   with no fresh directory refuses every one (`pollis_relay::nexthop`).
 //! - `--transparency-key <hex>` / `POLLIS_RELAY_TRANSPARENCY_KEY` — the pinned
 //!   account-key transparency log key. Unset ⇒ this node makes no anchoring
 //!   claim (#813 Phase E2).
@@ -43,6 +47,7 @@ use std::time::Duration;
 use pollis_relay::anchor::AnchorPolicy;
 use pollis_relay::config::{RelayFileConfig, DEFAULT_BIND, DEFAULT_IDENTITY_PATH};
 use pollis_relay::health;
+use pollis_relay::nexthop::{self, NextHopDirectory};
 use pollis_relay::policy::RevocationStore;
 use pollis_relay::revocation_sync;
 use pollis_relay::server::{Allowlist, RelayConfig, RelayServer};
@@ -119,6 +124,18 @@ async fn main() -> anyhow::Result<()> {
     if let Some(allow_extend) = file.allow_extend {
         config.allow_extend = allow_extend;
     }
+    if let Some(secs) = file.extend_dial_timeout_secs {
+        config.extend_dial_timeout = Duration::from_secs(secs.max(1));
+    }
+    if let Some(allow_private) = file.allow_private_next_hops {
+        config.allow_private_next_hops = allow_private;
+        if allow_private {
+            tracing::warn!(
+                "allow_private_next_hops is on — this node will extend circuits to private and \
+                 loopback addresses the directory lists. Lab pools only."
+            );
+        }
+    }
 
     // Live relay revocation (#813 Phase C). No key ⇒ the store stays
     // `unconfigured`, which admits NOTHING — this node still serves circuits that
@@ -129,13 +146,20 @@ async fn main() -> anyhow::Result<()> {
         .or_else(|| file.directory_key_b64.clone());
     let revocation_url = arg_or_env(&args, "revocation-url", "POLLIS_RELAY_REVOCATION_URL")
         .unwrap_or_else(|| file.revocation_url());
+    let directory_url = arg_or_env(&args, "directory-url", "POLLIS_RELAY_DIRECTORY_URL")
+        .unwrap_or_else(|| file.directory_url());
     match &directory_key {
         Some(key) => {
             config.revocations = RevocationStore::enforcing(key.trim());
+            // The same pinned key bounds WHERE a circuit may be extended to: an
+            // `Extend` names an arbitrary address, and only the signed directory
+            // says which addresses are relays (#813).
+            config.next_hops = NextHopDirectory::enforcing(key.trim());
         }
         None => {
             tracing::warn!(
-                "no directory key configured — this node cannot evaluate relay revocation and will refuse to extend circuits"
+                "no directory key configured — this node cannot evaluate relay revocation or the \
+                 signed directory, and will refuse to extend circuits"
             );
         }
     }
@@ -196,6 +220,14 @@ async fn main() -> anyhow::Result<()> {
         wait_for_shutdown(shutdown_rx.clone()),
     );
 
+    // And the directory, on the same terms: a missed refresh degrades this node
+    // to "no longer a middle hop", never to "extending to whatever it was told".
+    let directory_task = nexthop::spawn(
+        config.next_hops.clone(),
+        directory_url,
+        wait_for_shutdown(shutdown_rx.clone()),
+    );
+
     let (handle, addr) = RelayServer::spawn_with_shutdown(config, relay_shutdown, DRAIN_TIMEOUT)?;
     tracing::info!("pollis-relay listening on {addr} (identity: {identity_path})");
 
@@ -205,6 +237,9 @@ async fn main() -> anyhow::Result<()> {
         let _ = h.await;
     }
     if let Some(h) = revocation_task {
+        let _ = h.await;
+    }
+    if let Some(h) = directory_task {
         let _ = h.await;
     }
     tracing::info!("pollis-relay shut down cleanly");

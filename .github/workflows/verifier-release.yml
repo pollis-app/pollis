@@ -47,19 +47,19 @@ jobs:
             target: x86_64-apple-darwin
             asset: pollis-verify-macos-x86_64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # Must match the rust-toolchain.toml pin: cargo resolves the toolchain
       # from that file, so a floating @stable here installs the cross target
       # (x86_64-apple-darwin) into the WRONG toolchain and the build dies with
       # E0463 "can't find crate for `core`".
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.96.0
+        uses: dtolnay/rust-toolchain@ebb3d1676050bfd0971c36c1e215b5751473994d # 1.96.0
         with:
           targets: ${{ matrix.target }}
 
       - name: Cache cargo build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: verifier-${{ matrix.target }}
 
@@ -103,14 +103,14 @@ jobs:
           fi
 
       - name: Upload run artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ matrix.asset }}
           path: dist/*
 
       - name: Publish to GitHub Release (tag pushes only)
         if: startsWith(github.ref, 'refs/tags/pollis-verify-v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: dist/*
           body: |

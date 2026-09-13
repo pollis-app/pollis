@@ -620,6 +620,124 @@ pub async fn conversation_id_taken(conn: &Connection, id: &str) -> anyhow::Resul
     Ok(rows.next().await?.is_some())
 }
 
+// ── The commit-log head as a CEILING on control-plane writes ─────────────────
+
+/// Hard ceiling on one published GroupInfo blob.
+///
+/// A GroupInfo carries the whole ratchet tree — KBs for a small roster,
+/// hundreds of KBs for a very large one — so a megabyte is far above anything
+/// the protocol produces and far below "park arbitrary storage on the DS". The
+/// row is a single mutable slot per conversation, which is exactly what makes
+/// an unbounded blob attractive: one authenticated member could hold a
+/// permanent multi-megabyte allocation per conversation it belongs to.
+pub const GROUP_INFO_MAX_BYTES: usize = 1024 * 1024;
+
+/// The verdict of a control-plane write that names a `(generation, epoch)`.
+///
+/// Separate from [`WriteOutcome`] because "you named a key the commit log has
+/// not reached" is neither a permission problem nor a malformed body: it is a
+/// statement about the log, and the answer carries the head so the caller can
+/// catch up (the same 409 shape `/v1/commits` already returns).
+#[derive(Debug)]
+pub enum HeadBoundedOutcome {
+    /// The write was admissible. `affected` is 0 when the monotone CAS declined
+    /// it (a stale republish), which is a normal race outcome, not an error.
+    Ok { affected: u64 },
+    /// The named key sits ABOVE the log's head — an unreachable future epoch.
+    AheadOfHead {
+        head_generation: i64,
+        head_epoch: i64,
+    },
+    /// `&'static str` so no caller input is ever echoed back.
+    Invalid(&'static str),
+}
+
+/// The ceiling a `(generation, epoch)` control-plane write may not exceed:
+/// `(head_generation, head_epoch_in(generation))`.
+///
+/// WHY THERE MUST BE A CEILING. `mls_group_info` and `pin_keystate` are single
+/// mutable rows guarded by a lexicographic `(generation, epoch)` compare-and-set
+/// — strictly greater wins. That guard alone is monotone but UNBOUNDED: a
+/// current member could publish `generation = 2^62`, which nothing later can
+/// ever exceed, and the row is frozen for the life of the conversation. Every
+/// device that external-joins afterwards reads a GroupInfo for a lineage that
+/// does not exist, and every pin re-wrap is refused, so the conversation's join
+/// and pin paths are permanently wedged by one write.
+///
+/// The commit log is the only thing that decides what epochs exist, and it does
+/// so under the head+1 CAS in [`crate::commit::submit_commit`]. So the ceiling
+/// is the log's own head: `generation` must be a lineage that has been opened,
+/// and `epoch` must be at or below that lineage's head — `MAX(epoch) + 1`, the
+/// epoch the group is in once the head commit is merged, which is exactly the
+/// epoch an honest publisher stamps. An empty log heads at generation 0 epoch 0,
+/// which is the epoch a freshly created group publishes from.
+///
+/// Read this from the LOG DB, and — where the write lands there too — inside the
+/// write's own transaction. The head only ever advances, so a head read that is
+/// already stale can only make this check stricter, never laxer: a value at or
+/// below a head observed earlier is still at or below the head now.
+pub async fn head_bound(
+    log_conn: &Connection,
+    conversation_id: &str,
+    generation: i64,
+) -> anyhow::Result<(i64, i64)> {
+    let head_generation = crate::commit::head_generation(log_conn, conversation_id).await?;
+    let head_epoch = crate::commit::head_epoch_in(log_conn, conversation_id, generation).await?;
+    Ok((head_generation, head_epoch))
+}
+
+/// `Some(outcome)` when `(generation, epoch)` is not admissible — negative, or
+/// above the log's head. `None` when the write may proceed.
+pub async fn refuse_above_head(
+    log_conn: &Connection,
+    conversation_id: &str,
+    generation: i64,
+    epoch: i64,
+) -> anyhow::Result<Option<HeadBoundedOutcome>> {
+    if generation < 0 || epoch < 0 {
+        return Ok(Some(HeadBoundedOutcome::Invalid(
+            "generation/epoch out of range",
+        )));
+    }
+    let (head_generation, head_epoch) = head_bound(log_conn, conversation_id, generation).await?;
+    if generation > head_generation {
+        // The named lineage does not exist, so its own head is a meaningless 0.
+        // Report the head LINEAGE's head instead — the position the caller has
+        // to catch up to before anything it names can be admissible.
+        let head_epoch =
+            crate::commit::head_epoch_in(log_conn, conversation_id, head_generation).await?;
+        return Ok(Some(HeadBoundedOutcome::AheadOfHead {
+            head_generation,
+            head_epoch,
+        }));
+    }
+    if epoch > head_epoch {
+        return Ok(Some(HeadBoundedOutcome::AheadOfHead {
+            head_generation,
+            head_epoch,
+        }));
+    }
+    Ok(None)
+}
+
+/// Map a [`HeadBoundedOutcome`] to the HTTP response (200 / 409 with the head /
+/// 400). The 409 body is the same [`pollis_api::messages::EpochBehind`] shape
+/// `/v1/commits` answers a stale submit with, because it answers the same
+/// question — "here is the head; you are not at it".
+pub(crate) fn head_bounded_response<B>(outcome: HeadBoundedOutcome) -> Response
+where
+    B: pollis_api::DsRequest<Response = pollis_api::StatusOk>,
+{
+    match outcome {
+        HeadBoundedOutcome::Ok { .. } => ok_response::<B>(pollis_api::StatusOk::Ok),
+        HeadBoundedOutcome::AheadOfHead {
+            head_generation,
+            head_epoch,
+        } => epoch_behind_response(head_generation, head_epoch),
+        HeadBoundedOutcome::Invalid(msg) => bad_request(msg),
+    }
+}
+
 // ── W4 — POST /v1/group-info ─────────────────────────────────────────────────
 
 /// POST /v1/group-info — republish GroupInfo for a conversation, epoch-monotone
@@ -649,7 +767,7 @@ pub async fn group_info(
     };
 
     let conn = state.log_db.conn().await?;
-    upsert_group_info(
+    let outcome = upsert_group_info(
         &conn,
         &parsed.conversation_id,
         parsed.generation,
@@ -659,7 +777,7 @@ pub async fn group_info(
     )
     .await?;
 
-    Ok(ok_response::<GroupInfoBody>(pollis_api::StatusOk::Ok))
+    Ok(head_bounded_response::<GroupInfoBody>(outcome))
 }
 
 /// Decode a parsed [`GroupInfoBody`]'s base64 GroupInfo and UPSERT it (the W4
@@ -667,7 +785,10 @@ pub async fn group_info(
 /// decode + write without re-implementing base64 handling. A decode failure is
 /// an `Err` here (the axum handler maps the same case to 400 itself, before
 /// calling [`upsert_group_info`], so its 400-vs-500 behavior is unchanged).
-pub async fn apply_group_info(log_conn: &Connection, body: &GroupInfoBody) -> anyhow::Result<u64> {
+pub async fn apply_group_info(
+    log_conn: &Connection,
+    body: &GroupInfoBody,
+) -> anyhow::Result<HeadBoundedOutcome> {
     let gi = b64_decode(&body.group_info)?;
     upsert_group_info(
         log_conn,
@@ -688,6 +809,12 @@ pub async fn apply_group_info(log_conn: &Connection, body: &GroupInfoBody) -> an
 /// strand every externally-joining device on the retired suite. Pure conn-level
 /// write so the integration harness can reuse it against its shared log
 /// connection.
+///
+/// Monotone is not enough on its own: the CAS is also CEILINGED at the commit
+/// log's head ([`refuse_above_head`]), read inside this write's own transaction,
+/// so a member cannot publish an unreachable future epoch and freeze the row
+/// forever. The blob is bounded by [`GROUP_INFO_MAX_BYTES`] for the same reason
+/// — one mutable slot per conversation is not somewhere to park storage.
 pub async fn upsert_group_info(
     log_conn: &Connection,
     conversation_id: &str,
@@ -695,8 +822,24 @@ pub async fn upsert_group_info(
     epoch: i64,
     group_info: &[u8],
     updated_by_device_id: &str,
-) -> anyhow::Result<u64> {
-    let affected = log_conn
+) -> anyhow::Result<HeadBoundedOutcome> {
+    if group_info.is_empty() {
+        return Ok(HeadBoundedOutcome::Invalid("group_info is empty"));
+    }
+    if group_info.len() > GROUP_INFO_MAX_BYTES {
+        return Ok(HeadBoundedOutcome::Invalid("group_info too large"));
+    }
+
+    // One transaction for the ceiling read and the CAS: the head the write is
+    // checked against is the head the write lands on.
+    let tx = log_conn
+        .transaction_with_behavior(libsql::TransactionBehavior::Immediate)
+        .await?;
+    if let Some(refused) = refuse_above_head(&tx, conversation_id, generation, epoch).await? {
+        tx.rollback().await?;
+        return Ok(refused);
+    }
+    let affected = tx
         .execute(
             "INSERT INTO mls_group_info (conversation_id, generation, epoch, group_info, updated_by_device_id) \
              VALUES (?1, ?2, ?3, ?4, ?5) \
@@ -718,7 +861,8 @@ pub async fn upsert_group_info(
             ],
         )
         .await?;
-    Ok(affected)
+    tx.commit().await?;
+    Ok(HeadBoundedOutcome::Ok { affected })
 }
 
 // ── W5 — POST /v1/welcomes/ack ───────────────────────────────────────────────
@@ -873,12 +1017,86 @@ pub async fn purge_welcomes(log_conn: &Connection, recipient: &str) -> anyhow::R
 
 // ── POST /v1/welcomes/resubmit (issue #430 P2) ───────────────────────────────
 
+/// Hard ceiling on one Welcome blob. A Welcome carries the group's ratchet tree
+/// plus the joiner's secrets, so it is bounded by the same reasoning (and the
+/// same number) as a GroupInfo.
+pub const WELCOME_MAX_BYTES: usize = GROUP_INFO_MAX_BYTES;
+
+/// The verdict of `POST /v1/welcomes/resubmit`.
+#[derive(Debug)]
+pub enum ResubmitOutcome {
+    Ok,
+    Forbidden,
+    /// `&'static str` so no caller input is ever echoed back.
+    Invalid(&'static str),
+    /// The Welcome names a lineage the commit log has not opened.
+    AheadOfHead {
+        head_generation: i64,
+        head_epoch: i64,
+    },
+}
+
+/// The verdict of the low-level Welcome upsert.
+#[derive(Debug)]
+pub enum WelcomeUpsertOutcome {
+    Ok,
+    /// The tuple already holds an UNDELIVERED Welcome published by somebody
+    /// else, and the actor is neither its publisher, the head commit's author,
+    /// nor an admin of the conversation's group.
+    Forbidden,
+}
+
+/// The author of the newest commit in `generation` — the account that actually
+/// performed the Add this Welcome belongs to. `None` for a lineage with no
+/// commits.
+pub async fn head_commit_sender(
+    log_conn: &Connection,
+    conversation_id: &str,
+    generation: i64,
+) -> anyhow::Result<Option<String>> {
+    let mut rows = log_conn
+        .query(
+            "SELECT sender_id FROM mls_commit_log \
+             WHERE conversation_id = ?1 AND generation = ?2 \
+             ORDER BY epoch DESC LIMIT 1",
+            libsql::params![conversation_id.to_string(), generation],
+        )
+        .await?;
+    Ok(match rows.next().await? {
+        Some(row) => Some(row.get::<String>(0)?),
+        None => None,
+    })
+}
+
+/// True when `user_id` is an ADMIN of the group that owns `conversation_id`.
+///
+/// The two id kinds that can have admins are a group id and one of its channel
+/// ids; a DM has no admins, so it simply matches nothing. Deliberately narrower
+/// than [`is_member`], which ORs in `dm_channel_member` as well.
+pub async fn is_conversation_admin(
+    conn: &Connection,
+    conversation_id: &str,
+    user_id: &str,
+) -> anyhow::Result<bool> {
+    let mut rows = conn
+        .query(
+            "SELECT 1 WHERE \
+                EXISTS (SELECT 1 FROM group_member \
+                        WHERE group_id = ?1 AND user_id = ?2 AND role = 'admin') \
+             OR EXISTS (SELECT 1 FROM channels c \
+                        JOIN group_member gm ON gm.group_id = c.group_id \
+                        WHERE c.id = ?1 AND gm.user_id = ?2 AND gm.role = 'admin') \
+             LIMIT 1",
+            libsql::params![conversation_id.to_string(), user_id.to_string()],
+        )
+        .await?;
+    Ok(rows.next().await?.is_some())
+}
+
 /// POST /v1/welcomes/resubmit — idempotently (re)insert a single Welcome for
 /// `(conversation_id, recipient_id, recipient_device_id)`, so a recipient whose
 /// Welcome went missing can be re-driven WITHOUT depending solely on the client's
-/// external-join fallback. When auth is enforced, the authenticated user must be
-/// a current member of the conversation (mirrors `/v1/group-info` authz — only a
-/// member can re-drive a Welcome for the group they belong to).
+/// external-join fallback.
 pub async fn welcomes_resubmit(
     State(state): State<AppState>,
     req: RawRequest,
@@ -887,33 +1105,107 @@ pub async fn welcomes_resubmit(
         Ok(v) => v,
         Err(resp) => return Ok(resp),
     };
+    let main = state.db.conn().await?;
+    let log = state.log_db.conn().await?;
+    let outcome = apply_welcomes_resubmit(&main, &log, authed.as_deref(), &parsed).await?;
+    Ok(match outcome {
+        ResubmitOutcome::Ok => ok_response::<ResubmitBody>(pollis_api::StatusOk::Ok),
+        ResubmitOutcome::Forbidden => AuthRejection::Forbidden.into_response(),
+        ResubmitOutcome::Invalid(why) => bad_request(why),
+        ResubmitOutcome::AheadOfHead {
+            head_generation,
+            head_epoch,
+        } => epoch_behind_response(head_generation, head_epoch),
+    })
+}
 
-    // Authz: a signed request may only resubmit for a conversation it belongs to.
-    // Skipped on the no-auth path (mirrors submit / group_info).
-    if let Some(user_id) = &authed {
-        let conn = state.db.conn().await?;
-        if !is_member(&conn, &parsed.conversation_id, user_id).await? {
-            return Ok(AuthRejection::Forbidden.into_response());
-        }
+/// The resubmit decision and the write, with the four gates a member could
+/// previously walk straight past:
+///
+///   1. **The actor is a current member** of the conversation (unchanged; skipped
+///      on the no-auth path, mirroring submit / group_info).
+///   2. **The RECIPIENT is a current member** too. Without this, any member
+///      could park a Welcome addressed to an arbitrary user/device pair — a row
+///      `/v1/welcomes/fetch` then hands that device, inviting it to join a group
+///      nobody added it to. Checked on both paths, because it is a property of
+///      the ROW being written rather than of the caller's credential.
+///   3. **The lineage exists.** `generation` may not exceed the commit log's head
+///      generation ([`refuse_above_head`]); a Welcome into a lineage that was
+///      never opened admits nobody and only occupies the tuple.
+///   4. **One member may not overwrite another's undelivered Welcome.** The
+///      tuple is UNIQUE, so a resubmit IS an overwrite; before `submitted_by`
+///      existed the DS could not tell an honest resend from a hijack of the
+///      Welcome the real adder had just written. A resubmit may always refresh a
+///      Welcome the actor itself published (or an unattributed pre-migration
+///      one, or one already delivered); replacing somebody else's PENDING
+///      Welcome takes the head commit's author — the party that actually
+///      performed the Add — or an admin of the conversation's group.
+pub async fn apply_welcomes_resubmit(
+    main_conn: &Connection,
+    log_conn: &Connection,
+    authed: Option<&str>,
+    body: &ResubmitBody,
+) -> anyhow::Result<ResubmitOutcome> {
+    let Ok(welcome) = b64_decode(&body.welcome) else {
+        return Ok(ResubmitOutcome::Invalid("invalid welcome"));
+    };
+    if welcome.is_empty() || welcome.len() > WELCOME_MAX_BYTES {
+        return Ok(ResubmitOutcome::Invalid("welcome size out of range"));
     }
 
-    let welcome = match b64_decode(&parsed.welcome) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid welcome")),
+    if let Some(user_id) = authed {
+        if !is_member(main_conn, &body.conversation_id, user_id).await? {
+            return Ok(ResubmitOutcome::Forbidden);
+        }
+    }
+    if !is_member(main_conn, &body.conversation_id, &body.recipient_id).await? {
+        return Ok(ResubmitOutcome::Forbidden);
+    }
+
+    // A Welcome names only a lineage, not an epoch, so the ceiling that applies
+    // is the generation half: epoch 0 is at or below every lineage's head.
+    match refuse_above_head(log_conn, &body.conversation_id, body.generation, 0).await? {
+        Some(HeadBoundedOutcome::Invalid(why)) => return Ok(ResubmitOutcome::Invalid(why)),
+        Some(HeadBoundedOutcome::AheadOfHead {
+            head_generation,
+            head_epoch,
+        }) => {
+            return Ok(ResubmitOutcome::AheadOfHead {
+                head_generation,
+                head_epoch,
+            })
+        }
+        Some(HeadBoundedOutcome::Ok { .. }) | None => {}
+    }
+
+    // Who may take a pending Welcome away from the member that wrote it.
+    let may_override = match authed {
+        // No signed identity to attribute anything to (dev/test path).
+        None => true,
+        Some(actor) => {
+            head_commit_sender(log_conn, &body.conversation_id, body.generation)
+                .await?
+                .as_deref()
+                == Some(actor)
+                || is_conversation_admin(main_conn, &body.conversation_id, actor).await?
+        }
     };
 
-    let conn = state.log_db.conn().await?;
-    upsert_welcome(
-        &conn,
-        &parsed.conversation_id,
-        parsed.generation,
-        &parsed.recipient_id,
-        &parsed.recipient_device_id,
+    match upsert_welcome(
+        log_conn,
+        &body.conversation_id,
+        body.generation,
+        &body.recipient_id,
+        &body.recipient_device_id,
         &welcome,
+        authed,
+        may_override,
     )
-    .await?;
-
-    Ok(ok_response::<ResubmitBody>(pollis_api::StatusOk::Ok))
+    .await?
+    {
+        WelcomeUpsertOutcome::Ok => Ok(ResubmitOutcome::Ok),
+        WelcomeUpsertOutcome::Forbidden => Ok(ResubmitOutcome::Forbidden),
+    }
 }
 
 /// Idempotent (re)insert of a Welcome, keyed on the UNIQUE
@@ -922,6 +1214,14 @@ pub async fn welcomes_resubmit(
 /// delivery (`delivered = 0`) rather than duplicating or erroring. Mirrors the
 /// inline Welcome insert in the commit bundle so both writers of `mls_welcome`
 /// obey one rule. Pure conn-level write reused by the harness.
+///
+/// `submitted_by` records the actor (migration `migrations-log/000006`) so the
+/// next writer of the same tuple can be told apart from this one. When
+/// `may_override` is false, an existing UNDELIVERED row published by a different
+/// actor is refused rather than replaced — the read and the write share one
+/// IMMEDIATE transaction, so two racing resubmits cannot both see "no
+/// conflicting row".
+#[allow(clippy::too_many_arguments)]
 pub async fn upsert_welcome(
     log_conn: &Connection,
     conversation_id: &str,
@@ -929,26 +1229,66 @@ pub async fn upsert_welcome(
     recipient_id: &str,
     recipient_device_id: &str,
     welcome: &[u8],
-) -> anyhow::Result<u64> {
-    Ok(log_conn
-        .execute(
-            "INSERT INTO mls_welcome \
-                 (id, conversation_id, generation, recipient_id, welcome_data, recipient_device_id, delivered) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0) \
-             ON CONFLICT(conversation_id, recipient_id, recipient_device_id) DO UPDATE SET \
-                 generation = excluded.generation, \
-                 welcome_data = excluded.welcome_data, \
-                 delivered = 0",
-            libsql::params![
-                ulid::Ulid::new().to_string(),
-                conversation_id.to_string(),
-                generation,
-                recipient_id.to_string(),
-                welcome.to_vec(),
-                recipient_device_id.to_string(),
-            ],
-        )
-        .await?)
+    submitted_by: Option<&str>,
+    may_override: bool,
+) -> anyhow::Result<WelcomeUpsertOutcome> {
+    let tx = log_conn
+        .transaction_with_behavior(libsql::TransactionBehavior::Immediate)
+        .await?;
+
+    if !may_override {
+        let mut rows = tx
+            .query(
+                "SELECT delivered, submitted_by FROM mls_welcome \
+                 WHERE conversation_id = ?1 AND recipient_id = ?2 AND recipient_device_id = ?3",
+                libsql::params![
+                    conversation_id.to_string(),
+                    recipient_id.to_string(),
+                    recipient_device_id.to_string(),
+                ],
+            )
+            .await?;
+        let conflict = match rows.next().await? {
+            Some(row) => {
+                let delivered: i64 = row.get(0)?;
+                let owner: Option<String> = row.get(1)?;
+                // An unattributed (pre-000006) row and an already-delivered one
+                // are both fair game: the first has no owner to protect, the
+                // second is spent. Only a PENDING Welcome someone else published
+                // is defended.
+                delivered == 0 && owner.is_some() && owner.as_deref() != submitted_by
+            }
+            None => false,
+        };
+        drop(rows);
+        if conflict {
+            tx.rollback().await?;
+            return Ok(WelcomeUpsertOutcome::Forbidden);
+        }
+    }
+
+    tx.execute(
+        "INSERT INTO mls_welcome \
+             (id, conversation_id, generation, recipient_id, welcome_data, recipient_device_id, delivered, submitted_by) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7) \
+         ON CONFLICT(conversation_id, recipient_id, recipient_device_id) DO UPDATE SET \
+             generation = excluded.generation, \
+             welcome_data = excluded.welcome_data, \
+             submitted_by = excluded.submitted_by, \
+             delivered = 0",
+        libsql::params![
+            ulid::Ulid::new().to_string(),
+            conversation_id.to_string(),
+            generation,
+            recipient_id.to_string(),
+            welcome.to_vec(),
+            recipient_device_id.to_string(),
+            submitted_by.map(|s| s.to_string()),
+        ],
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(WelcomeUpsertOutcome::Ok)
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────

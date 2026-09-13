@@ -37,17 +37,16 @@ const SRC = fileURLToPath(new URL("../src", import.meta.url));
  * this turn. A path the code picked — anything derived from `tempDir()`, a
  * cache directory, a scratch name — is the shape that leaks, because nothing
  * owns the file afterwards.
+ *
+ * The list is now EMPTY, and that is the strongest form of the rule. "Save
+ * attachment as…" was the renderer's one writer; it moved to Rust
+ * (`save_media_to_path`) so the saved file gets this platform's provenance
+ * marker — macOS quarantine, Windows mark-of-the-web — which a renderer
+ * `writeFile` cannot apply. Nothing else ever wrote, so `bridge/fs.ts` dropped
+ * the wrapper and `capabilities/default.json` dropped `fs:allow-temp-write`:
+ * the webview can no longer put a file on the disk at all.
  */
-const WRITE_FILE_ALLOWED = new Map<string, string>([
-  [
-    "bridge/fs.ts",
-    "the bridge wrapper itself — the narrow surface the rule is stated on",
-  ],
-  [
-    "components/Message/AttachmentDisplay.tsx",
-    "'save attachment as…' — writes to the path the user picked in dialogSave",
-  ],
-]);
+const WRITE_FILE_ALLOWED = new Map<string, string>([]);
 
 function walk(dir: string): string[] {
   const out: string[] = [];

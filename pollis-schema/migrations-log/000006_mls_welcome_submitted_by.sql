@@ -1,0 +1,27 @@
+-- Record WHO published each Welcome, so `POST /v1/welcomes/resubmit` can refuse
+-- to overwrite one member's undelivered Welcome with another member's blob.
+--
+-- IMPORTANT: COMMIT-LOG-DB migration (mls_welcome lives on the SEPARATE log DB
+-- post-#420). Applied by desktop-release.yml's second db-apply step
+-- (MIGRATIONS_DIR=pollis-schema/migrations-log). It must NOT go in the main-DB
+-- dir. This is migration 000006 of the log DB's OWN sequence.
+--
+-- WHY. `mls_welcome` is UPSERTed on (conversation_id, recipient_id,
+-- recipient_device_id), and `/v1/welcomes/resubmit` was gated only on the
+-- submitter being *a* member of the conversation. Any member could therefore
+-- replace any other member's pending Welcome for any recipient device with a
+-- blob of its own choosing — the recipient joins the group the attacker's blob
+-- admits it into, or fails to join at all, and the legitimate adder never learns
+-- why. The row had no memory of who wrote it, so the DS could not tell an
+-- honest resend (same sender, same tuple) from a hijack.
+--
+-- With the submitter recorded, the rule the DS can now state is: a resubmit may
+-- always refresh a Welcome YOU published, and may only overwrite an UNDELIVERED
+-- Welcome published by someone else when the actor is the head commit's author
+-- (the device that actually performed the Add) or an admin of the conversation's
+-- group. See `pollis_delivery::writes::welcomes_resubmit`.
+--
+-- Additive and backward-compatible per CLAUDE.md: one nullable ADD COLUMN. NULL
+-- means "written before this column existed" and is treated as unattributed —
+-- the pre-existing behaviour for those rows, never a new refusal.
+ALTER TABLE mls_welcome ADD COLUMN submitted_by TEXT;

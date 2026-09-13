@@ -514,7 +514,10 @@ pub async fn enrollment_request(
     )
     .await
     {
-        Ok(()) => {
+        // A resubmit of the caller's OWN request is the same request; answer it
+        // the same way and re-emit the nudge, since the reason to retry is
+        // usually that the first notification was missed.
+        Ok(EnrollmentRequestOutcome::Created | EnrollmentRequestOutcome::Duplicate) => {
             // Notify the user's already-enrolled devices via their inbox room.
             // The requesting device can't send this itself — it is
             // pre-enrollment (no signing credential, local DB closed), so its
@@ -534,8 +537,31 @@ pub async fn enrollment_request(
             }
             ok_status::<EnrollmentRequestBody>()
         }
+        Ok(EnrollmentRequestOutcome::Conflict) => conflict("request_id_taken"),
         Err(e) => internal(e),
     }
+}
+
+/// What a `POST /v1/auth/enrollment-request` did.
+///
+/// The row is keyed on a CLIENT-CHOSEN `request_id`, so a second submit of the
+/// same id is a normal thing to see and used to be an unhandled
+/// `UNIQUE constraint failed` — a 500, which says "the service is broken" about
+/// a request that is merely repeated, and hands an unauthenticated-ish caller a
+/// cheap way to make the DS log errors. It is now two distinct, typed answers.
+#[derive(Debug, PartialEq, Eq)]
+pub enum EnrollmentRequestOutcome {
+    /// The row was inserted.
+    Created,
+    /// The id already names THIS session's own pending request — the client
+    /// retried. Idempotent: nothing is rewritten, and the caller gets its 200.
+    Duplicate,
+    /// The id already names somebody else's request (or the same user's other
+    /// device). Refused with 409 rather than overwriting: the row carries the
+    /// verification code an approving device compares against, so letting a
+    /// second caller replace it in place is how an approval gets steered onto
+    /// the wrong device.
+    Conflict,
 }
 
 /// INSERT the pending enrollment request, `user_id` + `new_device_id` bound to
@@ -551,22 +577,53 @@ pub async fn apply_enrollment_request(
     verification_code: &str,
     created_at: &str,
     expires_at: &str,
-) -> anyhow::Result<()> {
-    conn.execute(
-        "INSERT INTO device_enrollment_request \
-         (id, user_id, new_device_id, new_device_ephemeral_pub, verification_code, \
-          status, created_at, expires_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7)",
-        libsql::params![
-            request_id.to_string(),
-            user_id.to_string(),
-            new_device_id.to_string(),
-            ephemeral_pub.to_vec(),
-            verification_code.to_string(),
-            created_at.to_string(),
-            expires_at.to_string(),
-        ],
-    )
-    .await?;
-    Ok(())
+) -> anyhow::Result<EnrollmentRequestOutcome> {
+    // `OR IGNORE` rather than a bare INSERT: the primary key is a client-chosen
+    // id, so a duplicate is a client retry, not a service fault. The conflict is
+    // then RESOLVED by reading the row that won — never by overwriting it, since
+    // it holds the verification code the approving device compares against.
+    let inserted = conn
+        .execute(
+            "INSERT OR IGNORE INTO device_enrollment_request \
+             (id, user_id, new_device_id, new_device_ephemeral_pub, verification_code, \
+              status, created_at, expires_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7)",
+            libsql::params![
+                request_id.to_string(),
+                user_id.to_string(),
+                new_device_id.to_string(),
+                ephemeral_pub.to_vec(),
+                verification_code.to_string(),
+                created_at.to_string(),
+                expires_at.to_string(),
+            ],
+        )
+        .await?;
+    if inserted > 0 {
+        return Ok(EnrollmentRequestOutcome::Created);
+    }
+
+    let mut rows = conn
+        .query(
+            "SELECT user_id, new_device_id FROM device_enrollment_request WHERE id = ?1",
+            libsql::params![request_id.to_string()],
+        )
+        .await?;
+    let owner = match rows.next().await? {
+        Some(row) => Some((row.get::<String>(0)?, row.get::<String>(1)?)),
+        None => None,
+    };
+    Ok(match owner {
+        // The row vanished between the INSERT and the read (an expiry sweep, a
+        // teardown). Nothing was written and nothing is owned; refuse rather
+        // than claim success for a request that does not exist.
+        None => EnrollmentRequestOutcome::Conflict,
+        Some((owner_user, owner_device)) => {
+            if owner_user == user_id && owner_device == new_device_id {
+                EnrollmentRequestOutcome::Duplicate
+            } else {
+                EnrollmentRequestOutcome::Conflict
+            }
+        }
+    })
 }

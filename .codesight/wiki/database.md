@@ -674,6 +674,28 @@ that class of bug.
 - `device_id` TEXT _(migration 11)_
 - `ciphersuite` INTEGER NOT NULL DEFAULT 1 _(post-baseline 000010; MLS code point. Still written and still queried after #669 — every package now carries `0x0052` (`CIPHERSUITE_PQ`), which is also what the DS assumes when a publish/claim request omits the field (it defaulted to the classic `1` before #669). A column and not derived-on-read because `key_package` is an opaque TLS blob the DS must not parse. Claims narrow on it: under #454 that kept the classic and hybrid pools disjoint, and it still keeps a package published under a retired code point from being served for a current group — see `pollis-delivery/src/devices.rs`. The SQL default of 1 is left as-is because migrations must stay additive; no live writer relies on it.)_
 
+
+### mls_key_package_claim _(post-baseline 000022)_
+- `id` TEXT PK _(ULID)_
+- `claimer_id` TEXT NOT NULL — the authenticated account that claimed
+- `target_user_id` TEXT NOT NULL — whose pool was drawn from
+- `target_device_id` TEXT — the device, when the claim named one
+- `claimed_at` TEXT NOT NULL DEFAULT now
+- INDEX `idx_kp_claim_pair` on `(claimer_id, target_user_id, claimed_at DESC)`; INDEX `idx_kp_claim_target` on `(target_user_id, target_device_id, claimed_at DESC)`
+
+The durable budget behind `POST /v1/key-packages/claim`, and the audit trail for
+"who drained this pool". A claim is a one-way flip of `mls_key_package.claimed`,
+so an unlimited claim loop empties a target's pool for good and a device with no
+unclaimed package cannot be added to any group — a stranger holding an arbitrary
+user out of every conversation they are invited to. Counting from the table
+rather than from process memory is the same reasoning as
+`group_invite_link_redemption` (#847): the DS restarts on every deploy, and a
+bound a rolling restart clears is not a bound. Only SUCCESSFUL claims are
+recorded — charging for a claim against an already-empty pool would let a
+target's own exhaustion lock out the honest adders retrying behind it. Nothing is
+recorded on the DS's no-auth path, which has no signed identity to attribute a
+claim to.
+
 ### mls_commit_log _(migration 3 + 14)_
 - `seq` INTEGER PK AUTOINCREMENT
 - `conversation_id` TEXT NOT NULL
@@ -762,6 +784,7 @@ branches:
 - `created_at` TEXT NOT NULL DEFAULT now
 - `recipient_device_id` TEXT _(migration 11)_
 - `generation` INTEGER NOT NULL DEFAULT 0 _(migration 000004, #454 P4)_ — the lineage this Welcome **admits into**, so a recipient can tell "added to the group you're in" from "moved to the successor group" BEFORE applying the blob. It needs that before, not after: `max_past_epochs = 0` means it must finish draining its current lineage first.
+- `submitted_by` TEXT _(commit-log-DB migration 000006)_ — who published this Welcome: the commit bundle's `sender_id`, or the actor of a `/v1/welcomes/resubmit`. NULL for rows written before the column existed. The tuple below is UNIQUE, so a resubmit IS an overwrite; without an owner the DS could not tell an honest resend from one member replacing the pending Welcome the real adder had just written. Overriding somebody else's UNDELIVERED Welcome takes the head commit's author or a group admin.
 - UNIQUE INDEX `idx_mls_welcome_recipient` on `(conversation_id, recipient_id, recipient_device_id)` _(commit-log-DB migration 000002, #430 P2)_ — one live Welcome per recipient device. It is the conflict target the DS submit bundle's and `/v1/welcomes/resubmit`'s idempotent `ON CONFLICT … DO UPDATE` upserts key on, so a re-sent Welcome refreshes the blob and re-arms delivery (`delivered = 0`) instead of stacking a duplicate row. The migration collapses any pre-existing duplicates (keeping the newest per tuple) before adding the index.
 
 `mls_welcome`, `mls_commit_log`, and `mls_group_info` live on the **separate
@@ -803,7 +826,7 @@ the floor. Lives on the commit-log DB; the DS is the sole writer.
 **Retention floor (I4, #539).** Without pruning, `mls_commit_log` grows with
 membership-churn × time. The DS (sole writer) prunes commits below a floor,
 event-driven on commit-append (`POST /v1/commits`) and on a device's catch-up
-report (`GET /v1/commits/:id?since=&user_id=&device_id=`) — never on a timer.
+report (device-signed `POST /v1/commits/since`) — never on a timer.
 Two tiers (`pollis_delivery::commit::prune_floor`, modelled in
 `specs/tla/Delivery.tla` Spec B):
 - **Tier 1 (zero loss):** floor = MIN applied epoch across all CURRENT member
@@ -860,6 +883,7 @@ independently.
 - `created_at` TEXT NOT NULL DEFAULT now
 - `expires_at` TEXT NOT NULL
 - `approved_by_device_id` TEXT
+- `id` is the CLIENT's `request_id`, so a duplicate submit is an ordinary retry rather than a fault. `POST /v1/auth/enrollment-request` inserts `OR IGNORE` and then resolves the conflict by READING the winning row: the same session's own id is idempotent (200), anybody else's is a typed 409 `request_id_taken`. It is never an overwrite — the row carries the `verification_code` the approving device compares against, so letting a second caller replace it in place is how an approval gets steered onto the wrong device. (A bare INSERT here surfaced the UNIQUE violation as a 500.)
 
 ### security_event _(migration 13)_
 - `id` TEXT PK

@@ -87,6 +87,21 @@ pub struct LivekitIdentitiesBody {
     pub user_id: Option<String>,
 }
 
+/// Hard ceiling on one presigned media PUT.
+///
+/// The client caps a cached attachment at 100 MiB
+/// (`pollis_core::commands::r2::MEDIA_CACHE_MAX_FILE_BYTES`); the ciphertext is
+/// that plus a 16-byte AEAD tag per 4 MiB chunk, so the wire bound is the
+/// plaintext bound rounded up. It exists because "presign a PUT" with no signed
+/// length is permission to write an object of ANY size — the bucket bill is the
+/// vulnerability. Declared here so the uploader and the DS that refuses the
+/// upload cannot hold two different numbers.
+pub const R2_MEDIA_MAX_BYTES: u64 = 104 * 1024 * 1024;
+
+/// Hard ceiling on one presigned avatar / group-icon PUT. These are decoration
+/// rendered in a list; a few megabytes is already generous.
+pub const R2_PUBLIC_IMAGE_MAX_BYTES: u64 = 8 * 1024 * 1024;
+
 #[derive(Serialize, Deserialize)]
 pub struct R2PresignBody {
     /// `"get"` → presign a GET (download); `"put"` → presign a PUT (upload);

@@ -60,25 +60,12 @@ interface MediaLinkUnfurlProps {
   text: string;
 }
 
-/// Hosts whose media loads without asking.
-///
-/// Only our own CDN: those bytes are already fetched from us, so previewing
-/// them tells a third party nothing it does not already know.
-const AUTO_LOAD_HOSTS = ["cdn.pollis.com"];
-
-function isFirstParty(url: string): boolean {
-  try {
-    return AUTO_LOAD_HOSTS.includes(new URL(ensureProtocol(url)).hostname.toLowerCase());
-  } catch {
-    return false;
-  }
-}
-
 export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text }) => {
   const { t } = useTranslation("chat");
   const links = useMemo(() => extractMediaLinks(text), [text]);
   const [hidden, setHidden] = useState<Set<string>>(() => new Set());
-  // Third-party media loads only when the reader asks for it.
+  // Remote media loads only when the reader asks for it. EVERY host, with no
+  // first-party exception.
   //
   // Rendering `<img src>` straight from message text meant that merely OPENING
   // a message made the app fetch from a host the sender chose — handing them
@@ -91,6 +78,17 @@ export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text }) => {
   // A click is the consent. It is deliberately per-URL and not remembered —
   // the sender picks the URL, so a blanket "always load" would be a setting the
   // attacker, not the user, gets to exploit.
+  //
+  // There used to be an allowlist holding exactly `cdn.pollis.com`, on the
+  // reasoning that our own CDN learns nothing new. That reasoning was wrong on
+  // two counts. The hostname comes out of MESSAGE TEXT, so the sender chooses
+  // it: anyone who can get a DNS name pointed at an address they watch, or who
+  // can see traffic to ours, gets the read receipt back — and the check was on
+  // the hostname alone, so the PATH was still the sender's to pick, making the
+  // URL itself a per-recipient beacon. And with the relay overlay on, an
+  // automatic fetch from the webview does not ride the shim (`img src` is the
+  // renderer's own request, not `http_client`'s), so the one host that "already
+  // knows" is precisely the one the overlay is hiding the address from.
   const [revealed, setRevealed] = useState<Set<string>>(() => new Set());
 
   const handleClick = useCallback((url: string) => {
@@ -115,7 +113,7 @@ export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text }) => {
     <div data-testid="media-link-unfurl" className="mt-2 flex flex-wrap gap-1">
       {visible.map((link) => {
         const href = ensureProtocol(link.url);
-        const show = revealed.has(link.url) || isFirstParty(link.url);
+        const show = revealed.has(link.url);
         if (!show) {
           return (
             <button

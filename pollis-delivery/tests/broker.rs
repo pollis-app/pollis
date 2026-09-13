@@ -13,7 +13,9 @@
 
 use base64::Engine as _;
 use hmac::{Hmac, Mac};
-use pollis_delivery::broker::{presign_r2_url, sign_livekit_admin_token, sign_livekit_token};
+use pollis_delivery::broker::{
+    presign_r2_url, sign_livekit_admin_token, sign_livekit_token, LIVEKIT_TOKEN_TTL_SECS,
+};
 use sha2::Sha256;
 
 // ── LiveKit JWT ────────────────────────────────────────────────────────────
@@ -78,7 +80,7 @@ fn livekit_token_claim_shape_and_signature() {
     assert_eq!(payload["name"], "");
     assert_eq!(payload["iat"], now);
     assert_eq!(payload["nbf"], now);
-    assert_eq!(payload["exp"], now + 3600);
+    assert_eq!(payload["exp"], now + LIVEKIT_TOKEN_TTL_SECS);
 
     // Video grants — a normal publisher.
     let v = &payload["video"];
@@ -89,6 +91,34 @@ fn livekit_token_claim_shape_and_signature() {
     assert_eq!(v["canPublishData"], true);
 
     assert_hs256_signature(&token, LK_SECRET);
+}
+
+/// Membership is checked when a token is MINTED and never again — LiveKit
+/// verifies it at join and the SFU is told nothing about a later removal. So the
+/// TTL is exactly the window in which a token issued to a member who has since
+/// been removed, left, been blocked or had their device revoked can still be
+/// redeemed. It used to be an hour. The client re-mints on every reconnect, so a
+/// short one costs nothing; an hour is a whole hour of re-entry.
+#[test]
+fn a_participant_token_expires_in_minutes_not_hours() {
+    let ttl = LIVEKIT_TOKEN_TTL_SECS;
+    assert!(
+        ttl <= 15 * 60,
+        "a {LIVEKIT_TOKEN_TTL_SECS}s participant token leaves that long a window \
+         for an ex-member to rejoin the room with a token minted before they lost access"
+    );
+    assert!(
+        ttl >= 5 * 60,
+        "a {LIVEKIT_TOKEN_TTL_SECS}s token is short enough that an ordinary \
+         reconnect races its own expiry"
+    );
+    let now = 1_700_000_000u64;
+    let token = sign_livekit_token(LK_KEY, LK_SECRET, "room-1", "alice", true, now).unwrap();
+    let (_, payload, _) = split_jwt(&token);
+    assert_eq!(
+        payload["exp"], now + LIVEKIT_TOKEN_TTL_SECS,
+        "the minted claim must carry the declared TTL, not a hardcoded one"
+    );
 }
 
 #[test]

@@ -2,12 +2,12 @@ import { errorMessage } from "../../utils/errorMessage";
 import React, { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { decode } from "blurhash";
-import { dialogSave, writeFile } from "../../bridge";
+import { dialogSave, invoke } from "../../bridge";
 import { Download, Film, Check } from "lucide-react";
 import { getFileIcon } from "../../utils/fileIcon";
 import { captureVideoPoster } from "../../utils/imageProcessing";
 import { formatFileSize, formatDuration } from "../../utils/format";
-import { downloadAndDecryptMedia, getMediaUrl } from "../../services/r2-upload";
+import { getMediaUrl } from "../../services/r2-upload";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { InlineAudioPlayer } from "../ui/InlineAudioPlayer";
 import { AudioPlayer } from "../ui/AudioPlayer";
@@ -237,22 +237,36 @@ export const AttachmentDisplay: React.FC<AttachmentDisplayProps> = ({
     };
   }, [downloadUrl, attachment.localPreviewUrl]);
 
-  // Save to a user-chosen path via the native Tauri dialog. The `<a download>`
+  // Save to a user-chosen path via the native save panel. The `<a download>`
   // trick doesn't work on WebKitGTK: `download` is ignored across origins
   // (loopback media URL vs the app's tauri:// origin), so the webview just
   // navigates to the URL and shows the browser's built-in audio/video player
   // instead of triggering a download.
-  const triggerSave = async (url: string): Promise<boolean> => {
+  //
+  // The write itself is Rust's (`save_media_to_path`), not a `writeFile` of
+  // bytes the renderer fetched. Two reasons, one of them the point: the bytes
+  // no longer round-trip through the webview, and — an attachment is a file a
+  // STRANGER sent — the file lands with this platform's provenance marker on
+  // it (macOS `com.apple.quarantine`, Windows mark-of-the-web). Saved through
+  // the fs plugin it arrived indistinguishable from a file the user authored,
+  // so Gatekeeper and SmartScreen both stood down. See
+  // `pollis-core/src/downloads.rs`.
+  const triggerSave = async (): Promise<boolean> => {
     const target = await dialogSave({ defaultPath: attachment.filename });
     if (!target) {
       return false;
     }
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error(`fetch failed: ${res.status}`);
+    const marking = await invoke<string>("save_media_to_path", {
+      r2Key: attachment.object_key,
+      contentHash: attachment.content_hash,
+      targetPath: target,
+    });
+    // The bytes are saved either way — a marker that could not be written (a
+    // FAT32 stick, a network share) is not worth failing the save over — but it
+    // is not something to swallow silently.
+    if (marking.startsWith("failed")) {
+      console.warn("[attachment] saved without a download marker:", marking);
     }
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    await writeFile(target, bytes);
     return true;
   };
 
@@ -260,13 +274,7 @@ export const AttachmentDisplay: React.FC<AttachmentDisplayProps> = ({
     if (downloadStatus !== "idle") { return; }
     setDownloadStatus("downloading");
     try {
-      const url = downloadUrl
-        ?? await downloadAndDecryptMedia(
-          attachment.object_key,
-          attachment.content_hash,
-          attachment.content_type,
-        );
-      const saved = await triggerSave(url);
+      const saved = await triggerSave();
       setDownloadStatus(saved ? "done" : "idle");
       if (saved) {
         setTimeout(() => setDownloadStatus("idle"), 2000);

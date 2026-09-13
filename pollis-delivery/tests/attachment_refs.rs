@@ -431,7 +431,13 @@ async fn r2_presign_get_is_not_gated_but_put_of_a_referenced_object_is() {
     let presign = |op: &'static str, key: String| {
         let router = router.clone();
         async move {
-            let body = serde_json::json!({ "operation": op, "key": key, "user_id": "u1" });
+            // Every `put` now declares a bounded length; `get` ignores the field.
+            let body = serde_json::json!({
+                "operation": op,
+                "key": key,
+                "user_id": "u1",
+                "content_length": 1024,
+            });
             let req = Request::builder()
                 .method("POST")
                 .uri("/v1/r2/presign")
@@ -462,8 +468,10 @@ async fn r2_presign_get_is_not_gated_but_put_of_a_referenced_object_is() {
 
     // The legitimate upload still works: a hash nobody references yet. Without
     // this the gate could be "refuse every put" and the assertion above would
-    // still pass, while breaking all uploads.
-    let put_new = presign("put", "media/brandnewhash/pic.enc".to_string()).await;
+    // still pass, while breaking all uploads. The key is the content-addressed
+    // shape every upload since #762 writes — a `put` may only name one of those.
+    let fresh_hash = "c".repeat(64);
+    let put_new = presign("put", format!("media/{fresh_hash}.enc")).await;
     assert_eq!(
         put_new.status(),
         StatusCode::OK,

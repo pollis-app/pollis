@@ -24,9 +24,9 @@ jobs:
   supply-chain:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
 
       # Prebuilt binaries — no compile step, keeps the gate fast. Versions are
       # PINNED: cargo-vet's imports.lock format is version-specific, so CI must
@@ -34,7 +34,7 @@ jobs:
       # (else --locked fails to parse). Bump these deliberately, regenerating
       # supply-chain/ in the same commit.
       - name: Install cargo-deny + cargo-vet
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
         with:
           tool: cargo-deny@0.19.9,cargo-vet@0.10.2
 

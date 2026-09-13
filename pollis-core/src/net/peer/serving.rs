@@ -50,6 +50,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
+use pollis_relay::nexthop::NextHopDirectory;
 use pollis_relay::policy::RevocationStore;
 
 use crate::sink::EventSink;
@@ -235,6 +236,20 @@ impl RelayServingManager {
         }
     }
 
+    /// The engine's next-hop directory, keyed on the same pinned key — the
+    /// bound on WHERE this device may extend a circuit to.
+    ///
+    /// [`NextHopDirectory::unconfigured`] when there is no key, which permits
+    /// nothing and (in [`PeerEngine::start`]) turns `allow_extend` off outright.
+    /// A volunteer's device must never be a general-purpose dialer, and the only
+    /// statement of what a relay is comes from the signed directory.
+    fn next_hop_directory(&self) -> NextHopDirectory {
+        match self.context().and_then(|c| c.directory()) {
+            Some((_, key)) => NextHopDirectory::enforcing(key),
+            None => NextHopDirectory::unconfigured(),
+        }
+    }
+
     /// Start parking outbound connections for the running engine.
     ///
     /// Returns `None` when there is no context to park with, in which case the
@@ -243,6 +258,7 @@ impl RelayServingManager {
         &self,
         leaf_der: pollis_relay::CertificateDer<'static>,
         revocations: RevocationStore,
+        next_hops: NextHopDirectory,
     ) -> Option<Reachability> {
         let context = self.context()?;
         let me = self.me.get()?.clone();
@@ -269,6 +285,7 @@ impl RelayServingManager {
         Some(Reachability::start(ReachabilityConfig {
             context,
             revocations,
+            next_hops,
             leaf_der,
             acceptor: Arc::new(ManagerAcceptor(me)),
             on_change,
@@ -304,13 +321,24 @@ impl RelayServingManager {
             // unexpired list — fail-closed from the first instant, not from the
             // first refresh.
             let revocations = self.revocation_store();
-            match PeerEngine::start(self.counters.clone(), revocations.clone()) {
+            // Same story for the addresses it may extend to: the reachability
+            // loop already verifies the signed directory, so it installs one
+            // into the store the engine checks every `Extend` against.
+            let next_hops = self.next_hop_directory();
+            match PeerEngine::start(
+                self.counters.clone(),
+                revocations.clone(),
+                next_hops.clone(),
+            ) {
                 Ok(engine) => {
                     // Parking carries the engine's leaf: that cert IS this
                     // peer's identity, and it is what a client pins when the
                     // directory offers this device as a hop.
-                    inner.reachability =
-                        self.start_reachability(engine.cert_der().clone(), revocations);
+                    inner.reachability = self.start_reachability(
+                        engine.cert_der().clone(),
+                        revocations,
+                        next_hops,
+                    );
                     inner.engine = Some(engine);
                 }
                 Err(e) => {
@@ -539,6 +567,10 @@ mod tests {
             manager.revocation_store().is_configured(),
             "a peer with a directory must be able to evaluate revocation"
         );
+        assert!(
+            manager.next_hop_directory().is_configured(),
+            "a peer with a directory must be able to check where it extends to"
+        );
     }
 
     /// And the other half of §5: no directory ⇒ no key ⇒ the store admits
@@ -551,6 +583,19 @@ mod tests {
 
         manager.set_context(Arc::new(FakeContext(None)));
         assert!(!manager.revocation_store().is_configured());
+    }
+
+    /// ...and the same for the next-hop bound: no directory key ⇒ nothing is a
+    /// relay as far as this device is concerned, so `PeerEngine::start` turns
+    /// `allow_extend` off outright rather than dialling addresses it cannot
+    /// vouch for.
+    #[tokio::test]
+    async fn without_a_directory_the_engine_will_not_extend_anywhere() {
+        let manager = RelayServingManager::new();
+        assert!(!manager.next_hop_directory().is_configured());
+
+        manager.set_context(Arc::new(FakeContext(None)));
+        assert!(!manager.next_hop_directory().is_configured());
     }
 
     /// A device with no way to be reached settles on the reachability hold and

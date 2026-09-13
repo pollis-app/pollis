@@ -39,6 +39,8 @@ use rustls::pki_types::CertificateDer;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
+mod common;
+
 const USER: &str = "u_revoke";
 const DEVICE: &str = "d_revoke";
 const DEVICE_ED_PUB: [u8; 32] = [7u8; 32];
@@ -145,6 +147,10 @@ fn spawn_relay(allow: &[&str], revocations: RevocationStore) -> TestRelay {
     )
     .unwrap();
     config.revocations = revocations;
+    // A relay extends only to an address the signed directory lists, and these
+    // hops are on loopback — see `common::publish_hop`.
+    config.next_hops = common::test_directory();
+    config.allow_private_next_hops = true;
 
     let peers: Arc<Mutex<Vec<SocketAddr>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = peers.clone();
@@ -156,6 +162,7 @@ fn spawn_relay(allow: &[&str], revocations: RevocationStore) -> TestRelay {
     let cert = config.server_cert();
     let stats = config.stats.clone();
     let (task, addr) = RelayServer::spawn(config).unwrap();
+    common::publish_hop(addr);
     TestRelay {
         addr,
         cert,

@@ -786,3 +786,95 @@ async fn enrollment_request_is_session_gated_and_binds_user() {
     assert_eq!(row_device, device_id, "new_device_id must be bound from the session");
     assert_eq!(row_status, "pending");
 }
+
+/// A REPEATED enrollment request is not a server fault.
+///
+/// `device_enrollment_request.id` is a CLIENT-chosen `request_id`, and the
+/// handler inserted it with a bare `INSERT`, so submitting the same id twice hit
+/// `UNIQUE constraint failed: device_enrollment_request.id` and fell out as a
+/// 500 (found by an OWASP ZAP sweep against a local DS). A 500 says "the service
+/// is broken" about a request that is merely repeated — it is the wrong answer
+/// for the honest retry a flaky network produces, and a free way to fill the
+/// DS's error log.
+///
+/// The caller resubmitting its OWN request gets its 200 back, idempotently; a
+/// caller naming somebody else's request id gets a typed 409. Neither is a 500,
+/// and neither overwrites the stored row — it carries the verification code an
+/// approving device compares against, so a second caller replacing it in place
+/// is how an approval gets steered onto the wrong device.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_duplicate_enrollment_request_is_not_a_500() {
+    let db = fresh_db().await;
+    let state = dev_state(Arc::clone(&db));
+
+    let alice = login(&state, "dup-a@x.com", "dev-a").await;
+    let alice_token = alice["session_token"].as_str().unwrap().to_string();
+    let alice_user = alice["user_id"].as_str().unwrap().to_string();
+
+    let body = |code: &str| {
+        serde_json::json!({
+            "request_id": "req-dup",
+            "new_device_ephemeral_pub": b64(&[7u8; 32]),
+            "verification_code": code,
+            "created_at": "2026-06-27T00:00:00Z",
+            "expires_at": "2026-06-27T00:10:00Z",
+        })
+    };
+
+    let (s, _) = send(
+        &state,
+        "/v1/auth/enrollment-request",
+        body("111111"),
+        Some(&alice_token),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+
+    // Same session, same id — the retry.
+    let (s, _) = send(
+        &state,
+        "/v1/auth/enrollment-request",
+        body("222222"),
+        Some(&alice_token),
+    )
+    .await;
+    assert_eq!(
+        s,
+        StatusCode::OK,
+        "a client's own resubmit must be idempotent, not a 500"
+    );
+
+    // Somebody else naming the same id — refused, typed.
+    let bob = login(&state, "dup-b@x.com", "dev-b").await;
+    let bob_token = bob["session_token"].as_str().unwrap().to_string();
+    let (s, json) = send(
+        &state,
+        "/v1/auth/enrollment-request",
+        body("333333"),
+        Some(&bob_token),
+    )
+    .await;
+    assert_eq!(
+        s,
+        StatusCode::CONFLICT,
+        "a taken request_id is a conflict, not an internal error"
+    );
+    assert_eq!(json["error"], "request_id_taken");
+
+    // Through all of it the stored row is untouched: same owner, same code.
+    let conn = db.conn().await.unwrap();
+    let mut rows = conn
+        .query(
+            "SELECT user_id, verification_code FROM device_enrollment_request WHERE id = 'req-dup'",
+            (),
+        )
+        .await
+        .unwrap();
+    let row = rows.next().await.unwrap().expect("the first request stands");
+    assert_eq!(row.get::<String>(0).unwrap(), alice_user);
+    assert_eq!(
+        row.get::<String>(1).unwrap(),
+        "111111",
+        "the verification code an approver compares against must never be rewritten"
+    );
+}

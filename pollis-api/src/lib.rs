@@ -75,8 +75,10 @@
 //!     failures are carried by the status code, which is what every caller
 //!     branches on.
 //!   - GET endpoints (`/health`, `/version`, `/v1/config`,
-//!     `/v1/retention/metrics`, `GET /v1/commits/:id`) have no request body and
-//!     so no entry here.
+//!     `/v1/retention/metrics`) have no request body and so no entry here. They
+//!     are also the ONLY GETs the DS serves: a read that answers about user data
+//!     belongs in this table, because a GET is invisible to the route-coverage
+//!     test and its query string is outside the signature.
 //!
 //! # Adding an endpoint
 //!

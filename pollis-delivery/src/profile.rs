@@ -357,7 +357,18 @@ pub async fn block_user(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
-    outcome_response::<AddBlock>(apply_block_user(&conn, authed.as_deref(), &parsed.0).await?)
+    let outcome = apply_block_user(&conn, authed.as_deref(), &parsed.0).await?;
+    // The block is what un-authorizes the blocked user for the shared DM's
+    // realtime room (`broker::dm_peer_blocked`); this is what ends the session
+    // they are already holding, which no membership change would.
+    if matches!(outcome, WriteOutcome::Ok) {
+        let blocker = authed
+            .clone()
+            .unwrap_or_else(|| parsed.0.blocker_id.clone());
+        let rooms = crate::broker::shared_dm_rooms(&conn, &blocker, &parsed.0.blocked_id).await?;
+        crate::broker::evict_user_from_rooms(&state, &rooms, &parsed.0.blocked_id).await;
+    }
+    outcome_response::<AddBlock>(outcome)
 }
 
 /// Insert a block row and reset the blocker's `accepted_at` for every DM shared

@@ -354,13 +354,19 @@ pub async fn submit_commit(conn: &Connection, body: &SubmitBody) -> Result<Submi
         // It needs that distinction because `max_past_epochs = 0` means it must
         // finish draining its current lineage first; a Welcome it cannot place is
         // a Welcome it might apply too early, and messages get dropped.
+        //
+        // `submitted_by` is the commit's own sender (migration
+        // `migrations-log/000006`): this bundle IS the Add, so its author is the
+        // party `/v1/welcomes/resubmit` must not let another member overwrite
+        // while the Welcome is still pending.
         tx.execute(
             "INSERT INTO mls_welcome \
-                 (id, conversation_id, generation, recipient_id, welcome_data, recipient_device_id, delivered) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0) \
+                 (id, conversation_id, generation, recipient_id, welcome_data, recipient_device_id, delivered, submitted_by) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7) \
              ON CONFLICT(conversation_id, recipient_id, recipient_device_id) DO UPDATE SET \
                  generation = excluded.generation, \
                  welcome_data = excluded.welcome_data, \
+                 submitted_by = excluded.submitted_by, \
                  delivered = 0",
             libsql::params![
                 ulid::Ulid::new().to_string(),
@@ -369,6 +375,7 @@ pub async fn submit_commit(conn: &Connection, body: &SubmitBody) -> Result<Submi
                 w.recipient_id.clone(),
                 welcome,
                 w.recipient_device_id.clone(),
+                body.sender_id.clone(),
             ],
         )
         .await?;

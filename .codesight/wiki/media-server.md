@@ -36,6 +36,29 @@ resolves a hash by scanning for `<hash>.<ext>.enc`, so a new producer needs no
 server change at all; what it needs is a content-addressed name, which is why
 avatars had to stop living at a mutable `avatars/{user_id}` key first.
 
+## Saving an attachment out of the app
+
+The loopback route is for RENDERING. "Save attachment as…" does not use it:
+`commands::r2::save_media_to_path` downloads, decrypts, verifies the content
+hash, and writes the file itself, so the bytes never round-trip through the
+webview.
+
+That is not only a bandwidth point. An attachment is a file a stranger sent, and
+when the renderer fetched the loopback URL and wrote it with the fs plugin, the
+file landed on disk with **no provenance marker** — no `com.apple.quarantine` on
+macOS, no `Zone.Identifier` stream on Windows. Gatekeeper, SmartScreen, Office's
+Protected View and the script-host warnings all key on exactly that marker, so
+every one of them stood down for anything saved out of Pollis. `pollis-core/src/downloads.rs`
+writes the bytes and applies the marker in **one** function
+(`write_downloaded_file`) precisely so a future save path cannot do the first
+without the second; `src-tauri/Info.plist` sets `LSFileQuarantineEnabled` as the
+backstop for any macOS write that does not go through it. Linux has no enforced
+equivalent and the function says so (`Marking::Unsupported`) rather than
+reporting a success it did not achieve.
+
+The command's target path goes through the same `PathScope` gate as every other
+path-taking command (see `.codesight/wiki/commands.md`).
+
 This fits the "media is Rust-first" architecture (see [overview.md](./overview.md)):
 the renderer's WebRTC is intentionally unused; IPC carries UI events only, never
 media bytes.
@@ -123,6 +146,39 @@ it that way, and `cache_dir_walks()` (test builds only) counts directory walks
 so "this path does not stat the whole cache" is assertable as a number rather
 than a stopwatch. Note that CLAUDE.md's no-periodic-polling rule rules out the
 obvious alternative: a timer is not the answer, cache mutation is.
+
+## A DS-chosen download URL is origin-checked and size-capped
+
+Every R2 access is a URL the **DS** picks (`POST /v1/r2/presign`) which the client
+then fetches unauthenticated. Two things about that were taken on trust:
+
+- **Where it points.** The presigned URL was used verbatim, so a compromised or
+  impersonated DS could aim a `get` at attacker-controlled bytes or a `put` at
+  an exfiltration endpoint. `commands::r2::PresignedUrl` is now the only thing
+  the request builders accept, and its only constructor checks the URL's origin
+  (`scheme://host[:port]`, userinfo discarded) against `config.r2_endpoint` and
+  `config.r2_public_url`. An unconfigured build allows nothing.
+- **How much it sends.** The body was read with `resp.bytes()` — fully resident —
+  and only then measured against the caller's ceiling, so a URL that streams
+  forever is an OOM kill that no downstream check ever reaches. `r2_get_url` now
+  takes the cap as an argument, streams with `chunk()`, and returns `Ok(None)`
+  the moment the cap would be exceeded, dropping the response mid-body. Caps:
+  `MEDIA_CACHE_MAX_FILE_BYTES` for public objects and `download_file`,
+  `EMOJI_MAX_BYTES` for emoji, `R2_MAX_DOWNLOAD_BYTES` (512 MiB) for attachment
+  ciphertext, which is buffered whole to be decrypted and re-hashed.
+
+The shared reqwest builder (`pollis_relay::http::http_client_builder`, which
+`pollis-core` re-exports) also carries a 10s `connect_timeout` and a 30s
+`read_timeout`. `reqwest`'s default is no timeout at all, so a peer that finished
+the handshake and then went silent held the caller — and a pooled connection —
+indefinitely. The read deadline is per-read inactivity rather than a whole-request
+one on purpose: the same client fetches 100 MiB attachments, and a total deadline
+generous enough for those over a slow link would not be a deadline.
+
+Tests: `commands::r2::tests` (origin refusals including userinfo/suffix/scheme
+tricks; a local stub that streams 64 MiB is abandoned at a 32 KiB cap, and a body
+under its cap still arrives whole) and `pollis_relay::http::deadline_tests` (a
+black-hole peer ends as a timeout instead of hanging).
 
 ## Zero-copy screenshare frame fan-out (#480)
 

@@ -31,6 +31,20 @@ const MEDIA_CACHE_MAX_BYTES: u64 = 500 * 1024 * 1024;
 /// other entry out.
 pub const MEDIA_CACHE_MAX_FILE_BYTES: u64 = 100 * 1024 * 1024;
 
+/// Hard ceiling on how many bytes any single R2 download may buffer, enforced
+/// mid-transfer by [`r2_get_url`].
+///
+/// Not a product limit — a memory-safety one. Every download here is buffered
+/// whole (an attachment is decrypted and re-hashed in memory, so it is resident
+/// twice at the peak), which means the size of a fetch is dictated by whatever
+/// the DS-chosen URL decides to send. Without a cap that is unbounded: a
+/// compromised or impersonated DS, or an R2 object that is not what its key
+/// says, can stream until the process dies, and no downstream check runs
+/// because none of them are reached. Deliberately far above any attachment this
+/// client can produce — uploads hold plaintext and ciphertext in memory too, so
+/// anything approaching this never survived its own upload.
+pub const R2_MAX_DOWNLOAD_BYTES: u64 = 512 * 1024 * 1024;
+
 /// Set once at app startup from the Tauri shim (`app_data_dir()`).
 static MEDIA_CACHE_DIR: OnceLock<PathBuf> = OnceLock::new();
 
@@ -472,7 +486,11 @@ pub async fn upload_file(
     content_type: String,
     state: &Arc<AppState>,
 ) -> Result<UploadResult> {
-    let put_url = presign_r2(state, "put", &key).await?;
+    // Every PUT declares its exact length now: the DS signs `content-length`
+    // into the URL, so R2 itself refuses a body of any other size. A presign
+    // with no length is permission to write an object of ANY size.
+    let put_url =
+        presign_r2_with_length(state, "put", &key, Some(data.len() as u64)).await?;
     let overlay = state.overlay_handle();
     r2_put_url(overlay.as_deref(), &put_url, data, &content_type).await?;
     let url = format!("{}/{}", state.config.r2_endpoint.trim_end_matches('/'), key);
@@ -488,7 +506,12 @@ pub async fn download_file(
     // The public byte-returning command: this is the boundary that owes an owned
     // `Vec`, so the conversion happens HERE rather than inside `r2_get_url`
     // where it used to cost every caller a copy (#915).
-    Ok(r2_get_url(overlay.as_deref(), &get_url).await?.to_vec())
+    match r2_get_url(overlay.as_deref(), &get_url, MEDIA_CACHE_MAX_FILE_BYTES).await? {
+        Some(bytes) => Ok(bytes.to_vec()),
+        None => Err(Error::Other(anyhow::anyhow!(
+            "object {key} is over the {MEDIA_CACHE_MAX_FILE_BYTES}-byte download cap"
+        ))),
+    }
 }
 
 // ── Public objects (avatars, group icons) ─────────────────────────────────
@@ -518,11 +541,19 @@ pub async fn upload_public_file(
     content_type: String,
     state: &Arc<AppState>,
 ) -> Result<UploadResult> {
+    if data.len() as u64 > pollis_api::broker::R2_PUBLIC_IMAGE_MAX_BYTES {
+        return Err(Error::Other(anyhow::anyhow!(
+            "image is {} bytes; the limit is {} bytes",
+            data.len(),
+            pollis_api::broker::R2_PUBLIC_IMAGE_MAX_BYTES
+        )));
+    }
     let hash = hex::encode(sha256_bytes(&data));
     let ext = ext_for_content_type(&content_type);
     let key = format!("{}/{hash}.{ext}", prefix.trim_matches('/'));
 
-    let put_url = presign_r2(state, "put", &key).await?;
+    let put_url =
+        presign_r2_with_length(state, "put", &key, Some(data.len() as u64)).await?;
     let overlay = state.overlay_handle();
     r2_put_url(overlay.as_deref(), &put_url, data, &content_type).await?;
     let url = format!("{}/{}", state.config.r2_endpoint.trim_end_matches('/'), key);
@@ -574,11 +605,13 @@ pub async fn get_public_file_url(key: String, state: &Arc<AppState>) -> Result<S
 
     let get_url = presign_r2(state, "get", &key).await?;
     let overlay = state.overlay_handle();
-    let bytes = r2_get_url(overlay.as_deref(), &get_url).await?;
-
-    if bytes.len() as u64 > MEDIA_CACHE_MAX_FILE_BYTES {
+    // Over the per-file cap → the empty-string sentinel, exactly as before; the
+    // difference is that the transfer is now ABORTED at the cap instead of being
+    // read in full and then measured.
+    let Some(bytes) = r2_get_url(overlay.as_deref(), &get_url, MEDIA_CACHE_MAX_FILE_BYTES).await?
+    else {
         return Ok(String::new());
-    }
+    };
 
     // The key is the address; verify the bytes ARE their address. Public
     // objects are stored unencrypted, so nothing else attests to them — a
@@ -733,6 +766,19 @@ async fn upload_plaintext(
 ) -> Result<MediaUploadResult> {
     let size_bytes = data.as_slice().len();
 
+    // Refuse an over-cap attachment HERE, before hashing and encrypting it.
+    // The DS refuses to sign a PUT above the same bound
+    // (`pollis_api::broker::R2_MEDIA_MAX_BYTES`, one constant shared by both
+    // ends), so without this check the user waits through a full encrypt to be
+    // told no by a 400 they cannot read. The ciphertext adds a 16-byte tag per
+    // 4 MiB chunk, which the cap has room for.
+    if size_bytes as u64 > pollis_api::broker::R2_MEDIA_MAX_BYTES {
+        return Err(Error::Other(anyhow::anyhow!(
+            "attachment is {size_bytes} bytes; the limit is {} bytes",
+            pollis_api::broker::R2_MEDIA_MAX_BYTES
+        )));
+    }
+
     // SHA-256 of plaintext — the dedup + key-derivation anchor.
     let hash_bytes = sha256_bytes(data.as_slice());
     let content_hash = hex::encode(hash_bytes);
@@ -789,7 +835,9 @@ async fn upload_plaintext(
         // of an upload for the entire duration of the transfer.
         data.release();
 
-        let put_url = presign_r2(state, "put", &r2_key).await?;
+        let put_url =
+            presign_r2_with_length(state, "put", &r2_key, Some(ciphertext.len() as u64))
+                .await?;
         let overlay = state.overlay_handle();
         r2_put_url(overlay.as_deref(), &put_url, ciphertext, "application/octet-stream").await?;
 
@@ -843,7 +891,17 @@ pub async fn download_media(
     // MLS key distribution, not the R2 ACL (see broker.rs).
     let get_url = presign_r2(state, "get", &r2_key).await?;
     let overlay = state.overlay_handle();
-    let ciphertext = r2_get_url(overlay.as_deref(), &get_url).await?;
+    // The ciphertext is buffered whole (it has to be, to decrypt and re-hash),
+    // so the cap is what stops a DS-chosen URL from streaming until the process
+    // dies.
+    let ciphertext = match r2_get_url(overlay.as_deref(), &get_url, R2_MAX_DOWNLOAD_BYTES).await? {
+        Some(bytes) => bytes,
+        None => {
+            return Err(Error::Other(anyhow::anyhow!(
+                "attachment {r2_key} is over the download cap; refusing to buffer it"
+            )))
+        }
+    };
     let plaintext = decrypt_chunked(&ciphertext, &enc_key, &enc_nonce)?;
     // Explicit, not incidental (#915): without this the ciphertext stays alive
     // until the function returns, so the hash check below — and the caller's
@@ -871,6 +929,42 @@ pub async fn download_media(
         )));
     }
     Ok(plaintext)
+}
+
+/// Save an attachment to a location the user picked, marked as a download.
+///
+/// This is "save attachment as…". It replaces a renderer-side
+/// `fetch(loopbackUrl)` + `writeFile(target, bytes)`, which had two problems.
+/// The bytes made a round trip through the webview for no reason, and — the
+/// finding — the file arrived on disk with no provenance marker, so macOS
+/// Gatekeeper and Windows SmartScreen both treated an attachment a stranger
+/// sent as a file the user had made themselves. `crate::downloads` writes and
+/// marks in one call; see its module docs for why those cannot be two steps.
+///
+/// The returned string is what happened to the marker (`marked`, `unsupported`,
+/// or `failed: …`). A failed marker does NOT fail the save: the bytes are the
+/// thing the user asked for, and refusing to hand them over because an xattr
+/// call returned an error would be the wrong trade. The renderer surfaces it.
+pub async fn save_media_to_path(
+    r2_key: String,
+    content_hash: String,
+    target_path: String,
+    state: &Arc<AppState>,
+) -> Result<String> {
+    let bytes = download_media(r2_key, content_hash, state).await?;
+    let path = std::path::PathBuf::from(&target_path);
+    let marking = tokio::task::spawn_blocking(move || {
+        crate::downloads::write_downloaded_file(&path, &bytes)
+    })
+    .await
+    .map_err(|e| Error::Other(anyhow::anyhow!("save attachment: {e}")))?
+    .map_err(|e| Error::Other(anyhow::anyhow!("write {target_path}: {e}")))?;
+
+    Ok(match marking {
+        crate::downloads::Marking::Marked => "marked".to_string(),
+        crate::downloads::Marking::Unsupported => "unsupported".to_string(),
+        crate::downloads::Marking::Failed(reason) => format!("failed: {reason}"),
+    })
 }
 
 /// Resolve a media attachment to a loopback HTTP URL the webview can use
@@ -1197,26 +1291,98 @@ fn compute_image_meta(data: &[u8]) -> anyhow::Result<(String, u32, u32)> {
 // bundle — the whole point of the broker is that the secret never ships.
 // See `pollis-delivery::broker` and `docs/secrets-broker.md`.
 
+/// A presigned URL that has been checked to point at first-party R2.
+///
+/// The DS chooses this string, and the client then fetches it with no
+/// authentication and no further questions — so a DS that is compromised,
+/// impersonated, or simply wrong could aim the client's downloads and uploads at
+/// any host on the internet, exfiltrating a `put` body or feeding a `get` from
+/// somewhere the content-hash check is the only thing standing between the app
+/// and attacker-chosen bytes. There is nothing the client needs from that
+/// freedom: R2 is a fixed, compiled-in origin.
+///
+/// The type is the enforcement. [`r2_get_url`] / [`r2_put_url`] /
+/// [`r2_delete_url`] take a `PresignedUrl` and nothing else, and the ONLY
+/// constructor is [`PresignedUrl::parse`], so a raw DS string cannot reach a
+/// request builder without passing the origin check.
+pub(crate) struct PresignedUrl(String);
+
+impl PresignedUrl {
+    /// Accept `url` only if its origin (`scheme://host[:port]`) is one of the
+    /// configured R2 origins — `r2_endpoint` (what `/v1/r2/presign` signs
+    /// against) or `r2_public_url` (the public bucket domain).
+    ///
+    /// The comparison is on the whole origin rather than the host alone so a
+    /// plaintext `http://` URL cannot be smuggled past a configured `https://`
+    /// one: the scheme has to match too, and both configured values are `https`
+    /// in every shipped build. `parse` never *adds* an allowed origin, so a
+    /// misconfigured empty value allows nothing.
+    fn parse(url: String, config: &crate::config::Config) -> Result<Self> {
+        let origin = origin_of(&url);
+        let allowed = [
+            origin_of(&config.r2_endpoint),
+            origin_of(&config.r2_public_url),
+        ];
+        match origin {
+            Some(o) if allowed.iter().flatten().any(|a| *a == o) => Ok(Self(url)),
+            _ => Err(Error::Other(anyhow::anyhow!(
+                "refusing a presigned URL that is not on the configured R2 origin"
+            ))),
+        }
+    }
+
+    fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// `scheme://host[:port]`, lowercased. `None` when either half is missing —
+/// which includes a bare path, so a relative URL can never match an origin.
+fn origin_of(url: &str) -> Option<String> {
+    let (scheme, rest) = url.split_once("://")?;
+    if scheme.is_empty() {
+        return None;
+    }
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    // Userinfo would let `https://r2.example.com@evil.test/…` read as the
+    // configured host to a careless split; the host is what follows the last
+    // `@`, exactly as a URL parser resolves it.
+    let host = authority.rsplit('@').next().unwrap_or("");
+    if host.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{}://{}",
+        scheme.to_ascii_lowercase(),
+        host.to_ascii_lowercase()
+    ))
+}
+
 /// Ask the DS to presign an R2 `operation` (`"get"` / `"put"` / `"delete"`) on
 /// `key` and return the ready-to-use URL. Device-signed via [`ds_post`].
-async fn presign_r2(state: &Arc<AppState>, operation: &str, key: &str) -> Result<String> {
+async fn presign_r2(
+    state: &Arc<AppState>,
+    operation: &str,
+    key: &str,
+) -> Result<PresignedUrl> {
     presign_r2_with_length(state, operation, key, None).await
 }
 
-/// [`presign_r2`], optionally declaring the EXACT byte count a `put` will
-/// carry. When present the DS signs `content-length` into the URL, so R2 itself
-/// refuses a body of any other size.
+/// [`presign_r2`], declaring the EXACT byte count a `put` will carry. The DS
+/// signs `content-length` into the URL, so R2 itself refuses a body of any other
+/// size.
 ///
-/// Required for `emoji/…` puts (#848) — those objects are unencrypted, publicly
-/// fetchable and hard-capped, and a cap the client merely honours is not a cap.
-/// `None` reproduces the previous request byte for byte, which is why every
-/// media/avatar call site is untouched.
+/// REQUIRED on every `put`: the DS refuses to sign one without it. A cap the
+/// client merely honours is not a cap — the DS validates a size it is told, and
+/// only R2 ever counts the bytes, so the length has to be inside the signature.
+/// `None` remains valid for `get` and `delete`, where a signed length would just
+/// make the URL unusable.
 pub(crate) async fn presign_r2_with_length(
     state: &Arc<AppState>,
     operation: &str,
     key: &str,
     content_length: Option<u64>,
-) -> Result<String> {
+) -> Result<PresignedUrl> {
     let body = pollis_api::broker::R2PresignBody {
         operation: operation.to_string(),
         key: key.to_string(),
@@ -1230,7 +1396,27 @@ pub(crate) async fn presign_r2_with_length(
         user_id: Some(crate::commands::mls::current_user_id(state).await?),
     };
     let parsed = crate::commands::mls::ds_post_json(state, &body).await?;
-    Ok(parsed.url)
+    PresignedUrl::parse(parsed.url, &state.config)
+}
+
+/// As much of a failed response's body as is worth putting in an error message.
+///
+/// `resp.text()` would read all of it, and an error path is exactly where an
+/// unbounded read is easiest to overlook: the same endpoint that can stream
+/// forever on a 200 can do it on a 500, and the bytes end up in a formatted
+/// string rather than a buffer someone was watching. A kilobyte is more than
+/// enough of an S3 error document to diagnose one.
+async fn error_snippet(mut resp: reqwest::Response) -> String {
+    const SNIPPET_MAX: usize = 1024;
+    let mut buf = Vec::new();
+    while let Ok(Some(chunk)) = resp.chunk().await {
+        let room = SNIPPET_MAX - buf.len();
+        buf.extend_from_slice(&chunk[..room.min(chunk.len())]);
+        if buf.len() >= SNIPPET_MAX {
+            break;
+        }
+    }
+    String::from_utf8_lossy(&buf).into_owned()
 }
 
 /// PUT `data` to a presigned URL. Content-Type is set at request time (the broker
@@ -1238,54 +1424,84 @@ pub(crate) async fn presign_r2_with_length(
 /// overlay when on — R2 is a first-party, allowlisted host (§14.2).
 pub(crate) async fn r2_put_url(
     overlay: Option<&pollis_relay::OverlayHandle>,
-    url: &str,
+    url: &PresignedUrl,
     data: Vec<u8>,
     content_type: &str,
 ) -> Result<()> {
     let resp = crate::net::overlay::http_client(overlay)
-        .put(url)
+        .put(url.as_str())
         .header("Content-Type", content_type)
         .body(data)
         .send()
         .await?;
     if !resp.status().is_success() {
         let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
+        let body = error_snippet(resp).await;
         return Err(Error::Other(anyhow::anyhow!("R2 upload failed: {} — {}", status, body)));
     }
     Ok(())
 }
 
-/// GET the bytes at a presigned URL. Routes through the overlay when on.
+/// GET the bytes at a presigned URL, refusing to buffer more than `max_bytes`.
+/// Routes through the overlay when on.
 ///
-/// Returns [`bytes::Bytes`], not `Vec<u8>` (#915). `resp.bytes()` already owns
-/// the whole body; the `.to_vec()` this replaces allocated a SECOND full-size
-/// buffer and memcpy'd into it, so for a moment every download held two copies
-/// of the attachment. `Bytes` derefs to `[u8]`, so every reader is unchanged,
-/// and the one caller that genuinely needs an owned `Vec` converts at its own
-/// boundary.
+/// `Ok(None)` means the body went over the cap and the transfer was ABORTED —
+/// not that it was read and then measured. Every caller here has a ceiling it
+/// applies to the result (the cache's per-file cap, the emoji ceiling), but
+/// applying it after `resp.bytes()` is applying it too late: the whole body is
+/// already resident by then, so a DS-chosen URL that streams forever is an OOM
+/// no downstream check can prevent. Streaming with `chunk()` and stopping at the
+/// cap is what makes the ceiling real, and dropping the response mid-body is
+/// what closes the connection.
+///
+/// Returns [`bytes::Bytes`], not `Vec<u8>` (#915) — `Bytes` derefs to `[u8]`, so
+/// readers are unchanged, and the one caller that needs an owned `Vec` converts
+/// at its own boundary rather than making every caller pay a full-size copy.
 pub(crate) async fn r2_get_url(
     overlay: Option<&pollis_relay::OverlayHandle>,
-    url: &str,
-) -> Result<bytes::Bytes> {
-    let resp = crate::net::overlay::http_client(overlay).get(url).send().await?;
+    url: &PresignedUrl,
+    max_bytes: u64,
+) -> Result<Option<bytes::Bytes>> {
+    let mut resp = crate::net::overlay::http_client(overlay)
+        .get(url.as_str())
+        .send()
+        .await?;
     if !resp.status().is_success() {
         let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
+        let body = error_snippet(resp).await;
         return Err(Error::Other(anyhow::anyhow!("R2 download failed: {} — {}", status, body)));
     }
-    Ok(resp.bytes().await?)
+    // A declared length over the cap is refused before a byte of body is read.
+    // Advisory only — the checks below are what actually hold — but it saves
+    // transferring a body that was never going to be accepted.
+    if resp.content_length().is_some_and(|n| n > max_bytes) {
+        return Ok(None);
+    }
+    let mut buf = bytes::BytesMut::new();
+    while let Some(chunk) = resp.chunk().await? {
+        if buf.len() as u64 + chunk.len() as u64 > max_bytes {
+            return Ok(None);
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    Ok(Some(buf.freeze()))
 }
 
 /// DELETE the object at a presigned URL. A 404 counts as success (already gone).
 /// Routes through the overlay when on.
-async fn r2_delete_url(overlay: Option<&pollis_relay::OverlayHandle>, url: &str) -> Result<()> {
-    let resp = crate::net::overlay::http_client(overlay).delete(url).send().await?;
+async fn r2_delete_url(
+    overlay: Option<&pollis_relay::OverlayHandle>,
+    url: &PresignedUrl,
+) -> Result<()> {
+    let resp = crate::net::overlay::http_client(overlay)
+        .delete(url.as_str())
+        .send()
+        .await?;
     let status = resp.status();
     if status.is_success() || status.as_u16() == 404 {
         return Ok(());
     }
-    let body = resp.text().await.unwrap_or_default();
+    let body = error_snippet(resp).await;
     Err(Error::Other(anyhow::anyhow!("R2 delete failed: {} — {}", status, body)))
 }
 
@@ -1627,5 +1843,158 @@ mod tests {
         for bad in ["", "/home/alice", "..", ".", "../x", "a/b", "a\\b", "a.b", "a b"] {
             assert_eq!(user_cache_dir(root, bad), None, "{bad:?} must not resolve");
         }
+    }
+
+    // ── DS-chosen URLs: origin and size are the client's problem ────────────
+    //
+    // The DS picks the presigned URL and the client fetches it unauthenticated,
+    // so both the WHERE and the HOW MUCH have to be enforced here. Neither was:
+    // the URL was taken verbatim, and the body was read with `resp.bytes()` —
+    // fully resident — before any caller's ceiling was consulted.
+
+    fn test_config(r2_endpoint: &str) -> crate::config::Config {
+        let mut config = crate::config::Config::for_test().expect("test config");
+        config.r2_endpoint = r2_endpoint.to_string();
+        config.r2_public_url = "https://cdn.pollis.test".to_string();
+        config
+    }
+
+    /// A URL that is not on a configured R2 origin is refused outright, so it
+    /// never reaches a request builder. Includes the shapes that LOOK like the
+    /// configured host to a naive check: userinfo, a suffix host, a plaintext
+    /// downgrade of the right host, and a relative URL.
+    #[test]
+    fn a_presigned_url_off_the_configured_origin_is_refused() {
+        let config = test_config("https://acct.r2.cloudflarestorage.com");
+        for bad in [
+            "https://evil.test/media/x.enc?sig=1",
+            "https://acct.r2.cloudflarestorage.com.evil.test/x",
+            "https://evil.test@acct.r2.cloudflarestorage.com.evil.test/x",
+            "http://acct.r2.cloudflarestorage.com/x",
+            "https://acct.r2.cloudflarestorage.com:8443/x",
+            "file:///etc/passwd",
+            "/media/x.enc",
+            "",
+        ] {
+            assert!(
+                PresignedUrl::parse(bad.to_string(), &config).is_err(),
+                "{bad:?} must not be fetchable"
+            );
+        }
+    }
+
+    /// Both configured origins are accepted — the presign endpoint signs against
+    /// the S3 endpoint, public objects are served from the bucket domain — and
+    /// the query string the signature lives in is left alone.
+    #[test]
+    fn a_presigned_url_on_a_configured_origin_is_accepted_verbatim() {
+        let config = test_config("https://acct.r2.cloudflarestorage.com");
+        for good in [
+            "https://acct.r2.cloudflarestorage.com/bucket/media/x.enc?X-Amz-Signature=abc",
+            "https://ACCT.r2.CloudflareStorage.com/bucket/x",
+            "https://cdn.pollis.test/emoji/x.webp",
+        ] {
+            let parsed = PresignedUrl::parse(good.to_string(), &config)
+                .unwrap_or_else(|_| panic!("{good:?} must be fetchable"));
+            assert_eq!(parsed.as_str(), good, "the URL must be passed through byte for byte");
+        }
+    }
+
+    /// An unconfigured build allows nothing rather than everything — the empty
+    /// string is not an origin.
+    #[test]
+    fn an_unconfigured_r2_allows_no_url_at_all() {
+        let config = crate::config::Config::for_test().expect("test config");
+        assert!(PresignedUrl::parse("https://evil.test/x".into(), &config).is_err());
+        assert!(PresignedUrl::parse("".into(), &config).is_err());
+    }
+
+    /// A minimal HTTP/1.1 server that answers every request with `total` bytes,
+    /// written in 64 KiB writes and terminated by EOF (no `Content-Length`, so a
+    /// client cannot know the size up front — the case a length pre-check does
+    /// not cover). Returns its origin and a counter of bytes actually written.
+    async fn streaming_stub(total: usize) -> (String, Arc<std::sync::atomic::AtomicUsize>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let written = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = Arc::clone(&written);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind stub");
+        let addr = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let counter = Arc::clone(&counter);
+                tokio::spawn(async move {
+                    let mut scratch = [0u8; 1024];
+                    let _ = sock.read(&mut scratch).await;
+                    if sock
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nConnection: close\r\n\r\n")
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                    let block = vec![b'x'; 64 * 1024];
+                    let mut sent = 0usize;
+                    while sent < total {
+                        let n = block.len().min(total - sent);
+                        if sock.write_all(&block[..n]).await.is_err() {
+                            break;
+                        }
+                        sent += n;
+                        counter.fetch_add(n, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    let _ = sock.shutdown().await;
+                });
+            }
+        });
+        (format!("http://{addr}"), written)
+    }
+
+    /// The defect: the body was read to completion and only then measured, so a
+    /// URL that streams forever is an out-of-memory kill no downstream ceiling
+    /// can prevent. The transfer must be abandoned AT the cap.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_body_past_the_cap_is_abandoned_mid_transfer() {
+        const TOTAL: usize = 64 * 1024 * 1024;
+        const CAP: u64 = 32 * 1024;
+
+        let (origin, written) = streaming_stub(TOTAL).await;
+        let config = test_config(&origin);
+        let url = PresignedUrl::parse(format!("{origin}/media/huge.enc"), &config)
+            .expect("the stub is the configured origin");
+
+        let got = r2_get_url(None, &url, CAP).await.expect("no transport error");
+        assert!(got.is_none(), "a body over the cap must not be returned");
+
+        // Give the writer a moment to notice the closed socket, then assert it
+        // never got anywhere near sending the whole thing. The kernel's socket
+        // buffers make an exact byte count meaningless, so the assertion is on
+        // the order of magnitude: bounded, not the full 64 MiB.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let sent = written.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(
+            sent < TOTAL / 4,
+            "the download must stop near the cap; the server got to send {sent} of {TOTAL} bytes"
+        );
+    }
+
+    /// The other half: a body under the cap still comes back whole and
+    /// unmodified. A cap that also truncates honest downloads is not a fix.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_body_within_the_cap_is_returned_whole() {
+        const TOTAL: usize = 200 * 1024;
+
+        let (origin, _) = streaming_stub(TOTAL).await;
+        let config = test_config(&origin);
+        let url = PresignedUrl::parse(format!("{origin}/media/ok.enc"), &config).expect("origin");
+
+        let got = r2_get_url(None, &url, 1024 * 1024)
+            .await
+            .expect("no transport error")
+            .expect("under the cap");
+        assert_eq!(got.len(), TOTAL);
+        assert!(got.iter().all(|b| *b == b'x'), "the bytes must be the ones sent");
     }
 }

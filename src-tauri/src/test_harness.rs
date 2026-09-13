@@ -119,6 +119,11 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::bookmarks::resolve_message_permalink,
             crate::commands::export::export_archive,
             crate::commands::export::fetch_export_attachments,
+            // The other two commands that take a filesystem path off the IPC.
+            // Registered so `tests/flows/security.rs` can prove all four refuse
+            // a path the user never chose (`crate::pathscope`).
+            crate::commands::r2::upload_media,
+            crate::commands::emoji::upload_group_emoji,
             // Pinned messages (#99)
             crate::commands::pinned_messages::pin_message,
             crate::commands::pinned_messages::unpin_message,
@@ -160,6 +165,10 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::overlay::set_overlay_mode,
         ])
         .manage(state)
+        // Empty, exactly as a freshly-launched app is: the harness drives no
+        // file picker, so the four path-taking shims must refuse every path.
+        // `tests/flows/security.rs` asserts that.
+        .manage(crate::pathscope::PathScope::default())
         .build(mock_context(noop_assets()))
         .map_err(|e| Error::Other(anyhow::anyhow!("build mock app: {e}")))?;
 

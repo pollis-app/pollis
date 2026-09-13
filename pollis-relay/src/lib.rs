@@ -22,6 +22,8 @@
 //! - [`shim`] — the local SOCKS5 CONNECT server on loopback.
 //! - [`policy`] — pure `off | prefer | strict` routing + the plane split (§6.4),
 //!   and the fail-closed **live relay revocation** store (#813).
+//! - [`nexthop`] — the fail-closed signed-directory bound on where an `Extend`
+//!   may dial: relays the pool published, public unicast only, never us.
 //! - [`ratelimit`] — in-memory per-account / per-IP abuse control (§11.5).
 //! - [`revocation_sync`] — keeps a deployed node's revocation store loaded.
 //! - [`config`] — the deployable bin's TOML config.
@@ -42,6 +44,7 @@ pub mod client;
 pub mod config;
 pub mod health;
 pub mod http;
+pub mod nexthop;
 pub mod onion;
 pub mod park;
 pub mod policy;
@@ -64,6 +67,10 @@ pub use policy::{
     verify_revocations, Admission, FinalAction, OverlayMode, PlannedRoute, RelayIdentity,
     RevocationError, RevocationList, RevocationStore, RoutingPolicy, REVOCATION_TYPE,
     REVOCATION_VERSION,
+};
+pub use nexthop::{
+    is_public_dial_address, verify_next_hops, DialVerdict, DirectoryError, NextHopDirectory,
+    NextHops, DIRECTORY_TYPE, DIRECTORY_VERSION,
 };
 pub use park::{ParkedPeers, PeerFingerprint};
 pub use proto::{ClientFrame, DeviceCertMaterial, Park, RejectReason, VerifiedClient};

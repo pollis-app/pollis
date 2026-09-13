@@ -2,6 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- Every file this app hands to the user's own filesystem came from
+	     someone else. LSFileQuarantineEnabled makes macOS apply
+	     com.apple.quarantine to files the app creates, so Gatekeeper evaluates
+	     them on first open instead of trusting them as locally-authored. The
+	     save path sets the attribute explicitly too (pollis-core/src/downloads.rs)
+	     — this key is the backstop for any write that does not go through it. -->
+	<key>LSFileQuarantineEnabled</key>
+	<true/>
 	<key>NSUserNotificationAlertStyle</key>
 	<string>alert</string>
 	<key>NSMicrophoneUsageDescription</key>

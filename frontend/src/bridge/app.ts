@@ -9,7 +9,11 @@
  * renderer a temp path again would re-open that door — see
  * `frontend/tests/no-plaintext-temp-files.test.ts`.
  *
- * `convertFileSrc` returns a sync string — Tauri's `convertFileSrc` is sync.
+ * There is deliberately no `convertFileSrc` either. It minted `asset://` URLs
+ * for native paths, and the asset protocol is switched off in
+ * `src-tauri/tauri.conf.json` — a second, scope-checked way to read a file that
+ * bypasses the path scope the four path-taking commands are gated on. Read the
+ * bytes through `bridge/fs.ts` instead.
  */
 
 export async function getVersion(): Promise<string> {
@@ -25,12 +29,4 @@ export async function relaunch(): Promise<void> {
 export async function exit(code = 0): Promise<void> {
   const mod = await import("@tauri-apps/plugin-process");
   await mod.exit(code);
-}
-
-// Sync. We eagerly import @tauri-apps/api/core here because the same module
-// already underpins invoke/Channel — there's no extra cost.
-import { convertFileSrc as tauriConvertFileSrc } from "@tauri-apps/api/core";
-
-export function convertFileSrc(path: string): string {
-  return tauriConvertFileSrc(path);
 }

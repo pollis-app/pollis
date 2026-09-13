@@ -115,10 +115,13 @@ async fn login_publishes_one_pool_in_the_current_suite() {
         target_device_id: Some(device_id.clone()),
         ciphersuite: None,
     };
-    match apply_claim_key_package(&conn, &untagged_claim).await.expect("claim") {
+    match apply_claim_key_package(&conn, Some("alice"), &untagged_claim).await.expect("claim") {
         ClaimOutcome::Claimed { .. } => {}
         ClaimOutcome::NoKeyPackage => {
             panic!("a suite-less claim must draw from the current suite's pool")
+        }
+        other @ (ClaimOutcome::Forbidden | ClaimOutcome::RateLimited) => {
+            panic!("the claim gate refused an unrelated test claim: {other:?}")
         }
     }
 

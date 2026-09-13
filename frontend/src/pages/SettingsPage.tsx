@@ -11,7 +11,7 @@ import { resizeImage } from "../utils/imageProcessing";
 import { useUserProfile, useUpdateProfile, useUpdateAvatar, useUserAvatar, userQueryKeys } from "../hooks/queries";
 import { TextInput } from "../components/ui/TextInput";
 import { Button } from "../components/ui/Button";
-import { convertFileSrc, invoke } from "../bridge";
+import { invoke, readFile } from "../bridge";
 import { EmptyState } from "../components/ui/EmptyState";
 import { isValidUsername } from "../utils/username";
 
@@ -70,15 +70,29 @@ export const SettingsPage: React.FC = observer(() => {
       if (!imagePath) {
         return;
       }
-      // Convert the native path to a File-like object via fetch(convertFileSrc(path)).
-      // Tauri exposes native paths through the asset protocol; Electron uses
-      // the custom `pollis-file://` protocol registered in main.
-      const src = convertFileSrc(imagePath);
-      fetch(src)
-        .then((r) => r.blob())
-        .then((blob) => {
-          const name = imagePath.split(/[\\/]/).pop() ?? "image";
-          const file = new File([blob], name, { type: blob.type || "image/png" });
+      // Read the dropped file's bytes and wrap them as a `File`. This used to
+      // go through `fetch(convertFileSrc(path))`, i.e. the asset protocol —
+      // which is switched off now (`src-tauri/tauri.conf.json`), because it was
+      // a second way to read an arbitrary path that the path scope did not
+      // cover. A drop is one of the two gestures Rust records, so the read
+      // below is in scope.
+      const name = imagePath.split(/[\\/]/).pop() ?? "image";
+      readFile(imagePath)
+        .then((bytes) => {
+          const mime = /\.png$/i.test(name)
+            ? "image/png"
+            : /\.(jpe?g)$/i.test(name)
+              ? "image/jpeg"
+              : /\.gif$/i.test(name)
+                ? "image/gif"
+                : /\.webp$/i.test(name)
+                  ? "image/webp"
+                  : /\.avif$/i.test(name)
+                    ? "image/avif"
+                    : /\.svg$/i.test(name)
+                      ? "image/svg+xml"
+                      : "image/png";
+          const file = new File([bytes], name, { type: mime });
           setSelectedFile(file);
           setUploadError(null);
           if (preview) {

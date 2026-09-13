@@ -34,6 +34,8 @@ use rustls::pki_types::CertificateDer;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
+mod common;
+
 const USER: &str = "u_onion";
 const DEVICE: &str = "d_onion";
 const ORIGIN_NAME: &str = "origin.test";
@@ -137,6 +139,10 @@ fn spawn_relay_with(allow: &[&str], overrides: &[(&str, IpAddr)], allow_extend: 
     }
     config.allow_extend = allow_extend;
     config.revocations = healthy_revocations();
+    // A relay extends only to an address the signed directory lists, and these
+    // hops are on loopback — see `common::publish_hop`.
+    config.next_hops = common::test_directory();
+    config.allow_private_next_hops = true;
 
     let peers: Arc<Mutex<Vec<SocketAddr>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = peers.clone();
@@ -148,6 +154,7 @@ fn spawn_relay_with(allow: &[&str], overrides: &[(&str, IpAddr)], allow_extend: 
     let cert = config.server_cert();
     let stats = config.stats.clone();
     let (task, addr) = RelayServer::spawn(config).unwrap();
+    common::publish_hop(addr);
     TestRelay {
         addr,
         cert,

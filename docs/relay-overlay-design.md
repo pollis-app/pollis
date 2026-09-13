@@ -46,6 +46,8 @@ General-purpose onion routing (Tor) has to solve a hard, open-ended problem: for
 
 This is the whole argument for building something *bespoke and small* rather than embedding Tor: the closed destination set removes ~80% of what makes anonymity networks hard and dangerous to operate. What remains is the genuinely useful core — **breaking the link between a user's IP and a first-party service** — without inheriting the exit-node liability.
 
+**The same closure applies to the hop *before* the destination.** The allowlist bounds `Connect`, which names a destination; `Extend`, which names the next relay, is bounded by the **signed directory**: a node opens a next leg only to an address the current, verified directory lists, only if that address is public unicast (never loopback/RFC1918/CGNAT/link-local/multicast), and never to itself. Without that, "no exits" would have been true of `Connect` and false of `Extend` — the frame carries a client-chosen `addr`, so honouring it unconditionally makes every relay, and every volunteer's device, a dial-anything primitive pointed at whatever network it sits in. Fail-closed: a node with no key or no fresh directory extends to nothing. Implementation and operator knobs: `pollis-relay/src/nexthop.rs`, `docs/relay-operations.md` → "Where a circuit may be extended to".
+
 **Honest caveat.** "No exit problem" is not "no abuse problem." A relay still consumes a peer's bandwidth and could be used to amplify traffic *toward Pollis's own services* (a relay-assisted DoS on Turso/DS). That is a first-party capacity/rate-limiting problem the operator already has to solve for direct clients; it does not create third-party liability. See §7 (Sybil) and §11 (risks).
 
 ---
@@ -210,6 +212,7 @@ Layered (onion) encryption: the client wraps the payload in one encryption layer
 - **Wins:** **unlinkability even against a single malicious/curious relay operator.** No one relay knows both who you are (IP) and what you're doing (which first-party host). Defeats the §4.3 single-relay attack and much of §4.4 (given good path selection + first-party last hop, §4.4).
 - **Costs:** each hop adds a full network RTT and a crypto layer. For the control plane (libSQL CRUD, DS submission) this is tolerable — those are already async, retryable, non-interactive (`messages.rs` send is fire-and-forget with offline catch-up per whitepaper §6.6). For anything interactive it's painful.
 - **Build cost:** materially more than v0 — circuit construction, per-hop key agreement, onion encryption, path selection, guard relays. This is where "reuse a library" (§9) matters most.
+- **What a hop will forward to:** the `Extend` frame names the next relay by address plus a pinned cert fingerprint. The fingerprint bounds who may *answer*; the **signed directory** bounds who gets *dialled* (§1.2), and the leg is opened under a ~5s deadline. Both checks run before any socket is opened, alongside the revocation check that was already there.
 
 ### 6.3 Option C — Mixnet-style batching (v2)
 
@@ -502,11 +505,55 @@ Every outbound path in `pollis-core` (+ shells), from the surface audit:
 | Transparency **verify** | `ureq` (sync, in `verifiable-log-serve`) | `.proxy()` via `*_via` ✅ | **overlay** (closed §14.4) |
 | Push register (Expo) | `reqwest` — `push.rs:139` | `.proxy()` ✅ | see §14.4 (non-first-party host) |
 | LiveKit signaling (WS) + media (RTP) | `livekit` crate | ❌ none | **direct** — plane split (§6.4) |
+| Auto-update manifest + artifact (`cdn.pollis.com`) | `tauri-plugin-updater`'s own `reqwest` | `.proxy()` on `check` ✅ | **overlay**, or skipped — see below |
+| Remote media in an unfurled link | the WEBVIEW's own `<img>` / `<video>` | ❌ none possible | **click-to-load only** — see below |
 
 The 10 bare `reqwest::Client::new()` sites confirm there is **no shared HTTP client builder** today.
 v0's first refactor is a `state`-aware `http_client()` helper that all sites call; it applies the
 proxy when the overlay is on and is a no-op passthrough when off. This both wires the overlay and
 removes the per-call-`Client::new()` anti-pattern (connection-pool win for free).
+
+#### The two callers that are not `http_client`'s
+
+Two first-party requests do not and cannot go through
+`pollis_relay::http::http_client`, so each carries its own rule.
+
+**1. The auto-updater.** `tauri-plugin-updater` builds its `reqwest` client
+inside the plugin, so with the overlay on every other request rode the relay and
+this one went straight to `cdn.pollis.com` — on every window focus, and in
+`strict` too, which is exactly the silent-direct §10.1 forbids.
+
+It is not an exception any more. `pollis-core/src/commands/update.rs` exposes
+`get_update_check_plan`, which the renderer's `bridge/updater.ts` consults before
+every check:
+
+| overlay state | plan |
+| --- | --- |
+| `off` | `direct` — byte-for-byte the pre-overlay path |
+| `prefer` or `strict`, shim up | `proxy` — `socks5h://<shim>`, passed to the plugin's `check` |
+| `prefer`, no circuit | `direct` — which is what Prefer means |
+| `strict`, no circuit | `blocked` — the check does not happen at all |
+
+The proxy reaches the artifact download too, not only the manifest fetch: the
+plugin stores it on the `Update` that `check` returns. Two mechanical details
+keep this working — `src-tauri/Cargo.toml` declares `reqwest 0.13` with the
+`socks` feature purely so cargo unifies it into the plugin's copy (`pollis-core`
+is on 0.12, a different major, so its `socks` does not reach there), and
+`plan_update_check`'s unit tests pin all four rows above.
+
+The residual: in `strict` with no circuit a device stops learning about updates
+until the overlay comes up. That is the right trade — an update check is the one
+first-party request that can always wait, and the alternative is announcing the
+address the mode exists to hide.
+
+**2. Remote media in a message.** An `<img src="https://…">` the renderer paints
+is the WEBVIEW's request, not `reqwest`'s, so no proxy setting can reach it and
+the overlay cannot cover it. It is therefore **never** automatic: every remote
+image and video in message text renders as a click-to-load placeholder
+(`frontend/src/components/Message/MediaLinkUnfurl.tsx`). There is no host
+allowlist — an exception for `cdn.pollis.com` was removed, because the hostname
+comes out of message text and is the sender's to choose, and because the CDN is
+one of the hosts the overlay exists to hide the address from.
 
 ### 14.3 v0 slices (each independently reviewable + headless-gated)
 

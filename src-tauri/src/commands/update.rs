@@ -17,3 +17,11 @@ pub async fn mark_update_required(state: State<'_, Arc<AppState>>) -> Result<()>
 pub async fn is_update_required(state: State<'_, Arc<AppState>>) -> Result<bool> {
     pollis_core::commands::update::is_update_required(&state).await
 }
+
+/// How the auto-updater may reach the CDN right now — direct, through the
+/// relay overlay's SOCKS shim, or not at all. See
+/// `pollis_core::commands::update::UpdateCheckPlan`.
+#[tauri::command]
+pub async fn get_update_check_plan(state: State<'_, Arc<AppState>>) -> Result<UpdateCheckPlan> {
+    pollis_core::commands::update::get_update_check_plan(&state).await
+}
