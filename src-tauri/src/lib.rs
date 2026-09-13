@@ -647,6 +647,7 @@ pub fn run() {
             commands::r2::upload_file,
             commands::r2::upload_public_file,
             commands::r2::get_public_file_url,
+            commands::r2::save_media_to_path,
             commands::r2::upload_media,
             commands::r2::upload_media_staged,
             commands::staging::stage_attachment,

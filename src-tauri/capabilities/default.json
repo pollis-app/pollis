@@ -22,7 +22,6 @@
     "core:image:allow-from-bytes",
     "shell:allow-open",
     "fs:default",
-    "fs:allow-temp-write",
     "notification:default",
     "os:default",
     "process:allow-exit",

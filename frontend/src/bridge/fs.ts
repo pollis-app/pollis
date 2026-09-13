@@ -1,25 +1,22 @@
 /**
  * Filesystem bridge — narrow subset of `@tauri-apps/plugin-fs`.
  *
- * Only the three calls the renderer actually uses today are exposed:
- *   - writeFile(path, bytes): save a downloaded attachment to the location the
- *     user picked in the save dialog. NOT for staging a paste — pasted bytes go
- *     to `bridge/staging.ts`, which never puts them on a disk.
+ * READ ONLY. Two calls, both of them reads:
  *   - readFile(path) -> bytes: image/video preview pre-send.
  *   - stat(path) -> { size, isFile, isDirectory, modifiedAtMs }: filter
  *     directories out of dropped paths before treating them as files.
  *
- * Every path here is user-chosen — a dialog result, or a file the OS dropped
- * on the window.
+ * There is deliberately no `writeFile`. The renderer's one writer was "save
+ * attachment as…", and that moved to Rust (`save_media_to_path`) so the saved
+ * file gets this platform's provenance marker — macOS quarantine, Windows
+ * mark-of-the-web — which nothing in the webview can apply. Nothing else ever
+ * needed to write, so the capability went with it: `fs:allow-temp-write` is out
+ * of `src-tauri/capabilities/default.json` too, and the renderer can no longer
+ * put a file on the disk at all.
+ *
+ * Every path here is user-chosen — a picker result, or a file the OS dropped on
+ * the window — and Rust records which (`src-tauri/src/pathscope.rs`).
  */
-
-export async function writeFile(
-  path: string,
-  bytes: Uint8Array,
-): Promise<void> {
-  const mod = await import("@tauri-apps/plugin-fs");
-  await mod.writeFile(path, bytes);
-}
 
 export async function readFile(path: string): Promise<Uint8Array<ArrayBuffer>> {
   const mod = await import("@tauri-apps/plugin-fs");

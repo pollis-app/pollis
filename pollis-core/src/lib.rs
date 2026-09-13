@@ -11,6 +11,9 @@ pub mod error;
 pub mod keystore;
 pub mod media_server;
 pub mod net;
+// Marking files that leave the app for the user's own filesystem: macOS
+// quarantine, Windows mark-of-the-web.
+pub mod downloads;
 pub mod private_fs;
 pub mod realtime;
 pub mod signal;

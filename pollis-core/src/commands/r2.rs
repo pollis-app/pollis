@@ -904,6 +904,42 @@ pub async fn download_media(
     Ok(plaintext)
 }
 
+/// Save an attachment to a location the user picked, marked as a download.
+///
+/// This is "save attachment as…". It replaces a renderer-side
+/// `fetch(loopbackUrl)` + `writeFile(target, bytes)`, which had two problems.
+/// The bytes made a round trip through the webview for no reason, and — the
+/// finding — the file arrived on disk with no provenance marker, so macOS
+/// Gatekeeper and Windows SmartScreen both treated an attachment a stranger
+/// sent as a file the user had made themselves. `crate::downloads` writes and
+/// marks in one call; see its module docs for why those cannot be two steps.
+///
+/// The returned string is what happened to the marker (`marked`, `unsupported`,
+/// or `failed: …`). A failed marker does NOT fail the save: the bytes are the
+/// thing the user asked for, and refusing to hand them over because an xattr
+/// call returned an error would be the wrong trade. The renderer surfaces it.
+pub async fn save_media_to_path(
+    r2_key: String,
+    content_hash: String,
+    target_path: String,
+    state: &Arc<AppState>,
+) -> Result<String> {
+    let bytes = download_media(r2_key, content_hash, state).await?;
+    let path = std::path::PathBuf::from(&target_path);
+    let marking = tokio::task::spawn_blocking(move || {
+        crate::downloads::write_downloaded_file(&path, &bytes)
+    })
+    .await
+    .map_err(|e| Error::Other(anyhow::anyhow!("save attachment: {e}")))?
+    .map_err(|e| Error::Other(anyhow::anyhow!("write {target_path}: {e}")))?;
+
+    Ok(match marking {
+        crate::downloads::Marking::Marked => "marked".to_string(),
+        crate::downloads::Marking::Unsupported => "unsupported".to_string(),
+        crate::downloads::Marking::Failed(reason) => format!("failed: {reason}"),
+    })
+}
+
 /// Resolve a media attachment to a loopback HTTP URL the webview can use
 /// directly as `<img src>` / `<audio src>` / `<video src>`.
 ///

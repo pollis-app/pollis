@@ -36,6 +36,29 @@ resolves a hash by scanning for `<hash>.<ext>.enc`, so a new producer needs no
 server change at all; what it needs is a content-addressed name, which is why
 avatars had to stop living at a mutable `avatars/{user_id}` key first.
 
+## Saving an attachment out of the app
+
+The loopback route is for RENDERING. "Save attachment as…" does not use it:
+`commands::r2::save_media_to_path` downloads, decrypts, verifies the content
+hash, and writes the file itself, so the bytes never round-trip through the
+webview.
+
+That is not only a bandwidth point. An attachment is a file a stranger sent, and
+when the renderer fetched the loopback URL and wrote it with the fs plugin, the
+file landed on disk with **no provenance marker** — no `com.apple.quarantine` on
+macOS, no `Zone.Identifier` stream on Windows. Gatekeeper, SmartScreen, Office's
+Protected View and the script-host warnings all key on exactly that marker, so
+every one of them stood down for anything saved out of Pollis. `pollis-core/src/downloads.rs`
+writes the bytes and applies the marker in **one** function
+(`write_downloaded_file`) precisely so a future save path cannot do the first
+without the second; `src-tauri/Info.plist` sets `LSFileQuarantineEnabled` as the
+backstop for any macOS write that does not go through it. Linux has no enforced
+equivalent and the function says so (`Marking::Unsupported`) rather than
+reporting a success it did not achieve.
+
+The command's target path goes through the same `PathScope` gate as every other
+path-taking command (see `.codesight/wiki/commands.md`).
+
 This fits the "media is Rust-first" architecture (see [overview.md](./overview.md)):
 the renderer's WebRTC is intentionally unused; IPC carries UI events only, never
 media bytes.

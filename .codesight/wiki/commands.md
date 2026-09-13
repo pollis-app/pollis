@@ -500,6 +500,7 @@ Invariant: **`deafened ⇒ self_muted`** — the gate's fields are private and u
 - ~~`presign_upload(key, content_type)`~~ — **does not exist** under that name as of 2026-08-03 (#714). Presigning is server-side: the DS secrets broker mints URLs via `POST /v1/r2/presign` (see `delete_r2_object` below and `docs/secrets-broker.md`).
 - `get_media_url(r2_key, content_hash, content_type)` → URL — builds the loopback media-server URL (`http://127.0.0.1:<port>/<token>/<hash>`) for a cached item; errors if the server isn't started or there is no active unlock. See `pollis-core/src/media_server.rs`.
 - `upload_media(path, filename, content_type)` / `download_media(r2_key, content_hash)` — convergent-encryption media path; dedups via `attachment_object` on Turso. `path` is a file the **user** already has (picker selection, OS drag-and-drop); nothing in the app ever writes a file in order to have a path to pass here. **The shim enforces that** — see "Path-taking commands are scoped to what the user picked" below.
+- `save_media_to_path(r2_key, content_hash, target_path)` → `"marked"` | `"unsupported"` | `"failed: …"` — "save attachment as…". Downloads, decrypts, verifies the content hash and writes the file in Rust, then applies this platform's download marker (macOS `com.apple.quarantine`, Windows `Zone.Identifier`). The renderer used to `fetch` the loopback URL and `writeFile` the bytes, which left the file with no provenance marker at all — Gatekeeper and SmartScreen both treat an unmarked file as locally authored. A marker that cannot be written (FAT32, a network share) does NOT fail the save; the return value says what happened. `target_path` is gated by `PathScope`. See `.codesight/wiki/media-server.md`.
 - `upload_media_staged(staged_id, filename, content_type)` — the same upload for bytes with no path: a paste, or a drop the webview surfaced as a `File`. Reads them from the in-memory staging registry (`commands/staging.rs`) and releases them **only on success**, so a failed upload is a retry rather than a lost paste.
 - Internal: `delete_r2_object(state, r2_key)` — DS-presigned DELETE (via `presign_r2`) used by `delete_message` to purge orphaned attachments. Treats 404 as success. The client holds no R2 credentials — every get/put/delete is presigned by the DS secrets broker (`POST /v1/r2/presign`, #393).
 
@@ -599,7 +600,7 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 - **`pathscope`** — `pick_open_paths`, `pick_save_path`
 - **`pin`** — `get_unlock_state`, `lock`, `set_pin`, `unlock`
 - **`pinned_messages`** — `list_pinned_messages`, `pin_message`, `unpin_message`
-- **`r2`** — `download_file`, `download_media`, `get_media_url`, `get_public_file_url`, `upload_file`, `upload_media`, `upload_media_staged`, `upload_public_file`
+- **`r2`** — `download_file`, `download_media`, `get_media_url`, `get_public_file_url`, `save_media_to_path`, `upload_file`, `upload_media`, `upload_media_staged`, `upload_public_file`
 - **`staging`** — `discard_staged_attachment`, `stage_attachment`
 - **`relay_serving`** — `get_relay_serving_status`, `set_relay_serving`
 - **`safety`** — `get_safety_number`, `list_peer_verifications`, `set_contact_verified`
@@ -670,7 +671,7 @@ than hand-edit.
 
 **`livekit`** (12) — `cancel_call`, `connect_rooms`, `get_livekit_token`, `get_livekit_url`, `get_livekit_view_token`, `list_voice_participants`, `list_voice_room_counts`, `publish_ping`, `publish_typing`, `publish_voice_presence`, `start_call`, `subscribe_realtime`
 
-**`r2`** (8) — `download_file`, `download_media`, `get_media_url`, `get_public_file_url`, `upload_file`, `upload_media`, `upload_media_staged`, `upload_public_file`
+**`r2`** (9) — `download_file`, `download_media`, `get_media_url`, `get_public_file_url`, `save_media_to_path`, `upload_file`, `upload_media`, `upload_media_staged`, `upload_public_file`
 
 **`pathscope`** (2) — `pick_open_paths`, `pick_save_path`
 

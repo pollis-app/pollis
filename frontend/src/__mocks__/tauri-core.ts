@@ -945,6 +945,12 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'set_terminal_enabled':
       return null;
 
+    // "Save attachment as…" (#17): Rust writes the file and applies this
+    // platform's download marker, so the renderer never sees the bytes. The
+    // browser suite has no filesystem — report the Linux answer.
+    case 'save_media_to_path':
+      return 'unsupported';
+
     // The overlay's verdict on the auto-updater (`bridge/updater.ts`). The
     // browser suite runs with no overlay, so a direct check is the honest
     // answer — see pollis-core/src/commands/update.rs.
