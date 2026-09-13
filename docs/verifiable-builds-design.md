@@ -139,14 +139,22 @@ The known non-determinism sources and their fixes:
   `codegen-units = 1` for the release profile — slower build, but deterministic
   and marginally faster runtime. **Performance lens:** this is a *build-time*
   cost paid on CI runners, not a user-facing one.
-- **`option_env!` baked config.** The release bakes `TURSO_URL`, `LOG_DB_URL`,
-  the **read-only** tokens, R2 public URL, LiveKit URL, delivery URL, etc. into
-  the binary (`desktop-release.yml` "Load production secrets"). These are part of
-  the reproducible input and must be **declared in the provenance** so a
-  rebuilder supplies the identical values. They are non-secret by design (RO
-  token, public URLs) — but the *build inputs manifest* must pin them, or an
+- **`option_env!` baked config.** The release bakes the R2 endpoint + public
+  URL, LiveKit URL, delivery URL and the relay-directory URL + verification key
+  into the binary (`desktop-release.yml` "Load build recipe (public endpoints)";
+  at design time this step was "Load production secrets" and also carried
+  `TURSO_URL`/`LOG_DB_URL` + read-only tokens, gone since #987). These are part
+  of the reproducible input and must be **declared in the provenance** so a
+  rebuilder supplies the identical values. They are non-secret by design (public
+  URLs, a public key) — but the *build inputs manifest* must pin them, or an
   honest rebuild diverges. This is the subtlest reproducibility gotcha in
   Pollis's specific pipeline and must be documented as a public "build recipe."
+  The recipe is also the **whole** of what a build job may put in its
+  environment: `scripts/check-build-recipe.py` fails CI if a `build-*` job
+  exports anything else to `$GITHUB_ENV`, because that environment is readable
+  by every `build.rs`, proc-macro and third-party action in the job. The
+  account-wide R2 write key used to sit there unused; it is now step-scoped on
+  the upload steps of the publish jobs only.
 
 ### 1.4 Frontend (Vite) bundle determinism
 
@@ -802,11 +810,12 @@ needs the **release runners** (macOS/Windows/Linux signing hardware).
   Pollis secrets, trusts only the pinned key).
 - **Still best-effort (in the residual list, not yet closed):** vendoring the
   capture-helper bindgen output; pinning native `meson`/`clang` and runner
-  images by *digest* (labels only today); and — the top item — stripping the
-  still-baked *secret* `option_env!` inputs so a fully secretless third party can
-  bit-reproduce the Linux payload (today only a party given the published recipe
-  can). macOS/Windows payload reproduction is best-effort pending a
-  matching-runner reproducer.
+  images by *digest* (labels only today). The former top item — stripping the
+  still-baked *secret* `option_env!` inputs — is closed: since #987 every baked
+  value is public, and the release build jobs' environment is checker-bounded to
+  exactly that recipe (`scripts/check-build-recipe.py`), so a fully secretless
+  third party can bit-reproduce the Linux payload. macOS/Windows payload
+  reproduction is best-effort pending a matching-runner reproducer.
 - **Acceptance:** an *independent* party reproduces the Linux payload bit-for-bit
   (or modulo the documented list) and confirms its hash is logged; the reproduced
   set is published. Reproducibility of **macOS/Windows payloads** is

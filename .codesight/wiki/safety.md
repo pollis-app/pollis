@@ -226,6 +226,22 @@ tree can never stand in for another:
   let 26 releases publish a false recipe with green runs. The existing leaves are
   **not** backfilled: the tree is append-only by design.
 
+  **The build-job environment is the recipe and nothing else.** Every value the
+  client bakes via `option_env!` (`pollis-core/src/config.rs`) is a public URL or
+  verification key, and those are the only names a `build-*` job of
+  `desktop-release.yml` / `cli-release.yml` may write to `$GITHUB_ENV` — whatever
+  a build job exports is readable by every crate `build.rs`, proc-macro, pnpm
+  lifecycle script and third-party action that runs after it. The account-wide R2
+  write key (which writes `cdn.pollis.com`: `install.sh`, `latest.json`, the
+  installers) and the LiveKit API secret used to be exported into every build job
+  with no consumer there; they are gone, and the R2 key is step-scoped `env:` on
+  exactly the `aws s3` upload steps of the publish jobs, read straight from
+  `secrets.*`. `scripts/check-build-recipe.py` fails `scripts-check.yml` on any
+  build-job export outside the recipe (plus the determinism/signtool toolchain
+  flags) and on any `secrets.*` export via `$GITHUB_ENV` in any job of those two
+  workflows; `scripts/test-check-build-recipe.sh` re-creates each shape of the
+  mistake and asserts it is named.
+
   Two adjacent defects in the same class, also fixed: `attest-and-log` now requires
   `provenance` to have succeeded *and* proves each leaf's `provenance_uri` resolves
   before appending (v1.9.0/v1.9.1 baked permanent 404s), and the R2 retention prune

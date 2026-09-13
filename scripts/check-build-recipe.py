@@ -30,7 +30,25 @@ Note (3) ⊄ (2) is fine and expected: the recipe may list a var the release lea
 (e.g. an optional log-DB token), because the rebuilder skips unset vars so the compile sees
 `None` either way.
 
-Exit 0 = a third party given the published recipe compiles the same inputs we did.
+A fourth list is enforced for a different reason — containment rather than
+reproducibility. Whatever a BUILD job writes to `$GITHUB_ENV` becomes an ordinary
+environment variable for every later step of that job: every crate's `build.rs` and
+proc-macro, pnpm's lifecycle scripts, and every third-party action. Every `option_env!`
+input is a public endpoint or verification key, so exporting the recipe is harmless; a
+credential exported alongside it is one a poisoned dependency can read and exfiltrate.
+The release build jobs did exactly that — the account-wide R2 write key and the LiveKit
+API secret sat in every build job's environment with no consumer in the job. So:
+
+    4. every `$GITHUB_ENV` export in a build job of desktop-release.yml or
+       cli-release.yml must name either an `option_env!` key or one of the known
+       toolchain flags (SOURCE_DATE_EPOCH, RUSTFLAGS, ...), and no build-job export
+       may interpolate a `secrets.*` value under a name outside the recipe;
+    5. in EVERY job of those two workflows, an export that interpolates `secrets.X`
+       must have X in the recipe — credentials the release/publish jobs need reach
+       the `aws s3` steps as step-scoped `env:`, never through `$GITHUB_ENV`.
+
+Exit 0 = a third party given the published recipe compiles the same inputs we did, and
+         no release build job carries a credential the binary cannot even absorb.
 Exit 1 = a report of the drift.
 """
 
@@ -43,10 +61,40 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG = ROOT / "pollis-core" / "src" / "config.rs"
 RELEASE = ROOT / ".github" / "workflows" / "desktop-release.yml"
+CLI_RELEASE = ROOT / ".github" / "workflows" / "cli-release.yml"
 REBUILD = ROOT / ".github" / "workflows" / "rebuild-verify.yml"
 
 # The reproducible unit is the Linux AppImage, so only that job's recipe matters.
 RELEASE_JOB = "build-linux"
+
+# Every job that compiles client code in the two release workflows — the jobs whose
+# environment is visible to build scripts and dependencies. Listed explicitly (and
+# cross-checked against every `build-*` job header below) so a new build job cannot
+# appear without being placed under this check.
+BUILD_JOBS: dict[Path, tuple[str, ...]] = {
+    RELEASE: ("build-macos", "build-windows", "build-capture-helper", "build-linux"),
+    CLI_RELEASE: ("build-cli-linux", "build-cli-macos", "build-cli-windows"),
+}
+
+# The only non-recipe names a build job may write to $GITHUB_ENV: the determinism
+# flags (#504) and the Windows signtool paths resolved on the runner. None of them
+# carries a secret — and check 5 refuses an export that smuggles one under these names.
+TOOLCHAIN_EXPORTS = frozenset(
+    {
+        "SOURCE_DATE_EPOCH",
+        "RUSTFLAGS",
+        "CFLAGS",
+        "CXXFLAGS",
+        "SIGNTOOL_PATH",
+        "SIGNING_DLIB_PATH",
+        "SIGN_METADATA_PATH",
+    }
+)
+
+# One `$GITHUB_ENV` write, wherever it appears: the exported name (or None when the
+# line's shape is not one this script understands) and whether it interpolates a
+# repository secret.
+Export = tuple[str, str | None, bool]
 
 failures: list[str] = []
 
@@ -112,6 +160,87 @@ def rebuild_env_mapping() -> set[str]:
     return set(re.findall(r"^\s+([A-Z_0-9]+):", m.group(1), re.M))
 
 
+def github_env_exports(block: str) -> list[Export]:
+    """Every `$GITHUB_ENV` write in a job body, as (line, exported name, uses a secret).
+
+    Understands the two shapes the release workflows use — `echo "KEY=..." >> $GITHUB_ENV`
+    (bash, quoted or not) and `"KEY=..." | Out-File -FilePath $env:GITHUB_ENV` (pwsh) —
+    plus the heredoc opener `echo "KEY<<EOF"`. Comment lines are skipped. A line that
+    mentions GITHUB_ENV in any other shape yields name=None so the caller fails it:
+    an export this script cannot read is one it cannot vouch for.
+    """
+    out: list[Export] = []
+    for raw in block.splitlines():
+        line = raw.strip()
+        if "GITHUB_ENV" not in line or line.startswith("#"):
+            continue
+        m = re.search(r'"?([A-Z][A-Z0-9_]*)(?:=|<<)', line)
+        out.append((line, m.group(1) if m else None, "secrets." in line))
+    return out
+
+
+def job_headers(text: str) -> list[str]:
+    """Every top-level job id in a workflow file."""
+    return re.findall(r"^  ([a-z][a-z0-9_-]*):$", text, re.M)
+
+
+def check_build_job_exports(client: set[str]) -> None:
+    """(4) + (5): no credential in a build job's environment, none via $GITHUB_ENV anywhere."""
+    allowed = client | TOOLCHAIN_EXPORTS
+    for path, jobs in BUILD_JOBS.items():
+        text = path.read_text()
+
+        # A `build-*` job this list does not know is a job this check does not cover.
+        for job in job_headers(text):
+            if job.startswith("build-") and job not in jobs:
+                fail(
+                    f"{path.name}: job `{job}` compiles client code but is not listed in "
+                    f"BUILD_JOBS in {Path(__file__).name} — add it so its $GITHUB_ENV exports "
+                    f"are checked against the option_env! recipe."
+                )
+
+        for job in jobs:
+            block = job_block(text, job)
+            for line, name, uses_secret in github_env_exports(block):
+                if name is None:
+                    fail(
+                        f"{path.name} `{job}`: cannot read what this line exports to "
+                        f"$GITHUB_ENV — rewrite it as `echo \"KEY=...\" >> $GITHUB_ENV` so "
+                        f"the export can be checked: {line}"
+                    )
+                    continue
+                if name not in allowed:
+                    fail(
+                        f"{path.name} `{job}` exports {name} to $GITHUB_ENV, which "
+                        f"{CONFIG.name} never reads via option_env! — the binary cannot "
+                        f"absorb it, but every build.rs, proc-macro, pnpm lifecycle script "
+                        f"and third-party action in the job can read it. Delete the export; "
+                        f"if a publish step needs the value, pass it as step-scoped `env:` on "
+                        f"that step, straight from `secrets.*`."
+                    )
+                elif uses_secret and name not in client:
+                    fail(
+                        f"{path.name} `{job}` writes a `secrets.*` value into $GITHUB_ENV under "
+                        f"the toolchain name {name} — a secret is a secret whatever it is "
+                        f"called, and nothing outside the option_env! recipe belongs in a build "
+                        f"job's environment: {line}"
+                    )
+
+        # (5) Release/publish/provenance jobs too: a credential those jobs legitimately use
+        # still has no business in $GITHUB_ENV, where the artifact-download, gh-release and
+        # attest/cosign actions inherit it. Step-scoped `env:` is the only sanctioned shape.
+        for job in job_headers(text):
+            if job in jobs:
+                continue
+            for line, name, uses_secret in github_env_exports(job_block(text, job)):
+                if uses_secret and name not in client:
+                    fail(
+                        f"{path.name} `{job}` exports the secret {name or '<unreadable>'} to "
+                        f"$GITHUB_ENV, making it visible to every later step in the job. Pass "
+                        f"it as step-scoped `env:` on exactly the step that uses it: {line}"
+                    )
+
+
 # Jobs that produce the bit-reproducible Linux payload. Both must build cold.
 REPRODUCIBLE_JOBS = ("build-linux", "build-capture-helper")
 
@@ -174,6 +303,10 @@ def main() -> int:
                     f"`-ffile-prefix-map` to CFLAGS/CXXFLAGS."
                 )
 
+    # (4) + (5) — nothing but the recipe in a build job's environment; no secret via
+    # $GITHUB_ENV anywhere in the release workflows.
+    check_build_job_exports(client)
+
     # No build cache on the reproducible path.
     for job in cached_reproducible_jobs(RELEASE.read_text()):
         fail(
@@ -191,7 +324,8 @@ def main() -> int:
     if failures:
         print(
             "BUILD RECIPE DRIFT — an independent rebuild of the Linux payload cannot "
-            "reproduce the shipped bytes:\n",
+            "reproduce the shipped bytes, or a release job's environment carries more "
+            "than the recipe:\n",
             file=sys.stderr,
         )
         for f in failures:
@@ -202,9 +336,11 @@ def main() -> int:
         )
         return 1
 
+    n_build_jobs = sum(len(j) for j in BUILD_JOBS.values())
     print(
         f"Build recipe OK — {len(release)} value(s) baked by the release are all in the "
-        f"rebuilder's recipe ({len(recipe)} entries), and every recipe entry is read by the client."
+        f"rebuilder's recipe ({len(recipe)} entries), every recipe entry is read by the client, "
+        f"and none of the {n_build_jobs} release build jobs exports anything but the recipe."
     )
     return 0
 

@@ -18,7 +18,12 @@ pub use pollis_relay::OverlayMode;
 /// Note for anyone adding a compile-time input here: `scripts/check-build-recipe.py`
 /// enforces `desktop-release.yml` ⊆ `rebuild-verify.yml` ⊆ the `option_env!`
 /// keys below, so a new value must be added to the release workflow AND the
-/// reproducer's recipe, or independent Linux reproduction breaks.
+/// reproducer's recipe, or independent Linux reproduction breaks. The same
+/// script bounds the release build jobs' `$GITHUB_ENV` to exactly these keys
+/// (plus the toolchain flags): every value here is public by construction, and
+/// whatever a build job exports is readable by every `build.rs`, proc-macro and
+/// third-party action in it — so a credential can never be added here, and a
+/// credential a publish step needs is step-scoped `env:` on that step instead.
 pub struct Config {
     /// R2 S3 endpoint. Non-secret — retained only to build the display `url`
     /// returned from uploads. All R2 access credentials moved server-side to the
