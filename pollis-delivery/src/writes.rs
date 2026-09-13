@@ -205,6 +205,61 @@ where
     })
 }
 
+/// The outcome of the identity gate: the authenticated `(user_id, device_id)`
+/// pair, or `None` on the no-auth path. Same contract as [`Authed`], with the
+/// DEVICE half kept.
+pub(crate) type AuthedIdentity = Option<(String, String)>;
+
+/// [`gate`] for the writes that key a row on the specific DEVICE, not just the
+/// user — the per-device delivery cursor (`/v1/watermarks/advance`). Same
+/// verification, same rejections; the only difference is that the verified
+/// `device_id` is returned instead of dropped, so the handler can bind the
+/// body's `device_id` to the signer the way `report_commit_since` does, rather
+/// than trusting an unauthenticated field.
+pub(crate) async fn gate_identity(
+    state: &AppState,
+    req: &RawRequest,
+) -> Result<Result<AuthedIdentity, Response>, AppError> {
+    if !state.require_auth {
+        return Ok(Ok(None));
+    }
+    let conn = state.db.conn().await?;
+    match auth::verify_request_identity_cached(
+        &state.device_keys,
+        &conn,
+        &req.headers,
+        req.method.as_str(),
+        req.uri.path(),
+        &req.body,
+        crate::util::now_unix() as i64,
+    )
+    .await
+    {
+        Ok(identity) => Ok(Ok(Some(identity))),
+        Err(rej) => Ok(Err(rej.into_response())),
+    }
+}
+
+/// [`gate_and_parse`] over [`gate_identity`] — same ordering guarantee
+/// (signature over the raw bytes first, deserialize second), for the endpoints
+/// that need the device half of the identity.
+pub(crate) async fn gate_identity_and_parse<B>(
+    state: &AppState,
+    req: &RawRequest,
+) -> Result<Result<(AuthedIdentity, B), Response>, AppError>
+where
+    B: serde::de::DeserializeOwned,
+{
+    let authed = match gate_identity(state, req).await? {
+        Ok(a) => a,
+        Err(resp) => return Ok(Err(resp)),
+    };
+    Ok(match serde_json::from_slice(&req.body) {
+        Ok(parsed) => Ok((authed, parsed)),
+        Err(_) => Err(bad_request("invalid body")),
+    })
+}
+
 /// Resolve the recipient/owner a welcome op targets.
 ///
 ///   - auth ON  → the authenticated user. If the body also carries `user_id`,
@@ -306,6 +361,12 @@ pub enum WriteOutcome {
         head_generation: i64,
         head_epoch: i64,
     },
+    /// The body is well-formed JSON but carries a value the DS refuses to store
+    /// (→ 400). Distinct from `Forbidden`: the caller is allowed to make the
+    /// write, the VALUE is not admissible — a `sent_at` or `last_fetched_at`
+    /// that is not a canonical UTC RFC 3339 stamp, or sits past the DS clock's
+    /// skew allowance (see `messages::check_cursor_stamp`).
+    Invalid(&'static str),
 }
 
 /// The 409 body for [`WriteOutcome::EpochBehind`].
@@ -322,7 +383,7 @@ pub(crate) fn epoch_behind_response(head_generation: i64, head_epoch: i64) -> Re
 }
 
 /// Map a [`WriteOutcome`] to the HTTP response (200 ok / 403 forbidden / 409
-/// epoch-behind).
+/// epoch-behind / 400 invalid).
 ///
 /// Generic over the endpoint's request type since #922, which is what ties this
 /// shared success body to a specific route: `B::Response` must be
@@ -342,6 +403,7 @@ where
             head_generation,
             head_epoch,
         } => epoch_behind_response(head_generation, head_epoch),
+        WriteOutcome::Invalid(msg) => bad_request(msg),
     })
 }
 

@@ -457,6 +457,7 @@ pub async fn revoke_device(
             head_generation,
             head_epoch,
         } => Ok(crate::writes::epoch_behind_response(head_generation, head_epoch)),
+        WriteOutcome::Invalid(msg) => Ok(crate::writes::bad_request(msg)),
         WriteOutcome::Ok => Ok(crate::writes::ok_response::<RevokeDeviceBody>(
             match device_name {
                 Some(name) => DeviceRevoked::Ok {

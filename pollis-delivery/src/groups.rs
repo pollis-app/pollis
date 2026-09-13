@@ -303,6 +303,7 @@ pub async fn update_group(
             head_generation,
             head_epoch,
         } => Ok(crate::writes::epoch_behind_response(head_generation, head_epoch)),
+        WriteOutcome::Invalid(msg) => Ok(crate::writes::bad_request(msg)),
         WriteOutcome::Ok => match crate::directory::group_row(&conn, &parsed.group_id).await? {
             Some(g) => Ok(crate::writes::ok_response::<UpdateGroupBody>(
                 UpdatedGroup::Ok {
@@ -547,6 +548,7 @@ pub async fn update_channel(
             head_generation,
             head_epoch,
         } => Ok(crate::writes::epoch_behind_response(head_generation, head_epoch)),
+        WriteOutcome::Invalid(msg) => Ok(crate::writes::bad_request(msg)),
         WriteOutcome::Ok => match channel_row(&conn, &parsed.channel_id).await? {
             Some(c) => Ok(crate::writes::ok_response::<UpdateChannelBody>(c)),
             None => Err(AppError(anyhow::anyhow!(
@@ -942,6 +944,7 @@ pub async fn accept_invite(
             head_generation,
             head_epoch,
         } => Ok(crate::writes::epoch_behind_response(head_generation, head_epoch)),
+        WriteOutcome::Invalid(msg) => Ok(crate::writes::bad_request(msg)),
         WriteOutcome::Ok => match group_id {
             Some(group_id) => Ok(crate::writes::ok_response::<AcceptInviteBody>(
                 AcceptedInvite::Ok { group_id },

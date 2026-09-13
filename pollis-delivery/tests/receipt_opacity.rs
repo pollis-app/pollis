@@ -117,7 +117,9 @@ fn body(id: &str, ciphertext: &str) -> SendMessageBody {
         sender_id: Some(SEALED_SENTINEL.to_string()),
         ciphertext: ciphertext.to_string(),
         reply_to_id: None,
-        sent_at: "2026-08-15T12:00:00Z".to_string(),
+        // The canonical client shape (`+00:00`, never `Z`) — the DS admits no
+        // other (`check_cursor_stamp`).
+        sent_at: "2026-08-15T12:00:00+00:00".to_string(),
         sealed: 1,
         generation: None,
         epoch: None,

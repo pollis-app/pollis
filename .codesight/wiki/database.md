@@ -259,6 +259,28 @@ the conversation's **floor** (`sent_at_after` / `TOMBSTONE_FLOOR` in
 `pollis-delivery/src/messages.rs`), so client/DS clock skew cannot reintroduce
 the same burial.
 
+**A client-chosen `sent_at` is bounded, never trusted (`check_cursor_stamp`).**
+The value stays client-chosen — the sender's own local `message.sent_at` carries
+the same stamp and cross-device read cursors (#844) compare against it, so a DS
+re-stamp would make one message sort differently on the sender's device than on
+everyone else's — but `/v1/messages/send` and `/v1/messages/edit` admit it only
+when it is a **canonical UTC RFC 3339** rendering (`…+00:00`, 0/3/6/9 fraction
+digits — exactly the set `envelope_sent_at` and `now_rfc3339` produce) **and no
+further ahead of the DS clock than the request-signature window**
+(`CURSOR_STAMP_SKEW_SECS` = `auth::REPLAY_WINDOW_SECS`, 300 s). Anything else is
+a `400` and nothing is stored. Before this bound one member posting
+`sent_at = "9999-…"` blacked out the conversation for every member: each
+recipient fetched it (it sorts above every cursor), reported a `9999-…`
+watermark, and `sent_at > cursor` matched nothing ever again; once every live
+device had reported, the next GC sweep deleted every envelope in the
+conversation, fetched or not. The honest client already meets the bound — its
+stamp is written before the request is signed, and a signature further ahead
+than the window is already refused. `Z` suffixes, non-zero offsets, SQLite's
+`YYYY-MM-DD HH:MM:SS` and truncated/padded fractions are refused as
+non-canonical because each sorts somewhere other than where its instant
+belongs. Pinned by `messages::cursor_stamp_tests` and
+`pollis-delivery/tests/cursor_poisoning.rs`.
+
 **The CLIENT side is correct as it stands, and must not be "fixed" to match
 (#875).** `chrono::Utc::now().to_rfc3339()` is `SecondsFormat::AutoSi`, which
 emits 0, 3, 6 or 9 fraction digits — it **omits** the fraction only when the
@@ -292,8 +314,11 @@ still clears the recipient's watermark). Any change to timestamp formatting on
 either side must keep all four green.
 
 That floor is the greater of `MAX(sent_at)` over `message_envelope` **and**
-`MAX(last_fetched_at)` over `conversation_watermark`, both scoped to the
-conversation (#692). The envelope side alone is not enough: envelope GC deletes
+`MAX(last_fetched_at)` over the conversation's **member-device roster** in
+`conversation_watermark` — the same `channel_member_device_rows!` /
+`dm_member_device_rows!` join the GC predicate aggregates over, both shapes
+UNIONed since the floor does not know which one the id is (#692; roster join
+added with the cursor bound). The envelope side alone is not enough: envelope GC deletes
 rows once every current member device has watermarked past them, and since the
 TTL arm's removal that deletion is purely watermark-gated — so a fully-collected
 conversation ends up with *no* envelopes, `MAX(sent_at)` goes NULL, and the stamp
@@ -303,8 +328,17 @@ cursor only moves forward, so an envelope at or below it is skipped permanently,
 not merely delayed) and the deleted message would stay readable on that device
 forever. `conversation_watermark` rows outlive envelope GC — they are only ever
 advanced, or deleted with the device itself — so they are the evidence the floor
-must also consult. Pinned by `messages::tombstone_floor_tests` and
-`pollis-delivery/tests/envelope_retention.rs` (Part F).
+must also consult. Only *roster* rows, though: a recipient is by definition a
+member device, and the unjoined `MAX` was an attack surface — with
+`/v1/watermarks/advance` then unauthorized beyond the user binding, any account
+could park `last_fetched_at = "9999-…"` under a victim conversation, the floor
+adopted it, and the next admin delete was stamped `9999-…000000001`; every
+device that applied that tombstone took it as its cursor and went dark, then GC
+collected the conversation. The endpoint is now membership-gated and the value
+bounded, and the floor ignores a stray row exactly as GC does. Pinned by
+`messages::tombstone_floor_tests` (including the non-member and DM-roster
+cases), `pollis-delivery/tests/envelope_retention.rs` (Part F) and
+`pollis-delivery/tests/cursor_poisoning.rs`.
 
 **Sealed sender (#331, #607).** Attribution is taken from the MLS credential inside
 the ciphertext, never from `sender_id` — the ingest reader ([mls.md](./mls.md#sealed-sender-331))
@@ -534,7 +568,9 @@ One row = "group `group_id` calls this object `:shortcode:`". The PK makes a sho
 - `last_fetched_at` TEXT NOT NULL _(the message cursor — how far the device has read)_
 - `reported_at` TEXT _(migration 000012, #720; server-stamped wall-clock time of the device's LAST report — the device-liveness signal, distinct from the message cursor. Nullable: pre-migration rows are NULL and treated as live)_
 
-**The two columns are in different text formats, deliberately (#908).** A text timestamp's format is decided by one thing: what it is compared against. `last_fetched_at` is compared lexically against `message_envelope.sent_at`, so it is **RFC 3339** — clients write it through `pollis_core::commands::messages::envelope_sent_at`, and the DS's own server-side seeds write it through `pollis_delivery::messages::seeded_watermark_cursor`. `reported_at` is compared against `datetime('now', ?)` in the `CLEANUP_*` predicate, so it stays in **SQLite's `YYYY-MM-DD HH:MM:SS`**. Until #908 the three seed paths (device registration, DM create / DM member-add, group join) wrote `datetime('now')` into *both*; because a space (0x20) sorts below a `T` (0x54), a seeded cursor compared as older than every RFC 3339 stamp sharing its calendar day — the opposite of the "this device has already consumed the backlog" the seed exists to assert. Fail-safe (over-pin, under-collect — envelopes were kept, never lost), but the seed did not do what its comment claimed. `seeded_watermark_cursor` is the DS-side counterpart to `envelope_sent_at`: one function owns the format so five call sites cannot each get it wrong.
+**Who may write a row, and what (`apply_advance_watermark`).** Both halves of the key are bound to the verified signature — `user_id` via `resolve_actor`, `device_id` must equal the signing device (`gate_identity_and_parse` → `verify_request_identity_cached`, the same gate `report_commit_since` uses) — and the user must be a current `is_member` of the conversation; otherwise `403`. The value is admitted only through `check_cursor_stamp` (canonical UTC RFC 3339, at most `CURSOR_STAMP_SKEW_SECS` ahead of the DS clock; otherwise `400`, row untouched). The upsert is monotone (`MAX`) and nothing ever rewinds a cursor, so a far-future value that got in was a permanent blackout for that device and — once every device held one — GC of the whole conversation; and without the membership gate any account could plant a row under any conversation id, which the tombstone floor (above) used to read. Pinned by `pollis-delivery/tests/cursor_poisoning.rs`.
+
+**The two columns are in different text formats, deliberately (#908).** A text timestamp's format is decided by one thing: what it is compared against. `last_fetched_at` is compared lexically against `message_envelope.sent_at`, so it is **RFC 3339** — clients write it through `pollis_core::commands::messages::envelope_sent_at`, and the DS's own server-side seeds write it through `pollis_delivery::messages::seeded_watermark_cursor`; `check_cursor_stamp` refuses any other shape at the endpoint. `reported_at` is compared against `datetime('now', ?)` in the `CLEANUP_*` predicate, so it stays in **SQLite's `YYYY-MM-DD HH:MM:SS`**. Until #908 the three seed paths (device registration, DM create / DM member-add, group join) wrote `datetime('now')` into *both*; because a space (0x20) sorts below a `T` (0x54), a seeded cursor compared as older than every RFC 3339 stamp sharing its calendar day — the opposite of the "this device has already consumed the backlog" the seed exists to assert. Fail-safe (over-pin, under-collect — envelopes were kept, never lost), but the seed did not do what its comment claimed. `seeded_watermark_cursor` is the DS-side counterpart to `envelope_sent_at`: one function owns the format so five call sites cannot each get it wrong.
 
 **Read as a BOUND value, never correlated (#1049).** `fetch_envelopes` in
 `pollis-delivery/src/directory.rs` serves every conversation in one query, so
