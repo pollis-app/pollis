@@ -712,3 +712,119 @@ pub async fn pending_welcomes(
     }
     Ok(out)
 }
+
+/// The commit-batch cross-signing prefetch (#1080).
+#[cfg(test)]
+mod added_identities_tests {
+    use super::*;
+
+    async fn conn() -> Connection {
+        let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
+        let conn = db.connect().unwrap();
+        // Production is Turso, where foreign-key enforcement is off; libsql's
+        // LOCAL backend turns it ON by default, so say so explicitly rather than
+        // inherit a constraint no deploy has.
+        conn.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
+        pollis_schema::apply::single_db(&conn).await.expect("schema");
+        conn.execute_batch(
+            "INSERT INTO users (id, email, username, account_id_pub)
+                 VALUES ('alice', 'a@x.com', 'alice', x'0102');
+             INSERT INTO users (id, email, username, account_id_pub)
+                 VALUES ('bob', 'b@x.com', 'bob', x'0304');
+             INSERT INTO user_device (user_id, device_id) VALUES ('alice', 'a2');
+             INSERT INTO user_device (user_id, device_id) VALUES ('bob', 'b1');",
+        )
+        .await
+        .unwrap();
+        conn
+    }
+
+    fn commit(added_user_id: &str, added_device_ids: &str) -> pollis_api::commit::CommitWire {
+        pollis_api::commit::CommitWire {
+            generation: 0,
+            epoch: 1,
+            seq: 1,
+            sender_id: "alice".to_string(),
+            commit: String::new(),
+            added_user_id: Some(added_user_id.to_string()),
+            added_device_ids: Some(added_device_ids.to_string()),
+            created_at: "2026-09-01T00:00:00+00:00".to_string(),
+        }
+    }
+
+    /// The #1080 shape: ONE commit adds devices of TWO users — a device
+    /// enrolment coinciding with an invite, or a suite migration re-adding the
+    /// whole roster. Both users' cross-signing inputs must be folded in, or the
+    /// replaying client reaches `Unverifiable` for the one that was left out and
+    /// runs a pointless eviction reconcile.
+    #[tokio::test]
+    async fn a_multi_user_add_prefetches_every_named_user() {
+        let c = conn().await;
+        let out = added_identities(&c, &[commit("alice,bob", "a2,b1")])
+            .await
+            .expect("prefetch");
+
+        let mut users: Vec<&str> = out.iter().map(|i| i.user_id.as_str()).collect();
+        users.sort();
+        assert_eq!(users, vec!["alice", "bob"]);
+
+        // Each user carries their own root key and only their own device rows —
+        // the device-id list is a hint shared across users, so the per-user query
+        // has to filter it rather than hand Bob's row to Alice.
+        for identity in &out {
+            assert!(
+                identity.account_id_pub.is_some(),
+                "{} must carry a root key to verify against",
+                identity.user_id
+            );
+            assert_eq!(identity.devices.len(), 1, "{}", identity.user_id);
+        }
+        let alice = out.iter().find(|i| i.user_id == "alice").unwrap();
+        assert_eq!(alice.devices[0].device_id, "a2");
+        let bob = out.iter().find(|i| i.user_id == "bob").unwrap();
+        assert_eq!(bob.devices[0].device_id, "b1");
+    }
+
+    /// The single-user case is unchanged — no stray empty entry from splitting a
+    /// string with no separator in it.
+    #[tokio::test]
+    async fn a_single_user_add_is_unchanged() {
+        let c = conn().await;
+        let out = added_identities(&c, &[commit("alice", "a2")]).await.unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].user_id, "alice");
+        assert_eq!(out[0].devices.len(), 1);
+    }
+
+    /// A user named across several commits of one batch accumulates device ids
+    /// rather than replacing them — some paths emit one commit per added device.
+    #[tokio::test]
+    async fn a_user_named_twice_accumulates_devices() {
+        let c = conn().await;
+        let out = added_identities(&c, &[commit("alice", "a2"), commit("alice,bob", "b1")])
+            .await
+            .unwrap();
+        let alice = out.iter().find(|i| i.user_id == "alice").unwrap();
+        assert_eq!(
+            alice.devices.len(),
+            1,
+            "alice has one registered device; both ids were asked for"
+        );
+        assert!(out.iter().any(|i| i.user_id == "bob"));
+    }
+
+    /// A NULL or empty hint prefetches nothing and must not error: the client
+    /// still verifies off the commit's own Add proposals, so this degrades to a
+    /// round trip, never to a wrong verdict.
+    #[tokio::test]
+    async fn an_absent_hint_prefetches_nothing() {
+        let c = conn().await;
+        let mut bare = commit("alice", "a2");
+        bare.added_user_id = None;
+        assert!(added_identities(&c, &[bare]).await.unwrap().is_empty());
+
+        let mut empty = commit("", "");
+        empty.added_user_id = Some(String::new());
+        assert!(added_identities(&c, &[empty]).await.unwrap().is_empty());
+    }
+}

@@ -462,19 +462,40 @@ fn welcomes_for(added: &[(String, String)], welcome_bytes: Option<&[u8]>) -> Vec
 }
 
 /// The `(added_user_id, added_device_ids)` pair the commit row carries so
-/// receivers can verify cross-signing certs before processing it. Mirrors
-/// reconcile: one user id (the first) plus every added device id.
+/// receivers can verify cross-signing certs before processing it.
+///
+/// **Every distinct user**, in add order, plus every added device id — both CSV,
+/// mirroring `reconcile`. It used to name only `welcomes[0]`'s user (#1080),
+/// which is always wrong here: a suite migration re-adds the WHOLE roster in one
+/// commit, so the opening commit of every successor lineage named one user and
+/// left every other member's leaf unverifiable to a replaying device.
+///
+/// This is a PREFETCH HINT, not what receivers verify — they read the added
+/// leaves off the commit's own Add proposals (`AddedLeaf`), so an incomplete
+/// hint could only ever make an honest add look *unverifiable*, never make a
+/// rogue one look verified. What it cost was a spurious eviction reconcile on
+/// every receiver, and a log line saying a teammate's device could not be
+/// verified.
+///
+/// Only reachable through an external join into a fresh lineage: a Welcome
+/// joiner starts at the successor's epoch 1 and never replays its opening
+/// commit. That narrowness is why it survived the reconcile-side fix.
 fn added_metadata(welcomes: &[WelcomeOut]) -> (Option<String>, Option<String>) {
     if welcomes.is_empty() {
         return (None, None);
     }
-    let uid = welcomes[0].recipient_id.clone();
+    let mut uids: Vec<&str> = Vec::new();
+    for w in welcomes {
+        if !uids.contains(&w.recipient_id.as_str()) {
+            uids.push(w.recipient_id.as_str());
+        }
+    }
     let dids = welcomes
         .iter()
         .map(|w| w.recipient_device_id.as_str())
         .collect::<Vec<_>>()
         .join(",");
-    (Some(uid), Some(dids))
+    (Some(uids.join(",")), Some(dids))
 }
 
 #[cfg(test)]
@@ -510,11 +531,38 @@ mod tests {
         assert_eq!(out[2].recipient_id, "u2");
     }
 
+    /// #1080: a migration re-adds the whole roster in ONE commit, so naming a
+    /// single user left every other member's leaf unverifiable to a device that
+    /// replays that commit (an external join into the fresh lineage).
     #[test]
-    fn added_metadata_lists_every_device() {
+    fn added_metadata_lists_every_user_and_every_device() {
         let (uid, dids) = added_metadata(&[welcome("u1", "d1"), welcome("u2", "d2")]);
-        assert_eq!(uid.as_deref(), Some("u1"));
+        assert_eq!(uid.as_deref(), Some("u1,u2"));
         assert_eq!(dids.as_deref(), Some("d1,d2"));
+    }
+
+    /// A user with several devices appears ONCE in the user list — the DS folds
+    /// per user, so a repeat is wasted work, and the device list is what carries
+    /// the per-device detail.
+    #[test]
+    fn added_metadata_does_not_repeat_a_multi_device_user() {
+        let (uid, dids) = added_metadata(&[
+            welcome("u1", "d1"),
+            welcome("u1", "d2"),
+            welcome("u2", "d3"),
+        ]);
+        assert_eq!(uid.as_deref(), Some("u1,u2"));
+        assert_eq!(dids.as_deref(), Some("d1,d2,d3"));
+    }
+
+    /// The shape the DS parses: both columns are CSV and it splits each on `,`
+    /// (`reads::added_identities`). A single-user migration must still produce a
+    /// bare id with no stray separator.
+    #[test]
+    fn added_metadata_of_one_user_carries_no_separator() {
+        let (uid, dids) = added_metadata(&[welcome("u1", "d1")]);
+        assert_eq!(uid.as_deref(), Some("u1"));
+        assert_eq!(dids.as_deref(), Some("d1"));
     }
 
     #[test]
