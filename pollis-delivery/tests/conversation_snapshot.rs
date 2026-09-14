@@ -235,6 +235,15 @@ async fn a_split_read_can_observe_a_torn_pair() {
 /// concurrency; the assertion at the end refuses to pass without having sampled
 /// both states, so a degenerate interleaving fails loudly instead of quietly
 /// proving nothing.
+///
+/// That guard used to be a flake source (#1145). The two states are not
+/// symmetric — `published` lasts only between two transactions, while
+/// `retracted` also covers the loop turn — so a fixed sample budget could miss
+/// the window entirely on a contended runner and fail a build for a scheduler
+/// accident. The reader now samples until it has seen BOTH states rather than a
+/// fixed number of times, so missing the window costs extra samples instead of
+/// a red build. The guard keeps its teeth for the case it was written for:
+/// a writer that genuinely stops still fails, at the cap.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn torn_group_info_and_welcome_is_not_observable() {
     let db = log_db().await;
@@ -254,6 +263,13 @@ async fn torn_group_info_and_welcome_is_not_observable() {
         let mut epoch = 1i64;
         while !writer_done.load(Ordering::SeqCst) {
             publish_pair(&conn, epoch).await;
+            // Give the reader a scheduling slot while the pair IS published
+            // (#1145). Without this the published state lasts only as long as
+            // the gap between two transactions, while the retracted state also
+            // covers the loop turn — so on a contended runner every one of the
+            // reader's samples can land outside the short window and the
+            // anti-vacuity guard below fires on a scheduler accident.
+            tokio::task::yield_now().await;
             retract_pair(&conn).await;
             epoch += 1;
         }
@@ -266,7 +282,18 @@ async fn torn_group_info_and_welcome_is_not_observable() {
         let conn = reader_db.conn().await.expect("reader conn");
         let mut saw_published = 0usize;
         let mut saw_retracted = 0usize;
-        for _ in 0..2_000 {
+        // 2_000 is the MINIMUM number of times the tearing property is checked.
+        // Past that the reader keeps going until it has actually sampled both
+        // states, up to a hard cap — so an unlucky interleaving costs extra
+        // samples rather than a red build, while a writer that genuinely stopped
+        // still fails at the cap (#1145).
+        const MIN_SAMPLES: usize = 2_000;
+        const MAX_SAMPLES: usize = 200_000;
+        let mut taken = 0usize;
+        while taken < MIN_SAMPLES
+            || ((saw_published == 0 || saw_retracted == 0) && taken < MAX_SAMPLES)
+        {
+            taken += 1;
             let snap = snapshot(&conn, &q, &me, Some(true))
                 .await
                 .expect("snapshot");
@@ -298,8 +325,11 @@ async fn torn_group_info_and_welcome_is_not_observable() {
     assert!(
         published > 0 && retracted > 0,
         "the reader only ever saw one of the two states ({published} published, \
-         {retracted} retracted), so it never sampled the window a tear lives in — \
-         the fixture, not the property, is what passed"
+         {retracted} retracted) across every sample it was allowed, so it never \
+         sampled the window a tear lives in — the fixture, not the property, is \
+         what passed. Reaching this now means the writer stopped making progress, \
+         not that the scheduler was unlucky: the reader keeps sampling until it \
+         has seen both states."
     );
 }
 
