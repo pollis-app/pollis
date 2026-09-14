@@ -135,11 +135,10 @@ pub fn step_index(len: usize, idx: usize, dir: i32) -> usize {
 mod tests {
     use super::*;
 
-    fn req(id: &str, code: &str) -> PendingEnrollmentRequest {
+    fn req(id: &str) -> PendingEnrollmentRequest {
         PendingEnrollmentRequest {
             request_id: id.to_string(),
             new_device_id: format!("dev-{id}"),
-            verification_code: code.to_string(),
             created_at: "t".to_string(),
             expires_at: "t".to_string(),
         }
@@ -180,11 +179,11 @@ mod tests {
     #[test]
     fn approval_state_clamps_selection_when_the_list_shrinks() {
         let mut s = ApprovalState::default();
-        s.set_requests(vec![req("a", "111111"), req("b", "222222"), req("c", "333333")]);
+        s.set_requests(vec![req("a"), req("b"), req("c")]);
         s.selected = 2;
         assert_eq!(s.current().map(|r| r.request_id.as_str()), Some("c"));
         // A refresh that drops the last two requests must not strand the highlight.
-        s.set_requests(vec![req("a", "111111")]);
+        s.set_requests(vec![req("a")]);
         assert_eq!(s.selected, 0);
         assert_eq!(s.current().map(|r| r.request_id.as_str()), Some("a"));
         // Emptied list → no current, selection safe at 0.
@@ -196,7 +195,7 @@ mod tests {
     #[test]
     fn approval_state_moves_within_bounds() {
         let mut s = ApprovalState::default();
-        s.set_requests(vec![req("a", "1"), req("b", "2")]);
+        s.set_requests(vec![req("a"), req("b")]);
         s.move_selection(1);
         assert_eq!(s.selected, 1);
         // Off the bottom stays put.

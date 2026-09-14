@@ -72,7 +72,7 @@ export type NotifyPayload = {
   title?: string;
   body?: string;
   senderUsername?: string;
-  enrollment?: { requestId: string; newDeviceId: string; verificationCode: string };
+  enrollment?: { requestId: string; newDeviceId: string };
 };
 
 type NotifyPrefs = {

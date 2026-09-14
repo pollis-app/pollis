@@ -9,7 +9,7 @@ import { isSpeaking } from '../voice/participantAudio';
 import { presenceStore } from './presenceStore';
 
 type CameraRemote = { trackKey: string; width: number; height: number };
-type EnrollmentApproval = { requestId: string; newDeviceId: string; verificationCode: string };
+type EnrollmentApproval = { requestId: string; newDeviceId: string };
 type IncomingCall = { callId: string; roomName: string; callerId: string; callerUsername: string };
 type OutgoingCall = { callId: string; calleeId: string };
 type StatusBarAlert = { senderUsername: string; roomId: string };

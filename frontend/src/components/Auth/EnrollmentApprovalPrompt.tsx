@@ -1,16 +1,17 @@
 import { errorMessage } from "../../utils/errorMessage";
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { TitleBar } from "../Layout/TitleBar";
 import { DotMatrix } from "../ui/DotMatrix";
 import { Card } from "../ui/Card";
 import { Button } from "../ui/Button";
+import { TextInput } from "../ui/TextInput";
+import { SAS_LENGTH, normalizeSasInput } from "../../utils/enrollmentSas";
 import * as api from "../../services/api";
 
 interface EnrollmentApprovalPromptProps {
   requestId: string;
   newDeviceId: string;
-  verificationCode: string;
   onResolved: () => void;
 }
 
@@ -19,24 +20,42 @@ interface EnrollmentApprovalPromptProps {
 /// must explicitly approve or reject — there is no auto-dismiss because
 /// silently ignoring an enrollment request would be a quiet account
 /// takeover vector.
+///
+/// The approver TYPES the code shown on the new device (#1096). This screen
+/// used to display the server's copy of it and submit that same value back on
+/// one click, so the SAS comparison the whole flow rests on was performed by
+/// nobody: a Delivery Service that swapped the new device's ephemeral key and
+/// its stored code to match satisfied every programmatic check, and approving
+/// handed the account private key to whoever controlled the substituted key.
+/// Typing puts the code the USER read off the other screen on one side of the
+/// comparison, and the code Rust derives from the ephemeral key it fetched on
+/// the other — so a swap fails without depending on the user's diligence.
 export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> = ({
   requestId,
   newDeviceId,
-  verificationCode,
   onResolved,
 }) => {
   const { t } = useTranslation("auth");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [typedCode, setTypedCode] = useState("");
+
+  const isComplete = typedCode.length === SAS_LENGTH;
 
   const handleApprove = async () => {
+    if (!isComplete || isLoading) {
+      return;
+    }
     setIsLoading(true);
     setError(null);
     try {
-      await api.approveDeviceEnrollment(requestId, verificationCode);
+      await api.approveDeviceEnrollment(requestId, typedCode);
       onResolved();
     } catch (err) {
       setError(errorMessage(err, t("approval.approveFailed")));
+      // Clear on failure: a wrong code is the signal to go and re-read the
+      // other screen, not to nudge one character and retry.
+      setTypedCode("");
     } finally {
       setIsLoading(false);
     }
@@ -56,7 +75,10 @@ export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> =
   };
 
   // Truncate the device id for display so the prompt is readable.
-  const shortDeviceId = `${newDeviceId.slice(0, 6)}…${newDeviceId.slice(-4)}`;
+  const shortDeviceId = useMemo(
+    () => `${newDeviceId.slice(0, 6)}…${newDeviceId.slice(-4)}`,
+    [newDeviceId],
+  );
 
   return (
     <div
@@ -119,17 +141,21 @@ export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> =
               </p>
             </div>
 
-            <div
-              data-testid="approval-verification-code"
-              className="font-mono text-3xl font-bold text-center select-all bg-surface border-2 border-accent text-accent"
-              style={{
-                borderRadius: "0.5rem",
-                padding: "1.5rem",
-                letterSpacing: "0.4em",
+            <TextInput
+              data-testid="approval-code-input"
+              label={t("approval.codeLabel")}
+              description={t("approval.codeHint", { count: SAS_LENGTH })}
+              value={typedCode}
+              onChange={(next) => {
+                setError(null);
+                setTypedCode(normalizeSasInput(next));
               }}
-            >
-              {verificationCode}
-            </div>
+              placeholder={"·".repeat(SAS_LENGTH)}
+              disabled={isLoading}
+              autoFocus
+              autoComplete="off"
+              className="font-mono"
+            />
 
             {error && (
               <p
@@ -146,6 +172,7 @@ export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> =
                 onClick={handleApprove}
                 isLoading={isLoading}
                 loadingText={t("approval.approving")}
+                disabled={!isComplete}
                 className="w-full"
               >
                 {t("approval.approve")}

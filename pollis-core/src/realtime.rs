@@ -97,11 +97,17 @@ pub enum RealtimeEvent {
     /// Sent to a user's personal inbox room when one of their OTHER devices
     /// has just posted a `device_enrollment_request` row and is waiting for
     /// approval. Interrupts the UI on every receiving device so the user can
-    /// confirm (the verification code must match the other screen) or reject.
+    /// confirm or reject.
+    ///
+    /// Carries **no verification code** (#1096). The DS's packet still has one —
+    /// shipped clients read it — but a receiver that took it would be back to
+    /// pre-filling the approval UI with a server-supplied value, which is the
+    /// whole defect: the approver must type what the NEW device shows, and
+    /// `approve_device_enrollment` checks that against the code it derives from
+    /// the ephemeral key it fetched itself.
     EnrollmentRequested {
         request_id: String,
         new_device_id: String,
-        verification_code: String,
     },
     /// Sent after a room's event stream recovers from a drop. The frontend
     /// uses this to resync state that may have changed during the outage

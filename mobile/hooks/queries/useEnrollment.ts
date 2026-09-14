@@ -30,10 +30,18 @@ export interface EnrollmentStatus {
   status: EnrollmentStatusKind;
 }
 
+/// One open enrollment request, as the APPROVING device sees it.
+///
+/// No verification code, on purpose (#1096) — the approver types the code shown
+/// on the new device, and Rust checks it against the value derived from the
+/// ephemeral key it fetched. The server's copy used to be here and the UI
+/// submitted it straight back, which put the server on both sides of the
+/// comparison the SAS exists to make. `EnrollmentHandle` above still has one:
+/// that is the REQUESTING device's own locally-derived code, the value the user
+/// reads off this screen and types on the other.
 export interface PendingEnrollmentRequest {
   request_id: string;
   new_device_id: string;
-  verification_code: string;
   created_at: string;
   expires_at: string;
 }

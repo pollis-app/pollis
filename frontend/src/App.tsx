@@ -693,7 +693,6 @@ function MainApp() {
           <EnrollmentApprovalPrompt
             requestId={pendingEnrollmentApproval.requestId}
             newDeviceId={pendingEnrollmentApproval.newDeviceId}
-            verificationCode={pendingEnrollmentApproval.verificationCode}
             onResolved={() => setPendingEnrollmentApproval(null)}
           />
         )}

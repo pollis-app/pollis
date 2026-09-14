@@ -308,7 +308,6 @@ export function useLiveKitRealtime() {
           enrollment: {
             requestId: r.request_id,
             newDeviceId: r.new_device_id,
-            verificationCode: r.verification_code,
           },
         });
       } catch (err) {
@@ -596,7 +595,6 @@ export function useLiveKitRealtime() {
           enrollment: {
             requestId: event.request_id,
             newDeviceId: event.new_device_id,
-            verificationCode: event.verification_code,
           },
         });
         return;

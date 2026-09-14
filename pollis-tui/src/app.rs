@@ -52,6 +52,15 @@ pub enum Screen {
     /// Existing device (M4b): the "Pending device enrollments" list — approve or
     /// reject other devices requesting to join this account.
     PendingEnrollments,
+    /// Existing device: type the verification code shown on the NEW device to
+    /// approve the highlighted request (#1096).
+    ///
+    /// A separate screen rather than an inline field because the list's keymap
+    /// needs `a`/`r`/`j`/`k`, and every one of those is also a character a
+    /// verification code can contain — so the two cannot share a keystroke.
+    /// Reached with `a` from [`Screen::PendingEnrollments`]; `Enter` approves
+    /// once the code is complete, `Esc` goes back.
+    ApproveEnrollment,
     /// Signed in and unlocked — the three-pane client (M2b).
     Home,
     /// Unrecoverable boot/config error — show it and let the user quit.
@@ -244,6 +253,7 @@ impl App {
             Screen::EnrollWaiting => self.on_enroll_waiting_key(key),
             Screen::RecoverKey => self.on_recover_key(key),
             Screen::PendingEnrollments => self.on_pending_enrollments_key(key),
+            Screen::ApproveEnrollment => self.on_approve_enrollment_key(key),
         }
     }
 
@@ -359,19 +369,26 @@ impl App {
                 self.approvals.move_selection(1);
                 None
             }
-            KeyCode::Char('a') => match self.approvals.current() {
-                Some(req) => {
-                    self.status = Some(format!("Approving device {}…", req.new_device_id));
-                    Some(Action::ApproveEnrollment {
-                        request_id: req.request_id.clone(),
-                        code: req.verification_code.clone(),
-                    })
+            // #1096: `a` no longer approves. It opens the code-entry screen,
+            // because the approver has to type the code shown on the NEW device
+            // — the list cannot display one (nothing fetches it) and a one-key
+            // approval is exactly what let a substituted ephemeral key through.
+            KeyCode::Char('a') => {
+                match self.approvals.current() {
+                    Some(req) => {
+                        let device = req.new_device_id.clone();
+                        self.input.clear();
+                        self.status = Some(format!(
+                            "Type the code shown on device {device} to approve it."
+                        ));
+                        self.screen = Screen::ApproveEnrollment;
+                    }
+                    None => {
+                        self.status = Some("No pending requests to approve.".to_string());
+                    }
                 }
-                None => {
-                    self.status = Some("No pending requests to approve.".to_string());
-                    None
-                }
-            },
+                None
+            }
             KeyCode::Char('r') => match self.approvals.current() {
                 Some(req) => {
                     self.status = Some(format!("Rejecting device {}…", req.new_device_id));
@@ -383,6 +400,69 @@ impl App {
                 }
             },
             _ => None,
+        }
+    }
+
+    /// Type the verification code shown on the NEW device, then `Enter` (#1096).
+    ///
+    /// `self.input` is the per-screen buffer every other typed screen uses.
+    /// Characters go through `pollis_core`'s own normalizer — the same function
+    /// the alphabet and length come from — so a lookalike is DROPPED rather than
+    /// mapped: turning a typed `O` into `0` would let a mis-read code compare
+    /// equal to the one Rust derives, which is the substitution this whole
+    /// screen exists to catch.
+    fn on_approve_enrollment_key(&mut self, key: KeyEvent) -> Option<Action> {
+        use pollis_core::commands::device_enrollment::{
+            normalize_enrollment_sas, ENROLLMENT_SAS_LEN,
+        };
+        match classify_code_entry(key.code, self.input.chars().count()) {
+            CodeEntry::Cancel => {
+                self.input.clear();
+                self.status = None;
+                self.screen = Screen::PendingEnrollments;
+                None
+            }
+            CodeEntry::Backspace => {
+                self.input.pop();
+                None
+            }
+            CodeEntry::Incomplete => {
+                self.status = Some(format!(
+                    "The code is {ENROLLMENT_SAS_LEN} characters — read it off the new device's screen."
+                ));
+                None
+            }
+            CodeEntry::Approve => match self.approvals.current() {
+                Some(req) => {
+                    self.status = Some(format!("Approving device {}…", req.new_device_id));
+                    Some(Action::ApproveEnrollment {
+                        request_id: req.request_id.clone(),
+                        code: self.input.clone(),
+                    })
+                }
+                None => {
+                    self.status = Some("That request is no longer pending.".to_string());
+                    self.screen = Screen::PendingEnrollments;
+                    None
+                }
+            },
+            CodeEntry::Type(c) => {
+                let next = normalize_enrollment_sas(&format!("{}{c}", self.input));
+                if next == self.input {
+                    // Either the buffer is full or the character is not one a
+                    // code can contain. Say which, rather than swallowing it.
+                    self.status = Some(if self.input.chars().count() == ENROLLMENT_SAS_LEN {
+                        "The code is complete — press Enter to approve.".to_string()
+                    } else {
+                        format!("'{c}' is not a character a code contains.")
+                    });
+                } else {
+                    self.input = next;
+                    self.status = None;
+                }
+                None
+            }
+            CodeEntry::Ignore => None,
         }
     }
 
@@ -1240,6 +1320,46 @@ impl InputKind {
     }
 }
 
+/// What a keystroke means on the verification-code entry screen (#1096).
+///
+/// Pure, and separate from the handler, for one reason: the rule that `Enter`
+/// approves ONLY a complete code is the gate that replaced a one-keystroke
+/// approval, and it has to be testable. Building an `App` needs a full `Config`,
+/// so the handler itself is not — this is, and the handler is a thin match over
+/// it. Same shape as [`InputKind`], which the auth screens' validation uses for
+/// the same reason.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum CodeEntry {
+    /// Offer this character to the normalizer.
+    Type(char),
+    Backspace,
+    /// The buffer holds a full code — approve the highlighted request with it.
+    Approve,
+    /// `Enter` on a short code. Does nothing except explain the width.
+    Incomplete,
+    /// Back to the list, buffer discarded.
+    Cancel,
+    Ignore,
+}
+
+/// Classify `code` against a buffer of `typed` characters.
+pub(crate) fn classify_code_entry(code: KeyCode, typed: usize) -> CodeEntry {
+    use pollis_core::commands::device_enrollment::ENROLLMENT_SAS_LEN;
+    match code {
+        KeyCode::Esc => CodeEntry::Cancel,
+        KeyCode::Backspace => CodeEntry::Backspace,
+        KeyCode::Enter => {
+            if typed == ENROLLMENT_SAS_LEN {
+                CodeEntry::Approve
+            } else {
+                CodeEntry::Incomplete
+            }
+        }
+        KeyCode::Char(c) => CodeEntry::Type(c),
+        _ => CodeEntry::Ignore,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1247,6 +1367,46 @@ mod tests {
     // The auth screens differ only in their `InputKind`; these lock the
     // per-screen validation so a wrong OTP/PIN length or a non-numeric key can't
     // reach the (DB-opening, network-hitting) command layer.
+
+    /// #1096: the gate that replaced a one-keystroke approval. `Enter` must
+    /// produce an approval ONLY when the buffer holds a full code — otherwise
+    /// the screen is back to approving whatever happens to be there.
+    #[test]
+    fn enter_approves_only_a_complete_code() {
+        use pollis_core::commands::device_enrollment::ENROLLMENT_SAS_LEN;
+
+        for typed in 0..ENROLLMENT_SAS_LEN {
+            assert_eq!(
+                classify_code_entry(KeyCode::Enter, typed),
+                CodeEntry::Incomplete,
+                "{typed} of {ENROLLMENT_SAS_LEN} characters must not approve"
+            );
+        }
+        assert_eq!(
+            classify_code_entry(KeyCode::Enter, ENROLLMENT_SAS_LEN),
+            CodeEntry::Approve
+        );
+    }
+
+    /// The list keys the previous design used — `a` to approve, `j`/`k` to move
+    /// — are all characters a code can contain, which is why code entry is its
+    /// own screen. On THAT screen every one of them is just input.
+    #[test]
+    fn on_the_entry_screen_the_list_keys_are_only_input() {
+        for c in ['a', 'r', 'j', 'k', 'q'] {
+            assert_eq!(
+                classify_code_entry(KeyCode::Char(c), 0),
+                CodeEntry::Type(c),
+                "'{c}' must be typed, never treated as a command here"
+            );
+        }
+        // Esc is the way out; it is not a code character.
+        assert_eq!(classify_code_entry(KeyCode::Esc, 3), CodeEntry::Cancel);
+        assert_eq!(classify_code_entry(KeyCode::Backspace, 3), CodeEntry::Backspace);
+        // Anything else is inert rather than accidentally submitting.
+        assert_eq!(classify_code_entry(KeyCode::Tab, 8), CodeEntry::Ignore);
+        assert_eq!(classify_code_entry(KeyCode::Delete, 8), CodeEntry::Ignore);
+    }
 
     #[test]
     fn email_needs_an_at_sign_and_rejects_whitespace() {

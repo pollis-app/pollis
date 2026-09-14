@@ -89,6 +89,43 @@ const SAS_ALPHABET: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 /// 32-symbol alphabet is 40 bits, so the same attack costs ~10^12 keygens.
 const SAS_LEN: usize = 8;
 
+/// Length of the verification code, for the UIs that ask the approver to type
+/// it. Re-exported rather than re-stated so a change to [`SAS_LEN`] reaches the
+/// input fields that gate on it.
+pub const ENROLLMENT_SAS_LEN: usize = SAS_LEN;
+
+/// The 32 characters a verification code can contain, as a `&str` — for a UI
+/// that has to decide whether a typed character belongs in a code.
+pub const ENROLLMENT_SAS_ALPHABET: &str = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+/// Normalize what a human typed into the canonical verification-code form.
+///
+/// The approver reads the code off the NEW device's screen and types it here
+/// (#1096), so this has to be forgiving about FORM — upper-case it, drop the
+/// spaces and dashes people add while reading a code aloud — and unforgiving
+/// about CONTENT. A character outside the alphabet is DROPPED, never mapped to a
+/// lookalike: turning `O` into `0` or `I` into `1` would let a mis-read code
+/// compare equal to the derived one, which is precisely the substitution the
+/// typed comparison exists to catch. Truncates at [`ENROLLMENT_SAS_LEN`].
+///
+/// The shipped UIs each have a twin of this — `frontend/src/utils/enrollmentSas.ts`
+/// and `mobile/lib/enrollmentSas.ts`, because the two apps share `pollis-core`
+/// but no TypeScript. This is the source of truth; each twin's unit test quotes
+/// the two constants above and fails if they drift. `pollis-tui` calls this
+/// function directly.
+pub fn normalize_enrollment_sas(raw: &str) -> String {
+    let mut out = String::with_capacity(SAS_LEN);
+    for ch in raw.chars().flat_map(|c| c.to_uppercase()) {
+        if ENROLLMENT_SAS_ALPHABET.contains(ch) {
+            out.push(ch);
+            if out.chars().count() == SAS_LEN {
+                break;
+            }
+        }
+    }
+    out
+}
+
 const X25519_PUB_LEN: usize = 32;
 const AES_NONCE_LEN: usize = 12;
 const ACCOUNT_ID_PRIVATE_LEN: usize = 32;
@@ -118,11 +155,24 @@ pub enum EnrollmentStatus {
     Expired,
 }
 
+/// One open enrollment request, as the APPROVING device sees it.
+///
+/// Deliberately carries **no verification code** (#1096). The DS's stored copy
+/// used to be here, and the approval UI displayed it and submitted it back
+/// verbatim — so approving was one click and the SAS comparison was performed by
+/// nobody. A DS that swapped the ephemeral key and its stored code to match
+/// passed every programmatic check, because both sides of the comparison came
+/// from the server.
+///
+/// The approver types the code shown on the NEW device instead, and
+/// [`approve_device_enrollment`] checks it against the value derived from the
+/// ephemeral key it fetched. Leaving the field out is what makes the pre-fill
+/// unrepresentable rather than merely discouraged: there is nothing for the UI
+/// to pre-fill with.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PendingEnrollmentRequest {
     pub request_id: String,
     pub new_device_id: String,
-    pub verification_code: String,
     pub created_at: String,
     pub expires_at: String,
 }
@@ -521,9 +571,6 @@ pub async fn list_pending_enrollment_requests(
         .map(|r| PendingEnrollmentRequest {
             request_id: r.id,
             new_device_id: r.new_device_id,
-            // Present on this endpoint precisely because this list IS the
-            // approving device's UI, and the code is what it displays.
-            verification_code: r.verification_code.unwrap_or_default(),
             created_at: r.created_at,
             expires_at: r.expires_at,
         })
@@ -1205,6 +1252,45 @@ mod tests {
             (SAS_ALPHABET.len() as f64).log2() * SAS_LEN as f64 >= 40.0,
             "the human-compared code must carry at least 40 bits"
         );
+    }
+
+    /// #1096: the approver types the code, so the input rule is part of the
+    /// security boundary — a normalizer that "helpfully" mapped a lookalike
+    /// would let a mis-read code compare equal to the derived one.
+    #[test]
+    fn normalizing_typed_input_is_forgiving_about_form_and_strict_about_content() {
+        // Form: case, and the separators a human adds reading a code aloud.
+        assert_eq!(normalize_enrollment_sas("h7k2pq3m"), "H7K2PQ3M");
+        assert_eq!(normalize_enrollment_sas("H7K2 PQ3M"), "H7K2PQ3M");
+        assert_eq!(normalize_enrollment_sas(" h7k2-pq3m\n"), "H7K2PQ3M");
+
+        // Content: an excluded glyph is dropped, NOT mapped to its lookalike.
+        assert_eq!(normalize_enrollment_sas("O0"), "0");
+        assert_eq!(normalize_enrollment_sas("I1"), "1");
+        assert_eq!(normalize_enrollment_sas("L1"), "1");
+        assert_eq!(normalize_enrollment_sas("UV"), "V");
+        assert_eq!(normalize_enrollment_sas("oilu"), "");
+
+        // Bounded, and a partial code stays partial so the UI stays gated.
+        assert_eq!(normalize_enrollment_sas("H7K2PQ3MEXTRA").len(), SAS_LEN);
+        assert!(normalize_enrollment_sas("H7K").len() < SAS_LEN);
+    }
+
+    /// The exported constants must describe the codes this module actually
+    /// derives, or every legitimate code would be rejected at the input.
+    #[test]
+    fn the_exported_input_rule_accepts_every_derived_code() {
+        assert_eq!(ENROLLMENT_SAS_LEN, SAS_LEN);
+        assert_eq!(
+            ENROLLMENT_SAS_ALPHABET.as_bytes(),
+            &SAS_ALPHABET[..],
+            "the alphabet a UI validates against must be the one codes are built from"
+        );
+        // A derived code survives normalization unchanged, for many keys.
+        for seed in 0u8..32 {
+            let code = derive_verification_code(&[seed; X25519_PUB_LEN]);
+            assert_eq!(normalize_enrollment_sas(&code), code);
+        }
     }
 
     #[test]

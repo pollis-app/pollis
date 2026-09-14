@@ -11,6 +11,7 @@ import {
   Chip,
   Button,
   Ctx,
+  Field,
 } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty, fonts } from "../../theme/tokens";
@@ -33,6 +34,7 @@ import {
   useLockNow,
 } from "../../lib/autolock";
 import { ExportArchive } from "../../components/ExportArchive";
+import { SAS_LENGTH, normalizeSasInput } from "../../lib/enrollmentSas";
 
 function formatRelative(iso: string): string {
   const d = new Date(iso);
@@ -169,6 +171,11 @@ export default function Security() {
   const approveEnrollment = useApproveEnrollment();
   const rejectEnrollment = useRejectEnrollment();
   const [confirmRevoke, setConfirmRevoke] = useState<string | null>(null);
+  // The code the approver TYPES off the new device's screen, per request
+  // (#1096). Never pre-filled — the server's copy is no longer even sent to the
+  // client, because submitting it back would put the server on both sides of the
+  // comparison the SAS exists to make.
+  const [typedCodes, setTypedCodes] = useState<Record<string, string>>({});
   const { minutes: autoLockMinutes, setMinutes: setAutoLockMinutes } =
     useAutoLockMinutes();
   const lockNow = useLockNow();
@@ -228,16 +235,19 @@ export default function Security() {
                 >
                   {t("mobile:self.security.pairIntro")}
                 </Text>
-                <Text
-                  style={{
-                    fontFamily: fonts.mono400,
-                    fontSize: 18,
-                    letterSpacing: 3,
-                    color: semantic.accent,
-                  }}
-                >
-                  {req.verification_code}
-                </Text>
+                <Field
+                  testID={`input-approval-code-${req.request_id}`}
+                  accessibilityLabel={t("auth:approval.codeLabel")}
+                  value={typedCodes[req.request_id] ?? ""}
+                  onChangeText={(next) =>
+                    setTypedCodes((prev) => ({
+                      ...prev,
+                      [req.request_id]: normalizeSasInput(next),
+                    }))
+                  }
+                  placeholder={"·".repeat(SAS_LENGTH)}
+                  editable={!approveEnrollment.isPending}
+                />
                 <Text
                   style={{
                     fontFamily: ty.body.fontFamily,
@@ -259,10 +269,13 @@ export default function Security() {
                     variant="on"
                     testID={`btn-approve-${req.request_id}`}
                     accessibilityLabel={t("mobile:self.security.approveA11y")}
+                    disabled={
+                      (typedCodes[req.request_id] ?? "").length !== SAS_LENGTH
+                    }
                     onPress={() =>
                       approveEnrollment.mutate({
                         requestId: req.request_id,
-                        verificationCode: req.verification_code,
+                        verificationCode: typedCodes[req.request_id] ?? "",
                       })
                     }
                   >

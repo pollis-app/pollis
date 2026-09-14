@@ -81,10 +81,26 @@ async fn second_device_enrolls_via_approval_and_gets_a_working_mls_leaf() {
                 handle.request_id
             )
         });
-    assert_eq!(
-        matching.verification_code, handle.verification_code,
-        "the verification code must match between the two devices",
+    // What A does NOT get is a verification code (#1096). It used to, and the UI
+    // displayed that copy and submitted it back, so the comparison the code
+    // exists for was performed by nobody — a Delivery Service that swapped B's
+    // ephemeral key and its stored code to match passed every check. A's list
+    // now carries only the device id; the code has to come off B's screen.
+    let _ = matching;
+
+    // A wrong code is refused, which is the whole point: what the approver types
+    // is checked against the code A derives from the ephemeral key A fetched.
+    let wrong = wrong_code(&handle.verification_code);
+    let refused = alice_a
+        .try_approve_enrollment(&handle.request_id, &wrong)
+        .await;
+    assert!(
+        refused.is_err(),
+        "approving with a code that is not the derived one must fail, got {refused:?}",
     );
+
+    // The right code — `handle.verification_code` is B's own locally-derived
+    // value, i.e. exactly what a human reads off B's screen and types on A.
     alice_a
         .approve_enrollment(&handle.request_id, &handle.verification_code)
         .await;
@@ -116,4 +132,18 @@ async fn second_device_enrolls_via_approval_and_gets_a_working_mls_leaf() {
         a_seen.contains(&"hello from device B".to_string()),
         "device A must decrypt the message B sent; got {a_seen:?}",
     );
+}
+
+/// One character of `code` changed to a DIFFERENT character of the same
+/// alphabet — a near-miss, the shape a mis-read or substituted code takes.
+fn wrong_code(code: &str) -> String {
+    use pollis_core::commands::device_enrollment::ENROLLMENT_SAS_ALPHABET;
+    let mut chars: Vec<char> = code.chars().collect();
+    let alphabet: Vec<char> = ENROLLMENT_SAS_ALPHABET.chars().collect();
+    let last = chars.len() - 1;
+    chars[last] = *alphabet
+        .iter()
+        .find(|c| **c != chars[last])
+        .expect("the alphabet has more than one character");
+    chars.into_iter().collect()
 }

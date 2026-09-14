@@ -1,0 +1,72 @@
+appId: com.pollis.mobile
+tags:
+  - parity
+  - two-client
+---
+# ENROLLMENT APPROVAL (#1096) — the approver TYPES the verification code.
+#
+# TWO-CLIENT. This is device A, already signed in, approving device B's
+# enrollment request. B must be at `screen-auth-enrollment` on a second
+# device/simulator with a pending request against the SAME account — see
+# `_two-client.md` and the README's "Two-client flows".
+#
+# Why the typing matters: the short-authentication-string is derived from B's
+# ephemeral public key, and A checks what is typed against the value A derives
+# from the key A fetched. The card used to display the Delivery Service's stored
+# copy and submit it on one tap, so a DS that swapped B's key and its stored code
+# to match satisfied every check and approval handed over the account key. With
+# the code typed off B's screen, that substitution fails here.
+#
+# Required env:
+#   MAESTRO_EMAIL             — the account both devices sign into
+#   MAESTRO_ENROLL_REQUEST_ID — B's request id (read off A's card, or the DS)
+#   MAESTRO_ENROLL_CODE       — the 8-character code B is DISPLAYING
+#
+# Run:
+#   maestro test -e MAESTRO_EMAIL=… -e MAESTRO_ENROLL_REQUEST_ID=… \
+#     -e MAESTRO_ENROLL_CODE=… .maestro/flows/enrollment-approval.yaml
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-security"
+- assertVisible:
+    id: "screen-self-security"
+
+# The pending card is present, and it shows NO code — there is nothing to read
+# off A's own screen, which is what stops a one-tap approval.
+- assertVisible:
+    id: "input-approval-code-${MAESTRO_ENROLL_REQUEST_ID}"
+- assertNotVisible:
+    text: "${MAESTRO_ENROLL_CODE}"
+- takeScreenshot: enrollment-01-card-has-no-code
+
+# Approve is gated until the full code is entered. Seven characters is not
+# enough — the tap must do nothing and leave the card up.
+- tapOn:
+    id: "input-approval-code-${MAESTRO_ENROLL_REQUEST_ID}"
+- inputText: "${MAESTRO_ENROLL_CODE}"
+- eraseText: 1
+- tapOn:
+    id: "btn-approve-${MAESTRO_ENROLL_REQUEST_ID}"
+- assertVisible:
+    id: "input-approval-code-${MAESTRO_ENROLL_REQUEST_ID}"
+- takeScreenshot: enrollment-02-partial-code-gated
+
+# The full code, read off B's screen.
+- tapOn:
+    id: "input-approval-code-${MAESTRO_ENROLL_REQUEST_ID}"
+- eraseText: 8
+- inputText: "${MAESTRO_ENROLL_CODE}"
+- takeScreenshot: enrollment-03-code-typed
+- tapOn:
+    id: "btn-approve-${MAESTRO_ENROLL_REQUEST_ID}"
+
+# The request is gone from A's list once it is approved.
+- assertNotVisible:
+    id: "input-approval-code-${MAESTRO_ENROLL_REQUEST_ID}"
+- takeScreenshot: enrollment-04-approved
+
+# On DEVICE B, after this: the enrollment completes and B reaches the tabs.
+# Assert there, not here.

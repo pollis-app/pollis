@@ -198,6 +198,7 @@ export function Chip({
   style,
   testID,
   accessibilityLabel,
+  disabled,
 }: {
   children: React.ReactNode;
   variant?: "default" | "on" | "solid" | "subtle";
@@ -207,6 +208,10 @@ export function Chip({
   // e.g. `chip-accent-mint`. Harmless when the chip is purely decorative.
   testID?: string;
   accessibilityLabel?: string;
+  // Same shape as `Button`'s: the press is suppressed, the state is announced,
+  // and the chip dims — so a chip gated on an incomplete input (the enrollment
+  // approval's typed code, #1096) reads as unavailable rather than inert.
+  disabled?: boolean;
 }) {
   const border =
     variant === "on"
@@ -230,12 +235,14 @@ export function Chip({
         : semantic.ink2;
   return (
     <Pressable
-      onPress={onPress}
+      onPress={disabled ? undefined : onPress}
+      disabled={disabled}
       testID={testID}
       accessibilityLabel={
         accessibilityLabel ??
         (typeof children === "string" ? children : undefined)
       }
+      accessibilityState={{ disabled: !!disabled }}
       style={[
         {
           flexDirection: "row",
@@ -247,6 +254,7 @@ export function Chip({
           borderColor: border,
           backgroundColor: bg,
           borderRadius: r.sm,
+          opacity: disabled ? 0.45 : 1,
         },
         style,
       ]}

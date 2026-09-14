@@ -83,10 +83,11 @@ gallery the visual evaluator reviews. Override device names with `IOS_DEVICE=…
 | `ipad-two-pane` | #622 list+detail side-by-side (run on **iPad**) | no |
 | `dms` | start a DM with the seeded peer (initiator side) | yes |
 | `i18n` | switch language (copy re-renders), persists across relaunch, Arabic mirrors the layout after relaunch (#1074) | no |
+| `enrollment-approval` | #1096 the approver TYPES the code off the new device — the card shows none, approve is gated on eight characters | yes |
 
-Two-client / special flows (`enrollment`, `realtime`, `blocking`, `push-tap`,
-and the DM accept/reply side) are scaffolded in `_two-client.md` — they need the
-two-device setup below and a Mac shakedown.
+Two-client / special flows (`enrollment-approval`, `realtime`, `blocking`,
+`push-tap`, and the DM accept/reply side) are scaffolded in `_two-client.md` —
+they need the two-device setup below and a Mac shakedown.
 
 ## Two-client flows
 

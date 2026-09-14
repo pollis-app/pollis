@@ -242,15 +242,17 @@ pub(super) fn dispatch_data(
             if sender.is_some() {
                 return None;
             }
-            if let (Some(request_id), Some(new_device_id), Some(verification_code)) = (
+            // `verification_code` is deliberately NOT read out of the packet
+            // (#1096), even though the DS still sends it for shipped clients.
+            // Forwarding it would let the approval UI pre-fill the comparison
+            // with a server-supplied value.
+            if let (Some(request_id), Some(new_device_id)) = (
                 data.get("request_id").and_then(|v| v.as_str()),
                 data.get("new_device_id").and_then(|v| v.as_str()),
-                data.get("verification_code").and_then(|v| v.as_str()),
             ) {
                 let _ = channel.send(RealtimeEvent::EnrollmentRequested {
                     request_id: request_id.to_owned(),
                     new_device_id: new_device_id.to_owned(),
-                    verification_code: verification_code.to_owned(),
                 });
             }
         }
@@ -522,5 +524,52 @@ mod tests {
             username: None,
         };
         assert!(run(payload, Some(&someone)).is_empty());
+    }
+
+    /// #1096: the approval takeover must not carry the server's copy of the
+    /// verification code. The DS still puts one in the packet for shipped
+    /// clients, so the check is that this dispatch DROPS it — otherwise the
+    /// approval UI can pre-fill the comparison with a server-supplied value and
+    /// a DS that swaps the ephemeral key and its stored code together passes.
+    #[test]
+    fn an_enrollment_takeover_carries_no_server_supplied_code() {
+        let events = run(
+            serde_json::json!({
+                "type": "enrollment_requested",
+                "request_id": "r1",
+                "new_device_id": "d2",
+                "verification_code": "ABCD2345",
+            }),
+            None,
+        );
+        let [RealtimeEvent::EnrollmentRequested { request_id, new_device_id }] = &events[..] else {
+            panic!("expected exactly one EnrollmentRequested, got {} event(s)", events.len());
+        };
+        assert_eq!(request_id, "r1");
+        assert_eq!(new_device_id, "d2");
+        // The variant has no code field at all; this is the compile-time half of
+        // the assertion. The runtime half is that a packet WITH a code still
+        // dispatches, rather than being rejected as malformed — shipped DS
+        // packets must keep working.
+        let serialized = serde_json::to_string(&events[0]).expect("serialize");
+        assert!(
+            !serialized.contains("ABCD2345"),
+            "the server's code reached the UI event: {serialized}"
+        );
+    }
+
+    /// And a packet with NO code must still raise the takeover — a future DS
+    /// that stops sending it cannot be allowed to silence enrollment prompts.
+    #[test]
+    fn an_enrollment_takeover_needs_no_code_in_the_packet() {
+        let events = run(
+            serde_json::json!({
+                "type": "enrollment_requested",
+                "request_id": "r1",
+                "new_device_id": "d2",
+            }),
+            None,
+        );
+        assert_eq!(events.len(), 1, "a packet with no code must still raise the takeover");
     }
 }

@@ -154,6 +154,25 @@ interface MockReceipt {
   read_by: string[];
 }
 
+/**
+ * An open enrollment request as the APPROVING device sees it — with **no**
+ * verification code, mirroring `PendingEnrollmentRequest` in
+ * `pollis-core/src/commands/device_enrollment.rs` (#1096). If this shape ever
+ * grows a code again, `enrollment-approval.spec.ts` is the spec that notices.
+ *
+ * `correctCode` is the value the mock's `approve_device_enrollment` accepts. It
+ * stands in for what Rust derives from the ephemeral key it fetched — the spec's
+ * whole point is that the UI cannot see it, so it is deliberately NOT part of
+ * what `list_pending_enrollment_requests` returns.
+ */
+interface MockPendingEnrollment {
+  request_id: string;
+  new_device_id: string;
+  created_at: string;
+  expires_at: string;
+  correctCode: string;
+}
+
 interface MockStore {
   session: MockUser | null;
   profile: MockProfile | null;
@@ -180,6 +199,10 @@ interface MockStore {
   // Shareable invite links (#847), keyed by nothing — the group id is on the
   // row, as it is server-side.
   inviteLinks: MockInviteLink[];
+  /** Open device-enrollment requests the approval takeover renders (#1096). */
+  pendingEnrollments: MockPendingEnrollment[];
+  /** What the UI actually submitted to `approve_device_enrollment`. */
+  enrollmentApprovals: { requestId: string; verificationCode: string }[];
   // Local voice gate (#849). Rust owns this in production.
   voiceGate: MockVoiceGate;
   // Delivery / read receipts (#857), keyed by conversation id. DM-only in
@@ -265,6 +288,8 @@ const store: MockStore = {
   vaultMessages: preload.vaultMessages ?? [],
   customEmoji: preload.customEmoji ?? [],
   inviteLinks: preload.inviteLinks ?? [],
+  pendingEnrollments: preload.pendingEnrollments ?? [],
+  enrollmentApprovals: [],
   voiceGate: {
     mode: 'voice_activity',
     self_muted: false,
@@ -863,7 +888,6 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'list_join_requests':
     case 'get_join_requests':
     case 'get_group_join_requests':
-    case 'list_pending_enrollment_requests':
     case 'list_devices':
     case 'list_user_devices':
     case 'list_blocked_users':
@@ -871,6 +895,44 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'list_security_events':
     case 'get_pinned_messages':
       return [];
+
+    // The approving device's view of open enrollment requests. Note what is
+    // NOT here: a verification code (#1096). The approver types the code shown
+    // on the new device, so there is nothing for this list to pre-fill with.
+    case 'list_pending_enrollment_requests':
+      return store.pendingEnrollments.map((e) => ({
+        request_id: e.request_id,
+        new_device_id: e.new_device_id,
+        created_at: e.created_at,
+        expires_at: e.expires_at,
+      }));
+
+    // Records what the UI submitted, and accepts it only if it equals the
+    // request's real code — standing in for `approve_device_enrollment`, which
+    // compares against the value it derives from the ephemeral key it fetched
+    // rather than against anything the server said.
+    case 'approve_device_enrollment': {
+      const { requestId, verificationCode } = args as {
+        requestId: string;
+        verificationCode: string;
+      };
+      store.enrollmentApprovals.push({ requestId, verificationCode });
+      const req = store.pendingEnrollments.find((e) => e.request_id === requestId);
+      if (!req || verificationCode !== req.correctCode) {
+        throw new Error('verification code does not match');
+      }
+      store.pendingEnrollments = store.pendingEnrollments.filter(
+        (e) => e.request_id !== requestId,
+      );
+      return null;
+    }
+    case 'reject_device_enrollment': {
+      const { requestId } = args as { requestId: string };
+      store.pendingEnrollments = store.pendingEnrollments.filter(
+        (e) => e.request_id !== requestId,
+      );
+      return null;
+    }
 
     // `MessageReactions` destructures with `= []`, which only covers
     // `undefined` — the `null` an unhandled command returns reaches

@@ -660,8 +660,23 @@ impl TestClient {
             .expect("pending_requests")
     }
 
-    /// Existing device: approve a pending request, confirming its code.
+    /// Existing device: approve a pending request with the code the approver
+    /// TYPED (#1096) — in a test, the value the new device derived and is
+    /// displaying, which is what a human reads off its screen.
     pub async fn approve_enrollment(&self, request_id: &str, verification_code: &str) {
+        self.try_approve_enrollment(request_id, verification_code)
+            .await
+            .expect("approve_enrollment");
+    }
+
+    /// [`Self::approve_enrollment`] without the `expect`, for the negative case:
+    /// a wrong code must be REFUSED, and a test that can only panic on failure
+    /// cannot assert that.
+    pub async fn try_approve_enrollment(
+        &self,
+        request_id: &str,
+        verification_code: &str,
+    ) -> anyhow::Result<()> {
         self.activate();
         pollis_tui::enroll::approve(
             &self.state,
@@ -669,7 +684,6 @@ impl TestClient {
             verification_code.to_string(),
         )
         .await
-        .expect("approve_enrollment");
     }
 
     /// New device: complete an enrollment/recovery after the account key is in

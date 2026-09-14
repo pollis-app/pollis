@@ -1709,12 +1709,20 @@ pub(crate) async fn enroll_second_device(primary: &TestClient, email: &str) -> T
                  got {pending_arr:#?}"
             )
         });
-    assert_eq!(
-        matching["verification_code"].as_str(),
-        Some(verification_code.as_str()),
-        "verification code should match between devices"
+    // The approver's list carries NO verification code (#1096). It used to, and
+    // the approving UI displayed that copy and submitted it straight back — so
+    // the comparison the code exists for was performed by nobody, and a Delivery
+    // Service that swapped the new device's ephemeral key and its stored code to
+    // match passed every check. Asserting the two copies were equal was asserting
+    // exactly that insecure property, so the assertion is the ABSENCE of a copy.
+    assert!(
+        matching.get("verification_code").is_none(),
+        "the approver's list must not carry a verification code: {matching:#?}"
     );
 
+    // `verification_code` here is the NEW device's own locally-derived value —
+    // what a human reads off its screen and types on the approving device. That
+    // is the only place it legitimately comes from.
     primary
         .invoke_json(
             "approve_device_enrollment",

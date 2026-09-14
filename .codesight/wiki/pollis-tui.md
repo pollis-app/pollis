@@ -22,10 +22,30 @@ exact same `pollis_core::commands::*` surface the desktop app reaches over Tauri
   verification code, polls `enrollment_status` on a tick; retry on rejected/
   expired) → on Approved, `SetPin` → `enroll::set_pin_and_finalize`; or *Recover*
   → **RecoverKey** (Secret-Key entry) → `enroll::recover` → same finalize tail.
-  On an existing signed-in device, `E` opens **PendingEnrollments** (↑/↓, `a`
-  approve with the shown code, `r` reject). The pure branch/selection logic lives
-  in `src/enroll_flow.rs` (`PinFlow`/`EnrollChoice`/`PollOutcome`/`ApprovalState`,
-  unit-tested); async work is in `app.rs`.
+  On an existing signed-in device, `E` opens **PendingEnrollments** (↑/↓ move,
+  `a` approve, `r` reject). The list shows the requesting **device id and
+  nothing else**: `a` opens **ApproveEnrollment**, where the approver TYPES the
+  verification code shown on the NEW device (`Enter` approves, `Esc` back).
+
+  That is #1096, and it is why code entry is its own screen rather than an inline
+  field — `a`, `r`, `j`, `k` and `q` are all characters a verification code can
+  contain, so the list's keymap and the code input cannot share a keystroke. The
+  list used to display the Delivery Service's copy of the code and `a` approved
+  with that same value, so the comparison the code exists for was performed by
+  nobody: a DS that swapped the new device's ephemeral key and its stored code to
+  match passed on one keystroke, and approving handed over the account private
+  key. Input goes through `pollis_core`'s own
+  `device_enrollment::normalize_enrollment_sas` — the single source of truth for
+  the alphabet and length, shared with the desktop and mobile twins — so a
+  lookalike is dropped rather than mapped (`O`→`0` would let a mis-read code
+  compare equal).
+
+  The pure branch/selection logic lives in `src/enroll_flow.rs`
+  (`PinFlow`/`EnrollChoice`/`PollOutcome`/`ApprovalState`, unit-tested); the
+  code-entry gate is `app.rs`'s pure `classify_code_entry` (`Enter` yields
+  `Approve` only at the full length), also unit-tested; async work is in
+  `app.rs`. `tests/enroll_smoke.rs` drives the whole two-device flow and asserts
+  a near-miss code is REFUSED.
 
 ## Why a TUI
 

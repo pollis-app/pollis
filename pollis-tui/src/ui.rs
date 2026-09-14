@@ -44,6 +44,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         Screen::EnrollChoice => render_enroll_choice(frame, chunks[1], app),
         Screen::EnrollWaiting => render_enroll_waiting(frame, chunks[1], app),
         Screen::PendingEnrollments => render_pending_enrollments(frame, chunks[1], app),
+        Screen::ApproveEnrollment => render_approve_enrollment(frame, chunks[1], app),
         _ => render_auth_body(frame, chunks[1], app),
     }
     render_status(frame, chunks[2], app);
@@ -215,6 +216,58 @@ fn render_sidebar(frame: &mut Frame, area: Rect, home: &HomeState) {
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
+/// Existing device: type the verification code shown on the NEW device (#1096).
+///
+/// Deliberately shows no code of its own — there is none to show, because
+/// nothing fetched one. What the user types goes on one side of the comparison
+/// and the code Rust derives from the ephemeral key IT fetched goes on the
+/// other, so a substituted key fails here instead of passing unnoticed.
+fn render_approve_enrollment(frame: &mut Frame, area: Rect, app: &App) {
+    use pollis_core::commands::device_enrollment::ENROLLMENT_SAS_LEN;
+
+    let card = centered(area, 62, 11);
+    let device = app
+        .approvals
+        .current()
+        .map_or("?", |r| r.new_device_id.as_str());
+
+    let typed = app.input.chars().count();
+    // Underscores for the characters still to come, so the width is obvious.
+    let field = format!(
+        "{}{}",
+        app.input,
+        "_".repeat(ENROLLMENT_SAS_LEN.saturating_sub(typed))
+    );
+
+    let block = Block::default().borders(Borders::ALL).title(Span::styled(
+        " Approve device ",
+        Style::default().add_modifier(Modifier::BOLD),
+    ));
+    let lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("  Device {device} wants to join this account."),
+            Style::default().fg(Color::Gray),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Read the code off THAT device's screen and type it here:",
+            Style::default().fg(Color::Gray),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("      {field}"),
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  If it does not match, press Esc and reject the request.",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+    frame.render_widget(Paragraph::new(lines).block(block), card);
+}
+
 fn render_messages(frame: &mut Frame, area: Rect, home: &HomeState) {
     let focused = home.focus == Focus::Messages;
     let title = home
@@ -339,6 +392,7 @@ fn render_auth_body(frame: &mut Frame, area: Rect, app: &App) {
         Screen::EnrollChoice => ("Enroll", "", String::new()),
         Screen::EnrollWaiting => ("Enroll", "", String::new()),
         Screen::PendingEnrollments => ("Enrollments", "", String::new()),
+        Screen::ApproveEnrollment => ("Approve", "", String::new()),
         // Home is rendered by render_home; Fatal shows a simple message.
         Screen::Home => ("Home", "", String::new()),
         Screen::Fatal => ("Error", "Press any key to exit.", String::new()),
@@ -440,9 +494,15 @@ fn render_enroll_waiting(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(Paragraph::new(lines).block(block), card);
 }
 
-/// Existing device: the full-screen "Pending device enrollments" list. Each row
-/// shows the requesting device id and its verification code so the user can
-/// confirm the code matches the new device's screen before approving.
+/// Existing device: the full-screen "Pending device enrollments" list.
+///
+/// Each row shows the requesting device id and nothing else. It used to show a
+/// verification code, fetched from the Delivery Service, and `a` approved with
+/// that same value — so the comparison the code exists for was performed by
+/// nobody, and a DS that swapped the new device's ephemeral key and its stored
+/// code to match passed on one keystroke (#1096). `a` now opens
+/// [`render_approve_enrollment`], where the approver types what the NEW device
+/// is showing.
 fn render_pending_enrollments(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::default().borders(Borders::ALL).title(Span::styled(
         " Pending device enrollments ",
@@ -471,10 +531,7 @@ fn render_pending_enrollments(frame: &mut Frame, area: Rect, app: &App) {
             }
             let marker = if selected { "›" } else { " " };
             Line::from(Span::styled(
-                format!(
-                    "{marker} device {}   code {}",
-                    r.new_device_id, r.verification_code
-                ),
+                format!("{marker} device {}", r.new_device_id),
                 style,
             ))
         })
@@ -498,6 +555,9 @@ fn render_status(frame: &mut Frame, area: Rect, app: &App) {
             Screen::EnrollWaiting => "Waiting for approval… · Ctrl-C quit",
             Screen::RecoverKey => "Type/paste your Secret Key · Enter recover · Esc back",
             Screen::PendingEnrollments => "↑/↓ move · a approve · r reject · Esc back",
+            Screen::ApproveEnrollment => {
+                "Type the code from the new device · Enter approve · Esc back"
+            }
             _ => "Ctrl-C to quit",
         };
         spans.push(Span::styled(help, Style::default().fg(Color::DarkGray)));

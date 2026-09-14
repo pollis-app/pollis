@@ -8,10 +8,22 @@ state a simulator can't easily fake. Author/verify these on the Mac:
 - **dms.yaml** — the initiator side IS authored; the peer runs `subflows/sign-in.yaml`
   (with `-e MAESTRO_EMAIL=$MAESTRO_PEER_EMAIL`) on a second simulator, accepts the
   DM request (`btn-accept-request-<id>`), and replies. Assert convergence on both.
-- **enrollment** — device A (signed in) approves device B's enrollment:
-  A → `screen-self-security` → `btn-approve-<requestId>`; B starts from the
-  `screen-auth-enrollment` branch (OTP on an already-registered account) and
-  reaches the tabs. Recovery path: `btn-enroll-recovery` → `input-recovery-key`.
+- **enrollment** — device A (signed in) approves device B's enrollment. Scaffolded
+  as `enrollment-approval.yaml`; it needs the second device, so run it with the
+  two-device harness.
+
+  **The approver now TYPES the code (#1096).** A's card no longer displays one:
+  `btn-approve-<requestId>` is **disabled** until eight characters are entered in
+  `input-approval-code-<requestId>`, and the value submitted is what was typed.
+  The code to type is the one B shows on `screen-auth-enrollment` — read it off
+  B's screen, not from anything A fetched, because that is the whole point: A
+  checks it against the value it derives from the ephemeral key it fetched
+  itself, so a Delivery Service that substituted the key fails here instead of
+  passing on one tap.
+
+  B starts from the `screen-auth-enrollment` branch (OTP on an already-registered
+  account) and reaches the tabs. Recovery path: `btn-enroll-recovery` →
+  `input-recovery-key`.
 - **realtime** — two devices in the same channel/DM; peer sends, assert the
   message appears on device A WITHOUT a manual refresh (LiveKit data-only). Needs
   `EXPO_PUBLIC_LIVEKIT_URL` baked into both dev builds.
