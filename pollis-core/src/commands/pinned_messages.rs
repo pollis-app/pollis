@@ -647,12 +647,16 @@ mod tests {
 
     const KEY: &[u8; 32] = b"0123456789abcdef0123456789abcdef";
 
+    /// Ids are long and distinctive on purpose — see
+    /// [`the_stored_bytes_do_not_contain_the_plaintext`], which searches the
+    /// ciphertext for them. A two-character id makes that search a coin flip
+    /// rather than a leak detector.
     fn snapshot() -> PinSnapshot {
         PinSnapshot {
             v: 1,
-            message_id: "m1".into(),
-            conversation_id: "c1".into(),
-            sender_id: "u1".into(),
+            message_id: "msg-01M2PINNEDSNAPSHOT".into(),
+            conversation_id: "conv-01M2PINNEDSNAPSHOT".into(),
+            sender_id: "user-01M2PINNEDSNAPSHOT".into(),
             sent_at: "2026-01-01T00:00:00Z".into(),
             content: "the pinned words".into(),
         }
@@ -660,30 +664,56 @@ mod tests {
 
     #[test]
     fn a_sealed_snapshot_opens_back_to_itself() {
-        let json = serde_json::to_vec(&snapshot()).unwrap();
+        let snap = snapshot();
+        let json = serde_json::to_vec(&snap).unwrap();
         let padded = crate::commands::messages::framing::pad(&json);
         let (nonce, ct) = seal(KEY, &padded).unwrap();
         let opened = open(KEY, &nonce, &ct).unwrap();
         let stripped = crate::commands::messages::framing::strip(&opened);
         let back: PinSnapshot = serde_json::from_slice(&stripped).unwrap();
-        assert_eq!(back.content, "the pinned words");
-        assert_eq!(back.message_id, "m1");
+        // Compared against the fixture, not against re-typed literals — the two
+        // drifted the moment the fixture's ids changed.
+        assert_eq!(back.content, snap.content);
+        assert_eq!(back.message_id, snap.message_id);
+        assert_eq!(back.conversation_id, snap.conversation_id);
+        assert_eq!(back.sender_id, snap.sender_id);
     }
 
     /// What the DS stores must not carry the pin's words or ids.
+    ///
+    /// **Every needle must be long enough that finding one is evidence.** This
+    /// searched for `b"m1"` — the old two-byte `message_id` — and a two-byte
+    /// sequence turns up in random ciphertext about once every 300 runs, so the
+    /// test reddened CI roughly that often with nothing wrong. Measured at 2
+    /// failures in 400 runs before the fixture ids were lengthened.
+    ///
+    /// A short needle cannot tell a leak from a coincidence, which makes it
+    /// worse than no needle: it trains people to re-run the suite. The fixture's
+    /// ids are now long and distinctive, so a hit is a real leak, and the
+    /// assertion says which needle hit.
     #[test]
     fn the_stored_bytes_do_not_contain_the_plaintext() {
-        let json = serde_json::to_vec(&snapshot()).unwrap();
+        let snap = snapshot();
+        let json = serde_json::to_vec(&snap).unwrap();
         let padded = crate::commands::messages::framing::pad(&json);
         let (_, ct) = seal(KEY, &padded).unwrap();
         for needle in [
-            b"the pinned words".as_slice(),
+            snap.content.as_bytes(),
+            snap.message_id.as_bytes(),
+            snap.conversation_id.as_bytes(),
+            snap.sender_id.as_bytes(),
             b"message_id".as_slice(),
-            b"m1".as_slice(),
         ] {
             assert!(
+                needle.len() >= 8,
+                "a needle shorter than 8 bytes cannot distinguish a leak from a \
+                 coincidence: {:?}",
+                String::from_utf8_lossy(needle)
+            );
+            assert!(
                 !ct.windows(needle.len()).any(|w| w == needle),
-                "plaintext leaked into the stored pin bytes"
+                "plaintext leaked into the stored pin bytes: {:?}",
+                String::from_utf8_lossy(needle)
             );
         }
     }
