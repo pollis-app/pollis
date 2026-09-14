@@ -144,6 +144,15 @@ export class PollisDelivery extends Container<Env> {
   // value EXPLICIT — matching the default — to document intent and to survive a
   // library default change. Re-measure the cold start before paying: procedure
   // in docs/deployments.md, DS section. (#695)
+  //
+  // DO NOT LOWER THIS BELOW THE OTP LIFETIME (#1142). The DS holds the OTP
+  // failed-guess counter and mailbox lockout in memory, so sleeping clears them.
+  // That is safe only because the silence needed to trigger a sleep (10m) also
+  // expires the code being attacked (OTP_TTL_SECS, 600s) — the reset cannot
+  // outlive the secret it protects. Lower it and an attacker earns a fresh
+  // 5-guess budget against one LIVE code every sleep window just by pausing.
+  // `tests/otp_state_durability.rs` reads this line and fails if the inequality
+  // inverts; raising it (a cost decision) is always safe.
   sleepAfter = "10m";
   // The DS reaches out to Turso, Resend, LiveKit and R2 — needs egress.
   enableInternet = true;

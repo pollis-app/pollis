@@ -11,6 +11,26 @@
 //! **Store:** in-memory (the DS is single-container — mirrors the OTP map the
 //! client used to keep). Behind [`OtpStore`] so a scaled-out DS can swap it for a
 //! Turso table without touching the handlers.
+//!
+//! **That store is not durable, and the guess budget depends on it (#1142).**
+//! Single-container buys *consistency* — no second instance holding a divergent
+//! counter — not persistence. The container scales to zero after
+//! `PollisDelivery.sleepAfter` (`worker/index.ts`), so in a quiet hour every
+//! mailbox's `failed` count and `locked_until` are dropped routinely, not only
+//! across a redeploy.
+//!
+//! This is safe **only because `sleepAfter >= ttl_secs`**. Triggering the reset
+//! costs an attacker total silence for `sleepAfter` — their own requests keep
+//! the container warm — and that same silence expires the code they were
+//! guessing, so they come back to a fresh counter AND a dead code. The budget
+//! stays bounded by the code's lifetime rather than by the lockout, which is why
+//! the practical exposure is a 300-second head start on re-requesting, not a
+//! brute-force window.
+//!
+//! Invert the inequality and the reasoning inverts: the counter would reset
+//! while the code is still live, giving repeated fresh [`OtpConfig::max_attempts`]
+//! bursts against ONE code for the price of pausing between them.
+//! `tests/otp_state_durability.rs` pins the inequality across the two languages.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -86,6 +106,11 @@ impl Default for OtpConfig {
 impl OtpConfig {
     /// Build from DS environment. `RESEND_API_KEY` (the key the client no longer
     /// ships), `DEV_OTP` (harness/local override), `OTP_TTL_SECS` (optional).
+    ///
+    /// **Raising `OTP_TTL_SECS` above the container's `sleepAfter` re-opens
+    /// #1142** — see the module header. `tests/otp_state_durability.rs` guards
+    /// the compiled-in default, but it cannot see a deploy-time env override, so
+    /// that one is on whoever sets it.
     pub fn from_env() -> Self {
         let defaults = Self::default();
         Self {
