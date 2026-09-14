@@ -66,6 +66,26 @@ pub struct SendMessageBody {
     /// The MLS epoch the ciphertext was sealed at. See `generation`.
     #[serde(default)]
     pub epoch: Option<i64>,
+    /// `SHA-256(delete_token)`, base64 — the per-envelope **deletion capability**
+    /// (#1086), stored alongside the row and required to remove it later.
+    ///
+    /// Sealed sender means the DS cannot tell whose envelope this is, so the
+    /// self-delete branch trusted the caller's own claim and any member could
+    /// remove any envelope in a conversation before slower recipients fetched it
+    /// — an attacker-controlled fourth message loss, on top of the three
+    /// CLAUDE.md allows. Possession of the preimage replaces the claim: the DS
+    /// authorizes nobody, it just checks a hash.
+    ///
+    /// The token is derived, not stored: `HMAC-SHA256(k, message_id)` under a key
+    /// HKDF'd from the account identity key, so **every device of the author**
+    /// can recompute it and nobody else can. The hash reveals nothing linkable —
+    /// it is a fresh-looking 32 bytes per message.
+    ///
+    /// Absent (an older client) → the row keeps a NULL hash and deletes fall back
+    /// to the membership-only check. That is the rollout: the DS cannot require a
+    /// capability for envelopes written before clients produced one.
+    #[serde(default)]
+    pub delete_token_hash: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -85,6 +105,15 @@ pub struct EditMessageBody {
     /// See [`SendMessageBody::epoch`].
     #[serde(default)]
     pub epoch: Option<i64>,
+    /// The TARGET message's deletion capability, base64 (#1086).
+    ///
+    /// An edit replaces any pending edit of the same target, which is a delete —
+    /// so without this, one member could clobber another author's unfetched
+    /// edit exactly the way they could delete an unfetched message. Required
+    /// whenever the target row has a hash; the edit's own new envelope carries
+    /// the target's hash too, so a later edit can replace it in turn.
+    #[serde(default)]
+    pub delete_token: Option<String>,
 }
 
 /// The `409 Conflict` body `/v1/messages/send` and `/v1/messages/edit` answer
@@ -122,6 +151,16 @@ pub struct DeleteMessageBody {
     /// No-auth fallback for the acting user.
     #[serde(default)]
     pub actor_id: Option<String>,
+    /// The per-envelope deletion capability, base64 (#1086) — the preimage of
+    /// the `delete_token_hash` stored at send time. Required by the self-delete
+    /// branch whenever the target row HAS a hash; ignored by the admin branch,
+    /// which is a re-derived permission and not a claim of authorship.
+    ///
+    /// Absent, or wrong, against a row that has a hash → `Forbidden`. Absent
+    /// against a row with no hash → the pre-#1086 membership-only path, for
+    /// envelopes older clients wrote.
+    #[serde(default)]
+    pub delete_token: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]

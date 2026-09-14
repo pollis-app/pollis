@@ -229,8 +229,15 @@ pub(crate) async fn emit_receipt(
     // Blind the envelope sender exactly like every other send — sealing is
     // unconditional (#607). The reader's true identity is the MLS credential
     // inside the ciphertext, which is what the recipient records as `reader_id`.
+    let envelope_id = ulid::Ulid::new().to_string();
+    // A receipt frame is an envelope like any other, so it carries a capability
+    // like any other (#1086) — uniform, rather than a per-type carve-out nobody
+    // would remember to keep in step. Deleting one would stop a recipient
+    // recording the acknowledgement.
+    let delete_token_hash =
+        super::delete_capability::envelope_delete_token_hash(state, &envelope_id).await;
     let body = pollis_api::messages::SendMessageBody {
-        id: ulid::Ulid::new().to_string(),
+        id: envelope_id,
         conversation_id: conversation_id.to_string(),
         sender_id: Some(super::send::SEALED_SENDER_SENTINEL.to_string()),
         ciphertext: sealed.wire(),
@@ -243,6 +250,7 @@ pub(crate) async fn emit_receipt(
         // A receipt frame wakes nobody: it is an acknowledgement of
         // something the recipient already has (#987).
         push_to: None,
+        delete_token_hash,
     };
     // No re-seal loop here, deliberately: a receipt's callers may hold the
     // group lock (the committer's post-merge sweep) and the catch-up a re-seal

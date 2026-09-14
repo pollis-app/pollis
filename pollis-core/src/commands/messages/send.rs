@@ -249,6 +249,12 @@ pub async fn send_message(
     // through the Delivery Service (the write API). The body asserts the epoch
     // the envelope was sealed at; if a commit landed since our catch-up the DS
     // refuses it (#1041) and `post_resealing` catches up, re-seals at the new
+    // The per-envelope deletion capability (#1086). Computed once, outside the
+    // re-seal closure: it binds to the envelope id, which a re-seal does not
+    // change, so the same hash is correct for every attempt.
+    let delete_token_hash =
+        super::delete_capability::envelope_delete_token_hash(state, &id).await;
+
     // epoch, rewrites our own local copy to match, and posts again.
     let sealed = super::seal::post_resealing(
         state,
@@ -270,6 +276,7 @@ pub async fn send_message(
             generation: Some(sealed.generation),
             epoch: Some(sealed.epoch),
             push_to: push_to.clone(),
+            delete_token_hash: delete_token_hash.clone(),
         },
         |conn, sealed| {
             conn.execute(

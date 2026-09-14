@@ -25,17 +25,24 @@ use crate::state::AppState;
 /// `actor_id` is NOT a permission grant on the signed path: `resolve_actor`
 /// requires it to equal the authenticated user and rejects otherwise, so sending
 /// it can never widen what the caller may do.
+///
+/// `delete_token` is the per-envelope deletion capability (#1086) — `None` on
+/// the admin branch, which is a re-derived permission rather than a claim of
+/// authorship, and `Some` on the self branch whenever this device can compute
+/// one.
 pub fn delete_message_body(
     message_id: &str,
     conversation_id: &str,
     msg_sender_id: &str,
     actor_id: &str,
+    delete_token: Option<String>,
 ) -> DeleteMessageBody {
     DeleteMessageBody {
         message_id: message_id.to_string(),
         conversation_id: conversation_id.to_string(),
         msg_sender_id: Some(msg_sender_id.to_string()),
         actor_id: Some(actor_id.to_string()),
+        delete_token,
     }
 }
 
@@ -166,7 +173,11 @@ pub async fn delete_message(
         // authority (it must not trust the client's branch choice). DS seam:
         // route the whole 3-write op (one transaction server-side) through the
         // Delivery Service.
-        let body = delete_message_body(&message_id, &conversation_id, &msg_sender_id, &user_id);
+        // No capability: an admin delete is authorised by the re-derived admin
+        // role, not by proving authorship, and an admin cannot compute another
+        // member's token by design.
+        let body =
+            delete_message_body(&message_id, &conversation_id, &msg_sender_id, &user_id, None);
         crate::commands::mls::ds_post_ok(state, &body).await?;
 
         // Local `message.deleted_at` only — a display/presence field, never
@@ -250,7 +261,19 @@ pub async fn delete_message(
     // Remove the original envelope (best-effort — may already be GC'd) and any
     // pending edit. DS seam: route both deletes (one transaction server-side,
     // scoped to the authenticated sender) through the Delivery Service.
-    let body = delete_message_body(&message_id, &conversation_id, &user_id, &user_id);
+    // Prove authorship rather than assert it (#1086): the DS checks this against
+    // the hash stored when the envelope was written. `None` — this device cannot
+    // compute one, or the message predates the capability — leaves the DS on its
+    // legacy membership check.
+    let delete_token =
+        super::delete_capability::envelope_delete_token(state, &message_id).await;
+    let body = delete_message_body(
+        &message_id,
+        &conversation_id,
+        &user_id,
+        &user_id,
+        delete_token,
+    );
     crate::commands::mls::ds_post_ok(state, &body).await?;
 
     // Read the local plaintext content before soft-deleting so we can inspect
@@ -420,6 +443,11 @@ pub async fn edit_message_as(
         super::seal::seal_under_lock(db.conn(), &mls_group_id, conversation_id, &plaintext, &held)?
     };
 
+    // The target's deletion capability (#1086) — this write replaces any pending
+    // edit of the target, which is a delete.
+    let delete_token =
+        super::delete_capability::envelope_delete_token(state, target_message_id).await;
+
     // Edit envelopes are NOT sealed (the DS membership-gates the write on the
     // authenticated writer, so `sender_id` binds to the caller); the recipient's
     // author check reads the MLS credential, not this column.
@@ -441,6 +469,7 @@ pub async fn edit_message_as(
             sent_at: sealed.sent_at.clone(),
             generation: Some(sealed.generation),
             epoch: Some(sealed.epoch),
+            delete_token: delete_token.clone(),
         },
         |_, _| Ok(()),
     )
@@ -511,6 +540,13 @@ async fn send_redaction_message(
         super::seal::seal_under_lock(db.conn(), &mls_group_id, conversation_id, &plaintext, &held)?
     };
 
+    // The redaction envelope carries a deletion capability like every other
+    // envelope this client writes (#1086) — uniform rather than a per-type
+    // carve-out. Deleting a redaction would stop a recipient ever soft-deleting
+    // the message it redacts, which is the same class of attack.
+    let delete_token_hash =
+        super::delete_capability::envelope_delete_token_hash(state, &envelope_id).await;
+
     // Blind the envelope sender exactly like a normal send — sealing is
     // UNCONDITIONAL (#607). The true author is the MLS credential inside the
     // ciphertext, which is what the recipient's redaction-authorization check
@@ -539,6 +575,7 @@ async fn send_redaction_message(
             // ingest, and pushing "you have a new message" for a deletion would be
             // both wrong and a notification the user cannot act on (#987).
             push_to: None,
+            delete_token_hash: delete_token_hash.clone(),
         },
         |_, _| Ok(()),
     )
@@ -864,6 +901,12 @@ pub async fn edit_message(
         sealed
     };
 
+    // Replacing the pending edit is a delete, so it needs the target's deletion
+    // capability (#1086) — the same proof a self-delete presents, and the reason
+    // one member cannot clobber another author's unfetched edit.
+    let delete_token =
+        super::delete_capability::envelope_delete_token(state, &message_id).await;
+
     // Replace any existing edit envelope for this message with the new one
     // (DELETE + INSERT, single transaction on the DS side). DS seam: route the
     // replace through the Delivery Service. Re-sealed at the new epoch if a
@@ -886,6 +929,7 @@ pub async fn edit_message(
             sent_at: sealed.sent_at.clone(),
             generation: Some(sealed.generation),
             epoch: Some(sealed.epoch),
+            delete_token: delete_token.clone(),
         },
         |conn, sealed| {
             conn.execute(

@@ -2249,3 +2249,126 @@ async fn a_leave_is_committed_by_a_remaining_member_not_left_for_the_sweep() {
     drop(bob);
     drop(carol);
 }
+
+// ─── Scenario 14 — a member cannot delete another member's envelope ──────────
+
+/// **Invalid state it attacks:** one member removing another member's
+/// not-yet-fetched envelope, with no tombstone, so an offline device simply
+/// never receives the message (#1086).
+///
+/// Sealed sender (#607) blinds `message_envelope.sender_id`, so the Delivery
+/// Service cannot tell whose envelope a row is. Its self-delete branch therefore
+/// trusted the caller's own `msg_sender_id` hint and gated on membership alone —
+/// and any member of the conversation could delete anything in it. CLAUDE.md
+/// allows exactly three message losses; that was a fourth, and unlike the other
+/// three it was attacker-controlled rather than a bound on storage.
+///
+/// The fix is a per-envelope capability: the sender stores `SHA-256(token)` with
+/// the row and must present the preimage. This drives the REAL client send path,
+/// so it proves the client actually computes and sends a hash — the DS unit
+/// tests in `messages::delete_capability_tests` only prove the DS checks one.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_member_cannot_delete_another_members_envelope() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+
+    let _alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+
+    let group_id = alice.create_group("CapDelete").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+    join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
+
+    let message_id = alice
+        .send_channel_message_id(&channel_id, "alice's message")
+        .await;
+
+    let conn = writable_remote().await.conn().await.expect("remote conn");
+
+    // The client really did attach a capability. Without this the rest of the
+    // test would pass vacuously against the legacy NULL path.
+    let stored: Option<String> = {
+        let mut rows = conn
+            .query(
+                "SELECT delete_token_hash FROM message_envelope WHERE id = ?1",
+                libsql::params![message_id.clone()],
+            )
+            .await
+            .expect("select");
+        rows.next()
+            .await
+            .expect("row")
+            .expect("alice's envelope must exist")
+            .get::<Option<String>>(0)
+            .expect("column")
+    };
+    assert!(
+        stored.is_some(),
+        "the send path must attach a deletion capability, or this proves nothing"
+    );
+
+    // THE ATTACK. Bob is a genuine member, so the membership check passes, and
+    // his hint claims the self-branch. He cannot produce Alice's capability.
+    let attack = pollis_delivery::messages::apply_delete_message(
+        &conn,
+        Some(bob_p.id.as_str()),
+        &pollis_api::messages::DeleteMessageBody {
+            message_id: message_id.clone(),
+            conversation_id: channel_id.clone(),
+            msg_sender_id: Some(bob_p.id.clone()),
+            actor_id: Some(bob_p.id.clone()),
+            delete_token: None,
+        },
+    )
+    .await
+    .expect("the call itself succeeds; the outcome is the assertion");
+    assert!(
+        matches!(attack, pollis_delivery::writes::WriteOutcome::Forbidden),
+        "a member must not delete another member's envelope, got {attack:?}"
+    );
+
+    // And the envelope is still there, so a recipient who has not fetched yet
+    // still receives it.
+    let survives: i64 = {
+        let mut rows = conn
+            .query(
+                "SELECT COUNT(*) FROM message_envelope WHERE id = ?1",
+                libsql::params![message_id.clone()],
+            )
+            .await
+            .expect("count");
+        rows.next().await.expect("row").expect("some").get(0).expect("count")
+    };
+    assert_eq!(
+        survives, 1,
+        "MESSAGE LOSS: bob removed alice's envelope before its recipients fetched it"
+    );
+
+    // Bob does in fact receive it — the message was never his to delete.
+    bob.process_commits_for(&channel_id).await;
+    assert!(
+        contents(&bob, &channel_id).await.contains(&"alice's message".to_string()),
+        "bob must receive the message he could not delete"
+    );
+
+    // The control: the real author still deletes her own message through the
+    // real command, so the capability does not break what it protects.
+    alice.delete_message(&message_id).await;
+    let after: i64 = {
+        let mut rows = conn
+            .query(
+                "SELECT COUNT(*) FROM message_envelope WHERE id = ?1",
+                libsql::params![message_id.clone()],
+            )
+            .await
+            .expect("count");
+        rows.next().await.expect("row").expect("some").get(0).expect("count")
+    };
+    assert_eq!(after, 0, "the author's own delete must still remove the envelope");
+
+    drop(alice);
+    drop(bob);
+}

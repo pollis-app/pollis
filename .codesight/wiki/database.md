@@ -288,6 +288,69 @@ credentials live.
 - `sealed` INTEGER NOT NULL DEFAULT 0 _(migration 000008; sealed sender, #331)_
 - `type` TEXT NOT NULL DEFAULT 'message' — `'message'` | `'edit'` | `'delete'`
 - `target_message_id` TEXT _(the message an `edit`/`delete` envelope acts on)_
+- `delete_token_hash` TEXT _(migration `000027`; the per-envelope deletion capability, #1086 — see below)_
+
+**Removing an envelope takes proof, not a claim (#1086).** Sealed sender blinds
+`sender_id`, so the DS cannot tell whose envelope a row is. The self-delete
+branch therefore trusted the caller's own `msg_sender_id` hint — and any member
+could remove any envelope in a conversation, with no tombstone, before slower
+recipients fetched it, or clobber another author's pending edit the same way.
+CLAUDE.md allows exactly three message losses; that was a fourth, and the only
+attacker-controlled one.
+
+The fix does not try to re-identify the sender — that is what sealing exists to
+prevent. The sender stores `SHA-256(token)` on the row at send time and must
+present the preimage to remove it; the DS authorizes nobody, it compares a hash
+(`messages::check_delete_capability`, constant-time).
+
+The token is **derived, never transmitted**:
+
+```text
+delete_key = HKDF-SHA256(account identity key, "pollis/envelope-delete/v1")
+token      = HMAC-SHA256(delete_key, message_id)
+```
+
+so every device of the author can recompute it — which is what keeps
+delete-from-another-device working — and no one else can. Putting it in the
+ciphertext instead would hand it to every member, i.e. back to the original
+problem. Two layers on purpose: what the DS stores is not itself the capability
+and cannot be replayed as one, and an HMAC means seeing tokens does not let the
+DS mint one.
+
+Not linkable: the value is a fresh-looking 32 bytes per message, so it gives the
+operator nothing sealing took away.
+
+Three things it deliberately does not cover:
+
+- **Rows written before it shipped** hold NULL and keep the membership-only path.
+  The DS cannot demand a capability for an envelope no client produced one for,
+  so *requiring* one is a follow-up once clients that produce them have reached
+  the fleet.
+- **Admin delete** presents none — it is authorised by the re-derived admin role,
+  and an admin cannot compute another member's token by design.
+- **After an identity rotation** the account key changes, so tokens for messages
+  sent under the old one can no longer be recomputed. The MLS-authenticated
+  redaction path still works, and a reset already orphans every device and drops
+  group membership.
+
+An **edit** envelope inherits its target's hash, because replacing a pending edit
+is itself a delete: the next edit proves authorship of the original rather than
+needing a capability of its own that the DS could not check against anything.
+
+**This narrows Solution A (#607) for edits, and the schema leaves no choice.**
+#607 had the DS accept an edit envelope from any member, leaving authorship to
+the recipient's ingest check, because the DS could not tell an author from anyone
+else. But `idx_envelope_one_edit_per_message` — a partial UNIQUE on
+`(conversation_id, target_message_id)` where `type = 'edit'` — allows exactly one
+pending edit per message, so accepting a second one MUST delete the first. There
+is no "accept but do not clobber" state this table can hold, which is why the
+clobber was unavoidable rather than incidental, and why the DS now refuses an
+edit whose caller cannot open the target's capability.
+
+It does not undo what #607 bought: the DS still cannot tell whose envelope a row
+is. It verifies possession of a secret, not an identity. The **ingest-side author
+check is unchanged and still load-bearing** — it is what covers a legacy envelope
+whose capability is NULL, where the DS still accepts any member's edit.
 
 **Deletion.** A **self-delete** ("delete for everyone") does NOT use a `'delete'`
 envelope — it sends an ordinary `'message'` envelope carrying an E2EE **redaction

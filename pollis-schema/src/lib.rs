@@ -247,6 +247,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "email_case_insensitive",
         include_str!("../migrations/000026_email_case_insensitive.sql"),
     ),
+    (
+        27,
+        "envelope_delete_capability",
+        include_str!("../migrations/000027_envelope_delete_capability.sql"),
+    ),
 ];
 
 /// Every script for the MAIN DB, in apply order (baseline first). One element

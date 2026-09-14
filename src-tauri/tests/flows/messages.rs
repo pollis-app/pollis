@@ -1708,13 +1708,23 @@ async fn sealed_self_edit_is_visible_to_recipient() {
     drop((alice, bob));
 }
 
-/// Sealed EDIT, non-author rejected: carol (a member, but NOT the author) forges
-/// an edit envelope for alice's message via the test-only `edit_message_as`
-/// (bypassing the client-send self-gate). The DS accepts the envelope for storage
-/// (membership only), but bob's ingest DROPS it because the edit's
-/// MLS-authenticated author (carol) does not match the target's author (alice).
-/// This is the load-bearing new client-side check that replaces the dropped DS
-/// author gate.
+/// Sealed EDIT, non-author rejected — now at BOTH layers.
+///
+/// Carol (a member, but NOT the author) forges an edit envelope for alice's
+/// message via the test-only `edit_message_as`, bypassing the client-send
+/// self-gate.
+///
+/// Since #1086 the DS refuses it outright: an edit replaces the target's pending
+/// edit, and `idx_envelope_one_edit_per_message` allows exactly one per message,
+/// so accepting carol's would delete alice's — the clobber. Carol cannot open
+/// alice's per-envelope deletion capability, so her write is a 403.
+///
+/// The ingest-side check this test was originally written for is UNCHANGED and
+/// still load-bearing: it is what covers a legacy envelope whose capability is
+/// NULL, where the DS still accepts any member's edit. So the assertion is that
+/// alice's message survives carol's attempt, whichever layer stopped it — and
+/// the test exercises the ingest path directly below by persisting a forged edit
+/// against a legacy target.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn sealed_non_author_edit_is_ignored() {
@@ -1750,15 +1760,21 @@ async fn sealed_non_author_edit_is_ignored() {
 
     // carol forges an edit targeting alice's message: a real, decryptable MLS
     // edit envelope — but authored by carol, not alice.
-    pollis_core::commands::messages::edit_message_as(
+    // The DS layer (#1086): carol cannot prove the capability, so the write never
+    // lands. Before #1086 this returned Ok and the envelope was stored.
+    let refused = pollis_core::commands::messages::edit_message_as(
         &carol.state,
         &channel_id,
         &msg_id,
         carol.user_id(),
         "hacked by carol",
     )
-    .await
-    .expect("forged edit send");
+    .await;
+    assert!(
+        refused.is_err(),
+        "the DS must refuse an edit from a member who cannot open the target's \
+         deletion capability (#1086), got {refused:?}"
+    );
 
     // bob re-fetches: the message is UNCHANGED — the edit was rejected because
     // carol is not the author.

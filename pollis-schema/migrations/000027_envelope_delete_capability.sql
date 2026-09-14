@@ -1,0 +1,33 @@
+-- #1086: a per-envelope deletion capability, so removing an envelope needs
+-- proof rather than a claim.
+--
+-- Sealed sender (#607) blinds `message_envelope.sender_id`, so the Delivery
+-- Service cannot tell whose envelope a row is. The self-delete branch therefore
+-- trusted the caller's own `msg_sender_id` hint: any member could delete any
+-- envelope in a conversation, with no tombstone, before slower recipients
+-- fetched it — and a member could clobber another author's pending edit the same
+-- way. CLAUDE.md allows exactly three message losses; that is a fourth, and
+-- unlike the other three it is attacker-controlled rather than a storage bound.
+--
+-- The fix does not try to re-identify the sender — that is what sealing exists
+-- to prevent. It stores `SHA-256(token)` at send time and requires the preimage
+-- to delete. The DS authorizes nobody; it compares a hash.
+--
+-- The token is DERIVED, never transmitted or stored by the client:
+--
+--     delete_key = HKDF-SHA256(account identity key, "pollis/envelope-delete/v1")
+--     token      = HMAC-SHA256(delete_key, message_id)
+--
+-- so every device of the author can recompute it and no one else can, which is
+-- what keeps multi-device delete working without handing the capability to the
+-- rest of the conversation.
+--
+-- Nullable, and it has to stay nullable: rows written by clients that predate
+-- this have no hash, and the DS falls back to the old membership-only check for
+-- them. Requiring the capability outright has to wait until clients that produce
+-- one have reached the fleet.
+--
+-- Not linkable: the value is a fresh-looking 32 bytes per message, so it groups
+-- nothing and identifies no one. It is also not a secret the DS can use — the
+-- hash cannot be turned back into the token that authorizes a delete.
+ALTER TABLE message_envelope ADD COLUMN delete_token_hash TEXT;

@@ -406,6 +406,7 @@ endpoints! {
 ///     conversation_id: "c".into(),
 ///     msg_sender_id: None,
 ///     actor_id: Some("u".into()),
+///     delete_token: None,
 /// };
 /// ```
 ///

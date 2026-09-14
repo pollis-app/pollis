@@ -737,6 +737,7 @@ async fn tombstone_clears_watermarks_that_outlived_envelope_gc() {
             conversation_id: "c1".into(),
             msg_sender_id: Some("bob".into()),
             actor_id: None,
+            delete_token: None,
         },
     )
     .await
@@ -788,6 +789,7 @@ async fn tombstone_is_not_pushed_forward_by_watermarks_behind_the_ds_clock() {
             conversation_id: "c1".into(),
             msg_sender_id: Some("bob".into()),
             actor_id: None,
+            delete_token: None,
         },
     )
     .await

@@ -4,6 +4,7 @@
 //! `commands::*` modules, integration tests) keeps resolving names at
 //! `pollis_core::commands::messages::*`.
 
+mod delete_capability;
 mod edit_delete;
 pub(crate) mod framing;
 mod ingest;

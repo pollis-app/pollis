@@ -174,11 +174,20 @@ async fn ds_rejects_domain_a_writes_lacking_authorization() {
         "a validly-signed edit from a NON-member must be FORBIDDEN, got {code}"
     );
 
-    // (3) Member-but-non-author edit → 200 (Solution A, #607). Bob is a member,
-    //     so he passes the membership gate; the DS no longer checks authorship
-    //     (the sealed sender_id can't prove it), so it ACCEPTS the envelope. The
-    //     forged edit is rejected instead on ingest by every recipient — see
-    //     `messages::sealed_non_author_edit_is_ignored`.
+    // (3) Member-but-non-author edit → 403 since #1086. Bob is a member, so he
+    //     passes the membership gate — but an edit REPLACES the target's pending
+    //     edit, and `idx_envelope_one_edit_per_message` allows exactly one per
+    //     message, so accepting his would have to delete the author's. That is
+    //     the clobber #1086 closes, and the schema leaves no third option: there
+    //     is no "accept but do not clobber" state this table can hold.
+    //
+    //     This NARROWS Solution A (#607) for edits. It does not undo it: the DS
+    //     still cannot tell whose envelope this is. It checks possession of a
+    //     per-envelope capability — an HMAC under a key only the author's devices
+    //     hold — so it verifies a secret, not an identity, and nothing is
+    //     de-anonymized. The ingest-side author check is unchanged and still runs
+    //     (`messages::sealed_non_author_edit_is_ignored`), which is what covers a
+    //     legacy envelope whose capability is NULL.
     let edit_body = serde_json::to_vec(&json!({
         "envelope_id": "01TESTBOGUSEDITENVXXXXXXXX",
         "conversation_id": channel_id,
@@ -190,9 +199,9 @@ async fn ds_rejects_domain_a_writes_lacking_authorization() {
     .expect("serialize edit body");
     let code = signed_post_status(&bob, "/v1/messages/edit", &edit_body).await;
     assert_eq!(
-        code, 200,
-        "post-#607 the DS accepts a member's edit regardless of authorship \
-         (enforced client-side on ingest), got {code}"
+        code, 403,
+        "a member who cannot open the target's deletion capability must not be able \
+         to replace its pending edit (#1086), got {code}"
     );
 
     drop(alice);
@@ -766,7 +775,7 @@ async fn message_delete_works_when_ds_auth_is_disabled() {
     // "does the client body parse as the DS body" is no longer a question a test
     // can meaningfully ask — it is the same struct. What remains testable, and is
     // what actually broke, is the DS's behaviour on that body.
-    let parsed = delete_message_body("env-mine", "conv-mine", "mallory", "mallory");
+    let parsed = delete_message_body("env-mine", "conv-mine", "mallory", "mallory", None);
 
     // With auth OFF there is no signed identity, so `actor_id` is the ONLY thing
     // that can name the actor. Before #875 this returned Forbidden.
@@ -786,7 +795,7 @@ async fn message_delete_works_when_ds_auth_is_disabled() {
     // `conversation_id` and must delete against the SAME one, so membership of
     // 'conv-mine' cannot reach an envelope in 'conv-theirs' — even though the
     // client now always names an actor.
-    let parsed = delete_message_body("env-theirs", "conv-mine", "mallory", "mallory");
+    let parsed = delete_message_body("env-theirs", "conv-mine", "mallory", "mallory", None);
     let outcome = pollis_delivery::messages::apply_delete_message(&conn, Some("mallory"), &parsed)
         .await
         .expect("delete must not error");
@@ -798,7 +807,7 @@ async fn message_delete_works_when_ds_auth_is_disabled() {
 
     // ...and `actor_id` is never a permission grant on the signed path: naming
     // someone else is refused outright rather than honoured.
-    let parsed = delete_message_body("env-theirs", "conv-theirs", "alice", "alice");
+    let parsed = delete_message_body("env-theirs", "conv-theirs", "alice", "alice", None);
     let outcome = pollis_delivery::messages::apply_delete_message(&conn, Some("mallory"), &parsed)
         .await
         .expect("delete must not error");

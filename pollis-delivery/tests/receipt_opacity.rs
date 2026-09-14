@@ -125,6 +125,7 @@ fn body(id: &str, ciphertext: &str) -> SendMessageBody {
         epoch: None,
         // No push from a unit test — this asserts envelope opacity.
         push_to: None,
+        delete_token_hash: None,
     }
 }
 

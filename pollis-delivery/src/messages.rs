@@ -783,10 +783,15 @@ pub async fn apply_send_message(
     if let Err(refused) = admit_sent_at(&body.sent_at) {
         return Ok(refused);
     }
+    // The per-envelope deletion capability (#1086), stored as the client sent it
+    // — the DS never computes it and cannot: it is an HMAC under a key only the
+    // author's devices hold. Absent (an older client) → NULL, and deletes of this
+    // row fall back to the pre-#1086 membership check.
     conn.execute(
         "INSERT INTO message_envelope \
-             (id, conversation_id, sender_id, ciphertext, reply_to_id, sent_at, sealed) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+             (id, conversation_id, sender_id, ciphertext, reply_to_id, sent_at, sealed, \
+              delete_token_hash) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         libsql::params![
             body.id.clone(),
             body.conversation_id.clone(),
@@ -795,6 +800,7 @@ pub async fn apply_send_message(
             body.reply_to_id.clone(),
             body.sent_at.clone(),
             body.sealed,
+            body.delete_token_hash.clone(),
         ],
     )
     .await?;
@@ -983,6 +989,37 @@ pub async fn apply_edit_message(
     if let Err(refused) = admit_sent_at(&body.sent_at) {
         return Ok(refused);
     }
+    // An edit REPLACES the target's pending edit, so it is a delete, so it needs
+    // the target's capability (#1086).
+    //
+    // This narrows Solution A (#607), which had the DS accept an edit envelope
+    // from any member and left authorship to the recipient's ingest check. That
+    // was the only option while the DS could not tell an author from anyone
+    // else — but it meant any member could clobber another author's
+    // not-yet-fetched edit, and `idx_envelope_one_edit_per_message` (a partial
+    // UNIQUE on `(conversation_id, target_message_id)`) makes that unavoidable
+    // rather than incidental: one pending edit per message is a schema rule, so
+    // accepting a second one MUST remove the first. "Accept but do not clobber"
+    // is not a state this table can hold.
+    //
+    // Checking the capability does not undo what #607 bought. The DS still
+    // cannot tell whose envelope this is — it verifies possession of a secret,
+    // not an identity, so nothing is de-anonymized. The ingest-side author check
+    // stays exactly as it was, as defence in depth against a legacy row whose
+    // capability is NULL.
+    //
+    // Checked before the transaction opens, so a refusal removes nothing.
+    if check_delete_capability(
+        conn,
+        &body.conversation_id,
+        &body.target_message_id,
+        body.delete_token.as_deref(),
+    )
+    .await?
+        == DeleteCapability::Refused
+    {
+        return Ok(WriteOutcome::Forbidden);
+    }
     let tx = conn.transaction().await?;
     tx.execute(
         "DELETE FROM message_envelope \
@@ -992,8 +1029,9 @@ pub async fn apply_edit_message(
     .await?;
     tx.execute(
         "INSERT INTO message_envelope \
-             (id, conversation_id, sender_id, ciphertext, sent_at, type, target_message_id) \
-         VALUES (?1, ?2, ?3, ?4, ?5, 'edit', ?6)",
+             (id, conversation_id, sender_id, ciphertext, sent_at, type, target_message_id, \
+              delete_token_hash) \
+         VALUES (?1, ?2, ?3, ?4, ?5, 'edit', ?6, ?7)",
         libsql::params![
             body.envelope_id.clone(),
             body.conversation_id.clone(),
@@ -1001,6 +1039,9 @@ pub async fn apply_edit_message(
             body.ciphertext.clone(),
             body.sent_at.clone(),
             body.target_message_id.clone(),
+            // The edit envelope inherits the TARGET's capability, so the next
+            // edit (or a delete) can replace it with the same proof.
+            edit_capability_hash(conn, &body.conversation_id, &body.target_message_id).await?,
         ],
     )
     .await?;
@@ -1020,6 +1061,99 @@ pub async fn delete_message(
     };
     let conn = state.db.conn().await?;
     outcome_response::<DeleteMessageBody>(apply_delete_message(&conn, authed.as_deref(), &parsed).await?)
+}
+
+/// Whether a caller has proved the right to remove an envelope (#1086).
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum DeleteCapability {
+    /// The row carries no capability — written by a client that predates #1086,
+    /// or already gone. The caller falls back to the membership check that was
+    /// the whole authorization before.
+    NotRequired,
+    /// The presented token hashes to the stored value.
+    Proved,
+    /// The row HAS a capability and the caller did not open it.
+    Refused,
+}
+
+/// Check `token` against the capability stored on `message_id`.
+///
+/// Sealed sender means the DS cannot tell whose envelope a row is, so it cannot
+/// decide who may delete it. It does not try: the sender stored
+/// `SHA-256(token)` when the envelope was written, and this compares a hash. The
+/// DS can neither compute a token (it is an HMAC under a key only the author's
+/// devices hold) nor replay the stored value as one.
+///
+/// Scoped to `conversation_id` for the same reason every other statement here
+/// is: the caller's authorization was checked against that id, so the lookup
+/// must be too.
+pub(crate) async fn check_delete_capability(
+    conn: &Connection,
+    conversation_id: &str,
+    message_id: &str,
+    token: Option<&str>,
+) -> anyhow::Result<DeleteCapability> {
+    use sha2::{Digest, Sha256};
+    use subtle::ConstantTimeEq;
+
+    let mut rows = conn
+        .query(
+            "SELECT delete_token_hash FROM message_envelope \
+             WHERE id = ?1 AND conversation_id = ?2",
+            libsql::params![message_id.to_string(), conversation_id.to_string()],
+        )
+        .await?;
+    // TEXT, not BLOB: the value travels as base64 and is stored verbatim, so it
+    // is a string all the way down. Reading it as bytes panics inside libsql.
+    let stored: Option<String> = match rows.next().await? {
+        // A row with no hash: the legacy path. A row that does not exist at all:
+        // the delete is a no-op, so there is nothing to refuse.
+        Some(row) => row.get::<Option<String>>(0).ok().flatten(),
+        None => return Ok(DeleteCapability::NotRequired),
+    };
+    let Some(stored) = stored else {
+        return Ok(DeleteCapability::NotRequired);
+    };
+
+    // The row demands a capability from here on: no token is a refusal, not a
+    // fallback, or presenting nothing would be the easiest way past the check.
+    let Some(token) = token else {
+        return Ok(DeleteCapability::Refused);
+    };
+    // Compare the base64 forms, in constant time: both are fixed-length encodings
+    // of a 32-byte digest, so a length difference is itself a mismatch rather
+    // than something to branch on.
+    use base64::Engine as _;
+    let digest = base64::engine::general_purpose::STANDARD.encode(Sha256::digest(token.as_bytes()));
+    if digest.as_bytes().ct_eq(stored.as_bytes()).into() {
+        Ok(DeleteCapability::Proved)
+    } else {
+        Ok(DeleteCapability::Refused)
+    }
+}
+
+/// The capability hash stored on `message_id`, for an edit envelope to inherit.
+///
+/// An edit is a replaceable envelope: the next edit deletes it. Copying the
+/// TARGET's hash onto it means that next edit proves the same thing — authorship
+/// of the original — rather than needing a capability of the edit's own, which
+/// the DS could not check against anything.
+async fn edit_capability_hash(
+    conn: &Connection,
+    conversation_id: &str,
+    message_id: &str,
+) -> anyhow::Result<Option<String>> {
+    let mut rows = conn
+        .query(
+            "SELECT delete_token_hash FROM message_envelope \
+             WHERE id = ?1 AND conversation_id = ?2",
+            libsql::params![message_id.to_string(), conversation_id.to_string()],
+        )
+        .await?;
+    Ok(match rows.next().await? {
+        Some(row) => row.get::<Option<String>>(0).ok().flatten(),
+        None => None,
+    })
 }
 
 /// Delete a message. Two branches, chosen by the client's `msg_sender_id` hint
@@ -1060,6 +1194,24 @@ pub async fn apply_delete_message(
         // they claim to have authored (authorship itself is enforced
         // client-side on ingest, never here). Skipped on the no-auth path.
         if authed.is_some() && !is_member(conn, &body.conversation_id, &actor).await? {
+            return Ok(WriteOutcome::Forbidden);
+        }
+        // ...and, since #1086, PROOF rather than a claim. Membership alone let
+        // any member remove any envelope in the conversation before slower
+        // recipients fetched it — a fourth message loss on top of the three
+        // CLAUDE.md allows, and the only attacker-controlled one. A row written
+        // before capabilities existed still takes the membership-only path;
+        // requiring one outright waits for clients that produce one to reach the
+        // fleet.
+        if check_delete_capability(
+            conn,
+            &body.conversation_id,
+            &body.message_id,
+            body.delete_token.as_deref(),
+        )
+        .await?
+            == DeleteCapability::Refused
+        {
             return Ok(WriteOutcome::Forbidden);
         }
         // Both deletes are SCOPED to the conversation that was just authorised.
@@ -3545,6 +3697,7 @@ mod admin_delete_visibility_tests {
                 epoch: None,
                 // No push from a unit test — these assert envelope columns.
                 push_to: None,
+                delete_token_hash: None,
             },
         )
         .await
@@ -3597,6 +3750,7 @@ mod admin_delete_visibility_tests {
                 conversation_id: conv.to_string(),
                 msg_sender_id: Some("bob".to_string()),
                 actor_id: Some("alice".to_string()),
+                delete_token: None,
             },
         )
         .await
@@ -3709,6 +3863,7 @@ mod admin_delete_visibility_tests {
                 epoch: None,
                 // No push from a unit test — these assert envelope columns.
                 push_to: None,
+                delete_token_hash: None,
             },
         )
         .await
@@ -3739,6 +3894,7 @@ mod admin_delete_visibility_tests {
                 conversation_id: conv.to_string(),
                 msg_sender_id: Some("bob".to_string()),
                 actor_id: Some("alice".to_string()),
+                delete_token: None,
             },
         )
         .await
@@ -3806,6 +3962,7 @@ mod admin_delete_visibility_tests {
                 epoch: None,
                 // No push from a unit test — these assert envelope columns.
                 push_to: None,
+                delete_token_hash: None,
             },
         )
         .await
@@ -3977,6 +4134,7 @@ mod delete_scope_tests {
             // … and the self-branch is entered by naming themselves as author.
             msg_sender_id: Some("mallory".to_string()),
             actor_id: None,
+            delete_token: None,
         };
         let outcome = apply_delete_message(&c, Some("mallory"), &body).await.unwrap();
 
@@ -4014,6 +4172,7 @@ mod delete_scope_tests {
             // A different author than the actor takes the admin branch.
             msg_sender_id: Some("alice".to_string()),
             actor_id: None,
+            delete_token: None,
         };
         let outcome = apply_delete_message(&c, Some("mallory"), &body).await.unwrap();
 
@@ -4048,6 +4207,7 @@ mod delete_scope_tests {
             conversation_id: "mine".to_string(),
             msg_sender_id: Some("mallory".to_string()),
             actor_id: None,
+            delete_token: None,
         };
         apply_delete_message(&c, Some("mallory"), &body).await.unwrap();
 
@@ -4111,6 +4271,7 @@ mod epoch_gate_tests {
             generation,
             epoch,
             push_to: None,
+            delete_token_hash: None,
         }
     }
 
@@ -4130,6 +4291,7 @@ mod epoch_gate_tests {
             sent_at: "2026-09-01T00:00:00+00:00".to_string(),
             generation,
             epoch,
+            delete_token: None,
         }
     }
 
@@ -4385,5 +4547,360 @@ mod cursor_stamp_tests {
         assert_eq!(check_cursor_stamp(&now_rfc3339(), now), Ok(()));
         assert_eq!(check_cursor_stamp(&seeded_watermark_cursor(), now), Ok(()));
         assert_eq!(check_cursor_stamp(&chrono::Utc::now().to_rfc3339(), now), Ok(()));
+    }
+}
+
+/// Fixtures shared by the two #1086 test modules.
+#[cfg(test)]
+mod delete_capability_tests_support {
+    use super::*;
+    use pollis_api::messages::SendMessageBody;
+
+    /// Two members of one conversation, `alice` and `bob`, both in group `g1`.
+    pub(super) async fn conn() -> Connection {
+        let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
+        let conn = db.connect().unwrap();
+        // Production is Turso, where foreign-key enforcement is off; libsql's
+        // LOCAL backend turns it ON by default, so say so explicitly rather than
+        // inherit a constraint no deploy has.
+        conn.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
+        pollis_schema::apply::single_db(&conn).await.expect("schema");
+        conn.execute_batch(
+            "INSERT INTO conversation (id, kind) VALUES ('c1', 'channel');
+             INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');
+             INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');
+             INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'bob');",
+        )
+        .await
+        .unwrap();
+        conn
+    }
+
+    /// Stand-in for what the author's devices derive. The DS never computes
+    /// this — it only ever hashes what it is handed — so a fixed string is a
+    /// faithful stand-in for an HMAC it cannot produce.
+    pub(super) const TOKEN: &str = "the-authors-capability";
+
+    pub(super) fn hash_of(token: &str) -> String {
+        use base64::Engine as _;
+        use sha2::{Digest, Sha256};
+        base64::engine::general_purpose::STANDARD.encode(Sha256::digest(token.as_bytes()))
+    }
+
+    pub(super) fn send(id: &str, delete_token_hash: Option<String>) -> SendMessageBody {
+        SendMessageBody {
+            id: id.to_string(),
+            conversation_id: "c1".to_string(),
+            sender_id: Some("sealed".to_string()),
+            ciphertext: "mls:00".to_string(),
+            reply_to_id: None,
+            sent_at: chrono::Utc::now().to_rfc3339(),
+            sealed: 1,
+            generation: None,
+            epoch: None,
+            push_to: None,
+            delete_token_hash,
+        }
+    }
+}
+
+/// The per-envelope deletion capability (#1086).
+#[cfg(test)]
+mod delete_capability_tests {
+    use super::delete_capability_tests_support::*;
+    use super::*;
+    use pollis_api::messages::DeleteMessageBody;
+
+    fn del(id: &str, actor: &str, delete_token: Option<String>) -> DeleteMessageBody {
+        DeleteMessageBody {
+            message_id: id.to_string(),
+            conversation_id: "c1".to_string(),
+            // The self-branch hint: the caller claims to be the author. Before
+            // #1086 that claim WAS the authorization.
+            msg_sender_id: Some(actor.to_string()),
+            actor_id: Some(actor.to_string()),
+            delete_token,
+        }
+    }
+
+    async fn envelope_exists(conn: &Connection, id: &str) -> bool {
+        let mut rows = conn
+            .query(
+                "SELECT COUNT(*) FROM message_envelope WHERE id = ?1",
+                libsql::params![id.to_string()],
+            )
+            .await
+            .unwrap();
+        let n: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
+        n > 0
+    }
+
+    /// **The attack.** Bob is a member of the conversation, so the pre-#1086
+    /// membership check passed and his `msg_sender_id == bob` hint selected the
+    /// self-branch. Sealed sender means the DS cannot see that the envelope is
+    /// Alice's — so he could delete it, with no tombstone, before slower
+    /// recipients ever fetched it. He cannot compute Alice's capability.
+    #[tokio::test]
+    async fn a_member_cannot_delete_another_members_envelope() {
+        let c = conn().await;
+        apply_send_message(&c, Some("alice"), &send("m1", Some(hash_of(TOKEN))))
+            .await
+            .unwrap();
+
+        // No token at all: presenting nothing must not be the easy way past.
+        let out = apply_delete_message(&c, Some("bob"), &del("m1", "bob", None))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Forbidden), "{out:?}");
+        assert!(envelope_exists(&c, "m1").await, "the envelope must survive");
+
+        // A guessed token fares no better.
+        let out = apply_delete_message(
+            &c,
+            Some("bob"),
+            &del("m1", "bob", Some("not-the-token".to_string())),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(out, WriteOutcome::Forbidden), "{out:?}");
+        assert!(envelope_exists(&c, "m1").await, "the envelope must survive");
+    }
+
+    /// The author still deletes their own message — the capability must not
+    /// break the thing it protects.
+    #[tokio::test]
+    async fn the_author_deletes_with_the_capability() {
+        let c = conn().await;
+        apply_send_message(&c, Some("alice"), &send("m1", Some(hash_of(TOKEN))))
+            .await
+            .unwrap();
+
+        let out = apply_delete_message(
+            &c,
+            Some("alice"),
+            &del("m1", "alice", Some(TOKEN.to_string())),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(out, WriteOutcome::Ok), "{out:?}");
+        assert!(!envelope_exists(&c, "m1").await, "the envelope must be gone");
+    }
+
+    /// A capability opens exactly one envelope. Holding a token for your own
+    /// message must not let you remove somebody else's.
+    #[tokio::test]
+    async fn a_capability_does_not_travel_between_envelopes() {
+        let c = conn().await;
+        apply_send_message(&c, Some("alice"), &send("mine", Some(hash_of("token-mine"))))
+            .await
+            .unwrap();
+        apply_send_message(&c, Some("bob"), &send("theirs", Some(hash_of("token-theirs"))))
+            .await
+            .unwrap();
+
+        let out = apply_delete_message(
+            &c,
+            Some("alice"),
+            &del("theirs", "alice", Some("token-mine".to_string())),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(out, WriteOutcome::Forbidden), "{out:?}");
+        assert!(envelope_exists(&c, "theirs").await);
+    }
+
+    /// The rollout path: a row written before capabilities existed has a NULL
+    /// hash and keeps the old membership-only behaviour, because the DS cannot
+    /// demand a capability for an envelope no client produced one for. This is
+    /// the deliberate gap the follow-up closes once clients have shipped.
+    #[tokio::test]
+    async fn an_envelope_from_an_older_client_keeps_the_legacy_path() {
+        let c = conn().await;
+        apply_send_message(&c, Some("alice"), &send("m1", None))
+            .await
+            .unwrap();
+
+        let out = apply_delete_message(&c, Some("bob"), &del("m1", "bob", None))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Ok), "{out:?}");
+        assert!(!envelope_exists(&c, "m1").await);
+    }
+
+    /// A non-member is refused before the capability is even consulted — the
+    /// membership gate stays, the capability is added to it.
+    #[tokio::test]
+    async fn membership_is_still_required() {
+        let c = conn().await;
+        apply_send_message(&c, Some("alice"), &send("m1", Some(hash_of(TOKEN))))
+            .await
+            .unwrap();
+
+        let out = apply_delete_message(
+            &c,
+            Some("mallory"),
+            &del("m1", "mallory", Some(TOKEN.to_string())),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(out, WriteOutcome::Forbidden), "{out:?}");
+        assert!(envelope_exists(&c, "m1").await);
+    }
+
+    /// The check itself, in isolation: a missing row is `NotRequired` (the
+    /// delete is a no-op, so there is nothing to refuse) and a NULL hash is the
+    /// legacy path.
+    #[tokio::test]
+    async fn the_check_classifies_every_state() {
+        let c = conn().await;
+        assert_eq!(
+            check_delete_capability(&c, "c1", "absent", None).await.unwrap(),
+            DeleteCapability::NotRequired
+        );
+
+        apply_send_message(&c, Some("alice"), &send("legacy", None)).await.unwrap();
+        assert_eq!(
+            check_delete_capability(&c, "c1", "legacy", None).await.unwrap(),
+            DeleteCapability::NotRequired
+        );
+
+        apply_send_message(&c, Some("alice"), &send("guarded", Some(hash_of(TOKEN))))
+            .await
+            .unwrap();
+        assert_eq!(
+            check_delete_capability(&c, "c1", "guarded", Some(TOKEN)).await.unwrap(),
+            DeleteCapability::Proved
+        );
+        assert_eq!(
+            check_delete_capability(&c, "c1", "guarded", None).await.unwrap(),
+            DeleteCapability::Refused
+        );
+        assert_eq!(
+            check_delete_capability(&c, "c1", "guarded", Some("wrong")).await.unwrap(),
+            DeleteCapability::Refused
+        );
+
+        // Scoped: the same id in another conversation is a different row, and
+        // the lookup must not reach across.
+        assert_eq!(
+            check_delete_capability(&c, "other", "guarded", Some(TOKEN)).await.unwrap(),
+            DeleteCapability::NotRequired
+        );
+    }
+}
+
+/// The edit half of #1086: replacing a pending edit needs proof, inserting one
+/// does not.
+#[cfg(test)]
+mod edit_capability_tests {
+    use super::delete_capability_tests_support::*;
+    use super::*;
+    use pollis_api::messages::EditMessageBody;
+
+    fn edit(envelope_id: &str, target: &str, sender: &str, token: Option<&str>) -> EditMessageBody {
+        EditMessageBody {
+            envelope_id: envelope_id.to_string(),
+            conversation_id: "c1".to_string(),
+            target_message_id: target.to_string(),
+            sender_id: Some(sender.to_string()),
+            ciphertext: "mls:01".to_string(),
+            sent_at: chrono::Utc::now().to_rfc3339(),
+            generation: None,
+            epoch: None,
+            delete_token: token.map(str::to_string),
+        }
+    }
+
+    async fn pending_edits(conn: &Connection, target: &str) -> i64 {
+        let mut rows = conn
+            .query(
+                "SELECT COUNT(*) FROM message_envelope \
+                 WHERE target_message_id = ?1 AND type = 'edit'",
+                libsql::params![target.to_string()],
+            )
+            .await
+            .unwrap();
+        rows.next().await.unwrap().unwrap().get(0).unwrap()
+    }
+
+    /// The clobber. `idx_envelope_one_edit_per_message` allows exactly one
+    /// pending edit per message, so accepting Bob's MUST remove Alice's — there
+    /// is no "accept but do not clobber" state. Bob's edit is therefore refused,
+    /// which narrows #607's "the DS accepts any member's edit" for edits only.
+    /// Nothing is de-anonymized by it: the DS checks possession of a secret, not
+    /// an identity.
+    #[tokio::test]
+    async fn a_member_cannot_clobber_another_authors_pending_edit() {
+        let c = conn().await;
+        apply_send_message(&c, Some("alice"), &send("m1", Some(hash_of(TOKEN))))
+            .await
+            .unwrap();
+
+        // Alice edits her own message, proving the capability.
+        let out = apply_edit_message(&c, Some("alice"), &edit("e1", "m1", "alice", Some(TOKEN)))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Ok), "{out:?}");
+        assert_eq!(pending_edits(&c, "m1").await, 1);
+
+        // Bob forges one, with no capability and then with a guess.
+        for token in [None, Some("not-the-token")] {
+            let out = apply_edit_message(&c, Some("bob"), &edit("e2", "m1", "bob", token))
+                .await
+                .unwrap();
+            assert!(matches!(out, WriteOutcome::Forbidden), "{out:?}");
+        }
+
+        assert_eq!(
+            pending_edits(&c, "m1").await,
+            1,
+            "alice's pending edit must survive bob's"
+        );
+        let mut rows = c
+            .query("SELECT COUNT(*) FROM message_envelope WHERE id = 'e1'", ())
+            .await
+            .unwrap();
+        let alices: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
+        assert_eq!(alices, 1, "MESSAGE LOSS: bob clobbered alice's pending edit");
+    }
+
+    /// The author replaces their own pending edit, so repeated edits do not pile
+    /// up — the behaviour the DELETE exists for.
+    #[tokio::test]
+    async fn the_author_replaces_their_own_pending_edit() {
+        let c = conn().await;
+        apply_send_message(&c, Some("alice"), &send("m1", Some(hash_of(TOKEN))))
+            .await
+            .unwrap();
+
+        for envelope in ["e1", "e2", "e3"] {
+            apply_edit_message(
+                &c,
+                Some("alice"),
+                &edit(envelope, "m1", "alice", Some(TOKEN)),
+            )
+            .await
+            .unwrap();
+        }
+        assert_eq!(
+            pending_edits(&c, "m1").await,
+            1,
+            "the author's edits must replace, not accumulate"
+        );
+    }
+
+    /// A target written before capabilities existed keeps the old replace
+    /// behaviour, or editing an older message would start piling up envelopes.
+    #[tokio::test]
+    async fn a_legacy_target_still_replaces() {
+        let c = conn().await;
+        apply_send_message(&c, Some("alice"), &send("m1", None)).await.unwrap();
+        apply_edit_message(&c, Some("alice"), &edit("e1", "m1", "alice", None))
+            .await
+            .unwrap();
+        apply_edit_message(&c, Some("alice"), &edit("e2", "m1", "alice", None))
+            .await
+            .unwrap();
+        assert_eq!(pending_edits(&c, "m1").await, 1);
     }
 }

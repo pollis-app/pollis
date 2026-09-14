@@ -79,6 +79,7 @@ fn send(id: &str, sent_at: &str) -> SendMessageBody {
         generation: None,
         epoch: None,
         push_to: None,
+        delete_token_hash: None,
     }
 }
 
@@ -92,6 +93,7 @@ fn edit(envelope_id: &str, target: &str, sent_at: &str) -> EditMessageBody {
         sent_at: sent_at.to_string(),
         generation: None,
         epoch: None,
+        delete_token: None,
     }
 }
 
@@ -369,6 +371,7 @@ async fn a_non_members_watermark_row_does_not_floor_the_admin_tombstone() {
             conversation_id: "c1".into(),
             msg_sender_id: Some("bob".into()),
             actor_id: None,
+            delete_token: None,
         },
     )
     .await
