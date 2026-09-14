@@ -120,23 +120,6 @@ pub const CONVERSATION_PURGED_TABLES: &[&str] = &[
 /// purged nor listed here — the list is a decision record, not a suppression.
 pub const EXEMPT_FROM_USER_PURGE: &[(&str, &str)] = &[
     (
-        "user_groups",
-        "Retired (#1085). Migration 000009 created this sidebar index (#532) and \
-         backfilled it once; #540 reverted the feature and nothing has written to it \
-         since — the DS never INSERTed, never READ it, and only ever DELETEd from it \
-         here. Migration 000025 empties it, and \
-         `no_ds_sql_names_the_retired_directory_mirror` forbids any SQL in this crate \
-         naming it, so there is nothing left to purge. Not DROPped yet: a rolling \
-         deploy still has older instances running the DELETEs this PR removes, and \
-         pulling the table out from under them would fail account deletion. The DROP \
-         belongs in a later release.",
-    ),
-    (
-        "user_dms",
-        "Retired (#1085) — same story as `user_groups`, same migration, same DROP \
-         deferral.",
-    ),
-    (
         "account_key_log",
         "Append-only account-key transparency log (migration 000005). Its rows are \
          already published in the account tenant's Merkle tree at verify.pollis.com; \
@@ -191,16 +174,6 @@ pub const EXEMPT_FROM_USER_PURGE: &[(&str, &str)] = &[
 /// Tables that deliberately survive a conversation (group / channel / DM)
 /// teardown, and why.
 pub const EXEMPT_FROM_CONVERSATION_PURGE: &[(&str, &str)] = &[
-    (
-        "user_groups",
-        "Retired (#1085) — emptied by migration 000025, written by nothing, and no \
-         SQL in this crate may name it. See EXEMPT_FROM_USER_PURGE for the full \
-         story and why the DROP is deferred.",
-    ),
-    (
-        "user_dms",
-        "Retired (#1085) — see EXEMPT_FROM_USER_PURGE.",
-    ),
     (
         "conversation",
         "Append-only id registry (migration 000016) — see EXEMPT_FROM_USER_PURGE.",

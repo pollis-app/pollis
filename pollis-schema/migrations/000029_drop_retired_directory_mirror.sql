@@ -1,0 +1,27 @@
+-- #1143: drop the retired `user_groups` / `user_dms` directory mirror.
+--
+-- This is the second half of #1085, which emptied the tables (migration 000025)
+-- but deliberately left them in place:
+--
+--   "It does NOT drop them: a rolling deploy still has older DS instances
+--    executing `DELETE FROM user_groups` during teardown, and dropping the table
+--    out from under those would fail account deletion. The DROP belongs in a
+--    later release once no running DS names them."
+--
+-- That condition is now met. #1085 shipped and both environments have been
+-- redeployed past it several times over (api.pollis.com and api-dev.pollis.com
+-- served 92a3415d and then 8422bea5), so no running instance issues those
+-- DELETEs, and `no_ds_sql_names_the_retired_directory_mirror` has kept it true
+-- since.
+--
+-- CLAUDE.md requires a multi-release dance for a DROP rather than forbidding it.
+-- This IS the second release of that dance: release N (#1085) stopped naming the
+-- tables, release N+1 removes them. The "shipped app" that matters here is the
+-- DS itself — no client has ever read or written these tables, so no client
+-- release floor applies.
+--
+-- IF EXISTS because a database provisioned after 000009 but restored from a
+-- partial snapshot may not have them, and a migration that can fail aborts the
+-- release.
+DROP TABLE IF EXISTS user_groups;
+DROP TABLE IF EXISTS user_dms;

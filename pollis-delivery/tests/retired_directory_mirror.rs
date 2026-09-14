@@ -8,12 +8,15 @@
 //! only drift further from `group_member` / `dm_channel_member`, and would have
 //! served a confidently wrong sidebar to whatever started reading it.
 //!
-//! Migration 000025 empties them and the DS no longer names them at all. The
-//! tables themselves are still there (a rolling deploy has older instances
-//! running the removed DELETEs, so the DROP waits for a later release), which is
-//! exactly why this guard exists: an empty, un-referenced table is an inviting
-//! place to put something, and the next person to reach for it should be told
-//! that its contents are not maintained.
+//! Migration 000025 emptied them and the DS stopped naming them; migration
+//! 000029 then DROPped them (#1143), once enough deploys had shipped that no
+//! running instance still issued the removed DELETEs.
+//!
+//! Both halves are still guarded. `the_retired_tables_are_gone_from_the_schema`
+//! proves the DROP actually happened rather than the migration being a silent
+//! no-op, and `no_ds_sql_names_the_retired_directory_mirror` keeps the name from
+//! coming back — a recreated table would be far worse than the emptied one,
+//! since nothing would be maintaining it and the sidebar it fed is long gone.
 //!
 //! Keyed on SQL keyword adjacency rather than a bare name search, so the
 //! exemption entries in `teardown.rs` — which name the tables in prose to
@@ -93,5 +96,50 @@ fn the_guard_would_catch_a_reintroduction() {
             .iter()
             .any(|kw| prose_upper.contains(&format!("{kw} {}", t.to_uppercase())))),
         "prose naming the tables must not trip the guard"
+    );
+}
+
+/// The DROP in migration 000029 must actually remove the tables — a migration
+/// that silently did nothing would leave exactly the inviting empty table #1143
+/// set out to remove, and nothing else would notice.
+#[tokio::test]
+async fn the_retired_tables_are_gone_from_the_schema() {
+    let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
+    let conn = db.connect().unwrap();
+    pollis_schema::apply::single_db(&conn).await.expect("schema");
+
+    let mut present: Vec<String> = Vec::new();
+    for table in RETIRED {
+        let mut rows = conn
+            .query(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                libsql::params![table.to_string()],
+            )
+            .await
+            .unwrap();
+        if rows.next().await.unwrap().is_some() {
+            present.push((*table).to_string());
+        }
+    }
+
+    assert!(
+        present.is_empty(),
+        "migration 000029 must DROP the retired directory mirror, but {present:?} \
+         still exist after applying the full migration set"
+    );
+
+    // Sanity: the probe can see tables that DO exist, or the assertion above is
+    // vacuous and would pass against a schema that was never applied.
+    let mut rows = conn
+        .query(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'group_member'",
+            (),
+        )
+        .await
+        .unwrap();
+    assert!(
+        rows.next().await.unwrap().is_some(),
+        "the schema probe found no `group_member`, so it would not have found the \
+         retired tables either — the check above proves nothing"
     );
 }

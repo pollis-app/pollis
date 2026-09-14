@@ -257,6 +257,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "delivery_sequence",
         include_str!("../migrations/000028_delivery_sequence.sql"),
     ),
+    (
+        29,
+        "drop_retired_directory_mirror",
+        include_str!("../migrations/000029_drop_retired_directory_mirror.sql"),
+    ),
 ];
 
 /// Every script for the MAIN DB, in apply order (baseline first). One element
