@@ -106,11 +106,22 @@ fn attributed(sender: Option<&PacketSender>, data: &serde_json::Value) -> Option
     })
 }
 
+/// What a `membership_changed` wake-up asks the receiving device to do, beyond
+/// forwarding the event to the UI.
+pub(super) struct MembershipWake {
+    /// The `mls_group_id` — `group_id` for channels, `dm_channel_id` for DMs.
+    pub(super) conversation_id: String,
+    /// `true` when the change was a member LEAVING (or deleting their account).
+    /// A leaver cannot commit its own removal, so unlike every other membership
+    /// change there is no committer yet and the receiver has to be one (#1081).
+    pub(super) is_leave: bool,
+}
+
 pub(super) fn dispatch_data(
     payload: &[u8],
     sender: Option<&PacketSender>,
     channel: &dyn crate::sink::EventSink<RealtimeEvent>,
-) -> Option<String> {
+) -> Option<MembershipWake> {
     let text = match std::str::from_utf8(payload) {
         Ok(s) => s,
         Err(_) => return None,
@@ -158,6 +169,8 @@ pub(super) fn dispatch_data(
                 .and_then(|v| v.as_str())
                 .map(str::to_owned);
             let kind = data.get("kind").and_then(|v| v.as_str()).map(str::to_owned);
+            let is_leave =
+                kind.as_deref() == Some(crate::commands::livekit_signalling::LEAVE_KIND);
             // The inviter is the attributed actor (see `attributed`); the DS
             // resolves `group_name` from the group row the invite names.
             let _ = channel.send(RealtimeEvent::MembershipChanged {
@@ -169,7 +182,10 @@ pub(super) fn dispatch_data(
                     .and_then(|v| v.as_str())
                     .map(str::to_owned),
             });
-            return conv_id;
+            return conv_id.map(|conversation_id| MembershipWake {
+                conversation_id,
+                is_leave,
+            });
         }
         Some("join_requests_changed") => {
             if let Some(group_id) = data.get("group_id").and_then(|v| v.as_str()) {
@@ -345,6 +361,52 @@ mod tests {
         let sink = Recording(Mutex::new(Vec::new()));
         dispatch_data(payload.to_string().as_bytes(), sender, &sink);
         sink.0.into_inner().unwrap()
+    }
+
+    fn wake(payload: serde_json::Value) -> Option<MembershipWake> {
+        let sink = Recording(Mutex::new(Vec::new()));
+        dispatch_data(payload.to_string().as_bytes(), None, &sink)
+    }
+
+    /// #1081: a leave is the one membership change with no committer, so the
+    /// handler has to be able to tell it apart. Classification lives here; what
+    /// the flag makes the device do lives in `mls::apply_membership_wake`.
+    #[test]
+    fn only_a_leave_wake_asks_the_receiver_to_commit() {
+        let leave = wake(crate::commands::livekit_signalling::member_left_group_payload("g1"))
+            .expect("a leave names its conversation");
+        assert_eq!(leave.conversation_id, "g1");
+        assert!(leave.is_leave);
+
+        let dm_leave = wake(
+            crate::commands::livekit_signalling::member_left_conversation_payload("dm1"),
+        )
+        .expect("a DM leave names its conversation");
+        assert_eq!(dm_leave.conversation_id, "dm1");
+        assert!(dm_leave.is_leave);
+
+        // Everything else was committed by the device that made it.
+        let plain = wake(crate::commands::livekit_signalling::membership_changed_payload("g1"))
+            .expect("a plain membership change still names its conversation");
+        assert!(!plain.is_leave, "a plain membership change needs no remove commit here");
+
+        let invite = wake(crate::commands::livekit_signalling::group_invite_inbox_payload(
+            "g1",
+            Some("alice"),
+            Some("Group"),
+        ))
+        .expect("an invite names its conversation");
+        assert!(!invite.is_leave);
+
+        // An unknown kind is not a leave — a future kind must not accidentally
+        // trigger a remove commit on every receiver.
+        let unknown = wake(serde_json::json!({
+            "type": "membership_changed",
+            "group_id": "g1",
+            "kind": "something-new",
+        }))
+        .expect("names its conversation");
+        assert!(!unknown.is_leave);
     }
 
     fn forged_call_invite() -> serde_json::Value {

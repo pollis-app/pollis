@@ -80,6 +80,7 @@ pub use group_state::rendezvous;
 
 // ── Cold-launch / post-reconnect sweep ──────────────────────────────────────
 pub use sweep::catch_up_all_mls_groups;
+pub use sweep::apply_membership_wake;
 
 // ── Own-leaf rotation (post-join merge + periodic PCS) ───────────────────────
 pub use self_update::{self_update_group, self_update_if_due};

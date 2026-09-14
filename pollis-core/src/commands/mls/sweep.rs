@@ -121,7 +121,7 @@ async fn sweep_conversation(
     {
         eprintln!("[mls-sweep] catch_up_mls_group for {kind} {conversation_id}: {e}");
     }
-    if let Err(e) = reconcile_backstop(state, conversation_id, user_id).await {
+    if let Err(e) = reconcile_if_tree_has_stale_leaf(state, conversation_id, user_id).await {
         eprintln!("[mls-sweep] reconcile backstop for {kind} {conversation_id}: {e}");
     }
     migrate_backstop(state, conversation_id, user_id, migrations).await;
@@ -221,7 +221,78 @@ async fn self_update_backstop(
 /// `mls_group_lock` for its whole body, and its own lost-race converge re-runs
 /// the interleaved catch-up — so there is no deadlock and no epoch advanced past
 /// an un-ingested message.
-async fn reconcile_backstop(
+/// Everything a device does when a `membership_changed` wake-up names one of its
+/// conversations. Extracted from the LiveKit event loop so it has a name, a doc
+/// comment, and a test — and so the headless build can exercise it without a
+/// room.
+///
+/// Order matters, and it is the same order `groups::membership` uses:
+///
+/// 1. **Poll Welcomes** — this device may be the one that was just added.
+/// 2. **Interleaved group catch-up**, not a bare commit-only replay: a
+///    membership commit advances the shared group past an epoch at which a
+///    channel may still hold an un-ingested message, and with
+///    `max_past_epochs = 0` those keys would then be gone. Interleaving decrypts
+///    en route. `conversation_id` is the `mls_group_id` — `group_id` for
+///    channels, `dm_channel_id` for DMs.
+/// 3. **On a leave only**, stage the remove. Every other membership change was
+///    already committed by the device that made it, which is why this step is
+///    normally skipped. A leave cannot be: MLS forbids removing your own leaf,
+///    so the leaver only deleted its roster row and wiped local state. Before
+///    #1081 nobody staged the commit until some remaining member's next
+///    cold-launch sweep, and until then the leaver's leaf sat in every remaining
+///    tree with every new message still sealed for it. Reconciling here is safe
+///    to do from several members at once — they race on the DS commit-log CAS,
+///    one wins and the rest converge through `LostRace`.
+///
+/// Every step is best-effort: this runs from a wake-up, not a user action, and a
+/// failure is logged and left for the next catch-up or the sweep backstop.
+pub async fn apply_membership_wake(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    user_id: &str,
+    is_leave: bool,
+) {
+    let device_id = state.device_id.lock().await.clone();
+    if let Some(ref device_id) = device_id {
+        if let Err(e) =
+            crate::commands::mls::poll_mls_welcomes_inner(state, user_id, device_id).await
+        {
+            eprintln!("[mls] poll_welcomes for {conversation_id}: {e}");
+        }
+    }
+
+    if let Err(e) = crate::commands::messages::catch_up_mls_group_interleaved(
+        state,
+        conversation_id,
+        user_id,
+    )
+    .await
+    {
+        eprintln!("[mls] catch_up_mls_group for {conversation_id}: {e}");
+    }
+
+    if is_leave {
+        if let Err(e) = reconcile_if_tree_has_stale_leaf(state, conversation_id, user_id).await {
+            eprintln!("[mls] leave reconcile for {conversation_id}: {e}");
+        }
+    }
+}
+
+/// Reconcile `conversation_id` only if the local tree actually holds a leaf a
+/// reconcile would evict. Two callers, both of which want exactly this shape:
+///
+/// * the sweep's backstop, retrying a remove commit that was dropped;
+/// * [`apply_membership_wake`] on a **leave**, where no member has staged the
+///   remove yet because a leaver cannot commit its own removal (#1081) — before
+///   that, the sweep was the *first* attempt rather than a retry, so the
+///   leaver's leaf sat in every remaining tree until some member's next cold
+///   launch.
+///
+/// The precheck is what makes it cheap enough to run from a wake-up path: a
+/// local MLS load and two small SELECTs, never the DS claim / account-key-pin /
+/// commit-crypto work of a full reconcile.
+async fn reconcile_if_tree_has_stale_leaf(
     state: &Arc<AppState>,
     conversation_id: &str,
     user_id: &str,
@@ -231,7 +302,7 @@ async fn reconcile_backstop(
     }
 
     eprintln!(
-        "[mls-sweep] {conversation_id}: stale leaf in local tree — retrying dropped remove/eviction reconcile"
+        "[mls-sweep] {conversation_id}: stale leaf in local tree — staging the remove/eviction reconcile"
     );
     crate::commands::mls::reconcile_group_mls_impl(state, conversation_id, user_id).await?;
     Ok(())

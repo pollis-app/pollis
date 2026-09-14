@@ -131,11 +131,14 @@ pub async fn leave_group(
     }
 
     // Signal remaining members to reconcile (removes the leaver's stale leaf).
-    // Use publish_to_room_server since the leaver may not be connected to the room.
+    // `kind: "leave"` is what makes them actually do it — every other membership
+    // change was already committed by the device that made it, and a leaver
+    // cannot commit its own removal (#1081). Use publish_to_room_server since the
+    // leaver may not be connected to the room.
     if let Err(e) = crate::commands::livekit::publish_to_room_server(
         state,
         &group_id,
-        serde_json::json!({"type": "membership_changed", "group_id": group_id}),
+        crate::commands::livekit_signalling::member_left_group_payload(&group_id),
     ).await {
         eprintln!("[realtime] leave_group: notify group {group_id}: {e}");
     }

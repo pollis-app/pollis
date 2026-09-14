@@ -67,6 +67,41 @@ pub fn membership_changed_payload(group_id: &str) -> Value {
     })
 }
 
+/// `membership_changed` wake-up for a member who LEFT — voluntarily, or by
+/// deleting their account.
+///
+/// `kind: "leave"` is load-bearing, not a label (#1081). Every other membership
+/// change is committed by the device that made it, which is why the realtime
+/// handler only catches up on the rest. A leave cannot be: MLS forbids removing
+/// your own leaf, so the leaver deletes its roster row, wipes local state, and
+/// sends this — and somebody still online has to stage the remove. Without the
+/// kind, nobody did until a remaining member's next cold-launch sweep, and the
+/// leaver's leaf stayed in every tree until then, with every message still
+/// sealed for it.
+///
+/// It names no one. Who left is re-derived from the authenticated commit and the
+/// roster refetch, so the cleartext broadcast stays a bare wake-up (§5.3).
+pub fn member_left_group_payload(group_id: &str) -> Value {
+    json!({
+        "type": "membership_changed",
+        "group_id": group_id,
+        "kind": LEAVE_KIND,
+    })
+}
+
+/// [`member_left_group_payload`] for a DM / conversation-keyed room.
+pub fn member_left_conversation_payload(conversation_id: &str) -> Value {
+    json!({
+        "type": "membership_changed",
+        "conversation_id": conversation_id,
+        "kind": LEAVE_KIND,
+    })
+}
+
+/// The `kind` that marks a `membership_changed` wake-up as a leave. Declared
+/// once so the emitters and the handler that reconciles on it cannot drift.
+pub const LEAVE_KIND: &str = "leave";
+
 /// `roster_changed` wake-up broadcast to a conversation's LiveKit room. Carries
 /// only the routing handle + epochs so already-connected peers refetch the
 /// member list — the per-user `joined`/`left`/device id lists are deliberately
@@ -229,6 +264,23 @@ mod tests {
         assert_eq!(p["type"], "deleted_message");
         assert_eq!(p["message_id"], "msg-1");
         assert_no_identity(&p);
+    }
+
+    /// A leave wake-up must carry the kind the handler reconciles on — and still
+    /// name nobody (§5.3): which member left is re-derived from the commit.
+    #[test]
+    fn leave_pings_carry_the_kind_and_no_leaver() {
+        let g = member_left_group_payload("group-1");
+        assert_eq!(g["type"], "membership_changed");
+        assert_eq!(g["group_id"], "group-1");
+        assert_eq!(g["kind"], LEAVE_KIND);
+        assert_no_identity(&g);
+
+        let d = member_left_conversation_payload("dm-1");
+        assert_eq!(d["type"], "membership_changed");
+        assert_eq!(d["conversation_id"], "dm-1");
+        assert_eq!(d["kind"], LEAVE_KIND);
+        assert_no_identity(&d);
     }
 
     /// #836: the typing broadcast is where the pseudonymous participant identity

@@ -187,38 +187,17 @@ pub async fn connect_rooms(
                                             lk.channel.clone()
                                         };
                                         if let Some(ch) = channel {
-                                            let reconcile_id = super::dispatch_data(payload.as_slice(), sender.as_ref(), ch.as_ref());
-                                            // On membership changes: process inbound commits
-                                            // so this device advances to the current epoch,
-                                            // and poll Welcomes in case this device was just
-                                            // added to the group. Reconcile is NOT needed
-                                            // here — it already ran on the device that made
-                                            // the change.
-                                            if let Some(conv_id) = reconcile_id {
+                                            let wake = super::dispatch_data(payload.as_slice(), sender.as_ref(), ch.as_ref());
+                                            // A membership wake-up: catch this device up, and
+                                            // on a LEAVE also stage the remove nobody else has.
+                                            // See `mls::apply_membership_wake`.
+                                            if let Some(super::MembershipWake { conversation_id, is_leave }) = wake {
                                                 let state = Arc::clone(app_state);
                                                 let uid = user_id.to_owned();
                                                 tokio::spawn(async move {
-                                                    let did = state.device_id.lock().await.clone();
-                                                    if let Some(ref did) = did {
-                                                        if let Err(e) = crate::commands::mls::poll_mls_welcomes_inner(
-                                                            &state, &uid, did,
-                                                        ).await {
-                                                            eprintln!("[mls] poll_welcomes for {conv_id}: {e}");
-                                                        }
-                                                    }
-                                                    // Group-level interleaved catch-up, not a
-                                                    // bare commit-only replay: a membership commit
-                                                    // advances the shared group past an epoch at
-                                                    // which a channel may hold an un-ingested
-                                                    // message, and (max_past_epochs = 0) its keys
-                                                    // would then be gone. Interleaving decrypts en
-                                                    // route. `conv_id` is the mls_group_id
-                                                    // (group_id for channels, dm_channel_id for DMs).
-                                                    if let Err(e) = crate::commands::messages::catch_up_mls_group_interleaved(
-                                                        &state, &conv_id, &uid,
-                                                    ).await {
-                                                        eprintln!("[mls] catch_up_mls_group for {conv_id}: {e}");
-                                                    }
+                                                    crate::commands::mls::apply_membership_wake(
+                                                        &state, &conversation_id, &uid, is_leave,
+                                                    ).await;
                                                 });
                                             }
                                         }

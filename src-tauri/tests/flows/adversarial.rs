@@ -2127,3 +2127,125 @@ async fn corrupt_commit_recovers_instead_of_wedging() {
     drop(carol);
     drop(dave);
 }
+
+// ─── Scenario 13 — a voluntary leave must be committed by somebody ───────────
+
+/// **Invalid state it attacks:** the leaver's leaf lingering in every remaining
+/// member's ratchet tree, with every message sealed after the leave still sealed
+/// for it (#1081).
+///
+/// A member cannot commit its own removal — MLS rejects `remove_members` with
+/// self as target — so leaving is two halves: the leaver deletes its roster row
+/// and wipes local state, and someone still online has to stage the remove.
+/// `leave_group` broadcast a `membership_changed` wake-up for exactly that, but
+/// the receiver ran Welcome polling and the catch-up only, on the (true for
+/// invite/remove/approve, false for leave) grounds that the change was already
+/// committed by the device that made it. So nothing staged the remove until some
+/// remaining member's next cold-launch sweep.
+///
+/// Here Bob leaves and Alice does only what the wake-up now makes her do —
+/// `apply_membership_wake(.., is_leave = true)`, no `sweep()` — and the message
+/// she sends afterwards must be unreadable to him. Carol is the positive
+/// control: a continuous member must still decrypt it, so the assertion is about
+/// Bob's eviction and not about a broken send.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_leave_is_committed_by_a_remaining_member_not_left_for_the_sweep() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+
+    let alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    let carol_p = carol.sign_up("carol@test.local").await;
+
+    let group_id = alice.create_group("LeaveEvict").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+
+    join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
+    join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
+    bob.process_commits_for(&channel_id).await;
+    carol.process_commits_for(&channel_id).await;
+
+    // Baseline: bob is a genuine member and decrypts.
+    alice.send_channel_message(&channel_id, "pre-leave").await;
+    assert!(
+        contents(&bob, &channel_id).await.contains(&"pre-leave".to_string()),
+        "bob must decrypt while still a member"
+    );
+
+    // Bob leaves for real, through the command: DS roster delete, local wipe,
+    // and the `kind: "leave"` wake-up to the room.
+    bob.leave_group(&group_id).await;
+
+    // Before: bob's leaf is still in alice's tree. Leaving cannot remove it —
+    // MLS refuses a self-remove, so all bob did was delete his roster row.
+    let before = pollis_lib::commands::mls::local_tree_members(&alice.state, &group_id).await;
+    assert!(
+        before.iter().any(|(u, _)| u == &bob_p.id),
+        "bob's leaf must still be in alice's tree immediately after he leaves: {before:?}"
+    );
+
+    // Alice has run no sweep. All she does is handle the wake-up.
+    pollis_lib::commands::mls::apply_membership_wake(
+        &alice.state,
+        &group_id,
+        &alice_p.id,
+        true,
+    )
+    .await;
+
+    // The assertion the ticket is about: the wake-up alone evicted him, with no
+    // cold launch and no sweep in between.
+    let after = pollis_lib::commands::mls::local_tree_members(&alice.state, &group_id).await;
+    assert!(
+        !after.iter().any(|(u, _)| u == &bob_p.id),
+        "LEAVE EVICTION GAP: bob's leaf is still in alice's tree after she handled the leave \
+         wake-up — nothing staged the remove commit, so every message she seals from here is \
+         still sealed for the leaf of a device that has left. tree={after:?}"
+    );
+
+    // And it is only bob who went: carol's leaf is the control.
+    assert!(
+        after.iter().any(|(u, _)| u == &carol_p.id),
+        "carol must still be in the tree: {after:?}"
+    );
+
+    // She staged the remove, so bob is gone from her tree before anything else
+    // happens. Settle it and send.
+    alice.process_commits_for(&channel_id).await;
+    alice.send_channel_message(&channel_id, "post-leave").await;
+
+    // Positive control: carol still decrypts, so the message was genuinely
+    // delivered to the surviving members.
+    carol.poll().await;
+    carol.process_commits_for(&channel_id).await;
+    assert!(
+        contents(&carol, &channel_id).await.contains(&"post-leave".to_string()),
+        "carol (a continuous member) must decrypt the post-leave message"
+    );
+
+    // Roster sanity: bob is not a member any more.
+    let members = alice.group_member_ids(&group_id).await;
+    assert!(
+        !members.contains(&bob_p.id),
+        "bob should not be a current member after leaving, got: {members:?}"
+    );
+
+    // Bob himself reads nothing, but that proves little on its own: `leave_group`
+    // wiped his local state, so his view is empty whether or not he was evicted.
+    // The load-bearing assertion is the tree walk above — it is what decides
+    // whether a disk image of his pre-leave state could open the message.
+    bob.poll().await;
+    bob.process_commits_for(&channel_id).await;
+    assert!(
+        !contents(&bob, &channel_id).await.contains(&"post-leave".to_string()),
+        "a wiped leaver must read nothing"
+    );
+
+    drop(alice);
+    drop(bob);
+    drop(carol);
+}

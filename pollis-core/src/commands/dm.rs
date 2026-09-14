@@ -350,10 +350,12 @@ pub async fn leave_dm_channel(
     }
 
     // Signal remaining members to reconcile (removes the leaver's stale leaf).
+    // `kind: "leave"` is what makes them actually do it — see
+    // `member_left_conversation_payload` and #1081.
     if let Err(e) = crate::commands::livekit::publish_to_room_server(
         state,
         &dm_channel_id,
-        serde_json::json!({"type": "membership_changed", "conversation_id": dm_channel_id}),
+        crate::commands::livekit_signalling::member_left_conversation_payload(&dm_channel_id),
     ).await {
         eprintln!("[realtime] leave_dm_channel: notify room {dm_channel_id}: {e}");
     }

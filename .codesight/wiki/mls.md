@@ -36,7 +36,10 @@ Source: `pollis-core/src/commands/mls.rs`
 - `create_group` (add creator's other devices)
 - `send_group_invite` (pre-add invitee so Welcome is ready)
 - `approve_join_request` (add requester)
-- `remove_member_from_group` / `leave_group` (remove member)
+- `remove_member_from_group` (remove member)
+- the realtime `membership_changed` handler, **on a leave only** (`mls::apply_membership_wake`, below)
+
+`leave_group` / `leave_dm_channel` deliberately do **not** appear in that list. MLS forbids removing your own leaf, so a leaver can only delete its roster row, wipe local state, and broadcast; the remove has to be staged by somebody still online. See "A leave has no committer" below.
 
 Steps:
 1. **Build roster** from `group_member` + `group_invite` (or `dm_channel_member`)
@@ -69,7 +72,7 @@ See commit `83df6ef` for the rationale; breaking this ordering re-introduces the
 
 When device A commits a membership change:
 1. The commit is written to `mls_commit_log`
-2. A `membership_changed` LiveKit event notifies online devices (convenience, not required). Like every realtime wake-up ping it carries **no sender/actor identity** — just the routing handle (see "Metadata-minimized signalling" below)
+2. A `membership_changed` LiveKit event notifies online devices (convenience, not required). Like every realtime wake-up ping it carries **no sender/actor identity** — just the routing handle (see "Metadata-minimized signalling" below). The receiving device runs `mls::apply_membership_wake`: poll Welcomes, interleaved group catch-up, and — for a leave only — stage the remove (see below)
 3. Other devices call `process_pending_commits_inner` which:
    - Fetches commits from `mls_commit_log` at `epoch >= local_epoch`
    - Applies them sequentially via `apply_one_commit`, which returns the leaves each commit **added, read off the staged commit's own Add proposals** (`AddedLeaf`: credential `user:device`, leaf signature key, scheme). Every added leaf is checked against the batch's `IdentityDirectory` (built from the snapshot's `added_identities`); a leaf that is not `Certified` is logged and answered with a detached eviction reconcile (`report_uncertified_leaves`). **Only a POSITIVELY `Uncertified` leaf also writes an `uncertified_mls_leaf` `security_event`** to this user's own audit log (the Security page lists it). An `Unverifiable` one does not (#1127): "the cert row has not reached me yet" — or "the commit's `added_user_id` hint did not name this user", which is #1080 for a multi-user add — is the absence of evidence, the reconcile self-corrects it, and alarming on it would both train people to ignore the real event and let a malicious committer manufacture alarms in other members' audit logs by omitting the hint. The split is `FlagKind` / `FlagKind::alarms`. The commit is still merged: it won the epoch CAS and is canonical, and a `StagedCommit` cannot be dropped and re-processed later (its ratchet generation is consumed), so the remedy is eviction, not refusal. Because the leaves come from the commit and not from the `added_*` columns, a committer that NULLs or shortens the hint can only make its own honest add look *unverifiable* (which the eviction reconcile, reading the whole roster's material, then finds certified and keeps) — never make a rogue add look verified. See [Leaf cross-signing](#leaf-cross-signing)
@@ -77,6 +80,20 @@ When device A commits a membership change:
    - If the group was evicted (user was kicked) → deletes it, then external-joins
    - Publishes updated GroupInfo after processing
    - Reports this device's now-current applied epoch to the DS (`ds_report_commit_since` → **device-signed** `POST /v1/commits/since`) so the server can compute the commit-log **retention floor** (#539, below). The report is authenticated (#681): it raises the floor, so it must be bound to the reporting device. The open `GET /v1/commits/:id` it replaced is retired outright — catch-up reads go through the signed, membership-gated `POST /v1/mls/conversation-state`, so no control-plane read is unauthenticated any more. The report is fully best-effort and bounded by a short (5s) timeout inside `ds_report_commit_since`, so a black-holed DS can never stall catch-up — nor the suite-migration path (`migrate.rs`), which awaits it inline
+
+### A leave has no committer (#1081)
+
+Every membership change is committed by the device that made it — except a leave, because MLS rejects `remove_members` with self as the target. So `leave_group` / `leave_dm_channel` (and `delete_account`, which is a leave of every conversation at once) do three things: delete the roster row through the DS, `forget_local_mls_group`, and broadcast a `membership_changed` wake-up. Somebody still online has to stage the remove.
+
+The realtime handler used to run Welcome polling and the catch-up only, on the explicit grounds that "reconcile is NOT needed here — it already ran on the device that made the change". True for invite / remove / approve, false for leave. So nothing staged the remove commit until the **sweep's** reconcile backstop happened to run on some remaining member's next cold launch or reconnect — and `sweep.rs` documents that backstop as a retry for a *dropped* remove commit, whereas for a leave it was the first attempt. Until it ran, the leaver's leaf stayed in every remaining member's tree and every message sealed after the leave was still sealed for it (recoverable from a disk image of the leaver's pre-wipe state).
+
+The leave wake-up therefore carries `kind: "leave"` (`livekit_signalling::member_left_group_payload` / `member_left_conversation_payload`, the constant is `LEAVE_KIND`), and `mls::apply_membership_wake` treats that kind as "reconcile too", **after** the catch-up so the commit is staged from the current epoch:
+
+- Gated on `sweep::reconcile_if_tree_has_stale_leaf`, the same cheap precheck the sweep backstop uses — one local MLS load plus two small SELECTs, derived from `reconcile::desired_set` so it flags exactly the leaves a reconcile would evict. In steady state the answer is `false` and no reconcile runs, so this costs a wake-up almost nothing.
+- Convergent when several members do it at once: they all stage from the same epoch, race on the DS commit-log CAS, one wins and the rest see `LostRace` and converge.
+- The kind is load-bearing, not a label. An unknown future kind is **not** treated as a leave, so it cannot accidentally make every receiver stage a commit.
+- The payload still names nobody (§5.3) — who left is re-derived from the authenticated commit and the roster refetch.
+- The sweep backstop stays as the safety net for the case where nobody was online to hear the broadcast.
 
 ### Commit-apply recovery: no silent wedge (#680)
 

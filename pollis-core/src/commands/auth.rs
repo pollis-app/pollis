@@ -1263,8 +1263,14 @@ pub async fn delete_account(
 
     {
         for gid in &mine.group_ids {
-            if let Err(e) = crate::commands::livekit::publish_membership_changed_to_room(
-                &state.livekit, gid,
+            // `publish_to_room_server`, not `publish_membership_changed_to_room`:
+            // the latter no-ops unless this client happens to be connected to the
+            // group's room, and a leaf nobody evicts is exactly the #1081 defect.
+            // Routed through the DS, the wake-up reaches the members regardless.
+            if let Err(e) = crate::commands::livekit::publish_to_room_server(
+                state,
+                gid,
+                crate::commands::livekit_signalling::member_left_group_payload(gid),
             ).await {
                 eprintln!("[account] membership_changed for group {gid} failed (non-fatal): {e}");
             }
@@ -1273,10 +1279,12 @@ pub async fn delete_account(
 
     {
         for dm_id in &mine.dm_ids {
+            // A deleted account is a leave by another name: nobody else has
+            // committed the remove, so the wake-up must ask them to (#1081).
             if let Err(e) = crate::commands::livekit::publish_to_room_server(
                 state,
                 dm_id,
-                serde_json::json!({"type": "membership_changed", "conversation_id": dm_id}),
+                crate::commands::livekit_signalling::member_left_conversation_payload(dm_id),
             ).await {
                 eprintln!("[account] membership_changed for DM {dm_id} failed (non-fatal): {e}");
             }
