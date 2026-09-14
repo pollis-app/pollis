@@ -319,6 +319,12 @@ async fn spawn_in_process_delivery(main: Arc<Db>, log: Arc<Db>) -> String {
             session_ttl_secs: 600,
             resend_throttle_secs: 0,
             max_attempts: 5,
+            // Every sign-in in the suite uses a handful of fixed mailboxes, so
+            // the production per-mailbox send budget (3 codes per TTL) would read
+            // one test run as one abused mailbox. Raised, not disabled — the OTP
+            // unit tests pin the real number.
+            max_sends_per_window: u32::MAX,
+            ..pollis_delivery::otp::OtpConfig::default()
         })
         // Every request arrives from 127.0.0.1, so the production per-IP limits
         // would read one test run as a single abusive client. Raised, not

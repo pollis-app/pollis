@@ -56,6 +56,7 @@ fn authed_state(db: Arc<Db>) -> AppState {
         session_ttl_secs: 600,
         resend_throttle_secs: 0,
         max_attempts: 5,
+        ..OtpConfig::default()
     })
 }
 

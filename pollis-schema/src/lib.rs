@@ -242,6 +242,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "retire_directory_mirror",
         include_str!("../migrations/000025_retire_directory_mirror.sql"),
     ),
+    (
+        26,
+        "email_case_insensitive",
+        include_str!("../migrations/000026_email_case_insensitive.sql"),
+    ),
 ];
 
 /// Every script for the MAIN DB, in apply order (baseline first). One element

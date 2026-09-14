@@ -119,15 +119,32 @@ now reused rather than rebuilt.
 
 **`email` is the account's identity, so it must be canonicalized before it reaches
 this table** — `NOT NULL UNIQUE` cannot merge `" a@x.com "` with `"a@x.com"`, it just
-lets both exist as two accounts for one person. Canonical form is **trim only**
-(deliberately *not* lowercased: only the OTP store key is lowercased, in
-`pollis_delivery::otp::normalize_email`). Both writers apply it at the function
-holding the INSERT, not at their handlers, because both are also called directly by
-in-process harnesses:
+lets both exist as two accounts for one person. Canonical form is **`trim` +
+`lower`** — one function, `pollis_delivery::otp::normalize_email`, which is also
+the OTP store's key.
 
-| writer | function | when |
+It used to be trim only, with the lowercasing applied to the store key alone. That
+split was the bug (#1088): `Alice@x.com` and `alice@x.com` were *one* mailbox to
+the code that mails the OTP and *two* accounts to the table that stores them, so
+signing in with a different capitalisation dropped you into a fresh empty account
+while your real one, its groups and its devices stayed where they were. Every
+read and write of `users.email` now canonicalizes, each at the function holding
+the statement rather than at its handler, because all of them are also called
+directly by in-process harnesses:
+
+| site | function | statement |
 |---|---|---|
-| DS (authoritative, and the only one) | `pollis_delivery::otp::apply_verify_otp` | every sign-in |
+| sign-in (resolve-or-create) | `pollis_delivery::otp::apply_verify_otp` | the `SELECT` + `INSERT INTO users` |
+| email change | `pollis_delivery::email_change::apply_verify_email_change` | the conflict `SELECT` + `UPDATE users SET email` |
+| identifier lookup | `pollis_delivery::directory::user_by_identifier` | the email-branch `SELECT` (usernames are already `a-z0-9_.-`, so there is no case to fold) |
+
+Migration `000026_email_case_insensitive` makes the database agree: it lowercases
+every row that *cannot* collide, then adds `UNIQUE INDEX idx_users_email_lower ON
+users (lower(trim(email)))`. Rows left over after the backfill are exactly the
+genuine two-accounts-one-mailbox pairs, and for those the index creation fails and
+aborts the release **on purpose** — deciding which of two real accounts survives is
+not a migration's call. Confirm before a release with
+`SELECT COUNT(*) - COUNT(DISTINCT lower(trim(email))) FROM users;` (want `0`).
 
 **`username` has a shape, and the shape is what makes identifier lookups sound.**
 Every "find a person by what the user typed" on the DS — `/v1/invites/create`,

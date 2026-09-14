@@ -79,6 +79,7 @@ fn dev_state(db: Arc<Db>) -> AppState {
         session_ttl_secs: 600,
         resend_throttle_secs: 0,
         max_attempts: 5,
+        ..OtpConfig::default()
     })
 }
 
@@ -155,6 +156,7 @@ async fn request_otp_is_ip_rate_limited() {
             // No per-email throttle, so only the per-IP limit is under test.
             resend_throttle_secs: 0,
             max_attempts: 5,
+            ..OtpConfig::default()
         })
         .with_ratelimit_config(RateLimitConfig {
             request_otp_max: 2,
@@ -199,6 +201,7 @@ async fn security_headers_on_every_response_including_429() {
             session_ttl_secs: 600,
             resend_throttle_secs: 0,
             max_attempts: 5,
+            ..OtpConfig::default()
         })
         .with_ratelimit_config(RateLimitConfig {
             request_otp_max: 1,

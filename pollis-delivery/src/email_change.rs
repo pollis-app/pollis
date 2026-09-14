@@ -211,7 +211,10 @@ pub async fn apply_verify_email_change(
     new_email: &str,
     code: &str,
 ) -> anyhow::Result<EmailChangeOutcome> {
-    let trimmed = new_email.trim();
+    // Canonical form (trim + lowercase) — the same key the OTP store used to
+    // bind the code, and what `users.email` now holds for every row (#1088).
+    let canonical = normalize_email(new_email);
+    let trimmed = canonical.as_str();
 
     // Binding gate FIRST — the device-signed caller MUST be the one who requested
     // this change. Checked before the OTP so a different user can't even burn the
@@ -225,7 +228,7 @@ pub async fn apply_verify_email_change(
     // the `users.email` write below succeeds, so a transient/config DB failure
     // returns a clean 5xx and the same code still works on retry instead of being
     // burned and disguised as "invalid code" (#518). Wrong-guess accounting stands.
-    match store.otp.check(trimmed, code, cfg.max_attempts, crate::util::now_unix()) {
+    match store.otp.check(trimmed, code, cfg, crate::util::now_unix()) {
         VerifyOutcome::Ok => {}
         VerifyOutcome::LockedOut => {
             // check() already deleted the code on lockout; drop the binding too so a

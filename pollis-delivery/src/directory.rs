@@ -1080,13 +1080,22 @@ pub async fn user_by_identifier(
     conn: &Connection,
     identifier: &str,
 ) -> anyhow::Result<Option<UserWire>> {
-    let column = if identifier.contains('@') { "email" } else { "username" };
+    let is_email = identifier.contains('@');
+    let column = if is_email { "email" } else { "username" };
+    // Mailboxes are case-insensitive and `users.email` now stores the canonical
+    // `trim(lower(..))` form (#1088), so an email identifier is canonicalized
+    // before the compare — otherwise `Alice@x.com` would not resolve to Alice.
+    // Usernames are left as typed: `is_valid_username` already restricts them to
+    // `a-z0-9_.-`, so there is no case to fold.
+    let needle = if is_email {
+        crate::otp::normalize_email(identifier)
+    } else {
+        identifier.to_string()
+    };
     let sql = format!(
         "SELECT id, username, preferred_name, avatar_url FROM users WHERE {column} = ?1"
     );
-    let mut rows = conn
-        .query(&sql, libsql::params![identifier.to_string()])
-        .await?;
+    let mut rows = conn.query(&sql, libsql::params![needle]).await?;
     match rows.next().await? {
         Some(row) => Ok(Some(UserWire {
             id: row.get(0)?,

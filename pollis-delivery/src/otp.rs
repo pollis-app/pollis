@@ -55,9 +55,17 @@ pub struct OtpConfig {
     pub session_ttl_secs: u64,
     /// Minimum seconds between two emails for the same address.
     pub resend_throttle_secs: u64,
-    /// Wrong-guess lockout threshold; the `(max+1)`-th wrong guess locks out and
-    /// deletes the code.
+    /// Wrong-guess lockout threshold; the `(max+1)`-th wrong guess locks the
+    /// MAILBOX (not merely the code) for `lockout_secs`.
     pub max_attempts: u32,
+    /// How long a mailbox stays locked after `max_attempts` wrong guesses.
+    /// Persisted on the mailbox record, so a fresh `request-otp` cannot clear it.
+    pub lockout_secs: u64,
+    /// How many codes one mailbox may be sent inside a `ttl_secs` window. The
+    /// cap exists because a re-request no longer invalidates the outstanding
+    /// code (#1088) — without it an attacker could mint unbounded concurrently
+    /// valid codes for a victim's mailbox.
+    pub max_sends_per_window: u32,
 }
 
 impl Default for OtpConfig {
@@ -69,6 +77,8 @@ impl Default for OtpConfig {
             session_ttl_secs: 600,
             resend_throttle_secs: 30,
             max_attempts: 5,
+            lockout_secs: 900,
+            max_sends_per_window: 3,
         }
     }
 }
@@ -90,21 +100,116 @@ impl OtpConfig {
     }
 }
 
-/// One stored OTP. The code itself is never kept — only `SHA-256(salt || code)`.
-struct OtpRecord {
+/// One outstanding code. The code itself is never kept — only
+/// `SHA-256(salt || code)`.
+struct CodeSlot {
     code_hash: [u8; 32],
     salt: [u8; 16],
     expires_at: u64,
-    attempts: u32,
-    last_sent_at: u64,
-    locked: bool,
 }
+
+/// State for ONE mailbox. The unit of throttling and lockout is the mailbox, not
+/// the code (#1088): a fresh `request-otp` used to replace the record outright,
+/// which reset the guess budget (so "5 attempts" was really 6 guesses per
+/// requested code, unbounded in aggregate) and let anyone invalidate the code a
+/// victim was about to type simply by asking for a new one.
+///
+/// So this record is created on the first request for the mailbox and then only
+/// ever *amended*: `failed` and `locked_until` survive every subsequent
+/// `prepare`, and a new code is ADDED to `codes` rather than replacing what is
+/// there. Every code stays valid until its own TTL expires.
+struct MailboxState {
+    /// Codes still inside their TTL, oldest first. Bounded by
+    /// `max_sends_per_window`; expired slots are dropped lazily.
+    codes: Vec<CodeSlot>,
+    /// Wrong guesses since the last success. Reset only by
+    /// [`OtpStore::consume`] (a completed sign-in) or by the lockout elapsing.
+    failed: u32,
+    /// When set and still in the future, every `check` is
+    /// [`VerifyOutcome::LockedOut`] and every `prepare` is a silent no-op.
+    locked_until: Option<u64>,
+    /// Last time an email actually went out, for the resend throttle.
+    last_sent_at: u64,
+    /// Sends inside the current window, and when that window opened.
+    sends: u32,
+    window_start: u64,
+}
+
+impl MailboxState {
+    fn new(now: u64) -> Self {
+        Self {
+            codes: Vec::new(),
+            failed: 0,
+            locked_until: None,
+            last_sent_at: 0,
+            sends: 0,
+            window_start: now,
+        }
+    }
+
+    /// `true` while a lockout is in force. An elapsed lockout is cleared along
+    /// with the guess counter, so the mailbox is usable again without needing a
+    /// successful sign-in to reset it.
+    fn locked(&mut self, now: u64) -> bool {
+        match self.locked_until {
+            Some(until) if now < until => true,
+            Some(_) => {
+                self.locked_until = None;
+                self.failed = 0;
+                false
+            }
+            None => false,
+        }
+    }
+
+    /// Drop codes past their TTL. Called before every read and write so an
+    /// expired code is never counted as outstanding.
+    fn prune(&mut self, now: u64) {
+        self.codes.retain(|c| now <= c.expires_at);
+    }
+
+    /// Whether this mailbox is at its per-window send budget, rolling the window
+    /// over first if it has elapsed.
+    fn over_send_budget(&mut self, window_secs: u64, max_sends: u32, now: u64) -> bool {
+        if now.saturating_sub(self.window_start) >= window_secs {
+            self.window_start = now;
+            self.sends = 0;
+        }
+        self.sends >= max_sends
+    }
+}
+
+/// Map size past which [`prepare`](OtpStore::prepare) sweeps records that carry
+/// no state worth keeping. Records used to be self-clearing (an expired or
+/// locked-out code deleted its own entry), but the whole point of #1088 is that
+/// mailbox state outlives its codes — so something has to collect the mailboxes
+/// nobody ever came back to, or the map grows with every address anyone asks
+/// about. Amortised: the sweep is O(map) and runs only above this size.
+const SWEEP_AT: usize = 1024;
 
 /// In-memory OTP store keyed on the normalized email. `Clone` is shallow (shared
 /// `Arc`) so it rides on the `Clone` `AppState`.
 #[derive(Clone, Default)]
 pub struct OtpStore {
-    inner: Arc<Mutex<HashMap<String, OtpRecord>>>,
+    inner: Arc<Mutex<HashMap<String, MailboxState>>>,
+}
+
+/// Drop mailboxes holding nothing: no live code, no lockout in force, and a send
+/// window that has already elapsed. Anything still carrying one of those is
+/// load-bearing and stays.
+///
+/// The bound this sets on the guess budget: abandoning a mailbox for a full
+/// `ttl_secs` with no outstanding code resets its failed-guess count. So the
+/// budget refills at most once per OTP lifetime, versus once per *request*
+/// before #1088 — and the per-IP window (`ratelimit.rs`) bounds how many
+/// mailboxes one client can cycle that way.
+fn sweep(map: &mut HashMap<String, MailboxState>, ttl_secs: u64, now: u64) {
+    map.retain(|_, rec| {
+        rec.prune(now);
+        let locked = rec.locked_until.is_some_and(|until| now < until);
+        let window_open = now.saturating_sub(rec.window_start) < ttl_secs;
+        !rec.codes.is_empty() || locked || window_open
+    });
 }
 
 /// Normalize an email for store keying so request/verify always agree: trim +
@@ -135,11 +240,17 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 }
 
 /// Outcome of preparing a code for an email.
+#[derive(Debug, PartialEq, Eq)]
 pub enum PrepareOutcome {
     /// A fresh code was stored; email this plaintext.
     Send(String),
-    /// Within the resend-throttle window; do NOT email, but still 200 the caller.
+    /// Within the resend-throttle window, or at the per-mailbox send budget for
+    /// this window; do NOT email, but still 200 the caller.
     Throttled,
+    /// The mailbox is locked out by failed guesses. Do NOT email and do NOT
+    /// store a code — the whole point of a persisted lockout is that asking for
+    /// a new code cannot clear it. Still 200 the caller (anti-enumeration).
+    LockedOut,
 }
 
 /// Outcome of verifying a submitted code.
@@ -153,83 +264,106 @@ pub enum VerifyOutcome {
 }
 
 impl OtpStore {
-    /// Store a fresh `code` for `email` (replacing any prior one), unless the
-    /// last send is within the resend-throttle window (→ [`PrepareOutcome::Throttled`]).
-    pub fn prepare(
-        &self,
-        email: &str,
-        code: &str,
-        ttl_secs: u64,
-        resend_throttle_secs: u64,
-        now: u64,
-    ) -> PrepareOutcome {
+    /// Store a fresh `code` for `email`, ADDING it to whatever codes the mailbox
+    /// already has outstanding rather than replacing them.
+    ///
+    /// Returns [`PrepareOutcome::LockedOut`] while a failed-guess lockout is in
+    /// force and [`PrepareOutcome::Throttled`] inside the resend window or at the
+    /// per-window send budget. In all three cases the caller still answers 200 —
+    /// the outcome only decides whether an email goes out.
+    pub fn prepare(&self, email: &str, code: &str, cfg: &OtpConfig, now: u64) -> PrepareOutcome {
         let key = normalize_email(email);
         let mut guard = self.inner.lock().expect("otp store mutex poisoned");
-        if let Some(rec) = guard.get(&key) {
-            if !rec.locked
-                && now < rec.expires_at
-                && now.saturating_sub(rec.last_sent_at) < resend_throttle_secs
-            {
-                return PrepareOutcome::Throttled;
-            }
+        if guard.len() >= SWEEP_AT {
+            sweep(&mut guard, cfg.ttl_secs, now);
         }
+        let rec = guard.entry(key).or_insert_with(|| MailboxState::new(now));
+        rec.prune(now);
+
+        // A persisted lockout is not clearable by requesting a new code — that
+        // was the hole: `prepare` replaced the record and with it the counter.
+        if rec.locked(now) {
+            return PrepareOutcome::LockedOut;
+        }
+        if rec.last_sent_at > 0
+            && now.saturating_sub(rec.last_sent_at) < cfg.resend_throttle_secs
+        {
+            return PrepareOutcome::Throttled;
+        }
+        if rec.over_send_budget(cfg.ttl_secs, cfg.max_sends_per_window, now) {
+            return PrepareOutcome::Throttled;
+        }
+
         let mut salt = [0u8; 16];
         OsRng.fill_bytes(&mut salt);
-        guard.insert(
-            key,
-            OtpRecord {
-                code_hash: salted_hash(&salt, code),
-                salt,
-                expires_at: now.saturating_add(ttl_secs),
-                attempts: 0,
-                last_sent_at: now,
-                locked: false,
-            },
-        );
+        rec.codes.push(CodeSlot {
+            code_hash: salted_hash(&salt, code),
+            salt,
+            expires_at: now.saturating_add(cfg.ttl_secs),
+        });
+        rec.last_sent_at = now;
+        rec.sends += 1;
         PrepareOutcome::Send(code.to_string())
     }
 
-    /// Check a submitted `code` against the stored record WITHOUT consuming it on
-    /// success. Constant-time compare; on a WRONG guess it increments the attempt
-    /// counter and locks out + deletes past `max_attempts`; it deletes an expired
-    /// record. On a CORRECT code the record is **left in place** — the caller must
-    /// call [`OtpStore::consume`] only after the dependent account-write + session
-    /// mint succeed, so a transient/config failure downstream (e.g. a bad DB token)
-    /// can't permanently burn a valid code and masquerade as "invalid code" (#518).
-    /// Wrong-guess accounting (attempts + lockout) is never rolled back.
-    pub fn check(&self, email: &str, code: &str, max_attempts: u32, now: u64) -> VerifyOutcome {
+    /// Check a submitted `code` against every code the mailbox has outstanding,
+    /// WITHOUT consuming it on success. Constant-time compare; on a wrong guess
+    /// it increments the mailbox's failed-guess counter and, past
+    /// `cfg.max_attempts`, locks the mailbox for `cfg.lockout_secs` and drops
+    /// every outstanding code.
+    ///
+    /// On a CORRECT code the record is **left in place** — the caller must call
+    /// [`OtpStore::consume`] only after the dependent account-write + session
+    /// mint succeed, so a transient/config failure downstream (e.g. a bad DB
+    /// token) can't permanently burn a valid code and masquerade as "invalid
+    /// code" (#518). Wrong-guess accounting is never rolled back.
+    pub fn check(&self, email: &str, code: &str, cfg: &OtpConfig, now: u64) -> VerifyOutcome {
         let key = normalize_email(email);
         let mut guard = self.inner.lock().expect("otp store mutex poisoned");
         let rec = match guard.get_mut(&key) {
             Some(r) => r,
             None => return VerifyOutcome::NotFound,
         };
-        if rec.locked {
+        if rec.locked(now) {
             return VerifyOutcome::LockedOut;
         }
-        if now > rec.expires_at {
-            guard.remove(&key);
-            return VerifyOutcome::Expired;
+        let had_codes = !rec.codes.is_empty();
+        rec.prune(now);
+        if rec.codes.is_empty() {
+            // Distinguish "the code you were given has run out of time" from
+            // "this mailbox has no code at all" — the client renders them
+            // differently — but keep the mailbox record either way, so the
+            // guess counter survives.
+            return if had_codes {
+                VerifyOutcome::Expired
+            } else {
+                VerifyOutcome::NotFound
+            };
         }
-        let provided = salted_hash(&rec.salt, code);
-        if constant_time_eq(&provided, &rec.code_hash) {
-            // Correct: leave the record so a failed downstream write doesn't burn
-            // it. `consume` enforces single-use once the write has succeeded.
+
+        // Compare against every outstanding code. `fold` rather than `any` so the
+        // work does not depend on which slot matched.
+        let matched = rec.codes.iter().fold(false, |acc, slot| {
+            acc | constant_time_eq(&salted_hash(&slot.salt, code), &slot.code_hash)
+        });
+        if matched {
             return VerifyOutcome::Ok;
         }
-        rec.attempts += 1;
-        if rec.attempts > max_attempts {
-            // Lock out and delete — the bug fix: no unlimited guessing.
-            guard.remove(&key);
+
+        rec.failed += 1;
+        if rec.failed > cfg.max_attempts {
+            rec.locked_until = Some(now.saturating_add(cfg.lockout_secs));
+            rec.codes.clear();
             return VerifyOutcome::LockedOut;
         }
         VerifyOutcome::Invalid
     }
 
-    /// Consume (single-use) the OTP for `email` once the dependent account-write +
-    /// session mint have succeeded. Idempotent — a no-op if the record is already
-    /// gone. Pairs with [`OtpStore::check`] to make consumption contingent on the
-    /// whole verify-otp operation succeeding (#518).
+    /// Consume (single-use) the OTPs for `email` once the dependent
+    /// account-write and session mint have succeeded: a completed sign-in drops
+    /// the whole mailbox record, which is also what resets the failed-guess
+    /// counter. Idempotent. Pairs with [`OtpStore::check`] to make consumption
+    /// contingent on the whole verify-otp operation succeeding (#518).
     pub fn consume(&self, email: &str) {
         let key = normalize_email(email);
         let mut guard = self.inner.lock().expect("otp store mutex poisoned");
@@ -267,10 +401,16 @@ pub async fn process_request_otp(otp: &OtpStore, cfg: &OtpConfig, email: &str) {
         None => format!("{:06}", OsRng.gen_range(0..1_000_000u32)),
     };
 
-    let outcome = otp.prepare(email, &code, cfg.ttl_secs, cfg.resend_throttle_secs, crate::util::now_unix());
+    let outcome = otp.prepare(email, &code, cfg, crate::util::now_unix());
 
     match outcome {
         PrepareOutcome::Throttled => {}
+        PrepareOutcome::LockedOut => {
+            tracing::warn!(
+                "OTP request for {} refused — mailbox locked out by failed guesses",
+                mask_email(email)
+            );
+        }
         PrepareOutcome::Send(code) => {
             // DEV_OTP: skip the real send entirely.
             if cfg.dev_otp.is_some() {
@@ -394,7 +534,7 @@ pub async fn apply_verify_otp(
     // clean 5xx and the *same* code still works on retry, instead of being burned
     // and disguised as "invalid code" (#518). Wrong/expired/locked codes are
     // rejected here and their attempt accounting stands.
-    match otp.check(email, code, cfg.max_attempts, crate::util::now_unix()) {
+    match otp.check(email, code, cfg, crate::util::now_unix()) {
         VerifyOutcome::Ok => {}
         VerifyOutcome::LockedOut => return Ok(VerifyOtpResult::LockedOut),
         VerifyOutcome::Invalid | VerifyOutcome::Expired | VerifyOutcome::NotFound => {
@@ -417,7 +557,17 @@ pub async fn apply_verify_otp(
     // and the only place that can guarantee "one address, one row" is the
     // function holding the INSERT. `apply_verify_otp` is also called directly by
     // the in-process test harnesses, which do not go through the handler's trim.
-    let email = email.trim();
+    //
+    // Lowercase as well as trim (#1088). Mailboxes are case-insensitive in
+    // practice, and the OTP store has always keyed on `trim(lower(..))` — so
+    // `Alice@x.com` and `alice@x.com` were one mailbox to the code that sends
+    // the code and two rows to the table that stores the account. Whoever typed
+    // the second spelling landed in a fresh empty account while their real one,
+    // its groups and its devices stayed where they were. Migration
+    // `000026_email_case_insensitive` backfills the existing rows and adds a
+    // unique index on `lower(trim(email))` so the database agrees.
+    let canonical = normalize_email(email);
+    let email = canonical.as_str();
 
     let mut rows = conn
         .query(
@@ -593,18 +743,31 @@ mod tests {
         (dir, db, conn)
     }
 
+    /// A config with the resend throttle off, for tests that prepare several
+    /// codes at one instant. Everything else is left at the real defaults.
+    fn no_throttle(cfg: &OtpConfig) -> OtpConfig {
+        OtpConfig { resend_throttle_secs: 0, ..cfg.clone() }
+    }
+
+    /// Defaults with the throttle off — the store tests below drive `now`
+    /// explicitly, so wall-clock spacing is not what they are about.
+    fn cfg() -> OtpConfig {
+        no_throttle(&OtpConfig::default())
+    }
+
     #[test]
     fn check_does_not_consume_a_correct_code_consume_does() {
         let store = OtpStore::default();
-        store.prepare("a@x.com", "123456", 600, 0, 1000);
+        let cfg = cfg();
+        store.prepare("a@x.com", "123456", &cfg, 1000);
         // A correct code checks Ok — and stays valid; checking again still Ok (the
         // #518 fix: check alone must not burn the code).
-        assert_eq!(store.check("a@x.com", "123456", 5, 1000), VerifyOutcome::Ok);
-        assert_eq!(store.check("a@x.com", "123456", 5, 1000), VerifyOutcome::Ok);
+        assert_eq!(store.check("a@x.com", "123456", &cfg, 1000), VerifyOutcome::Ok);
+        assert_eq!(store.check("a@x.com", "123456", &cfg, 1000), VerifyOutcome::Ok);
         // Single-use is enforced by consume, not by check.
         store.consume("a@x.com");
         assert_eq!(
-            store.check("a@x.com", "123456", 5, 1000),
+            store.check("a@x.com", "123456", &cfg, 1000),
             VerifyOutcome::NotFound
         );
         // consume is idempotent.
@@ -614,29 +777,150 @@ mod tests {
     #[test]
     fn lockout_after_six_wrong_then_correct_fails() {
         let store = OtpStore::default();
-        store.prepare("a@x.com", "123456", 600, 0, 1000);
+        let cfg = cfg();
+        store.prepare("a@x.com", "123456", &cfg, 1000);
         // 5 wrong guesses are merely invalid.
         for _ in 0..5 {
             assert_eq!(
-                store.check("a@x.com", "000000", 5, 1000),
+                store.check("a@x.com", "000000", &cfg, 1000),
                 VerifyOutcome::Invalid
             );
         }
-        // The 6th locks out and deletes the code.
+        // The 6th locks out and drops the code.
         assert_eq!(
-            store.check("a@x.com", "000000", 5, 1000),
+            store.check("a@x.com", "000000", &cfg, 1000),
             VerifyOutcome::LockedOut
         );
         // The correct code no longer works.
-        assert_ne!(store.check("a@x.com", "123456", 5, 1000), VerifyOutcome::Ok);
+        assert_ne!(store.check("a@x.com", "123456", &cfg, 1000), VerifyOutcome::Ok);
+    }
+
+    /// The #1088 bug: `prepare` used to replace the whole record, so the guess
+    /// budget was per *requested code* rather than per mailbox — 5 guesses, ask
+    /// for a new code, 5 more, forever. The counter must survive the request.
+    #[test]
+    fn a_fresh_request_does_not_refill_the_guess_budget() {
+        let store = OtpStore::default();
+        let cfg = cfg();
+        store.prepare("a@x.com", "123456", &cfg, 1000);
+        for _ in 0..5 {
+            assert_eq!(
+                store.check("a@x.com", "000000", &cfg, 1000),
+                VerifyOutcome::Invalid
+            );
+        }
+        // Ask for a new code — under the old store this reset `attempts` to 0.
+        store.prepare("a@x.com", "654321", &cfg, 1000);
+        assert_eq!(
+            store.check("a@x.com", "000000", &cfg, 1000),
+            VerifyOutcome::LockedOut,
+            "the 6th wrong guess must lock out even across a re-request"
+        );
+    }
+
+    /// And once locked, requesting a new code must not clear the lockout or mint
+    /// a usable code — the old `!rec.locked` branch was dead because the record
+    /// (and with it `locked`) was thrown away on every `prepare`.
+    #[test]
+    fn a_locked_mailbox_cannot_be_unlocked_by_requesting_a_new_code() {
+        let store = OtpStore::default();
+        let cfg = cfg();
+        store.prepare("a@x.com", "123456", &cfg, 1000);
+        for _ in 0..6 {
+            store.check("a@x.com", "000000", &cfg, 1000);
+        }
+        assert_eq!(
+            store.prepare("a@x.com", "654321", &cfg, 1000),
+            PrepareOutcome::LockedOut
+        );
+        assert_eq!(
+            store.check("a@x.com", "654321", &cfg, 1000),
+            VerifyOutcome::LockedOut,
+            "no code may be stored while the mailbox is locked"
+        );
+        // The lockout is time-bounded, not permanent: past `lockout_secs` the
+        // mailbox is usable again and the guess budget is fresh.
+        let after = 1000 + cfg.lockout_secs + 1;
+        assert!(matches!(
+            store.prepare("a@x.com", "654321", &cfg, after),
+            PrepareOutcome::Send(_)
+        ));
+        assert_eq!(store.check("a@x.com", "654321", &cfg, after), VerifyOutcome::Ok);
+    }
+
+    /// The other half of #1088: requesting a new code used to invalidate the one
+    /// the victim was about to type, so anyone who knew an address could stall
+    /// that person's sign-in indefinitely. Codes now accumulate and each stays
+    /// valid for its own TTL.
+    #[test]
+    fn a_new_request_leaves_the_outstanding_code_valid() {
+        let store = OtpStore::default();
+        let cfg = cfg();
+        store.prepare("a@x.com", "111111", &cfg, 1000);
+        store.prepare("a@x.com", "222222", &cfg, 1005);
+        assert_eq!(store.check("a@x.com", "111111", &cfg, 1010), VerifyOutcome::Ok);
+        assert_eq!(store.check("a@x.com", "222222", &cfg, 1010), VerifyOutcome::Ok);
+    }
+
+    /// Codes accumulating is only safe with a ceiling on how many a mailbox can
+    /// be sent, or the attacker just mints unbounded valid codes instead.
+    #[test]
+    fn a_mailbox_is_capped_at_max_sends_per_window() {
+        let store = OtpStore::default();
+        let cfg = cfg();
+        for i in 0..cfg.max_sends_per_window {
+            assert!(
+                matches!(store.prepare("a@x.com", "111111", &cfg, 1000 + i as u64), PrepareOutcome::Send(_)),
+                "send {i} is inside the budget"
+            );
+        }
+        assert_eq!(
+            store.prepare("a@x.com", "222222", &cfg, 1000 + cfg.max_sends_per_window as u64),
+            PrepareOutcome::Throttled
+        );
+        // The window rolls over.
+        let next = 1000 + cfg.ttl_secs + 1;
+        assert!(matches!(
+            store.prepare("a@x.com", "222222", &cfg, next),
+            PrepareOutcome::Send(_)
+        ));
+    }
+
+    /// Mailbox state outliving its codes needs a collector, or the map grows
+    /// with every address anyone asks about. A record with a live code, a
+    /// standing lockout, or an open send window is load-bearing and must
+    /// survive; one with none of the three is garbage.
+    #[test]
+    fn the_sweep_drops_only_mailboxes_that_hold_nothing() {
+        let store = OtpStore::default();
+        let cfg = cfg();
+        store.prepare("live@x.com", "111111", &cfg, 1000);
+        store.prepare("locked@x.com", "111111", &cfg, 1000);
+        for _ in 0..=cfg.max_attempts {
+            store.check("locked@x.com", "000000", &cfg, 1000);
+        }
+        store.prepare("stale@x.com", "111111", &cfg, 1000);
+
+        // Past `stale@x.com`'s code TTL and its send window, but still inside
+        // `locked@x.com`'s lockout, and with a code freshly issued to
+        // `live@x.com`.
+        let later = 1000 + cfg.ttl_secs + 1;
+        store.prepare("live@x.com", "222222", &cfg, later);
+
+        let mut guard = store.inner.lock().unwrap();
+        sweep(&mut guard, cfg.ttl_secs, later);
+        let mut kept: Vec<&str> = guard.keys().map(|k| k.as_str()).collect();
+        kept.sort();
+        assert_eq!(kept, vec!["live@x.com", "locked@x.com"]);
     }
 
     #[test]
     fn expired_code_rejected() {
         let store = OtpStore::default();
-        store.prepare("a@x.com", "123456", 600, 0, 1000);
+        let cfg = cfg();
+        store.prepare("a@x.com", "123456", &cfg, 1000);
         assert_eq!(
-            store.check("a@x.com", "123456", 5, 2000),
+            store.check("a@x.com", "123456", &cfg, 2000),
             VerifyOutcome::Expired
         );
     }
@@ -644,12 +928,13 @@ mod tests {
     #[test]
     fn throttle_skips_resend() {
         let store = OtpStore::default();
+        let cfg = OtpConfig::default();
         assert!(matches!(
-            store.prepare("a@x.com", "111111", 600, 30, 1000),
+            store.prepare("a@x.com", "111111", &cfg, 1000),
             PrepareOutcome::Send(_)
         ));
         assert!(matches!(
-            store.prepare("a@x.com", "222222", 600, 30, 1010),
+            store.prepare("a@x.com", "222222", &cfg, 1010),
             PrepareOutcome::Throttled
         ));
     }
@@ -668,7 +953,7 @@ mod tests {
         cfg: &OtpConfig,
         email: &str,
     ) -> VerifyOtpResult {
-        otp.prepare(email, "123456", cfg.ttl_secs, 0, crate::util::now_unix());
+        otp.prepare(email, "123456", &no_throttle(cfg), crate::util::now_unix());
         apply_verify_otp(conn, otp, sessions, cfg, email, "123456", "dev-1")
             .await
             .expect("verify-otp must succeed")
@@ -700,6 +985,52 @@ mod tests {
         assert!(!new_b, "the padded spelling must find the account, not make one");
         assert_eq!(id_a, id_b);
         assert_eq!(user_count(&conn).await, 1, "one address must never own two accounts");
+    }
+
+    /// #1088: the same address in different CASE is the same mailbox — the OTP
+    /// store always thought so (it keys on `trim(lower(..))`), but `users.email`
+    /// was byte-exact UNIQUE, so the second spelling opened a fresh empty
+    /// account beside the real one.
+    #[tokio::test]
+    async fn the_same_address_in_a_different_case_resolves_to_one_account() {
+        let (_dir, _db, conn) = conn_with(true).await;
+        let (otp, sessions, cfg) = (OtpStore::default(), SessionStore::default(), OtpConfig::default());
+
+        let first = verify(&conn, &otp, &sessions, &cfg, "alice@x.com").await;
+        let shouty = verify(&conn, &otp, &sessions, &cfg, "Alice@X.COM").await;
+
+        let (id_a, new_a) = match first {
+            VerifyOtpResult::Ok { user_id, is_new_account, .. } => (user_id, is_new_account),
+            _ => panic!("expected Ok"),
+        };
+        let (id_b, new_b) = match shouty {
+            VerifyOtpResult::Ok { user_id, is_new_account, .. } => (user_id, is_new_account),
+            _ => panic!("expected Ok"),
+        };
+
+        assert!(new_a);
+        assert!(!new_b, "a different capitalisation must find the account, not make one");
+        assert_eq!(id_a, id_b);
+        assert_eq!(user_count(&conn).await, 1);
+
+        // Stored canonically, so the byte-exact UNIQUE and the migration's
+        // `lower(trim(email))` index agree.
+        let mut rows = conn
+            .query("SELECT email FROM users", ())
+            .await
+            .unwrap();
+        let stored: String = rows.next().await.unwrap().unwrap().get(0).unwrap();
+        assert_eq!(stored, "alice@x.com");
+
+        // And the directory resolves either spelling to that one row, so an
+        // invite or DM addressed to `Alice@X.COM` reaches Alice.
+        for spelling in ["alice@x.com", "Alice@X.COM", "  ALICE@x.com "] {
+            let found = crate::directory::user_by_identifier(&conn, spelling)
+                .await
+                .unwrap()
+                .unwrap_or_else(|| panic!("{spelling} must resolve"));
+            assert_eq!(found.id, id_a);
+        }
     }
 
     /// The default username contract: the email's local part, an underscore,
@@ -804,7 +1135,7 @@ mod tests {
         let otp = OtpStore::default();
         let sessions = SessionStore::default();
         let cfg = OtpConfig::default();
-        otp.prepare("a@x.com", "123456", cfg.ttl_secs, 0, crate::util::now_unix());
+        otp.prepare("a@x.com", "123456", &no_throttle(&cfg), crate::util::now_unix());
 
         let first =
             apply_verify_otp(&conn, &otp, &sessions, &cfg, "a@x.com", "123456", "dev-1").await;
@@ -834,7 +1165,7 @@ mod tests {
         let otp = OtpStore::default();
         let sessions = SessionStore::default();
         let cfg = OtpConfig::default();
-        otp.prepare("a@x.com", "123456", cfg.ttl_secs, 0, crate::util::now_unix());
+        otp.prepare("a@x.com", "123456", &no_throttle(&cfg), crate::util::now_unix());
 
         let first =
             apply_verify_otp(&conn, &otp, &sessions, &cfg, "a@x.com", "123456", "dev-1").await;
@@ -853,7 +1184,7 @@ mod tests {
         let otp = OtpStore::default();
         let sessions = SessionStore::default();
         let cfg = OtpConfig::default();
-        otp.prepare("a@x.com", "123456", cfg.ttl_secs, 0, crate::util::now_unix());
+        otp.prepare("a@x.com", "123456", &no_throttle(&cfg), crate::util::now_unix());
 
         for _ in 0..cfg.max_attempts {
             let r =
@@ -863,9 +1194,11 @@ mod tests {
         let locked =
             apply_verify_otp(&conn, &otp, &sessions, &cfg, "a@x.com", "000000", "dev-1").await;
         assert!(matches!(locked, Ok(VerifyOtpResult::LockedOut)));
-        // The correct code is gone too (record deleted on lockout).
+        // The correct code is gone too — and the caller is told the mailbox is
+        // locked rather than "invalid code", because the lockout is now persisted
+        // on the mailbox instead of being implied by a deleted record (#1088).
         let after =
             apply_verify_otp(&conn, &otp, &sessions, &cfg, "a@x.com", "123456", "dev-1").await;
-        assert!(matches!(after, Ok(VerifyOtpResult::InvalidCode)));
+        assert!(matches!(after, Ok(VerifyOtpResult::LockedOut)));
     }
 }
