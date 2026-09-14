@@ -4,3 +4,5 @@ artifacts/
 # Backend fixture state (start-backend.sh: DS log/pid) + captured fixture env.
 .backend/
 .e2e-env.sh
+# Core dumps + captured secret from the memory-after-lock probe (#1141).
+.tmp-mem-out/
