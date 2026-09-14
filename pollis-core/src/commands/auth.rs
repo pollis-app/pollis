@@ -302,11 +302,53 @@ async fn verify_otp_ds(
         // cert publish is then gated by cert-validity ALONE (not this session),
         // since approval can outlast the session TTL. See
         // `docs/otp-server-bootstrap-design.md` §5.
-        let device_id = ensure_device_id(state, &user_id, &candidate_device_id).await?;
+        let stored_device_id = ensure_device_id(state, &user_id, &candidate_device_id).await?;
+
+        // Whether this device already holds the account key. That — not the id
+        // comparison below on its own — is what decides which branch is right
+        // (#1099).
+        let enrolled = crate::commands::account_identity::has_local_account_identity(
+            state, &user_id,
+        )
+        .await
+        .unwrap_or(false);
+
+        // A NOT-yet-enrolled device carrying a stale local id adopts the session's
+        // instead. The keystore has a `device_id` for this account, but
+        // `stable_device_id_for_reenrollment` could not find it from the typed
+        // address, so verify-otp bound the session to a fresh candidate — which
+        // happens when the local accounts index does not know the address, after an
+        // email change made on another device, say.
+        //
+        // Every session-gated write that follows is bound to the CANDIDATE, and the
+        // pre-enrollment soft reset is the one that matters: the DS keeps exactly
+        // the session's device (`account::reset_recover_in_tx`, taken from the
+        // session record and never from the request body — trusting the body would
+        // reopen the account-takeover finding). Keep the stale id and the reset
+        // deletes this device's own row, after which its cert publish fails and the
+        // only way out is a manual re-enroll.
+        //
+        // Nothing is lost by adopting: an unenrolled device's row carries no cert
+        // and no MLS state, and a soft reset orphans every other device regardless.
+        // The id comparison alone would be wrong — an already-enrolled device also
+        // sees a mismatch (`stable_device_id_for_reenrollment` returns `None` for it
+        // by design) and there keeping the stored id is correct, which is what
+        // `enrolled` distinguishes.
+        let device_id = if !enrolled && stored_device_id != candidate_device_id {
+            state
+                .keystore
+                .store_for_user(DEVICE_ID_KEY, &user_id, candidate_device_id.as_bytes())
+                .await?;
+            *state.device_id.lock().await = Some(candidate_device_id.clone());
+            candidate_device_id.clone()
+        } else {
+            stored_device_id
+        };
+
         if device_id == candidate_device_id {
-            // Brand-new device for this account (nothing in the keystore yet): the
-            // session minted above is bound to exactly this device_id, so it can
-            // authorize the row.
+            // Brand-new device for this account (nothing in the keystore yet), or
+            // one that just adopted the session's id above: the session minted
+            // above is bound to exactly this device_id, so it can authorize the row.
             let hostname = gethostname::gethostname().to_string_lossy().to_string();
             let device_name = format!("{hostname} ({})", std::env::consts::OS);
             crate::commands::mls::ds_post_session_ok(

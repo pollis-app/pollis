@@ -1220,3 +1220,142 @@ async fn logout_with_delete_removes_device_via_ds() {
 
     drop(alice);
 }
+
+/// #1099: a registered-but-not-yet-enrolled device whose LOCAL address index has
+/// gone stale must not be stranded by the pre-enrollment soft reset.
+///
+/// `verify_otp` binds the OTP session to a device id it picks before the DS has
+/// told it anything — normally a fresh candidate, but for a returning,
+/// not-yet-enrolled device it looks its stable id up from the typed address
+/// (`stable_device_id_for_reenrollment`). When that lookup misses — the local
+/// accounts index does not know the address, which is what an email change made
+/// on another device leaves behind — the session ends up bound to a fresh
+/// candidate while the device keeps its older stored id.
+///
+/// That combination used to break the soft reset. `rotate-identity` under a bare
+/// session runs the `reset-recover` wipe in the same transaction and keeps
+/// exactly ONE device: the one the SESSION names, read from the server-side
+/// session record and never from the request body (trusting the body is the
+/// account-takeover finding). Bound to a candidate that has no row, the wipe
+/// deleted the device's own row, and everything after it — the cert publish
+/// above all — failed until the user re-enrolled by hand.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_stale_local_address_index_does_not_strand_an_unenrolled_device() {
+    wipe().await;
+
+    let email = "stale-index@test.local";
+    let mut primary = TestClient::new().await;
+    let user_id = primary.sign_up(email).await.id;
+
+    // A second device signs in against the existing account and registers, but
+    // stops short of enrollment — it holds no account key yet. This is the state
+    // the bug needs.
+    let second = TestClient::new().await;
+    invoke::<()>(&second.webview, "request_otp", json!({ "email": email }))
+        .await
+        .expect("request_otp on the second device");
+    let first_profile: pollis_lib::commands::auth::UserProfile = invoke(
+        &second.webview,
+        "verify_otp",
+        json!({ "email": email, "code": crate::harness::DEV_OTP }),
+    )
+    .await
+    .expect("first verify_otp on the second device");
+    assert!(
+        first_profile.enrollment_required,
+        "the second device must land on the enrollment path"
+    );
+    let first_device_id = second
+        .state
+        .device_id
+        .lock()
+        .await
+        .clone()
+        .expect("the second device has a device_id after its first sign-in");
+
+    // Make its local index stale about the address, which is what an email change
+    // performed on `primary` would leave behind. The key mirrors
+    // `auth::LOGIN_EMAIL_KEY`, the slot `local_user_id_for_email` matches against.
+    second
+        .state
+        .keystore
+        .store_for_user("login_email", &user_id, b"moved-elsewhere@test.local")
+        .await
+        .expect("overwrite the stored login address");
+
+    // Sign in again. `stable_device_id_for_reenrollment` now misses, so the
+    // session is bound to a fresh candidate.
+    invoke::<()>(&second.webview, "request_otp", json!({ "email": email }))
+        .await
+        .expect("second request_otp");
+    let _: pollis_lib::commands::auth::UserProfile = invoke(
+        &second.webview,
+        "verify_otp",
+        json!({ "email": email, "code": crate::harness::DEV_OTP }),
+    )
+    .await
+    .expect("second verify_otp on the second device");
+    let session_device_id = second
+        .state
+        .device_id
+        .lock()
+        .await
+        .clone()
+        .expect("device_id after the stale-index sign-in");
+    assert_ne!(
+        session_device_id, first_device_id,
+        "the device must adopt the session's id, not keep the one the session cannot authorize"
+    );
+
+    // The invariant that makes the wipe safe: an unenrolled device's own id and
+    // the id its OTP session is bound to are the same string, so "keep exactly
+    // the session's device" and "keep this device" cannot diverge.
+    //
+    // Two observable consequences, both of which used to be false here. First,
+    // the session-gated path is live at all — the stale-index sign-in took the
+    // "already known device" branch, which never stashes the enrollment session,
+    // so every session-gated write after it (the enrollment request, the soft
+    // reset) failed with "no verified-email session".
+    assert!(
+        second.state.enrollment_session.lock().await.is_some(),
+        "the sign-in must leave a usable session for the writes that follow"
+    );
+
+    // Second, the DS has a row for the device the session names, so the
+    // session-credentialed `reset-recover` wipe
+    // (`account::reset_recover_in_tx`, `DELETE FROM user_device WHERE user_id = ?
+    // AND device_id != <session's device>`) keeps this device rather than
+    // deleting it along with the siblings.
+    let w = world().await;
+    let conn = w.remote.conn().await.expect("remote conn");
+    let rows_for_session_device: i64 = {
+        let mut rows = conn
+            .query(
+                "SELECT COUNT(*) FROM user_device WHERE user_id = ?1 AND device_id = ?2",
+                libsql::params![user_id.clone(), session_device_id.clone()],
+            )
+            .await
+            .expect("user_device count");
+        rows.next().await.expect("row").expect("count row").get(0).expect("count")
+    };
+    assert_eq!(
+        rows_for_session_device, 1,
+        "register-device under the session must have created the row the wipe keeps"
+    );
+
+    // And the stale id is gone from the keystore, so nothing downstream can pick
+    // it back up on the next launch.
+    let persisted = second
+        .state
+        .keystore
+        .load_for_user("device_id", &user_id)
+        .await
+        .expect("keystore read")
+        .expect("device_id slot");
+    assert_eq!(
+        String::from_utf8(persisted).expect("utf8"),
+        session_device_id,
+        "the adopted id must be the persisted one"
+    );
+}
