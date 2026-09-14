@@ -108,7 +108,7 @@ jobs:
         with:
           ref: ${{ env.TAG }}
 
-      - uses: dtolnay/rust-toolchain@ebb3d1676050bfd0971c36c1e215b5751473994d # 1.96.0
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
 
       # Build pollis-verify FROM THE TAG'S OWN SOURCE (no prebuilt binary to
       # trust) so the verifier code is itself part of what is being verified.
@@ -277,7 +277,7 @@ jobs:
         with:
           ref: ${{ env.TAG }}
 
-      - uses: dtolnay/rust-toolchain@ebb3d1676050bfd0971c36c1e215b5751473994d # 1.96.0
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
 
       - name: Install PipeWire build dependencies
         run: |
@@ -396,7 +396,7 @@ jobs:
           node-version: "20"
           cache: "pnpm"
 
-      - uses: dtolnay/rust-toolchain@ebb3d1676050bfd0971c36c1e215b5751473994d # 1.96.0
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
 
       # Mirror the release's "Stamp version from git tag" (desktop-release.yml,
       # scripts/bump-version.sh): the committed Cargo.toml / package.json /

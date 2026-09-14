@@ -74,7 +74,7 @@ jobs:
       # bearing for a same-commit self-comparison — it is about the recipe being
       # true. macOS rebuild-from-source remains best-effort; see
       # docs/reproducible-builds-residuals.md.)
-      - uses: dtolnay/rust-toolchain@ebb3d1676050bfd0971c36c1e215b5751473994d # 1.96.0
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
         with:
           targets: aarch64-apple-darwin
 
@@ -262,7 +262,7 @@ jobs:
 
       # Pinned to rust-toolchain.toml's 1.96.0 (see the macOS job note) — never
       # float on @stable, or the same commit can produce different bytes.
-      - uses: dtolnay/rust-toolchain@ebb3d1676050bfd0971c36c1e215b5751473994d # 1.96.0
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -513,7 +513,7 @@ jobs:
 
       # Pinned to rust-toolchain.toml's 1.96.0 (see the macOS job note) — never
       # float on @stable, or the same commit can produce different bytes.
-      - uses: dtolnay/rust-toolchain@ebb3d1676050bfd0971c36c1e215b5751473994d # 1.96.0
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
 
       # NO build cache on the Linux path, deliberately (#795).
       #
@@ -631,7 +631,7 @@ jobs:
 
       # Pinned to rust-toolchain.toml's 1.96.0 (see the macOS job note) — never
       # float on @stable, or the same commit can produce different bytes.
-      - uses: dtolnay/rust-toolchain@ebb3d1676050bfd0971c36c1e215b5751473994d # 1.96.0
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
 
       # NO build cache here, deliberately (#795). A restored `target/` lets cargo
       # reuse artifacts compiled under earlier conditions, so the output stops being

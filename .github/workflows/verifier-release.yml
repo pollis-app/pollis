@@ -54,7 +54,7 @@ jobs:
       # (x86_64-apple-darwin) into the WRONG toolchain and the build dies with
       # E0463 "can't find crate for `core`".
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@ebb3d1676050bfd0971c36c1e215b5751473994d # 1.96.0
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
         with:
           targets: ${{ matrix.target }}
 

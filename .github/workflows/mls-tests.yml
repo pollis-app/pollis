@@ -165,7 +165,7 @@ jobs:
       # stable's new lints cannot turn an untouched PR red on their own) and
       # makes the gate test what actually ships. Bump in lockstep with
       # rust-toolchain.toml and the desktop-release refs.
-      - uses: dtolnay/rust-toolchain@ebb3d1676050bfd0971c36c1e215b5751473994d # 1.96.0
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
         with:
           components: clippy
 
@@ -412,7 +412,7 @@ jobs:
 
       # The PINNED toolchain, like every other Rust job here: a gate that tests
       # on a different rustc than the release builds with is not a gate.
-      - uses: dtolnay/rust-toolchain@ebb3d1676050bfd0971c36c1e215b5751473994d # 1.96.0
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
