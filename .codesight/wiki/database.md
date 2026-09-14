@@ -289,6 +289,7 @@ credentials live.
 - `type` TEXT NOT NULL DEFAULT 'message' — `'message'` | `'edit'` | `'delete'`
 - `target_message_id` TEXT _(the message an `edit`/`delete` envelope acts on)_
 - `delete_token_hash` TEXT _(migration `000027`; the per-envelope deletion capability, #1086 — see below)_
+- `seq` INTEGER _(migration `000028`, #1087)_ — the **delivery sequence**: assigned by the DS, strictly increasing per conversation. The fetch is `seq > last_seq` ordered by `seq`; the GC floor is `seq <= MIN(last_seq)`. `UNIQUE (conversation_id, seq) WHERE seq IS NOT NULL` (`idx_envelope_conv_seq`) makes the position a schema rule rather than a convention.
 
 **Removing an envelope takes proof, not a claim (#1086).** Sealed sender blinds
 `sender_id`, so the DS cannot tell whose envelope a row is. The self-delete
@@ -360,17 +361,61 @@ original envelope. A `type='delete'` **tombstone** (empty ciphertext,
 `target_message_id` set) is written only by **admin-delete** (server-authorized
 moderation); recipients apply it epoch-independently on ingest.
 
-**`sent_at` is compared lexically, so its precision is load-bearing.** The
-message cursor advances on `sent_at > watermark`, and this one column carries
-both client-issued stamps (`chrono::Utc::now().to_rfc3339()`, sub-second) and
-DS-issued ones. A DS stamp must therefore also carry sub-second digits: a
-whole-second `…T09:00:00+00:00` sorts *below* `…T09:00:00.123456789+00:00`
-(`'+'` 0x2B < `'.'` 0x2E), which silently buried admin tombstones written in the
-same second as the message they redact — the delete appeared to succeed and no
-recipient ever applied it. The DS additionally stamps a tombstone strictly above
-the conversation's **floor** (`sent_at_after` / `TOMBSTONE_FLOOR` in
-`pollis-delivery/src/messages.rs`), so client/DS clock skew cannot reintroduce
-the same burial.
+**`sent_at` is DISPLAY metadata (#1087).** It is the time the sender stamped on
+the envelope, shown in the UI. It is **not** the delivery order, **not** the read
+cursor, and **not** what retention compares against — `seq` is all three. A
+client with a wrong clock now produces a wrong timestamp in a bubble rather than
+an undeliverable message.
+
+**Why the sequence is not `MAX(seq)+1`.** The counter lives in its own table,
+`conversation_seq(conversation_id, next_seq)`, taken with a single `INSERT … ON
+CONFLICT DO UPDATE … RETURNING`. Deriving it from `message_envelope` is wrong in
+a way that is easy to miss and produces silent message loss: envelope GC
+**deletes rows**, so once every member device has read past everything the
+conversation is emptied, `MAX(seq)` goes NULL, and the next envelope is assigned
+`1` again — at or below every device's cursor, so `seq > last_seq` never selects
+it and it reaches nobody. That is the #692 shape reappearing inside the design
+meant to retire it. GC never touches `conversation_seq`; only teardown removes a
+row, at which point the cursors pointing into it go too. Pinned by
+`delivery_sequence_tests::a_sequence_is_never_reused_after_gc_empties_the_conversation`,
+which fails against the naive implementation. Every envelope — send, edit,
+tombstone — is written through one chokepoint, `messages::insert_envelope_with_seq`.
+
+**Why that chokepoint takes a `Transaction`, not a `Connection`.** Allocating the
+sequence and inserting the row are two statements. If another writer can slip
+between them it takes `N+1` and publishes *that* row while `N` is still missing;
+a recipient fetching `seq > last_seq` in that window sees `N+1`, advances its
+cursor onto it, and envelope `N` lands below every cursor — delivered to nobody,
+then collected. That would be a fourth acceptable loss, which the delivery
+contract does not have room for. Under SQLite/libsql a transaction whose first
+statement is a write holds the write lock until commit, so writers serialise and
+the gap is never observable; taking the transaction *in the signature* is what
+stops a later caller from re-opening the window with a bare autocommit
+connection. A rolled-back insert un-does the counter bump with it, so there is
+not even a burned sequence. Pinned by
+`delivery_sequence_tests::an_in_flight_send_never_exposes_a_sequence_without_its_envelope`,
+which reads from a second connection mid-send and fails if either half is
+visible alone.
+
+**What the sequence retired**, all of it the cost of ordering by a lexically
+compared string that two different clocks wrote:
+
+- **The tombstone floor.** A DS tombstone used to need `sent_at_after(now,
+  tombstone_floor(..))`, because a whole-second DS stamp sorts *below* a
+  sub-second client stamp in the same second (`'+'` 0x2B < `'.'` 0x2E) and the
+  delete was buried under the message it redacted. #692 then found that a
+  GC-pruned conversation lost the envelope side of that floor and fell back to
+  wall-clock `now`, reintroducing the clock dependency the guard existed to
+  remove. `TOMBSTONE_FLOOR`, `tombstone_floor` and `sent_at_after` are all gone: a
+  tombstone takes the next sequence, which is above every cursor by construction.
+- **The seeded-cursor format trap (#908).** A `datetime('now')` seed sorted below
+  every RFC 3339 stamp sharing its day, because a space sorts below a `T`. Seeds
+  now write `conversation_seq.next_seq` — "this device has consumed the backlog"
+  — with `COALESCE(…, 0)` for a conversation nobody has posted in.
+- **Ties.** Two envelopes could share a `sent_at`, which is why the watermark rule
+  stops STRICTLY BELOW the first un-handled cursor. A sequence is unique, so the
+  GC floor is now `seq <= MIN(last_seq)` — the boundary envelope is provably
+  handled by everyone — where the timestamp version had to be conservative.
 
 **A client-chosen `sent_at` is bounded, never trusted (`check_cursor_stamp`).**
 The value stays client-chosen — the sender's own local `message.sent_at` carries
@@ -678,7 +723,8 @@ One row = "group `group_id` calls this object `:shortcode:`". The PK makes a sho
 - `conversation_id` TEXT NOT NULL
 - `user_id` TEXT NOT NULL
 - `device_id` TEXT NOT NULL
-- `last_fetched_at` TEXT NOT NULL _(the message cursor — how far the device has read)_
+- `last_seq` INTEGER _(migration `000028`, #1087; **the cursor** — the delivery sequence this device has handled up to. The fetch is `seq > last_seq`; the GC floor is `MIN(last_seq)` over the member-device roster)_
+- `last_fetched_at` TEXT NOT NULL _(**legacy since #1087** — still written and carried, read by nothing. It was the cursor until the sequence replaced it)_
 - `reported_at` TEXT _(migration 000012, #720; server-stamped wall-clock time of the device's LAST report — the device-liveness signal, distinct from the message cursor. Nullable: pre-migration rows are NULL and treated as live)_
 
 **Who may write a row, and what (`apply_advance_watermark`).** Both halves of the key are bound to the verified signature — `user_id` via `resolve_actor`, `device_id` must equal the signing device (`gate_identity_and_parse` → `verify_request_identity_cached`, the same gate `report_commit_since` uses) — and the user must be a current `is_member` of the conversation; otherwise `403`. The value is admitted only through `check_cursor_stamp` (canonical UTC RFC 3339, at most `CURSOR_STAMP_SKEW_SECS` ahead of the DS clock; otherwise `400`, row untouched). The upsert is monotone (`MAX`) and nothing ever rewinds a cursor, so a far-future value that got in was a permanent blackout for that device and — once every device held one — GC of the whole conversation; and without the membership gate any account could plant a row under any conversation id, which the tombstone floor (above) used to read. Pinned by `pollis-delivery/tests/cursor_poisoning.rs`.

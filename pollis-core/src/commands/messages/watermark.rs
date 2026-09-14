@@ -5,23 +5,32 @@
 //! ## What this decides (the safety property)
 //!
 //! During interleaved catch-up ([`super::ingest`]) each conversation gets a new
-//! watermark: an EXCLUSIVE `sent_at` cursor that the next fetch uses as
-//! `sent_at > watermark`. Advancing this cursor past an envelope means "never
-//! fetch it again". So the cursor MUST NOT advance to or past any envelope we
-//! still have to retry (an MLS message whose epoch this pass never reached) —
-//! otherwise a current member permanently loses a decryptable message (failure
-//! class F3; the exact property #442 was a false alarm about).
+//! watermark: an EXCLUSIVE cursor that the next fetch uses as
+//! `cursor > watermark`. Advancing it past an envelope means "never fetch it
+//! again". So it MUST NOT advance to or past any envelope we still have to retry
+//! (an MLS message whose epoch this pass never reached) — otherwise a current
+//! member permanently loses a decryptable message (failure class F3; the exact
+//! property #442 was a false alarm about).
+//!
+//! **The cursor is the DS-assigned delivery sequence since #1087** — an integer,
+//! unique and strictly increasing per conversation — not the client's `sent_at`.
+//! This module never had to change for that: it is generic over the key type, so
+//! the swap moved a `&str` to an `(i64, String)` ordered by its sequence and the
+//! proofs below carried over untouched. What did change is that TIES are now
+//! impossible, which makes the `>=` rule below belt-and-braces rather than
+//! load-bearing. It stays, because a rule that is correct for a weaker
+//! precondition is worth keeping when it costs nothing.
 //!
 //! The rule, preserved verbatim from the original inline logic:
-//! * `stop_at` = the `sent_at` of the FIRST un-handled envelope (in the given,
-//!   `sent_at`-ordered, slice order).
-//! * the candidate loop walks the slice and adopts each `sent_at` as the running
+//! * `stop_at` = the cursor of the FIRST un-handled envelope (in the given,
+//!   cursor-ordered, slice order).
+//! * the candidate loop walks the slice and adopts each cursor as the running
 //!   watermark, but BREAKS as soon as it reaches an envelope with
-//!   `sent_at >= stop_at`. The `>=` (not `>`) is deliberate: on a `sent_at`
-//!   tie between a handled and an un-handled envelope the cursor must stop
-//!   STRICTLY BELOW the shared timestamp, or the next `sent_at > watermark`
-//!   fetch would skip the un-handled one. The watermark is therefore always
-//!   strictly less than the first un-handled `sent_at`, even on a tie.
+//!   `cursor >= stop_at`. The `>=` (not `>`) is deliberate: on a tie between a
+//!   handled and an un-handled envelope the cursor must stop STRICTLY BELOW the
+//!   shared value, or the next `cursor > watermark` fetch would skip the
+//!   un-handled one. The watermark is therefore always strictly less than the
+//!   first un-handled cursor, even on a tie.
 //!
 //! The Kani harnesses at the bottom of this file prove exactly that (P1), plus
 //! monotonicity (P2) and handled-liveness (P3). Each proof is paired with a
@@ -150,9 +159,9 @@ pub fn next_watermark<S: Ord + Clone, E: Ord + Copy>(
     envs: &[EnvView<S, E>],
     max_fired_epoch: Option<E>,
 ) -> Option<S> {
-    // The `sent_at` of the first envelope we must retry is an EXCLUSIVE ceiling
-    // on the watermark: advancing to (or, via a `sent_at` tie, past) it would
-    // drop it from the next `sent_at > watermark` fetch.
+    // The cursor of the first envelope we must retry is an EXCLUSIVE ceiling on
+    // the watermark: advancing to (or, via a tie, past) it would drop it from the
+    // next `cursor > watermark` fetch.
     let stop_at: Option<&S> = envs
         .iter()
         .find(|(_, kind, epoch)| !is_handled(*kind, *epoch, max_fired_epoch))

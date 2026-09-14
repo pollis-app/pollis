@@ -260,9 +260,14 @@ async fn fetch_watermarks(
     conversation_ids: &[String],
     user_id: &str,
     device_id: &str,
-) -> anyhow::Result<HashMap<String, String>> {
+) -> anyhow::Result<HashMap<String, i64>> {
+    // `last_seq`, not `last_fetched_at` (#1087): the cursor is the DS-assigned
+    // delivery sequence. A row with no `last_seq` — a device that has only ever
+    // reported through a pre-#1087 client — reads as 0, i.e. "has seen nothing",
+    // so it re-fetches rather than skipping. Re-delivery is absorbed by ingest's
+    // `INSERT OR IGNORE`; skipping would be message loss.
     let sql = format!(
-        "SELECT conversation_id, last_fetched_at FROM conversation_watermark \
+        "SELECT conversation_id, COALESCE(last_seq, 0) FROM conversation_watermark \
          WHERE user_id = ?1 AND device_id = ?2 AND conversation_id IN ({})",
         placeholders(conversation_ids.len(), 3)
     );
@@ -300,8 +305,8 @@ async fn fetch_watermarks(
 ///
 /// Reading the watermarks first and binding each conversation's own value makes
 /// every branch a real range seek (`MULTI-INDEX OR`, each
-/// `conversation_id=? AND sent_at>?`): 0.1 ms, no rows read, same one round
-/// trip. `pollis-delivery/tests/envelope_query_plan.rs` pins the plan, because
+/// `conversation_id=? AND seq>?`, served by `idx_envelope_conv_seq`): 0.1 ms, no
+/// rows read, same one round trip. `pollis-delivery/tests/envelope_query_plan.rs` pins the plan, because
 /// this regressed silently once already — #875 batched the per-channel queries
 /// into one and turned a bound `?1` into a correlation without anything noticing.
 ///
@@ -311,6 +316,23 @@ async fn fetch_watermarks(
 /// query using an OLDER cursor — re-sending an envelope the client already has,
 /// which `ingest.rs`'s `INSERT OR IGNORE INTO message` absorbs. It can never
 /// skip one.
+/// [`fetch_envelopes`] for ONE conversation — the production delivery query,
+/// exposed so tests assert against the real predicate instead of a copy of it.
+///
+/// A duplicated fetch rule is how a delivery test stops testing delivery: the
+/// #661 tombstone tests carried their own `sent_at > last_fetched_at` inline, so
+/// when #1087 moved the cursor to `seq` they failed for a reason unrelated to
+/// what they assert. There is one predicate now, and it lives here.
+#[cfg(test)]
+pub(crate) async fn envelopes_for_device(
+    conn: &Connection,
+    conversation_id: &str,
+    user_id: &str,
+    device_id: &str,
+) -> anyhow::Result<Vec<EnvelopeWire>> {
+    fetch_envelopes(conn, &[conversation_id.to_string()], user_id, device_id).await
+}
+
 async fn fetch_envelopes(
     conn: &Connection,
     conversation_ids: &[String],
@@ -326,19 +348,19 @@ async fn fetch_envelopes(
         let mut params: Vec<libsql::Value> = Vec::with_capacity(chunk.len() * 2);
         for (i, cid) in chunk.iter().enumerate() {
             clauses.push(format!(
-                "(conversation_id = ?{} AND sent_at > ?{})",
+                "(conversation_id = ?{} AND seq > ?{})",
                 i * 2 + 1,
                 i * 2 + 2
             ));
             params.push(cid.clone().into());
-            params.push(watermarks.get(cid).cloned().unwrap_or_default().into());
+            params.push(watermarks.get(cid).copied().unwrap_or(0).into());
         }
         let sql = format!(
             "SELECT conversation_id, id, sender_id, ciphertext, reply_to_id, \
-                    target_message_id, sent_at, type \
+                    target_message_id, sent_at, type, seq \
              FROM message_envelope \
              WHERE {} \
-             ORDER BY conversation_id ASC, sent_at ASC, id ASC",
+             ORDER BY conversation_id ASC, seq ASC",
             clauses.join(" OR ")
         );
         let mut rows = conn.query(&sql, params).await?;
@@ -352,6 +374,7 @@ async fn fetch_envelopes(
                 target_message_id: row.get(5)?,
                 sent_at: row.get(6)?,
                 kind: row.get(7)?,
+                seq: row.get::<Option<i64>>(8).ok().flatten(),
             });
         }
     }

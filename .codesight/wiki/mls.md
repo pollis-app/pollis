@@ -283,6 +283,10 @@ Three enforcement points, lowest layer first:
    `messages::seal::post_resealing`: on `epoch_behind` it runs the interleaved
    catch-up, re-seals at the new epoch with a fresh `sent_at`, updates its own
    local row, and re-posts (up to `MAX_RESEALS` = 4, then a visible failure).
+   The fresh stamp is now cosmetic — since #1087 a re-posted envelope simply
+   takes the next **delivery sequence**, so it lands above every recipient's
+   cursor whatever its timestamp says. Before that the stamp had to be refreshed
+   or the re-post could sort beneath a cursor that had already moved.
    Receipts (`receipts::emit_receipt`) are best-effort and skip instead — some
    callers hold the group lock. Bounded replay on the receiver side:
    `CatchUpResponse.head` becomes a `ReplayBound`, so a receiver never applies a

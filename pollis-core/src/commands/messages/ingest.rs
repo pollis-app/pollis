@@ -6,7 +6,11 @@ use crate::error::Result;
 use crate::state::AppState;
 
 /// One row from `message_envelope`:
-/// `(id, sender_id, ciphertext, reply_to_id, target_message_id, sent_at, type)`.
+/// `(id, sender_id, ciphertext, reply_to_id, target_message_id, sent_at, type, seq)`.
+///
+/// `seq` is the DS-assigned delivery position (#1087) — the cursor, the fetch
+/// order and what retention compares against. `sent_at` is display metadata and
+/// is carried only so the legacy `last_fetched_at` column can still be filled.
 type EnvelopeRow = (
     String,
     String,
@@ -15,6 +19,7 @@ type EnvelopeRow = (
     Option<String>,
     String,
     String,
+    i64,
 );
 
 /// Whether a delete tombstone's redaction is done on this device, or must be
@@ -40,7 +45,14 @@ enum DeleteResolution {
 /// receipt, #857).
 struct ConvIngest {
     conversation_id: String,
-    watermark: Option<String>,
+    /// The cursor this device may advance to: `(seq, sent_at)` of the highest
+    /// envelope it has HANDLED (#1087).
+    ///
+    /// Ordered by `seq` — the DS-assigned delivery position, which is unique per
+    /// conversation — so the tuple's second element never affects the
+    /// comparison. It rides along only to fill the legacy `last_fetched_at`
+    /// column, which nothing routes on any more.
+    watermark: Option<(i64, String)>,
     /// Ids of messages persisted for the FIRST time on this pass, authored by
     /// someone else. Empty for group channels, which never emit receipts.
     newly_delivered: Vec<String>,
@@ -244,12 +256,15 @@ pub async fn catch_up_mls_group_interleaved(
     // ingest. This path only reports the watermark that GC reads.
     for res in &results {
         let cid = &res.conversation_id;
-        if let (Some(ts), Some(did)) = (res.watermark.as_ref(), device_id.as_ref()) {
+        if let (Some((seq, sent_at)), Some(did)) = (res.watermark.as_ref(), device_id.as_ref()) {
             let body = pollis_api::messages::WatermarkBody {
                 conversation_id: cid.clone(),
                 user_id: Some(user_id.to_string()),
                 device_id: did.clone(),
-                last_fetched_at: ts.clone(),
+                // The cursor (#1087). `last_fetched_at` rides along for the
+                // legacy column only; delivery and retention read `last_seq`.
+                last_seq: Some(*seq),
+                last_fetched_at: sent_at.clone(),
             };
             if let Err(e) =
                 crate::commands::mls::ds_post_ok(state, &body).await
@@ -316,6 +331,10 @@ fn partition_envelopes(
             env.target_message_id,
             env.sent_at,
             env.kind,
+            // A row the DS wrote always carries one; 0 is the fail-safe for a
+            // row that somehow does not, since the cursor then never advances
+            // past it rather than skipping it.
+            env.seq.unwrap_or(0),
         ));
     }
     per_conv
@@ -412,7 +431,7 @@ pub(crate) async fn sweep_current_epoch(
     for (cid, envs) in &per_conv {
         let mut delivered: Vec<String> = Vec::new();
         for env in envs {
-            let (_, _, ciphertext, _, _, _, env_type) = env;
+            let (_, _, ciphertext, _, _, _, env_type, _) = env;
             if env_type != "message" && env_type != "edit" {
                 continue;
             }
@@ -504,7 +523,7 @@ async fn ingest_group_envelopes_interleaved(
     for (ci, (_cid, envs)) in per_conv.iter().enumerate() {
         let mut this: Vec<Option<(i64, u64)>> = Vec::with_capacity(envs.len());
         for (ei, env) in envs.iter().enumerate() {
-            let (_, _, ciphertext, _, _, _, env_type) = env;
+            let (_, _, ciphertext, _, _, _, env_type, _) = env;
             let bytes = match env_type.as_str() {
                 "message" | "edit" => ciphertext
                     .strip_prefix("mls:")
@@ -612,7 +631,7 @@ async fn ingest_group_envelopes_interleaved(
             .as_ref()
             .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
         for (ci, (_cid, envs)) in per_conv.iter().enumerate() {
-            for (ei, (_, _, _, _, target_id, _, env_type)) in envs.iter().enumerate() {
+            for (ei, (_, _, _, _, target_id, _, env_type, _)) in envs.iter().enumerate() {
                 if env_type != "delete" {
                     continue;
                 }
@@ -679,11 +698,19 @@ async fn ingest_group_envelopes_interleaved(
     // `super::watermark`) — the "is this handled / how far may the cursor
     // advance" decision is the message-delivery safety property, so the runtime
     // path goes through the verified function, not a copy. Build the
-    // `(sent_at, EnvKind, Option<epoch>)` view from the existing envelope rows +
-    // pre-parsed `epoch_of`; `&str` keys avoid cloning every `sent_at`.
+    // `((seq, sent_at), EnvKind, Option<epoch>)` view from the existing envelope
+    // rows + pre-parsed `epoch_of`.
+    //
+    // The cursor key is the tuple, and its ORDER is the sequence alone: `seq` is
+    // the DS-assigned delivery position and is unique per conversation, so the
+    // `sent_at` beside it never decides a comparison (#1087). It rides along
+    // purely so the report can still fill the legacy `last_fetched_at` column.
+    //
+    // `next_watermark` is generic over the key precisely so this swap needed no
+    // change to the Kani-proved logic — only the type flowing through it.
     let mut out: Vec<ConvIngest> = Vec::with_capacity(per_conv.len());
     for (ci, (cid, envs)) in per_conv.iter().enumerate() {
-        let items: Vec<super::watermark::EnvView<&str, (i64, u64)>> = envs
+        let items: Vec<super::watermark::EnvView<(i64, String), (i64, u64)>> = envs
             .iter()
             .enumerate()
             .map(|(ei, env)| {
@@ -695,11 +722,10 @@ async fn ingest_group_envelopes_interleaved(
                 } else {
                     super::watermark::EnvKind::from_type(env.6.as_str())
                 };
-                (env.5.as_str(), kind, epoch_of[ci][ei])
+                ((env.7, env.5.clone()), kind, epoch_of[ci][ei])
             })
             .collect();
-        let watermark =
-            super::watermark::next_watermark(&items, max_fired_epoch).map(str::to_string);
+        let watermark = super::watermark::next_watermark(&items, max_fired_epoch);
         out.push(ConvIngest {
             conversation_id: cid.clone(),
             watermark,
@@ -739,7 +765,7 @@ fn decrypt_and_persist_one(
     // `sender_id` (the server-writable envelope column) is intentionally NOT
     // read for attribution — the sender is taken from the MLS credential inside
     // the ciphertext (sealed sender, `docs/metadata-minimization-design.md` §2).
-    let (id, _sender_id, _ciphertext, reply_to_id, target_id, sent_at, env_type) = env;
+    let (id, _sender_id, _ciphertext, reply_to_id, target_id, sent_at, env_type, _seq) = env;
     match env_type.as_str() {
         "message" => {
             let exists: bool = conn

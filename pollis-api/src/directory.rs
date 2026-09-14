@@ -156,10 +156,21 @@ pub struct EnvelopeWire {
     pub reply_to_id: Option<String>,
     #[serde(default)]
     pub target_message_id: Option<String>,
+    /// DISPLAY metadata only since #1087. It is the time the sender stamped on
+    /// the envelope, shown in the UI — it is not the delivery order, not the
+    /// cursor, and not what retention compares against. `seq` is all three.
     pub sent_at: String,
     /// The envelope's `type` column — `message`, `edit`, `delete`, …. Named
     /// `kind` here because `type` is a Rust keyword.
     pub kind: String,
+    /// The DS-assigned delivery position, strictly increasing per conversation
+    /// (#1087). This is the cursor: a device reports the highest `seq` it has
+    /// handled and the next fetch is `seq > last_seq`.
+    ///
+    /// `Option` for the wire only — every row the DS writes has one, and a row
+    /// that somehow does not is skipped rather than delivered out of order.
+    #[serde(default)]
+    pub seq: Option<i64>,
 }
 
 // ── POST /v1/messages/lookup ─────────────────────────────────────────────────

@@ -26,9 +26,14 @@ pub(super) struct Sealed {
     /// DS, never taken from anywhere the server could influence.
     pub generation: i64,
     pub epoch: i64,
-    /// Stamped at seal time. A re-seal takes a fresh stamp: recipients fetch
-    /// `sent_at > watermark`, so an envelope that re-lands under an old stamp
-    /// could sit below a cursor that already moved past it.
+    /// Stamped at seal time, and DISPLAY metadata since #1087. A re-seal still
+    /// takes a fresh stamp so the bubble shows when the message actually landed,
+    /// but nothing depends on it any more: a re-posted envelope takes the next
+    /// DS-assigned delivery sequence, so it is above every recipient's cursor
+    /// whatever its timestamp says. Before that, refreshing the stamp was
+    /// load-bearing — recipients fetched `sent_at > watermark`, so an envelope
+    /// re-landing under an old stamp could sit below a cursor that had already
+    /// moved past it.
     pub sent_at: String,
 }
 

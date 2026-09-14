@@ -94,6 +94,7 @@ pub const USER_PURGED_TABLES: &[&str] = &[
 pub const CONVERSATION_PURGED_TABLES: &[&str] = &[
     "attachment_ref",
     "channels",
+    "conversation_seq",
     "conversation_watermark",
     "dm_channel",
     "dm_channel_member",
@@ -463,6 +464,12 @@ pub async fn purge_conversation_rows(
     .await?;
     conn.execute("DELETE FROM message_envelope WHERE conversation_id = ?1", cid()).await?;
     conn.execute("DELETE FROM conversation_watermark WHERE conversation_id = ?1", cid()).await?;
+    // The delivery-sequence counter (#1087). GC must NEVER remove this — the
+    // whole point is that it outlives the envelopes it numbers — but a teardown
+    // must, because the conversation and every cursor pointing into it are going
+    // together. Leaving it would also let a recreated id inherit a stale
+    // high-water mark.
+    conn.execute("DELETE FROM conversation_seq WHERE conversation_id = ?1", cid()).await?;
     // Pins live on the channel/DM id (#99); the keystate row lives on the MLS
     // conversation id, which for a DM is this same id and for a group channel
     // is the group id (removed by `purge_group` below). Both statements are

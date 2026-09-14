@@ -655,8 +655,10 @@ pub async fn apply_create_dm(
         // are deliberately in different formats — see that function (#908).
         tx.execute(
             "INSERT OR IGNORE INTO conversation_watermark \
-                 (conversation_id, user_id, device_id, last_fetched_at, reported_at) \
-             SELECT ?1, ?2, ud.device_id, ?3, datetime('now') \
+                 (conversation_id, user_id, device_id, last_fetched_at, last_seq, reported_at) \
+             SELECT ?1, ?2, ud.device_id, ?3, \
+                    COALESCE((SELECT next_seq FROM conversation_seq WHERE conversation_id = ?1), 0), \
+                    datetime('now') \
              FROM user_device ud WHERE ud.user_id = ?2 AND ud.revoked_at IS NULL",
             libsql::params![body.id.clone(), member.clone(), cursor.clone()],
         )
@@ -783,8 +785,10 @@ pub async fn apply_add_dm_member(
     // deliberately in different formats — see that function (#908).
     tx.execute(
         "INSERT OR IGNORE INTO conversation_watermark \
-             (conversation_id, user_id, device_id, last_fetched_at, reported_at) \
-         SELECT ?1, ?2, ud.device_id, ?3, datetime('now') \
+             (conversation_id, user_id, device_id, last_fetched_at, last_seq, reported_at) \
+         SELECT ?1, ?2, ud.device_id, ?3, \
+                COALESCE((SELECT next_seq FROM conversation_seq WHERE conversation_id = ?1), 0), \
+                datetime('now') \
          FROM user_device ud WHERE ud.user_id = ?2 AND ud.revoked_at IS NULL",
         libsql::params![
             body.dm_channel_id.clone(),

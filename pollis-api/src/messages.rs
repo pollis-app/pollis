@@ -182,7 +182,17 @@ pub struct WatermarkBody {
     /// When signed it must equal the SIGNING device (→ 403); the row is keyed
     /// on the verified device, never on this field alone.
     pub device_id: String,
-    /// The cursor: the highest envelope `sent_at` this device has handled.
+    /// The DS-assigned delivery position this device has handled up to (#1087).
+    /// The cursor the next fetch uses: `seq > last_seq`. Monotone — the upsert
+    /// takes `MAX(existing, reported)`, so a cursor never rewinds.
+    ///
+    /// `None` from a client that predates #1087; such a report advances only the
+    /// legacy timestamp and is what keeps `last_fetched_at` alive for one
+    /// release. See `apply_advance_watermark`.
+    #[serde(default)]
+    pub last_seq: Option<i64>,
+    /// **Legacy**, and no longer the cursor (#1087): the highest envelope
+    /// `sent_at` this device has handled.
     /// Admitted only through `check_cursor_stamp` (canonical UTC RFC 3339,
     /// within the signature window of the DS clock, → 400 otherwise) — the
     /// upsert is monotone and never rewinds, so a far-future cursor would be a

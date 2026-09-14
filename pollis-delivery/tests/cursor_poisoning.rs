@@ -103,6 +103,7 @@ fn watermark(user: &str, device: &str, at: &str) -> WatermarkBody {
         user_id: Some(user.to_string()),
         device_id: device.to_string(),
         last_fetched_at: at.to_string(),
+        last_seq: None,
     }
 }
 

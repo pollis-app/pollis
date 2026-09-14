@@ -82,12 +82,23 @@ async fn seed_channel_with_an_envelope_from_earlier_today(conn: &Connection) -> 
 
     let sent_at = rfc3339(earlier_today());
     conn.execute(
-        "INSERT INTO message_envelope (id, conversation_id, sender_id, ciphertext, sent_at) \
-         VALUES ('m-old', 'c1', 'alice', 'ct', ?1)",
+        "INSERT INTO message_envelope \
+             (id, conversation_id, sender_id, ciphertext, sent_at, seq) \
+         VALUES ('m-old', 'c1', 'alice', 'ct', ?1, 1)",
         libsql::params![sent_at.clone()],
     )
     .await
     .expect("envelope");
+    // The durable counter has to agree with the row, exactly as
+    // `insert_envelope_with_seq` keeps it (#1087) — a fixture that writes an
+    // envelope without advancing it is not simulating the DS, and the seed this
+    // test asserts on reads `conversation_seq`, not `MAX(seq)`.
+    conn.execute(
+        "INSERT INTO conversation_seq (conversation_id, next_seq) VALUES ('c1', 1)",
+        (),
+    )
+    .await
+    .expect("sequence counter");
     sent_at
 }
 
@@ -213,8 +224,21 @@ fn no_seed_writes_a_sqlite_datetime_into_the_cursor_column() {
             if path.extension().is_none_or(|e| e != "rs") {
                 continue;
             }
-            let text = std::fs::read_to_string(&path).expect("read source");
+            let raw = std::fs::read_to_string(&path).expect("read source");
             let rel = path.strip_prefix(root).expect("under manifest").to_path_buf();
+            // CODE ONLY. Line comments are stripped first, because this scan
+            // matches on bare words — a paragraph explaining why a reader does
+            // NOT seed a watermark contains every trigger word, and flagging it
+            // is exactly how a tripwire stops being read (#1087 tripped this by
+            // documenting the cursor change next to the fetch).
+            let text: String = raw
+                .lines()
+                .map(|l| match l.find("//") {
+                    Some(i) => &l[..i],
+                    None => l,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
             // Statements are written across several lines, so normalise the file
             // to one line and look at each INSERT into the table as a whole.
             let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");

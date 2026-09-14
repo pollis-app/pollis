@@ -252,6 +252,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "envelope_delete_capability",
         include_str!("../migrations/000027_envelope_delete_capability.sql"),
     ),
+    (
+        28,
+        "delivery_sequence",
+        include_str!("../migrations/000028_delivery_sequence.sql"),
+    ),
 ];
 
 /// Every script for the MAIN DB, in apply order (baseline first). One element

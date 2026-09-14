@@ -166,8 +166,10 @@ async fn add_member_rows(conn: &Connection, group_id: &str, user_id: &str) -> an
     // deliberately in different formats — see that function (#908).
     let _ = conn
         .execute(
-            "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at, reported_at)
-             SELECT c.id, ?1, ud.device_id, ?3, datetime('now')
+            "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at, last_seq, reported_at)
+             SELECT c.id, ?1, ud.device_id, ?3,
+                    COALESCE((SELECT next_seq FROM conversation_seq WHERE conversation_id = c.id), 0),
+                    datetime('now')
              FROM channels c
              JOIN user_device ud ON ud.user_id = ?1 AND ud.revoked_at IS NULL
              WHERE c.group_id = ?2",

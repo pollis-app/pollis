@@ -253,10 +253,19 @@ pub async fn apply_register_device(
 /// NULL) is what makes the dormancy bound actually bite for a device that
 /// installs, joins and vanishes.
 ///
-/// The two timestamps are deliberately in different formats: the cursor is bound
-/// from `seeded_watermark_cursor` (RFC 3339, because it is compared against
-/// `message_envelope.sent_at`), `reported_at` stays `datetime('now')` (because it
-/// is compared against `datetime('now', ?)`). See #908.
+/// The seeded cursor is `conversation_seq.next_seq` — the conversation's current
+/// high-water mark, i.e. "this device has consumed the backlog" (#1087). Seeding
+/// it is what stops a newly enrolled device pinning every envelope ever sent
+/// from being collected, and what stops it re-fetching them.
+///
+/// `COALESCE(..., 0)` covers a conversation nobody has posted in: there is no
+/// counter row yet, and 0 is below the first sequence that will ever be handed
+/// out, so the device correctly receives whatever comes next.
+///
+/// `last_fetched_at` is still seeded — the column is NOT NULL and is carried as
+/// legacy metadata — from `seeded_watermark_cursor` (RFC 3339). `reported_at`
+/// stays `datetime('now')` because it is compared against `datetime('now', ?)`.
+/// See #908.
 ///
 /// Called at cert publish, not at register — see [`apply_register_device`].
 pub async fn seed_conversation_watermarks(
@@ -267,8 +276,10 @@ pub async fn seed_conversation_watermarks(
     let cursor = crate::messages::seeded_watermark_cursor();
     conn.execute(
         "INSERT OR IGNORE INTO conversation_watermark \
-            (conversation_id, user_id, device_id, last_fetched_at, reported_at) \
-         SELECT c.id, ?1, ?2, ?3, datetime('now') \
+            (conversation_id, user_id, device_id, last_fetched_at, last_seq, reported_at) \
+         SELECT c.id, ?1, ?2, ?3, \
+                COALESCE((SELECT next_seq FROM conversation_seq WHERE conversation_id = c.id), 0), \
+                datetime('now') \
          FROM channels c \
          JOIN group_member gm ON gm.group_id = c.group_id AND gm.user_id = ?1",
         libsql::params![user_id.to_string(), device_id.to_string(), cursor.clone()],
@@ -276,8 +287,11 @@ pub async fn seed_conversation_watermarks(
     .await?;
     conn.execute(
         "INSERT OR IGNORE INTO conversation_watermark \
-            (conversation_id, user_id, device_id, last_fetched_at, reported_at) \
-         SELECT dcm.dm_channel_id, ?1, ?2, ?3, datetime('now') \
+            (conversation_id, user_id, device_id, last_fetched_at, last_seq, reported_at) \
+         SELECT dcm.dm_channel_id, ?1, ?2, ?3, \
+                COALESCE((SELECT next_seq FROM conversation_seq \
+                           WHERE conversation_id = dcm.dm_channel_id), 0), \
+                datetime('now') \
          FROM dm_channel_member dcm WHERE dcm.user_id = ?1",
         libsql::params![user_id.to_string(), device_id.to_string(), cursor],
     )

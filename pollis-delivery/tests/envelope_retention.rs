@@ -80,40 +80,45 @@ async fn add_device(db: &Db, user: &str, device: &str, revoked: bool) {
         .unwrap();
 }
 
-async fn seed_watermark(db: &Db, conv: &str, user: &str, device: &str, offset: &str) {
+/// Seed a watermark whose cursor is the delivery sequence `seq` (#1087).
+/// `last_fetched_at` is written because the column is NOT NULL, but nothing
+/// asserts on it — that is the change.
+async fn seed_watermark(db: &Db, conv: &str, user: &str, device: &str, seq: i64) {
     db.conn().await
         .unwrap()
         .execute(
-            "INSERT INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at) \
-             VALUES (?1, ?2, ?3, datetime('now', ?4))",
-            libsql::params![conv.to_string(), user.to_string(), device.to_string(), offset.to_string()],
+            "INSERT INTO conversation_watermark \
+                 (conversation_id, user_id, device_id, last_fetched_at, last_seq) \
+             VALUES (?1, ?2, ?3, datetime('now'), ?4)",
+            libsql::params![conv.to_string(), user.to_string(), device.to_string(), seq],
         )
         .await
         .unwrap();
 }
 
 /// Seed a watermark with an explicit `reported_at` (the #720 liveness signal),
-/// independent of the message cursor. `cursor`/`reported` are `datetime('now', …)`
-/// offsets.
+/// independent of the delivery cursor. The two are of different KINDS on
+/// purpose: `seq` is how far the device has read, `reported` is when the DS last
+/// heard from it.
 async fn seed_watermark_reported(
     db: &Db,
     conv: &str,
     user: &str,
     device: &str,
-    cursor: &str,
+    seq: i64,
     reported: &str,
 ) {
     db.conn().await
         .unwrap()
         .execute(
             "INSERT INTO conversation_watermark \
-                 (conversation_id, user_id, device_id, last_fetched_at, reported_at) \
-             VALUES (?1, ?2, ?3, datetime('now', ?4), datetime('now', ?5))",
+                 (conversation_id, user_id, device_id, last_fetched_at, last_seq, reported_at) \
+             VALUES (?1, ?2, ?3, datetime('now'), ?4, datetime('now', ?5))",
             libsql::params![
                 conv.to_string(),
                 user.to_string(),
                 device.to_string(),
-                cursor.to_string(),
+                seq,
                 reported.to_string()
             ],
         )
@@ -121,16 +126,28 @@ async fn seed_watermark_reported(
         .unwrap();
 }
 
-async fn add_envelope(db: &Db, id: &str, conv: &str, offset: &str) {
-    db.conn().await
-        .unwrap()
-        .execute(
-            "INSERT INTO message_envelope (id, conversation_id, sent_at, sender_id, ciphertext) \
-             VALUES (?1, ?2, datetime('now', ?3), 'sender', 'ct')",
-            libsql::params![id.to_string(), conv.to_string(), offset.to_string()],
-        )
-        .await
-        .unwrap();
+/// Insert one envelope at delivery sequence `seq`.
+async fn add_envelope(db: &Db, id: &str, conv: &str, seq: i64) {
+    let conn = db.conn().await.unwrap();
+    conn.execute(
+        "INSERT INTO message_envelope \
+             (id, conversation_id, sent_at, sender_id, ciphertext, seq) \
+         VALUES (?1, ?2, datetime('now'), 'sender', 'ct', ?3)",
+        libsql::params![id.to_string(), conv.to_string(), seq],
+    )
+    .await
+    .unwrap();
+    // Keep the durable counter consistent with the row, exactly as
+    // `insert_envelope_with_seq` does — a fixture that inserts an envelope
+    // without advancing `conversation_seq` is not simulating the DS, and the
+    // next real write would reuse this sequence.
+    conn.execute(
+        "INSERT INTO conversation_seq (conversation_id, next_seq) VALUES (?1, ?2) \
+         ON CONFLICT(conversation_id) DO UPDATE SET next_seq = MAX(next_seq, excluded.next_seq)",
+        libsql::params![conv.to_string(), seq],
+    )
+    .await
+    .unwrap();
 }
 
 async fn envelope_count(db: &Db, conv: &str) -> i64 {
@@ -180,8 +197,8 @@ async fn channel_gc_ignores_revoked_device_with_no_watermark() {
     add_device(&db, "alice", "a-live", false).await;
     add_device(&db, "alice", "a-old", true).await;
     // Only the live device reported; the revoked device has no watermark row.
-    seed_watermark(&db, "c1", "alice", "a-live", "-1 day").await;
-    add_envelope(&db, "e1", "c1", "-5 days").await;
+    seed_watermark(&db, "c1", "alice", "a-live", 10).await;
+    add_envelope(&db, "e1", "c1", 7).await;
 
     let body = EnvelopeGcBody {
         conversation_id: "c1".into(),
@@ -212,9 +229,9 @@ async fn dm_gc_ignores_stale_revoked_watermark() {
         .unwrap();
     add_device(&db, "alice", "a-live", false).await;
     add_device(&db, "alice", "a-old", true).await;
-    seed_watermark(&db, "d1", "alice", "a-live", "-1 day").await;
-    seed_watermark(&db, "d1", "alice", "a-old", "-10 days").await;
-    add_envelope(&db, "e1", "d1", "-5 days").await;
+    seed_watermark(&db, "d1", "alice", "a-live", 10).await;
+    seed_watermark(&db, "d1", "alice", "a-old", 4).await;
+    add_envelope(&db, "e1", "d1", 7).await;
 
     let body = EnvelopeGcBody {
         conversation_id: "d1".into(),
@@ -342,10 +359,10 @@ async fn revoke_device_deletes_that_devices_watermarks_only() {
 
     // The doomed device holds a cursor in two conversations; the live sibling and
     // a different user hold cursors that must survive untouched.
-    seed_watermark(&db, "c1", "alice", "a-doomed", "-3 days").await;
-    seed_watermark(&db, "d1", "alice", "a-doomed", "-3 days").await;
-    seed_watermark(&db, "c1", "alice", "a-live", "-1 day").await;
-    seed_watermark(&db, "c1", "bob", "b-live", "-1 day").await;
+    seed_watermark(&db, "c1", "alice", "a-doomed", 8).await;
+    seed_watermark(&db, "d1", "alice", "a-doomed", 8).await;
+    seed_watermark(&db, "c1", "alice", "a-live", 10).await;
+    seed_watermark(&db, "c1", "bob", "b-live", 10).await;
 
     let body = RevokeDeviceBody {
         device_id: "a-doomed".into(),
@@ -376,7 +393,7 @@ async fn revoke_device_deletes_that_devices_watermarks_only() {
 async fn revoke_device_cannot_delete_another_users_watermarks() {
     let db = fresh().await;
     add_device(&db, "bob", "b-live", false).await;
-    seed_watermark(&db, "c1", "bob", "b-live", "-1 day").await;
+    seed_watermark(&db, "c1", "bob", "b-live", 10).await;
 
     // Alice is the authenticated actor; the DELETE is bound `user_id = actor`, so
     // naming bob's device id must be inert rather than destructive.
@@ -445,9 +462,9 @@ async fn ancient_envelope_survives_while_a_member_device_has_not_collected_it() 
     add_device(&db, "alice", "a1", false).await;
     add_device(&db, "bob", "b1", false).await;
     // Alice is caught up; bob's cursor sits BELOW the envelope.
-    seed_watermark(&db, "c1", "alice", "a1", "-1 day").await;
-    seed_watermark(&db, "c1", "bob", "b1", "-500 days").await;
-    add_envelope(&db, "ancient", "c1", "-400 days").await;
+    seed_watermark(&db, "c1", "alice", "a1", 10).await;
+    seed_watermark(&db, "c1", "bob", "b1", 1).await;
+    add_envelope(&db, "ancient", "c1", 2).await;
 
     gc_channel(&db).await;
 
@@ -470,8 +487,8 @@ async fn ancient_envelope_survives_for_a_device_that_never_reported() {
     add_device(&db, "alice", "a1", false).await;
     add_device(&db, "bob", "b-silent", false).await;
     // Only alice has ever reported.
-    seed_watermark(&db, "c1", "alice", "a1", "-1 day").await;
-    add_envelope(&db, "ancient", "c1", "-400 days").await;
+    seed_watermark(&db, "c1", "alice", "a1", 10).await;
+    add_envelope(&db, "ancient", "c1", 2).await;
 
     gc_channel(&db).await;
 
@@ -494,12 +511,12 @@ async fn envelope_is_deleted_once_every_member_device_collected_past_it() {
     add_device(&db, "alice", "a1", false).await;
     add_device(&db, "alice", "a2", false).await;
     add_device(&db, "bob", "b1", false).await;
-    add_envelope(&db, "collected", "c1", "-3 days").await;
-    add_envelope(&db, "pending", "c1", "-1 hour").await;
+    add_envelope(&db, "collected", "c1", 8).await;
+    add_envelope(&db, "pending", "c1", 11).await;
     // Every device sits strictly above `collected` and strictly below `pending`.
-    seed_watermark(&db, "c1", "alice", "a1", "-2 days").await;
-    seed_watermark(&db, "c1", "alice", "a2", "-2 days").await;
-    seed_watermark(&db, "c1", "bob", "b1", "-2 days").await;
+    seed_watermark(&db, "c1", "alice", "a1", 9).await;
+    seed_watermark(&db, "c1", "alice", "a2", 9).await;
+    seed_watermark(&db, "c1", "bob", "b1", 9).await;
 
     gc_channel(&db).await;
 
@@ -530,9 +547,9 @@ async fn a_revoked_device_does_not_pin_retention_forever() {
     channel_with_members(&db, &["alice", "bob"]).await;
     add_device(&db, "alice", "a1", false).await;
     add_device(&db, "bob", "b-revoked", true).await;
-    seed_watermark(&db, "c1", "alice", "a1", "-1 day").await;
-    seed_watermark(&db, "c1", "bob", "b-revoked", "-500 days").await;
-    add_envelope(&db, "e1", "c1", "-3 days").await;
+    seed_watermark(&db, "c1", "alice", "a1", 10).await;
+    seed_watermark(&db, "c1", "bob", "b-revoked", 1).await;
+    add_envelope(&db, "e1", "c1", 8).await;
 
     gc_channel(&db).await;
 
@@ -554,8 +571,8 @@ async fn an_empty_member_device_set_deletes_nothing() {
     let db = fresh().await;
     channel_with_members(&db, &["alice"]).await;
     // A member row exists, but the member has no device at all.
-    add_envelope(&db, "ancient", "c1", "-400 days").await;
-    add_envelope(&db, "fresh", "c1", "-1 hour").await;
+    add_envelope(&db, "ancient", "c1", 2).await;
+    add_envelope(&db, "fresh", "c1", 11).await;
 
     gc_channel(&db).await;
 
@@ -574,8 +591,8 @@ async fn an_all_revoked_roster_deletes_nothing() {
     let db = fresh().await;
     channel_with_members(&db, &["alice"]).await;
     add_device(&db, "alice", "a-old", true).await;
-    seed_watermark(&db, "c1", "alice", "a-old", "-500 days").await;
-    add_envelope(&db, "ancient", "c1", "-400 days").await;
+    seed_watermark(&db, "c1", "alice", "a-old", 1).await;
+    add_envelope(&db, "ancient", "c1", 2).await;
 
     gc_channel(&db).await;
 
@@ -603,47 +620,12 @@ fn rfc3339_from_now(minutes: i64) -> String {
     (chrono::Utc::now() + chrono::Duration::minutes(minutes)).to_rfc3339()
 }
 
-async fn add_envelope_at(db: &Db, id: &str, conv: &str, sender: &str, sent_at: &str) {
-    db.conn().await
-        .unwrap()
-        .execute(
-            "INSERT INTO message_envelope (id, conversation_id, sender_id, ciphertext, sent_at) \
-             VALUES (?1, ?2, ?3, 'mls:00', ?4)",
-            libsql::params![
-                id.to_string(),
-                conv.to_string(),
-                sender.to_string(),
-                sent_at.to_string()
-            ],
-        )
-        .await
-        .unwrap();
-}
-
-async fn seed_watermark_at(db: &Db, conv: &str, user: &str, device: &str, at: &str) {
-    db.conn().await
-        .unwrap()
-        .execute(
-            "INSERT INTO conversation_watermark \
-                 (conversation_id, user_id, device_id, last_fetched_at) \
-             VALUES (?1, ?2, ?3, ?4)",
-            libsql::params![
-                conv.to_string(),
-                user.to_string(),
-                device.to_string(),
-                at.to_string()
-            ],
-        )
-        .await
-        .unwrap();
-}
-
-/// The single `type='delete'` tombstone in `conv`, as `(id, sent_at)`.
-async fn only_tombstone(db: &Db, conv: &str) -> (String, String) {
+/// The delivery sequence of the single `type='delete'` tombstone in `conv`.
+async fn tombstone_seq(db: &Db, conv: &str) -> i64 {
     let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
-            "SELECT id, sent_at FROM message_envelope \
+            "SELECT seq FROM message_envelope \
              WHERE conversation_id = ?1 AND type = 'delete'",
             libsql::params![conv.to_string()],
         )
@@ -654,10 +636,10 @@ async fn only_tombstone(db: &Db, conv: &str) -> (String, String) {
         .await
         .unwrap()
         .expect("an admin delete must write a tombstone");
-    let out = (
-        row.get::<String>(0).unwrap(),
-        row.get::<String>(1).unwrap(),
-    );
+    let out: i64 = row
+        .get::<Option<i64>>(0)
+        .unwrap()
+        .expect("every envelope the DS writes carries a delivery sequence");
     assert!(
         rows.next().await.unwrap().is_none(),
         "expected exactly one tombstone"
@@ -665,39 +647,45 @@ async fn only_tombstone(db: &Db, conv: &str) -> (String, String) {
     out
 }
 
-/// Every surviving `last_fetched_at` in `conv` — the cursors the tombstone has to
-/// clear to be fetched at all.
-async fn watermark_values(db: &Db, conv: &str) -> Vec<String> {
+/// Every surviving cursor in `conv` — the positions the tombstone has to clear
+/// to be fetched at all.
+async fn watermark_seqs(db: &Db, conv: &str) -> Vec<i64> {
     let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
-            "SELECT last_fetched_at FROM conversation_watermark WHERE conversation_id = ?1",
+            "SELECT COALESCE(last_seq, 0) FROM conversation_watermark \
+             WHERE conversation_id = ?1",
             libsql::params![conv.to_string()],
         )
         .await
         .unwrap();
     let mut out = Vec::new();
     while let Some(r) = rows.next().await.unwrap() {
-        out.push(r.get::<String>(0).unwrap());
+        out.push(r.get::<i64>(0).unwrap());
     }
     out
 }
 
-/// **The #692 regression test.** The whole conversation has been GC'd — every
-/// current member device reported a watermark past every envelope, so the real
-/// cleanup predicate emptied `message_envelope`. The watermark rows survive that
-/// pruning, and they were written from client clocks running an HOUR AHEAD of the
-/// DS clock. An admin then deletes the message.
+/// **The #692 shape, now unrepresentable (#1087).**
 ///
-/// With the floor read only from surviving envelopes there is nothing left to
-/// read: the floor is NULL, `sent_at_after` falls back to wall-clock `now`, and
-/// `now` sorts an hour BELOW every surviving cursor. Ingest's `sent_at >
-/// last_fetched_at` then never selects the tombstone, the cursor never rewinds to
-/// pick it up later, and the deleted message stays readable on those devices
-/// forever. Consulting `MAX(last_fetched_at)` — the evidence GC does not destroy
-/// — is what makes the tombstone reachable.
+/// This replaces two tests that pinned the `tombstone_floor` / `sent_at_after`
+/// arithmetic. The bug they guarded: the whole conversation has been GC'd, so the
+/// floor had no envelope left to read; it fell back to wall-clock `now`; and the
+/// surviving watermark rows had been written from client clocks running an HOUR
+/// AHEAD. Ingest's `sent_at > last_fetched_at` then never selected the tombstone,
+/// the cursor never rewound to pick it up, and the deleted message stayed
+/// readable on those devices forever.
+///
+/// Every step of that depended on comparing two clocks' strings. The cursor is
+/// now a DS-assigned sequence, so the tombstone takes `MAX(seq)+1` and is above
+/// every surviving cursor by construction — there is no floor to compute, no
+/// fallback to get wrong, and no clock to disagree with.
+///
+/// The fixture keeps the adversarial clocks precisely because they no longer
+/// matter: both devices report cursors stamped an hour into the DS's future, and
+/// the tombstone still outranks them.
 #[tokio::test]
-async fn tombstone_clears_watermarks_that_outlived_envelope_gc() {
+async fn a_tombstone_outranks_surviving_cursors_after_gc_emptied_the_conversation() {
     let db = fresh().await;
     channel_with_members(&db, &["alice", "bob"]).await;
     db.conn().await
@@ -708,27 +696,32 @@ async fn tombstone_clears_watermarks_that_outlived_envelope_gc() {
     add_device(&db, "alice", "a1", false).await;
     add_device(&db, "bob", "b1", false).await;
 
-    // Bob's client clock runs ahead: his message is stamped 30 minutes into the
-    // DS's future, and both devices' cursors — copied from that `sent_at` on
-    // ingest — end up an hour ahead.
-    add_envelope_at(&db, "m1", "c1", "bob", &rfc3339_from_now(30)).await;
-    let alice_cursor = rfc3339_from_now(60);
-    let bob_cursor = rfc3339_from_now(60);
-    seed_watermark_at(&db, "c1", "alice", "a1", &alice_cursor).await;
-    seed_watermark_at(&db, "c1", "bob", "b1", &bob_cursor).await;
+    // Bob's message at sequence 1; both devices have read past it. Their
+    // `last_fetched_at` is an hour in the DS's FUTURE — the #692 clock shape,
+    // kept to prove it is now irrelevant.
+    add_envelope(&db, "m1", "c1", 1).await;
+    for (user, device) in [("alice", "a1"), ("bob", "b1")] {
+        db.conn().await
+            .unwrap()
+            .execute(
+                "INSERT INTO conversation_watermark \
+                     (conversation_id, user_id, device_id, last_fetched_at, last_seq) \
+                 VALUES ('c1', ?1, ?2, ?3, 1)",
+                libsql::params![user.to_string(), device.to_string(), rfc3339_from_now(60)],
+            )
+            .await
+            .unwrap();
+    }
 
-    // The REAL cleanup predicate, not a hand-emptied table: every current member
-    // device has collected past `m1`, so it is pruned.
+    // The REAL cleanup predicate empties the conversation, which is what used to
+    // destroy the floor's only input.
     gc_channel(&db).await;
     assert_eq!(
         envelope_count(&db, "c1").await,
         0,
-        "fixture precondition: watermark-gated GC must have emptied the \
-         conversation, leaving the floor with no envelope to read"
+        "fixture precondition: watermark-gated GC must have emptied the conversation"
     );
 
-    // Alice (a group admin) deletes bob's message — the admin branch, which is
-    // the one that writes a tombstone.
     let out = apply_delete_message(
         &db.conn().await.unwrap(),
         Some("alice"),
@@ -744,70 +737,17 @@ async fn tombstone_clears_watermarks_that_outlived_envelope_gc() {
     .unwrap();
     assert!(matches!(out, WriteOutcome::Ok), "admin delete must be allowed");
 
-    let (_, tombstone_sent_at) = only_tombstone(&db, "c1").await;
-    let cursors = watermark_values(&db, "c1").await;
+    let tombstone_seq = tombstone_seq(&db, "c1").await;
+    let cursors = watermark_seqs(&db, "c1").await;
     assert_eq!(cursors.len(), 2, "both watermark rows must have survived GC");
     for cursor in &cursors {
         assert!(
-            tombstone_sent_at.as_str() > cursor.as_str(),
-            "tombstone {tombstone_sent_at} must sort strictly above the surviving \
-             cursor {cursor}: ingest selects `sent_at > last_fetched_at` and never \
-             rewinds, so a tombstone at or below a cursor is skipped PERMANENTLY \
-             and the deleted message stays readable on that device (#692)"
+            tombstone_seq > *cursor,
+            "tombstone seq {tombstone_seq} must be above the surviving cursor \
+             {cursor}, or the device never fetches it and the deleted message \
+             stays readable there (#692)"
         );
     }
-}
-
-/// The complementary shape, to prove the widened floor did not simply become
-/// "always jump forward": with every surviving cursor BEHIND the DS clock the
-/// tombstone keeps a stamp at wall-clock now — above the cursors, but not pushed
-/// into the future by them.
-#[tokio::test]
-async fn tombstone_is_not_pushed_forward_by_watermarks_behind_the_ds_clock() {
-    let db = fresh().await;
-    channel_with_members(&db, &["alice", "bob"]).await;
-    db.conn().await
-        .unwrap()
-        .execute("UPDATE group_member SET role = 'admin' WHERE user_id = 'alice'", ())
-        .await
-        .unwrap();
-    add_device(&db, "alice", "a1", false).await;
-    add_device(&db, "bob", "b1", false).await;
-    add_envelope_at(&db, "m1", "c1", "bob", &rfc3339_from_now(-120)).await;
-    seed_watermark_at(&db, "c1", "alice", "a1", &rfc3339_from_now(-60)).await;
-    seed_watermark_at(&db, "c1", "bob", "b1", &rfc3339_from_now(-60)).await;
-
-    gc_channel(&db).await;
-    assert_eq!(envelope_count(&db, "c1").await, 0, "fixture precondition");
-
-    let before = chrono::Utc::now();
-    apply_delete_message(
-        &db.conn().await.unwrap(),
-        Some("alice"),
-        &DeleteMessageBody {
-            message_id: "m1".into(),
-            conversation_id: "c1".into(),
-            msg_sender_id: Some("bob".into()),
-            actor_id: None,
-            delete_token: None,
-        },
-    )
-    .await
-    .unwrap();
-    let after = chrono::Utc::now();
-
-    let (_, tombstone_sent_at) = only_tombstone(&db, "c1").await;
-    // Compared as instants, not lexically: the bound is "inside the window the
-    // call occupied", and the two stamps can carry different fraction widths.
-    let stamped = chrono::DateTime::parse_from_rfc3339(&tombstone_sent_at)
-        .expect("tombstone sent_at must be RFC3339")
-        .to_utc();
-    assert!(
-        stamped >= before && stamped <= after,
-        "with every cursor behind the DS clock the tombstone must keep plain \
-         wall-clock now ({before} ..= {after}), got {tombstone_sent_at} — the \
-         floor only ever pushes forward when something is already ahead"
-    );
 }
 
 // ── Part G (#689) — the server-side sweep is the GC trigger ───────────────────
@@ -840,17 +780,17 @@ async fn sweep_collects_quiet_conversations_and_spares_uncollected() {
 
     // cA — channel, its one device caught up past the envelope.
     add_device(&db, "alice", "aA", false).await;
-    seed_watermark(&db, "cA", "alice", "aA", "-1 day").await;
-    add_envelope(&db, "eA", "cA", "-5 days").await;
+    seed_watermark(&db, "cA", "alice", "aA", 10).await;
+    add_envelope(&db, "eA", "cA", 7).await;
 
     // dB — DM, its one device caught up past the envelope.
     add_device(&db, "bob", "bB", false).await;
-    seed_watermark(&db, "dB", "bob", "bB", "-1 day").await;
-    add_envelope(&db, "eB", "dB", "-5 days").await;
+    seed_watermark(&db, "dB", "bob", "bB", 10).await;
+    add_envelope(&db, "eB", "dB", 7).await;
 
     // cC — channel with an uncollected recipient: carol's device never reported.
     add_device(&db, "carol", "cC-dev", false).await;
-    add_envelope(&db, "eC", "cC", "-5 days").await;
+    add_envelope(&db, "eC", "cC", 7).await;
 
     // No member ingests, no endpoint call — the sweep is the sole trigger.
     let visited = sweep_envelope_gc(&db.conn().await.unwrap(), STALE).await.unwrap().visited;
@@ -899,9 +839,9 @@ async fn dormant_device_stops_pinning_via_endpoint() {
         .unwrap();
     add_device(&db, "alice", "a1", false).await;
     add_device(&db, "bob", "b1", false).await;
-    seed_watermark_reported(&db, "c1", "alice", "a1", "-1 day", "-1 day").await;
-    seed_watermark_reported(&db, "c1", "bob", "b1", "-500 days", "-400 days").await;
-    add_envelope(&db, "e1", "c1", "-100 days").await;
+    seed_watermark_reported(&db, "c1", "alice", "a1", 10, "-1 day").await;
+    seed_watermark_reported(&db, "c1", "bob", "b1", 1, "-400 days").await;
+    add_envelope(&db, "e1", "c1", 3).await;
 
     let body = EnvelopeGcBody { conversation_id: "c1".into(), is_dm: false, actor_id: Some("alice".into()) };
     apply_envelope_gc(&db.conn().await.unwrap(), None, &body, STALE).await.unwrap();
@@ -930,9 +870,9 @@ async fn a_returning_device_reports_and_pins_again() {
         ).await.unwrap();
         add_device(&db, "alice", "a1", false).await;
         add_device(&db, "bob", "b1", false).await;
-        seed_watermark_reported(&db, "c1", "alice", "a1", "-1 day", "-1 day").await;
-        seed_watermark_reported(&db, "c1", "bob", "b1", "-500 days", "-400 days").await;
-        add_envelope(&db, "e1", "c1", "-100 days").await;
+        seed_watermark_reported(&db, "c1", "alice", "a1", 10, "-1 day").await;
+        seed_watermark_reported(&db, "c1", "bob", "b1", 1, "-400 days").await;
+        add_envelope(&db, "e1", "c1", 3).await;
 
         let body = EnvelopeGcBody { conversation_id: "c1".into(), is_dm: false, actor_id: Some("alice".into()) };
         apply_envelope_gc(&db.conn().await.unwrap(), None, &body, STALE).await.unwrap();
@@ -949,9 +889,9 @@ async fn a_returning_device_reports_and_pins_again() {
         ).await.unwrap();
         add_device(&db, "alice", "a1", false).await;
         add_device(&db, "bob", "b1", false).await;
-        seed_watermark_reported(&db, "c1", "alice", "a1", "-1 day", "-1 day").await;
-        seed_watermark_reported(&db, "c1", "bob", "b1", "-500 days", "-400 days").await;
-        add_envelope(&db, "e1", "c1", "-100 days").await;
+        seed_watermark_reported(&db, "c1", "alice", "a1", 10, "-1 day").await;
+        seed_watermark_reported(&db, "c1", "bob", "b1", 1, "-400 days").await;
+        add_envelope(&db, "e1", "c1", 3).await;
 
         // Bob comes back and reports — a cursor still BEHIND the envelope (-200d).
         // The monotone guard keeps the max cursor, but `reported_at` jumps to now.
@@ -963,6 +903,7 @@ async fn a_returning_device_reports_and_pins_again() {
             user_id: Some("bob".into()),
             device_id: "b1".into(),
             last_fetched_at: rfc3339_from_now(-200 * 24 * 60),
+            last_seq: None,
         };
         apply_advance_watermark(&db.conn().await.unwrap(), None, &wm).await.unwrap();
 
@@ -995,9 +936,9 @@ async fn sweep_and_endpoint_agree_on_the_staleness_bound() {
         )).await.unwrap();
         add_device(&db, "alice", "a1", false).await;
         add_device(&db, "bob", "b1", false).await;
-        seed_watermark_reported(&db, conv, "alice", "a1", "-1 day", "-1 day").await;
-        seed_watermark_reported(&db, conv, "bob", "b1", "-500 days", "-400 days").await;
-        add_envelope(&db, "e1", conv, "-100 days").await;
+        seed_watermark_reported(&db, conv, "alice", "a1", 10, "-1 day").await;
+        seed_watermark_reported(&db, conv, "bob", "b1", 1, "-400 days").await;
+        add_envelope(&db, "e1", conv, 3).await;
         db
     }
 
@@ -1029,10 +970,10 @@ async fn sweep_reports_identity_free_growth_metrics() {
     // Alice never reported anywhere → COUNT(ud) != COUNT(cw) → nothing collected,
     // so every envelope survives and the snapshot sees them all.
     add_device(&db, "alice", "a1", false).await;
-    add_envelope(&db, "b1", "big", "-10 days").await;
-    add_envelope(&db, "b2", "big", "-9 days").await;
-    add_envelope(&db, "b3", "big", "-8 days").await;
-    add_envelope(&db, "s1", "small", "-2 days").await;
+    add_envelope(&db, "b1", "big", 4).await;
+    add_envelope(&db, "b2", "big", 5).await;
+    add_envelope(&db, "b3", "big", 6).await;
+    add_envelope(&db, "s1", "small", 9).await;
 
     let report = sweep_envelope_gc(&db.conn().await.unwrap(), STALE).await.unwrap();
     let m = report.metrics;

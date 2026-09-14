@@ -862,24 +862,24 @@ async fn envelope_cleanup_is_watermark_gated_and_never_ttl_gated() {
         "young envelope with a lagging member should not be cleaned up"
     );
 
-    // ── Watermark: young envelope, both watermarks strictly past it ──
-    // The cleanup query uses `sent_at < MIN(cw)`, and the watermark upsert
-    // uses the latest returned message's `sent_at`. So to delete "neg-hello"
-    // via the watermark gate we need a STRICTLY later message that both
-    // members have fetched — that later message's sent_at becomes the new
-    // watermark, and neg-hello's sent_at becomes strictly less than it.
+    // ── Watermark: both members caught up, so BOTH envelopes go ──
+    // Since #1087 the gate is `seq <= MIN(last_seq)`, not `sent_at < MIN(cw)`.
+    // The cursor means "the highest position this device has HANDLED", so an
+    // envelope AT the floor has provably been read by everyone and is
+    // collectable. The old `<` was conservative for one reason only: two
+    // envelopes could share a `sent_at`, so the one at the cursor might not be
+    // the one that was handled. A sequence is unique, so that tie cannot exist
+    // and retention is now exact rather than off by one.
     bob.fetch_channel_messages(&channel_id).await;
     alice.send_channel_message(&channel_id, "neg-hello-2").await;
     alice.fetch_channel_messages(&channel_id).await;
     bob.fetch_channel_messages(&channel_id).await;
-    // Both watermarks now sit at sent_at("neg-hello-2"), strictly greater
-    // than sent_at("neg-hello"). The GC sweep evicts the older envelope but
-    // leaves the newer one (whose sent_at equals MIN).
     run_gc_sweep(&remote).await;
     assert_eq!(
         envelope_count(&remote, &channel_id).await,
-        1,
-        "older envelope should be cleaned once every watermark passes it, while the latest envelope remains"
+        0,
+        "every member device has read past both envelopes, so both are collectable \
+         — an envelope AT the floor is handled by everyone (#1087)"
     );
 
     // ── No-TTL regression (F3): ancient envelopes nobody has collected ──
@@ -909,9 +909,9 @@ async fn envelope_cleanup_is_watermark_gated_and_never_ttl_gated() {
     );
 
     // Still reclaimable, so removing the TTL bounds retention rather than
-    // disabling GC. As in the watermark leg above, the cursor is EXCLUSIVE
-    // (`sent_at < MIN(cw)`), so a STRICTLY later envelope is needed to lift both
-    // members' watermarks above the backdated rows.
+    // disabling GC. The cursor is INCLUSIVE since #1087 (`seq <= MIN(last_seq)`),
+    // so once both members have fetched everything there is nothing left to
+    // keep — including the newest, which they have also read.
     bob.fetch_channel_messages(&channel_id).await;
     alice.send_channel_message(&channel_id, "fresh").await;
     alice.fetch_channel_messages(&channel_id).await;
@@ -919,9 +919,9 @@ async fn envelope_cleanup_is_watermark_gated_and_never_ttl_gated() {
     run_gc_sweep(&remote).await;
     assert_eq!(
         envelope_count(&remote, &channel_id).await,
-        1,
+        0,
         "once every member device has collected past them, the backdated \
-         envelopes are reclaimed and only the newest remains"
+         envelopes are reclaimed — and so is the newest, which they have read too"
     );
 
     drop(alice);
@@ -2420,6 +2420,107 @@ async fn reactions_round_trip_between_two_members() {
         remaining,
         vec![bob_profile.id.as_str()],
         "the surviving reaction must be bob's"
+    );
+
+    drop(alice);
+    drop(bob);
+}
+
+/// #1087: the delivery sequence, end to end through the real stack.
+///
+/// The rest of this suite proves delivery *works*, which is the property that
+/// matters — but it proves it implicitly, so a cursor that quietly stopped being
+/// assigned would surface as some unrelated test failing much later. This one
+/// looks at the columns directly: a real client send lands with a sequence, the
+/// sequences increase, and the recipient's reported cursor advances past them.
+///
+/// That is the whole loop — DS assignment on write, client report on ingest, DS
+/// storage of the cursor — which no single unit test can cover because each half
+/// lives in a different crate.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_real_send_assigns_a_delivery_sequence_and_advances_the_cursor() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let _alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+
+    let group_id = alice.create_group("SeqCursor").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+    alice.invite(&group_id, &bob_profile.username).await;
+    let invite_id = bob
+        .first_pending_invite()
+        .await
+        .expect("bob has an invite")["id"]
+        .as_str()
+        .expect("invite id")
+        .to_string();
+    bob.accept_invite(&invite_id).await;
+    bob.poll().await;
+    alice.process_commits_for(&channel_id).await;
+    bob.process_commits_for(&channel_id).await;
+
+    let first = alice.send_channel_message_id(&channel_id, "one").await;
+    let second = alice.send_channel_message_id(&channel_id, "two").await;
+
+    let remote = writable_remote().await;
+    let conn = remote.conn().await.expect("remote conn");
+
+    let seq_of = |id: String| {
+        let conn = conn.clone();
+        async move {
+            let mut rows = conn
+                .query(
+                    "SELECT seq FROM message_envelope WHERE id = ?1",
+                    libsql::params![id],
+                )
+                .await
+                .expect("seq query");
+            rows.next()
+                .await
+                .expect("row")
+                .expect("the envelope must exist")
+                .get::<Option<i64>>(0)
+                .expect("seq column")
+        }
+    };
+
+    let s1 = seq_of(first.clone())
+        .await
+        .expect("a real send must land with a delivery sequence");
+    let s2 = seq_of(second.clone())
+        .await
+        .expect("a real send must land with a delivery sequence");
+    assert!(s1 < s2, "sequences must increase: {s1} then {s2}");
+
+    // Bob fetches — the client computes its cursor over the sequence and
+    // reports it, and the DS stores it.
+    bob.fetch_channel_messages(&channel_id).await;
+
+    let cursor: Option<i64> = {
+        let mut rows = conn
+            .query(
+                "SELECT last_seq FROM conversation_watermark \
+                 WHERE conversation_id = ?1 AND user_id = ?2",
+                libsql::params![channel_id.clone(), bob_profile.id.clone()],
+            )
+            .await
+            .expect("watermark query");
+        rows.next()
+            .await
+            .expect("row")
+            .expect("bob's device has a watermark row")
+            .get::<Option<i64>>(0)
+            .expect("last_seq column")
+    };
+    assert_eq!(
+        cursor,
+        Some(s2),
+        "bob handled both messages, so his cursor must sit AT the highest — \
+         the cursor is inclusive, and a cursor that lagged would re-deliver \
+         while one that ran ahead would skip"
     );
 
     drop(alice);

@@ -801,10 +801,17 @@ async fn recipient_that_loses_the_epoch_zero_race_still_reads_the_creators_messa
     stop.store(true, Ordering::Relaxed);
     let _ = sync_loop.await;
     let _ = refresh_loop.await;
-    assert!(
-        bob_view.contains(&"PING_ACROSS_THE_UI".to_string()),
-        "bob lost the creator's message after losing the epoch-0 race: {bob_view:?}"
-    );
+    if !bob_view.contains(&"PING_ACROSS_THE_UI".to_string()) {
+        // Same idea as `messages::diagnose_admin_delete_failure`: a bare
+        // "bob's view is []" says nothing about WHICH link broke, and this test
+        // is a race, so a failure is likely to be seen on CI and not
+        // reproducible locally. Classify it while the state still exists.
+        let diag = diagnose_missing_delivery(&bob_profile.id, &dm_id).await;
+        panic!(
+            "bob lost the creator's message after losing the epoch-0 race: \
+             {bob_view:?}\n{diag}"
+        );
+    }
 
     // And back: the DM is usable in both directions.
     bob.send_channel_message(&dm_id, "PONG_BACK_ACROSS_UI").await;
@@ -1130,4 +1137,87 @@ async fn a_read_receipt_cannot_advance_the_epoch_of_a_parked_committer() {
     let _ = alice_profile;
     drop(alice);
     drop(bob);
+}
+
+/// Why an envelope did not reach a device, read straight off the DS tables.
+///
+/// Three links can break and they look identical from the recipient's empty
+/// view: the envelope was never stored; it WAS stored but sits at or below the
+/// device's cursor so no fetch selects it; or it was fetched and could not be
+/// decrypted. The first two are visible in the DS's own rows, so report them
+/// rather than leaving a future CI failure to be guessed at.
+async fn diagnose_missing_delivery(user_id: &str, conversation_id: &str) -> String {
+    let remote = crate::harness::writable_remote().await;
+    let Ok(conn) = remote.conn().await else {
+        return "  diagnosis: could not open the remote connection".to_string();
+    };
+
+    let mut envelopes: Vec<String> = Vec::new();
+    if let Ok(mut rows) = conn
+        .query(
+            "SELECT id, type, seq, sent_at FROM message_envelope \
+             WHERE conversation_id = ?1 ORDER BY seq",
+            libsql::params![conversation_id.to_string()],
+        )
+        .await
+    {
+        while let Ok(Some(r)) = rows.next().await {
+            envelopes.push(format!(
+                "    id={} type={} seq={:?} sent_at={}",
+                r.get::<String>(0).unwrap_or_default(),
+                r.get::<String>(1).unwrap_or_default(),
+                r.get::<Option<i64>>(2).unwrap_or(None),
+                r.get::<String>(3).unwrap_or_default(),
+            ));
+        }
+    }
+
+    let mut cursors: Vec<String> = Vec::new();
+    if let Ok(mut rows) = conn
+        .query(
+            "SELECT device_id, last_seq, last_fetched_at FROM conversation_watermark \
+             WHERE conversation_id = ?1 AND user_id = ?2",
+            libsql::params![conversation_id.to_string(), user_id.to_string()],
+        )
+        .await
+    {
+        while let Ok(Some(r)) = rows.next().await {
+            cursors.push(format!(
+                "    device={} last_seq={:?} last_fetched_at={}",
+                r.get::<String>(0).unwrap_or_default(),
+                r.get::<Option<i64>>(1).unwrap_or(None),
+                r.get::<String>(2).unwrap_or_default(),
+            ));
+        }
+    }
+
+    let counter: Option<i64> = match conn
+        .query(
+            "SELECT next_seq FROM conversation_seq WHERE conversation_id = ?1",
+            libsql::params![conversation_id.to_string()],
+        )
+        .await
+    {
+        Ok(mut rows) => rows
+            .next()
+            .await
+            .ok()
+            .flatten()
+            .and_then(|r| r.get::<i64>(0).ok()),
+        Err(_) => None,
+    };
+
+    format!(
+        "  diagnosis (#1087 delivery sequence):\n  \
+         conversation_seq.next_seq = {counter:?}\n  \
+         envelopes ({}):\n{}\n  \
+         this user's cursors ({}):\n{}\n  \
+         — no envelopes at all means the send never landed; an envelope whose \
+         seq is <= every cursor means the fetch could never select it (a cursor \
+         seeded or advanced too far); otherwise it was fetched and not decrypted.",
+        envelopes.len(),
+        if envelopes.is_empty() { "    (none)".to_string() } else { envelopes.join("\n") },
+        cursors.len(),
+        if cursors.is_empty() { "    (none)".to_string() } else { cursors.join("\n") },
+    )
 }

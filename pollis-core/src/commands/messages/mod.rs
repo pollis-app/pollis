@@ -48,11 +48,15 @@ pub mod watermark;
 /// same way.
 ///
 /// **What must never happen here** is truncation — writing `…T09:00:00+00:00`
-/// for an instant that was really `…T09:00:00.789`. That value sorts below its
-/// own second's traffic and buries the envelope under recipients' watermarks;
-/// it is exactly the #692 bug, on the DS side, and the reason that side had to
-/// move to explicit nanoseconds. `sent_at_never_truncates_a_real_fraction` below
-/// is what stops it reappearing on this side.
+/// for an instant that was really `…T09:00:00.789`.
+///
+/// Since #1087 that is a DISPLAY bug rather than a delivery one: `sent_at` is no
+/// longer the cursor, so a truncated stamp mis-sorts a message in the UI instead
+/// of burying it under recipients' watermarks. The chokepoint and
+/// `sent_at_never_truncates_a_real_fraction` stay — the local history pagination
+/// in `read.rs` still compares these lexically, and "the timeline shows messages
+/// in the wrong order" is a bug worth keeping out even when it is no longer the
+/// #692 catastrophe it once was.
 pub(crate) fn envelope_sent_at() -> String {
     stamp_envelope_sent_at(chrono::Utc::now())
 }

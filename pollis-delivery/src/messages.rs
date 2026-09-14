@@ -243,10 +243,10 @@ const CLEANUP_CHANNEL_ENVELOPES: &str = concat!(
     "\
 DELETE FROM message_envelope
  WHERE conversation_id = ?1
-   AND sent_at < (
+   AND seq <= (
        SELECT CASE
-                WHEN COUNT(ud.device_id) = COUNT(cw.last_fetched_at)
-                THEN MIN(cw.last_fetched_at)
+                WHEN COUNT(ud.device_id) = COUNT(cw.last_seq)
+                THEN MIN(cw.last_seq)
                 ELSE NULL
               END
        ",
@@ -260,10 +260,10 @@ const CLEANUP_DM_ENVELOPES: &str = concat!(
     "\
 DELETE FROM message_envelope
  WHERE conversation_id = ?1
-   AND sent_at < (
+   AND seq <= (
        SELECT CASE
-                WHEN COUNT(ud.device_id) = COUNT(cw.last_fetched_at)
-                THEN MIN(cw.last_fetched_at)
+                WHEN COUNT(ud.device_id) = COUNT(cw.last_seq)
+                THEN MIN(cw.last_seq)
                 ELSE NULL
               END
        ",
@@ -563,123 +563,25 @@ fn admit_last_fetched_at(value: &str) -> Result<(), WriteOutcome> {
     }
 }
 
-// ── The tombstone `sent_at` floor ────────────────────────────────────────────
+// ── The tombstone `sent_at` floor — REMOVED (#1087) ──────────────────────────
 //
-// A DS-stamped tombstone is only ever fetched if it sorts strictly ABOVE the
-// recipient's `conversation_watermark.last_fetched_at`: ingest selects
-// `sent_at > last_fetched_at` (strictly greater) and advances the cursor to the
-// highest `sent_at` it consumed, so the cursor NEVER rewinds and anything
-// stamped at or below it is skipped permanently, not merely delayed
-// (`pollis_core::commands::messages::ingest`).
+// A DS-stamped tombstone used to need a computed `sent_at`, strictly above the
+// greatest cursor any recipient could already hold, because ingest selected
+// `sent_at > last_fetched_at` and the two stamps came from different clocks with
+// different precisions. A whole-second DS stamp sorts BELOW a sub-second client
+// stamp inside the same second (`+` 0x2B < `.` 0x2E), so the delete was buried
+// under the message it redacted and no recipient ever applied it. #692 then
+// found that a GC-pruned conversation lost the envelope side of the floor and
+// fell back to wall-clock `now`, reintroducing the clock dependency the guard
+// existed to remove; the floor became the greater of the envelope and watermark
+// sides.
 //
-// The floor is therefore the highest cursor value any recipient could already
-// hold, and it has TWO sources — one of which outlives the other:
-//
-//   * `MAX(sent_at)` over `message_envelope` — the conversation's high-water
-//     mark, but only over envelopes STILL PRESENT. Envelope GC deletes rows once
-//     every current member device has reported a watermark past them (see
-//     `CLEANUP_*` above; since #688 that deletion is purely watermark-gated, with
-//     no TTL arm to bound it). Once a conversation has been fully pruned this
-//     side is NULL.
-//   * `MAX(last_fetched_at)` over `conversation_watermark` — the highest cursor
-//     actually reported for the conversation. These rows are NOT touched by
-//     envelope GC; they are only ever advanced (monotone UPSERT in
-//     `apply_advance_watermark`) or deleted with the device itself
-//     (`apply_revoke_device`). They therefore SURVIVE the pruning that empties
-//     the envelope side.
-//
-//     This arm reads ONLY the rows of the real member-device roster — the same
-//     `channel_member_device_rows!` / `dm_member_device_rows!` join the GC
-//     predicate aggregates over (both shapes, since the floor does not know
-//     which one `?1` is; the wrong shape joins to nothing). A recipient is by
-//     definition a member device, so a watermark row outside the roster can
-//     never be a cursor the tombstone has to clear — and reading it anyway was
-//     an attack surface: `apply_advance_watermark` did not require membership,
-//     so any account could park `last_fetched_at = "9999-…"` under a victim
-//     conversation, the unjoined MAX adopted it, and the next admin delete was
-//     stamped `9999-…000000001`. Every device that applied that tombstone
-//     advanced its cursor into year 9999 and stopped receiving mail; once all
-//     of them had, GC deleted the conversation. The endpoint is now
-//     membership-gated and the value bounded (`check_cursor_stamp`), so such
-//     a row can no longer be written — and the roster join means one that
-//     somehow existed would still be ignored here, exactly as GC ignores it.
-//
-// #692: using only the envelope side meant that once GC had pruned a
-// conversation the floor went NULL, `sent_at_after` fell back to wall-clock
-// `now`, and the clock-skew dependency this guard exists to remove was back — a
-// recipient whose watermark came from a client clock running AHEAD of the DS
-// clock would never fetch the tombstone, and the deleted message stayed readable
-// on that device forever. The watermark side is precisely the evidence that
-// survives GC, so the floor is the greater of the two.
-//
-// Expressed as one SQL statement rather than two queries max'd in Rust: each arm
-// is an aggregate over a possibly-empty set, so each yields exactly one
-// (possibly NULL) row, and the outer `MAX` skips NULLs — giving "greater of the
-// two, or NULL when both are absent" with no Rust-side NULL bookkeeping and a
-// single round trip. The comparison is lexical in both SQL and Rust (see
-// [`now_rfc3339`] on why lexical order matches chronological order here), so the
-// two formulations agree.
-const TOMBSTONE_FLOOR: &str = concat!(
-    "\
-SELECT MAX(v) FROM (
-    SELECT MAX(sent_at) AS v FROM message_envelope WHERE conversation_id = ?1
-    UNION ALL
-    SELECT MAX(cw.last_fetched_at) AS v
-       ",
-    channel_member_device_rows!(),
-    "
-    UNION ALL
-    SELECT MAX(cw.last_fetched_at) AS v
-       ",
-    dm_member_device_rows!(),
-    "
-)"
-);
-
-/// The greatest cursor value any recipient of `conversation_id` could already
-/// hold — see the [`TOMBSTONE_FLOOR`] block comment. `None` only when the
-/// conversation has neither a surviving envelope nor a reported watermark.
-async fn tombstone_floor(
-    conn: &Connection,
-    conversation_id: &str,
-) -> anyhow::Result<Option<String>> {
-    let mut rows = conn
-        .query(TOMBSTONE_FLOOR, libsql::params![conversation_id.to_string()])
-        .await?;
-    Ok(match rows.next().await? {
-        Some(row) => row.get::<Option<String>>(0)?,
-        None => None,
-    })
-}
-
-/// The `sent_at` an envelope must carry to be guaranteed visible to every
-/// member of `conversation_id`, given `floor` — the greatest cursor value any
-/// recipient could already hold (see [`tombstone_floor`]).
-///
-/// Precision parity (see [`now_rfc3339`]) fixes ordering between two correct
-/// clocks, but `sent_at` for ordinary messages comes from the *client's* clock
-/// while a tombstone's comes from the *DS's*. A client running ahead would put
-/// its messages — and so every recipient's watermark — in the DS's future, and
-/// the tombstone would again sort underneath and never be fetched. Stamping the
-/// tombstone strictly after everything already in the conversation removes the
-/// dependence on the two clocks agreeing: the cursor cannot already be past it.
-///
-/// Falls back to `now` when the floor is absent or unparseable, which is the
-/// pre-existing behaviour and never worse than it.
-fn sent_at_after(now: String, floor: Option<String>) -> String {
-    let Some(floor) = floor else {
-        return now;
-    };
-    if floor < now {
-        return now;
-    }
-    match chrono::DateTime::parse_from_rfc3339(&floor) {
-        Ok(t) => (t + chrono::Duration::nanoseconds(1))
-            .to_utc()
-            .to_rfc3339_opts(chrono::SecondsFormat::Nanos, false),
-        Err(_) => now,
-    }
-}
+// All of that was the cost of ordering by a lexically-compared string that two
+// different clocks wrote. With a DS-assigned sequence a tombstone simply takes
+// `MAX(seq)+1`, which is above every recipient's cursor by construction — so
+// `TOMBSTONE_FLOOR`, `tombstone_floor` and `sent_at_after` are gone, along with
+// the class of bug they patched. `sent_at` is display metadata now and nothing
+// routes on it.
 
 // ── POST /v1/messages/send ───────────────────────────────────────────────────
 
@@ -783,27 +685,31 @@ pub async fn apply_send_message(
     if let Err(refused) = admit_sent_at(&body.sent_at) {
         return Ok(refused);
     }
-    // The per-envelope deletion capability (#1086), stored as the client sent it
-    // — the DS never computes it and cannot: it is an HMAC under a key only the
-    // author's devices hold. Absent (an older client) → NULL, and deletes of this
-    // row fall back to the pre-#1086 membership check.
-    conn.execute(
-        "INSERT INTO message_envelope \
-             (id, conversation_id, sender_id, ciphertext, reply_to_id, sent_at, sealed, \
-              delete_token_hash) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        libsql::params![
-            body.id.clone(),
-            body.conversation_id.clone(),
-            stored_sender,
-            body.ciphertext.clone(),
-            body.reply_to_id.clone(),
-            body.sent_at.clone(),
-            body.sealed,
-            body.delete_token_hash.clone(),
+    // The sequence allocation and the row must land together — see
+    // `insert_envelope_with_seq`. Edit and delete already run in a transaction;
+    // the send path needs its own.
+    let tx = conn.transaction().await?;
+    insert_envelope_with_seq(
+        &tx,
+        &body.conversation_id,
+        // The per-envelope deletion capability (#1086), stored as the client sent
+        // it — the DS never computes it and cannot: it is an HMAC under a key only
+        // the author's devices hold. Absent (an older client) → NULL, and deletes
+        // of this row fall back to the pre-#1086 membership check.
+        "id, sender_id, ciphertext, reply_to_id, sent_at, sealed, delete_token_hash",
+        "?3, ?4, ?5, ?6, ?7, ?8, ?9",
+        vec![
+            body.id.clone().into(),
+            stored_sender.into(),
+            body.ciphertext.clone().into(),
+            body.reply_to_id.clone().into(),
+            body.sent_at.clone().into(),
+            body.sealed.into(),
+            body.delete_token_hash.clone().into(),
         ],
     )
     .await?;
+    tx.commit().await?;
     Ok(WriteOutcome::Ok)
 }
 
@@ -1027,21 +933,22 @@ pub async fn apply_edit_message(
         libsql::params![body.conversation_id.clone(), body.target_message_id.clone()],
     )
     .await?;
-    tx.execute(
-        "INSERT INTO message_envelope \
-             (id, conversation_id, sender_id, ciphertext, sent_at, type, target_message_id, \
-              delete_token_hash) \
-         VALUES (?1, ?2, ?3, ?4, ?5, 'edit', ?6, ?7)",
-        libsql::params![
-            body.envelope_id.clone(),
-            body.conversation_id.clone(),
-            sender,
-            body.ciphertext.clone(),
-            body.sent_at.clone(),
-            body.target_message_id.clone(),
+    insert_envelope_with_seq(
+        &tx,
+        &body.conversation_id,
+        "id, sender_id, ciphertext, sent_at, type, target_message_id, delete_token_hash",
+        "?3, ?4, ?5, ?6, 'edit', ?7, ?8",
+        vec![
+            body.envelope_id.clone().into(),
+            sender.into(),
+            body.ciphertext.clone().into(),
+            body.sent_at.clone().into(),
+            body.target_message_id.clone().into(),
             // The edit envelope inherits the TARGET's capability, so the next
             // edit (or a delete) can replace it with the same proof.
-            edit_capability_hash(conn, &body.conversation_id, &body.target_message_id).await?,
+            edit_capability_hash(conn, &body.conversation_id, &body.target_message_id)
+                .await?
+                .into(),
         ],
     )
     .await?;
@@ -1156,6 +1063,85 @@ async fn edit_capability_hash(
     })
 }
 
+/// Take the next delivery sequence for `conversation_id` (#1087).
+///
+/// One atomic statement against `conversation_seq`, which is the ONLY durable
+/// high-water mark. The obvious alternative — `MAX(seq)+1` over
+/// `message_envelope` — is wrong for a reason that is easy to miss and produces
+/// silent message loss:
+///
+/// envelope GC **deletes rows**. Once every member device has read past
+/// everything the conversation is emptied, `MAX(seq)` goes NULL, and the next
+/// envelope is assigned 1 again — at or below every device's existing cursor, so
+/// `seq > last_seq` never selects it and it reaches nobody. That is the #692
+/// shape reappearing inside the design meant to retire it;
+/// `envelope_retention::a_tombstone_outranks_surviving_cursors_after_gc_emptied_the_conversation`
+/// is the test that catches it.
+///
+/// So the counter outlives the rows it numbers. GC never touches this table;
+/// only conversation teardown removes a row, and the cursors pointing into it go
+/// at the same time.
+async fn next_delivery_seq(conn: &Connection, conversation_id: &str) -> anyhow::Result<i64> {
+    let mut rows = conn
+        .query(
+            "INSERT INTO conversation_seq (conversation_id, next_seq) VALUES (?1, 1) \
+             ON CONFLICT(conversation_id) DO UPDATE SET next_seq = next_seq + 1 \
+             RETURNING next_seq",
+            libsql::params![conversation_id.to_string()],
+        )
+        .await?;
+    let row = rows
+        .next()
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("conversation_seq returned no row for {conversation_id}"))?;
+    Ok(row.get::<i64>(0)?)
+}
+
+/// Insert an envelope, assigning it the next delivery sequence (#1087).
+///
+/// **Every envelope goes through here** — send, edit, tombstone. The sequence is
+/// what recipients fetch by, what their cursor points into, and what retention
+/// compares against, so a writer that skipped it would create an envelope
+/// delivered to nobody and collected by nothing.
+///
+/// **Takes a `Transaction`, not a `Connection`, and that is the whole point.**
+/// Allocating the sequence and inserting the row are two statements; if another
+/// writer can slip between them, it allocates `N+1` and makes that row visible
+/// while `N` is still missing. A recipient fetching `seq > last_seq` in that
+/// window sees `N+1`, advances its cursor to it, and envelope `N` lands
+/// *below every cursor* — delivered to nobody and collected by GC. That is a
+/// fourth acceptable-loss mode, which we do not get to add.
+///
+/// Under SQLite/libsql a transaction whose first statement is a write holds the
+/// write lock to commit, so writers serialise and the gap is never observable.
+/// Requiring the transaction in the *type* is what stops a future caller from
+/// re-opening the window by passing a bare autocommit connection.
+///
+/// A rolled-back insert un-does the counter bump too, so there is not even a
+/// burned sequence; `idx_envelope_conv_seq` remains the backstop.
+///
+/// `columns` names the columns AFTER `conversation_id` and `seq`; `placeholders`
+/// supplies them starting at `?3`, and `params` binds them in that order.
+async fn insert_envelope_with_seq(
+    tx: &libsql::Transaction,
+    conversation_id: &str,
+    columns: &str,
+    placeholders: &str,
+    params: Vec<libsql::Value>,
+) -> anyhow::Result<()> {
+    let seq = next_delivery_seq(tx, conversation_id).await?;
+    let sql = format!(
+        "INSERT INTO message_envelope (conversation_id, seq, {columns}) \
+         VALUES (?1, ?2, {placeholders})"
+    );
+    let mut bound: Vec<libsql::Value> = Vec::with_capacity(params.len() + 2);
+    bound.push(conversation_id.into());
+    bound.push(seq.into());
+    bound.extend(params);
+    tx.execute(&sql, bound).await?;
+    Ok(())
+}
+
 /// Delete a message. Two branches, chosen by the client's `msg_sender_id` hint
 /// (Solution A, #607): under unconditional sealed sender the stored `sender_id`
 /// is always a blinded sentinel, so the DS can no longer derive who authored the
@@ -1246,11 +1232,18 @@ pub async fn apply_delete_message(
     }
 
     let tombstone_id = Ulid::new().to_string();
-    // Read the conversation's floor BEFORE the deletes below remove the target —
-    // a recipient's watermark can be anywhere up to this value, and the tombstone
-    // is only ever fetched if it sorts above it.
-    let floor = tombstone_floor(conn, &body.conversation_id).await?;
-    let now = sent_at_after(now_rfc3339(), floor);
+    // #1087: no floor arithmetic any more. A tombstone takes the next delivery
+    // sequence like every other envelope, and `MAX(seq)+1` is above every
+    // recipient's cursor by construction — that is the whole point of an
+    // assigned sequence. `sent_at` is display metadata here, so plain `now` is
+    // correct and cannot bury anything.
+    //
+    // What this replaces: the tombstone used to be stamped `sent_at_after(now,
+    // tombstone_floor(..))`, because a whole-second DS stamp sorts BELOW a
+    // sub-second client stamp inside the same second (`+` 0x2B < `.` 0x2E) and
+    // silently buried the delete under the message it redacted. That was a
+    // lexical-format accident, and an integer has no format to get wrong.
+    let now = now_rfc3339();
     // Scoped for the same reason as the self-branch above: the admin check is
     // against `conversation_id`, so the delete must be too, or an admin of any
     // one group could remove envelopes from every other conversation.
@@ -1266,16 +1259,16 @@ pub async fn apply_delete_message(
         libsql::params![body.message_id.clone(), body.conversation_id.clone()],
     )
     .await?;
-    tx.execute(
-        "INSERT INTO message_envelope \
-             (id, conversation_id, sender_id, ciphertext, sent_at, type, target_message_id) \
-         VALUES (?1, ?2, ?3, '', ?4, 'delete', ?5)",
-        libsql::params![
-            tombstone_id,
-            body.conversation_id.clone(),
-            actor,
-            now,
-            body.message_id.clone(),
+    insert_envelope_with_seq(
+        &tx,
+        &body.conversation_id,
+        "id, sender_id, ciphertext, sent_at, type, target_message_id",
+        "?3, ?4, '', ?5, 'delete', ?6",
+        vec![
+            tombstone_id.into(),
+            actor.into(),
+            now.into(),
+            body.message_id.clone().into(),
         ],
     )
     .await?;
@@ -1443,18 +1436,34 @@ pub async fn apply_advance_watermark(
     if let Err(refused) = admit_last_fetched_at(&body.last_fetched_at) {
         return Ok(refused);
     }
+    // A cursor that runs backwards is the whole hazard, so both columns take
+    // `MAX(existing, reported)` and neither can rewind. `last_seq` is the one
+    // delivery and retention read (#1087); `last_fetched_at` is carried for one
+    // release so a device that reports only the old cursor still pins its
+    // envelopes — the GC floor requires a `last_seq` from EVERY member device
+    // before it collects anything, so a device reporting only the legacy value
+    // holds the conversation rather than being counted as caught up.
+    //
+    // A negative `last_seq` is refused rather than clamped: sequences start at 1,
+    // so it can only be a client bug or a probe, and silently coercing it would
+    // hide both.
+    if body.last_seq.is_some_and(|s| s < 0) {
+        return Ok(WriteOutcome::Invalid("last_seq must not be negative"));
+    }
     conn.execute(
         "INSERT INTO conversation_watermark \
-             (conversation_id, user_id, device_id, last_fetched_at, reported_at) \
-         VALUES (?1, ?2, ?3, ?4, datetime('now')) \
+             (conversation_id, user_id, device_id, last_fetched_at, last_seq, reported_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, datetime('now')) \
          ON CONFLICT(conversation_id, user_id, device_id) DO UPDATE SET \
              last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at), \
+             last_seq = MAX(COALESCE(last_seq, 0), COALESCE(excluded.last_seq, 0)), \
              reported_at = datetime('now')",
         libsql::params![
             body.conversation_id.clone(),
             user,
             device,
             body.last_fetched_at.clone(),
+            body.last_seq,
         ],
     )
     .await?;
@@ -1953,7 +1962,6 @@ pub async fn object_is_referenced(conn: &Connection, content_hash: &str) -> anyh
 
 #[cfg(test)]
 mod timestamp_tests {
-    use super::*;
 
     /// The exact shape a client writes for `sent_at` (`pollis-core` sends
     /// `chrono::Utc::now().to_rfc3339()`, i.e. `SecondsFormat::AutoSi`).
@@ -2010,300 +2018,6 @@ mod timestamp_tests {
         }
     }
 
-    /// A tombstone must outrank everything already in the conversation even when
-    /// the client's clock runs ahead of the DS's — otherwise the recipient's
-    /// watermark is already past it and it is never fetched.
-    #[test]
-    fn a_tombstone_outranks_a_conversation_stamped_in_the_future() {
-        let now = now_rfc3339();
-        let ahead = chrono::Utc::now() + chrono::Duration::hours(1);
-        let floor = ahead.to_rfc3339();
-
-        let stamped = sent_at_after(now.clone(), Some(floor.clone()));
-        assert!(
-            stamped > floor,
-            "tombstone {stamped} must sort above the conversation's high-water mark {floor}"
-        );
-    }
-
-    /// When nothing in the conversation is ahead of the DS clock, the tombstone
-    /// keeps the plain current time — the guard only ever pushes forward.
-    #[test]
-    fn the_floor_guard_is_a_no_op_when_the_conversation_is_behind() {
-        let now = now_rfc3339();
-        let behind = (chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
-        assert_eq!(sent_at_after(now.clone(), Some(behind)), now);
-        assert_eq!(sent_at_after(now.clone(), None), now);
-        assert_eq!(sent_at_after(now.clone(), Some("not-a-timestamp".into())), now);
-    }
-}
-
-#[cfg(test)]
-mod tombstone_floor_tests {
-    //! [`TOMBSTONE_FLOOR`] driven against a real (in-memory) libsql DB.
-    //!
-    //! **#692 — the floor must outlive envelope GC.** A tombstone is only ever
-    //! fetched when it sorts strictly above the recipient's watermark, because
-    //! ingest selects `sent_at > last_fetched_at` and the cursor never rewinds.
-    //! The old floor was `MAX(sent_at)` over envelopes STILL PRESENT, so once
-    //! watermark-gated GC had pruned a conversation the floor went NULL, the
-    //! stamp fell back to wall-clock `now`, and a recipient whose watermark came
-    //! from a client clock running AHEAD of the DS clock never fetched the
-    //! tombstone — the deleted message stayed readable on that device forever.
-    //!
-    //! `conversation_watermark` rows survive that pruning, so they are the
-    //! evidence the floor must also consult. Each test below asserts the floor
-    //! AND the stamp `sent_at_after` derives from it, since the stamp is what
-    //! ingest actually compares.
-
-    use super::*;
-
-
-    /// A schema'd in-memory DB with the roster the floor's watermark arm joins
-    /// to: channel `c1` of group `g1`, members `alice` (device `a1`) and `bob`
-    /// (device `b1`). Only a member device's cursor can be one a tombstone has
-    /// to clear, so — like the GC predicate — the floor reads no others.
-    async fn conn() -> Connection {
-        let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
-        let conn = db.connect().unwrap();
-        // Production is Turso, where foreign-key enforcement is off; libsql's LOCAL
-        // backend turns it ON by default, so say so explicitly rather than
-        // inherit a constraint no deploy has (`Db::connect_local` does the same).
-        conn.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
-        pollis_schema::apply::single_db(&conn).await.expect("schema");
-        conn.execute_batch(
-            "INSERT INTO conversation (id, kind) VALUES ('c1', 'channel');
-             INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');
-             INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');
-             INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'bob');
-             INSERT INTO user_device (user_id, device_id) VALUES ('alice', 'a1');
-             INSERT INTO user_device (user_id, device_id) VALUES ('bob', 'b1');",
-        )
-        .await
-        .unwrap();
-        conn
-    }
-
-    /// An RFC3339 stamp `offset` from now, in the shape a CLIENT writes it
-    /// (`chrono::Utc::now().to_rfc3339()`), which is what actually lands in
-    /// `sent_at` and — via ingest — in `last_fetched_at`.
-    fn stamp(offset: chrono::Duration) -> String {
-        (chrono::Utc::now() + offset).to_rfc3339()
-    }
-
-    /// **The tombstone-floor poisoning regression test.** A watermark row for
-    /// `c1` written by an account that is NOT a member (the pre-fix
-    /// `advance_watermark` let anyone write one) — and one under a member's
-    /// name but for a device that account does not have — carry a year-9999
-    /// cursor. Neither can be a recipient's cursor, so neither may raise the
-    /// floor: the tombstone must be stamped at plain `now`, not at
-    /// `9999-…000000001`, which every device that applied it would have adopted
-    /// as its cursor (a permanent blackout, then GC of the whole conversation).
-    ///
-    /// Against the unjoined `MAX(last_fetched_at)` this FAILS: the floor is the
-    /// poisoned value and `sent_at_after` rolls the tombstone into year 9999.
-    #[tokio::test]
-    async fn watermark_rows_outside_the_member_device_roster_do_not_floor_the_tombstone() {
-        let conn = conn().await;
-        let poison = "9999-12-31T23:59:59.000000000+00:00";
-        // A non-member's row for the victim conversation.
-        add_watermark(&conn, "c1", "mallory", "m1", poison).await;
-        // A member's user id, but a device the member does not have.
-        add_watermark(&conn, "c1", "alice", "not-alices-device", poison).await;
-        // The genuine roster's cursors, behind the DS clock.
-        let honest = stamp(chrono::Duration::minutes(-5));
-        add_watermark(&conn, "c1", "alice", "a1", &honest).await;
-        add_watermark(&conn, "c1", "bob", "b1", &honest).await;
-
-        let floor = tombstone_floor(&conn, "c1").await.unwrap();
-        assert_eq!(
-            floor.as_deref(),
-            Some(honest.as_str()),
-            "the floor must be the highest MEMBER-DEVICE cursor; a row outside the \
-             roster is not a recipient and must be ignored exactly as GC ignores it"
-        );
-
-        let now = now_rfc3339();
-        assert_eq!(
-            sent_at_after(now.clone(), floor),
-            now,
-            "with every real cursor behind the DS clock the tombstone keeps plain \
-             now — a poisoned non-member row must not push it into year 9999"
-        );
-    }
-
-    /// The DM shape of the same join: a `dm_channel_member` roster, a
-    /// non-member's poisoned row ignored, a member device's real cursor read.
-    #[tokio::test]
-    async fn the_dm_roster_floors_the_tombstone_and_ignores_outsiders() {
-        let conn = conn().await;
-        conn.execute_batch(
-            "INSERT INTO conversation (id, kind) VALUES ('dm1', 'dm');
-             INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) VALUES ('dm1', 'alice', 'alice');
-             INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) VALUES ('dm1', 'bob', 'alice');",
-        )
-        .await
-        .unwrap();
-        add_watermark(&conn, "dm1", "mallory", "m1", "9999-12-31T23:59:59.000000000+00:00").await;
-        let ahead = stamp(chrono::Duration::minutes(2));
-        add_watermark(&conn, "dm1", "bob", "b1", &ahead).await;
-
-        let floor = tombstone_floor(&conn, "dm1").await.unwrap();
-        assert_eq!(
-            floor.as_deref(),
-            Some(ahead.as_str()),
-            "a DM member device's cursor is read through the DM roster; the \
-             outsider's row is not"
-        );
-    }
-
-    async fn add_envelope(conn: &Connection, id: &str, conv: &str, sent_at: &str) {
-        conn.execute(
-            "INSERT INTO message_envelope (id, conversation_id, sent_at, sender_id, ciphertext) VALUES (?1, ?2, ?3, 'sender', 'ct')",
-            libsql::params![id.to_string(), conv.to_string(), sent_at.to_string()],
-        )
-        .await
-        .unwrap();
-    }
-
-    async fn add_watermark(conn: &Connection, conv: &str, user: &str, device: &str, at: &str) {
-        conn.execute(
-            "INSERT INTO conversation_watermark \
-                 (conversation_id, user_id, device_id, last_fetched_at) \
-             VALUES (?1, ?2, ?3, ?4)",
-            libsql::params![
-                conv.to_string(),
-                user.to_string(),
-                device.to_string(),
-                at.to_string()
-            ],
-        )
-        .await
-        .unwrap();
-    }
-
-    /// **The #692 regression test.** Every envelope in the conversation has been
-    /// GC'd (watermark-gated deletion: every current member device reported past
-    /// them), but the watermark rows survive — and one of them was written from a
-    /// client clock running an hour AHEAD of the DS clock, so it sits in the DS's
-    /// future. The tombstone must still be stamped strictly above it.
-    ///
-    /// Against the old `MAX(sent_at)`-only floor this FAILS: with no envelopes
-    /// left the floor is NULL, `sent_at_after` returns plain `now`, and `now` is
-    /// an hour BELOW the surviving cursor — so ingest's `sent_at >
-    /// last_fetched_at` never selects the tombstone and the delete silently does
-    /// nothing on that device, permanently.
-    #[tokio::test]
-    async fn a_future_watermark_surviving_gc_still_floors_the_tombstone() {
-        let conn = conn().await;
-        // The recipient's clock ran ahead; its reported cursor is in the DS's future.
-        let ahead = stamp(chrono::Duration::hours(1));
-        add_watermark(&conn, "c1", "alice", "a1", &ahead).await;
-        // GC has pruned every envelope — `message_envelope` is empty for c1.
-
-        let floor = tombstone_floor(&conn, "c1").await.unwrap();
-        assert_eq!(
-            floor.as_deref(),
-            Some(ahead.as_str()),
-            "with every envelope GC'd, the surviving watermark must still supply \
-             the floor — MAX(sent_at) alone yields NULL here (#692)"
-        );
-
-        let stamped = sent_at_after(now_rfc3339(), floor);
-        assert!(
-            stamped > ahead,
-            "tombstone {stamped} must sort strictly above the surviving watermark \
-             {ahead}, or ingest's `sent_at > last_fetched_at` never selects it and \
-             the deleted message stays readable on that device forever (#692)"
-        );
-    }
-
-    /// Envelopes present and every watermark BEHIND them: the floor is the
-    /// envelope high-water mark exactly as before — this fix widens the floor,
-    /// it never lowers it.
-    #[tokio::test]
-    async fn envelopes_present_with_watermarks_behind_keeps_todays_floor() {
-        let conn = conn().await;
-        let newest = stamp(chrono::Duration::minutes(-1));
-        add_envelope(&conn, "e1", "c1", &stamp(chrono::Duration::hours(-2))).await;
-        add_envelope(&conn, "e2", "c1", &newest).await;
-        add_watermark(&conn, "c1", "alice", "a1", &stamp(chrono::Duration::hours(-3))).await;
-        add_watermark(&conn, "c1", "bob", "b1", &stamp(chrono::Duration::minutes(-30))).await;
-
-        let floor = tombstone_floor(&conn, "c1").await.unwrap();
-        assert_eq!(
-            floor.as_deref(),
-            Some(newest.as_str()),
-            "with every watermark behind the newest envelope the floor is \
-             unchanged from the MAX(sent_at)-only behaviour"
-        );
-
-        // Both floors are behind the DS clock, so the guard is a no-op and the
-        // tombstone keeps plain `now` — today's behaviour, preserved.
-        let now = now_rfc3339();
-        assert_eq!(sent_at_after(now.clone(), floor), now);
-    }
-
-    /// Neither envelopes nor watermarks: the floor is absent and `sent_at_after`
-    /// falls back to `now` — the pre-existing behaviour, unchanged.
-    #[tokio::test]
-    async fn no_envelopes_and_no_watermarks_falls_back_to_now() {
-        let conn = conn().await;
-        // Rows exist, but for a DIFFERENT conversation — the floor is scoped.
-        add_envelope(&conn, "e1", "other", &stamp(chrono::Duration::hours(1))).await;
-        add_watermark(&conn, "other", "alice", "a1", &stamp(chrono::Duration::hours(1))).await;
-
-        let floor = tombstone_floor(&conn, "c1").await.unwrap();
-        assert_eq!(floor, None, "an empty conversation has no floor");
-
-        let now = now_rfc3339();
-        assert_eq!(
-            sent_at_after(now.clone(), floor),
-            now,
-            "with no floor the tombstone keeps plain `now` (unchanged fallback)"
-        );
-    }
-
-    /// Mixed: envelopes survive, but a watermark sits ABOVE the newest of them
-    /// (a client clock ahead of everyone else's). The greater of the two wins, so
-    /// the watermark supplies the floor and the tombstone clears it.
-    #[tokio::test]
-    async fn a_watermark_ahead_of_the_newest_envelope_wins() {
-        let conn = conn().await;
-        add_envelope(&conn, "e1", "c1", &stamp(chrono::Duration::minutes(-5))).await;
-        let ahead = stamp(chrono::Duration::hours(2));
-        add_watermark(&conn, "c1", "alice", "a1", &stamp(chrono::Duration::hours(-1))).await;
-        add_watermark(&conn, "c1", "bob", "b1", &ahead).await;
-
-        let floor = tombstone_floor(&conn, "c1").await.unwrap();
-        assert_eq!(
-            floor.as_deref(),
-            Some(ahead.as_str()),
-            "the floor is the GREATER of MAX(sent_at) and MAX(last_fetched_at)"
-        );
-
-        let stamped = sent_at_after(now_rfc3339(), floor);
-        assert!(
-            stamped > ahead,
-            "tombstone {stamped} must clear the highest surviving cursor {ahead}"
-        );
-    }
-
-    /// The symmetric case: an envelope ahead of every watermark still wins, so
-    /// widening the floor cannot regress the case the guard originally covered.
-    #[tokio::test]
-    async fn an_envelope_ahead_of_every_watermark_wins() {
-        let conn = conn().await;
-        let ahead = stamp(chrono::Duration::hours(2));
-        add_envelope(&conn, "e1", "c1", &ahead).await;
-        add_watermark(&conn, "c1", "alice", "a1", &stamp(chrono::Duration::hours(-1))).await;
-
-        let floor = tombstone_floor(&conn, "c1").await.unwrap();
-        assert_eq!(floor.as_deref(), Some(ahead.as_str()));
-
-        let stamped = sent_at_after(now_rfc3339(), floor);
-        assert!(stamped > ahead, "tombstone {stamped} must clear {ahead}");
-    }
 }
 
 #[cfg(test)]
@@ -2370,41 +2084,46 @@ mod gc_sql_tests {
         .unwrap();
     }
 
-    /// Seed a watermark row whose `last_fetched_at` is `datetime('now', offset)`.
+    /// Seed a watermark row whose cursor is the delivery sequence `seq` (#1087).
     /// `reported_at` is left NULL — "report time unknown", treated as live — so
-    /// legacy fixtures keep their pre-#720 meaning.
-    async fn seed_watermark(conn: &Connection, conv: &str, user: &str, device: &str, offset: &str) {
+    /// these fixtures keep their pre-#720 meaning.
+    ///
+    /// `last_fetched_at` is still written, because the column is NOT NULL and is
+    /// carried as display/legacy metadata; its VALUE is irrelevant to every
+    /// assertion below, which is precisely the change #1087 makes.
+    async fn seed_watermark(conn: &Connection, conv: &str, user: &str, device: &str, seq: i64) {
         conn.execute(
-            "INSERT INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at) \
-             VALUES (?1, ?2, ?3, datetime('now', ?4))",
-            libsql::params![conv.to_string(), user.to_string(), device.to_string(), offset.to_string()],
+            "INSERT INTO conversation_watermark \
+                 (conversation_id, user_id, device_id, last_fetched_at, last_seq) \
+             VALUES (?1, ?2, ?3, datetime('now'), ?4)",
+            libsql::params![conv.to_string(), user.to_string(), device.to_string(), seq],
         )
         .await
         .unwrap();
     }
 
-    /// Seed a watermark row with BOTH the message cursor (`last_fetched_at`) and
-    /// the wall-clock report time (`reported_at`) as explicit `datetime('now', …)`
-    /// offsets. The two are deliberately independent: `cursor` is how far the
-    /// device has read (a message timestamp), `reported` is when the DS last heard
-    /// from it (the #720 liveness signal).
+    /// Seed a watermark row with BOTH the delivery cursor (`last_seq`) and the
+    /// wall-clock report time (`reported_at`). The two are deliberately of
+    /// different KINDS, which is the #720 distinction made structural: `seq` is
+    /// how far the device has read (a position), `reported` is when the DS last
+    /// heard from it (a time). Conflating them would resurrect F3.
     async fn seed_watermark_reported(
         conn: &Connection,
         conv: &str,
         user: &str,
         device: &str,
-        cursor: &str,
+        seq: i64,
         reported: &str,
     ) {
         conn.execute(
             "INSERT INTO conversation_watermark \
-                 (conversation_id, user_id, device_id, last_fetched_at, reported_at) \
-             VALUES (?1, ?2, ?3, datetime('now', ?4), datetime('now', ?5))",
+                 (conversation_id, user_id, device_id, last_fetched_at, last_seq, reported_at) \
+             VALUES (?1, ?2, ?3, datetime('now'), ?4, datetime('now', ?5))",
             libsql::params![
                 conv.to_string(),
                 user.to_string(),
                 device.to_string(),
-                cursor.to_string(),
+                seq,
                 reported.to_string()
             ],
         )
@@ -2412,12 +2131,25 @@ mod gc_sql_tests {
         .unwrap();
     }
 
-    /// Insert one envelope at `datetime('now', offset)`.
-    async fn add_envelope(conn: &Connection, id: &str, conv: &str, offset: &str) {
+    /// Insert one envelope at delivery sequence `seq`. Its `sent_at` is plain
+    /// `now` — nothing routes on it since #1087, and writing an offset here would
+    /// suggest otherwise.
+    async fn add_envelope(conn: &Connection, id: &str, conv: &str, seq: i64) {
         conn.execute(
-            "INSERT INTO message_envelope (id, conversation_id, sent_at, sender_id, ciphertext) \
-             VALUES (?1, ?2, datetime('now', ?3), 'sender', 'ct')",
-            libsql::params![id.to_string(), conv.to_string(), offset.to_string()],
+            "INSERT INTO message_envelope \
+                 (id, conversation_id, sent_at, sender_id, ciphertext, seq) \
+             VALUES (?1, ?2, datetime('now'), 'sender', 'ct', ?3)",
+            libsql::params![id.to_string(), conv.to_string(), seq],
+        )
+        .await
+        .unwrap();
+        // Keep the durable counter consistent with the row, as
+        // `insert_envelope_with_seq` does. A fixture that inserts an envelope
+        // without advancing `conversation_seq` is not simulating the DS.
+        conn.execute(
+            "INSERT INTO conversation_seq (conversation_id, next_seq) VALUES (?1, ?2) \
+             ON CONFLICT(conversation_id) DO UPDATE SET next_seq = MAX(next_seq, excluded.next_seq)",
+            libsql::params![conv.to_string(), seq],
         )
         .await
         .unwrap();
@@ -2460,10 +2192,10 @@ mod gc_sql_tests {
         add_device(&conn, "alice", "a-live", false).await;
         add_device(&conn, "alice", "a-old", true).await;
         // Live cursor is recent; the revoked device is stuck 10 days back.
-        seed_watermark(&conn, "c1", "alice", "a-live", "-1 day").await;
-        seed_watermark(&conn, "c1", "alice", "a-old", "-10 days").await;
+        seed_watermark(&conn, "c1", "alice", "a-live", 10).await;
+        seed_watermark(&conn, "c1", "alice", "a-old", 5).await;
         // The envelope sits between them: above the stale cursor, below the live one.
-        add_envelope(&conn, "e1", "c1", "-5 days").await;
+        add_envelope(&conn, "e1", "c1", 7).await;
 
         run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "c1").await;
 
@@ -2484,8 +2216,8 @@ mod gc_sql_tests {
         add_device(&conn, "alice", "a-live", false).await;
         add_device(&conn, "alice", "a-old", true).await;
         // Only the live device has a watermark; the revoked device has none.
-        seed_watermark(&conn, "c1", "alice", "a-live", "-1 day").await;
-        add_envelope(&conn, "e1", "c1", "-5 days").await;
+        seed_watermark(&conn, "c1", "alice", "a-live", 10).await;
+        add_envelope(&conn, "e1", "c1", 7).await;
 
         run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "c1").await;
 
@@ -2511,9 +2243,9 @@ mod gc_sql_tests {
         dm_fixture(&conn).await;
         add_device(&conn, "alice", "a-live", false).await;
         add_device(&conn, "alice", "a-old", true).await;
-        seed_watermark(&conn, "d1", "alice", "a-live", "-1 day").await;
-        seed_watermark(&conn, "d1", "alice", "a-old", "-10 days").await;
-        add_envelope(&conn, "e1", "d1", "-5 days").await;
+        seed_watermark(&conn, "d1", "alice", "a-live", 10).await;
+        seed_watermark(&conn, "d1", "alice", "a-old", 5).await;
+        add_envelope(&conn, "e1", "d1", 7).await;
 
         run_cleanup(&conn, CLEANUP_DM_ENVELOPES, "d1").await;
 
@@ -2530,8 +2262,8 @@ mod gc_sql_tests {
         dm_fixture(&conn).await;
         add_device(&conn, "alice", "a-live", false).await;
         add_device(&conn, "alice", "a-old", true).await;
-        seed_watermark(&conn, "d1", "alice", "a-live", "-1 day").await;
-        add_envelope(&conn, "e1", "d1", "-5 days").await;
+        seed_watermark(&conn, "d1", "alice", "a-live", 10).await;
+        add_envelope(&conn, "e1", "d1", 7).await;
 
         run_cleanup(&conn, CLEANUP_DM_ENVELOPES, "d1").await;
 
@@ -2562,9 +2294,9 @@ mod gc_sql_tests {
         add_device(&conn, "bob", "b1", false).await;
         // Alice is fully caught up. Bob's device has been offline for 500 days —
         // its cursor is BELOW the envelope, so the envelope is still owed to it.
-        seed_watermark(&conn, "c1", "alice", "a1", "-1 day").await;
-        seed_watermark(&conn, "c1", "bob", "b1", "-500 days").await;
-        add_envelope(&conn, "ancient", "c1", "-400 days").await;
+        seed_watermark(&conn, "c1", "alice", "a1", 10).await;
+        seed_watermark(&conn, "c1", "bob", "b1", 1).await;
+        add_envelope(&conn, "ancient", "c1", 2).await;
 
         run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "c1").await;
 
@@ -2590,8 +2322,8 @@ mod gc_sql_tests {
         add_device(&conn, "alice", "a1", false).await;
         add_device(&conn, "bob", "b-silent", false).await;
         // Only alice has ever reported; bob's device has no watermark row.
-        seed_watermark(&conn, "c1", "alice", "a1", "-1 day").await;
-        add_envelope(&conn, "ancient", "c1", "-400 days").await;
+        seed_watermark(&conn, "c1", "alice", "a1", 10).await;
+        add_envelope(&conn, "ancient", "c1", 2).await;
 
         run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "c1").await;
 
@@ -2613,9 +2345,9 @@ mod gc_sql_tests {
             .unwrap();
         add_device(&conn, "alice", "a1", false).await;
         add_device(&conn, "bob", "b1", false).await;
-        seed_watermark(&conn, "d1", "alice", "a1", "-1 day").await;
-        seed_watermark(&conn, "d1", "bob", "b1", "-500 days").await;
-        add_envelope(&conn, "ancient", "d1", "-400 days").await;
+        seed_watermark(&conn, "d1", "alice", "a1", 10).await;
+        seed_watermark(&conn, "d1", "bob", "b1", 1).await;
+        add_envelope(&conn, "ancient", "d1", 2).await;
 
         run_cleanup(&conn, CLEANUP_DM_ENVELOPES, "d1").await;
 
@@ -2644,11 +2376,11 @@ mod gc_sql_tests {
         add_device(&conn, "bob", "b1", false).await;
         // Every device's cursor is strictly above `collected`, and strictly below
         // `pending` — so exactly one of the two envelopes may go.
-        add_envelope(&conn, "collected", "c1", "-3 days").await;
-        add_envelope(&conn, "pending", "c1", "-1 hour").await;
-        seed_watermark(&conn, "c1", "alice", "a1", "-2 days").await;
-        seed_watermark(&conn, "c1", "alice", "a2", "-2 days").await;
-        seed_watermark(&conn, "c1", "bob", "b1", "-2 days").await;
+        add_envelope(&conn, "collected", "c1", 8).await;
+        add_envelope(&conn, "pending", "c1", 11).await;
+        seed_watermark(&conn, "c1", "alice", "a1", 9).await;
+        seed_watermark(&conn, "c1", "alice", "a2", 9).await;
+        seed_watermark(&conn, "c1", "bob", "b1", 9).await;
 
         run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "c1").await;
 
@@ -2674,10 +2406,10 @@ mod gc_sql_tests {
         channel_fixture(&conn).await;
         add_device(&conn, "alice", "a-fast", false).await;
         add_device(&conn, "alice", "a-slow", false).await;
-        seed_watermark(&conn, "c1", "alice", "a-fast", "-1 hour").await;
-        seed_watermark(&conn, "c1", "alice", "a-slow", "-6 days").await;
+        seed_watermark(&conn, "c1", "alice", "a-fast", 11).await;
+        seed_watermark(&conn, "c1", "alice", "a-slow", 6).await;
         // Above the slow cursor, below the fast one: MIN keeps it, MAX would not.
-        add_envelope(&conn, "between", "c1", "-3 days").await;
+        add_envelope(&conn, "between", "c1", 8).await;
 
         run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "c1").await;
 
@@ -2702,8 +2434,8 @@ mod gc_sql_tests {
         let conn = conn().await;
         channel_fixture(&conn).await;
         // A member row exists but the member has no device at all.
-        add_envelope(&conn, "ancient", "c1", "-400 days").await;
-        add_envelope(&conn, "fresh", "c1", "-1 hour").await;
+        add_envelope(&conn, "ancient", "c1", 2).await;
+        add_envelope(&conn, "fresh", "c1", 11).await;
 
         run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "c1").await;
 
@@ -2719,7 +2451,7 @@ mod gc_sql_tests {
     #[tokio::test]
     async fn an_unknown_conversation_deletes_nothing() {
         let conn = conn().await;
-        add_envelope(&conn, "ancient", "ghost", "-400 days").await;
+        add_envelope(&conn, "ancient", "ghost", 2).await;
 
         run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "ghost").await;
         run_cleanup(&conn, CLEANUP_DM_ENVELOPES, "ghost").await;
@@ -2739,8 +2471,8 @@ mod gc_sql_tests {
         let conn = conn().await;
         channel_fixture(&conn).await;
         add_device(&conn, "alice", "a-old", true).await;
-        seed_watermark(&conn, "c1", "alice", "a-old", "-500 days").await;
-        add_envelope(&conn, "ancient", "c1", "-400 days").await;
+        seed_watermark(&conn, "c1", "alice", "a-old", 1).await;
+        add_envelope(&conn, "ancient", "c1", 2).await;
 
         run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "c1").await;
 
@@ -2769,16 +2501,16 @@ mod gc_sql_tests {
         // conversation counts toward every conversation they belong to.
         channel_fixture(&conn).await;
         add_device(&conn, "alice", "a1", false).await;
-        seed_watermark(&conn, "c1", "alice", "a1", "-1 day").await;
-        add_envelope(&conn, "eA", "c1", "-5 days").await;
+        seed_watermark(&conn, "c1", "alice", "a1", 10).await;
+        add_envelope(&conn, "eA", "c1", 7).await;
 
         // A DM whose one member device has caught up (exercises the DM predicate).
         conn.execute("INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) VALUES ('d1', 'dave', 'creator')", ())
             .await
             .unwrap();
         add_device(&conn, "dave", "d-dev", false).await;
-        seed_watermark(&conn, "d1", "dave", "d-dev", "-1 day").await;
-        add_envelope(&conn, "eD", "d1", "-5 days").await;
+        seed_watermark(&conn, "d1", "dave", "d-dev", 10).await;
+        add_envelope(&conn, "eD", "d1", 7).await;
 
         // A channel with an uncollected recipient: bob's device never reported.
         conn.execute("INSERT INTO group_member (group_id, user_id) VALUES ('g2', 'bob')", ())
@@ -2791,7 +2523,7 @@ mod gc_sql_tests {
         .await
         .unwrap();
         add_device(&conn, "bob", "b1", false).await;
-        add_envelope(&conn, "eB", "c2", "-5 days").await;
+        add_envelope(&conn, "eB", "c2", 7).await;
 
         // No member ingests; the sweep is the sole trigger.
         let report = sweep_envelope_gc(&conn, TEST_STALE).await.unwrap();
@@ -2835,10 +2567,10 @@ mod gc_sql_tests {
         add_device(&conn, "bob", "b1", false).await;
         // Alice is live and caught up. Bob reported 400 days ago (past the 6-month
         // window) and his cursor is stuck 500 days back — dormant.
-        seed_watermark_reported(&conn, "c1", "alice", "a1", "-1 day", "-1 day").await;
-        seed_watermark_reported(&conn, "c1", "bob", "b1", "-500 days", "-400 days").await;
+        seed_watermark_reported(&conn, "c1", "alice", "a1", 10, "-1 day").await;
+        seed_watermark_reported(&conn, "c1", "bob", "b1", 1, "-400 days").await;
         // The envelope sits above bob's stuck cursor but below alice's.
-        add_envelope(&conn, "e1", "c1", "-100 days").await;
+        add_envelope(&conn, "e1", "c1", 3).await;
 
         run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "c1").await;
 
@@ -2872,10 +2604,10 @@ mod gc_sql_tests {
                 .unwrap();
             add_device(&conn, "alice", "a1", false).await;
             add_device(&conn, "bob", "b1", false).await;
-            seed_watermark_reported(&conn, "c1", "alice", "a1", "-1 day", "-1 day").await;
+            seed_watermark_reported(&conn, "c1", "alice", "a1", 10, "-1 day").await;
             // Cursor 500 days back, but reported ONE day ago — live.
-            seed_watermark_reported(&conn, "c1", "bob", "b1", "-500 days", "-1 day").await;
-            add_envelope(&conn, "ancient", "c1", "-400 days").await;
+            seed_watermark_reported(&conn, "c1", "bob", "b1", 1, "-1 day").await;
+            add_envelope(&conn, "ancient", "c1", 2).await;
 
             run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "c1").await;
 
@@ -2895,10 +2627,10 @@ mod gc_sql_tests {
                 .unwrap();
             add_device(&conn, "alice", "a1", false).await;
             add_device(&conn, "bob", "b1", false).await;
-            seed_watermark_reported(&conn, "c1", "alice", "a1", "-1 day", "-1 day").await;
+            seed_watermark_reported(&conn, "c1", "alice", "a1", 10, "-1 day").await;
             // Same cursor, but reported 400 days ago — dormant.
-            seed_watermark_reported(&conn, "c1", "bob", "b1", "-500 days", "-400 days").await;
-            add_envelope(&conn, "ancient", "c1", "-400 days").await;
+            seed_watermark_reported(&conn, "c1", "bob", "b1", 1, "-400 days").await;
+            add_envelope(&conn, "ancient", "c1", 2).await;
 
             run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "c1").await;
 
@@ -2924,10 +2656,10 @@ mod gc_sql_tests {
             .unwrap();
         add_device(&conn, "alice", "a1", false).await;
         add_device(&conn, "bob", "b1", false).await;
-        seed_watermark_reported(&conn, "c1", "alice", "a1", "-1 day", "-1 day").await;
+        seed_watermark_reported(&conn, "c1", "alice", "a1", 10, "-1 day").await;
         // Legacy row: cursor set, reported_at NULL.
-        seed_watermark(&conn, "c1", "bob", "b1", "-500 days").await;
-        add_envelope(&conn, "e1", "c1", "-100 days").await;
+        seed_watermark(&conn, "c1", "bob", "b1", 1).await;
+        add_envelope(&conn, "e1", "c1", 3).await;
 
         run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "c1").await;
 
@@ -2947,8 +2679,8 @@ mod gc_sql_tests {
         let conn = conn().await;
         channel_fixture(&conn).await;
         add_device(&conn, "alice", "a1", false).await;
-        seed_watermark_reported(&conn, "c1", "alice", "a1", "-100 days", "-400 days").await;
-        add_envelope(&conn, "ancient", "c1", "-50 days").await;
+        seed_watermark_reported(&conn, "c1", "alice", "a1", 3, "-400 days").await;
+        add_envelope(&conn, "ancient", "c1", 4).await;
 
         run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "c1").await;
 
@@ -2971,9 +2703,9 @@ mod gc_sql_tests {
             .unwrap();
         add_device(&conn, "alice", "a1", false).await;
         add_device(&conn, "bob", "b1", false).await;
-        seed_watermark_reported(&conn, "d1", "alice", "a1", "-1 day", "-1 day").await;
-        seed_watermark_reported(&conn, "d1", "bob", "b1", "-500 days", "-400 days").await;
-        add_envelope(&conn, "e1", "d1", "-100 days").await;
+        seed_watermark_reported(&conn, "d1", "alice", "a1", 10, "-1 day").await;
+        seed_watermark_reported(&conn, "d1", "bob", "b1", 1, "-400 days").await;
+        add_envelope(&conn, "e1", "d1", 3).await;
 
         run_cleanup(&conn, CLEANUP_DM_ENVELOPES, "d1").await;
 
@@ -3029,8 +2761,8 @@ mod gc_sql_tests {
         channel_fixture(&conn).await;
         add_device(&conn, "alice", "a1", false).await;
         // Alice's one device has collected past the message, so GC will sweep it.
-        seed_watermark(&conn, "c1", "alice", "a1", "-1 day").await;
-        add_envelope(&conn, "m1", "c1", "-5 days").await;
+        seed_watermark(&conn, "c1", "alice", "a1", 10).await;
+        add_envelope(&conn, "m1", "c1", 7).await;
         add_attachment(&conn, "h", "m1").await;
 
         assert!(
@@ -3165,26 +2897,33 @@ mod roster_parity_tests {
         .unwrap();
     }
 
-    async fn watermark(conn: &Connection, conv: &str, user: &str, device: &str, offset: &str) {
+    async fn watermark(conn: &Connection, conv: &str, user: &str, device: &str, seq: i64) {
         conn.execute(
-            "INSERT INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at) \
-             VALUES (?1, ?2, ?3, datetime('now', ?4))",
-            libsql::params![
-                conv.to_string(),
-                user.to_string(),
-                device.to_string(),
-                offset.to_string()
-            ],
+            "INSERT INTO conversation_watermark \
+                 (conversation_id, user_id, device_id, last_fetched_at, last_seq) \
+             VALUES (?1, ?2, ?3, datetime('now'), ?4)",
+            libsql::params![conv.to_string(), user.to_string(), device.to_string(), seq],
         )
         .await
         .unwrap();
     }
 
-    async fn envelope(conn: &Connection, id: &str, conv: &str, offset: &str) {
+    async fn envelope(conn: &Connection, id: &str, conv: &str, seq: i64) {
         conn.execute(
-            "INSERT INTO message_envelope (id, conversation_id, sent_at, sender_id, ciphertext) \
-             VALUES (?1, ?2, datetime('now', ?3), 'sender', 'ct')",
-            libsql::params![id.to_string(), conv.to_string(), offset.to_string()],
+            "INSERT INTO message_envelope \
+                 (id, conversation_id, sent_at, sender_id, ciphertext, seq) \
+             VALUES (?1, ?2, datetime('now'), 'sender', 'ct', ?3)",
+            libsql::params![id.to_string(), conv.to_string(), seq],
+        )
+        .await
+        .unwrap();
+        // Keep the durable counter consistent with the row, as
+        // `insert_envelope_with_seq` does. A fixture that inserts an envelope
+        // without advancing `conversation_seq` is not simulating the DS.
+        conn.execute(
+            "INSERT INTO conversation_seq (conversation_id, next_seq) VALUES (?1, ?2) \
+             ON CONFLICT(conversation_id) DO UPDATE SET next_seq = MAX(next_seq, excluded.next_seq)",
+            libsql::params![conv.to_string(), seq],
         )
         .await
         .unwrap();
@@ -3294,13 +3033,13 @@ mod roster_parity_tests {
     /// devices reported, some never did, revoked devices carry ancient cursors,
     /// and a non-member has a row for the conversation.
     async fn seed_mixed_watermarks(conn: &Connection, conv: &str) {
-        watermark(conn, conv, "alice", "alice-1", "-1 day").await;
-        watermark(conn, conv, "bob", "bob-live", "-2 days").await;
+        watermark(conn, conv, "alice", "alice-1", 4).await;
+        watermark(conn, conv, "bob", "bob-live", 3).await;
         // `bob-silent` and `dave-1` deliberately have NO row.
-        watermark(conn, conv, "bob", "bob-revoked", "-400 days").await;
-        watermark(conn, conv, "carol", "carol-old-1", "-400 days").await;
-        watermark(conn, conv, "carol", "carol-old-2", "-400 days").await;
-        watermark(conn, conv, "mallory", "mallory-1", "-400 days").await;
+        watermark(conn, conv, "bob", "bob-revoked", 1).await;
+        watermark(conn, conv, "carol", "carol-old-1", 1).await;
+        watermark(conn, conv, "carol", "carol-old-2", 1).await;
+        watermark(conn, conv, "mallory", "mallory-1", 1).await;
     }
 
     // ── The parity assertions ────────────────────────────────────────────────
@@ -3389,7 +3128,7 @@ mod roster_parity_tests {
         .await;
         device(&conn, "carol", "carol-old-1", true).await;
         device(&conn, "carol", "carol-old-2", true).await;
-        watermark(&conn, "c-dead", "carol", "carol-old-1", "-400 days").await;
+        watermark(&conn, "c-dead", "carol", "carol-old-1", 1).await;
 
         for (select, conv) in [
             (CHANNEL_ROSTER_SELECT, "c-dead"),
@@ -3432,10 +3171,10 @@ mod roster_parity_tests {
             "\
 DELETE FROM message_envelope
  WHERE conversation_id = ?1
-   AND sent_at < (
+   AND seq <= (
        SELECT CASE
-                WHEN COUNT(ud.device_id) = COUNT(cw.last_fetched_at)
-                THEN MIN(cw.last_fetched_at)
+                WHEN COUNT(ud.device_id) = COUNT(cw.last_seq)
+                THEN MIN(cw.last_seq)
                 ELSE NULL
               END
        FROM group_member gm
@@ -3453,10 +3192,10 @@ DELETE FROM message_envelope
             "\
 DELETE FROM message_envelope
  WHERE conversation_id = ?1
-   AND sent_at < (
+   AND seq <= (
        SELECT CASE
-                WHEN COUNT(ud.device_id) = COUNT(cw.last_fetched_at)
-                THEN MIN(cw.last_fetched_at)
+                WHEN COUNT(ud.device_id) = COUNT(cw.last_seq)
+                THEN MIN(cw.last_seq)
                 ELSE NULL
               END
        FROM dm_channel_member dcm
@@ -3493,14 +3232,14 @@ DELETE FROM message_envelope
             assert_eq!(roster, expected(), "{conv}: unexpected roster");
             for d in &roster {
                 let user = d.split('-').next().unwrap().to_string();
-                watermark(&caught_up, conv, &user, d, "-1 day").await;
+                watermark(&caught_up, conv, &user, d, 4).await;
             }
             // Excluded devices are far behind — they must not be consulted.
-            watermark(&caught_up, conv, "bob", "bob-revoked", "-400 days").await;
-            watermark(&caught_up, conv, "carol", "carol-old-1", "-400 days").await;
-            watermark(&caught_up, conv, "carol", "carol-old-2", "-400 days").await;
-            watermark(&caught_up, conv, "mallory", "mallory-1", "-400 days").await;
-            envelope(&caught_up, "e1", conv, "-5 days").await;
+            watermark(&caught_up, conv, "bob", "bob-revoked", 1).await;
+            watermark(&caught_up, conv, "carol", "carol-old-1", 1).await;
+            watermark(&caught_up, conv, "carol", "carol-old-2", 1).await;
+            watermark(&caught_up, conv, "mallory", "mallory-1", 1).await;
+            envelope(&caught_up, "e1", conv, 2).await;
             // The `watermark` helper leaves `reported_at` NULL (live), so the #720
             // staleness arm excludes no one here — this test isolates the roster.
             caught_up
@@ -3519,18 +3258,17 @@ DELETE FROM message_envelope
             fixture(&held).await;
             for d in &roster {
                 let user = d.split('-').next().unwrap().to_string();
-                let offset = if d.as_str() == "bob-silent" {
-                    "-400 days"
-                } else {
-                    "-1 day"
-                };
-                watermark(&held, conv, &user, d, offset).await;
+                // `bob-silent` is BELOW the envelope's sequence (2); everyone
+                // else is above it. The envelope must survive on his account
+                // alone.
+                let cursor = if d.as_str() == "bob-silent" { 1 } else { 4 };
+                watermark(&held, conv, &user, d, cursor).await;
             }
-            watermark(&held, conv, "bob", "bob-revoked", "-1 day").await;
-            watermark(&held, conv, "carol", "carol-old-1", "-1 day").await;
-            watermark(&held, conv, "carol", "carol-old-2", "-1 day").await;
-            watermark(&held, conv, "mallory", "mallory-1", "-1 day").await;
-            envelope(&held, "e1", conv, "-5 days").await;
+            watermark(&held, conv, "bob", "bob-revoked", 4).await;
+            watermark(&held, conv, "carol", "carol-old-1", 4).await;
+            watermark(&held, conv, "carol", "carol-old-2", 4).await;
+            watermark(&held, conv, "mallory", "mallory-1", 4).await;
+            envelope(&held, "e1", conv, 2).await;
             held.execute(sql, libsql::params![conv.to_string(), "-6 months".to_string()])
                 .await
                 .unwrap();
@@ -3633,34 +3371,17 @@ mod admin_delete_visibility_tests {
         user_id: &str,
         device_id: &str,
     ) -> Vec<(String, String, Option<String>)> {
-        let mut rows = conn
-            .query(
-                "SELECT id, sender_id, ciphertext, reply_to_id, target_message_id, sent_at, type \
-                 FROM message_envelope \
-                 WHERE conversation_id = ?1 \
-                   AND sent_at > COALESCE( \
-                       (SELECT last_fetched_at FROM conversation_watermark \
-                        WHERE conversation_id = ?1 AND user_id = ?2 AND device_id = ?3), \
-                       '' \
-                   ) \
-                 ORDER BY sent_at ASC, id ASC",
-                libsql::params![
-                    conversation_id.to_string(),
-                    user_id.to_string(),
-                    device_id.to_string()
-                ],
-            )
+        // The PRODUCTION fetch, not a copy of its predicate. This used to
+        // reimplement `sent_at > last_fetched_at` inline, and a copy of the
+        // delivery rule is exactly the thing that drifts: when #1087 moved the
+        // cursor to `seq`, this helper kept fetching by timestamp and the tests
+        // failed for a reason that had nothing to do with what they assert.
+        crate::directory::envelopes_for_device(conn, conversation_id, user_id, device_id)
             .await
-            .expect("ingest fetch");
-        let mut out = Vec::new();
-        while let Some(row) = rows.next().await.expect("row") {
-            out.push((
-                row.get::<String>(0).expect("id"),
-                row.get::<String>(6).expect("type"),
-                row.get::<Option<String>>(4).expect("target"),
-            ));
-        }
-        out
+            .expect("ingest fetch")
+            .into_iter()
+            .map(|e| (e.id, e.kind, e.target_message_id))
+            .collect()
     }
 
     /// Drive the full #661 envelope-layer dance for a given client `sent_at`
@@ -3720,6 +3441,7 @@ mod admin_delete_visibility_tests {
                 user_id: Some("carol".to_string()),
                 device_id: "carol-dev".to_string(),
                 last_fetched_at: msg_sent_at.to_string(),
+                last_seq: None,
             },
         )
         .await
@@ -3733,6 +3455,7 @@ mod admin_delete_visibility_tests {
                 user_id: Some("alice".to_string()),
                 device_id: "alice-dev".to_string(),
                 last_fetched_at: msg_sent_at.to_string(),
+                last_seq: None,
             },
         )
         .await
@@ -3830,11 +3553,18 @@ mod admin_delete_visibility_tests {
     /// hand-rolled formatter that truncated a real fraction away; that is a
     /// different thing, and `now_rfc3339` is what fixed it.)
     ///
-    /// What this test pins is the DS half: `sent_at_after`'s floor, and the
-    /// mixed-format comparison between a Nanos tombstone and a fraction-less
-    /// client stamp. The client half — that pollis-core never starts truncating —
-    /// is pinned in `pollis_core::commands::messages::sent_at_format_tests`,
-    /// which this crate cannot reach.
+    /// **Since #1087 this is pinned by construction rather than by arithmetic.**
+    /// The delivery cursor is a DS-assigned sequence, so a tombstone gets
+    /// `MAX(seq)+1` and outranks every recipient's cursor no matter how the two
+    /// clocks compare. The test keeps the adversarial stamp shape — a client
+    /// message at `.999999999` and a tombstone whose `sent_at` sorts BELOW it —
+    /// and asserts the tombstone is delivered anyway. That is the strongest form
+    /// of the property: the bug is not avoided, it is unrepresentable.
+    ///
+    /// The client half — that pollis-core never starts truncating a real
+    /// fraction, which would corrupt DISPLAY order — is pinned in
+    /// `pollis_core::commands::messages::sent_at_format_tests`, which this crate
+    /// cannot reach.
     #[tokio::test]
     async fn a_zero_nanosecond_client_message_still_outsorts_the_preceding_tombstone() {
         let (_dir, db) = shared_db().await;
@@ -3882,6 +3612,7 @@ mod admin_delete_visibility_tests {
                 user_id: Some("carol".to_string()),
                 device_id: "carol-dev".to_string(),
                 last_fetched_at: client_stamp(base, 999_999_999),
+                last_seq: None,
             },
         )
         .await
@@ -3917,14 +3648,36 @@ mod admin_delete_visibility_tests {
                 .expect("tombstone sent_at");
             rows.next().await.expect("row").expect("row").get(0).expect("sent_at")
         };
-        // The second after `base`, as `…T08:00:01` was when the base was fixed.
-        let next_second = client_stamp(base + 1, 0);
-        let next_second = next_second.trim_end_matches("+00:00");
+        // #1087: the tombstone's `sent_at` is now plain `now` and is allowed to
+        // sort BELOW the message it redacts — that is the whole point. What
+        // matters is its SEQUENCE, which is `MAX(seq)+1` by construction and so
+        // is above every recipient's cursor no matter what the clocks did.
+        let (tomb_seq, msg_seq): (i64, Option<i64>) = {
+            let mut rows = w
+                .query(
+                    "SELECT \
+                       (SELECT seq FROM message_envelope WHERE id = ?1), \
+                       (SELECT seq FROM message_envelope WHERE id = 'msg-bobs-post')",
+                    libsql::params![tombstone.0.clone()],
+                )
+                .await
+                .expect("sequences");
+            let row = rows.next().await.expect("row").expect("row");
+            (row.get(0).expect("tombstone seq"), row.get(1).expect("message seq"))
+        };
         assert!(
-            cursor.starts_with(next_second),
-            "the floor guard must roll the tombstone into the next second \
-             ({next_second}), got {cursor}"
+            msg_seq.is_none(),
+            "the admin delete removes the message it redacts"
         );
+        assert!(
+            tomb_seq > 0,
+            "the tombstone must carry a delivery sequence, got {tomb_seq}"
+        );
+        // And the adversarial stamp ordering the old floor guard existed to
+        // paper over is now simply irrelevant: carol fetched the tombstone above
+        // (or the `expect` would have fired) even though its `sent_at`
+        // ({cursor}) sorts BELOW her reported `last_fetched_at`.
+        let _ = &cursor;
         apply_advance_watermark(
             &w,
             None,
@@ -3933,14 +3686,21 @@ mod admin_delete_visibility_tests {
                 user_id: Some("carol".to_string()),
                 device_id: "carol-dev".to_string(),
                 last_fetched_at: cursor.clone(),
+                last_seq: None,
             },
         )
         .await
         .expect("carol watermark 2");
 
-        // Now the client sends on the second boundary: AutoSi gives it NO
-        // fraction, and it must still sort above the tombstone's `.000000000`…
-        let boundary = client_stamp(base + 2, 0);
+        // Now the client sends with a stamp that sorts BELOW the tombstone's —
+        // a fraction-less stamp from an EARLIER second, which is what a client
+        // clock running behind the DS produces. Under the timestamp cursor this
+        // message was unreachable; under a sequence it is simply the next one.
+        // Deliberately far in the past and fraction-less — the shape a client
+        // whose clock is wrong produces, and unambiguously below the tombstone's
+        // `now`. The DS bounds `sent_at` against the FUTURE only, so this is
+        // admissible, and since #1087 it is also harmless.
+        let boundary = "2020-01-01T00:00:00+00:00".to_string();
         assert!(
             !boundary.contains('.'),
             "the premise of this test is a fraction-less stamp; got {boundary}"
@@ -3967,33 +3727,25 @@ mod admin_delete_visibility_tests {
         )
         .await
         .expect("send after tombstone");
+        // The strongest form of the property, and the one #1087 buys. Under the
+        // old design delivery turned on `boundary > cursor` — a LEXICAL compare
+        // between two clocks' stamps — so a message whose stamp happened to sort
+        // below the preceding tombstone was buried under every recipient's
+        // watermark and silently lost. Assert here that it is delivered even
+        // when it sorts BELOW, because the cursor is a sequence and the stamp is
+        // decoration.
         assert!(
-            boundary > cursor,
-            "a fraction-less client stamp ({boundary}) must sort above the DS \
-             tombstone that precedes it ({cursor}) — otherwise it lands under \
-             every recipient's watermark and is lost"
+            boundary < cursor,
+            "premise: this message's stamp ({boundary}) must sort BELOW the \
+             tombstone's ({cursor}) — that is the burial case"
         );
 
-        // The negative control, so this test is about the ORDERING RULE and not
-        // about two strings happening to differ: what a TRUNCATING client
-        // formatter (`SecondsFormat::Secs`) would have written for an instant
-        // inside the tombstone's own second. It sorts UNDER the cursor, which is
-        // the burial this whole scheme exists to prevent — and the reason
-        // `pollis_core::commands::messages::envelope_sent_at` is a chokepoint
-        // with `sent_at_never_truncates_a_real_fraction` guarding it.
-        let truncated = client_stamp(base + 1, 0);
-        assert!(
-            truncated < cursor,
-            "premise of the guard: a truncated stamp ({truncated}) sorts below the \
-             tombstone ({cursor}) and would be lost"
-        );
-
-        // …which is what makes carol actually receive it.
         let after = ingest_fetch(&carol, conv, "carol", "carol-dev").await;
         assert!(
             after.iter().any(|(id, _, _)| id == "msg-after-tombstone"),
-            "a message sent after an admin delete must reach a caught-up recipient; \
-             fetched: {after:?} against watermark {cursor}"
+            "a message sent after an admin delete must reach a caught-up recipient \
+             EVEN THOUGH its sent_at ({boundary}) sorts below the tombstone's \
+             ({cursor}); fetched: {after:?}"
         );
     }
 
@@ -4902,5 +4654,566 @@ mod edit_capability_tests {
             .await
             .unwrap();
         assert_eq!(pending_edits(&c, "m1").await, 1);
+    }
+}
+
+/// The delivery sequence (#1087) — the property the counter table exists for.
+#[cfg(test)]
+mod delivery_sequence_tests {
+    use super::*;
+    use pollis_api::messages::SendMessageBody;
+
+    async fn conn() -> Connection {
+        let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
+        let conn = db.connect().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
+        pollis_schema::apply::single_db(&conn).await.expect("schema");
+        conn.execute_batch(
+            "INSERT INTO conversation (id, kind) VALUES ('c1', 'channel');
+             INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');
+             INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');
+             INSERT INTO user_device (user_id, device_id) VALUES ('alice', 'a1');",
+        )
+        .await
+        .unwrap();
+        conn
+    }
+
+    fn send(id: &str) -> SendMessageBody {
+        SendMessageBody {
+            id: id.to_string(),
+            conversation_id: "c1".to_string(),
+            sender_id: Some("sealed".to_string()),
+            ciphertext: "mls:00".to_string(),
+            reply_to_id: None,
+            sent_at: chrono::Utc::now().to_rfc3339(),
+            sealed: 1,
+            delete_token_hash: None,
+            generation: None,
+            epoch: None,
+            push_to: None,
+        }
+    }
+
+    /// `conversation_seq.next_seq` as this connection can see it.
+    async fn visible_counter(conn: &Connection) -> i64 {
+        let mut rows = conn
+            .query(
+                "SELECT next_seq FROM conversation_seq WHERE conversation_id = 'c1'",
+                (),
+            )
+            .await
+            .unwrap();
+        rows.next().await.unwrap().map(|r| r.get::<i64>(0).unwrap()).unwrap_or(0)
+    }
+
+    async fn seq_of(conn: &Connection, id: &str) -> Option<i64> {
+        let mut rows = conn
+            .query(
+                "SELECT seq FROM message_envelope WHERE id = ?1",
+                libsql::params![id.to_string()],
+            )
+            .await
+            .unwrap();
+        rows.next().await.unwrap().and_then(|r| r.get::<Option<i64>>(0).ok().flatten())
+    }
+
+    /// The counter bump and the envelope row must become visible together.
+    ///
+    /// Regression for the allocate/insert gap: while a send was mid-flight the
+    /// sequence bump used to commit on its own, so a concurrent writer could
+    /// take `N+1` and publish *that* row first. A recipient fetching
+    /// `seq > last_seq` in the window would see `N+1`, advance its cursor onto
+    /// it, and envelope `N` would land below every cursor — delivered to nobody
+    /// and then collected. This asserts a reader mid-send sees neither half.
+    #[tokio::test]
+    async fn an_in_flight_send_never_exposes_a_sequence_without_its_envelope() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ds.db");
+
+        let writer = libsql::Builder::new_local(&path).build().await.unwrap();
+        let writer = writer.connect().unwrap();
+        writer.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
+        pollis_schema::apply::single_db(&writer).await.expect("schema");
+        writer
+            .execute_batch(
+                "INSERT INTO conversation (id, kind) VALUES ('c1', 'channel');
+                 INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');
+                 INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');
+                 INSERT INTO user_device (user_id, device_id) VALUES ('alice', 'a1');",
+            )
+            .await
+            .unwrap();
+
+        // A genuinely separate connection, the way a second DS worker would be.
+        let reader = libsql::Builder::new_local(&path).build().await.unwrap();
+        let reader = reader.connect().unwrap();
+
+        // One committed envelope, so the reader has a real cursor to sit on.
+        apply_send_message(&writer, None, &send("m1")).await.unwrap();
+        let first = seq_of(&writer, "m1").await.expect("committed envelope has a seq");
+
+        // A send caught mid-flight: sequence taken, row written, not yet committed.
+        let tx = writer.transaction().await.unwrap();
+        insert_envelope_with_seq(
+            &tx,
+            "c1",
+            "id, sender_id, ciphertext, sent_at, sealed",
+            "?3, ?4, ?5, ?6, 1",
+            vec![
+                "m2".into(),
+                "sealed".into(),
+                "mls:00".into(),
+                chrono::Utc::now().to_rfc3339().into(),
+            ],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            seq_of(&reader, "m2").await,
+            None,
+            "an uncommitted envelope must not be visible to another connection"
+        );
+        assert_eq!(
+            visible_counter(&reader).await,
+            first,
+            "the sequence bump must not commit ahead of the row it belongs to — \
+             a reader that sees the higher counter can be handed a gap"
+        );
+
+        tx.commit().await.unwrap();
+
+        let second = seq_of(&reader, "m2").await.expect("committed envelope has a seq");
+        assert!(
+            second > first,
+            "a committed send must sit strictly above the cursor a reader could \
+             have advanced to while it was in flight ({second} vs {first})"
+        );
+    }
+
+    /// Sequences are handed out strictly increasing, per conversation.
+    #[tokio::test]
+    async fn sequences_increase() {
+        let c = conn().await;
+        for id in ["m1", "m2", "m3"] {
+            apply_send_message(&c, None, &send(id)).await.unwrap();
+        }
+        let mut seqs: Vec<i64> = Vec::new();
+        for id in ["m1", "m2", "m3"] {
+            seqs.push(
+                seq_of(&c, id)
+                    .await
+                    .expect("every envelope the DS writes carries a sequence"),
+            );
+        }
+        assert!(seqs[0] < seqs[1] && seqs[1] < seqs[2], "{seqs:?}");
+    }
+
+    /// **The bug the counter table exists to prevent.**
+    ///
+    /// The obvious implementation is `MAX(seq)+1` over `message_envelope`. But
+    /// envelope GC DELETES rows: once every member device has read past
+    /// everything the conversation is emptied, `MAX(seq)` goes NULL, and the next
+    /// envelope is assigned 1 again — at or below every device's cursor, so
+    /// `seq > last_seq` never selects it and it is delivered to NOBODY.
+    ///
+    /// That is the #692 shape reappearing inside the design meant to retire it,
+    /// and it is invisible unless a test empties a conversation and then posts
+    /// into it. `conversation_seq` is not pruned by GC, which is what makes the
+    /// sequence monotone for the conversation's lifetime rather than for the
+    /// lifetime of its surviving rows.
+    #[tokio::test]
+    async fn a_sequence_is_never_reused_after_gc_empties_the_conversation() {
+        let c = conn().await;
+        apply_send_message(&c, None, &send("m1")).await.unwrap();
+        let first = seq_of(&c, "m1").await.expect("assigned");
+
+        // The only member device reads past it, so the real cleanup collects it.
+        // The legacy cursor column is written the way production writes it — an
+        // RFC 3339 stamp from the chokepoint, not `datetime('now')`. Nothing
+        // reads it any more, but a fixture that writes the wrong FORMAT there is
+        // the thing `watermark_seed_format` exists to catch, and a test that
+        // trips its own tripwire teaches nobody anything.
+        c.execute(
+            "INSERT INTO conversation_watermark \
+                 (conversation_id, user_id, device_id, last_fetched_at, last_seq, reported_at) \
+             VALUES ('c1', 'alice', 'a1', ?2, ?1, datetime('now'))",
+            libsql::params![first, seeded_watermark_cursor()],
+        )
+        .await
+        .unwrap();
+        cleanup_conversation_envelopes(&c, "c1", false, "-12 months").await.unwrap();
+        let remaining: i64 = {
+            let mut rows = c
+                .query("SELECT COUNT(*) FROM message_envelope WHERE conversation_id = 'c1'", ())
+                .await
+                .unwrap();
+            rows.next().await.unwrap().unwrap().get(0).unwrap()
+        };
+        assert_eq!(remaining, 0, "fixture precondition: GC must have emptied it");
+
+        // The next envelope must NOT reuse the collected sequence.
+        apply_send_message(&c, None, &send("m2")).await.unwrap();
+        let second = seq_of(&c, "m2").await.expect("assigned");
+        assert!(
+            second > first,
+            "MESSAGE LOSS: sequence {second} reuses or regresses below {first} after GC \
+             emptied the conversation — every device's cursor is already at {first}, so \
+             this envelope reaches nobody"
+        );
+    }
+
+    /// A sequence is per conversation, so two conversations number independently
+    /// and one busy channel does not push another's cursor forward.
+    #[tokio::test]
+    async fn sequences_are_scoped_to_their_conversation() {
+        let c = conn().await;
+        c.execute_batch(
+            "INSERT INTO conversation (id, kind) VALUES ('c2', 'channel');
+             INSERT INTO channels (id, group_id, name) VALUES ('c2', 'g1', 'other');",
+        )
+        .await
+        .unwrap();
+        apply_send_message(&c, None, &send("m1")).await.unwrap();
+        apply_send_message(&c, None, &send("m2")).await.unwrap();
+
+        let mut other = send("n1");
+        other.conversation_id = "c2".to_string();
+        apply_send_message(&c, None, &other).await.unwrap();
+
+        assert_eq!(seq_of(&c, "m2").await, Some(2));
+        assert_eq!(
+            seq_of(&c, "n1").await,
+            Some(1),
+            "a fresh conversation starts at 1 regardless of another's traffic"
+        );
+    }
+
+    /// Edits and tombstones take sequences too — an envelope that skipped the
+    /// chokepoint would be fetched by nobody and collected by nothing.
+    #[tokio::test]
+    async fn every_envelope_kind_is_sequenced() {
+        let c = conn().await;
+        apply_send_message(&c, None, &send("m1")).await.unwrap();
+
+        apply_edit_message(
+            &c,
+            None,
+            &pollis_api::messages::EditMessageBody {
+                envelope_id: "e1".to_string(),
+                conversation_id: "c1".to_string(),
+                target_message_id: "m1".to_string(),
+                sender_id: Some("alice".to_string()),
+                ciphertext: "mls:01".to_string(),
+                sent_at: chrono::Utc::now().to_rfc3339(),
+                generation: None,
+                epoch: None,
+                delete_token: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(seq_of(&c, "e1").await.is_some(), "an edit must be sequenced");
+
+        let unsequenced: i64 = {
+            let mut rows = c
+                .query(
+                    "SELECT COUNT(*) FROM message_envelope WHERE seq IS NULL",
+                    (),
+                )
+                .await
+                .unwrap();
+            rows.next().await.unwrap().unwrap().get(0).unwrap()
+        };
+        assert_eq!(unsequenced, 0, "no envelope may be written without a sequence");
+    }
+}
+
+/// The `000028` backfill — order preservation on a database that already holds
+/// envelopes.
+#[cfg(test)]
+mod delivery_sequence_backfill_tests {
+    use super::*;
+
+    /// A database whose envelopes and watermarks predate the sequence: rows are
+    /// inserted with `seq` NULL, exactly as they exist before the migration, and
+    /// the migration's own statements are then applied.
+    ///
+    /// Driven by running the REAL migration SQL, not a re-typed copy — a
+    /// hand-rolled backfill in a test proves nothing about the one that ships.
+    async fn migrated(rows: &[(&str, &str, &str)], cursors: &[(&str, &str)]) -> Connection {
+        let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
+        let conn = db.connect().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
+
+        // Everything up to but NOT including 000028, so the fixture can write
+        // pre-migration rows.
+        conn.execute_batch(pollis_schema::BASELINE_SQL).await.expect("baseline");
+        for (v, _, sql) in pollis_schema::POST_BASELINE_MIGRATIONS {
+            if *v < 28 {
+                conn.execute_batch(sql).await.unwrap_or_else(|e| panic!("migration {v}: {e}"));
+            }
+        }
+
+        for (id, conv, sent_at) in rows {
+            conn.execute(
+                "INSERT INTO message_envelope (id, conversation_id, sender_id, ciphertext, sent_at) \
+                 VALUES (?1, ?2, 'sender', 'ct', ?3)",
+                libsql::params![id.to_string(), conv.to_string(), sent_at.to_string()],
+            )
+            .await
+            .unwrap();
+        }
+        for (device, cursor) in cursors {
+            conn.execute(
+                "INSERT INTO conversation_watermark \
+                     (conversation_id, user_id, device_id, last_fetched_at) \
+                 VALUES ('c1', 'alice', ?1, ?2)",
+                libsql::params![device.to_string(), cursor.to_string()],
+            )
+            .await
+            .unwrap();
+        }
+
+        let (_, _, sql) = pollis_schema::POST_BASELINE_MIGRATIONS
+            .iter()
+            .find(|(v, _, _)| *v == 28)
+            .expect("000028 is registered");
+        conn.execute_batch(sql).await.expect("000028");
+        conn
+    }
+
+    async fn seqs(conn: &Connection, conv: &str) -> Vec<(String, i64)> {
+        let mut rows = conn
+            .query(
+                "SELECT id, seq FROM message_envelope WHERE conversation_id = ?1 ORDER BY seq",
+                libsql::params![conv.to_string()],
+            )
+            .await
+            .unwrap();
+        let mut out = Vec::new();
+        while let Some(r) = rows.next().await.unwrap() {
+            out.push((r.get::<String>(0).unwrap(), r.get::<i64>(1).unwrap()));
+        }
+        out
+    }
+
+    /// The backfill numbers existing envelopes in the order the OLD cursor would
+    /// have delivered them — `sent_at`, then `id`. Getting this wrong would
+    /// reorder history for anyone who had already read part of it.
+    #[tokio::test]
+    async fn the_backfill_preserves_the_delivery_order() {
+        let conn = migrated(
+            &[
+                ("m3", "c1", "2026-01-01T00:00:03+00:00"),
+                ("m1", "c1", "2026-01-01T00:00:01+00:00"),
+                ("m2", "c1", "2026-01-01T00:00:02+00:00"),
+            ],
+            &[],
+        )
+        .await;
+        let got: Vec<String> = seqs(&conn, "c1").await.into_iter().map(|(id, _)| id).collect();
+        assert_eq!(got, vec!["m1", "m2", "m3"], "sequence order must match sent_at order");
+    }
+
+    /// Sequences start at 1 and are contiguous over a fresh backfill, and the
+    /// counter is seeded ABOVE them so the next real send continues rather than
+    /// colliding.
+    #[tokio::test]
+    async fn the_backfill_seeds_the_counter_above_what_it_assigned() {
+        let conn = migrated(
+            &[
+                ("m1", "c1", "2026-01-01T00:00:01+00:00"),
+                ("m2", "c1", "2026-01-01T00:00:02+00:00"),
+            ],
+            &[],
+        )
+        .await;
+        assert_eq!(
+            seqs(&conn, "c1").await,
+            vec![("m1".to_string(), 1), ("m2".to_string(), 2)]
+        );
+
+        let next = next_delivery_seq(&conn, "c1").await.unwrap();
+        assert_eq!(next, 3, "the next send must continue, not collide with m2");
+    }
+
+    /// An existing cursor maps to the highest sequence at or below where that
+    /// device had read — so a device that had consumed two of three messages
+    /// still receives exactly the third, and no more.
+    #[tokio::test]
+    async fn an_existing_cursor_maps_to_the_right_position() {
+        let conn = migrated(
+            &[
+                ("m1", "c1", "2026-01-01T00:00:01+00:00"),
+                ("m2", "c1", "2026-01-01T00:00:02+00:00"),
+                ("m3", "c1", "2026-01-01T00:00:03+00:00"),
+            ],
+            // read through m2; and a device that has read nothing at all
+            &[("read-two", "2026-01-01T00:00:02+00:00"), ("read-none", "2020-01-01T00:00:00+00:00")],
+        )
+        .await;
+
+        let cursor = |device: &'static str| {
+            let conn = &conn;
+            async move {
+                let mut rows = conn
+                    .query(
+                        "SELECT last_seq FROM conversation_watermark WHERE device_id = ?1",
+                        libsql::params![device.to_string()],
+                    )
+                    .await
+                    .unwrap();
+                rows.next().await.unwrap().unwrap().get::<Option<i64>>(0).unwrap()
+            }
+        };
+        assert_eq!(cursor("read-two").await, Some(2), "must not re-deliver m1 and m2");
+        assert_eq!(
+            cursor("read-none").await,
+            Some(0),
+            "a device that read nothing maps below every sequence, so it gets everything"
+        );
+    }
+}
+
+/// The envelope-write chokepoint, enforced on the source (#1087).
+#[cfg(test)]
+mod envelope_insert_site_tests {
+    use std::path::{Path, PathBuf};
+
+    /// The only production function allowed to INSERT into `message_envelope`.
+    const ALLOWED_FN: &str = "insert_envelope_with_seq";
+
+    /// Every envelope must carry a delivery sequence, and the only way to be
+    /// sure is for every write to go through the one function that assigns one.
+    ///
+    /// An envelope written without a `seq` is invisible: the fetch predicate is
+    /// `seq > last_seq`, and `NULL > n` is NULL, so no recipient ever selects it
+    /// — and the GC floor `seq <= MIN(last_seq)` never collects it either. It
+    /// would sit in the table forever, delivered to nobody. That failure is
+    /// silent at every layer, which is exactly the kind that needs a tripwire
+    /// rather than a convention.
+    ///
+    /// A source-shape guard, not a proof: it reads production code only (test
+    /// modules seed rows directly on purpose, and keep `conversation_seq` in
+    /// step themselves), and it cannot see an INSERT built somewhere exotic. It
+    /// closes the case that actually happens — someone adds a fourth envelope
+    /// kind next to the three that exist and copies the wrong neighbour.
+    #[test]
+    fn every_envelope_insert_goes_through_the_sequence_chokepoint() {
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        collect_rs(&src, &mut files);
+        assert!(files.len() > 5, "walked only {} files — the walk is broken", files.len());
+
+        // Split so this file's own source does not match itself.
+        let needle = concat!("INSERT INTO ", "message_envelope");
+
+        let mut offenders = Vec::new();
+        for file in &files {
+            let Ok(text) = std::fs::read_to_string(file) else {
+                continue;
+            };
+            let rel = file.strip_prefix(&src).unwrap_or(file).display().to_string();
+            let lines: Vec<&str> = text.lines().collect();
+            let test_spans = cfg_test_spans(&lines);
+            for (i, line) in lines.iter().enumerate() {
+                if !line.contains(needle) {
+                    continue;
+                }
+                let t = line.trim_start();
+                if t.starts_with("//") || t.starts_with("///") {
+                    continue;
+                }
+                if test_spans.iter().any(|(a, b)| i >= *a && i <= *b) {
+                    continue;
+                }
+                let enclosing = enclosing_fn(&lines, i).unwrap_or_else(|| "<none>".into());
+                if enclosing == ALLOWED_FN {
+                    continue;
+                }
+                offenders.push(format!("{rel}:{} in fn {enclosing}", i + 1));
+            }
+        }
+
+        assert!(
+            offenders.is_empty(),
+            "an envelope written outside `{ALLOWED_FN}` carries no delivery sequence, so it \
+             is fetched by nobody and collected by nothing (#1087):\n  {}",
+            offenders.join("\n  ")
+        );
+    }
+
+    /// Line ranges covered by `#[cfg(test)] mod … { … }`, by brace counting.
+    fn cfg_test_spans(lines: &[&str]) -> Vec<(usize, usize)> {
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < lines.len() {
+            if lines[i].trim() == "#[cfg(test)]" {
+                // Find the `{` that opens the module and count to its match.
+                let mut depth = 0i32;
+                let mut opened = false;
+                let mut j = i;
+                while j < lines.len() {
+                    for ch in lines[j].chars() {
+                        match ch {
+                            '{' => {
+                                depth += 1;
+                                opened = true;
+                            }
+                            '}' => depth -= 1,
+                            _ => {}
+                        }
+                    }
+                    if opened && depth <= 0 {
+                        break;
+                    }
+                    j += 1;
+                }
+                out.push((i, j.min(lines.len() - 1)));
+                i = j + 1;
+                continue;
+            }
+            i += 1;
+        }
+        out
+    }
+
+    /// The nearest `fn` at or above `line`.
+    fn enclosing_fn(lines: &[&str], line: usize) -> Option<String> {
+        for l in lines[..=line].iter().rev() {
+            let t = l.trim_start();
+            let t = t.strip_prefix("pub ").unwrap_or(t);
+            let t = match t.find(") ") {
+                Some(i) if t.starts_with("pub(") => &t[i + 2..],
+                _ => t,
+            };
+            let t = t.strip_prefix("async ").unwrap_or(t);
+            if let Some(rest) = t.strip_prefix("fn ") {
+                let name: String = rest
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                if !name.is_empty() {
+                    return Some(name);
+                }
+            }
+        }
+        None
+    }
+
+    fn collect_rs(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_rs(&path, out);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                out.push(path);
+            }
+        }
     }
 }

@@ -1990,12 +1990,16 @@ async fn revoked_device_does_not_wedge_envelope_gc() {
             .expect("gc sweep");
     }
 
+    // Both envelopes go, not just the older one: since #1087 the gate is
+    // `seq <= MIN(last_seq)`, and the cursor means "handled up to and
+    // INCLUDING", so an envelope at the floor has been read by everyone. The
+    // property under test is unchanged — the revoked ghost must not wedge the
+    // gate — and a wedge would leave BOTH envelopes, not one.
     assert_eq!(
         gc_envelope_count(&channel_id).await,
-        1,
+        0,
         "GC WEDGED (#685): a revoked device with no watermark disabled envelope \
-         pruning — old-msg, read past by every LIVE device, was never deleted. Only \
-         new-msg (equal to the watermark) should remain."
+         pruning — the live devices have read past both envelopes, so both must go."
     );
 
     // Control: the group is still live for a real member — the pass was not earned
