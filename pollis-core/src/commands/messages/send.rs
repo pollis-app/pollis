@@ -149,10 +149,22 @@ pub async fn send_message(
     };
 
     let sealed = {
+        // #1079: serialize behind any committer on this device before sealing —
+        // see `seal::seal_under_lock`. Taken before `local_db` (reconcile's and
+        // self_update's order) and dropped with this block, before the post's
+        // own catch-up can want it.
+        let mls_guard = state.mls_group_lock(&mls_group_id).await;
+        let held = crate::state::MlsLockHeld::from_guard(&mls_guard);
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
 
-        let sealed = super::seal::seal(db.conn(), &mls_group_id, &conversation_id, &plaintext)?;
+        let sealed = super::seal::seal_under_lock(
+            db.conn(),
+            &mls_group_id,
+            &conversation_id,
+            &plaintext,
+            &held,
+        )?;
 
         db.conn().execute(
             "INSERT INTO message (id, conversation_id, sender_id, ciphertext, content, reply_to_id, thread_id, sent_at)

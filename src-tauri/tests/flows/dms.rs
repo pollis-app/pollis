@@ -988,3 +988,146 @@ async fn message_sealed_behind_a_landed_commit_is_resealed_and_delivered() {
     drop(alice);
     drop(bob);
 }
+
+/// #1079: nothing that merely wants to ENCRYPT may advance this device's epoch.
+///
+/// `load_group_with_signer` used to `merge_pending_commit` unconditionally, so
+/// every caller that only wanted a group got an epoch advance as a side effect.
+/// `try_mls_encrypt` is one such caller, and it is reached from
+/// `receipts::emit_receipt`, which by design takes no MLS lock and runs at the
+/// end of every DM catch-up as well as from `mark_messages_read`. A committer
+/// holds a staged commit across its DS round-trip, so a receipt landing in that
+/// window merged it:
+///
+/// * **lost race** — the device sat at a phantom epoch on a branch the log never
+///   held, past `invariants::resolve`, until some later replay classified it as
+///   `ForkedTree` and external-joined;
+/// * **won race** — `sweep_before_merge` opened its decryptor at the
+///   already-advanced lineage and skipped every envelope sealed at the closing
+///   epoch. With `max_past_epochs = 0` those are simply gone. That is the
+///   committer-arm loss #1041 exists to prevent.
+///
+/// Deterministic: Bob parks at `SelfUpdateBeforeSubmit` with his post-join
+/// commit staged and unsent, and the receipt is driven at him there.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_read_receipt_cannot_advance_the_epoch_of_a_parked_committer() {
+    use pollis_lib::commands::mls::rendezvous::{self, Point};
+    use std::time::Duration;
+
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+
+    // Alice's Add lands Bob's Welcome at epoch 1, and a first message so Bob has
+    // something of hers to acknowledge.
+    let dm_id = alice.create_dm(&[&bob_profile.id]).await;
+    alice.send_channel_message(&dm_id, "READ_ME").await;
+
+    // Bob applies the Welcome, ingests, and stages his post-join self-update —
+    // parking under the group lock with the commit built and unsent.
+    let mut parked = rendezvous::arm(Point::SelfUpdateBeforeSubmit);
+    let poll = {
+        let state = bob.state.clone();
+        let user = bob_profile.id.clone();
+        tokio::spawn(
+            async move { pollis_core::commands::mls::poll_mls_welcomes(&state, user).await },
+        )
+    };
+    let release = tokio::time::timeout(Duration::from_secs(30), parked.recv())
+        .await
+        .expect("bob never staged his post-join self-update")
+        .expect("rendezvous closed");
+
+    // Bob is mid-commit: staged, undecided.
+    let (epoch_parked, pending_parked) =
+        pollis_lib::commands::mls::local_epoch_and_pending(&bob.state, &dm_id)
+            .await
+            .expect("bob has a local group while parked");
+    assert!(
+        pending_parked,
+        "the rendezvous must park bob with a staged commit, or this test proves nothing"
+    );
+
+    // The message ids come from ALICE, not from Bob. Bob is parked holding the
+    // per-conversation MLS lock, and his own fetch would run an ingest that wants
+    // it — the test would deadlock rather than assert anything. The ids are the
+    // DS's, so they are the same on both sides, and Bob already ingested the
+    // message during the catch-up that precedes the park.
+    let read_ids: Vec<String> = alice
+        .fetch_dm_messages(&dm_id)
+        .await
+        .iter()
+        .filter_map(|m| m["id"].as_str().map(str::to_string))
+        .collect();
+    assert!(!read_ids.is_empty(), "bob must have alice's message to acknowledge");
+
+    // The receipt. Takes no MLS lock, on purpose — this is the call that used to
+    // merge Bob's staged commit out from under him.
+    pollis_core::commands::messages::mark_messages_read(
+        dm_id.clone(),
+        bob_profile.id.clone(),
+        read_ids,
+        &bob.state,
+    )
+    .await
+    .expect("mark_messages_read is best-effort and must not fail");
+
+    // THE ASSERTION. The epoch has not moved and the commit is still staged: the
+    // log has not decided, so neither has Bob.
+    let (epoch_after, pending_after) =
+        pollis_lib::commands::mls::local_epoch_and_pending(&bob.state, &dm_id)
+            .await
+            .expect("bob still has a local group");
+    assert_eq!(
+        epoch_after, epoch_parked,
+        "a read receipt advanced a parked committer's epoch — it merged a commit the log had \
+         not decided (#1079)"
+    );
+    assert!(
+        pending_after,
+        "a read receipt resolved a parked committer's staged commit (#1079)"
+    );
+
+    // Alice, still at the pre-commit epoch, seals a message there — exactly the
+    // envelope the won-race arm used to lose.
+    alice.send_channel_message(&dm_id, "SEALED_AT_THE_CLOSING_EPOCH").await;
+
+    // Release: Bob's commit lands and merges, and his pre-merge sweep must pick
+    // up the envelope sealed at the epoch he is leaving.
+    rendezvous::disarm(Point::SelfUpdateBeforeSubmit);
+    let _ = release.send(());
+    poll.await.expect("poll task").expect("poll_mls_welcomes");
+    bob.accept_dm_request(&dm_id).await;
+
+    let bob_view: Vec<String> = bob
+        .fetch_dm_messages(&dm_id)
+        .await
+        .iter()
+        .filter_map(|m| m["content"].as_str().map(str::to_string))
+        .collect();
+    assert!(
+        bob_view.contains(&"SEALED_AT_THE_CLOSING_EPOCH".to_string()),
+        "bob lost the message sealed at the epoch his commit left: {bob_view:?}"
+    );
+
+    // And the DM still works both ways afterwards.
+    bob.send_channel_message(&dm_id, "PONG_1079").await;
+    let alice_view: Vec<String> = alice
+        .fetch_dm_messages(&dm_id)
+        .await
+        .iter()
+        .filter_map(|m| m["content"].as_str().map(str::to_string))
+        .collect();
+    assert!(
+        alice_view.contains(&"PONG_1079".to_string()),
+        "alice did not get bob's reply: {alice_view:?}"
+    );
+
+    let _ = alice_profile;
+    drop(alice);
+    drop(bob);
+}

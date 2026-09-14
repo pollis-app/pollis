@@ -362,7 +362,10 @@ async fn clear_pending_best_effort(state: &Arc<AppState>, conversation_id: &str,
 // destroyed every member's history and could fork the group — the exact
 // append-only violation INV-1 forbids. The recovery for "my local MLS state is
 // missing" is now `external_join_group` (rejoin THIS device from the published
-// GroupInfo), wired at the `try_mls_encrypt` → None site in messages/edit_delete.
+// GroupInfo), wired at the `!has_local_group` site in messages/edit_delete. That
+// probe used to be `try_mls_encrypt(..).is_none()`; since #1079 a failed encrypt
+// also means "a commit is staged", and a transient answer must never reach a
+// rebuild.
 
 // ── Declarative reconcile ────────────────────────────────────────────────────
 
@@ -1024,6 +1027,24 @@ fn committer_leaf_check_skipped() -> bool {
 #[cfg(feature = "test-harness")]
 pub fn set_skip_committer_leaf_check(skip: bool) {
     SKIP_COMMITTER_LEAF_CHECK.store(skip, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Test-harness only: this device's local epoch for `conversation_id`, and
+/// whether it is holding a staged, unconfirmed commit.
+///
+/// `None` when there is no local group. Exists so a test can assert that an
+/// operation did NOT advance the epoch (#1079) — the pre-fix bug was invisible
+/// from every other observation point, because the phantom advance only showed
+/// up later as a message that silently never arrived.
+#[cfg(feature = "test-harness")]
+pub async fn local_epoch_and_pending(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+) -> Option<(u64, bool)> {
+    let guard = state.local_db.lock().await;
+    let db = guard.as_ref()?;
+    let group = load_stored_group(db.conn(), conversation_id)?;
+    Some((group.epoch().as_u64(), group.pending_commit().is_some()))
 }
 
 /// Test-harness only: the `(user_id, device_id)` leaves of this device's local

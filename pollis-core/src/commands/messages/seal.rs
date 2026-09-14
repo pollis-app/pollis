@@ -40,8 +40,12 @@ impl Sealed {
 }
 
 /// Encrypt `plaintext` for `mls_group_id` at the epoch the local group sits at
-/// right now. `Ok(None)` when this device holds no local group for it.
-pub(super) fn try_seal(
+/// right now.
+///
+/// `Ok(None)` when this device holds no local group for it, or when the group
+/// holds a staged, unconfirmed commit — see [`try_seal_unlocked`] and
+/// [`seal_under_lock`] for which of those a given caller can actually see.
+fn try_seal_inner(
     conn: &rusqlite::Connection,
     mls_group_id: &str,
     conversation_id: &str,
@@ -63,19 +67,49 @@ pub(super) fn try_seal(
     }))
 }
 
-/// [`try_seal`], with a missing local group an error — the shape every
+/// Seal for a caller that holds the per-conversation MLS lock — the shape every
 /// user-initiated post wants.
-pub(super) fn seal(
+///
+/// The [`MlsLockHeld`] witness is the point (#1079): a post must serialize behind
+/// any committer on this device, because a committer holds a staged commit across
+/// its DS round-trip and the epoch is undecided for that whole window. Holding
+/// the lock means this seal cannot observe that state at all, so `Ok(None)` from
+/// the inner sealer can only mean "no local group", which is the error this
+/// returns. Requiring proof rather than trusting each site to remember the lock
+/// is what keeps a future post site from silently reintroducing the race.
+///
+/// Take the lock BEFORE `state.local_db` — the order `reconcile` and
+/// `self_update` use — and drop it before any `await` that might itself take it
+/// (the catch-up does).
+pub(super) fn seal_under_lock(
     conn: &rusqlite::Connection,
     mls_group_id: &str,
     conversation_id: &str,
     plaintext: &[u8],
+    _held: &crate::state::MlsLockHeld<'_>,
 ) -> Result<Sealed> {
-    try_seal(conn, mls_group_id, conversation_id, plaintext)?.ok_or_else(|| {
+    try_seal_inner(conn, mls_group_id, conversation_id, plaintext)?.ok_or_else(|| {
         crate::error::Error::Other(anyhow::anyhow!(
             "MLS group not initialized for conversation {conversation_id}"
         ))
     })
+}
+
+/// Seal for a caller that deliberately holds NO MLS lock, where not sealing is
+/// an acceptable outcome.
+///
+/// `Ok(None)` means "not sealable right now" and covers both "no local group"
+/// and "a commit is staged" — the caller cannot distinguish them and must not
+/// need to. `receipts::emit_receipt` is the only such caller: taking the lock
+/// there would deadlock the catch-up paths that hold it while emitting delivered
+/// receipts, and a skipped receipt is already its documented failure mode.
+pub(super) fn try_seal_unlocked(
+    conn: &rusqlite::Connection,
+    mls_group_id: &str,
+    conversation_id: &str,
+    plaintext: &[u8],
+) -> Result<Option<Sealed>> {
+    try_seal_inner(conn, mls_group_id, conversation_id, plaintext)
 }
 
 /// How many times a post re-seals before giving up. Each round is one commit
@@ -151,11 +185,17 @@ pub(super) async fn post_resealing<B: ClientRequest>(
                         "[messages] re-seal catch-up for {mls_group_id} failed: {e}"
                     );
                 }
+                // The re-seal needs the MLS lock for the same reason the first
+                // seal did (#1079) — and only now that the catch-up has
+                // released it. Scoped so it is gone before the next post.
+                let mls_guard = state.mls_group_lock(mls_group_id).await;
+                let held = crate::state::MlsLockHeld::from_guard(&mls_guard);
                 let guard = state.local_db.lock().await;
                 let db = guard.as_ref().ok_or_else(|| {
                     crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
                 })?;
-                sealed = seal(db.conn(), mls_group_id, conversation_id, plaintext)?;
+                sealed =
+                    seal_under_lock(db.conn(), mls_group_id, conversation_id, plaintext, &held)?;
                 on_reseal(db.conn(), &sealed)?;
             }
         }

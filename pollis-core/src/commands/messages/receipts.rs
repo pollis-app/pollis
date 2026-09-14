@@ -216,7 +216,7 @@ pub(crate) async fn emit_receipt(
         let plaintext = super::framing::pad_receipt(kind, &now, message_ids);
         // A DM's MLS group is keyed by the conversation id directly.
         let Some(sealed) =
-            super::seal::try_seal(db.conn(), conversation_id, conversation_id, &plaintext)?
+            super::seal::try_seal_unlocked(db.conn(), conversation_id, conversation_id, &plaintext)?
         else {
             // No local MLS group for this DM yet. A receipt is best-effort
             // telemetry about messages we already hold; failing the caller over

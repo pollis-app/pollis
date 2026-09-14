@@ -2271,8 +2271,11 @@ where
             .expect("a joined member can always self-update");
         for (j, p) in providers.iter().enumerate() {
             if i == j {
-                // Loading merges the pending commit — see `load_group_with_signer`.
-                load_group_with_signer(p, conversation_id, 0).unwrap();
+                // The committer merges its own staged commit. Explicitly —
+                // `load_group_with_signer` no longer does it as a side effect of
+                // loading (#1079).
+                let (mut group, _) = load_group_with_signer(p, conversation_id, 0).unwrap();
+                group.merge_pending_commit(p).unwrap();
             } else {
                 apply_commit_in_suite(p, conversation_id, &commit_bytes);
             }
@@ -2293,8 +2296,9 @@ where
     let (_, commit_bytes, _) = stage_self_update(provider, conversation_id, 0)
         .unwrap()
         .expect("group exists");
-    // Deliberately NOT `load_group_with_signer`, which merges any pending commit
-    // as part of loading — that would make the measurement advance the epoch.
+    // A raw load, and deliberately no merge: the measurement must not advance the
+    // epoch. (`load_group_with_signer` no longer merges either, since #1079, but
+    // this path also wants the group without its signer.)
     let group_id = GroupId::from_slice(conversation_id.as_bytes());
     let mut group = MlsGroup::load(provider.storage(), &group_id)
         .unwrap()

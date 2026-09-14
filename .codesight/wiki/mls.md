@@ -212,6 +212,14 @@ advances the epoch:
 | Remove member | `groups/membership.rs` (`remove_member_from_group`) | Same hoist, same reason |
 | Voice / screenshare join | `voice_e2ee::derive_voice_key` | Already ingests (`ingest_*_envelopes_inner` → interleaved catch-up) — no change |
 
+**The lock is now load-bearing for sealing too (#1079).** Send and edit hold no
+lock *at the catch-up* — that is what makes the swap above safe — but they take
+the per-conversation `mls_group_lock` for the seal itself, so a post can never
+observe a committer's staged commit and be forced to guess its epoch. The lock is
+taken after the catch-up and dropped before the post (whose re-seal path runs its
+own catch-up), and always before `state.local_db`, matching `reconcile` and
+`self_update`. See "The epoch gate" point 4.
+
 **Locking caveat.** `catch_up_mls_group_interleaved` internally calls
 `process_pending_commits_inner_with_hook`, which acquires the per-conversation
 `mls_group_lock`. It therefore MUST NOT be invoked while that lock is already
@@ -278,11 +286,51 @@ Three enforcement points, lowest layer first:
    `CatchUpResponse.head` becomes a `ReplayBound`, so a receiver never applies a
    commit its fetched envelope set does not yet cover.
 
-Proofs (flows suite, `dms.rs`), both fail with the gate and sweep disabled:
+4. **Only the log decides an epoch (#1079).** All three points above assume the
+   local epoch moves only when the commit log has spoken. `load_group_with_signer`
+   broke that assumption: it merged any pending commit as a side effect of
+   *loading a group*, so `try_mls_encrypt` — reached from
+   `receipts::emit_receipt`, which by design takes no MLS lock and fires at the
+   end of every DM catch-up — merged a committer's staged commit mid-flight. On a
+   lost race the device sat at a **phantom epoch** on a branch the log never held
+   (`clear_pending_best_effort` then found nothing to clear, and the Kani-proved
+   `invariants::resolve` never saw it); on a won one point 2's sweep opened its
+   decryptor at the already-advanced lineage and skipped the whole closing epoch
+   — the very loss the sweep exists to prevent.
+
+   Three changes, lowest layer first:
+
+   - `load_group_with_signer` no longer merges. Callers that need it do it
+     themselves, in one line, where the decision belongs.
+   - `try_mls_encrypt` and `export_group_info_blob` return "not now" when
+     `pending_commit().is_some()` instead of resolving it. An encryptor does not
+     get to choose a branch of history.
+   - Which sites *may* merge is enforced on the source:
+     `mls::merge_site_tests::no_new_site_merges_a_pending_commit` allowlists
+     `(file, enclosing fn)` pairs — `reconcile::{merge_pending_in_suite,
+     reconcile_group_mls_core, stage_reconcile_commit}`,
+     `self_update::stage_self_update`, `group_state::apply_one_commit` — and
+     fails on any other, including one whose allowlist entry has gone stale.
+
+   Because a post must not merely *avoid* merging but must seal at a decided
+   epoch, every user-initiated post now holds the per-conversation MLS lock
+   across its seal. That is a type-level requirement, not a convention:
+   `seal::seal_under_lock` demands a `state::MlsLockHeld` witness, constructible
+   only from a live guard, so a new post site that forgets the lock does not
+   compile. The lock-free caller (`receipts::emit_receipt`, which would deadlock
+   the catch-up paths that hold it) uses `seal::try_seal_unlocked` and skips.
+   Asking "do I have this group?" is `has_local_group`, never a failed encrypt —
+   the edit/redaction repair probes used the latter, and a `false` there triggers
+   an external-join rebuild.
+
+Proofs (flows suite, `dms.rs`), each failing without the mechanism it pins:
 `message_sealed_at_the_epoch_a_committer_leaves_is_still_delivered` (committer
-arm, parks the committer at `SelfUpdateBeforeSubmit`) and
+arm, parks the committer at `SelfUpdateBeforeSubmit`),
 `message_sealed_behind_a_landed_commit_is_resealed_and_delivered` (sender arm,
-parks the sender at the `EnvelopeBeforePost` rendezvous point).
+parks the sender at `EnvelopeBeforePost`), and
+`a_read_receipt_cannot_advance_the_epoch_of_a_parked_committer` (#1079 — parks
+the committer, drives `mark_messages_read` at it, and asserts the epoch and the
+staged commit are both untouched).
 
 ### Recovery-path guards (revocation + membership lockout)
 

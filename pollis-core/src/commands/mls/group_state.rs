@@ -170,6 +170,13 @@ where
     let Ok((group, signer)) = load_group_with_signer(provider, conversation_id, generation) else {
         return Ok(None);
     };
+    // A staged commit means the epoch is still being decided, and GroupInfo is
+    // what an external join bootstraps from — publishing one for an epoch the
+    // log may never hold is the same defect as sealing at it (#1079). This is a
+    // best-effort backstop, so it simply waits for the next call.
+    if group.pending_commit().is_some() {
+        return Ok(None);
+    }
     let epoch = group.epoch().as_u64();
     let msg = match group.export_group_info(provider.crypto(), &signer, true) {
         Ok(m) => m,
@@ -908,6 +915,20 @@ pub async fn init_mls_group(
 /// under `group.ciphersuite()`'s scheme, not a constant. A leaf key of the
 /// wrong scheme is simply absent from storage, which surfaces as "signer not
 /// found" rather than as a signature nobody can verify.
+///
+/// **Does NOT merge a pending commit (#1079).** It used to, unconditionally, and
+/// that put an epoch advance behind a function whose job is only "give me this
+/// group". A staged commit is a decision the commit log has not made yet, so
+/// merging it is only correct where the log's answer is known — at
+/// `reconcile::publish_staged_commit` or in `apply_one_commit` — or under the
+/// per-conversation MLS lock, after a catch-up, by a caller that is about to
+/// stage its own commit. Merging here let `try_mls_encrypt` (reached from
+/// `receipts::emit_receipt`, which by design takes no MLS lock) advance the
+/// group past a committer's un-decided epoch: on a lost race the device sat at a
+/// phantom epoch on a branch the log never held, and on a won one the
+/// pre-merge sweep skipped every envelope sealed at the closing epoch. Callers
+/// that need the merge do it themselves, in one line, where the decision belongs
+/// — see `no_new_site_merges_a_pending_commit` for the enforced list.
 pub(super) fn load_group_with_signer<C>(
     provider: &MlsProvider<'_, C>,
     conversation_id: &str,
@@ -918,7 +939,7 @@ where
 {
     let group_id = mls_group_id(conversation_id, generation);
 
-    let mut group = MlsGroup::load(provider.storage(), &group_id)
+    let group = MlsGroup::load(provider.storage(), &group_id)
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("mls load: {e}")))?
         .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!(
             "MLS group not found for conversation {conversation_id}"
@@ -939,12 +960,6 @@ where
         signature_scheme(group.ciphersuite()),
     )
     .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("signer not found in mls_kv")))?;
-
-    // Resolve any in-flight pending commit so the group is operational before
-    // the caller performs new operations.
-    group
-        .merge_pending_commit(provider)
-        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("merge pending: {e}")))?;
 
     Ok((group, signer))
 }
@@ -2345,6 +2360,15 @@ pub async fn process_pending_commits(
 // ── Phase 5 helpers: encrypt / decrypt ───────────────────────────────────────
 
 /// Check whether an MLS group exists in the local database.
+///
+/// This — not `try_mls_encrypt(..).is_none()` — is how to ask "does this device
+/// have the group?". The edit and redaction paths used to ask it the other way,
+/// which was only ever right while a failed encrypt could mean nothing else;
+/// since #1079 it also means "a commit is staged", and a `false` there sends the
+/// caller through `external_join_group`, so a transient answer must not reach it.
+///
+/// Storage-only, so it needs no crypto backend and decides nothing about the
+/// epoch.
 pub fn has_local_group(conn: &rusqlite::Connection, conversation_id: &str) -> bool {
     load_stored_group(conn, conversation_id).is_some()
 }
@@ -2352,8 +2376,20 @@ pub fn has_local_group(conn: &rusqlite::Connection, conversation_id: &str) -> bo
 /// Try to encrypt `plaintext` with the MLS group for `conversation_id`.
 ///
 /// Returns `None` — without logging — if the group does not exist locally
-/// (e.g. the channel was created before MLS was rolled out).  The caller
-/// should fall back to the legacy Signal sender-key path in that case.
+/// (e.g. the channel was created before MLS was rolled out), or if the group
+/// holds a **staged, unconfirmed commit**. The caller treats `None` as "not
+/// sealable right now".
+///
+/// The pending-commit refusal is #1079. Sealing while a commit is staged means
+/// choosing an epoch the commit log has not decided: seal at the old epoch and
+/// the envelope may be behind the head by the time it posts (the DS epoch gate
+/// catches that, and `seal::post_resealing` retries); merge first to seal at the
+/// new one and this device has advanced onto a branch the log may never hold.
+/// Neither is a choice an encryptor gets to make, so it declines. Every
+/// user-initiated post holds the per-conversation MLS lock across its seal, so
+/// it cannot observe a pending commit at all; the callers that can are the
+/// deliberately lock-free ones — `receipts::emit_receipt` and the `edit_delete`
+/// probes — for which skipping is already the documented failure mode.
 pub fn try_mls_encrypt(
     conn: &rusqlite::Connection,
     conversation_id: &str,
@@ -2363,6 +2399,9 @@ pub fn try_mls_encrypt(
     let provider = PollisProvider::new(conn);
     let (mut group, signer) =
         load_group_with_signer(&provider, conversation_id, generation).ok()?;
+    if group.pending_commit().is_some() {
+        return None;
+    }
     let msg_out = group.create_message(&provider, &signer, plaintext).ok()?;
     msg_out.tls_serialize_detached().ok()
 }

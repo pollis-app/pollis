@@ -93,7 +93,173 @@ pub use reconcile::{
 // Leaf cross-signing seams for the flows suite: play a pre-fix committer, and
 // read the local tree back to assert what was admitted or evicted.
 #[cfg(feature = "test-harness")]
-pub use reconcile::{local_tree_members, set_skip_committer_leaf_check};
+pub use reconcile::{local_epoch_and_pending, local_tree_members, set_skip_committer_leaf_check};
 
 #[cfg(test)]
 mod tests;
+
+/// Where an epoch may be advanced, enforced on the source (#1079).
+#[cfg(test)]
+mod merge_site_tests {
+    use std::path::{Path, PathBuf};
+
+    /// The `(file, enclosing fn)` pairs allowed to call
+    /// `merge_pending_commit`. Each one is a place where the commit log's answer
+    /// is already known, or where the caller holds the per-conversation MLS lock
+    /// and is about to stage its own commit:
+    ///
+    /// | site | why it may merge |
+    /// |---|---|
+    /// | `reconcile::merge_pending_in_suite` | reached only from `finalize_won_commit` — the log said we WON this epoch |
+    /// | `reconcile::reconcile_group_mls_core` | merges the commit it just built, having already published it |
+    /// | `reconcile::stage_reconcile_commit` | resolves a dangling commit under the MLS lock, after a catch-up, before staging a new one |
+    /// | `self_update::stage_self_update` | same, for the own-leaf rotation |
+    /// | `group_state::apply_one_commit` | replaying a commit the log holds — that IS the log's answer |
+    const ALLOWED: &[(&str, &str)] = &[
+        ("commands/mls/reconcile.rs", "merge_pending_in_suite"),
+        ("commands/mls/reconcile.rs", "reconcile_group_mls_core"),
+        ("commands/mls/reconcile.rs", "stage_reconcile_commit"),
+        ("commands/mls/self_update.rs", "stage_self_update"),
+        ("commands/mls/group_state.rs", "apply_one_commit"),
+    ];
+
+    /// Merging a staged commit advances this device's epoch, so it is a decision
+    /// about which branch of history this device is on — and only the commit log
+    /// gets to make it.
+    ///
+    /// `load_group_with_signer` used to merge unconditionally, which put that
+    /// decision behind a function whose job is "give me this group". The
+    /// consequence was #1079: `try_mls_encrypt`, reached from
+    /// `receipts::emit_receipt` (which by design takes no MLS lock and runs at
+    /// the end of every DM catch-up), merged a committer's staged commit
+    /// mid-flight. On a lost race the device sat at a phantom epoch on a branch
+    /// the log never held, invisible to `invariants::resolve`; on a won one
+    /// `sweep_before_merge` opened its decryptor at the already-advanced lineage
+    /// and skipped every envelope sealed at the closing epoch — the exact
+    /// committer-arm loss #1041 exists to prevent.
+    ///
+    /// The fix was to move the merge to the callers that have the log's answer.
+    /// This test is what keeps it there: a refactor that reintroduces a merge
+    /// anywhere else fails here rather than in production, six months later, as
+    /// a message that silently never arrived.
+    ///
+    /// A source-shape guard, not a proof — it cannot see a merge reached through
+    /// a function pointer or a macro. It closes the case that actually happened.
+    #[test]
+    fn no_new_site_merges_a_pending_commit() {
+        let src_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        collect_rs(&src_root, &mut files);
+        assert!(
+            files.len() > 50,
+            "walked only {} files under {} — the walk is broken, not clean",
+            files.len(),
+            src_root.display()
+        );
+
+        // Split so this file's own source does not contain the needle and match
+        // itself. `concat!` is compile-time, so the check is exact.
+        let needle = concat!("merge_pending", "_commit(");
+
+        let mut offenders = Vec::new();
+        for file in &files {
+            let rel = file
+                .strip_prefix(&src_root)
+                .unwrap_or(file)
+                .to_string_lossy()
+                .replace('\\', "/");
+            // `tests.rs` is `#[cfg(test)]`: a test driving openmls directly is
+            // not a production epoch advance.
+            if rel.ends_with("/tests.rs") || rel.ends_with("tests.rs") {
+                continue;
+            }
+            let Ok(src) = std::fs::read_to_string(file) else {
+                continue;
+            };
+            let lines: Vec<&str> = src.lines().collect();
+            for (i, line) in lines.iter().enumerate() {
+                if !line.contains(needle) {
+                    continue;
+                }
+                let t = line.trim_start();
+                if t.starts_with("//") || t.starts_with("///") {
+                    continue;
+                }
+                let enclosing = enclosing_fn(&lines, i).unwrap_or_else(|| "<none>".to_string());
+                if ALLOWED
+                    .iter()
+                    .any(|(f, fun)| rel == *f && enclosing == *fun)
+                {
+                    continue;
+                }
+                offenders.push(format!("{rel}:{} in fn {enclosing}\n      {t}", i + 1));
+            }
+        }
+
+        assert!(
+            offenders.is_empty(),
+            "merging a pending commit advances this device's epoch onto a branch the commit log \
+             may never hold (#1079). Only a site that already knows the log's answer may do it — \
+             see `ALLOWED` above. New sites:\n  {}",
+            offenders.join("\n  ")
+        );
+
+        // And the allowlist must not rot: every entry has to still exist, or a
+        // deleted site would leave a permanent licence behind.
+        for (f, fun) in ALLOWED {
+            let path = src_root.join(f);
+            let src = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("allowlisted file {f} is unreadable: {e}"));
+            let lines: Vec<&str> = src.lines().collect();
+            let found = lines.iter().enumerate().any(|(i, l)| {
+                l.contains(concat!("merge_pending", "_commit("))
+                    && !l.trim_start().starts_with("//")
+                    && enclosing_fn(&lines, i).as_deref() == Some(fun)
+            });
+            assert!(
+                found,
+                "allowlist entry ({f}, {fun}) no longer merges a pending commit — drop it rather \
+                 than leaving a standing licence"
+            );
+        }
+    }
+
+    /// The name of the nearest `fn` at or above `line`. Textual, matching the
+    /// declaration forms this crate actually uses.
+    fn enclosing_fn(lines: &[&str], line: usize) -> Option<String> {
+        for l in lines[..=line].iter().rev() {
+            let t = l.trim_start();
+            let t = t.strip_prefix("pub ").unwrap_or(t);
+            let t = match t.find(") ") {
+                // `pub(super) fn` / `pub(crate) fn`
+                Some(i) if t.starts_with("pub(") => &t[i + 2..],
+                _ => t,
+            };
+            let t = t.strip_prefix("async ").unwrap_or(t);
+            if let Some(rest) = t.strip_prefix("fn ") {
+                let name: String = rest
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                if !name.is_empty() {
+                    return Some(name);
+                }
+            }
+        }
+        None
+    }
+
+    fn collect_rs(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_rs(&path, out);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                out.push(path);
+            }
+        }
+    }
+}

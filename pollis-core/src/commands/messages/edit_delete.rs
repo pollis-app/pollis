@@ -395,16 +395,13 @@ pub async fn edit_message_as(
         eprintln!("[messages] edit_message_as: catch_up_mls_group for {mls_group_id}: {e}");
     }
 
-    // Encrypt the padded new content, repairing the local group if it is missing.
+    // Repair the local group if it is missing. Asked as "is there a group?", not
+    // "can I encrypt?" — a failed encrypt now also means "a commit is staged"
+    // (#1079), which must not trigger a rejoin.
     let needs_repair = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
-        crate::commands::mls::try_mls_encrypt(
-            db.conn(),
-            &mls_group_id,
-            &super::framing::pad(new_content.as_bytes()),
-        )
-        .is_none()
+        !crate::commands::mls::has_local_group(db.conn(), &mls_group_id)
     };
     if needs_repair {
         crate::commands::mls::external_join_group(state, &mls_group_id, user_id).await?;
@@ -412,9 +409,15 @@ pub async fn edit_message_as(
 
     let plaintext = super::framing::pad(new_content.as_bytes());
     let sealed = {
+        // #1079: serialize behind any committer on this device before sealing —
+        // see `seal::seal_under_lock`. Taken before `local_db` (reconcile's and
+        // self_update's order) and dropped with this block, before the post's
+        // own catch-up can want it.
+        let mls_guard = state.mls_group_lock(&mls_group_id).await;
+        let held = crate::state::MlsLockHeld::from_guard(&mls_guard);
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
-        super::seal::seal(db.conn(), &mls_group_id, conversation_id, &plaintext)?
+        super::seal::seal_under_lock(db.conn(), &mls_group_id, conversation_id, &plaintext, &held)?
     };
 
     // Edit envelopes are NOT sealed (the DS membership-gates the write on the
@@ -489,12 +492,7 @@ async fn send_redaction_message(
     let needs_repair = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
-        crate::commands::mls::try_mls_encrypt(
-            db.conn(),
-            &mls_group_id,
-            &super::framing::pad_redaction(target_message_id),
-        )
-        .is_none()
+        !crate::commands::mls::has_local_group(db.conn(), &mls_group_id)
     };
     if needs_repair {
         crate::commands::mls::external_join_group(state, &mls_group_id, user_id).await?;
@@ -502,9 +500,15 @@ async fn send_redaction_message(
 
     let plaintext = super::framing::pad_redaction(target_message_id);
     let sealed = {
+        // #1079: serialize behind any committer on this device before sealing —
+        // see `seal::seal_under_lock`. Taken before `local_db` (reconcile's and
+        // self_update's order) and dropped with this block, before the post's
+        // own catch-up can want it.
+        let mls_guard = state.mls_group_lock(&mls_group_id).await;
+        let held = crate::state::MlsLockHeld::from_guard(&mls_guard);
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
-        super::seal::seal(db.conn(), &mls_group_id, conversation_id, &plaintext)?
+        super::seal::seal_under_lock(db.conn(), &mls_group_id, conversation_id, &plaintext, &held)?
     };
 
     // Blind the envelope sender exactly like a normal send — sealing is
@@ -806,7 +810,7 @@ pub async fn edit_message(
     let needs_repair = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
-        crate::commands::mls::try_mls_encrypt(db.conn(), &mls_group_id, new_content.as_bytes()).is_none()
+        !crate::commands::mls::has_local_group(db.conn(), &mls_group_id)
     };
 
     if needs_repair {
@@ -828,10 +832,22 @@ pub async fn edit_message(
     };
 
     let sealed = {
+        // #1079: serialize behind any committer on this device before sealing —
+        // see `seal::seal_under_lock`. Taken before `local_db` (reconcile's and
+        // self_update's order) and dropped with this block, before the post's
+        // own catch-up can want it.
+        let mls_guard = state.mls_group_lock(&mls_group_id).await;
+        let held = crate::state::MlsLockHeld::from_guard(&mls_guard);
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
 
-        let sealed = super::seal::seal(db.conn(), &mls_group_id, &conversation_id, &plaintext)?;
+        let sealed = super::seal::seal_under_lock(
+            db.conn(),
+            &mls_group_id,
+            &conversation_id,
+            &plaintext,
+            &held,
+        )?;
 
         let rows_affected = db.conn().execute(
             "UPDATE message SET content = ?1, edited_at = ?2

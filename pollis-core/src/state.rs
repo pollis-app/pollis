@@ -268,6 +268,7 @@ impl AppState {
         entry.lock_owned().await
     }
 
+
     /// Tear down long-lived background tasks so the host process can
     /// exit cleanly. Idempotent — safe to call more than once and from
     /// more than one exit path, because a quit and an update-relaunch can
@@ -395,6 +396,36 @@ impl AppState {
             return Err(crate::error::Error::ClientOutdated);
         }
         Ok(())
+    }
+}
+
+/// Proof, at the type level, that its holder has the per-conversation MLS lock.
+///
+/// #1079: a post that seals an envelope has to serialize behind any committer on
+/// this device, or it chooses an epoch the commit log has not decided — sealing
+/// at the old epoch risks landing behind the head, and merging to seal at the
+/// new one advances this device onto a branch the log may never hold. Neither is
+/// an encryptor's decision to make.
+///
+/// Taking the lock is one line, so relying on every post site to remember it is
+/// exactly the code discipline `docs/backend-core-invariants.md` calls a last
+/// resort. Instead [`crate::commands::messages::seal`]'s locked sealer demands
+/// one of these, and the only way to get one is [`MlsLockHeld::from_guard`] with
+/// a live guard in hand — so a new post site that forgets the lock does not
+/// compile. The deliberately lock-free caller (`receipts::emit_receipt`, which
+/// cannot take the lock without deadlocking the catch-up paths that hold it)
+/// uses the unlocked sealer and skips when a commit is staged.
+///
+/// Borrows the guard rather than owning it, so it can never extend the lock's
+/// lifetime past the block that took it.
+pub struct MlsLockHeld<'a> {
+    _guard: &'a tokio::sync::OwnedMutexGuard<()>,
+}
+
+impl<'a> MlsLockHeld<'a> {
+    /// Witness the guard. Cheap — the guard keeps doing the actual locking.
+    pub fn from_guard(guard: &'a tokio::sync::OwnedMutexGuard<()>) -> Self {
+        Self { _guard: guard }
     }
 }
 
