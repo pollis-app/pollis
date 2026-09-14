@@ -61,7 +61,7 @@ jobs:
         run: pnpm install --filter pollis-delivery-worker
 
       - name: Install Doppler CLI
-        uses: dopplerhq/cli-action@014df23b1329b615816a38eb5f473bb9000700b1 # v3
+        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
 
       # Skip the deploy as a green no-op until the env is configured with
       # CLOUDFLARE_API_TOKEN + DOPPLER_TOKEN — so merging the migration doesn't
