@@ -72,8 +72,10 @@ block (`ssl_preread`), because only one process can bind 443:
 ## Workflow requirements (one-time)
 
 - **Secrets:** `VPS_SSH_KEY` (deploy private key; add the pubkey to the box's
-  `authorized_keys`), `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` (must match what
-  shipped clients use).
+  `authorized_keys`), and **two** LiveKit pairs — `LIVEKIT_API_KEY` /
+  `LIVEKIT_API_SECRET` (prod) and `LIVEKIT_DEV_API_KEY` /
+  `LIVEKIT_DEV_API_SECRET` (dev). Both must match the corresponding Doppler
+  config, since the DS is what mints tokens; see "LiveKit API keys" below.
 - **Variables:** `VPS_HOST` (`31.97.140.76`), `VPS_USER` (`root`).
 - **GitHub Environment** `livekit-prod` (+ `livekit-dev` if used) for the
   optional manual-approval gate.
@@ -170,6 +172,47 @@ echo "net.core.rmem_default=5000000" >> /etc/sysctl.conf
 ### 4. Delivery Service
 Stand up `delivery` / `delivery-dev` / `watchtower` (#407) so nginx's upstreams
 resolve, then hit the **Deploy LiveKit + nginx** button.
+
+## LiveKit API keys
+
+One server, **two** key pairs — both DS deployments (`api.pollis.com` and
+`api-dev.pollis.com`) connect to `wss://rtc.pollis.com`, and LiveKit rejects a
+token signed by any key absent from its `keys:` block.
+
+| Pair | Doppler config | GitHub secret | Used by |
+|------|----------------|---------------|---------|
+| prod | `pollis/prd_prod` | `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | prod DS |
+| dev  | `pollis/dev_personal` | `LIVEKIT_DEV_API_KEY` / `LIVEKIT_DEV_API_SECRET` | dev DS, local `.env.development` |
+
+Note the asymmetry: **both** Doppler configs name the secrets `LIVEKIT_API_KEY`
+/ `LIVEKIT_API_SECRET` (that is what `broker.rs` reads, and each DS only ever
+sees its own config); the `LIVEKIT_DEV_*` names exist only on the GitHub side,
+where one workflow needs both pairs at once to render them into a single file.
+
+The pairs must stay distinct — the DS derives room names and participant
+identities by HMAC over `LIVEKIT_API_SECRET`, so a shared secret would give dev
+and prod the same room pseudonym for the same conversation.
+
+### Rotating
+
+Rotation is self-healing rather than a break: it invalidates outstanding tokens,
+and clients re-request one in a round trip they were already going to make. Only
+calls in progress at the moment of the switch drop. Rooms are re-keyed (see
+`room_id.rs`), which is expected.
+
+```bash
+# 1. Generate (canonical format, from the pinned image)
+docker run --rm --entrypoint /livekit-server \
+  livekit/livekit-server:v1.10.0 generate-keys
+```
+
+2. Write the new values to Doppler (`pollis/prd_prod`, `pollis/dev_personal`),
+   the GitHub repo secrets, and your local `.env.production` / `.env.development`.
+3. **Deploy LiveKit first** (this workflow) so the server accepts the new keys.
+4. Then re-run **Deploy Delivery Service (prod)** and **(dev)** — the DS reads
+   its keys from the Cloudflare Secrets Store, which `sync-ds-secrets.sh`
+   repopulates from Doppler on each deploy. Until that runs, the DS keeps
+   minting tokens with the old key and the server refuses them.
 
 ## App connection
 

@@ -135,6 +135,16 @@ and get the new name in the same round trip.
 These are stable pseudonyms, not unlinkable ones — one name per conversation for the life
 of the secret.
 
+**Dev and prod hold different secrets, and must.** Both DS deployments point at the one
+`wss://rtc.pollis.com`, whose `keys:` block carries two pairs (see
+[`livekit/DEPLOY.md`](../../livekit/DEPLOY.md) → "LiveKit API keys"). Because the room and
+participant pseudonyms are HMACs keyed off `LIVEKIT_API_SECRET`, a secret shared across
+the two environments would derive the *same* room name for the same conversation in both
+— a dev-minted token would then join the production room. The deploy workflow refuses to
+render two identical keys. Rotation procedure — including the ordering (LiveKit first,
+then both DS deploys, since the DS reads its key from the Cloudflare Secrets Store that
+`sync-ds-secrets.sh` repopulates from Doppler) — is in `DEPLOY.md`.
+
 ### Participant identities are pseudonymous too (#836)
 
 Room names alone said nothing about *who* was in a room: identity was still

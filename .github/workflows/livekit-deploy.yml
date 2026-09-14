@@ -58,6 +58,8 @@ jobs:
           [ -n "${{ secrets.VPS_SSH_KEY }}" ] || missing+=("secrets.VPS_SSH_KEY")
           [ -n "${{ secrets.LIVEKIT_API_KEY }}" ] || missing+=("secrets.LIVEKIT_API_KEY")
           [ -n "${{ secrets.LIVEKIT_API_SECRET }}" ] || missing+=("secrets.LIVEKIT_API_SECRET")
+          [ -n "${{ secrets.LIVEKIT_DEV_API_KEY }}" ] || missing+=("secrets.LIVEKIT_DEV_API_KEY")
+          [ -n "${{ secrets.LIVEKIT_DEV_API_SECRET }}" ] || missing+=("secrets.LIVEKIT_DEV_API_SECRET")
           if [ "${#missing[@]}" -ne 0 ]; then
             printf '::error::Missing required config: %s\n' "${missing[*]}"
             exit 1
@@ -67,13 +69,33 @@ jobs:
         env:
           LIVEKIT_API_KEY: ${{ secrets.LIVEKIT_API_KEY }}
           LIVEKIT_API_SECRET: ${{ secrets.LIVEKIT_API_SECRET }}
+          LIVEKIT_DEV_API_KEY: ${{ secrets.LIVEKIT_DEV_API_KEY }}
+          LIVEKIT_DEV_API_SECRET: ${{ secrets.LIVEKIT_DEV_API_SECRET }}
         run: |
           set -euo pipefail
           # The committed livekit.yml has no `keys:` block by design; append it
           # here so the secret only ever lives on the runner + the box, never git.
+          #
+          # TWO pairs, because ONE server serves both environments. The prod DS
+          # (api.pollis.com) and the dev DS (api-dev.pollis.com) both point at
+          # wss://rtc.pollis.com, and LiveKit only honours the keys listed here —
+          # so while this block carried a single pair, every token the dev DS
+          # minted was rejected by the server and dev voice simply did not work.
+          #
+          # They are DISTINCT pairs rather than one shared pair on purpose. The DS
+          # derives room names and participant identities by HMAC over
+          # LIVEKIT_API_SECRET (pollis-delivery/src/{room_id,participant_id}.rs),
+          # so a shared secret would make dev and prod derive the SAME room
+          # pseudonym for the same conversation — a dev-minted token would join a
+          # production room. Separate secrets keep the two namespaces disjoint.
+          if [ "${LIVEKIT_API_KEY}" = "${LIVEKIT_DEV_API_KEY}" ]; then
+            echo "::error::LIVEKIT_API_KEY and LIVEKIT_DEV_API_KEY are identical — LiveKit would keep only one, and the dev/prod pseudonym namespaces would collide."
+            exit 1
+          fi
           {
             printf '\nkeys:\n'
             printf '  %s: %s\n' "${LIVEKIT_API_KEY}" "${LIVEKIT_API_SECRET}"
+            printf '  %s: %s\n' "${LIVEKIT_DEV_API_KEY}" "${LIVEKIT_DEV_API_SECRET}"
           } >> livekit/livekit.yml
 
       - name: Preflight — TURN hostname resolves straight to this box

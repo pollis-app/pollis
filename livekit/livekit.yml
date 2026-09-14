@@ -44,10 +44,22 @@ turn:
   relay_range_end: 30999
 
 # NOTE: the `keys:` block is intentionally NOT committed. The deploy workflow
-# (.github/workflows/livekit-deploy.yml) appends it on the box from the
-# LIVEKIT_API_KEY / LIVEKIT_API_SECRET GitHub secrets:
+# (.github/workflows/livekit-deploy.yml) appends it on the box from four GitHub
+# secrets — TWO pairs, because this one server serves both environments:
 #
 #   keys:
-#     <LIVEKIT_API_KEY>: <LIVEKIT_API_SECRET>
+#     <LIVEKIT_API_KEY>: <LIVEKIT_API_SECRET>              # prod DS (api.pollis.com)
+#     <LIVEKIT_DEV_API_KEY>: <LIVEKIT_DEV_API_SECRET>      # dev DS  (api-dev.pollis.com)
+#
+# Both DS deployments point at wss://rtc.pollis.com, and LiveKit rejects a token
+# signed by any key not listed here. While this block carried only the prod pair,
+# dev voice was dead on arrival — the dev DS minted perfectly valid tokens that
+# the server refused.
+#
+# The pairs must stay DISTINCT. The DS derives room names and participant
+# identities by HMAC over LIVEKIT_API_SECRET (pollis-delivery/src/room_id.rs and
+# participant_id.rs), so one shared secret across both environments would map the
+# same conversation to the same room pseudonym in both — a dev client would join
+# the production room. The deploy workflow refuses to render two identical keys.
 #
 # A bare checkout of this file therefore carries no credentials by design.
