@@ -80,7 +80,10 @@ pub type AccountSigningKey = SigningKey<MlDsa44>;
 /// `A3-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX` (6 groups of 5 Crockford base32 chars).
 pub fn generate_secret_key_string() -> String {
     let mut rng = OsRng;
-    let mut body = String::with_capacity(SECRET_KEY_BODY_CHARS);
+    // The raw body IS the secret. `Zeroizing` so it does not outlive this
+    // function as readable heap; `with_capacity` so `push` never reallocates
+    // and strands a copy the wipe cannot reach (#1141).
+    let mut body = Zeroizing::new(String::with_capacity(SECRET_KEY_BODY_CHARS));
     for _ in 0..SECRET_KEY_BODY_CHARS {
         // Take a fresh random byte and reduce to 5 bits — rejection is
         // unnecessary because 32 divides 256 evenly.
@@ -105,12 +108,14 @@ pub fn generate_secret_key_string() -> String {
 /// `SECRET_KEY_BODY_CHARS` characters from the Crockford alphabet.
 ///
 /// Returned string is the raw body, suitable for feeding into HKDF as IKM.
-pub fn normalize_secret_key(input: &str) -> Result<String> {
-    let cleaned: String = input
-        .chars()
-        .filter(|c| !c.is_whitespace())
-        .collect::<String>()
-        .to_uppercase();
+pub fn normalize_secret_key(input: &str) -> Result<Zeroizing<String>> {
+    // Both the filtered copy and the uppercased one carry the secret, so both
+    // are wiped — `to_uppercase` allocates a second buffer and drops the first,
+    // which is precisely the copy that used to linger (#1141).
+    let filtered = Zeroizing::new(
+        input.chars().filter(|c| !c.is_whitespace()).collect::<String>(),
+    );
+    let cleaned = Zeroizing::new(filtered.to_uppercase());
 
     let body_with_dashes = cleaned.strip_prefix(&format!("{SECRET_KEY_VERSION}-")).ok_or_else(|| {
         Error::Crypto(format!(
@@ -118,7 +123,9 @@ pub fn normalize_secret_key(input: &str) -> Result<String> {
         ))
     })?;
 
-    let body: String = body_with_dashes.chars().filter(|c| *c != '-').collect();
+    let body = Zeroizing::new(
+        body_with_dashes.chars().filter(|c| *c != '-').collect::<String>(),
+    );
 
     if body.len() != SECRET_KEY_BODY_CHARS {
         return Err(Error::Crypto(format!(
@@ -141,10 +148,10 @@ pub fn normalize_secret_key(input: &str) -> Result<String> {
 
 // ── Key derivation and AEAD ──────────────────────────────────────────────────
 
-fn derive_wrap_key(secret_key_body: &str, salt: &[u8]) -> [u8; 32] {
+fn derive_wrap_key(secret_key_body: &str, salt: &[u8]) -> Zeroizing<[u8; 32]> {
     let hk = Hkdf::<Sha256>::new(Some(salt), secret_key_body.as_bytes());
-    let mut out = [0u8; 32];
-    hk.expand(HKDF_INFO, &mut out)
+    let mut out = Zeroizing::new([0u8; 32]);
+    hk.expand(HKDF_INFO, &mut *out)
         .expect("HKDF-SHA256 expand 32 bytes is always valid");
     out
 }
@@ -156,10 +163,17 @@ fn aes_gcm_encrypt(key: &[u8; 32], nonce: &[u8; NONCE_LEN], plaintext: &[u8]) ->
         .map_err(|e| Error::Crypto(format!("aes-256-gcm encrypt: {e}")))
 }
 
-fn aes_gcm_decrypt(key: &[u8; 32], nonce: &[u8; NONCE_LEN], ciphertext: &[u8]) -> Result<Vec<u8>> {
+/// Returns `Zeroizing` because on every call site here the plaintext IS the
+/// account seed (#1141).
+fn aes_gcm_decrypt(
+    key: &[u8; 32],
+    nonce: &[u8; NONCE_LEN],
+    ciphertext: &[u8],
+) -> Result<Zeroizing<Vec<u8>>> {
     let cipher = Aes256Gcm::new(GenericArray::from_slice(key));
     cipher
         .decrypt(GenericArray::from_slice(nonce), ciphertext)
+        .map(Zeroizing::new)
         .map_err(|e| Error::Crypto(format!("aes-256-gcm decrypt: {e}")))
 }
 
@@ -175,7 +189,7 @@ pub fn unwrap_recovery_blob(
     salt: &[u8],
     nonce: &[u8],
     wrapped_key: &[u8],
-) -> Result<Vec<u8>> {
+) -> Result<Zeroizing<Vec<u8>>> {
     let body = normalize_secret_key(secret_key_input)?;
     let wrap_key = derive_wrap_key(&body, salt);
 
@@ -245,9 +259,9 @@ pub async fn generate_account_identity_material(
     rng.fill_bytes(&mut nonce);
 
     let wrap_key = derive_wrap_key(&secret_key_body, &salt);
-    let wrapped = aes_gcm_encrypt(&wrap_key, &nonce, &private_bytes)?;
+    let wrapped = aes_gcm_encrypt(&wrap_key, &nonce, &*private_bytes)?;
 
-    *state.unlock.lock().await = Some(unlock_state_with_fresh_db_key(user_id, &private_bytes));
+    *state.unlock.lock().await = Some(unlock_state_with_fresh_db_key(user_id, &*private_bytes));
 
     Ok((
         secret_key_display,
@@ -263,10 +277,10 @@ pub async fn generate_account_identity_material(
 /// Draw a fresh account identity keypair, returned as `(32-byte seed, encoded
 /// 1312-byte public key)`. The seed — not the expanded key — is what every
 /// storage and transfer path carries.
-fn generate_account_keypair(rng: &mut OsRng) -> ([u8; ACCOUNT_SEED_LEN], Vec<u8>) {
-    let mut seed = [0u8; ACCOUNT_SEED_LEN];
-    rng.fill_bytes(&mut seed);
-    let signing_key = AccountSigningKey::from_seed(&seed.into());
+fn generate_account_keypair(rng: &mut OsRng) -> (Zeroizing<[u8; ACCOUNT_SEED_LEN]>, Vec<u8>) {
+    let mut seed = Zeroizing::new([0u8; ACCOUNT_SEED_LEN]);
+    rng.fill_bytes(&mut *seed);
+    let signing_key = AccountSigningKey::from_seed(&(*seed).into());
     let public_bytes = signing_key.verifying_key().encode().to_vec();
     (seed, public_bytes)
 }
@@ -440,7 +454,7 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
     let mut nonce = [0u8; NONCE_LEN];
     rng.fill_bytes(&mut nonce);
     let wrap_key = derive_wrap_key(&secret_key_body, &salt);
-    let wrapped = aes_gcm_encrypt(&wrap_key, &nonce, &private_bytes)?;
+    let wrapped = aes_gcm_encrypt(&wrap_key, &nonce, &*private_bytes)?;
 
     // 3. Rotate the account identity. The `account_key_log` is an append-only,
     //    transparency-backed log (#419 domains E+G): the version bump, the log
@@ -505,7 +519,7 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
     // 4. Install the new private key in AppState.unlock so the calling
     //    device is enrolled under the new identity. The bytes never
     //    touch the keystore unwrapped — set_pin will wrap them.
-    *state.unlock.lock().await = Some(unlock_state_with_fresh_db_key(user_id, &private_bytes));
+    *state.unlock.lock().await = Some(unlock_state_with_fresh_db_key(user_id, &*private_bytes));
 
     // 5. Re-sign every existing `user_device` row for this user against
     //    the freshly rotated account identity. Without this, every
@@ -688,7 +702,7 @@ mod tests {
         let plaintext = b"32-byte-account-key-seed-0000000";
         let ct = aes_gcm_encrypt(&wrap_key, &nonce, plaintext).unwrap();
         let pt = aes_gcm_decrypt(&wrap_key, &nonce, &ct).unwrap();
-        assert_eq!(pt, plaintext);
+        assert_eq!(&*pt, plaintext);
     }
 
     /// A test device's two leaf public keys: `(ed25519_pub, mldsa_pub)`.
@@ -887,7 +901,7 @@ mod tests {
         let (seed, public_bytes) = generate_account_keypair(&mut rng);
         assert_eq!(seed.len(), 32);
         assert_eq!(public_bytes.len(), MLDSA44_PUB_LEN);
-        assert!(account_id_pub_matches(&seed, &public_bytes));
+        assert!(account_id_pub_matches(&*seed, &public_bytes));
     }
 
     #[test]
@@ -909,7 +923,7 @@ mod tests {
         // User types it back with noise — should still unwrap.
         let noisy = format!(" {}\n", sk_display.to_lowercase());
         let unwrapped = unwrap_recovery_blob(&noisy, &salt, &nonce, &wrapped).unwrap();
-        assert_eq!(unwrapped, private.to_vec());
+        assert_eq!(*unwrapped, private.to_vec());
     }
 
     #[test]

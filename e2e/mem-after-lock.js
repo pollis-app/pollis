@@ -20,6 +20,13 @@ function pidOfApp() {
   return pids[pids.length - 1]; // newest
 }
 
+// HOUSEKEEPING: every run leaves a core in systemd's store (root-owned,
+// ~8 MB compressed) that CONTAINS THE THROWAWAY ACCOUNT'S SECRET KEY. They age
+// out on systemd's retention, but after a session of repeated runs it is worth
+// `sudo coredumpctl --since=today ... ` / clearing
+// /var/lib/systemd/coredump by hand. The local copy this script greps is
+// deleted immediately; the systemd one is not ours to remove.
+//
 // Dump WITHOUT ptrace. `gcore` and /proc/pid/mem both need
 // CAP_SYS_PTRACE or kernel.yama.ptrace_scope=0 (this box is =1), which needs
 // root we do not have. But core_pattern pipes to systemd-coredump and
@@ -124,7 +131,15 @@ async function main() {
     await h.waitTestId(browser, "app-ready", 60000);
     console.log("[mem] app-ready (UNLOCKED)");
 
-    const needles = [["secretKey", secretKey], ["PIN", PIN]];
+    // Two forms of the same secret, because they have different fates.
+    //   - display: "A3-XXXXX-...", the string handed to the UI. It crosses
+    //     serde + IPC into the webview, so pollis-core cannot wipe every copy
+    //     and this one is expected to linger until the allocator reuses it.
+    //   - body: the dash-free, version-free payload. This is what HKDF consumes
+    //     and what the key-material buffers hold; #1141's fix made those
+    //     `Zeroizing`, so THIS is the needle that should come back 0.
+    const secretBody = secretKey.replace(/^A3-/, "").replace(/-/g, "");
+    const needles = [["secretKey", secretKey], ["secretBody", secretBody], ["PIN", PIN]];
     const pid = pidOfApp();
     console.log(`[mem] app pid = ${pid}`);
 
@@ -153,10 +168,12 @@ async function main() {
         " resident while unlocked" + (ok ? "" : " - probe not measuring what it claims"));
       code = ok ? 0 : 1;
     } else {
-      const clean = found.secretKey === 0 && found.PIN === 0;
-      console.log("[mem] VERDICT(locked): secretKey=" + found.secretKey +
-        " PIN=" + found.PIN + " - " +
-        (clean ? "ZEROIZED (neither survives lock)" : "SECRETS SURVIVE LOCK"));
+      console.log("[mem] VERDICT(locked): display=" + found.secretKey +
+        " body=" + found.secretBody + " PIN=" + found.PIN);
+      console.log("[mem]   key material (body): " +
+        (found.secretBody === 0 ? "WIPED" : "SURVIVES LOCK"));
+      console.log("[mem]   display copy: " +
+        (found.secretKey === 0 ? "gone" : "lingers (crosses serde/IPC - see #1141)"));
       code = 0;
     }
     console.log("[mem] DONE");
