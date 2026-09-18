@@ -22,6 +22,33 @@ url = "https://raw.githubusercontent.com/mozilla/supply-chain/main/audits.toml"
 [imports.zcash]
 url = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
 
+[policy.openmls]
+audit-as-crates-io = true
+
+[policy.openmls_basic_credential]
+audit-as-crates-io = true
+
+[policy.openmls_libcrux_crypto]
+audit-as-crates-io = true
+
+[policy.openmls_memory_storage]
+audit-as-crates-io = true
+
+[policy.openmls_rust_crypto]
+audit-as-crates-io = true
+
+[policy.openmls_serialization_helpers]
+audit-as-crates-io = true
+
+[policy.openmls_sqlite_storage]
+audit-as-crates-io = true
+
+[policy.openmls_test]
+audit-as-crates-io = true
+
+[policy.openmls_traits]
+audit-as-crates-io = true
+
 [[exemptions.aead]]
 version = "0.5.2"
 criteria = "safe-to-deploy"
@@ -937,6 +964,7 @@ criteria = "safe-to-deploy"
 [[exemptions.h2]]
 version = "0.3.27"
 criteria = "safe-to-deploy"
+notes = "No independent review performed. HTTP/2 implementation, reached only transitively via libsql -> tonic 0.11 -> hyper 0.14 (see the RUSTSEC-2026-0258 [advisories] entry above for the reachability analysis: this is an outbound client to Turso only, never the DS's untrusted-facing listener, which runs axum 0.8 on hyper 1.9 without h2). Widely used (the de facto Rust HTTP/2 crate, underlies most of the hyper ecosystem); exempted on that ecosystem-maturity basis, not a line-by-line read."
 
 [[exemptions.half]]
 version = "2.7.1"
@@ -1045,10 +1073,12 @@ criteria = "safe-to-deploy"
 [[exemptions.hyper]]
 version = "0.14.32"
 criteria = "safe-to-deploy"
+notes = "No independent review performed. Pulled in transitively via libsql -> tonic 0.11 (outbound client to Turso only; see the h2 0.3 note above for why this line never faces untrusted input). Exempted on the strength of hyperium/hyper's status as the standard Rust HTTP implementation, not a source read."
 
 [[exemptions.hyper]]
 version = "1.9.0"
 criteria = "safe-to-deploy"
+notes = "No independent review performed. This is the version on the surface that DOES face untrusted input: pollis-delivery's axum 0.8 listener runs on hyper 1.9 (per the RUSTSEC-2026-0258 [advisories] note above), and reqwest's outbound HTTPS client (DS API calls, LiveKit) also resolves to this line. Higher-stakes than the 0.14 line above for that reason; exempted on hyperium's maturity/maintenance track record, not a line-by-line read — a real audit of this crate would be a better use of first-party review time than most others in this file."
 
 [[exemptions.hyper-rustls]]
 version = "0.25.0"
@@ -1686,6 +1716,51 @@ criteria = "safe-to-deploy"
 version = "5.3.4"
 criteria = "safe-to-deploy"
 
+[[exemptions.openmls]]
+version = "0.8.1@git:34222ef632c87df58baaa7614c8a72ac235c5f07"
+criteria = "safe-to-deploy"
+notes = "No independent review performed — see the LOUD NOTICE above [policy.openmls]. This is the RFC 9420 MLS engine and this app's entire E2EE guarantee sits on it; pinned by exact rev in the workspace Cargo.toml's [patch.crates-io] because the PQ ciphersuite point 0x0052 this app negotiates ships in no released version. Trust rationale absent a line-by-line review: openmls is maintained by the IETF MLS working group's reference-implementation team (Phoenix R&D / former Wire team), used by Wire and other production MLS deployments, developed in the open with a public issue tracker, and this pin tracks upstream `main` deliberately (not a stale fork). None of that substitutes for a real audit — it is why the risk is accepted, not evidence the risk is absent."
+
+[[exemptions.openmls_basic_credential]]
+version = "0.5.0@git:34222ef632c87df58baaa7614c8a72ac235c5f07"
+criteria = "safe-to-deploy"
+notes = "Same openmls-repo rev as [[exemptions.openmls]]; no independent review performed. Small crate (basic/X.509-less credential type used to bind MLS leaves to Pollis device identities) but still part of the trust boundary the MLS handshake authenticates against."
+
+[[exemptions.openmls_libcrux_crypto]]
+version = "0.3.1@git:34222ef632c87df58baaa7614c8a72ac235c5f07"
+criteria = "safe-to-deploy"
+notes = "Same openmls-repo rev; no independent review performed. Per the RUSTSEC-2026-0211-era comment in [advisories] above, #668 moved this app's PQ suite off the libcrux backend onto RustCrypto (0x0052), but the crate still resolves in this Cargo.lock as part of the same git workspace and cargo-vet's own graph (all-features, all-targets) counts it — exempted here for completeness rather than assumed dead weight without re-checking that assumption in this PR."
+
+[[exemptions.openmls_memory_storage]]
+version = "0.5.0@git:34222ef632c87df58baaa7614c8a72ac235c5f07"
+criteria = "safe-to-deploy"
+notes = "Same openmls-repo rev; no independent review performed. In-memory MLS group-state storage provider — one of the two [patch.crates-io]-pinned storage backends."
+
+[[exemptions.openmls_rust_crypto]]
+version = "0.5.1@git:34222ef632c87df58baaa7614c8a72ac235c5f07"
+criteria = "safe-to-deploy"
+notes = "Same openmls-repo rev; no independent review performed. This is the RustCrypto-backed crypto provider openmls is actually configured to use (see the libcrux note above) — i.e. the crate that performs the real key-schedule/AEAD/signature operations behind the MLS API, making it as security-critical as openmls itself."
+
+[[exemptions.openmls_serialization_helpers]]
+version = "0.1.0@git:34222ef632c87df58baaa7614c8a72ac235c5f07"
+criteria = "safe-to-deploy"
+notes = "Same openmls-repo rev; no independent review performed. Proc-macro crate (derive helpers for openmls's own wire (de)serialization) — compile-time only, not linked into the shipped binary's runtime, but still part of what the pinned rev builds."
+
+[[exemptions.openmls_sqlite_storage]]
+version = "0.2.0@git:34222ef632c87df58baaa7614c8a72ac235c5f07"
+criteria = "safe-to-deploy"
+notes = "Same openmls-repo rev; no independent review performed. Resolves in this Cargo.lock as a sibling crate in the same git workspace; exempted for completeness alongside openmls_memory_storage rather than assumed unused without re-checking."
+
+[[exemptions.openmls_test]]
+version = "0.2.1@git:34222ef632c87df58baaa7614c8a72ac235c5f07"
+criteria = "safe-to-deploy"
+notes = "Same openmls-repo rev; no independent review performed. openmls's own internal test-support crate; resolves in cargo-vet's all-features graph even though it is not something Pollis code calls directly."
+
+[[exemptions.openmls_traits]]
+version = "0.5.0@git:34222ef632c87df58baaa7614c8a72ac235c5f07"
+criteria = "safe-to-deploy"
+notes = "Same openmls-repo rev; no independent review performed. Defines the trait boundary (crypto provider, storage provider) the rest of the openmls family implements — the contract every other crate in this exemption block is reviewed against, so it carries the same weight as openmls itself despite being 'just traits'."
+
 [[exemptions.openssl-probe]]
 version = "0.1.6"
 criteria = "safe-to-deploy"
@@ -1993,10 +2068,12 @@ criteria = "safe-to-deploy"
 [[exemptions.quinn]]
 version = "0.11.9"
 criteria = "safe-to-deploy"
+notes = """No independent review performed. Direct dependency of pollis-core and pollis-relay (`quinn = { version = "0.11", features = ["ring", "runtime-tokio", "rustls"] }` in both Cargo.tomls) — QUIC transport for the relay hydra (#616), so it parses untrusted network input directly, unlike most of this file's transitive TLS-stack entries. Maintained by the same team as the rustls project; exempted on that provenance, not a source read — a stronger candidate for an actual first-party audit than most crates here given it is a direct, untrusted-input-facing dependency."""
 
 [[exemptions.quinn-proto]]
 version = "0.11.16"
 criteria = "safe-to-deploy"
+notes = "No independent review performed. quinn's protocol-state-machine crate (the part that actually decodes QUIC packets from the wire) — same untrusted-input exposure and provenance rationale as [[exemptions.quinn]] above."
 
 [[exemptions.quinn-udp]]
 version = "0.5.14"
@@ -2121,6 +2198,7 @@ criteria = "safe-to-deploy"
 [[exemptions.ring]]
 version = "0.17.14"
 criteria = "safe-to-deploy"
+notes = "No independent review performed. The AEAD/hash/HMAC/RSA-verify primitives underneath rustls across this whole tree (reqwest's TLS to the DS/LiveKit, quinn's QUIC, tonic/libsql's TLS to Turso) — one of the highest-stakes crates in this file since it is the actual crypto, not a protocol shell around someone else's crypto. Exempted on ring's status as the most widely-deployed Rust crypto primitive crate (BoringSSL-derived, used by rustls/quinn/webpki upstream), not a source read. If first-party review time is spent anywhere in this file, this crate is one of the top candidates."
 
 [[exemptions.rodio]]
 version = "0.19.0"
@@ -2157,14 +2235,17 @@ criteria = "safe-to-deploy"
 [[exemptions.rustls]]
 version = "0.21.12"
 criteria = "safe-to-deploy"
+notes = "No independent review performed. Old line pinned transitively via livekit's own rustls dependency (see the RUSTSEC-2026-0049/-0104 [advisories] notes above — this is exactly the stale line those ignores describe, still on old rustls-webpki because livekit hasn't bumped). Exempted on rustls's overall track record (memory-safe-by-construction TLS, backed by the Rustls/ISRG team whose own audits.toml we import above), not a source read of this specific old line."
 
 [[exemptions.rustls]]
 version = "0.22.4"
 criteria = "safe-to-deploy"
+notes = "No independent review performed. Pinned transitively via libsql's TLS stack to Turso (see RUSTSEC-2026-0098/-0099 [advisories] notes above — same stale-rustls-webpki situation as the 0.21 line, different upstream). Same trust rationale as the other rustls entries in this file."
 
 [[exemptions.rustls]]
 version = "0.23.45"
 criteria = "safe-to-deploy"
+notes = "No independent review performed. This is the current, non-stale line this app uses directly via reqwest/hyper-rustls for outbound HTTPS to the DS and LiveKit (and via tokio-rustls elsewhere) — already on the fixed rustls-webpki 0.103.15 line, unlike the 0.21/0.22 entries above. Exempted on rustls's maintenance and design track record (memory-safe by construction, ISRG-affiliated); note this exact version/criteria pair is NOT satisfied by the isrg/mozilla imports above even though those bring in real third-party audits for other crates in this tree, so no claim is being borrowed from them here."
 
 [[exemptions.rustls-native-certs]]
 version = "0.7.3"
@@ -2193,14 +2274,17 @@ criteria = "safe-to-deploy"
 [[exemptions.rustls-webpki]]
 version = "0.101.7"
 criteria = "safe-to-deploy"
+notes = "No independent review performed. The stale line named directly in the RUSTSEC-2026-0104 [advisories] ignore above (pinned via livekit's rustls 0.21); X.509 chain validation, so a real-world attack surface (a malicious cert) reaches this code even though the transport is TLS. Exempted on webpki's provenance (Rustls-project-maintained, BoringSSL/Chromium-derived validation logic), not a source read — the reachability argument in [advisories] is the actual mitigation, this exemption only says vet has no independent opinion on the code itself."
 
 [[exemptions.rustls-webpki]]
 version = "0.102.8"
 criteria = "safe-to-deploy"
+notes = "No independent review performed. Same situation as the 0.101.7 entry above, pinned via libsql's rustls 0.22 (RUSTSEC-2026-0098/-0099)."
 
 [[exemptions.rustls-webpki]]
 version = "0.103.15"
 criteria = "safe-to-deploy"
+notes = "No independent review performed. This is the fixed, non-stale line this app's direct TLS usage resolves to (paired with rustls 0.23.45 above); no open RUSTSEC advisory applies to it. Exempted on webpki's provenance, not a source read."
 
 [[exemptions.rustversion]]
 version = "1.0.22"
