@@ -70,6 +70,19 @@ jobs:
             clang \
             ninja-build
 
+      # KANI VERSION IS PINNED, and must stay pinned. The action's `kani-version`
+      # defaults to `latest`, which made this job depend on upstream's release
+      # schedule: Kani 0.68.0 shipped 2026-09-16 and every run after it failed at
+      # the INSTALL step with "The version of Kani installed was different than
+      # the one requested" — the cached toolchain no longer matched what `latest`
+      # resolved to. Nothing in this repo changed. 0.67.0 is the version the last
+      # green run used.
+      #
+      # A verifier is a merge gate, so its version is part of what "verified"
+      # means: an unpinned one both breaks CI on someone else's release and
+      # silently changes what the proofs were checked under. Upgrading is a
+      # deliberate edit here, with the proofs re-run — not a default.
+      #
       # Runs `cargo kani` over pollis-core. The action installs the pinned Kani
       # toolchain (kani-verifier + `cargo-kani setup`, which fetches CBMC) and
       # caches it. `--package pollis-core --lib` scopes to the library target
@@ -80,6 +93,7 @@ jobs:
       - name: Run Kani proofs (pollis-core)
         uses: model-checking/kani-github-action@2534b7aeb3c6b4b0a5ecc3981bb3e63d47b5b126 # v1
         with:
+          kani-version: '0.67.0'
           args: '--package pollis-core --lib --no-default-features'
 
       # The I1 DS-side head arithmetic + accept decision live in the Delivery
@@ -90,6 +104,7 @@ jobs:
       - name: Run Kani proofs (pollis-delivery)
         uses: model-checking/kani-github-action@2534b7aeb3c6b4b0a5ecc3981bb3e63d47b5b126 # v1
         with:
+          kani-version: '0.67.0'
           args: '--package pollis-delivery --lib'
 
       # Publish what the two verdicts above actually range over (#877). Before
