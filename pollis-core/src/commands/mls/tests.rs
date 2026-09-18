@@ -3101,3 +3101,142 @@ fn tree_before_reflects_the_pre_merge_not_the_pre_pass_snapshot() {
         outcome.tree_before
     );
 }
+
+// ── #1161 C2 / H5 / H4: what a commit-log slot may carry, and what a merge
+//    grafted ─────────────────────────────────────────────────────────────────
+//
+// The DS does not parse commit bytes, so the commit log is an attacker-writable
+// channel in exactly the shape these three findings exploit: a row that is not a
+// commit at all (C2), a row that is one of OUR OWN envelopes replayed (H5), and
+// a commit that grafts a leaf without an Add proposal to read it off (H4).
+
+/// C2: a non-commit row must be damage, never a free advance.
+///
+/// Pre-fix, `process_message` handed back `ApplicationMessage` content, the
+/// catch-all `_` arm logged "skipping", and the function still returned
+/// `Applied` — so the caller's replay counter advanced while the group's real
+/// epoch stood still. From then on every envelope is bucketed at the wrong
+/// epoch, fails to decrypt (`max_past_epochs = 0`), and `watermark.rs` marks it
+/// permanently handled: a fourth message-loss mode, where exactly three are
+/// sanctioned.
+#[test]
+fn an_application_message_in_the_commit_log_is_damage_not_a_free_advance() {
+    let conv = "01JT1161APPMSGINCOMMITSLOT";
+    let (alice_db, bob_db) = alice_and_bob(conv);
+    assert_eq!(member_epoch(&bob_db, conv), 1, "precondition: bob is at epoch 1");
+
+    // Any member can post this to the commit endpoint: it is a perfectly valid
+    // envelope, simply not a commit.
+    let envelope = try_mls_encrypt(&alice_db, conv, b"not a commit").expect("alice seals");
+
+    let outcome = apply_one(&bob_db, conv, 1, &envelope);
+    assert!(
+        matches!(outcome, CommitApply::Recover(RecoverReason::NotACommit)),
+        "a non-commit row must recover, not advance the replay counter, got {outcome:?}",
+    );
+}
+
+/// H5: one of our OWN envelopes, replayed into a commit slot, must not be
+/// mistaken for our own commit.
+///
+/// openmls returns `OwnPrivateMessage` for ANY `PrivateMessage` whose sender leaf
+/// index is ours — the early return fires before the content is decrypted — so
+/// pre-fix this arm merged a staged commit the log had never accepted, landing
+/// the committer on a phantom epoch (#1079) that no other member shares.
+#[test]
+fn our_own_envelope_replayed_into_a_commit_slot_never_merges_a_staged_commit() {
+    let conv = "01JT1161OWNENVELOPEREPLAY0";
+    let (alice_db, bob_db, carol_db) = (make_db(), make_db(), make_db());
+    create_group(&alice_db, conv, "alice");
+    let bob_kp = gen_key_package(&bob_db, "bob");
+    let (_c1, welcome1) = add_member_to_group(&alice_db, conv, &bob_kp);
+    join_via_welcome(&bob_db, &welcome1);
+
+    // An ordinary envelope alice sealed at epoch 1 — the bytes an attacker
+    // replays.
+    let own_envelope = try_mls_encrypt(&alice_db, conv, b"lunch?").expect("alice seals");
+
+    // Alice then stages a commit adding carol and does NOT adopt it: the #411
+    // lost-response state, and the one in which the own-commit branch merges.
+    let carol_kp = gen_key_package(&carol_db, "carol");
+    let (_own_commit, _welcome2) = stage_add_without_merge(&alice_db, conv, &carol_kp);
+    assert_eq!(member_epoch(&alice_db, conv), 1, "precondition: alice unmerged at epoch 1");
+
+    let outcome = apply_one(&alice_db, conv, 1, &own_envelope);
+    assert!(
+        matches!(outcome, CommitApply::Recover(RecoverReason::NotACommit)),
+        "our own envelope in a commit slot must not read as our own commit, got {outcome:?}",
+    );
+}
+
+/// C2's second half: `Applied` reports the epoch the group ACTUALLY reached, so
+/// the caller can check the equality its watermark safety rests on rather than
+/// assume it.
+#[test]
+fn applied_reports_the_epoch_the_group_actually_reached() {
+    let conv = "01JT1161APPLIEDEPOCHREADS0";
+    let (alice_db, bob_db, carol_db) = (make_db(), make_db(), make_db());
+    let (commit2, _w2) = two_members_plus_valid_commit(conv, &alice_db, &bob_db, &carol_db);
+
+    match apply_one(&bob_db, conv, 1, &commit2) {
+        CommitApply::Applied { epoch_after, .. } => {
+            assert_eq!(epoch_after, 2, "the commit at epoch 1 lands the group at epoch 2");
+            assert_eq!(
+                epoch_after,
+                member_epoch(&bob_db, conv),
+                "the reported epoch must be read back off the merged group"
+            );
+        }
+        other => panic!("a valid commit must apply, got {other:?}"),
+    }
+}
+
+/// H4: a leaf grafted by an EXTERNAL JOIN is reported for cross-signing exactly
+/// like one an Add proposal introduced.
+///
+/// An external commit carries no Add — the joiner's leaf arrives in the
+/// UpdatePath — so the pre-fix check, which read the staged commit's Add
+/// proposals, returned an empty list and the leaf was never verdicted, never
+/// flagged, and never triggered the eviction reconcile. That is the whole
+/// defence `external_join_group`'s own doc names for admitting unverified
+/// external joins.
+#[test]
+fn an_externally_joined_leaf_is_reported_for_cross_signing() {
+    let conv = "01JT1161EXTERNALJOINLEAF00";
+    let (alice_db, bob_db) = alice_and_bob(conv);
+    let carol_db = make_db();
+
+    // Alice publishes GroupInfo at epoch 1; carol external-joins off it.
+    let gi_bytes = {
+        let provider = PollisProvider::new(&alice_db);
+        export_group_info_blob(&provider, conv, 0).unwrap().expect("GroupInfo").1
+    };
+    let vgi: VerifiableGroupInfo = {
+        let mut reader: &[u8] = &gi_bytes;
+        match MlsMessageIn::tls_deserialize(&mut reader).unwrap().extract() {
+            MlsMessageBodyIn::GroupInfo(gi) => gi,
+            _ => panic!("expected GroupInfo"),
+        }
+    };
+    let ext_commit = {
+        let provider = PollisProvider::new(&carol_db);
+        build_external_commit(&provider, conv, 0, "carol", &test_device_id("carol"), CS_PQ, vgi)
+            .expect("external join builds")
+            .0
+    };
+
+    // Bob replays it from the log, exactly as the DS serves it.
+    match apply_one(&bob_db, conv, 1, &ext_commit) {
+        CommitApply::Applied { adds, .. } => {
+            assert_eq!(
+                adds.len(),
+                1,
+                "only the joined leaf is new — a commit's ordinary UpdatePath rotates \
+                 encryption keys, not credentials or signature keys; got {adds:?}"
+            );
+            assert_eq!(adds[0].user_id, "carol", "the externally-joined leaf must be verdicted");
+            assert_eq!(adds[0].device_id, test_device_id("carol"));
+        }
+        other => panic!("the external commit must apply, got {other:?}"),
+    }
+}

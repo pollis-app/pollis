@@ -543,13 +543,18 @@ pub async fn resign_stale_device_certs(
 
 // ── Leaf cross-signing ───────────────────────────────────────────────────────
 
-/// One leaf an MLS commit adds, as read off the commit's OWN Add proposals.
+/// One leaf an MLS commit grafts, as read off the MERGED TREE.
 ///
-/// Derived from the `KeyPackage` inside each `AddProposal` of the staged commit
+/// Diffed out of the ratchet tree after the merge (`group_state::grafted_leaves`)
 /// — never from the `added_user_id` / `added_device_ids` columns the committing
 /// client wrote next to it. Those columns are a prefetch hint the DS uses to
 /// fold cert rows into the commit batch; a committer that NULLs or shortens them
 /// changes what is prefetched, not what is verified.
+///
+/// The tree, not the commit's Add proposals: an external-join commit carries no
+/// Add at all — the joiner's leaf arrives in the UpdatePath — so reading
+/// proposals made the check blind to exactly the path that needs it most
+/// (#1161 H4).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AddedLeaf {
     pub user_id: String,

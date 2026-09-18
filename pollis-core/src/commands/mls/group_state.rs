@@ -1439,7 +1439,7 @@ async fn process_one_generation<'h>(
     // 2. Fetch pending commits, and with them the cross-signing rows for every
     //    user the batch's add-metadata HINTS at (#987), so verifying the leaves a
     //    commit adds costs no round trip per add-carrying commit. The leaves
-    //    themselves are read off each commit's Add proposals after staging —
+    //    themselves are diffed out of the merged tree (`grafted_leaves`) —
     //    never off the hint columns, which the committer wrote.
     //
     //    Scoped to ONE lineage: commits of a different generation are encrypted
@@ -1530,9 +1530,9 @@ async fn process_one_generation<'h>(
     // honest add look suspicious by lying here, never make a rogue one pass.
     let directory = IdentityDirectory::new(snapshot.added_identities);
 
-    // 3. Apply each commit in epoch order. Every leaf a commit ADDS — read off
-    //    the staged commit's own Add proposals — is checked against the added
-    //    user's account key; a leaf that is not certified is flagged and evicted
+    // 3. Apply each commit in epoch order. Every leaf a commit GRAFTS — diffed
+    //    out of the tree after the merge, whichever proposal type introduced it
+    //    (#1161 H4) — is checked against the added user's account key; a leaf that is not certified is flagged and evicted
     //    afterwards (see `report_uncertified_leaves`). The commit is still
     //    merged: it won the epoch CAS and is canonical, so refusing it would
     //    strand this device behind the group with no honest way back (the
@@ -1594,7 +1594,7 @@ async fn process_one_generation<'h>(
 
         // All MLS work is synchronous and scoped so nothing !Send crosses
         // the lock().await boundary.
-        let applied = {
+        let applied: Option<u64> = {
             let guard = state.local_db.lock().await;
             let db = match guard.as_ref() {
                 Some(db) => db,
@@ -1604,11 +1604,14 @@ async fn process_one_generation<'h>(
             let outcome =
                 apply_one_commit(&provider, mls_group_id, generation, commit.epoch, &commit_data);
             match outcome {
-                CommitApply::Applied { adds } => {
-                    // Verify AFTER the merge and OFF the commit: a StagedCommit
+                CommitApply::Applied { adds, epoch_after } => {
+                    // Verify AFTER the merge and OFF THE TREE: a StagedCommit
                     // cannot be dropped and re-processed later (its ratchet
                     // generation is consumed), so there is no "defer" — only
-                    // verify-and-flag, with eviction as the remedy.
+                    // verify-and-flag, with eviction as the remedy. `adds` is
+                    // the post-merge tree diff (#1161 H4), so a leaf grafted by
+                    // an external join's UpdatePath is verdicted exactly like
+                    // one an Add proposal introduced.
                     for leaf in adds {
                         let verdict = directory.leaf_verdict(
                             &leaf.user_id,
@@ -1634,7 +1637,26 @@ async fn process_one_generation<'h>(
                         );
                         flagged.push((leaf, commit.epoch, reason, kind));
                     }
-                    true
+                    // #1161 C2: the replay counter and the group's real epoch
+                    // must stay equal — every envelope this pass buckets, and
+                    // therefore every watermark it advances past, is keyed on
+                    // `current_epoch`. So read the epoch back off the merged
+                    // group and CHECK it rather than assuming `+= 1`: a single
+                    // silent divergence here mis-buckets every later envelope,
+                    // and `watermark.rs` then marks each one permanently handled.
+                    if epoch_after != commit.epoch as u64 + 1 {
+                        eprintln!(
+                            "[mls] process_pending_commits: {mls_group_id} applied the commit at \
+                             epoch {} but the group is at epoch {epoch_after}, not {} — refusing \
+                             to replay against a desynchronised counter",
+                            commit.epoch,
+                            commit.epoch + 1
+                        );
+                        recover = Some(RecoverReason::EpochDesync);
+                        None
+                    } else {
+                        Some(epoch_after)
+                    }
                 }
                 CommitApply::Recover(reason) => {
                     eprintln!(
@@ -1647,8 +1669,15 @@ async fn process_one_generation<'h>(
             }
         };
 
-        if applied {
-            current_epoch += 1;
+        // The desync guard above sets `recover` and yields `None` — stop the
+        // replay rather than run the epoch hook against a counter we have just
+        // proved wrong.
+        if recover.is_some() {
+            break;
+        }
+
+        if let Some(epoch_after) = applied {
+            current_epoch = epoch_after;
             any_applied = true;
             // #418 interleave: the commit we just merged advanced the group to
             // `current_epoch`. Decrypt the envelopes sealed at this epoch NOW,
@@ -1959,6 +1988,17 @@ pub(super) enum RecoverReason {
     MalformedCommit,
     /// The deserialized message was not a protocol message.
     NotAProtocolMessage,
+    /// The row is a protocol message but NOT a Commit — an application message
+    /// or a bare proposal sitting in a commit-log slot (#1161 C2). Nothing can
+    /// advance the group's epoch from it, so it is damage, never a free advance.
+    NotACommit,
+    /// The row is a protocol message for a DIFFERENT group id than the lineage
+    /// we are replaying (#1161 C2).
+    WrongGroup,
+    /// The commit merged but left the group at an epoch other than
+    /// `commit.epoch + 1` (#1161 C2). The whole watermark-safety argument rests
+    /// on that equality, so it is checked rather than assumed.
+    EpochDesync,
     /// Merging the staged commit failed (storage error / diverged tree).
     MergeFailed,
     /// Our keys cannot open the commit — we were evicted from the group.
@@ -1979,8 +2019,15 @@ pub(super) enum RecoverReason {
 #[derive(Debug)]
 pub(super) enum CommitApply {
     /// Merged; the local epoch advanced. `adds` are the leaves the commit
-    /// admitted, read off its own Add proposals — the caller verifies them.
-    Applied { adds: Vec<AddedLeaf> },
+    /// GRAFTED — every leaf present in the tree after the merge that was not
+    /// present (at the same index, with the same credential and signature key)
+    /// before it, whichever proposal type introduced it. The caller verifies
+    /// them. `epoch_after` is the epoch the group ACTUALLY reached, read back
+    /// off the merged group rather than inferred.
+    Applied {
+        adds: Vec<AddedLeaf>,
+        epoch_after: u64,
+    },
     /// The local group cannot advance on this lineage and must be rebuilt. The
     /// reason is carried so the caller recovers (external-join) rather than
     /// treating the stop as "caught up". `apply_one_commit` has already deleted
@@ -2072,24 +2119,53 @@ where
         }
     };
 
-    // The leaves this commit adds, for the caller to verify. Read off the
-    // proposals openmls actually staged — the only description of the commit
-    // that a committer cannot decouple from what it did.
-    let mut adds: Vec<AddedLeaf> = Vec::new();
+    // #1161 C2/H5: a commit-log slot may carry a COMMIT for THIS group and
+    // nothing else, and that is checked HERE — before openmls sees the message —
+    // rather than inferred from what `process_message` hands back.
+    //
+    // Both fields are authenticated: `group_id`, `epoch` and `content_type` are
+    // the AAD of a PrivateMessage's AEAD, so a member cannot relabel someone
+    // else's ciphertext and a non-member cannot produce one at all. What they
+    // are NOT is trustworthy by position: the DS does not parse commit bytes, so
+    // ANY member can POST an application message to `/v1/commits`, and every
+    // shape below used to reach a branch that advanced the replay counter (the
+    // catch-all `_` arm) or merged a staged commit (`OwnPrivateMessage`, which
+    // openmls returns for any PrivateMessage from OUR leaf index, commit or
+    // not — the early return fires before the content is decrypted).
+    //
+    // A non-commit here is damage in the log, never a no-op: the replay counter
+    // and `group.epoch()` must stay equal or every later envelope is bucketed at
+    // the wrong epoch, fails to decrypt under `max_past_epochs = 0`, and is then
+    // marked permanently handled by `watermark.rs` — a fourth message-loss mode,
+    // where CLAUDE.md sanctions exactly three.
+    if protocol_msg.group_id() != &group_id {
+        eprintln!(
+            "[mls] process_pending_commits: commit-log row at epoch {commit_epoch} for \
+             {mls_group_id} names a different group id ({:?}) — recovering via external-join",
+            protocol_msg.group_id()
+        );
+        let _ = group.delete(provider.storage());
+        return CommitApply::Recover(RecoverReason::WrongGroup);
+    }
+    if protocol_msg.content_type() != ContentType::Commit {
+        eprintln!(
+            "[mls] process_pending_commits: commit-log row at epoch {commit_epoch} for \
+             {mls_group_id} is a {:?}, not a Commit — recovering via external-join rather than \
+             advancing the replay counter past a row that cannot advance the group",
+            protocol_msg.content_type()
+        );
+        let _ = group.delete(provider.storage());
+        return CommitApply::Recover(RecoverReason::NotACommit);
+    }
+
+    // The tree as it stands BEFORE the merge, so every leaf the commit grafts can
+    // be diffed out of it afterwards — see [`grafted_leaves`].
+    let scheme = signature_scheme(group.ciphersuite());
+    let before = leaf_fingerprints(&group);
+
     match group.process_message(provider, protocol_msg) {
         Ok(processed) => match processed.into_content() {
             ProcessedMessageContent::StagedCommitMessage(staged) => {
-                for queued in staged.add_proposals() {
-                    let kp = queued.add_proposal().key_package();
-                    let leaf = kp.leaf_node();
-                    adds.push(AddedLeaf {
-                        user_id: parse_credential_user_id(leaf.credential()),
-                        device_id: parse_credential_device_id(leaf.credential())
-                            .unwrap_or_default(),
-                        signature_key: leaf.signature_key().as_slice().to_vec(),
-                        scheme: signature_scheme(kp.ciphersuite()),
-                    });
-                }
                 if let Err(e) = group.merge_staged_commit(provider, *staged) {
                     eprintln!("[mls] process_pending_commits: merge failed for {mls_group_id} at epoch {commit_epoch}: {e} — recovering via external-join");
                     let _ = group.delete(provider.storage());
@@ -2116,10 +2192,19 @@ where
             // else.
             ProcessedMessageContent::OwnPendingCommit
             | ProcessedMessageContent::OwnPrivateMessage => {
-                // A commit-log slot always carries a Commit, so an own message
-                // here is always our own commit. If we hold no pending commit to
-                // adopt (e.g. a crash cleared it) we cannot advance from it
-                // locally — rebuild from the published GroupInfo rather than wedge.
+                // The content-type gate above has already established that this
+                // row IS a Commit, which is what makes "our own message" mean
+                // "our own commit" here (#1161 H5). Without it, openmls's
+                // `OwnPrivateMessage` early return — which fires for ANY
+                // PrivateMessage whose sender leaf index is ours, before the
+                // content is decrypted — let a replay of one of our own
+                // application envelopes merge a staged commit onto a branch the
+                // log never accepted (a live #1079 phantom epoch) or force a
+                // rebuild.
+                //
+                // If we hold no pending commit to adopt (e.g. a crash cleared
+                // it) we cannot advance from it locally — rebuild from the
+                // published GroupInfo rather than wedge.
                 if group.pending_commit().is_none() {
                     eprintln!(
                         "[mls] process_pending_commits: own commit at epoch {commit_epoch} for {mls_group_id} but no pending commit to adopt — recovering via external-join"
@@ -2139,13 +2224,18 @@ where
                 );
                 // Fall through so this counts as applied and the epoch advances.
             }
-            // A commit-log slot only ever carries a Commit, so proposal /
-            // application content here is impossible in practice. Treat it as a
-            // no-op advance rather than wedging on an unreachable shape.
+            // Unreachable now that the content type is checked up front — a
+            // proposal or application message never reaches `process_message`.
+            // It is still a `Recover`, never a free advance: "impossible in
+            // practice" is exactly what the old comment here claimed, and the
+            // arm below it advanced the replay counter without advancing the
+            // group (#1161 C2).
             _ => {
                 eprintln!(
-                    "[mls] process_pending_commits: unexpected non-commit content at epoch {commit_epoch} for {mls_group_id} — skipping"
+                    "[mls] process_pending_commits: unexpected non-commit content at epoch {commit_epoch} for {mls_group_id} — recovering via external-join"
                 );
+                let _ = group.delete(provider.storage());
+                return CommitApply::Recover(RecoverReason::NotACommit);
             }
         },
         Err(e) => {
@@ -2165,7 +2255,68 @@ where
         }
     }
 
-    CommitApply::Applied { adds }
+    CommitApply::Applied {
+        adds: grafted_leaves(&before, &group, scheme),
+        epoch_after: group.epoch().as_u64(),
+    }
+}
+
+/// One leaf of a ratchet tree, as the grafted-leaf diff identifies it:
+/// `(position, user, device, signature key)`.
+///
+/// All four together, because each one alone misses a real case. Position alone
+/// misses a leaf swapped into an index that was already occupied; identity alone
+/// misses a second leaf claiming a `(user, device)` the tree already holds.
+type LeafFingerprint = (LeafNodeIndex, String, String, Vec<u8>);
+
+/// Fingerprint every leaf currently in `group`'s tree.
+fn leaf_fingerprints(group: &MlsGroup) -> std::collections::HashSet<LeafFingerprint> {
+    group
+        .members()
+        .map(|m| {
+            (
+                m.index,
+                parse_credential_user_id(&m.credential),
+                parse_credential_device_id(&m.credential).unwrap_or_default(),
+                m.signature_key.clone(),
+            )
+        })
+        .collect()
+}
+
+/// Every leaf a just-merged commit GRAFTED: present in the tree now, absent
+/// from `before`.
+///
+/// #1161 H4: the inbound cross-signing check used to read the staged commit's
+/// **Add proposals**, which made it blind to the one proposal type that grafts a
+/// leaf without one. An external-join commit carries no Add — the joiner's leaf
+/// arrives in the UpdatePath — so a leaf planted by external join was never
+/// verdicted, never flagged, and never triggered the eviction reconcile, even
+/// though `external_join_group`'s own doc names inbound verification by existing
+/// members as the defence that makes an unverified external join safe. Diffing
+/// the tree instead of reading proposals is what makes the check total: it sees
+/// a leaf however it arrived.
+///
+/// A commit's ordinary UpdatePath does NOT read as grafted. Every commit rotates
+/// the committer's own leaf, but rotation changes the ENCRYPTION key; the
+/// credential, the signature key and the index all stay put, and none of those
+/// is something a leaf may change about itself and still be the device its
+/// account certified.
+fn grafted_leaves(
+    before: &std::collections::HashSet<LeafFingerprint>,
+    group: &MlsGroup,
+    scheme: SignatureScheme,
+) -> Vec<AddedLeaf> {
+    leaf_fingerprints(group)
+        .into_iter()
+        .filter(|leaf| !before.contains(leaf))
+        .map(|(_, user_id, device_id, signature_key)| AddedLeaf {
+            user_id,
+            device_id,
+            signature_key,
+            scheme,
+        })
+        .collect()
 }
 
 /// Why a replayed add was flagged — and therefore whether the USER is told
