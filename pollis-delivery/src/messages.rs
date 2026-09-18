@@ -1848,6 +1848,26 @@ const REAP_ORPHANED_VAULT_REFS_SQL: &str = "\
 DELETE FROM vault_attachment_ref \
  WHERE NOT EXISTS (SELECT 1 FROM vault_message vm WHERE vm.id = vault_attachment_ref.vault_message_id)";
 
+/// True when `message_id` names a STILL-EXISTING envelope authored by `user_id`.
+///
+/// Both halves matter. Existence alone was the pre-#690 story and is what made a
+/// forged reference merely inert rather than refused; authorship is what binds
+/// the declaration to an account. A deleted or GC'd envelope answers `false`,
+/// which is correct — there is no message left to declare an attachment for.
+async fn envelope_is_authored_by(
+    conn: &Connection,
+    message_id: &str,
+    user_id: &str,
+) -> anyhow::Result<bool> {
+    let mut rows = conn
+        .query(
+            "SELECT 1 FROM message_envelope WHERE id = ?1 AND sender_id = ?2 LIMIT 1",
+            libsql::params![message_id.to_string(), user_id.to_string()],
+        )
+        .await?;
+    Ok(rows.next().await?.is_some())
+}
+
 pub async fn register_attachment(
     State(state): State<AppState>,
     req: RawRequest,
@@ -1874,17 +1894,36 @@ pub async fn delete_attachment(
 
 /// Register a convergent-encryption dedup row (`content_hash → r2_key`) and,
 /// when a `message_id` is supplied, a `(content_hash, message_id)` REFERENCE
-/// declaration (#690). Authz: any authenticated user. There is no conversation
-/// context at upload time — the row is content-addressed and identical for every
-/// uploader — so there is nothing finer to gate on. The signature still proves a
-/// real device, which is all the no-token model can assert here.
+/// declaration (#690).
 ///
-/// A forged register is inert, not merely fail-safe: the declaration only counts
-/// while a `message_envelope` with that id exists (see [`live_ref_exists`]), and
-/// a member does not control whether a given id names a live envelope. Forging a
-/// reference for a `message_id` it does not own therefore adds a row that never
-/// counts (reaped by [`sweep_envelope_gc`]); it cannot even over-retain, let
-/// alone release someone else's reference.
+/// ## Authz
+///
+/// The OBJECT row is content-addressed and identical for every uploader, so any
+/// authenticated device may register one; there is no conversation context at
+/// upload time and nothing finer to gate on.
+///
+/// The REFERENCE row is different, and used to be ungated — the handler took
+/// `_authed` and discarded it. A reference pins a shared R2 blob against
+/// collection (see [`live_ref_exists`]) and, through `/v1/r2/presign`'s delete
+/// gate, decides whether the UPLOADER may hard-delete their own bytes. So a
+/// reference is now bound to the account that owns the message it names: the
+/// actor must be the `message_envelope.sender_id` of `message_id`. Declaring
+/// "this file belongs to somebody else's message" is not a claim any account
+/// other than that message's author can make.
+///
+/// The old defence was that a forged reference is *inert* — it counts only while
+/// an envelope with that id exists, and the forger does not control that. True
+/// for an id they do not own; useless for an id they do, which is the shape the
+/// attack actually takes. Binding the declaration is what removes the class:
+/// afterwards every `attachment_ref` row joined to a live envelope was written
+/// by that envelope's own author, so the liveness predicate can no longer be
+/// satisfied by an unrelated account's forgery. (The residual — a member of a
+/// conversation pinning a hash they legitimately received onto their OWN live
+/// message — is indistinguishable server-side from an honest forward, and is
+/// noted against the `attachment_object` ownership migration.)
+///
+/// Skipped when `authed` is `None`: the no-auth (harness/dev) path has no actor
+/// to bind to, exactly as the membership gates elsewhere in this module are.
 ///
 /// The object INSERT stays `OR IGNORE` (the row is convergent — identical for
 /// every uploader). The reference INSERT is likewise `OR IGNORE`: the PK
@@ -1894,9 +1933,17 @@ pub async fn delete_attachment(
 /// carries it, and the count must track messages, not uploads.
 pub async fn apply_register_attachment(
     conn: &Connection,
-    _authed: Option<&str>,
+    authed: Option<&str>,
     body: &AttachmentRegisterBody,
 ) -> anyhow::Result<WriteOutcome> {
+    // Decided BEFORE the transaction opens, so a refused registration writes
+    // nothing at all — not even the (harmless) object row, which would otherwise
+    // let a refused caller confirm the shape of the refusal.
+    if let (Some(actor), Some(message_id)) = (authed, body.message_id()) {
+        if !envelope_is_authored_by(conn, message_id, actor).await? {
+            return Ok(WriteOutcome::Forbidden);
+        }
+    }
     let tx = conn.transaction().await?;
     tx.execute(
         "INSERT OR IGNORE INTO attachment_object (content_hash, r2_key) VALUES (?1, ?2)",

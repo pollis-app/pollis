@@ -98,7 +98,7 @@ async fn register_ref(db: &Db, hash: &str, key: &str, msg: &str) {
         r2_key: key.into(),
         message_id: msg.into(),
     };
-    let out = apply_register_attachment(&db.conn().await.unwrap(), Some("u1"), &body)
+    let out = apply_register_attachment(&db.conn().await.unwrap(), Some("sender"), &body)
         .await
         .unwrap();
     assert!(matches!(out, WriteOutcome::Ok));
@@ -476,5 +476,92 @@ async fn r2_presign_get_is_not_gated_but_put_of_a_referenced_object_is() {
         put_new.status(),
         StatusCode::OK,
         "a first upload of an unreferenced hash must still be allowed"
+    );
+}
+
+// ── M5: a reference is bound to the message's author ─────────────────────────
+
+/// **M5.** `/v1/attachments/register` took the authenticated user and discarded
+/// it, so a `(content_hash, message_id)` declaration could name ANY message. A
+/// reference pins the shared R2 blob against collection and, through
+/// `/v1/r2/presign`'s delete gate, decides whether the UPLOADER may hard-delete
+/// their own bytes — so an ungated declaration is a write into somebody else's
+/// retention decision.
+///
+/// The declaration is now bound to `message_envelope.sender_id`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reference_cannot_be_declared_for_another_users_message() {
+    let db = fresh().await;
+    let hash = "f".repeat(64);
+    // The envelope fixture's author is `sender`.
+    add_envelope(&db, "m-owned-by-sender").await;
+
+    let body = AttachmentRegisterBody::ForMessage {
+        content_hash: hash.clone(),
+        r2_key: format!("media/{hash}.enc"),
+        message_id: "m-owned-by-sender".into(),
+    };
+    let out = apply_register_attachment(&db.conn().await.unwrap(), Some("mallory"), &body)
+        .await
+        .unwrap();
+    assert!(
+        matches!(out, WriteOutcome::Forbidden),
+        "a declaration naming another account's message must be refused"
+    );
+    assert!(
+        !referenced(&db, &hash).await,
+        "the forged declaration must not pin the object"
+    );
+    assert!(
+        !object_exists(&db, &hash).await,
+        "a refused registration writes nothing at all"
+    );
+
+    // The author's own declaration for the same message still lands.
+    let out = apply_register_attachment(&db.conn().await.unwrap(), Some("sender"), &body)
+        .await
+        .unwrap();
+    assert!(matches!(out, WriteOutcome::Ok));
+    assert!(referenced(&db, &hash).await);
+}
+
+/// A declaration naming a message that does not exist is refused too, rather
+/// than left as an inert row: there is no message to declare an attachment for,
+/// and the row would only be reaped later by the GC sweep.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reference_cannot_be_declared_for_a_message_that_does_not_exist() {
+    let db = fresh().await;
+    let hash = "e".repeat(64);
+    let body = AttachmentRegisterBody::ForMessage {
+        content_hash: hash.clone(),
+        r2_key: format!("media/{hash}.enc"),
+        message_id: "no-such-message".into(),
+    };
+    let out = apply_register_attachment(&db.conn().await.unwrap(), Some("sender"), &body)
+        .await
+        .unwrap();
+    assert!(matches!(out, WriteOutcome::Forbidden));
+    assert!(!referenced(&db, &hash).await);
+}
+
+/// The upload-time, messageless registration stays open to any authenticated
+/// device: the object row is convergent — identical bytes for every uploader —
+/// and carries no reference, so there is nothing to bind it to.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_object_only_registration_stays_ungated() {
+    let db = fresh().await;
+    let hash = "d".repeat(64);
+    let body = AttachmentRegisterBody::ObjectOnly {
+        content_hash: hash.clone(),
+        r2_key: format!("media/{hash}.enc"),
+    };
+    let out = apply_register_attachment(&db.conn().await.unwrap(), Some("anyone"), &body)
+        .await
+        .unwrap();
+    assert!(matches!(out, WriteOutcome::Ok));
+    assert!(object_exists(&db, &hash).await);
+    assert!(
+        !referenced(&db, &hash).await,
+        "an object with no message reference is not pinned"
     );
 }
