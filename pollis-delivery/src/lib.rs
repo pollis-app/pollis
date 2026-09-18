@@ -687,15 +687,27 @@ async fn submit(State(state): State<AppState>, req: RawRequest) -> Result<Respon
     }
 
     // The MLS control-plane tables live on the commit-log DB (== main DB when no
-    // separate log DB is configured).
+    // separate log DB is configured). MEMBERSHIP lives on the MAIN DB, and the
+    // bundle's Welcome rows are checked against it (C1), so both connections go
+    // in.
     let conn = state.log_db.conn().await?;
+    let main_conn = state.db.conn().await?;
     // Bound to the endpoint's DECLARED response type (#922), not merely to
     // whatever `submit_commit` happens to return: `SubmitResponse` now lives in
     // `pollis-api` next to `SubmitBody`, and this annotation is what makes a
     // drift between the two a compile error here rather than a decode surprise
     // on a client.
     let outcome: <SubmitBody as DsRequest>::Response =
-        commit::submit_commit(&conn, &parsed).await?;
+        match commit::submit_commit(&main_conn, &conn, &parsed).await? {
+            commit::SubmitVerdict::Response(r) => r,
+            // A Welcome in the bundle named a non-member recipient, or tried to
+            // take a pending Welcome away from the member that published it.
+            // Nothing was written.
+            commit::SubmitVerdict::Forbidden => {
+                return Ok(AuthRejection::Forbidden.into_response())
+            }
+            commit::SubmitVerdict::Invalid(why) => return Ok(writes::bad_request(why)),
+        };
 
     // Retention floor (#539, I4): a landed commit advanced the head, so run an
     // EVENT-DRIVEN prune (no timer — repo rule). Best-effort: a prune failure must

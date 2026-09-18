@@ -200,6 +200,25 @@ pub async fn fetch_commits(
     Ok(out)
 }
 
+/// The verdict of `POST /v1/commits`.
+///
+/// Wider than the wire [`SubmitResponse`] because a bundle can now be REFUSED
+/// outright rather than merely losing the epoch race: a Welcome inside it may
+/// name a recipient who is not a member, or try to take a pending Welcome away
+/// from the member that published it. Neither is a CAS outcome, so neither can
+/// be expressed as `Accepted`/`Rejected` — and `SubmitResponse` is the shipped
+/// wire type, which must not grow variants a deployed client cannot decode.
+#[derive(Debug)]
+pub enum SubmitVerdict {
+    /// The ordinary CAS outcome — `Accepted` or `Rejected`.
+    Response(SubmitResponse),
+    /// A Welcome in the bundle is not one this submitter may write (C1). The
+    /// whole bundle is refused; nothing was written.
+    Forbidden,
+    /// The bundle is malformed. `&'static str` so no caller input is echoed.
+    Invalid(&'static str),
+}
+
 /// Submit a commit. Accepts iff `based_on_epoch` is the current head; otherwise
 /// rejects with the head + the missing commits. See the module docs for why
 /// this is race-free / fork-free / gap-free / append-only.
@@ -209,7 +228,44 @@ pub async fn fetch_commits(
 /// guard, and TLC proves that under any interleaving of racing submitters the
 /// log stays one-per-epoch / gapless / head-monotone. The teeth config
 /// (`CommitLogBroken.cfg`) drops exactly this guard and TLC forks the log.
-pub async fn submit_commit(conn: &Connection, body: &SubmitBody) -> Result<SubmitResponse> {
+///
+/// ## Why this takes TWO connections (C1)
+///
+/// The commit log lives on `log_conn`; MEMBERSHIP lives on `main_conn`. Until
+/// this function was given the main connection it could not check the Welcome
+/// rows it writes against the roster, and so it did not — which is precisely
+/// the hole [`crate::writes::apply_welcomes_resubmit`] documents on the sibling
+/// path: *"any member could park a Welcome addressed to an arbitrary
+/// user/device pair — a row `/v1/welcomes/fetch` then hands that device,
+/// inviting it to join a group nobody added it to."* The primary path permitted
+/// exactly that, with the recipient taken verbatim from the request body, so a
+/// member of ANY group (including one they made themselves) could park a
+/// Welcome on any device of any account.
+///
+/// The three gates are now the same on both paths, and are properties of the
+/// ROWS being written rather than of the caller's credential, so they run on the
+/// no-auth (harness) path too:
+///
+///   1. **Bounded blob.** A Welcome may not exceed
+///      [`crate::writes::WELCOME_MAX_BYTES`], the same ceiling a resubmit obeys.
+///   2. **The RECIPIENT is a current member.** The roster is written before the
+///      MLS tree is reconciled to it (`pollis-core`'s reconcile reads the
+///      desired roster from the remote DB and *then* issues the add commit), so
+///      an honest add always has the row already. A forged one never does.
+///   3. **One member may not steal another's pending Welcome.** The
+///      `(conversation_id, recipient_id, recipient_device_id)` tuple is UNIQUE,
+///      so writing it IS an overwrite. An UNDELIVERED Welcome published by a
+///      different member, at this generation or a later one, is defended unless
+///      the submitter is an admin of the conversation's group. A Welcome for a
+///      NEWER generation always wins: a suite migration legitimately re-Welcomes
+///      the whole roster into the successor lineage, and refusing that would
+///      strand the migration behind somebody's stale pending row.
+pub async fn submit_commit(
+    main_conn: &Connection,
+    log_conn: &Connection,
+    body: &SubmitBody,
+) -> Result<SubmitVerdict> {
+    let conn = log_conn;
     let commit = b64_decode(&body.commit)?;
 
     // Decode the GroupInfo / Welcome blobs BEFORE opening the transaction so a
@@ -221,6 +277,30 @@ pub async fn submit_commit(conn: &Connection, body: &SubmitBody) -> Result<Submi
         .iter()
         .map(|w| Ok((w, b64_decode(&w.welcome)?)))
         .collect::<Result<Vec<_>>>()?;
+
+    // ── Gates 1 + 2, BEFORE anything is written ──────────────────────────────
+    //
+    // Both are decided on inputs alone, so deciding them here means a refused
+    // bundle never opens a transaction and never touches the log.
+    for (w, welcome) in &welcomes {
+        if welcome.is_empty() || welcome.len() > crate::writes::WELCOME_MAX_BYTES {
+            return Ok(SubmitVerdict::Invalid("welcome size out of range"));
+        }
+        if !crate::writes::is_member(main_conn, &body.conversation_id, &w.recipient_id).await? {
+            return Ok(SubmitVerdict::Forbidden);
+        }
+    }
+
+    // Gate 3's escape hatch: an admin of the conversation's group may always
+    // re-drive a Welcome. Read once, on the MAIN DB, before the transaction —
+    // the log-DB transaction below cannot see that table when the two databases
+    // are configured separately.
+    let may_override = if welcomes.is_empty() {
+        true
+    } else {
+        crate::writes::is_conversation_admin(main_conn, &body.conversation_id, &body.sender_id)
+            .await?
+    };
 
     // The commit, GroupInfo, and Welcome(s) for one submit are ONE bundle: they
     // all-commit-or-all-rollback. A partial write (commit lands, Welcome fails)
@@ -296,11 +376,11 @@ pub async fn submit_commit(conn: &Connection, body: &SubmitBody) -> Result<Submi
         let missing =
             fetch_commits(&tx, &body.conversation_id, body.generation, body.based_on_epoch).await?;
         tx.rollback().await?;
-        return Ok(SubmitResponse::Rejected {
+        return Ok(SubmitVerdict::Response(SubmitResponse::Rejected {
             head,
             head_generation: head_gen,
             missing,
-        });
+        }));
     }
 
     // Won the epoch. Publish the resulting-epoch GroupInfo + any Welcomes so a
@@ -342,6 +422,49 @@ pub async fn submit_commit(conn: &Connection, body: &SubmitBody) -> Result<Submi
         .await?;
     }
     for (w, welcome) in welcomes {
+        // ── Gate 3, INSIDE the bundle's own IMMEDIATE transaction ────────────
+        //
+        // The read and the overwrite share one write-locked transaction, so two
+        // racing submitters cannot both see "no conflicting row" — the same
+        // reasoning `writes::upsert_welcome` gives for doing it this way.
+        //
+        // An already-DELIVERED row is spent and an unattributed (pre-000006) row
+        // has no owner to protect; a row this same sender published is its own
+        // to refresh. What is defended is another member's PENDING Welcome at
+        // this generation or a later one. A Welcome admitting into a NEWER
+        // lineage is never blocked by an older pending row: a suite migration
+        // re-Welcomes the whole roster, and one stale row must not wedge it.
+        if !may_override {
+            let mut rows = tx
+                .query(
+                    "SELECT delivered, submitted_by, generation FROM mls_welcome \
+                     WHERE conversation_id = ?1 AND recipient_id = ?2 AND recipient_device_id = ?3",
+                    libsql::params![
+                        body.conversation_id.clone(),
+                        w.recipient_id.clone(),
+                        w.recipient_device_id.clone(),
+                    ],
+                )
+                .await?;
+            let conflict = match rows.next().await? {
+                Some(row) => {
+                    let delivered: i64 = row.get(0)?;
+                    let owner: Option<String> = row.get(1)?;
+                    let existing_generation: i64 = row.get(2)?;
+                    delivered == 0
+                        && owner.is_some()
+                        && owner.as_deref() != Some(body.sender_id.as_str())
+                        && existing_generation >= body.generation
+                }
+                None => false,
+            };
+            drop(rows);
+            if conflict {
+                tx.rollback().await?;
+                return Ok(SubmitVerdict::Forbidden);
+            }
+        }
+
         // Idempotent on the UNIQUE (conversation_id, recipient_id,
         // recipient_device_id) tuple (migration 000002 (commit-log DB)): a re-sent Welcome for
         // the same recipient/device refreshes the blob and re-arms delivery
@@ -383,10 +506,10 @@ pub async fn submit_commit(conn: &Connection, body: &SubmitBody) -> Result<Submi
 
     tx.commit().await?;
 
-    Ok(SubmitResponse::Accepted {
+    Ok(SubmitVerdict::Response(SubmitResponse::Accepted {
         generation: body.generation,
         epoch: body.based_on_epoch,
-    })
+    }))
 }
 
 // ─── Commit-log retention floor (I4, issue #539) ─────────────────────────────

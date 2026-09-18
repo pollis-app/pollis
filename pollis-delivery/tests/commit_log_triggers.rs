@@ -19,10 +19,24 @@
 
 use pollis_delivery::commit::{
     delete_commits_below, delete_generations_below, submit_commit, SubmitBody, SubmitResponse,
+    SubmitVerdict,
 };
 use pollis_delivery::db::Db;
 
 mod common;
+
+/// `submit_commit` on a log-only fixture. The bodies here carry no Welcomes, so
+/// the main-DB gates added for C1 never look at a membership table — passing the
+/// log connection for both is exactly the DS's single-database configuration.
+async fn submit(
+    conn: &libsql::Connection,
+    body: &SubmitBody,
+) -> anyhow::Result<SubmitResponse> {
+    match submit_commit(conn, conn, body).await? {
+        SubmitVerdict::Response(r) => Ok(r),
+        other => panic!("expected a CAS response, got {other:?}"),
+    }
+}
 
 // The real log-DB schema, in version order (mirrors POST_BASELINE_LOG_MIGRATIONS
 // + LOG_DB_SCHEMA). 000005 is the trigger migration under test.
@@ -430,19 +444,19 @@ async fn real_submit_path_coexists_with_triggers() {
     };
 
     // Opening commit (head is 0 on an empty lineage) → Accepted.
-    match submit_commit(&conn, &body(0)).await.expect("submit 0") {
+    match submit(&conn, &body(0)).await.expect("submit 0") {
         SubmitResponse::Accepted { epoch, .. } => assert_eq!(epoch, 0),
         other => panic!("expected Accepted, got {other:?}"),
     }
     // Next head (head is now 1) → Accepted.
-    match submit_commit(&conn, &body(1)).await.expect("submit 1") {
+    match submit(&conn, &body(1)).await.expect("submit 1") {
         SubmitResponse::Accepted { epoch, .. } => assert_eq!(epoch, 1),
         other => panic!("expected Accepted, got {other:?}"),
     }
     // Stale resubmit at epoch 1 (head is now 2): the CAS WHERE is false, so no
     // row is produced and nothing is inserted — Rejected, and the trigger is a
     // no-op because it only fires on a row that is actually being inserted.
-    match submit_commit(&conn, &body(1)).await.expect("stale submit") {
+    match submit(&conn, &body(1)).await.expect("stale submit") {
         SubmitResponse::Rejected { head, .. } => assert_eq!(head, 2),
         other => panic!("expected Rejected, got {other:?}"),
     }
