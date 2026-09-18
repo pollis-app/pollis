@@ -236,6 +236,19 @@ pub(crate) async fn emit_receipt(
     // recording the acknowledgement.
     let delete_token_hash =
         super::delete_capability::envelope_delete_token_hash(state, &envelope_id).await;
+    // Since #1135 the DS refuses an envelope with no capability, so posting one
+    // is a guaranteed 400. The only way to get here without a capability is a
+    // locked device (the account seed is gone, so the HMAC cannot be computed) —
+    // which is already the documented best-effort case below: a receipt the DS
+    // turns away is re-emitted by the next read or ingest, and losing one loses
+    // no message. Skip it here rather than spend the round trip.
+    let Some(delete_token_hash) = delete_token_hash else {
+        eprintln!(
+            "[receipts] {kind:?} receipt for {conversation_id} skipped — this device \
+             cannot compute a delete capability (locked); the next ingest re-emits it"
+        );
+        return Ok(());
+    };
     let body = pollis_api::messages::SendMessageBody {
         id: envelope_id,
         conversation_id: conversation_id.to_string(),
@@ -250,7 +263,7 @@ pub(crate) async fn emit_receipt(
         // A receipt frame wakes nobody: it is an acknowledgement of
         // something the recipient already has (#987).
         push_to: None,
-        delete_token_hash,
+        delete_token_hash: Some(delete_token_hash),
     };
     // No re-seal loop here, deliberately: a receipt's callers may hold the
     // group lock (the committer's post-merge sweep) and the catch-up a re-seal

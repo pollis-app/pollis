@@ -288,7 +288,7 @@ credentials live.
 - `sealed` INTEGER NOT NULL DEFAULT 0 _(migration 000008; sealed sender, #331)_
 - `type` TEXT NOT NULL DEFAULT 'message' — `'message'` | `'edit'` | `'delete'`
 - `target_message_id` TEXT _(the message an `edit`/`delete` envelope acts on)_
-- `delete_token_hash` TEXT _(migration `000027`; the per-envelope deletion capability, #1086 — see below)_
+- `delete_token_hash` TEXT _(migration `000027`; the per-envelope deletion capability, #1086 — **required on every new envelope since #1135**, see below)_
 - `seq` INTEGER _(migration `000028`, #1087)_ — the **delivery sequence**: assigned by the DS, strictly increasing per conversation. The fetch is `seq > last_seq` ordered by `seq`; the GC floor is `seq <= MIN(last_seq)`. `UNIQUE (conversation_id, seq) WHERE seq IS NOT NULL` (`idx_envelope_conv_seq`) makes the position a schema rule rather than a convention.
 
 **Removing an envelope takes proof, not a claim (#1086).** Sealed sender blinds
@@ -303,6 +303,28 @@ The fix does not try to re-identify the sender — that is what sealing exists t
 prevent. The sender stores `SHA-256(token)` on the row at send time and must
 present the preimage to remove it; the DS authorizes nobody, it compares a hash
 (`messages::check_delete_capability`, constant-time).
+
+**Required on every new envelope (#1135).** #1086 could only enforce the
+capability for rows that *had* one: no shipped client produced one yet, so
+demanding it would have black-holed every send. That left the hole open for
+anything a pre-#1086 client wrote — a NULL hash keeps the membership-only check,
+so any member could still remove any member's not-yet-fetched envelope. Once
+#1086 shipped (v1.12.0) the client became the floor, and `apply_send_message`
+now refuses a body whose `delete_token_hash` is missing or empty
+(`WriteOutcome::Invalid` → 400).
+
+The NULL fallback **stays for rows that already exist** — they age out under the
+#720 retention bound — so `DeleteCapability::NotRequired` is still a live branch,
+just a shrinking one. The test for it writes such a row **directly** rather than
+through the send endpoint, because the endpoint can no longer produce one: going
+through `send` would leave no row at all, and a *missing* row also reads
+`NotRequired`, so the test would pass while asserting nothing
+(`delete_capability_tests_support::insert_pre_1135_envelope`).
+
+Client side, a device that cannot compute a capability is one that is **locked**
+(the account seed is gone). `receipts.rs` skips emitting the receipt rather than
+posting a frame the DS will refuse — already the documented best-effort case: the
+next read or ingest re-emits it, and losing a receipt loses no message.
 
 The token is **derived, never transmitted**:
 

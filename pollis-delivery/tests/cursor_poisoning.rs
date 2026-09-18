@@ -34,6 +34,13 @@ use pollis_delivery::messages::{
 };
 use pollis_delivery::writes::WriteOutcome;
 
+/// A capability hash whose preimage is known (#1135): every new envelope must
+/// carry one, and a fixture that later edits or deletes the row needs the token.
+/// `base64(SHA-256("fixture-capability"))`.
+const FIXTURE_CAPABILITY_HASH: &str = "MB8lyVjsEQamFuSzLTRZBVKGFQQ8nXoBjHFF7kvNuAo=";
+/// The preimage of [`FIXTURE_CAPABILITY_HASH`].
+const FIXTURE_CAPABILITY_TOKEN: &str = "fixture-capability";
+
 mod common;
 
 const POISON: &str = "9999-12-31T23:59:59.000000000+00:00";
@@ -79,7 +86,7 @@ fn send(id: &str, sent_at: &str) -> SendMessageBody {
         generation: None,
         epoch: None,
         push_to: None,
-        delete_token_hash: None,
+        delete_token_hash: Some(FIXTURE_CAPABILITY_HASH.to_string()),
     }
 }
 
@@ -93,7 +100,9 @@ fn edit(envelope_id: &str, target: &str, sent_at: &str) -> EditMessageBody {
         sent_at: sent_at.to_string(),
         generation: None,
         epoch: None,
-        delete_token: None,
+        // The target carries a capability (#1135), and an edit replaces its
+        // pending edit — a delete — so the token has to be presented.
+        delete_token: Some(FIXTURE_CAPABILITY_TOKEN.to_string()),
     }
 }
 

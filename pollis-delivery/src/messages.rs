@@ -685,6 +685,24 @@ pub async fn apply_send_message(
     if let Err(refused) = admit_sent_at(&body.sent_at) {
         return Ok(refused);
     }
+    // Every NEW envelope must carry a deletion capability (#1135). #1086 could
+    // only enforce it for rows that HAD one, because no shipped client produced
+    // one yet — so anything a pre-#1086 client wrote landed with NULL and kept
+    // the membership-only check, leaving the original hole open: any member
+    // could remove any member's not-yet-fetched envelope.
+    //
+    // The NULL fallback stays for rows that already exist (they age out under
+    // the #720 retention bound). This only closes the door on new ones, now
+    // that clients producing a capability are the floor — #1086 shipped in
+    // v1.12.0.
+    //
+    // `Invalid`, not `Forbidden`: the caller is entitled to send, the body is
+    // what is not admissible.
+    if body.delete_token_hash.as_deref().unwrap_or("").is_empty() {
+        return Ok(WriteOutcome::Invalid(
+            "delete_token_hash is required on every new envelope",
+        ));
+    }
     // The sequence allocation and the row must land together — see
     // `insert_envelope_with_seq`. Edit and delete already run in a transaction;
     // the send path needs its own.
@@ -969,6 +987,15 @@ pub async fn delete_message(
     let conn = state.db.conn().await?;
     outcome_response::<DeleteMessageBody>(apply_delete_message(&conn, authed.as_deref(), &parsed).await?)
 }
+
+/// A capability hash whose PREIMAGE is known, so a fixture can both write an
+/// envelope that requires a capability (#1135) and then present the token to
+/// edit or delete it. `base64(SHA-256("fixture-capability"))`.
+#[cfg(test)]
+pub(crate) const FIXTURE_CAPABILITY_HASH: &str = "MB8lyVjsEQamFuSzLTRZBVKGFQQ8nXoBjHFF7kvNuAo=";
+/// The preimage of [`FIXTURE_CAPABILITY_HASH`].
+#[cfg(test)]
+pub(crate) const FIXTURE_CAPABILITY_TOKEN: &str = "fixture-capability";
 
 /// Whether a caller has proved the right to remove an envelope (#1086).
 #[derive(Debug, PartialEq, Eq)]
@@ -3418,7 +3445,7 @@ mod admin_delete_visibility_tests {
                 epoch: None,
                 // No push from a unit test — these assert envelope columns.
                 push_to: None,
-                delete_token_hash: None,
+                delete_token_hash: Some(FIXTURE_CAPABILITY_HASH.to_string()),
             },
         )
         .await
@@ -3593,7 +3620,7 @@ mod admin_delete_visibility_tests {
                 epoch: None,
                 // No push from a unit test — these assert envelope columns.
                 push_to: None,
-                delete_token_hash: None,
+                delete_token_hash: Some(FIXTURE_CAPABILITY_HASH.to_string()),
             },
         )
         .await
@@ -3722,7 +3749,7 @@ mod admin_delete_visibility_tests {
                 epoch: None,
                 // No push from a unit test — these assert envelope columns.
                 push_to: None,
-                delete_token_hash: None,
+                delete_token_hash: Some(FIXTURE_CAPABILITY_HASH.to_string()),
             },
         )
         .await
@@ -4023,7 +4050,7 @@ mod epoch_gate_tests {
             generation,
             epoch,
             push_to: None,
-            delete_token_hash: None,
+            delete_token_hash: Some(FIXTURE_CAPABILITY_HASH.to_string()),
         }
     }
 
@@ -4339,6 +4366,27 @@ mod delete_capability_tests_support {
         base64::engine::general_purpose::STANDARD.encode(Sha256::digest(token.as_bytes()))
     }
 
+    /// Write an envelope the way a **pre-#1135 client** did: no capability at
+    /// all, NULL `delete_token_hash`.
+    ///
+    /// A direct insert rather than a `send`, because since #1135 the send
+    /// endpoint REFUSES a body without a capability — so the only way such a
+    /// row exists now is that it predates the gate. That is exactly the
+    /// population the legacy fallback still has to serve, and testing it
+    /// through an endpoint that can no longer produce it would quietly assert
+    /// nothing (a missing row also reads `NotRequired`).
+    pub(super) async fn insert_pre_1135_envelope(conn: &Connection, id: &str) {
+        let seq = next_delivery_seq(conn, "c1").await.unwrap();
+        conn.execute(
+            "INSERT INTO message_envelope \
+                 (id, conversation_id, sender_id, ciphertext, sent_at, sealed, seq) \
+             VALUES (?1, 'c1', 'sealed', 'mls:00', ?2, 1, ?3)",
+            libsql::params![id.to_string(), chrono::Utc::now().to_rfc3339(), seq],
+        )
+        .await
+        .unwrap();
+    }
+
     pub(super) fn send(id: &str, delete_token_hash: Option<String>) -> SendMessageBody {
         SendMessageBody {
             id: id.to_string(),
@@ -4468,9 +4516,7 @@ mod delete_capability_tests {
     #[tokio::test]
     async fn an_envelope_from_an_older_client_keeps_the_legacy_path() {
         let c = conn().await;
-        apply_send_message(&c, Some("alice"), &send("m1", None))
-            .await
-            .unwrap();
+        insert_pre_1135_envelope(&c, "m1").await;
 
         let out = apply_delete_message(&c, Some("bob"), &del("m1", "bob", None))
             .await
@@ -4499,6 +4545,48 @@ mod delete_capability_tests {
         assert!(envelope_exists(&c, "m1").await);
     }
 
+    /// #1135: a send with no capability is refused outright, so no NEW envelope
+    /// can land on the legacy path.
+    ///
+    /// Without this, a client that simply omits the field gets the pre-#1086
+    /// behaviour back on demand — any member able to remove any member's
+    /// not-yet-fetched envelope — which would make the capability optional in
+    /// the only sense that matters to an attacker.
+    #[tokio::test]
+    async fn a_send_without_a_capability_is_refused() {
+        let c = conn().await;
+
+        let out = apply_send_message(&c, Some("alice"), &send("m1", None))
+            .await
+            .unwrap();
+        assert!(
+            matches!(out, WriteOutcome::Invalid(_)),
+            "a send with no delete_token_hash must be refused, got {out:?}"
+        );
+        assert!(
+            !envelope_exists(&c, "m1").await,
+            "the refused send must store nothing"
+        );
+
+        // An empty string is the same omission wearing a different hat.
+        let out = apply_send_message(&c, Some("alice"), &send("m2", Some(String::new())))
+            .await
+            .unwrap();
+        assert!(
+            matches!(out, WriteOutcome::Invalid(_)),
+            "an empty delete_token_hash must be refused too, got {out:?}"
+        );
+        assert!(!envelope_exists(&c, "m2").await);
+
+        // And the same send with a capability lands, so the gate is not simply
+        // rejecting everything.
+        let out = apply_send_message(&c, Some("alice"), &send("m3", Some(hash_of(TOKEN))))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Ok), "{out:?}");
+        assert!(envelope_exists(&c, "m3").await);
+    }
+
     /// The check itself, in isolation: a missing row is `NotRequired` (the
     /// delete is a no-op, so there is nothing to refuse) and a NULL hash is the
     /// legacy path.
@@ -4510,7 +4598,9 @@ mod delete_capability_tests {
             DeleteCapability::NotRequired
         );
 
-        apply_send_message(&c, Some("alice"), &send("legacy", None)).await.unwrap();
+        // A row that EXISTS with a NULL hash — distinct from the absent case
+        // above, and the only thing the legacy fallback is still for.
+        insert_pre_1135_envelope(&c, "legacy").await;
         assert_eq!(
             check_delete_capability(&c, "c1", "legacy", None).await.unwrap(),
             DeleteCapability::NotRequired
@@ -4688,7 +4778,7 @@ mod delivery_sequence_tests {
             reply_to_id: None,
             sent_at: chrono::Utc::now().to_rfc3339(),
             sealed: 1,
-            delete_token_hash: None,
+            delete_token_hash: Some(FIXTURE_CAPABILITY_HASH.to_string()),
             generation: None,
             epoch: None,
             push_to: None,
@@ -4909,7 +4999,10 @@ mod delivery_sequence_tests {
                 sent_at: chrono::Utc::now().to_rfc3339(),
                 generation: None,
                 epoch: None,
-                delete_token: None,
+                // The target now carries a capability (#1135), and an edit
+                // replaces its pending edit — which is a delete — so the edit
+                // has to present the preimage.
+                delete_token: Some(FIXTURE_CAPABILITY_TOKEN.to_string()),
             },
         )
         .await

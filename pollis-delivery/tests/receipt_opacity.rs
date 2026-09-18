@@ -31,6 +31,11 @@ use pollis_delivery::writes::WriteOutcome;
 use pollis_delivery::{build_router_with_state, AppState};
 use tower::ServiceExt as _;
 
+/// A capability hash whose preimage is known (#1135): every new envelope must
+/// carry one, and a fixture that later edits or deletes the row needs the token.
+/// `base64(SHA-256("fixture-capability"))`.
+const FIXTURE_CAPABILITY_HASH: &str = "MB8lyVjsEQamFuSzLTRZBVKGFQQ8nXoBjHFF7kvNuAo=";
+
 mod common;
 
 
@@ -125,7 +130,7 @@ fn body(id: &str, ciphertext: &str) -> SendMessageBody {
         epoch: None,
         // No push from a unit test — this asserts envelope opacity.
         push_to: None,
-        delete_token_hash: None,
+        delete_token_hash: Some(FIXTURE_CAPABILITY_HASH.to_string()),
     }
 }
 
