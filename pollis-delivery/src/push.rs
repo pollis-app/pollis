@@ -125,29 +125,7 @@ pub async fn notify_new_message(
     let messages: Vec<serde_json::Value> = tokens
         .into_iter()
         .map(|(token, platform, user_id)| {
-            // Generic, content-free alert — the data fields drive routing and a
-            // local re-ingest; the body intentionally reveals nothing.
-            let mut msg = serde_json::json!({
-                "to": token,
-                "title": "New message",
-                "body": "You have a new message",
-                "priority": "high",
-                // `h` is the opaque handle (#1122); the client resolves it over
-                // its authenticated channel. `conversationId` and `kind` stay
-                // for ONE release so shipped clients keep routing taps — see
-                // the rollout note on #1122. A follow-up drops them once
-                // clients that prefer `h` are the floor.
-                "data": {
-                    "h": handles.get(&user_id),
-                    "conversationId": conversation_id,
-                    "kind": kind,
-                },
-            });
-            // Android posts to the channel the client created at startup.
-            if platform.as_deref() == Some("android") {
-                msg["channelId"] = serde_json::Value::String("default".into());
-            }
-            msg
+            expo_message(&token, platform.as_deref(), handles.get(&user_id))
         })
         .collect();
 
@@ -221,6 +199,38 @@ async fn push_tokens(
         }
     }
     Ok(out)
+}
+
+/// One Expo message, built from nothing but the token, the platform and the
+/// handle — so what leaves this process can be asserted on directly.
+///
+/// **The `data` blob is the whole privacy surface.** Expo, APNs and FCM all see
+/// it, and all three sit outside the overlay by design. It therefore carries the
+/// opaque handle and NOTHING else: no conversation id (#1157), no `kind`, no
+/// sender, no preview, no plaintext. The title and body are fixed strings.
+///
+/// A `None` handle means minting failed for that recipient (best-effort by
+/// design — a push nobody is waiting on must not fail a send). The notification
+/// still goes out, because "you have a new message" is true and useful, but it
+/// carries no routing and the tap opens the app. That is strictly better than
+/// naming the conversation to three third parties in order to route a tap.
+fn expo_message(
+    token: &str,
+    platform: Option<&str>,
+    handle: Option<&String>,
+) -> serde_json::Value {
+    let mut msg = serde_json::json!({
+        "to": token,
+        "title": "New message",
+        "body": "You have a new message",
+        "priority": "high",
+        "data": { "h": handle },
+    });
+    // Android posts to the channel the client created at startup.
+    if platform == Some("android") {
+        msg["channelId"] = serde_json::Value::String("default".into());
+    }
+    msg
 }
 
 /// Mint one opaque handle per recipient user and record what it resolves to
@@ -391,6 +401,58 @@ mod tests {
     #[test]
     fn no_authorization_header_without_a_token() {
         assert_eq!(authorization(None), None);
+    }
+
+    /// #1157: the payload carries the handle and nothing else.
+    ///
+    /// Asserted on the SERIALIZED `data` blob rather than on fields, because
+    /// that string is exactly what Expo, APNs and FCM receive. A test that
+    /// checked named keys would pass while some future field quietly reappeared
+    /// beside them.
+    #[test]
+    fn the_payload_data_carries_only_the_handle() {
+        let handle = "Zm9vYmFyMTIzNDU2Nzg5".to_string();
+        let msg = expo_message("ExponentPushToken[abc]", Some("ios"), Some(&handle));
+
+        let data = msg.get("data").expect("data blob");
+        let obj = data.as_object().expect("data is an object");
+        assert_eq!(
+            obj.keys().collect::<Vec<_>>(),
+            vec!["h"],
+            "data must contain exactly one key; got {obj:?}"
+        );
+        assert_eq!(obj.get("h").unwrap().as_str(), Some(handle.as_str()));
+
+        // And nothing anywhere in the message names a conversation or a kind.
+        let wire = serde_json::to_string(&msg).unwrap();
+        for forbidden in ["conversationId", "conversation_id", "kind", "senderId"] {
+            assert!(
+                !wire.contains(forbidden),
+                "`{forbidden}` must not appear in a push payload: {wire}"
+            );
+        }
+    }
+
+    /// A recipient whose handle could not be minted still gets the buzz, with
+    /// no routing — never a conversation id as a consolation prize.
+    #[test]
+    fn a_missing_handle_degrades_to_no_routing() {
+        let msg = expo_message("ExponentPushToken[abc]", None, None);
+        assert!(msg["data"]["h"].is_null());
+        assert_eq!(msg["title"].as_str(), Some("New message"));
+        let wire = serde_json::to_string(&msg).unwrap();
+        assert!(!wire.contains("conversationId"));
+    }
+
+    /// The Android channel is still set, and only for Android.
+    #[test]
+    fn the_android_channel_survives_the_payload_change() {
+        let h = "aGFuZGxl".to_string();
+        assert_eq!(
+            expo_message("t", Some("android"), Some(&h))["channelId"].as_str(),
+            Some("default")
+        );
+        assert!(expo_message("t", Some("ios"), Some(&h)).get("channelId").is_none());
     }
 
     async fn conn() -> Connection {

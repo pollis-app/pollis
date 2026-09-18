@@ -12,9 +12,10 @@
 // `h`, minted per notification, which `resolve_push_handle` trades for the
 // routing fields over our own authenticated channel.
 //
-// `conversationId` / `kind` are still READ as a fallback: a client can be newer
-// than the DS it is talking to, and during the #1122 rollout the DS sends both.
-// A later release drops the plain id from the payload.
+// #1157 removed `conversationId` from the payload entirely, so there is no
+// fallback to read: a notification either resolves its handle or opens the app.
+// Safe to do in one step because mobile has never been distributed — no shipped
+// client reads the old field (see the PR).
 //
 // Everything degrades gracefully: denied permission, a missing EAS
 // projectId, or a failed `register_push_token` call all resolve without
@@ -192,9 +193,6 @@ async function readRouting(data: unknown): Promise<Routing | null> {
   const decided = readPayloadRouting(data);
   if (decided === null) {
     return null;
-  }
-  if (decided.via === "plain") {
-    return { conversationId: decided.conversationId, kind: decided.kind };
   }
   try {
     const resolved = await invoke<Routing | null>("resolve_push_handle", {

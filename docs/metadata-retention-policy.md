@@ -239,11 +239,12 @@ client IPs from the first-party services, and is opt-in and off by default. This
   `updated_at` timestamp (`000006_push_token.sql`).
 - **Retention:** until the same device re-registers (which upserts by token) or the account is deleted.
   There is no expiry sweep for tokens belonging to uninstalled apps.
-- **Payload:** deliberately content-free, and since #1122 also conversation-free. The notification
+- **Payload:** deliberately content-free, and since #1157 conversation-free. The notification
   carries a fixed title and body ("New message" / "You have a new message") plus
-  `data: { h }` — a random 128-bit handle, minted per notification per recipient — never plaintext,
-  never a sender, never a preview, and no longer the conversation id
-  (`pollis-delivery/src/push.rs`).
+  `data: { h }` and nothing else — a random 128-bit handle, minted per notification per recipient.
+  Never plaintext, never a sender, never a preview, never the conversation id
+  (`pollis-delivery/src/push.rs`; `push::tests::the_payload_data_carries_only_the_handle` asserts it
+  on the serialized blob, which is what the providers actually receive).
 - **Handles:** `push_handle` stores `handle → (user_id, conversation_id, kind)` so the client can
   trade the handle for routing information at `POST /v1/push/resolve` over its own authenticated
   channel. Retention is `PUSH_HANDLE_TTL_DAYS` (7), swept on the DS's retention schedule, and rows
@@ -257,10 +258,6 @@ client IPs from the first-party services, and is opt-in and off by default. This
   do not see message content, the sender, or which conversation the notification is for — and because
   the handle never repeats, they cannot count activity per conversation either, which a stable
   per-conversation identifier would have allowed even without naming it.
-- **Rollout caveat:** during the #1122 rollout the DS sends `conversationId` alongside `h` for one
-  release so already-shipped clients keep routing taps. Until that follow-up lands and drops the plain
-  id, the paragraph above describes the payload's *intended* end state and the providers still see the
-  conversation id.
 
 ---
 
