@@ -282,11 +282,28 @@ pub async fn submit_commit(
     //
     // Both are decided on inputs alone, so deciding them here means a refused
     // bundle never opens a transaction and never touches the log.
+    //
+    // Membership is a property of the USER, while a bundle carries one Welcome
+    // per added DEVICE — and a suite migration carries one for every device of
+    // every member. Asking once per row would put a main-DB round trip behind
+    // each of them; the answer is cached per recipient so the cost is the number
+    // of distinct accounts, not of devices.
+    let mut membership: HashMap<&str, bool> = HashMap::new();
     for (w, welcome) in &welcomes {
         if welcome.is_empty() || welcome.len() > crate::writes::WELCOME_MAX_BYTES {
             return Ok(SubmitVerdict::Invalid("welcome size out of range"));
         }
-        if !crate::writes::is_member(main_conn, &body.conversation_id, &w.recipient_id).await? {
+        let is_member = match membership.get(w.recipient_id.as_str()) {
+            Some(known) => *known,
+            None => {
+                let answer =
+                    crate::writes::is_member(main_conn, &body.conversation_id, &w.recipient_id)
+                        .await?;
+                membership.insert(w.recipient_id.as_str(), answer);
+                answer
+            }
+        };
+        if !is_member {
             return Ok(SubmitVerdict::Forbidden);
         }
     }
