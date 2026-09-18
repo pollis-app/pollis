@@ -225,6 +225,61 @@ pub fn classify(current_epoch: u64, next_row_epoch: Option<u64>) -> ReplayStep {
     }
 }
 
+// ─── I1b: what a gap is allowed to destroy ───────────────────────────────────
+
+/// What a replay pass does when the next commit row does not bridge the local
+/// group's epoch.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum GapRecovery {
+    /// The server DECLARED why the bridging commit is absent — a retention prune
+    /// whose floor is above us, or a hole it detected while checking contiguity
+    /// inside the snapshot transaction. The commit is genuinely unreachable, so
+    /// drop the local MLS state and rebuild by external join.
+    Rebuild,
+    /// The batch is non-contiguous with no declared explanation. Hold position:
+    /// advance nothing, delete nothing, retry on the next pass.
+    HoldPosition,
+}
+
+/// Decide whether a gap at `current_epoch` licenses DESTROYING this device's MLS
+/// crypto state (#1161 M6).
+///
+/// `hole_expected` is the epoch the DS reported missing (`ConversationState::hole`)
+/// and `pruned_floor` its retention floor (`pruned_below`); both come from the
+/// same read transaction as the batch.
+///
+/// The destructive action is the point. `forget_local_mls_group_at` deletes the
+/// only keys that can still open envelopes sealed on this lineage, and every
+/// un-ingested envelope below the rejoin epoch is then classified handled and
+/// lost — a loss mode outside the three CLAUDE.md sanctions. Before this gate a
+/// batch that merely LOOKED non-contiguous was enough to trigger it, so a single
+/// malformed response destroyed state. Now the server has to have declared,
+/// in the same transaction that served the batch, an explanation that actually
+/// covers the epoch we are missing:
+///
+/// * `pruned_floor > current_epoch` — the bridging commit was retention-collected;
+/// * `hole_expected == current_epoch` — the DS's own contiguity check found
+///   exactly this epoch missing.
+///
+/// Anything else — including a hole declared at some OTHER epoch, which is a
+/// response that contradicts itself — holds position. Holding is not a wedge:
+/// nothing is deleted, the group keeps its keys, and the next pass re-reads. A
+/// log that really has lost the commit keeps saying so and the rebuild happens
+/// on the pass after; a transport or server glitch simply heals.
+pub fn gap_recovery(
+    current_epoch: u64,
+    hole_expected: Option<u64>,
+    pruned_floor: Option<u64>,
+) -> GapRecovery {
+    if pruned_floor.is_some_and(|floor| floor > current_epoch) {
+        return GapRecovery::Rebuild;
+    }
+    if hole_expected == Some(current_epoch) {
+        return GapRecovery::Rebuild;
+    }
+    GapRecovery::HoldPosition
+}
+
 // ─── Kani proof harnesses ────────────────────────────────────────────────────
 #[cfg(kani)]
 mod proofs {
@@ -594,5 +649,47 @@ mod tests {
                 }
             }
         }
+    }
+
+    // ── I1b: a gap only destroys crypto state when the server explained it ────
+
+    /// The headline property: `Rebuild` implies the server declared an
+    /// explanation that covers the epoch we are missing.
+    #[test]
+    fn a_gap_destroys_state_only_when_the_server_explained_it() {
+        for current in 0u64..4 {
+            for hole in [None, Some(0), Some(1), Some(2), Some(3)] {
+                for floor in [None, Some(0), Some(1), Some(2), Some(3)] {
+                    if gap_recovery(current, hole, floor) == GapRecovery::Rebuild {
+                        assert!(
+                            hole == Some(current) || floor.is_some_and(|f| f > current),
+                            "rebuilt at {current} on hole={hole:?} floor={floor:?} with no \
+                             explanation covering the missing epoch"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// An unexplained non-contiguous batch — the shape a malicious or broken DS
+    /// serves — must not be able to delete anything.
+    #[test]
+    fn an_unexplained_gap_holds_position() {
+        assert_eq!(gap_recovery(7, None, None), GapRecovery::HoldPosition);
+        // A hole declared somewhere else is a self-contradicting response, not a
+        // licence.
+        assert_eq!(gap_recovery(7, Some(9), None), GapRecovery::HoldPosition);
+        // A retention floor at or below us explains nothing: the commit we need
+        // is not below the floor.
+        assert_eq!(gap_recovery(7, None, Some(7)), GapRecovery::HoldPosition);
+    }
+
+    /// …and the two genuine causes still rebuild, so a conversation that really
+    /// has lost the commit is not stuck forever.
+    #[test]
+    fn a_declared_prune_or_hole_still_rebuilds() {
+        assert_eq!(gap_recovery(7, Some(7), None), GapRecovery::Rebuild);
+        assert_eq!(gap_recovery(7, None, Some(8)), GapRecovery::Rebuild);
     }
 }

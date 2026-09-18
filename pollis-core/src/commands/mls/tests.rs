@@ -3351,3 +3351,61 @@ fn removing_a_user_takes_every_leaf_claiming_their_device() {
         .collect();
     assert_eq!(after, vec!["alice".to_string()], "no leaf of bob's may survive — {after:?}");
 }
+
+/// #1161 M6: an external join must refuse a GroupInfo for a different group.
+///
+/// The blob comes from the DS, while everything downstream of the join — which
+/// local group is deleted, which lineage the join is recorded under, which
+/// conversation this device then seals messages for — is keyed on the
+/// `(conversation_id, generation)` the caller asked for. Unchecked, a
+/// substituted GroupInfo made the device destroy one group's state and join a
+/// group of the server's choosing under that group's name.
+#[test]
+fn an_external_join_refuses_a_group_info_for_another_group() {
+    let target = "01JT1161EXTJOINPINTARGET00";
+    let elsewhere = "01JT1161EXTJOINPINELSEWHR0";
+
+    // A real group the joiner is NOT trying to join, and its GroupInfo.
+    let (alice_db, _bob_db) = alice_and_bob(elsewhere);
+    let gi_bytes = {
+        let provider = PollisProvider::new(&alice_db);
+        export_group_info_blob(&provider, elsewhere, 0).unwrap().expect("GroupInfo").1
+    };
+    let vgi: VerifiableGroupInfo = {
+        let mut reader: &[u8] = &gi_bytes;
+        match MlsMessageIn::tls_deserialize(&mut reader).unwrap().extract() {
+            MlsMessageBodyIn::GroupInfo(gi) => gi,
+            _ => panic!("expected GroupInfo"),
+        }
+    };
+
+    // Carol holds a working local group for the conversation she MEANT to
+    // rejoin, and is handed the wrong lineage's GroupInfo for it.
+    let carol_db = make_db();
+    create_group(&carol_db, target, "carol");
+    let epoch_before = member_epoch(&carol_db, target);
+
+    let provider = PollisProvider::new(&carol_db);
+    let err = build_external_commit(
+        &provider,
+        target,
+        0,
+        "carol",
+        &test_device_id("carol"),
+        CS_PQ,
+        vgi,
+    )
+    .expect_err("a GroupInfo for another group must be refused");
+    assert!(
+        err.to_string().contains("different group"),
+        "the refusal must name the mismatch, got {err}"
+    );
+
+    // And the refusal costs nothing: the local group it would have replaced is
+    // untouched.
+    assert_eq!(
+        member_epoch(&carol_db, target),
+        epoch_before,
+        "a refused external join must not have deleted or replaced the local group"
+    );
+}

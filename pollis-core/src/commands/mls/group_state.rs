@@ -744,10 +744,26 @@ where
         signature_key: sig_pub.into(),
     };
 
+    // The GroupInfo must describe the lineage we MEANT to join (#1161 M6).
+    // Everything downstream — which local group is deleted, which lineage the
+    // join is recorded under, which conversation's messages this device then
+    // seals — is keyed on `(conversation_id, generation)`, while the blob itself
+    // arrives from the DS. Unchecked, a substituted GroupInfo made this device
+    // destroy one group's state and join a group of the server's choosing under
+    // that group's name. Checked FIRST, before the delete below, so a rejected
+    // blob costs nothing.
+    let group_id = mls_group_id(conversation_id, generation);
+    if verifiable_group_info.group_id() != &group_id {
+        return Err(crate::error::Error::Other(anyhow::anyhow!(
+            "external join for {conversation_id} generation {generation}: the published GroupInfo \
+             is for a different group ({:?}) — refusing to join it",
+            verifiable_group_info.group_id()
+        )));
+    }
+
     // Drop any stale local group with the same ID so the external commit builder
     // doesn't collide. Scoped to THIS lineage: a predecessor group under a
     // different id is still needed to drain messages sealed before the migration.
-    let group_id = mls_group_id(conversation_id, generation);
     if let Ok(Some(mut old)) = MlsGroup::load(provider.storage(), &group_id) {
         let _ = old.delete(provider.storage());
     }
@@ -1513,6 +1529,12 @@ async fn process_one_generation<'h>(
         );
     }
 
+    // The server's own account of why the batch might be short, captured before
+    // the snapshot is consumed — the gap gate below is allowed to destroy crypto
+    // state only when one of these covers the epoch we are missing (#1161 M6).
+    let hole_expected = snapshot.hole.and_then(|h| u64::try_from(h.expected).ok());
+    let pruned_floor = snapshot.pruned_below.and_then(|f| u64::try_from(f).ok());
+
     let mut pending: Vec<PendingCommit> = Vec::with_capacity(snapshot.commits.len());
     for row in &snapshot.commits {
         pending.push(PendingCommit {
@@ -1597,21 +1619,41 @@ async fn process_one_generation<'h>(
             != super::invariants::ReplayStep::Apply
         {
             // The commit that would bridge `current_epoch` -> next is missing
-            // from the log while a HIGHER epoch is present. The commit log is
-            // append-only and Turso reads are consistent, so a missing-but-
-            // surpassed epoch means that commit is permanently gone (historic
-            // bug that deleted a row, pruning, etc.) — there is nothing to
-            // replay and we'd wedge here forever. Drop the stale local group so
-            // the recovery block at the end external-joins us onto the current
-            // published epoch instead. forget only drops MLS crypto state, not
-            // decrypted message history (that lives in the local `message`
-            // table).
-            eprintln!(
-                "[mls] process_pending_commits: epoch gap for {mls_group_id}: \
-                 expected {current_epoch}, got {} — dropping local group to recover via external join",
-                commit.epoch
-            );
-            let _ = forget_local_mls_group_at(state, mls_group_id, generation).await;
+            // from the log while a HIGHER epoch is present. Recovery means
+            // dropping the local group so the block at the end external-joins us
+            // onto the current published epoch — which deletes the only keys
+            // that can still open envelopes sealed on this lineage, and
+            // classifies every un-ingested one below the rejoin epoch as
+            // handled. (It drops MLS crypto state only, never decrypted message
+            // history — that lives in the local `message` table.)
+            //
+            // So the gap alone does not license it (#1161 M6). The DS has to
+            // have DECLARED, in the same read transaction that served this
+            // batch, an explanation that covers the epoch we are missing: a
+            // retention floor above us, or its own contiguity check naming this
+            // exact epoch. Anything else holds position — nothing deleted,
+            // nothing advanced, retried next pass — so one malformed or hostile
+            // response cannot spend this device's crypto state.
+            match super::invariants::gap_recovery(current_epoch, hole_expected, pruned_floor) {
+                super::invariants::GapRecovery::Rebuild => {
+                    eprintln!(
+                        "[mls] process_pending_commits: epoch gap for {mls_group_id}: expected \
+                         {current_epoch}, got {} (hole={hole_expected:?} pruned_below={pruned_floor:?}) \
+                         — dropping local group to recover via external join",
+                        commit.epoch
+                    );
+                    let _ = forget_local_mls_group_at(state, mls_group_id, generation).await;
+                }
+                super::invariants::GapRecovery::HoldPosition => {
+                    eprintln!(
+                        "[mls] process_pending_commits: epoch gap for {mls_group_id}: expected \
+                         {current_epoch}, got {} — but the DS declared no prune or hole covering \
+                         it (hole={hole_expected:?} pruned_below={pruned_floor:?}). Holding at \
+                         {current_epoch} rather than destroying MLS state on an unexplained batch",
+                        commit.epoch
+                    );
+                }
+            }
             break;
         }
 
