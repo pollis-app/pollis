@@ -7,7 +7,8 @@
 //!   1. New device calls `start_device_enrollment` → generates an
 //!      ephemeral X25519 keypair, DERIVES an 8-character short authentication
 //!      string from that keypair's public half (`derive_verification_code`:
-//!      HKDF over the public key, Crockford base32), and writes a
+//!      HKDF over the public key, SALTED with the request's own id, account and
+//!      creation time, Crockford base32), and writes a
 //!      `device_enrollment_request` row via the session-gated DS endpoint (the
 //!      new device is pre-enrollment, so it can't device-sign). The DS then
 //!      emits the `enrollment_requested` inbox nudge SERVER-SIDE — the new
@@ -27,7 +28,9 @@
 //!      `derive_verification_code` for why comparing against the DS's
 //!      stored copy was the bug, not the check).
 //!      b. Generates its own ephemeral X25519 keypair.
-//!      c. ECDH(approver_priv, requester_pub) → HKDF → wrap key.
+//!      c. ECDH(approver_priv, requester_pub), REFUSED if non-contributory
+//!      (a low-order peer key would make the output computable by the
+//!      server) → HKDF → wrap key.
 //!      d. AES-256-GCM wraps `account_id_key.private` and writes
 //!      `approver_pub || nonce || ciphertext` into the request row.
 //!      e. Signs a `device_cert` for the new device.
@@ -36,9 +39,11 @@
 //!
 //!   4. New device polls `poll_enrollment_status`. When it sees
 //!      `approved`, it unwraps the blob with its stored ephemeral private
-//!      key, stores `account_id_key` in its OS keystore, and calls
-//!      `finalize_enrollment` which publishes the new device's cert and
-//!      processes any welcomes.
+//!      key, CHECKS that the unwrapped seed's public half is the account's
+//!      published `account_id_pub` (a successful AEAD open says only that the
+//!      blob was sealed to this device — not which seed is inside it), stores
+//!      `account_id_key` in its OS keystore, and calls `finalize_enrollment`
+//!      which publishes the new device's cert and processes any welcomes.
 //!
 //! Rejection and expiry: `reject_device_enrollment` flips status and
 //! records a security event. Requests that time out (10-minute TTL) are
@@ -91,6 +96,11 @@ const ENROLL_HKDF_INFO: &[u8] = b"pollis-enrollment-wrap-v1";
 /// HKDF info for the human-compared verification code (#793). Domain-separated
 /// from the wrap-key derivation so the two can never collide.
 const ENROLL_SAS_INFO: &[u8] = b"pollis-enrollment-sas-v1";
+
+/// Domain tag opening the per-request SAS salt. Versioned separately from
+/// [`ENROLL_SAS_INFO`] because the salt's *shape* is what a future change would
+/// alter, and both ends must agree on it byte for byte.
+const ENROLL_SAS_SALT_DOMAIN: &[u8] = b"pollis-enrollment-sas-salt-v1";
 
 /// Alphabet for the verification code — the same 32 characters the Secret Key
 /// uses (`0-9A-Z` minus I, L, O, U, which are easy to misread). Exactly 5 bits
@@ -223,14 +233,59 @@ pub struct SecurityEvent {
 /// the approver displays changes. The code is NOT a secret — it is a function of
 /// a public value, and the server can compute it too. Its job is binding, not
 /// confidentiality.
-fn derive_verification_code(ephemeral_pub: &[u8]) -> String {
-    let hk = Hkdf::<Sha256>::new(None, ephemeral_pub);
+///
+/// # Why the request context is mixed in
+///
+/// This used to be `Hkdf::new(None, ephemeral_pub)` — no salt, and a fixed info
+/// string — which made the code a PURE GLOBAL FUNCTION of one X25519 public key.
+/// The [`SAS_LEN`] comment prices the grinding attack at ~2^40 keygens per
+/// attempt, and that pricing was wrong: with nothing per-request in the
+/// derivation, 2^40 is a ONE-TIME precomputation. An attacker builds a table of
+/// ephemeral keypairs indexed by the code they derive, ONCE, and then reuses it
+/// against every user, every enrollment, forever — no work at all inside the
+/// ten-minute TTL. Swap in a keypair whose code collides with the one the human
+/// is reading off the new device's screen, and the approver derives the very
+/// code being read aloud, the human approves, and the account identity key is
+/// wrapped to the attacker.
+///
+/// Salting with [`sas_salt`] — the request id, the account, and the creation
+/// timestamp — makes the table worthless: a precomputation is valid for exactly
+/// one request, so the 2^40 is work the attacker must redo, from scratch, inside
+/// each TTL. Every field is one the Delivery Service cannot reuse across
+/// requests (`request_id` is the row's primary key) and every field is available
+/// to BOTH sides — the requester holds them because it minted them, the approver
+/// reads them off the same row.
+fn derive_verification_code(
+    ephemeral_pub: &[u8],
+    request_id: &str,
+    user_id: &str,
+    created_at: &str,
+) -> String {
+    let salt = sas_salt(request_id, user_id, created_at);
+    let hk = Hkdf::<Sha256>::new(Some(&salt), ephemeral_pub);
     let mut out = [0u8; SAS_LEN];
     hk.expand(ENROLL_SAS_INFO, &mut out)
         .expect("HKDF expand SAS_LEN bytes is infallible");
     out.iter()
         .map(|b| SAS_ALPHABET[(b & 0x1f) as usize] as char)
         .collect()
+}
+
+/// The per-request salt for [`derive_verification_code`].
+///
+/// Length-prefixed rather than concatenated or delimiter-joined: the three
+/// fields are free-form strings, and a joiner byte is a joiner byte until
+/// someone puts one in a `user_id`. With a 4-byte big-endian length in front of
+/// each field the encoding is injective, so two different triples cannot produce
+/// the same salt and therefore cannot be made to derive the same code.
+fn sas_salt(request_id: &str, user_id: &str, created_at: &str) -> Vec<u8> {
+    let mut salt = Vec::new();
+    salt.extend_from_slice(ENROLL_SAS_SALT_DOMAIN);
+    for field in [request_id, user_id, created_at] {
+        salt.extend_from_slice(&(field.len() as u32).to_be_bytes());
+        salt.extend_from_slice(field.as_bytes());
+    }
+    salt
 }
 
 /// Wrap key for the account-identity transfer, bound to the full transcript.
@@ -262,6 +317,32 @@ fn aead_decrypt(key: &[u8; 32], nonce: &[u8; AES_NONCE_LEN], ct: &[u8]) -> Resul
     cipher
         .decrypt(GenericArray::from_slice(nonce), ct)
         .map_err(|e| Error::Crypto(format!("enrollment aes-gcm decrypt: {e}")))
+}
+
+/// Reject an X25519 exchange whose output the peer did not contribute to.
+///
+/// `x25519-dalek` 2.x deliberately does NOT reject low-order points on its own —
+/// it hands back the all-zero shared secret and leaves the decision to the
+/// caller, and this caller was not making it. A peer public key of 32 zero bytes
+/// (or any other small-order point) drives the ECDH output to zero for EVERY
+/// private key, so `derive_wrap_key` becomes a function of public values alone
+/// and the Delivery Service — which chooses the `approver_pub` bytes in the blob
+/// it serves — can compute the wrap key itself. It could then forge an approval
+/// carrying an ATTACKER-CHOSEN account identity seed that the new device would
+/// decrypt without complaint.
+///
+/// Checked on both sides. The approver's peer key is the requester's ephemeral
+/// pub as the DS stored it; the requester's peer key is the `approver_pub`
+/// prefix of the DS-written blob. Either one is server-influenced, so neither is
+/// the "safe" side.
+fn require_contributory(shared: &x25519_dalek::SharedSecret, whose: &str) -> Result<()> {
+    if !shared.was_contributory() {
+        return Err(Error::Crypto(format!(
+            "enrollment key exchange is non-contributory: {whose} is a low-order point, so the \
+             shared secret is computable by anyone who saw the public keys"
+        )));
+    }
+    Ok(())
 }
 
 fn x25519_private_from_bytes(bytes: &[u8]) -> Result<StaticSecret> {
@@ -311,16 +392,26 @@ pub async fn start_device_enrollment(
     let ephemeral_secret = StaticSecret::from(private_bytes);
     let ephemeral_public = PublicKey::from(&ephemeral_secret);
 
-    // The verification code is DERIVED from this device's ephemeral public key
-    // (#793), not chosen at random. Both screens compute it from the same public
-    // value, so if anything substitutes that key in flight the two codes diverge
-    // and the user sees it. See `derive_verification_code`.
-    let verification_code: String = derive_verification_code(ephemeral_public.as_bytes());
-
     let request_id = Ulid::new().to_string();
     let now = chrono::Utc::now();
     let expires_at = now + chrono::Duration::seconds(ENROLLMENT_TTL_SECS);
     let expires_at_str = expires_at.to_rfc3339();
+    // Derived once, sent verbatim, and re-derived by the approver from the same
+    // three strings — so this is the exact spelling that has to travel.
+    let created_at_str = now.to_rfc3339();
+
+    // The verification code is DERIVED from this device's ephemeral public key
+    // (#793), not chosen at random. Both screens compute it from the same public
+    // value, so if anything substitutes that key in flight the two codes diverge
+    // and the user sees it. It is also SALTED with this request's own identity,
+    // so a precomputed key→code table cannot be aimed at it. See
+    // `derive_verification_code`.
+    let verification_code: String = derive_verification_code(
+        ephemeral_public.as_bytes(),
+        &request_id,
+        &user_id,
+        &created_at_str,
+    );
 
     // Insert the request row. Server stores only the public ephemeral key
     // and the verification code — the private key stays in memory on this
@@ -343,7 +434,7 @@ pub async fn start_device_enrollment(
                 request_id: request_id.clone(),
                 new_device_ephemeral_pub: b64.encode(ephemeral_public.as_bytes()),
                 verification_code: verification_code.clone(),
-                created_at: now.to_rfc3339(),
+                created_at: created_at_str.clone(),
                 expires_at: expires_at_str.clone(),
             };
             crate::commands::mls::ds_post_session_ok(
@@ -478,12 +569,19 @@ pub async fn poll_enrollment_status(
             // bytes under the user's PIN and opens the local DB.
             // finalize_device_enrollment runs after that to publish the
             // device cert, key packages, and external-join existing groups.
-            *state.unlock.lock().await = Some(
-                crate::commands::account_identity::unlock_state_with_fresh_db_key(
-                    &user_id,
-                    &account_id_private,
-                ),
-            );
+            //
+            // Via `adopt_recovered_account_identity`, which REFUSES a seed whose
+            // public half is not the account's published identity key. A
+            // successful AEAD open only proves the blob was sealed under a key
+            // derived from this device's ephemeral secret — it says nothing
+            // about WHICH seed is inside, which is precisely what a forged
+            // approval gets to choose.
+            crate::commands::account_identity::adopt_recovered_account_identity(
+                state,
+                &user_id,
+                &account_id_private,
+            )
+            .await?;
 
             Ok(EnrollmentStatus::Approved)
         }
@@ -556,6 +654,7 @@ fn unwrap_account_key(wrapped: &[u8], requester_private: &[u8]) -> Result<Vec<u8
     let requester_pub = PublicKey::from(&requester_priv);
     let approver_pub = x25519_public_from_bytes(approver_pub_bytes)?;
     let shared = requester_priv.diffie_hellman(&approver_pub);
+    require_contributory(&shared, "the approver_pub in the wrapped blob")?;
     // Same transcript the approver bound in: our own public key, then theirs.
     let wrap_key = derive_wrap_key(
         shared.as_bytes(),
@@ -638,6 +737,7 @@ pub async fn approve_device_enrollment(
     let stored_code: String = row.verification_code.unwrap_or_default();
     let status: String = row.status;
     let expires_at_str: String = row.expires_at;
+    let created_at_str: String = row.created_at;
 
     if status != "pending" {
         return Err(Error::Other(anyhow::anyhow!(
@@ -658,7 +758,17 @@ pub async fn approve_device_enrollment(
     // is server-controlled; the derived one is a function of the key this device is
     // about to wrap the account identity key to. Checking the server's copy would
     // re-introduce exactly the substitution this fix exists to stop.
-    let expected_code = derive_verification_code(&ephemeral_pub);
+    //
+    // Salted with this request's own id, account and creation time, exactly as
+    // the requester salted it. The three strings come off the row the DS served,
+    // so a DS that alters any of them derives a code that does not match the one
+    // on the new device's screen — the mismatch is visible and the human stops.
+    let expected_code = derive_verification_code(
+        &ephemeral_pub,
+        &request_id,
+        &user_id,
+        &created_at_str,
+    );
 
     // Constant-time comparison to avoid leaking prefix-match timing.
     if !constant_time_eq(expected_code.as_bytes(), verification_code.as_bytes()) {
@@ -696,6 +806,7 @@ pub async fn approve_device_enrollment(
 
         let requester_pub = x25519_public_from_bytes(&ephemeral_pub)?;
         let shared = approver_priv.diffie_hellman(&requester_pub);
+        require_contributory(&shared, "the request's published ephemeral key")?;
         let wrap_key = derive_wrap_key(
             shared.as_bytes(),
             requester_pub.as_bytes(),
@@ -810,12 +921,19 @@ pub async fn recover_with_secret_key(
     //    generated db_key. Frontend proceeds to pin-create; set_pin
     //    wraps both, and finalize_device_enrollment finishes the
     //    cert / KP / external-join work.
-    *state.unlock.lock().await = Some(
-        crate::commands::account_identity::unlock_state_with_fresh_db_key(
-            &user_id,
-            &account_id_private,
-        ),
-    );
+    //
+    //    Through the same chokepoint the approval path uses, and for the same
+    //    reason plus one of its own: the blob is served by the DS, and an
+    //    `account_recovery` row that the account has since SUPERSEDED still
+    //    unwraps cleanly under the Secret Key that sealed it. Only the check
+    //    against the account's published identity key tells a current blob from
+    //    a replayed one.
+    crate::commands::account_identity::adopt_recovered_account_identity(
+        state,
+        &user_id,
+        &account_id_private,
+    )
+    .await?;
 
     // 4. A security-event audit row would go here, but this runs PRE-FINALIZE —
     // the account key was just unwrapped into `AppState.unlock`, yet this device
@@ -1211,6 +1329,74 @@ mod tests {
         assert!(unwrap_account_key(&wrapped, &attacker_priv).is_err());
     }
 
+    // ── Non-contributory ECDH on the unwrap side ─────────────────────────────
+
+    /// The 32 zero bytes are the canonical low-order X25519 point: every private
+    /// key agrees to the all-zero shared secret with it. `x25519-dalek` 2.x does
+    /// NOT reject it — it returns the zero secret and expects the caller to
+    /// check — so before this fix the wrap key was a function of public values
+    /// alone and the Delivery Service could compute it.
+    #[test]
+    fn a_blob_whose_approver_pub_is_a_low_order_point_is_refused() {
+        const LOW_ORDER_POINTS: [[u8; 32]; 3] = [
+            // The identity.
+            [0u8; 32],
+            // Order 1 in the twist / small-order representative.
+            [
+                1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0,
+            ],
+            // Order 8.
+            [
+                224, 235, 122, 124, 59, 65, 184, 174, 22, 86, 227, 250, 241, 159, 196, 106, 218,
+                9, 141, 235, 156, 50, 177, 253, 134, 98, 5, 22, 95, 73, 184, 0,
+            ],
+        ];
+
+        let mut rng = OsRng;
+        let mut requester_priv = [0u8; 32];
+        rng.fill_bytes(&mut requester_priv);
+
+        for point in LOW_ORDER_POINTS {
+            // The server knows the wrap key too, so it can seal ANY seed it
+            // likes. Build exactly that blob.
+            let victim = StaticSecret::from(requester_priv);
+            let victim_pub = PublicKey::from(&victim);
+            let forged_shared = victim.diffie_hellman(&PublicKey::from(point));
+            let wrap_key =
+                derive_wrap_key(forged_shared.as_bytes(), victim_pub.as_bytes(), &point);
+            let nonce = [1u8; AES_NONCE_LEN];
+            let ct = aead_encrypt(&wrap_key, &nonce, &[0xffu8; ACCOUNT_ID_PRIVATE_LEN]).unwrap();
+
+            let mut blob = Vec::with_capacity(WRAPPED_ACCOUNT_KEY_LEN);
+            blob.extend_from_slice(&point);
+            blob.extend_from_slice(&nonce);
+            blob.extend_from_slice(&ct);
+
+            let err = unwrap_account_key(&blob, &requester_priv)
+                .expect_err("a non-contributory exchange must be refused");
+            assert!(
+                format!("{err}").contains("non-contributory"),
+                "refused for the wrong reason: {err}"
+            );
+        }
+    }
+
+    /// And the check does not fire on an honest exchange — a contributory-only
+    /// rule that also rejected real approvals would break every enrollment.
+    #[test]
+    fn an_honest_exchange_is_contributory() {
+        let mut rng = OsRng;
+        let mut a = [0u8; 32];
+        let mut b = [0u8; 32];
+        rng.fill_bytes(&mut a);
+        rng.fill_bytes(&mut b);
+        let a_priv = StaticSecret::from(a);
+        let b_priv = StaticSecret::from(b);
+        let shared = a_priv.diffie_hellman(&PublicKey::from(&b_priv));
+        require_contributory(&shared, "test").expect("a real X25519 exchange is contributory");
+    }
+
     #[test]
     fn constant_time_eq_matches_regular_eq() {
         assert!(constant_time_eq(b"123456", b"123456"));
@@ -1227,12 +1413,22 @@ mod tests {
     // screens, a confirming user, and the account identity key wrapped to the
     // attacker.
 
+    /// The request context both ends actually have. `REQ`/`USER`/`WHEN` stand
+    /// in for the ULID, the account id and the RFC3339 stamp.
+    const REQ: &str = "01J8ZQ5X7K0000000000000000";
+    const USER: &str = "01J8ZQ0000000000000000USER";
+    const WHEN: &str = "2026-09-18T10:11:12.131415+00:00";
+
+    fn sas(pub_bytes: &[u8]) -> String {
+        derive_verification_code(pub_bytes, REQ, USER, WHEN)
+    }
+
     #[test]
     fn the_verification_code_is_determined_by_the_ephemeral_key() {
         let pub_a = [7u8; 32];
         assert_eq!(
-            derive_verification_code(&pub_a),
-            derive_verification_code(&pub_a),
+            sas(&pub_a),
+            sas(&pub_a),
             "both devices derive from the same public value, so they must agree"
         );
     }
@@ -1243,8 +1439,8 @@ mod tests {
         let honest = [7u8; 32];
         let attacker = [8u8; 32];
         assert_ne!(
-            derive_verification_code(&honest),
-            derive_verification_code(&attacker),
+            sas(&honest),
+            sas(&attacker),
             "a swapped key MUST change the code the approver shows, or the human check is decorative"
         );
     }
@@ -1254,9 +1450,95 @@ mod tests {
         let mut a = [0u8; 32];
         let mut b = [0u8; 32];
         b[31] = 1;
-        assert_ne!(derive_verification_code(&a), derive_verification_code(&b));
+        assert_ne!(sas(&a), sas(&b));
         a[0] = 1;
-        assert_ne!(derive_verification_code(&a), derive_verification_code(&b));
+        assert_ne!(sas(&a), sas(&b));
+    }
+
+    // ── The SAS must be per-request, not a global function of the key ────────
+    //
+    // The defect: the derivation was `Hkdf::new(None, ephemeral_pub)` under a
+    // fixed info string, so the code depended on ONE X25519 public key and
+    // nothing else. That turns the 2^40 grind into a one-time precomputation
+    // reusable against every user and every enrollment forever, rather than
+    // work an attacker has to redo inside each ten-minute TTL.
+
+    /// The property the fix buys: the SAME key derives DIFFERENT codes in
+    /// different requests, so no table of key→code can be built in advance.
+    #[test]
+    fn the_same_ephemeral_key_derives_a_different_code_in_a_different_request() {
+        let key = [7u8; X25519_PUB_LEN];
+        let base = derive_verification_code(&key, REQ, USER, WHEN);
+
+        let other_request = derive_verification_code(&key, "01J8ZQ5X7K000000000000000B", USER, WHEN);
+        assert_ne!(
+            base, other_request,
+            "a precomputed key->code table must not carry over to another request"
+        );
+
+        let other_user = derive_verification_code(&key, REQ, "01J8ZQ0000000000000000OTHR", WHEN);
+        assert_ne!(base, other_user, "the code must be bound to the account");
+
+        let other_time =
+            derive_verification_code(&key, REQ, USER, "2026-09-18T10:11:12.131416+00:00");
+        assert_ne!(base, other_time, "the code must be bound to the creation time");
+    }
+
+    /// The other half, and the one that breaks enrollment if it is wrong: the
+    /// requester's displayed code and the approver's re-derived code are the
+    /// same value whenever the request context is the same. This is the exact
+    /// pairing the two call sites perform.
+    #[test]
+    fn the_requester_and_the_approver_derive_the_same_code_for_one_request() {
+        let mut rng = OsRng;
+        let mut secret = [0u8; 32];
+        rng.fill_bytes(&mut secret);
+        let ephemeral_pub = PublicKey::from(&StaticSecret::from(secret));
+
+        // Requester: it minted request_id / created_at and knows its own user.
+        let displayed = derive_verification_code(ephemeral_pub.as_bytes(), REQ, USER, WHEN);
+        // Approver: the same three strings arrive on the row it fetched, and
+        // the ephemeral pub is the one the DS stored.
+        let re_derived = derive_verification_code(ephemeral_pub.as_bytes(), REQ, USER, WHEN);
+
+        assert_eq!(
+            displayed, re_derived,
+            "the two sides MUST agree or every legitimate enrollment is refused"
+        );
+        assert_eq!(normalize_enrollment_sas(&displayed), displayed);
+    }
+
+    /// A Delivery Service that alters ANY of the three context strings on the
+    /// row it serves the approver makes the approver's code diverge from the
+    /// one on the new device's screen — which is the visible failure, not a
+    /// silent one.
+    #[test]
+    fn altering_the_stored_request_context_diverges_the_approvers_code() {
+        let key = [3u8; X25519_PUB_LEN];
+        let displayed = derive_verification_code(&key, REQ, USER, WHEN);
+        for (rid, uid, when) in [
+            ("01J8ZQ5X7K000000000000000B", USER, WHEN),
+            (REQ, "01J8ZQ0000000000000000EVIL", WHEN),
+            (REQ, USER, "2026-09-18T10:11:13.000000+00:00"),
+        ] {
+            assert_ne!(
+                displayed,
+                derive_verification_code(&key, rid, uid, when),
+                "a tampered row must not re-derive the displayed code"
+            );
+        }
+    }
+
+    /// The salt encoding is injective: no two different context triples can
+    /// collide, which is what a delimiter-joined salt would allow the moment a
+    /// field contained the delimiter.
+    #[test]
+    fn the_salt_encoding_cannot_be_confused_across_field_boundaries() {
+        assert_ne!(sas_salt("ab", "c", "d"), sas_salt("a", "bc", "d"));
+        assert_ne!(sas_salt("a", "bc", "d"), sas_salt("a", "b", "cd"));
+        assert_ne!(sas_salt("", "a", "b"), sas_salt("a", "", "b"));
+        // And the domain tag opens every one of them.
+        assert!(sas_salt("a", "b", "c").starts_with(ENROLL_SAS_SALT_DOMAIN));
     }
 
     #[test]
@@ -1265,7 +1547,7 @@ mod tests {
         // is wide: the server can grind ephemeral keypairs until one derives the
         // victim's code. At six digits that is 2^20 — about a million keygens, or
         // seconds. Eight characters over 32 symbols is 40 bits.
-        let code = derive_verification_code(&[3u8; 32]);
+        let code = sas(&[3u8; 32]);
         assert_eq!(code.chars().count(), SAS_LEN);
         assert_eq!(SAS_LEN, 8);
         assert!(
@@ -1308,7 +1590,7 @@ mod tests {
         );
         // A derived code survives normalization unchanged, for many keys.
         for seed in 0u8..32 {
-            let code = derive_verification_code(&[seed; X25519_PUB_LEN]);
+            let code = sas(&[seed; X25519_PUB_LEN]);
             assert_eq!(normalize_enrollment_sas(&code), code);
         }
     }
@@ -1318,7 +1600,7 @@ mod tests {
         // I, L, O and U are excluded so a user reading digits aloud cannot
         // manufacture a false mismatch (or a false match).
         for seed in 0u8..64 {
-            for c in derive_verification_code(&[seed; 32]).chars() {
+            for c in sas(&[seed; 32]).chars() {
                 assert!(SAS_ALPHABET.contains(&(c as u8)), "unexpected character {c}");
                 assert!(!"ILOU".contains(c), "ambiguous character {c} in the code");
             }

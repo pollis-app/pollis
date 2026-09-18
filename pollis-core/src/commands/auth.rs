@@ -378,10 +378,7 @@ async fn verify_otp_ds(
         None
     };
 
-    let enrollment_required = has_identity
-        && !crate::commands::account_identity::has_local_account_identity(state, &user_id)
-            .await
-            .unwrap_or(false);
+    let enrollment_required = enrollment_required_for(state, &user_id, has_identity).await;
 
     let profile = UserProfile {
         id: user_id,
@@ -397,15 +394,67 @@ async fn verify_otp_ds(
     Ok(profile)
 }
 
-/// Drop this device's local account key when the server's account identity is a
-/// DIFFERENT one — the signature of a reset performed on another device.
+/// Whether this device must go through the enrollment gate for `user_id`.
+///
+/// Two ways to need it, and both are here rather than at the three call sites
+/// that used to spell out only the first:
+///   1. The account HAS an identity and this device holds no copy of the key.
+///   2. This device holds a copy, but the server has told it that copy is no
+///      longer the account's identity ([`reconcile_account_identity`]). That
+///      used to be expressed by DELETING the key so (1) became true; the key now
+///      survives, so the marker has to be consulted directly.
+///
+/// A keystore error reads as "not superseded": the gate is driven by (1) in that
+/// case, exactly as before, rather than trapping a working device behind a
+/// failed read.
+async fn enrollment_required_for(
+    state: &Arc<AppState>,
+    user_id: &str,
+    has_remote_identity: bool,
+) -> bool {
+    if !has_remote_identity {
+        return false;
+    }
+    let has_local = crate::commands::account_identity::has_local_account_identity(state, user_id)
+        .await
+        .unwrap_or(false);
+    if !has_local {
+        return true;
+    }
+    crate::commands::account_identity::account_identity_superseded(state, user_id)
+        .await
+        .unwrap_or(false)
+}
+
+/// Reconcile this device's local account key against the account identity the
+/// server says is current — the signature of a reset performed on another
+/// device.
 ///
 /// `account_id_pub` is the value the just-completed verify-otp reported for this
 /// account (#987); it used to be a second, direct `SELECT` from the client.
 ///
-/// Fails SAFE in both directions: an absent or unparseable value leaves the
-/// local key alone (a wipe is destructive and must never be triggered by a
-/// missing field), and only a value that decodes AND fails to match wipes.
+/// # This does NOT delete the local key
+///
+/// It used to. A mismatch called `wipe_local_account_identity`, which removes
+/// both the wrapped and the legacy keystore slots — and NOTHING authenticates
+/// the value that decides it. It arrives in a `verify-otp` response, at a moment
+/// when the local database is still closed (so there is no TOFU pin to check it
+/// against) and the transparency log has not been consulted. The old doc comment
+/// claimed the function "fails SAFE in both directions", but the safe direction
+/// only ever covered an ABSENT or UNDECODABLE value; a FORGED one was the
+/// destructive branch. One response from a hostile or broken Delivery Service
+/// destroyed a user's only copy of their account identity key and left them
+/// needing their Secret Key.
+///
+/// So a mismatch now MARKS the device instead. `enrollment_required` picks the
+/// marker up, so the user still lands on the enrollment gate and the practical
+/// flow is unchanged — but the key stays until they actually re-enroll or
+/// recover, at which point `adopt_recovered_account_identity` clears both. A
+/// match clears the marker, so a server that retracts the claim heals the
+/// device.
+///
+/// Absent and undecodable values keep their genuinely-safe old behaviour: leave
+/// everything alone.
 async fn reconcile_account_identity(
     state: &Arc<AppState>,
     user_id: &str,
@@ -419,18 +468,43 @@ async fn reconcile_account_identity(
         eprintln!("[auth] verify-otp returned an undecodable account_id_pub; leaving local key");
         return;
     };
+
+    // Record it either way: this is the value a later enrollment or Secret-Key
+    // unwrap on this device is checked against
+    // (`account_identity::adopt_recovered_account_identity`).
+    if let Err(e) = crate::commands::account_identity::remember_published_account_id_pub(
+        state, user_id, &pub_bytes,
+    )
+    .await
+    {
+        eprintln!("[auth] could not record the published account_id_pub: {e}");
+    }
+
     let matches = crate::commands::account_identity::has_matching_local_account_identity(
         state, user_id, &pub_bytes,
     )
     .await
     .unwrap_or(false);
     if matches {
+        if let Err(e) =
+            crate::commands::account_identity::clear_account_identity_superseded(state, user_id)
+                .await
+        {
+            eprintln!("[auth] could not clear the superseded marker (non-fatal): {e}");
+        }
         return;
     }
-    if let Err(e) =
-        crate::commands::account_identity::wipe_local_account_identity(state, user_id).await
+
+    eprintln!(
+        "[auth] the server reports a different account identity for {user_id}; \
+         marking this device for re-enrollment and KEEPING the local key"
+    );
+    if let Err(e) = crate::commands::account_identity::mark_account_identity_superseded(
+        state, user_id, &pub_bytes,
+    )
+    .await
     {
-        eprintln!("[auth] wipe_local_account_identity (non-fatal): {e}");
+        eprintln!("[auth] could not mark the identity superseded (non-fatal): {e}");
     }
 }
 
@@ -907,13 +981,8 @@ pub async fn get_session(state: &Arc<AppState>) -> Result<Option<UserProfile>> {
     // user-existence check above; only a confirmed `None` row (user
     // genuinely has no remote pubkey) and a present row are decisive.
     let has_remote_identity = probe.as_ref().is_some_and(|p| p.has_identity);
-    let has_local_identity = crate::commands::account_identity::has_local_account_identity(
-        state,
-        &profile.id,
-    )
-    .await
-    .unwrap_or(false);
-    profile.enrollment_required = has_remote_identity && !has_local_identity;
+    profile.enrollment_required =
+        enrollment_required_for(state, &profile.id, has_remote_identity).await;
 
     Ok(Some(profile))
 }
@@ -1083,10 +1152,7 @@ async fn dev_login_ds(state: &Arc<AppState>, email: String) -> Result<UserProfil
     // writes (GroupInfo, external-join) authenticate.
     *state.bootstrap_session.lock().await = Some(session_token);
 
-    let enrollment_required = has_identity
-        && !crate::commands::account_identity::has_local_account_identity(state, &user_id)
-            .await
-            .unwrap_or(false);
+    let enrollment_required = enrollment_required_for(state, &user_id, has_identity).await;
 
     crate::accounts::upsert_account(&user_id, &username, None)?;
     store_login_email(state, &user_id, &email).await;
@@ -2265,5 +2331,152 @@ mod canonical_email_tests {
         // lowercases only the OTP store key, never `users.email`.
         assert_eq!(canonical_login_email("  a@x.com \t"), "a@x.com");
         assert_eq!(canonical_login_email("Alice@X.com"), "Alice@X.com");
+    }
+}
+
+#[cfg(test)]
+mod identity_reconciliation_tests {
+    use super::*;
+    use crate::commands::account_identity as ident;
+    use base64::Engine as _;
+    use ml_dsa::Keypair as _;
+
+    const ACCOUNT_ID_KEY_SLOT: &str = "account_id_key";
+
+    fn test_state() -> Arc<AppState> {
+        Arc::new(AppState::new_with_parts(
+            crate::config::Config::for_test().expect("test config"),
+            Arc::new(crate::keystore::InMemoryKeystore::new()),
+        ))
+    }
+
+    /// `(seed, base64 of the published public half)` for a real account
+    /// identity.
+    fn identity(seed_byte: u8) -> ([u8; 32], String) {
+        let seed = [seed_byte; 32];
+        let encoded = base64::engine::general_purpose::STANDARD.encode(
+            ml_dsa::SigningKey::<ml_dsa::MlDsa44>::from_seed(&seed.into())
+                .verifying_key()
+                .encode(),
+        );
+        (seed, encoded)
+    }
+
+    async fn seed_local_key(state: &Arc<AppState>, user_id: &str, seed: &[u8]) {
+        state
+            .keystore
+            .store_for_user(ACCOUNT_ID_KEY_SLOT, user_id, seed)
+            .await
+            .unwrap();
+    }
+
+    /// M2, the finding itself: a `verify-otp` response is not authenticated, so
+    /// a forged `account_id_pub` used to be enough to make a device delete its
+    /// only copy of the account identity key.
+    #[tokio::test]
+    async fn a_forged_account_id_pub_does_not_destroy_the_local_key() {
+        let state = test_state();
+        let (mine, _) = identity(11);
+        let (_, forged_pub) = identity(99);
+        seed_local_key(&state, "u1", &mine).await;
+
+        reconcile_account_identity(&state, "u1", Some(forged_pub.as_str())).await;
+
+        assert_eq!(
+            state
+                .keystore
+                .load_for_user(ACCOUNT_ID_KEY_SLOT, "u1")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(&mine[..]),
+            "an unauthenticated server claim must not delete the account identity key"
+        );
+        assert!(
+            ident::account_identity_superseded(&state, "u1")
+                .await
+                .unwrap(),
+            "but the device must be marked, so the user is still sent to re-enroll"
+        );
+        assert!(
+            enrollment_required_for(&state, "u1", true).await,
+            "the gate the wipe used to produce indirectly must still appear"
+        );
+    }
+
+    /// The matching case leaves the device alone and clears any stale marker —
+    /// a server that retracts the claim heals the device.
+    #[tokio::test]
+    async fn a_matching_account_id_pub_clears_the_marker() {
+        let state = test_state();
+        let (mine, mine_pub) = identity(11);
+        let (_, forged_pub) = identity(99);
+        seed_local_key(&state, "u1", &mine).await;
+
+        reconcile_account_identity(&state, "u1", Some(forged_pub.as_str())).await;
+        assert!(ident::account_identity_superseded(&state, "u1")
+            .await
+            .unwrap());
+
+        reconcile_account_identity(&state, "u1", Some(mine_pub.as_str())).await;
+        assert!(
+            !ident::account_identity_superseded(&state, "u1")
+                .await
+                .unwrap(),
+            "the marker must be reversible"
+        );
+        assert!(!enrollment_required_for(&state, "u1", true).await);
+    }
+
+    /// The genuinely-safe directions the old comment claimed for the whole
+    /// function: an absent or undecodable value changes nothing at all.
+    #[tokio::test]
+    async fn an_absent_or_undecodable_value_changes_nothing() {
+        let state = test_state();
+        let (mine, _) = identity(11);
+        seed_local_key(&state, "u1", &mine).await;
+
+        reconcile_account_identity(&state, "u1", None).await;
+        reconcile_account_identity(&state, "u1", Some("!!! not base64 !!!")).await;
+
+        assert_eq!(
+            state
+                .keystore
+                .load_for_user(ACCOUNT_ID_KEY_SLOT, "u1")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(&mine[..])
+        );
+        assert!(!ident::account_identity_superseded(&state, "u1")
+            .await
+            .unwrap());
+        assert!(!enrollment_required_for(&state, "u1", true).await);
+    }
+
+    /// Reconciliation is also where the device learns the value a later
+    /// enrollment unwrap is checked against (M1).
+    #[tokio::test]
+    async fn reconciliation_records_the_published_identity_key() {
+        let state = test_state();
+        let (_, mine_pub) = identity(11);
+        reconcile_account_identity(&state, "u1", Some(mine_pub.as_str())).await;
+
+        let recorded = ident::published_account_id_pub(&state, "u1")
+            .await
+            .unwrap()
+            .expect("verify-otp's value must be recorded");
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD.encode(&recorded),
+            mine_pub
+        );
+    }
+
+    /// An account with no identity never needs the gate, whatever the local
+    /// state is.
+    #[tokio::test]
+    async fn no_remote_identity_means_no_enrollment_gate() {
+        let state = test_state();
+        assert!(!enrollment_required_for(&state, "u1", false).await);
     }
 }
