@@ -280,6 +280,79 @@ pub fn gap_recovery(
     GapRecovery::HoldPosition
 }
 
+// ─── I7: who is allowed to found the lineage we adopt ────────────────────────
+
+/// The standing of the leaf that SIGNED a GroupInfo, against the roster's
+/// cross-signing material — [`super::device::LeafVerdict`] with its payloads
+/// dropped, so this decision stays pure.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SignerStanding {
+    /// The signing leaf is the device key the claimed user's account key
+    /// certified, and that device is not revoked.
+    Certified,
+    /// The inputs to decide are missing — unknown user, no account key, no
+    /// device row, cert columns not yet published.
+    Unverifiable,
+    /// The inputs are present and the leaf is NOT that user's device: revoked,
+    /// a cert that does not verify, or a leaf key that is not the certified one.
+    Uncertified,
+}
+
+/// Whether a published GroupInfo may be adopted as a lineage of this
+/// conversation — i.e. external-joined, with everything that follows from it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LineageAdoption {
+    /// Nothing positively contradicts the signer's claim to have built this
+    /// group as a member of this conversation.
+    Adopt,
+    /// Positive evidence the signer is not a current member's certified device.
+    Refuse,
+}
+
+/// Decide whether the device that signed a GroupInfo is allowed to have founded
+/// the lineage we are about to adopt (#1161 M6 residual).
+///
+/// A `GroupId` is a name, not a capability: anyone can stand up an MLS group
+/// with an arbitrary one, so pinning the name (`build_external_commit`'s
+/// `mls_group_id` check) says nothing about who built the group behind it. The
+/// signer's leaf credential and signature key ARE available before adoption —
+/// the GroupInfo is signed by a member and carries the ratchet tree — and a
+/// Delivery Service holds no account identity key, so it cannot produce a leaf
+/// that the roster's cross-signing material certifies. That asymmetry is the
+/// whole of what this gate rests on.
+///
+/// `signer_on_roster` is `None` when the roster could not be read, NOT when the
+/// signer is absent from it — the two must stay distinguishable, because only
+/// the second is evidence.
+///
+/// **The failure bias is the load-bearing half.** `Unverifiable` means the
+/// inputs are missing (cert rows not yet published, a device row still
+/// replicating), which is an ordinary race on a legitimate migration; refusing
+/// on it would leave real users unable to follow their conversation onto its
+/// successor lineage, which is a worse outcome than the attack. So this refuses
+/// only on POSITIVE evidence, exactly as the eviction rule does:
+///
+/// * `Uncertified` — the cross-signing chain is present and says no;
+/// * a signer whose claimed user is demonstrably not on the roster.
+///
+/// Everything else adopts. A DS that wants past this has to either publish a
+/// leaf that a member's own account key certified (it holds no account identity
+/// key, so it cannot) or keep the conversation's cross-signing material
+/// permanently unreadable — which shows up as a conversation whose leaves never
+/// certify, and is what the eviction sweep acts on.
+pub fn lineage_adoption(
+    signer_on_roster: Option<bool>,
+    standing: SignerStanding,
+) -> LineageAdoption {
+    if matches!(standing, SignerStanding::Uncertified) {
+        return LineageAdoption::Refuse;
+    }
+    if signer_on_roster == Some(false) {
+        return LineageAdoption::Refuse;
+    }
+    LineageAdoption::Adopt
+}
+
 // ─── Kani proof harnesses ────────────────────────────────────────────────────
 #[cfg(kani)]
 mod proofs {
@@ -691,5 +764,54 @@ mod tests {
     fn a_declared_prune_or_hole_still_rebuilds() {
         assert_eq!(gap_recovery(7, Some(7), None), GapRecovery::Rebuild);
         assert_eq!(gap_recovery(7, None, Some(8)), GapRecovery::Rebuild);
+    }
+
+    /// #1161 M6 residual: the whole 3×3 truth table of [`lineage_adoption`].
+    ///
+    /// Refusal is exactly the two POSITIVE cases. Enumerated rather than
+    /// asserted case-by-case so a later edit that widens refusal into the
+    /// `Unverifiable` column — the edit that would brick legitimate migrations
+    /// — fails here rather than in production.
+    #[test]
+    fn a_lineage_is_refused_only_on_positive_evidence() {
+        for roster in [None, Some(true), Some(false)] {
+            for standing in [
+                SignerStanding::Certified,
+                SignerStanding::Unverifiable,
+                SignerStanding::Uncertified,
+            ] {
+                let expected = if matches!(standing, SignerStanding::Uncertified)
+                    || roster == Some(false)
+                {
+                    LineageAdoption::Refuse
+                } else {
+                    LineageAdoption::Adopt
+                };
+                assert_eq!(
+                    lineage_adoption(roster, standing),
+                    expected,
+                    "roster={roster:?} standing={standing:?}"
+                );
+            }
+        }
+    }
+
+    /// The failure bias, pinned on its own: an unverifiable signer on a roster
+    /// we could read, and a certified signer whose roster we could NOT read,
+    /// both still adopt. Both are ordinary races on a legitimate migration.
+    #[test]
+    fn an_unverifiable_signer_does_not_block_a_migration() {
+        assert_eq!(
+            lineage_adoption(Some(true), SignerStanding::Unverifiable),
+            LineageAdoption::Adopt
+        );
+        assert_eq!(
+            lineage_adoption(None, SignerStanding::Unverifiable),
+            LineageAdoption::Adopt
+        );
+        assert_eq!(
+            lineage_adoption(None, SignerStanding::Certified),
+            LineageAdoption::Adopt
+        );
     }
 }

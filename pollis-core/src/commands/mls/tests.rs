@@ -2471,9 +2471,22 @@ fn pq_payloads_stay_under_their_ceilings() {
 
 use super::group_state::{
     apply_one_commit, build_external_commit, export_group_info_blob,
-    CommitApply, RecoverReason,
+    CommitApply, LineageProvenance, RecoverReason,
 };
 use openmls::prelude::group_info::VerifiableGroupInfo;
+
+/// The cross-signing material a device has when it can load none: an empty,
+/// unpinned directory, which verdicts every signer `Unverifiable`.
+///
+/// Paired with `roster: None` that is the provenance of a device whose reads all
+/// failed, and it ADOPTS — the bias `invariants::lineage_adoption` exists to
+/// keep (cert rows that have not replicated must not strand a migration). So it
+/// is also the right default for every test that is about something OTHER than
+/// provenance: those keep exercising the path they were written for instead of
+/// tripping a gate they never meant to address.
+fn no_identities() -> super::device::IdentityDirectory {
+    super::device::IdentityDirectory::new(Vec::new())
+}
 
 /// Layer 1 — the pure classifier. One case per openmls error we classify, plus
 /// the load-bearing #680 guarantee: an UNRECOGNISED error recovers conservatively
@@ -2873,6 +2886,7 @@ fn assert_rejoin_then_next_commit_works(
     };
 
     // Joiner external-joins from the GroupInfo, producing an external commit.
+    let identities = no_identities();
     let ext_commit = {
         let provider = PollisProvider::new(joiner_db);
         let (commit, _gi) = build_external_commit(
@@ -2883,6 +2897,10 @@ fn assert_rejoin_then_next_commit_works(
             &test_device_id("bob"),
             CS_PQ,
             vgi,
+            &LineageProvenance {
+                identities: &identities,
+                roster: None,
+            },
         )
         .expect("external join builds");
         commit
@@ -3218,11 +3236,24 @@ fn an_externally_joined_leaf_is_reported_for_cross_signing() {
             _ => panic!("expected GroupInfo"),
         }
     };
+    let identities = no_identities();
     let ext_commit = {
         let provider = PollisProvider::new(&carol_db);
-        build_external_commit(&provider, conv, 0, "carol", &test_device_id("carol"), CS_PQ, vgi)
-            .expect("external join builds")
-            .0
+        build_external_commit(
+            &provider,
+            conv,
+            0,
+            "carol",
+            &test_device_id("carol"),
+            CS_PQ,
+            vgi,
+            &LineageProvenance {
+                identities: &identities,
+                roster: None,
+            },
+        )
+        .expect("external join builds")
+        .0
     };
 
     // Bob replays it from the log, exactly as the DS serves it.
@@ -3386,6 +3417,7 @@ fn an_external_join_refuses_a_group_info_for_another_group() {
     let epoch_before = member_epoch(&carol_db, target);
 
     let provider = PollisProvider::new(&carol_db);
+    let identities = no_identities();
     let err = build_external_commit(
         &provider,
         target,
@@ -3394,6 +3426,10 @@ fn an_external_join_refuses_a_group_info_for_another_group() {
         &test_device_id("carol"),
         CS_PQ,
         vgi,
+        &LineageProvenance {
+            identities: &identities,
+            roster: None,
+        },
     )
     .expect_err("a GroupInfo for another group must be refused");
     assert!(
@@ -3408,6 +3444,308 @@ fn an_external_join_refuses_a_group_info_for_another_group() {
         epoch_before,
         "a refused external join must not have deleted or replaced the local group"
     );
+}
+
+// ── #1161 M6 residual: who is allowed to have BUILT the lineage we adopt ─────
+//
+// The GroupId pin above fixes the lineage's NAME. A GroupId is not a capability
+// — every test in this section creates a group with an arbitrary one, which is
+// the whole point — so a hostile or compromised Delivery Service can stand up
+// its own MLS group under the successor's name, publish its GroupInfo as the
+// conversation's newest lineage, and answer `head_generation = N+1`.
+// `maybe_advance_generation` reads that head as proof a successor exists,
+// external-joins it, and `adopt_generation_locked` then deletes the
+// predecessor's key material. These tests are the gate that stops it.
+
+use super::device::{IdentityDirectory, LeafVerdict};
+
+/// The MLS signature public key of `user_id`'s leaf in the group `db` holds for
+/// `conv` — the key the roster's cross-signing material has to certify.
+fn leaf_signature_key(db: &rusqlite::Connection, conv: &str, user_id: &str) -> Vec<u8> {
+    load_local_group(db, conv)
+        .expect("group must exist")
+        .members()
+        .find(|m| parse_credential_user_id(&m.credential) == user_id)
+        .expect("member must be in the tree")
+        .signature_key
+        .to_vec()
+}
+
+/// A pinned directory in which `(user_id, device_id)` is certified — by a real
+/// account key, over a real v2 device cert — as holding `pq_pub`.
+///
+/// `pq_pub` is the caller's choice on purpose: pass the honest leaf's key and a
+/// leaf presenting any OTHER key verdicts `Uncertified`, which is precisely the
+/// forged-lineage case.
+fn directory_certifying(user_id: &str, device_id: &str, pq_pub: &[u8]) -> IdentityDirectory {
+    use crate::commands::account_identity::{device_cert_signed_payload, AccountSigningKey};
+    use base64::Engine as _;
+    use ml_dsa::{Keypair as _, Signer as _};
+    use pollis_api::reads::{AddedIdentity, DeviceCertRow};
+
+    let b64 = |b: &[u8]| base64::engine::general_purpose::STANDARD.encode(b);
+    let account = AccountSigningKey::from_seed(&[42u8; 32].into());
+    let ed_pub = vec![7u8; 32];
+    let payload = device_cert_signed_payload(device_id, &ed_pub, pq_pub, 1, 1_700_000_000).unwrap();
+    let cert = account.sign(&payload).encode().to_vec();
+    IdentityDirectory::new(vec![AddedIdentity {
+        user_id: user_id.to_string(),
+        account_id_pub: Some(b64(&account.verifying_key().encode())),
+        devices: vec![DeviceCertRow {
+            device_id: device_id.to_string(),
+            device_cert: Some(b64(&cert)),
+            cert_issued_at: Some("1700000000".to_string()),
+            cert_identity_version: Some(1),
+            mls_signature_pub: Some(b64(&ed_pub)),
+            revoked_at: None,
+            mls_signature_pub_pq: Some(b64(pq_pub)),
+        }],
+    }])
+    .into_pinned()
+}
+
+/// A pinned directory that KNOWS `user_id` but has none of their cert columns —
+/// the ordinary mid-publish state, which verdicts `Unverifiable`.
+fn directory_without_certs(user_id: &str, device_id: &str) -> IdentityDirectory {
+    use pollis_api::reads::{AddedIdentity, DeviceCertRow};
+
+    IdentityDirectory::new(vec![AddedIdentity {
+        user_id: user_id.to_string(),
+        account_id_pub: None,
+        devices: vec![DeviceCertRow {
+            device_id: device_id.to_string(),
+            device_cert: None,
+            cert_issued_at: None,
+            cert_identity_version: None,
+            mls_signature_pub: None,
+            revoked_at: None,
+            mls_signature_pub_pq: None,
+        }],
+    }])
+    .into_pinned()
+}
+
+/// Read the GroupInfo `db` would publish for `(conv, generation)`.
+fn published_group_info(
+    db: &rusqlite::Connection,
+    conv: &str,
+    generation: i64,
+) -> VerifiableGroupInfo {
+    let bytes = {
+        let provider = PollisProvider::new(db);
+        export_group_info_blob(&provider, conv, generation)
+            .unwrap()
+            .expect("GroupInfo")
+            .1
+    };
+    let mut reader: &[u8] = &bytes;
+    match MlsMessageIn::tls_deserialize(&mut reader).unwrap().extract() {
+        MlsMessageBodyIn::GroupInfo(gi) => gi,
+        _ => panic!("expected GroupInfo"),
+    }
+}
+
+/// The attack in full: a group the DS built itself, under the successor
+/// lineage's exact name, whose GroupInfo is signed by a leaf that CLAIMS a real
+/// roster member's real device but holds a signature key that member's account
+/// key never certified.
+///
+/// Everything the #1166 gates look at checks out — the GroupId is exactly
+/// `mls_group_id(conversation_id, generation)`, the roster lists the claimed
+/// signer, and the DS (which answers `may_rejoin_via_external_join`) says the
+/// joiner may rejoin. The only thing that does not is the cross-signing chain,
+/// which is rooted in an account identity key the DS does not hold.
+#[test]
+fn an_external_join_refuses_a_lineage_built_by_a_forged_signer() {
+    let conv = "01JT1167FORGEDLINEAGE00000";
+    let alice_device = test_device_id("alice");
+
+    // The honest conversation, and the key the roster certifies for alice.
+    let alice_db = make_db();
+    create_group(&alice_db, conv, "alice");
+    let honest_key = leaf_signature_key(&alice_db, conv, "alice");
+    let identities = directory_certifying("alice", &alice_device, &honest_key);
+    assert_eq!(
+        identities.leaf_verdict("alice", &alice_device, &honest_key, signature_scheme(CS_PQ)),
+        LeafVerdict::Certified,
+        "precondition: the honest leaf is the one the roster certifies"
+    );
+
+    // The DS stands up its OWN group under the successor's name, signing with a
+    // leaf that claims alice's credential and its own key.
+    let ds_db = make_db();
+    {
+        let provider = PollisProvider::new(&ds_db);
+        create_mls_group_in_suite(&provider, conv, 1, "alice", &alice_device, CS_PQ).unwrap();
+    }
+    let forged = published_group_info(&ds_db, conv, 1);
+    assert_eq!(
+        forged.group_id(),
+        &super::generation::mls_group_id(conv, 1),
+        "precondition: the forgery passes the #1166 GroupId pin — that is the gap"
+    );
+
+    // Carol, a member being advanced onto the "successor", refuses it.
+    let carol_db = make_db();
+    let roster: std::collections::HashSet<String> =
+        ["alice".to_string(), "carol".to_string()].into_iter().collect();
+    let provider = PollisProvider::new(&carol_db);
+    let err = build_external_commit(
+        &provider,
+        conv,
+        1,
+        "carol",
+        &test_device_id("carol"),
+        CS_PQ,
+        forged,
+        &LineageProvenance {
+            identities: &identities,
+            roster: Some(&roster),
+        },
+    )
+    .expect_err("a lineage whose GroupInfo is signed by an uncertified leaf must be refused");
+    assert!(
+        err.to_string().contains("not a certified device of a current member"),
+        "the refusal must name the provenance failure, got {err}"
+    );
+
+    // And nothing was adopted: no local group exists on the forged lineage, so
+    // `adopt_generation_locked` never gets the chance to delete the predecessor.
+    assert!(
+        MlsGroup::load(
+            PollisProvider::new(&carol_db).storage(),
+            &super::generation::mls_group_id(conv, 1),
+        )
+        .unwrap()
+        .is_none(),
+        "a refused lineage must leave no local group behind"
+    );
+}
+
+/// The second shape of the same attack: the DS does not bother claiming a
+/// member's identity and signs with a leaf of its own invention.
+///
+/// The cross-signing chain cannot speak to a user it has never heard of, so the
+/// verdict here is `Unverifiable` — which alone must NOT refuse. What refuses is
+/// the roster: the signer is demonstrably not a member of this conversation.
+#[test]
+fn an_external_join_refuses_a_lineage_signed_from_outside_the_roster() {
+    let conv = "01JT1167OFFROSTERSIGNER000";
+
+    let ds_db = make_db();
+    {
+        let provider = PollisProvider::new(&ds_db);
+        create_mls_group_in_suite(&provider, conv, 1, "mallory", "mallory_dev", CS_PQ).unwrap();
+    }
+    let forged = published_group_info(&ds_db, conv, 1);
+
+    let carol_db = make_db();
+    let identities = no_identities();
+    let roster: std::collections::HashSet<String> =
+        ["alice".to_string(), "carol".to_string()].into_iter().collect();
+    let provider = PollisProvider::new(&carol_db);
+    let err = build_external_commit(
+        &provider,
+        conv,
+        1,
+        "carol",
+        &test_device_id("carol"),
+        CS_PQ,
+        forged,
+        &LineageProvenance {
+            identities: &identities,
+            roster: Some(&roster),
+        },
+    )
+    .expect_err("a lineage signed by a non-member must be refused");
+    assert!(
+        err.to_string().contains("mallory"),
+        "the refusal must name the signer it rejected, got {err}"
+    );
+}
+
+/// The failure bias, end to end: a LEGITIMATE migration whose signer cannot be
+/// verified still goes through.
+///
+/// Alice really did found the successor; her cert columns simply have not been
+/// published (or replicated) yet, so the directory answers `Unverifiable`. That
+/// is a race, not evidence, and refusing on it would leave real users unable to
+/// follow their conversation onto its successor lineage — a worse outcome than
+/// the attack above. Mirrors the eviction rule: only a positive `Uncertified`
+/// acts.
+#[test]
+fn a_legitimate_migration_survives_an_unverifiable_signer() {
+    let conv = "01JT1167UNVERIFIABLESIGNER";
+    let alice_device = test_device_id("alice");
+
+    // Alice founds the successor lineage herself — an honest migration.
+    let alice_db = make_db();
+    {
+        let provider = PollisProvider::new(&alice_db);
+        create_mls_group_in_suite(&provider, conv, 1, "alice", &alice_device, CS_PQ).unwrap();
+    }
+    let group_info = published_group_info(&alice_db, conv, 1);
+
+    let carol_db = make_db();
+    let identities = directory_without_certs("alice", &alice_device);
+    let honest_key = leaf_signature_key(&alice_db, &format!("{conv}#g1"), "alice");
+    assert!(
+        matches!(
+            identities.leaf_verdict("alice", &alice_device, &honest_key, signature_scheme(CS_PQ)),
+            LeafVerdict::Unverifiable(_)
+        ),
+        "precondition: this is the unverifiable case, not the uncertified one"
+    );
+    let roster: std::collections::HashSet<String> =
+        ["alice".to_string(), "carol".to_string()].into_iter().collect();
+    let provider = PollisProvider::new(&carol_db);
+    build_external_commit(
+        &provider,
+        conv,
+        1,
+        "carol",
+        &test_device_id("carol"),
+        CS_PQ,
+        group_info,
+        &LineageProvenance {
+            identities: &identities,
+            roster: Some(&roster),
+        },
+    )
+    .expect("an unverifiable — as opposed to uncertified — signer must not block a migration");
+}
+
+/// …and the same join still works when NEITHER read landed: no roster, no
+/// cross-signing material. A device whose DS reads failed must recover, not
+/// wedge.
+#[test]
+fn a_migration_survives_a_device_that_could_read_neither_roster_nor_certs() {
+    let conv = "01JT1167NOTHINGREADABLE000";
+    let alice_db = make_db();
+    {
+        let provider = PollisProvider::new(&alice_db);
+        create_mls_group_in_suite(&provider, conv, 1, "alice", &test_device_id("alice"), CS_PQ)
+            .unwrap();
+    }
+    let group_info = published_group_info(&alice_db, conv, 1);
+
+    let carol_db = make_db();
+    let identities = no_identities();
+    let provider = PollisProvider::new(&carol_db);
+    build_external_commit(
+        &provider,
+        conv,
+        1,
+        "carol",
+        &test_device_id("carol"),
+        CS_PQ,
+        group_info,
+        &LineageProvenance {
+            identities: &identities,
+            roster: None,
+        },
+    )
+    .expect("a device that could read nothing must still recover");
 }
 
 // ── #1161 C1 (client half): what a Welcome is allowed to destroy ─────────────

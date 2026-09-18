@@ -569,6 +569,46 @@ async fn external_join_attempt(
         parse_stored_group_info(&group_info_bytes)?;
     let suite = verifiable_group_info.ciphersuite();
 
+    // 2a. Who is allowed to have built this lineage (#1161 M6 residual). Both
+    //     reads happen OUTSIDE the local-DB guard and both fail to the weak
+    //     answer: a roster we could not read is `None` (unknown, not "empty"),
+    //     and identities we could not load leave an unpinned directory that
+    //     certifies nothing and therefore verdicts everything `Unverifiable`.
+    //     Neither failure refuses a join — see `invariants::lineage_adoption`.
+    let roster: Option<std::collections::HashSet<String>> =
+        match crate::commands::ds_reads::catch_up_full(state, conversation_id, false, false, true)
+            .await
+        {
+            Ok(resolved) if !resolved.roster.is_empty() => {
+                Some(resolved.roster.into_iter().collect())
+            }
+            Ok(_) => None,
+            Err(e) => {
+                eprintln!(
+                    "[mls] external_join: roster read for {conversation_id} failed ({e}) — the \
+                     GroupInfo signer's membership cannot be checked this pass"
+                );
+                None
+            }
+        };
+    let roster_ids: Vec<String> = roster.iter().flatten().cloned().collect();
+    let identities = match super::reconcile::load_pinned_identities(state, &roster_ids, user_id)
+        .await
+    {
+        Ok(dir) => dir,
+        Err(e) => {
+            eprintln!(
+                "[mls] external_join: cross-signing material for {conversation_id} could not be \
+                 loaded ({e}) — the GroupInfo signer stays unverifiable this pass"
+            );
+            IdentityDirectory::new(Vec::new())
+        }
+    };
+    let provenance = LineageProvenance {
+        identities: &identities,
+        roster: roster.as_ref(),
+    };
+
     let (commit_bytes, new_group_info_bytes): (Vec<u8>, Option<Vec<u8>>) = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| {
@@ -583,6 +623,7 @@ async fn external_join_attempt(
             &device_id,
             suite,
             verifiable_group_info,
+            &provenance,
         )?
     };
 
@@ -709,6 +750,189 @@ async fn external_join_attempt(
 
 // ── Phase 3: Group / DM creation ─────────────────────────────────────────────
 
+/// The material an external join needs in order to decide WHO built the group
+/// it is about to adopt (#1161 M6 residual).
+///
+/// A parameter rather than something [`build_external_commit`] fetches, because
+/// the fetch is async and the build is not — but a mandatory one, so that the
+/// provenance check cannot be skipped by adding a call site. The two failure
+/// biases it carries are opposite and both deliberate:
+///
+/// * `identities` unpinned or empty → every verdict is `Unverifiable`, which
+///   ADOPTS. A directory this device could not load must not brick a migration.
+/// * `roster` is `None` only when the roster could not be READ, never when the
+///   signer is merely absent from it. `Some(set)` is an assertion about who the
+///   conversation's members are, and a signer outside it is refused.
+pub(super) struct LineageProvenance<'a> {
+    /// The roster's cross-signing material, already through the local
+    /// substitutions (`reconcile::pin_identities`). An unpinned directory
+    /// certifies nothing, which is the safe direction here.
+    pub identities: &'a IdentityDirectory,
+    /// The conversation's current member user ids, or `None` when the read that
+    /// would have answered failed.
+    pub roster: Option<&'a std::collections::HashSet<String>>,
+}
+
+impl LineageProvenance<'_> {
+    /// Is `user_id` a current member? `None` when the roster is unknown — the
+    /// distinction [`super::invariants::lineage_adoption`] turns on.
+    fn signer_on_roster(&self, user_id: &str) -> Option<bool> {
+        self.roster.map(|r| r.contains(user_id))
+    }
+}
+
+/// The leaf of `tree` that actually signed `vgi`, with the identity it claims.
+///
+/// `VerifiableGroupInfo::signer()` is `pub(crate)` at the pinned openmls rev
+/// (`34222ef6`), so the signer's leaf INDEX is not readable from outside the
+/// crate. It does not need to be: the signer is recovered by trial verification
+/// instead — the GroupInfo signature is checked against every leaf's signature
+/// key, and the leaf it verifies under IS the signer. That is strictly stronger
+/// than reading the index would have been, since an index is only a claim until
+/// the signature under that leaf's key is checked, which is the same check.
+///
+/// `tree` comes from the ratchet-tree extension via `RatchetTreeIn::into_verified`,
+/// which has already verified every leaf's own self-signature against its
+/// signature key AND against this `GroupId` and leaf position — so a credential
+/// here is bound to the key beside it by the holder of that key, not merely
+/// adjacent to it in a blob the DS wrote.
+fn group_info_signer<'t, C>(
+    provider: &MlsProvider<'_, C>,
+    scheme: SignatureScheme,
+    tree: &'t openmls::treesync::RatchetTree,
+    vgi: &VerifiableGroupInfo,
+) -> Option<&'t LeafNode>
+where
+    C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
+    tree.leaves().find(|leaf| {
+        let key = leaf.signature_key().as_slice().to_vec();
+        let Ok(pk) = OpenMlsSignaturePublicKey::new(key.into(), scheme) else {
+            return false;
+        };
+        // `verify_no_out` rather than `verify`: the latter consumes the
+        // GroupInfo, which would mean cloning the whole ratchet-tree extension
+        // once per candidate leaf.
+        vgi.verify_no_out(provider.crypto(), &pk).is_ok()
+    })
+}
+
+/// Refuse a GroupInfo whose signer is not a certified device of a current
+/// roster member (#1161 M6 residual).
+///
+/// `build_external_commit` pins the lineage's NAME — the GroupId has to be
+/// `mls_group_id(conversation_id, generation)`. A GroupId is not a capability
+/// though: anyone can create an MLS group with an arbitrary one, so a hostile or
+/// compromised Delivery Service could stand up its own group under the
+/// successor's name, publish its GroupInfo as the conversation's newest lineage
+/// and answer `head_generation = N+1`. `maybe_advance_generation` reads a head
+/// above ours as proof a successor exists, external-joins it, and
+/// `adopt_generation_locked` then deletes the predecessor's key material —
+/// losing every un-ingested envelope below the rejoin epoch and leaving this
+/// device sealing for a group of the server's choosing. The same shape applies
+/// to a plain external-join recovery inside one generation.
+///
+/// None of the existing gates closes it: `may_rejoin_via_external_join` is
+/// answered by the same DS, the `pruned_below`/`hole` gate constrains DELETION
+/// on a gap rather than ADOPTION of a successor, and the cross-signing verdicts
+/// run on leaves a COMMIT grafts — a lineage entered by Welcome or external
+/// commit is never replayed through that path at its founding.
+///
+/// What closes it is that the GroupInfo is signed by a member of the group it
+/// describes and carries the ratchet tree, so the signer's leaf credential and
+/// signature key are both readable BEFORE adoption. A Delivery Service holds no
+/// account identity key, so it cannot mint a leaf the roster's cross-signing
+/// material certifies.
+///
+/// Runs before the stale-group delete below, so a refusal costs nothing.
+fn check_lineage_provenance<C>(
+    provider: &MlsProvider<'_, C>,
+    conversation_id: &str,
+    generation: i64,
+    suite: Ciphersuite,
+    group_id: &GroupId,
+    vgi: &VerifiableGroupInfo,
+    provenance: &LineageProvenance<'_>,
+) -> Result<()>
+where
+    C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
+    let refuse = |why: String| {
+        crate::error::Error::Other(anyhow::anyhow!(
+            "external join for {conversation_id} generation {generation}: {why} — refusing to \
+             adopt this lineage"
+        ))
+    };
+
+    // Every group this client builds sets `use_ratchet_tree_extension(true)`,
+    // and an external commit cannot be built without the tree anyway, so a
+    // GroupInfo without one is not a lineage of ours. Refusing here only makes
+    // an error that would have happened in `build_group` happen before the
+    // delete, and keeps "we could not see who signed it" from being a way past
+    // this gate.
+    let Some(tree_ext) = vgi.extensions().ratchet_tree() else {
+        return Err(refuse(
+            "the published GroupInfo carries no ratchet-tree extension, so there is no way to \
+             establish who built it"
+            .to_string(),
+        ));
+    };
+
+    // Binds every leaf's credential to the signature key beside it, and both to
+    // this GroupId and leaf position. A tree that fails here is one openmls
+    // would have rejected on the next line.
+    let tree = tree_ext
+        .ratchet_tree()
+        .clone()
+        .into_verified(suite, provider.crypto(), group_id)
+        .map_err(|e| refuse(format!("the GroupInfo's ratchet tree does not verify: {e}")))?;
+
+    let scheme = signature_scheme(suite);
+    let Some(leaf) = group_info_signer(provider, scheme, &tree, vgi) else {
+        return Err(refuse(
+            "the published GroupInfo's signature does not verify under any leaf of its own tree"
+                .to_string(),
+        ));
+    };
+
+    let signer_user = parse_credential_user_id(leaf.credential());
+    let signer_device = parse_credential_device_id(leaf.credential()).unwrap_or_default();
+    let verdict = provenance.identities.leaf_verdict(
+        &signer_user,
+        &signer_device,
+        leaf.signature_key().as_slice(),
+        scheme,
+    );
+    let standing = match &verdict {
+        LeafVerdict::Certified => super::invariants::SignerStanding::Certified,
+        LeafVerdict::Unverifiable(_) => super::invariants::SignerStanding::Unverifiable,
+        LeafVerdict::Uncertified(_) => super::invariants::SignerStanding::Uncertified,
+    };
+    let on_roster = provenance.signer_on_roster(&signer_user);
+
+    match super::invariants::lineage_adoption(on_roster, standing) {
+        super::invariants::LineageAdoption::Refuse => Err(refuse(format!(
+            "the published GroupInfo is signed by {signer_user}:{signer_device}, which is not a \
+             certified device of a current member (verdict {verdict:?}, on roster {on_roster:?})"
+        ))),
+        super::invariants::LineageAdoption::Adopt => {
+            if !matches!(standing, super::invariants::SignerStanding::Certified) {
+                // Adopted on the weak verdict, and said so. This is the
+                // deliberate bias — cert rows that have not replicated yet must
+                // not strand a legitimate migration — but it is the one case
+                // where the gate let something through it could not prove, so
+                // it is never silent.
+                eprintln!(
+                    "[mls] external join for {conversation_id} generation {generation}: adopting a \
+                     GroupInfo signed by {signer_user}:{signer_device} whose cross-signing could \
+                     not be evaluated ({verdict:?}) — not positive evidence, so not a refusal"
+                );
+            }
+            Ok(())
+        }
+    }
+}
+
 /// Build (and locally stage) an external commit joining the group described by
 /// `verifiable_group_info`, returning the serialised commit and the GroupInfo at
 /// the resulting epoch.
@@ -716,6 +940,9 @@ async fn external_join_attempt(
 /// `suite` is the group's, read off the GroupInfo by the caller. It decides the
 /// scheme the joining leaf signs under, so passing the wrong one produces a
 /// commit the group rejects rather than a silently weaker signature.
+///
+/// `provenance` answers the question the GroupId pin cannot — see
+/// [`check_lineage_provenance`].
 ///
 /// Sync: the caller owns the local-DB guard.
 #[allow(clippy::too_many_arguments)]
@@ -727,6 +954,7 @@ pub(super) fn build_external_commit<C>(
     device_id: &str,
     suite: Ciphersuite,
     verifiable_group_info: VerifiableGroupInfo,
+    provenance: &LineageProvenance<'_>,
 ) -> Result<(Vec<u8>, Option<Vec<u8>>)>
 where
     C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
@@ -760,6 +988,19 @@ where
             verifiable_group_info.group_id()
         )));
     }
+
+    // …and it must have been built by a member of this conversation, not merely
+    // named after it (#1161 M6 residual). Also before the delete, for the same
+    // reason.
+    check_lineage_provenance(
+        provider,
+        conversation_id,
+        generation,
+        suite,
+        &group_id,
+        &verifiable_group_info,
+        provenance,
+    )?;
 
     // Drop any stale local group with the same ID so the external commit builder
     // doesn't collide. Scoped to THIS lineage: a predecessor group under a
