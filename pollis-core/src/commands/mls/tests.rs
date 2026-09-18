@@ -3240,3 +3240,114 @@ fn an_externally_joined_leaf_is_reported_for_cross_signing() {
         other => panic!("the external commit must apply, got {other:?}"),
     }
 }
+
+/// #1161 M7: two leaves claiming ONE `(user, device)` must not be
+/// unrepresentable in reconcile's model while being representable in the tree.
+///
+/// openmls rejects duplicate signature and encryption keys but NOT duplicate
+/// CREDENTIALS, so a second leaf can carry the same `"user:device"` as a real
+/// member. Keyed on the credential, reconcile's `actual` map silently kept one
+/// index, so the removal set could only ever name one of them and the shadowed
+/// leaf survived every reconcile — the step that turns a grafted leaf into a
+/// permanent one.
+#[test]
+fn a_duplicate_credential_leaf_is_evicted_rather_than_shadowed() {
+    let conv = "01JT1161DUPLICATELEAF00000";
+    let (alice_db, bob_db, rogue_db) = (make_db(), make_db(), make_db());
+    create_group(&alice_db, conv, "alice");
+
+    // Bob's genuine device joins.
+    let bob_kp = gen_key_package(&bob_db, "bob");
+    let (_c1, _w1) = add_member_to_group(&alice_db, conv, &bob_kp);
+
+    // A second leaf claiming the SAME "bob:bob_dev" credential, with its own
+    // signature key — the shape openmls permits.
+    let rogue_kp = gen_key_package(&rogue_db, "bob");
+    let (_c2, _w2) = add_member_to_group(&alice_db, conv, &rogue_kp);
+
+    let claims: Vec<(String, String)> = load_local_group(&alice_db, conv)
+        .unwrap()
+        .members()
+        .map(|m| {
+            (
+                parse_credential_user_id(&m.credential),
+                parse_credential_device_id(&m.credential).unwrap_or_default(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        claims.iter().filter(|(u, _)| u == "bob").count(),
+        2,
+        "precondition: the tree holds two leaves claiming one device — {claims:?}"
+    );
+
+    // A declarative reconcile against the honest roster.
+    let (outcome, data) = reconcile(
+        &alice_db,
+        conv,
+        &["alice", "bob"],
+        &[],
+        "alice",
+        &test_device_id("alice"),
+    );
+    assert!(data.is_some(), "the duplicate must produce a removal commit, not a no-op");
+    assert!(
+        outcome.removed.contains(&("bob".to_string(), test_device_id("bob"))),
+        "the duplicate leaf must be named in the removal set, got {:?}",
+        outcome.removed
+    );
+
+    let after: Vec<(String, String)> = load_local_group(&alice_db, conv)
+        .unwrap()
+        .members()
+        .map(|m| {
+            (
+                parse_credential_user_id(&m.credential),
+                parse_credential_device_id(&m.credential).unwrap_or_default(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        after.iter().filter(|(u, _)| u == "bob").count(),
+        1,
+        "exactly one leaf may claim bob's device after the reconcile — {after:?}"
+    );
+    assert!(
+        after.iter().any(|(u, _)| u == "alice"),
+        "the committer's own leaf survives — {after:?}"
+    );
+}
+
+/// The other half of M7: with the duplicate in the tree, removing that user from
+/// the roster must take BOTH leaves. Pre-fix the removal set could name only the
+/// index the map happened to hold, so the shadowed leaf kept its place — and its
+/// copy of the group's key schedule — through the very reconcile that was
+/// supposed to evict the user.
+#[test]
+fn removing_a_user_takes_every_leaf_claiming_their_device() {
+    let conv = "01JT1161DUPLICATEREMOVE000";
+    let (alice_db, bob_db, rogue_db) = (make_db(), make_db(), make_db());
+    create_group(&alice_db, conv, "alice");
+    let bob_kp = gen_key_package(&bob_db, "bob");
+    let (_c1, _w1) = add_member_to_group(&alice_db, conv, &bob_kp);
+    let rogue_kp = gen_key_package(&rogue_db, "bob");
+    let (_c2, _w2) = add_member_to_group(&alice_db, conv, &rogue_kp);
+
+    // Bob leaves the roster entirely.
+    let (_outcome, data) = reconcile(
+        &alice_db,
+        conv,
+        &["alice"],
+        &[],
+        "alice",
+        &test_device_id("alice"),
+    );
+    assert!(data.is_some(), "removing bob must produce a commit");
+
+    let after: Vec<String> = load_local_group(&alice_db, conv)
+        .unwrap()
+        .members()
+        .map(|m| parse_credential_user_id(&m.credential))
+        .collect();
+    assert_eq!(after, vec!["alice".to_string()], "no leaf of bob's may survive — {after:?}");
+}
