@@ -3409,3 +3409,119 @@ fn an_external_join_refuses_a_group_info_for_another_group() {
         "a refused external join must not have deleted or replaced the local group"
     );
 }
+
+// ── #1161 C1 (client half): what a Welcome is allowed to destroy ─────────────
+
+use super::welcomes::join_from_welcome;
+
+/// Extract the inner `Welcome` from serialised Welcome bytes.
+fn welcome_from_bytes(welcome_bytes: &[u8]) -> Welcome {
+    let mut reader: &[u8] = welcome_bytes;
+    match MlsMessageIn::tls_deserialize(&mut reader).unwrap().extract() {
+        MlsMessageBodyIn::Welcome(w) => w,
+        _ => panic!("expected Welcome"),
+    }
+}
+
+/// C1: a Welcome at or below our current epoch must never replace the group we
+/// already hold.
+///
+/// The GroupId lives inside the blob, so it names which of THIS device's groups
+/// gets deleted — and anyone who can claim one of our published KeyPackages can
+/// stand up a group whose GroupId is a conversation we are already in and send us
+/// a Welcome for it. The delete used to be unconditional, so that blob evicted a
+/// working group and replaced it with the attacker's.
+#[test]
+fn a_foreign_welcome_never_replaces_a_group_we_have_carried_past_it() {
+    let conv = "01JT1161WELCOMECLOBBER0000";
+    let (alice_db, bob_db, carol_db) = (make_db(), make_db(), make_db());
+    create_group(&alice_db, conv, "alice");
+    let bob_kp = gen_key_package(&bob_db, "bob");
+    let (_c1, welcome1) = add_member_to_group(&alice_db, conv, &bob_kp);
+    join_via_welcome(&bob_db, &welcome1);
+
+    // Bob's group moves on: alice adds carol at epoch 1 and bob applies it.
+    let carol_kp = gen_key_package(&carol_db, "carol");
+    let (commit2, _welcome2) = add_member_to_group(&alice_db, conv, &carol_kp);
+    apply_commit(&bob_db, conv, &commit2);
+    assert_eq!(member_epoch(&bob_db, conv), 2, "precondition: bob is at epoch 2");
+    let authenticator_before = member_auth(&bob_db, conv);
+
+    // Mallory stands up her own group under the SAME GroupId and welcomes bob
+    // into it off a freshly-claimed KeyPackage.
+    let mallory_db = make_db();
+    create_group(&mallory_db, conv, "mallory");
+    let bob_kp2 = gen_key_package(&bob_db, "bob");
+    let (_evil_commit, evil_welcome) = add_member_to_group(&mallory_db, conv, &bob_kp2);
+
+    let provider = PollisProvider::new(&bob_db);
+    let err = join_from_welcome(&provider, welcome_from_bytes(&evil_welcome), None)
+        .expect_err("a Welcome at or below our epoch must be refused");
+    assert!(
+        err.to_string().contains("refusing to replace"),
+        "the refusal must say what it protected, got {err}"
+    );
+
+    assert_eq!(
+        member_epoch(&bob_db, conv),
+        2,
+        "bob's working group must survive the foreign Welcome"
+    );
+    assert_eq!(
+        member_auth(&bob_db, conv),
+        authenticator_before,
+        "…and survive it unchanged, not be rebuilt from the blob"
+    );
+    // The tree is still the real one: alice and carol are in it, mallory is not.
+    let members: Vec<String> = load_local_group(&bob_db, conv)
+        .unwrap()
+        .members()
+        .map(|m| parse_credential_user_id(&m.credential))
+        .collect();
+    assert!(members.contains(&"alice".to_string()), "still the real group — {members:?}");
+    assert!(!members.contains(&"mallory".to_string()), "never mallory's group — {members:?}");
+}
+
+/// C1: once the row's `conversation_id` is available, a Welcome whose embedded
+/// GroupId disagrees with it is refused before anything is touched.
+#[test]
+fn a_welcome_whose_group_id_disagrees_with_its_row_is_refused() {
+    let conv = "01JT1161WELCOMEGROUPIDROW0";
+    let (alice_db, bob_db) = (make_db(), make_db());
+    create_group(&alice_db, conv, "alice");
+    let bob_kp = gen_key_package(&bob_db, "bob");
+    let (_c1, welcome1) = add_member_to_group(&alice_db, conv, &bob_kp);
+
+    let provider = PollisProvider::new(&bob_db);
+    let err = join_from_welcome(
+        &provider,
+        welcome_from_bytes(&welcome1),
+        Some("01JT1161WELCOMEOTHERCONV00"),
+    )
+    .expect_err("a Welcome filed under another conversation must be refused");
+    assert!(
+        err.to_string().contains("carries a group id for"),
+        "the refusal must name the disagreement, got {err}"
+    );
+    assert!(
+        load_local_group(&bob_db, conv).is_none(),
+        "a refused Welcome must not have created a group"
+    );
+}
+
+/// …and the same guard passes a Welcome that agrees with its row, so it refuses
+/// a mismatch rather than refusing Welcomes.
+#[test]
+fn a_welcome_matching_its_row_still_joins() {
+    let conv = "01JT1161WELCOMEROWMATCHES0";
+    let (alice_db, bob_db) = (make_db(), make_db());
+    create_group(&alice_db, conv, "alice");
+    let bob_kp = gen_key_package(&bob_db, "bob");
+    let (_c1, welcome1) = add_member_to_group(&alice_db, conv, &bob_kp);
+
+    let provider = PollisProvider::new(&bob_db);
+    let raw = join_from_welcome(&provider, welcome_from_bytes(&welcome1), Some(conv))
+        .expect("the honest Welcome must join");
+    assert_eq!(raw, conv);
+    assert_eq!(member_epoch(&bob_db, conv), 1);
+}
