@@ -5,22 +5,27 @@
 //! ephemeral, authenticated channel. Flow:
 //!
 //!   1. New device calls `start_device_enrollment` → generates an
-//!      ephemeral X25519 keypair and a 6-digit verification code, and
-//!      writes a `device_enrollment_request` row via the session-gated DS
-//!      endpoint (the new device is pre-enrollment, so it can't device-sign).
-//!      The DS then emits the `enrollment_requested` inbox nudge SERVER-SIDE
-//!      — the new device can't, since a client-side send-data needs a signing
-//!      credential it doesn't have yet. The private X25519 key stays in
-//!      memory on the new device.
+//!      ephemeral X25519 keypair, DERIVES an 8-character short authentication
+//!      string from that keypair's public half (`derive_verification_code`:
+//!      HKDF over the public key, Crockford base32), and writes a
+//!      `device_enrollment_request` row via the session-gated DS endpoint (the
+//!      new device is pre-enrollment, so it can't device-sign). The DS then
+//!      emits the `enrollment_requested` inbox nudge SERVER-SIDE — the new
+//!      device can't, since a client-side send-data needs a signing credential
+//!      it doesn't have yet. The private X25519 key stays in memory on the new
+//!      device, and the SAS is **displayed on the new device**.
 //!
 //!   2. Any of the user's already-enrolled devices receives the inbox
 //!      event (or, if it was offline at request time, picks the request up
 //!      via its login-time `list_pending_enrollment_requests` poll) and shows
-//!      an immediate-takeover approval UI that displays the verification code.
+//!      an approval UI with an EMPTY INPUT — it does not display the code.
 //!
-//!   3. User confirms the code matches and taps approve. The approving
-//!      device calls `approve_device_enrollment`:
-//!      a. Verifies the verification code against the request row.
+//!   3. The human reads the SAS off the new device's screen and types it into
+//!      the approver. The approving device calls `approve_device_enrollment`:
+//!      a. Re-derives the SAS from the ephemeral public key it fetched
+//!      itself and compares the typed value against that (#1096 — see
+//!      `derive_verification_code` for why comparing against the DS's
+//!      stored copy was the bug, not the check).
 //!      b. Generates its own ephemeral X25519 keypair.
 //!      c. ECDH(approver_priv, requester_pub) → HKDF → wrap key.
 //!      d. AES-256-GCM wraps `account_id_key.private` and writes
@@ -38,6 +43,21 @@
 //! Rejection and expiry: `reject_device_enrollment` flips status and
 //! records a security event. Requests that time out (10-minute TTL) are
 //! treated as `expired` by the poller without special cleanup.
+//!
+//! # Symmetric, and not a login second factor
+//!
+//! Every tier both requests and approves: desktop and mobile each call
+//! `start_device_enrollment` when they are the new device and
+//! `approve_device_enrollment` / `list_pending_enrollment_requests` /
+//! `reject_device_enrollment` when they are the existing one. A phone can
+//! authorise a desktop sign-in and a desktop can authorise a phone's.
+//!
+//! This is **device linking**, in the shape Signal and WhatsApp use — not a
+//! Steam-Guard-style second factor. It does not gate authentication (the
+//! email OTP does that, and it establishes a session) and it does not run on
+//! every login. It runs ONCE per new device, because it is the only way the
+//! account identity private key reaches that device at all: no server ever
+//! holds it, so an existing device has to hand it over.
 
 use std::sync::Arc;
 
