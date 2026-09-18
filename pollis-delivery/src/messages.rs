@@ -1380,10 +1380,57 @@ pub async fn remove_reaction(
     outcome_response::<RemoveReaction>(apply_remove_reaction(&conn, authed.as_deref(), &parsed.0).await?)
 }
 
-/// A reaction is membership-gated through the reacted-to message's envelope.
-/// When the envelope has aged out we cannot resolve the conversation, so we
-/// allow the write (it is already scoped to the actor's own `user_id`) —
-/// reacting to a still-locally-visible but GC'd message must keep working.
+/// Resolve the conversation a reaction is to be gated against, and refuse if it
+/// cannot be established (#1161).
+///
+/// Reactions are membership-gated through the reacted-to message's envelope.
+/// That was the whole gate, and it had a hole the size of the feature: envelope
+/// GC (#689) collects a row as soon as every member device has fetched it, so
+/// for anything but a very recent message `conversation_for_message` answers
+/// `None` — and the gate was SKIPPED in exactly that case. Any authenticated
+/// account that knew a message id could write a `message_reaction` row against
+/// it. The skip was not careless; refusing outright would break reacting to an
+/// older message, which is an ordinary thing to do, and there was nothing else
+/// to check against.
+///
+/// There is now: `ReactionBody.conversation_id`, which the client fills from its
+/// own decrypted local copy of the message. So:
+///
+///   * envelope present → its `conversation_id` is authoritative, and a body
+///     that declares a DIFFERENT one is a lie, refused rather than ignored (it
+///     would otherwise ask the membership question about a conversation the
+///     actor is in, on behalf of a message in one they are not);
+///   * envelope gone, body declares one → gate on that;
+///   * neither → refuse. Treating a missing declaration as "unknown, therefore
+///     allowed" would close nothing at all, since the attacker composes the body
+///     and would simply omit the field. A client that predates the field loses
+///     the ability to react to messages whose envelope has been collected, and
+///     gets a 403 rather than a silent no-op; that is the fail-closed direction.
+///
+/// `is_member`, not the wider `in_desired_roster` that #1161 put on the Welcome
+/// and KeyPackage gates. That widening exists for the invite handshake — an
+/// invitee's devices are Welcomed BEFORE they accept, so those two gates have to
+/// count pending invitees or the shipped invite flow refuses itself. A reaction
+/// has no such pre-acceptance step: it is ordinary in-conversation activity, and
+/// the envelope-present path has always used `is_member`. Using the wider
+/// predicate here would loosen an existing gate rather than repair a missing
+/// one.
+async fn reaction_conversation(
+    conn: &Connection,
+    body: &ReactionBody,
+) -> anyhow::Result<Option<String>> {
+    match conversation_for_message(conn, &body.message_id).await? {
+        Some(envelope_conv) => match body.conversation_id.as_deref() {
+            Some(declared) if declared != envelope_conv => Ok(None),
+            _ => Ok(Some(envelope_conv)),
+        },
+        None => Ok(body.conversation_id.clone().filter(|c| !c.is_empty())),
+    }
+}
+
+/// A reaction is membership-gated against [`reaction_conversation`] — the
+/// envelope's conversation when the envelope survives, the body's declared one
+/// when GC has collected it, and a refusal when neither is available.
 pub async fn apply_add_reaction(
     conn: &Connection,
     authed: Option<&str>,
@@ -1394,10 +1441,11 @@ pub async fn apply_add_reaction(
         Err(o) => return Ok(o),
     };
     if authed.is_some() {
-        if let Some(conv) = conversation_for_message(conn, &body.message_id).await? {
-            if !is_member(conn, &conv, &user).await? {
-                return Ok(WriteOutcome::Forbidden);
-            }
+        let Some(conv) = reaction_conversation(conn, body).await? else {
+            return Ok(WriteOutcome::Forbidden);
+        };
+        if !is_member(conn, &conv, &user).await? {
+            return Ok(WriteOutcome::Forbidden);
         }
     }
     let id = Ulid::new().to_string();
@@ -1423,8 +1471,16 @@ pub async fn apply_remove_reaction(
     // A user may only ever remove their OWN reaction — the DELETE is scoped to
     // `user_id = :user`, so even without a membership lookup it cannot touch
     // anyone else's row. We still membership-gate when determinable.
+    //
+    // Unlike the add path (#1161) this one does NOT fail closed on an
+    // unresolvable conversation. The add gate had to, because it WRITES a row
+    // and the skip was what let a non-member write one; removal can only ever
+    // unwrite a row the actor already got past the add gate to create, so an
+    // unresolvable conversation grants nothing here. Refusing would instead
+    // strand an un-react on a message whose envelope has been collected and
+    // whose local copy this device has since evicted.
     if authed.is_some() {
-        if let Some(conv) = conversation_for_message(conn, &body.message_id).await? {
+        if let Some(conv) = reaction_conversation(conn, body).await? {
             if !is_member(conn, &conv, &user).await? {
                 return Ok(WriteOutcome::Forbidden);
             }
@@ -5722,5 +5778,196 @@ mod envelope_insert_site_tests {
                 out.push(path);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod reaction_membership_tests {
+    //! A reaction must be membership-gated even when the envelope is gone
+    //! (#1161).
+    //!
+    //! The gate resolved the conversation from `message_envelope`, and envelope
+    //! GC (#689) collects that row as soon as every member device has fetched
+    //! it — so for anything but a very recent message there was nothing to
+    //! resolve, and the check was SKIPPED. That is the common case, not an edge:
+    //! any authenticated account holding a message id could write a reaction row
+    //! against a conversation it has never been in.
+    //!
+    //! `ReactionBody.conversation_id` closes it, and the tests pin all three
+    //! arms: the declared conversation is gated, a declaration that contradicts
+    //! a surviving envelope is refused, and a request that declares nothing at
+    //! all against a collected envelope is refused rather than waved through.
+
+    use super::*;
+    use libsql::Connection;
+
+    async fn conn() -> Connection {
+        let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
+        let c = db.connect().unwrap();
+        c.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
+        pollis_schema::apply::single_db(&c).await.expect("schema");
+        // `alice` is in g1. `mallory` is in a group of her own, so she is a real
+        // authenticated account with a real membership — just not this one.
+        c.execute_batch(
+            "INSERT INTO conversation (id, kind) VALUES ('g1', 'group');
+             INSERT INTO conversation (id, kind) VALUES ('g2', 'group');
+             INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'g1', 'alice');
+             INSERT INTO groups (id, name, owner_id) VALUES ('g2', 'g2', 'mallory');
+             INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');
+             INSERT INTO group_member (group_id, user_id) VALUES ('g2', 'mallory');",
+        )
+        .await
+        .unwrap();
+        c
+    }
+
+    async fn seed_envelope(c: &Connection, id: &str, conv: &str) {
+        c.execute(
+            "INSERT INTO message_envelope (id, conversation_id, sender_id, ciphertext, sent_at) \
+             VALUES (?1, ?2, 'alice', 'x', '2026-01-01T00:00:00.000000000+00:00')",
+            libsql::params![id.to_string(), conv.to_string()],
+        )
+        .await
+        .unwrap();
+    }
+
+    fn body(message_id: &str, conversation_id: Option<&str>) -> ReactionBody {
+        ReactionBody {
+            message_id: message_id.to_string(),
+            emoji: "🔥".to_string(),
+            user_id: None,
+            conversation_id: conversation_id.map(str::to_string),
+        }
+    }
+
+    async fn reaction_count(c: &Connection, message_id: &str) -> i64 {
+        let mut rows = c
+            .query(
+                "SELECT COUNT(*) FROM message_reaction WHERE message_id = ?1",
+                libsql::params![message_id.to_string()],
+            )
+            .await
+            .unwrap();
+        rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap()
+    }
+
+    /// **The finding.** The envelope has been collected, so the old gate had
+    /// nothing to check and allowed the write. FAILS before the change: the
+    /// outcome is `Ok` and the row lands.
+    #[tokio::test]
+    async fn a_non_member_cannot_react_to_a_collected_envelope() {
+        let c = conn().await;
+        let out = apply_add_reaction(&c, Some("mallory"), &body("m-gone", Some("g1")))
+            .await
+            .unwrap();
+        assert!(
+            matches!(out, WriteOutcome::Forbidden),
+            "a declared conversation the actor is not in must be refused"
+        );
+        assert_eq!(reaction_count(&c, "m-gone").await, 0);
+    }
+
+    /// Declaring nothing is not an opt-out. An attacker composes the body, so a
+    /// missing `conversation_id` treated as "unknown, therefore allowed" would
+    /// leave the hole exactly where it was.
+    #[tokio::test]
+    async fn an_undeclared_conversation_is_refused_when_the_envelope_is_gone() {
+        let c = conn().await;
+        let out = apply_add_reaction(&c, Some("mallory"), &body("m-gone", None))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Forbidden));
+        assert_eq!(reaction_count(&c, "m-gone").await, 0);
+
+        // And the same refusal for an account that IS a member somewhere — the
+        // refusal is about the absent evidence, not about who is asking.
+        let out = apply_add_reaction(&c, Some("alice"), &body("m-gone", None))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Forbidden));
+        assert_eq!(reaction_count(&c, "m-gone").await, 0);
+    }
+
+    /// The control: a member reacting to a collected envelope — the ordinary act
+    /// the old skip existed to allow — still works.
+    #[tokio::test]
+    async fn a_member_can_still_react_to_a_collected_envelope() {
+        let c = conn().await;
+        let out = apply_add_reaction(&c, Some("alice"), &body("m-gone", Some("g1")))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Ok));
+        assert_eq!(reaction_count(&c, "m-gone").await, 1);
+    }
+
+    /// A surviving envelope stays authoritative, and a body that names a
+    /// DIFFERENT conversation is refused rather than ignored. Ignoring it would
+    /// be safe here but silently accepting it would not be: the membership
+    /// question has to be asked about the conversation the message is actually
+    /// in.
+    #[tokio::test]
+    async fn a_declaration_that_contradicts_the_envelope_is_refused() {
+        let c = conn().await;
+        seed_envelope(&c, "m-live", "g1").await;
+
+        let out = apply_add_reaction(&c, Some("mallory"), &body("m-live", Some("g2")))
+            .await
+            .unwrap();
+        assert!(
+            matches!(out, WriteOutcome::Forbidden),
+            "mallory is a member of g2, but the message is in g1"
+        );
+        assert_eq!(reaction_count(&c, "m-live").await, 0);
+
+        // The envelope-present path is otherwise unchanged: a member lands, a
+        // non-member does not.
+        let out = apply_add_reaction(&c, Some("alice"), &body("m-live", Some("g1")))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Ok));
+        let out = apply_add_reaction(&c, Some("mallory"), &body("m-live", None))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Forbidden));
+        assert_eq!(reaction_count(&c, "m-live").await, 1);
+    }
+
+    /// Removal deliberately does NOT fail closed on an unresolvable
+    /// conversation: the DELETE is scoped to the actor's own row, so it can only
+    /// unwrite something the add gate already admitted, and refusing would
+    /// strand an un-react on a message whose envelope has been collected.
+    #[tokio::test]
+    async fn removal_stays_possible_once_the_envelope_is_gone() {
+        let c = conn().await;
+        apply_add_reaction(&c, Some("alice"), &body("m-gone", Some("g1")))
+            .await
+            .unwrap();
+        assert_eq!(reaction_count(&c, "m-gone").await, 1);
+
+        let out = apply_remove_reaction(&c, Some("alice"), &body("m-gone", None))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Ok));
+        assert_eq!(reaction_count(&c, "m-gone").await, 0);
+    }
+
+    /// And removal still cannot reach anyone else's row, declared conversation
+    /// or not — the property that makes the permissive arm above safe.
+    #[tokio::test]
+    async fn removal_cannot_reach_another_accounts_reaction() {
+        let c = conn().await;
+        apply_add_reaction(&c, Some("alice"), &body("m-gone", Some("g1")))
+            .await
+            .unwrap();
+
+        let out = apply_remove_reaction(&c, Some("mallory"), &body("m-gone", None))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Ok));
+        assert_eq!(
+            reaction_count(&c, "m-gone").await,
+            1,
+            "the DELETE is scoped to the actor's own user_id"
+        );
     }
 }
