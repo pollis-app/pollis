@@ -255,6 +255,40 @@ async fn a_welcome_to_a_current_member_still_lands() {
     );
 }
 
+/// The gate is the DESIRED roster, not `is_member`. An invitee's devices are
+/// added to the MLS tree and Welcomed at INVITE time — that is what makes
+/// accepting independent of the inviter being online — so a pending
+/// `group_invite` row is enough, and a gate that demanded membership would
+/// refuse the staged Welcome the shipped invite flow exists to produce.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_welcome_to_a_pending_invitee_is_admitted() {
+    let db = fresh_db().await;
+    let alice = seed_account(&db, "alice").await;
+    let _dave = seed_account(&db, "dave").await;
+    seed_member(&db, "grp", "alice", "admin").await;
+    // Dave is invited but has NOT accepted — no `group_member` row.
+    db.conn()
+        .await
+        .unwrap()
+        .execute(
+            "INSERT INTO group_invite (id, group_id, inviter_id, invitee_id) \
+             VALUES ('inv-1', 'grp', 'alice', 'dave')",
+            (),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        post(&db, &alice, "/v1/commits", bundle("grp", 0, "alice", "dave", b"staged")).await,
+        StatusCode::OK,
+        "a Welcome staged for a pending invitee must be admitted"
+    );
+    assert_eq!(
+        count(&db, "SELECT COUNT(*) FROM mls_welcome WHERE recipient_id = 'dave'", ()).await,
+        1
+    );
+}
+
 /// The blob bound `/v1/welcomes/resubmit` has always had, now on the primary
 /// path too: a Welcome is bounded by `WELCOME_MAX_BYTES`, so the commit bundle
 /// is not an unbounded write primitive for any member.
@@ -340,6 +374,44 @@ async fn an_admin_may_re_drive_another_members_pending_welcome() {
     assert_eq!(
         post(&db, &boss, "/v1/commits", bundle("grp", 1, "boss", "dave", b"boss-welcome")).await,
         StatusCode::OK
+    );
+}
+
+/// **C1's client half needs a field to compare against.** `/v1/welcomes/fetch`
+/// returned `{id, welcome}` and nothing else, so a client had no way to check
+/// the `GroupId` inside the (server-opaque) Welcome blob against the
+/// conversation the row was filed under — `join_from_welcome`'s guard had
+/// nothing to bind to. The row's `conversation_id` now rides along.
+///
+/// Additive: the field is `Option` with `#[serde(default)]`, so an older client
+/// ignores it and an older server decodes as `None`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fetched_welcome_names_the_conversation_it_was_filed_under() {
+    let db = fresh_db().await;
+    let alice = seed_account(&db, "alice").await;
+    let dave = seed_account(&db, "dave").await;
+    seed_member(&db, "grp", "alice", "member").await;
+    seed_member(&db, "grp", "dave", "member").await;
+
+    assert_eq!(
+        post(&db, &alice, "/v1/commits", bundle("grp", 0, "alice", "dave", b"real-welcome")).await,
+        StatusCode::OK
+    );
+
+    let (status, body) = post_json(
+        &db,
+        &dave,
+        "/v1/welcomes/fetch",
+        serde_json::json!({ "device_id": dave.device_id }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let welcomes = body["welcomes"].as_array().expect("welcomes array");
+    assert_eq!(welcomes.len(), 1);
+    assert_eq!(
+        welcomes[0]["conversation_id"], "grp",
+        "the fetched row must name the conversation it was filed under, so the \
+         client can refuse a blob whose GroupId disagrees with it"
     );
 }
 
