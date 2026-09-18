@@ -321,18 +321,46 @@ where
 /// May `claimer` draw from `target`'s key-package pool at all?
 ///
 /// Claiming is cross-account by construction — it is the mechanism for adding
-/// someone — so the gate cannot be "the target is you". What it CAN be is the
-/// product's own reachability rule, which is the same one `/v1/dm/create`
-/// applies: anybody may start a conversation with anybody they have not blocked
-/// and who has not blocked them. A shared conversation and a pending invite are
-/// both strictly inside that set, so the rule reduces to the block check — the
-/// one relationship state in which the two accounts have no business exchanging
-/// anything at all, and exactly the state in which draining a pool is pure
-/// harassment.
+/// someone — so the gate cannot be "the target is you". It used to be the
+/// product's reachability rule instead (not blocked either way), on the argument
+/// that anybody may start a conversation with anybody, so a claim from a
+/// stranger is a claim from a prospective correspondent.
 ///
-/// A claimer acting on its OWN account (adding its own second device) is always
-/// allowed; a user cannot block themselves, but saying so here means the
-/// self-add path does not depend on that.
+/// That argument does not survive contact with the numbers. A claim is a ONE-WAY
+/// flip and a device publishes a pool of FIVE
+/// (`pollis_core::commands::mls::key_packages`'s `TARGET`), while the per-pair
+/// budget is sixty an hour — so the budget never bound anything, and any
+/// unblocked stranger could empty a device's pool in five requests. A device with
+/// an empty pool cannot be added to a group at all, so that is targeted exclusion
+/// from every NEW conversation until the device next comes online to replenish —
+/// indefinitely, for a device that is offline.
+///
+/// So the gate is now a RELATIONSHIP, not merely the absence of a block: the
+/// claimer must already share a conversation with the target (or be the target).
+/// That costs no honest flow, because every path that claims has already written
+/// the roster row it is reconciling to:
+///
+///   * group add — the member row is written by `/v1/invites/accept`,
+///     `/v1/join-requests/approve` or `/v1/invite-links/redeem`, and
+///     `reconcile_group_mls_impl` then reads *that roster* and claims for the
+///     devices missing from the tree;
+///   * DM — `/v1/dm/create` writes `dm_channel` and every `dm_channel_member`
+///     row in ONE transaction, and only then does the client initialise and
+///     reconcile the MLS group. A DM request's recipient row exists from that
+///     moment (un-accepted, which membership does not depend on);
+///   * suite migration — the roster is the group's existing members;
+///   * a user's own second device — `claimer == target`.
+///
+/// The block check stays underneath it: sharing a conversation with someone you
+/// have since blocked is not a licence to drain their pool.
+///
+/// What this does NOT close is a co-member draining the pool of someone they
+/// genuinely share a group with. No budget can, either, while the pool is five
+/// and an honest adder legitimately spends one per add — any cap low enough to
+/// matter would refuse real adds. The structural answer is a LAST-RESORT
+/// KeyPackage (the RFC 9420 / X3DH device: one package handed out repeatedly
+/// rather than consumed, so a pool can be depleted but never emptied), which is
+/// a client and protocol change rather than a Delivery Service one.
 async fn may_claim_from(
     conn: &Connection,
     claimer: &str,
@@ -341,7 +369,36 @@ async fn may_claim_from(
     if claimer == target {
         return Ok(true);
     }
-    Ok(!crate::profile::is_blocked_either_way(conn, claimer, target).await?)
+    if crate::profile::is_blocked_either_way(conn, claimer, target).await? {
+        return Ok(false);
+    }
+    shares_a_conversation(conn, claimer, target).await
+}
+
+/// Do these two accounts sit in any of the same conversations?
+///
+/// Both shapes membership takes, matching `writes::is_member`'s legs: a group
+/// (whose channels share its MLS group) and a DM channel. A channel of a group
+/// is covered by the group row, so it needs no third leg here.
+async fn shares_a_conversation(
+    conn: &Connection,
+    a: &str,
+    b: &str,
+) -> anyhow::Result<bool> {
+    let mut rows = conn
+        .query(
+            "SELECT 1 WHERE \
+                EXISTS (SELECT 1 FROM group_member ga \
+                        JOIN group_member gb ON gb.group_id = ga.group_id \
+                        WHERE ga.user_id = ?1 AND gb.user_id = ?2) \
+             OR EXISTS (SELECT 1 FROM dm_channel_member da \
+                        JOIN dm_channel_member db ON db.dm_channel_id = da.dm_channel_id \
+                        WHERE da.user_id = ?1 AND db.user_id = ?2) \
+             LIMIT 1",
+            libsql::params![a.to_string(), b.to_string()],
+        )
+        .await?;
+    Ok(rows.next().await?.is_some())
 }
 
 /// Recent claims by `claimer` against `target`, and against that target device

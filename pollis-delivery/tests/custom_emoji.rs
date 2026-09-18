@@ -278,6 +278,48 @@ async fn removal_is_creator_or_admin_only() {
     );
 }
 
+/// **L3 — the existence oracle.** A missing shortcode answers `Ok` (a retried
+/// remove is idempotent, not a 404) and one the caller may not touch answers
+/// `Forbidden`. For a NON-MEMBER that difference read out the group's whole
+/// emoji set one shortcode at a time.
+///
+/// Membership is now checked before the row is read, so both answers are the
+/// same refusal and the probe learns nothing.
+#[tokio::test]
+async fn a_non_member_cannot_tell_an_existing_emoji_from_a_missing_one() {
+    let db = fresh().await;
+    add_member(&db, "g", "creator", "member").await;
+    create_as(&db, "creator", "g", "parrot", &hash('a')).await;
+
+    let present = remove_as(&db, "outsider", "g", "parrot").await;
+    let absent = remove_as(&db, "outsider", "g", "no_such_code").await;
+    assert!(
+        matches!(present, EmojiOutcome::Forbidden),
+        "got {present:?} for an existing shortcode"
+    );
+    assert!(
+        matches!(absent, EmojiOutcome::Forbidden),
+        "got {absent:?} for a missing one — a non-member must not be able to \
+         tell the two apart"
+    );
+
+    // And the probe changed nothing.
+    assert_eq!(count(&db, "SELECT COUNT(*) FROM group_emoji").await, 1);
+}
+
+/// The control: for a MEMBER the idempotent-`Ok`-on-missing behaviour is
+/// unchanged — they can already enumerate the set through `/v1/read/emoji`, and
+/// a retried remove must not start failing.
+#[tokio::test]
+async fn a_member_still_gets_an_idempotent_ok_for_a_missing_shortcode() {
+    let db = fresh().await;
+    add_member(&db, "g", "bystander", "member").await;
+    assert!(matches!(
+        remove_as(&db, "bystander", "g", "no_such_code").await,
+        EmojiOutcome::Ok
+    ));
+}
+
 // ── 2. Dedup — "no fifteen party-parrots" ────────────────────────────────────
 
 /// The same bytes registered twice — by two different users, into two different

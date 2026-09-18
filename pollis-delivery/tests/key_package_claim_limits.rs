@@ -26,12 +26,33 @@ mod common;
 /// MLS code point of the current suite, as the DS defaults an untagged claim.
 use pollis_delivery::devices::CIPHERSUITE_PQ;
 
+/// A fixture with `alice`, `bob` and `mallory` all in one group.
+///
+/// A claim now requires a SHARED CONVERSATION, not merely the absence of a block
+/// (see `devices::may_claim_from`) — every real claim path writes the roster row
+/// before reconciling the MLS tree to it, so this is the state every honest
+/// claim is made in. The budget tests below are about what a co-member can do;
+/// `a_stranger_cannot_touch_a_pool_at_all` covers the other side.
 async fn fresh() -> common::TempDb {
     let db = common::TempDb::open("kp-limits.db").await;
     pollis_schema::apply::single_db(&db.conn().await.unwrap())
         .await
         .expect("schema");
+    co_members(&db, "shared-grp", &["alice", "bob", "mallory"]).await;
     db
+}
+
+/// Put every one of `users` in the group `group_id`.
+async fn co_members(db: &common::TempDb, group_id: &str, users: &[&str]) {
+    let conn = db.conn().await.unwrap();
+    for u in users {
+        conn.execute(
+            "INSERT OR IGNORE INTO group_member (group_id, user_id) VALUES (?1, ?2)",
+            libsql::params![group_id, *u],
+        )
+        .await
+        .unwrap();
+    }
 }
 
 /// Publish `count` unclaimed packages for `(user, device)`.
@@ -226,6 +247,81 @@ async fn a_blocked_pair_cannot_claim_in_either_direction() {
         "the block is symmetric — the blocker must not drain the blocked user either"
     );
     assert_eq!(recorded(&db, "mallory", "bob").await, 0);
+}
+
+/// **L3.** The budget was 60 per pair per hour against a pool of FIVE, so it
+/// bound nothing: any unblocked stranger could empty a device's pool in five
+/// requests and hold that device out of every new conversation until it next
+/// came online. The gate is now a relationship — a shared conversation — and a
+/// stranger cannot take even the first package.
+#[tokio::test]
+async fn a_stranger_cannot_touch_a_pool_at_all() {
+    let db = fresh().await;
+    publish(&db, "bob", "b1", 5).await;
+    let conn = db.conn().await.unwrap();
+
+    // `stranger` is in no conversation with bob, and has blocked nobody.
+    assert!(
+        matches!(
+            apply_claim_key_package(&conn, Some("stranger"), &claim("bob", "b1"))
+                .await
+                .unwrap(),
+            ClaimOutcome::Forbidden
+        ),
+        "an account sharing no conversation with the target must not claim at all"
+    );
+    assert_eq!(recorded(&db, "stranger", "bob").await, 0);
+
+    // The pool is untouched, so bob is still addable. Scoped so the read
+    // statement is finalized before the write below — an open cursor pins this
+    // connection's snapshot and would hide it.
+    {
+        let mut rows = conn
+            .query(
+                "SELECT COUNT(*) FROM mls_key_package WHERE user_id = 'bob' AND claimed = 0",
+                (),
+            )
+            .await
+            .unwrap();
+        let left: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
+        assert_eq!(left, 5, "a refused claim must spend nothing");
+    }
+
+    // The moment they share a conversation — which every real add path writes
+    // BEFORE reconciling the MLS tree — the claim goes through.
+    co_members(&db, "new-grp", &["stranger", "bob"]).await;
+    let out = apply_claim_key_package(&conn, Some("stranger"), &claim("bob", "b1"))
+        .await
+        .unwrap();
+    assert!(matches!(out, ClaimOutcome::Claimed { .. }), "got {out:?}");
+}
+
+/// A DM is the other shape membership takes, and is what the "anybody may start
+/// a conversation with anybody" path produces: `/v1/dm/create` writes both
+/// `dm_channel_member` rows in one transaction before the client reconciles, so
+/// a first-contact DM still claims.
+#[tokio::test]
+async fn a_dm_counts_as_a_shared_conversation() {
+    let db = fresh().await;
+    publish(&db, "bob", "b1", 5).await;
+    let conn = db.conn().await.unwrap();
+
+    for u in ["newcomer", "bob"] {
+        conn.execute(
+            "INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) \
+             VALUES ('dm-1', ?1, 'newcomer')",
+            libsql::params![u],
+        )
+        .await
+        .unwrap();
+    }
+
+    assert!(matches!(
+        apply_claim_key_package(&conn, Some("newcomer"), &claim("bob", "b1"))
+            .await
+            .unwrap(),
+        ClaimOutcome::Claimed { .. }
+    ));
 }
 
 /// Adding your own second device claims from your own pool, and must never be
