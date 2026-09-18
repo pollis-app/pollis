@@ -561,6 +561,82 @@ async fn b_cannot_write_or_read_as_security_events() {
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
+/// **L3 — flooding evicts evidence.** `/v1/read/security-events` is
+/// `ORDER BY created_at DESC LIMIT n` with `n` clamped to 500 and no cursor, so
+/// the log is a fixed-size window onto the newest rows. Appending was unbounded,
+/// which made eviction an available move for a device that had just done
+/// something the log records. The append is now budgeted per account per hour.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_flood_of_security_events_is_refused_before_it_can_evict() {
+    let db = fresh_db().await;
+    let bob = seed_account(&db, "bob").await;
+
+    // The DS-authored evidence a flood would try to bury.
+    db.conn()
+        .await
+        .unwrap()
+        .execute(
+            "INSERT INTO security_event (id, user_id, kind) VALUES ('ev-0', 'bob', 'identity_rotated')",
+            (),
+        )
+        .await
+        .unwrap();
+
+    let mut accepted = 0;
+    let mut refused = false;
+    for i in 0..200 {
+        let status = post(
+            &db,
+            &bob,
+            "/v1/security-events",
+            serde_json::json!({ "kind": format!("noise-{i}") }),
+        )
+        .await;
+        if status == StatusCode::FORBIDDEN {
+            refused = true;
+            break;
+        }
+        assert_eq!(status, StatusCode::OK);
+        accepted += 1;
+    }
+    assert!(refused, "an unbounded append loop must eventually be refused");
+    assert!(
+        accepted < 200,
+        "the flood was not bounded: {accepted} rows appended"
+    );
+
+    let total = count(&db, "SELECT COUNT(*) FROM security_event WHERE user_id = 'bob'", ()).await;
+    assert!(
+        total < 500,
+        "the log must stay inside the read window the client can actually see, \
+         got {total} rows"
+    );
+    assert_eq!(
+        count(
+            &db,
+            "SELECT COUNT(*) FROM security_event WHERE id = 'ev-0'",
+            ()
+        )
+        .await,
+        1,
+        "the DS-authored event must still be there"
+    );
+}
+
+/// The control: an ordinary client's handful of events is nowhere near the
+/// bound, so the cap never costs a real report.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_ordinary_run_of_security_events_is_unaffected() {
+    let db = fresh_db().await;
+    let bob = seed_account(&db, "bob").await;
+    for kind in ["device_enrolled", "identity_rotated", "device_revoked"] {
+        assert_eq!(
+            post(&db, &bob, "/v1/security-events", serde_json::json!({ "kind": kind })).await,
+            StatusCode::OK
+        );
+    }
+}
+
 // ── cross-account 403s: directory reads ──────────────────────────────────────
 
 /// The conversation directory is the map of who talks to whom. Asking for
