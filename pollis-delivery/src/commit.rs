@@ -248,10 +248,18 @@ pub enum SubmitVerdict {
 ///
 ///   1. **Bounded blob.** A Welcome may not exceed
 ///      [`crate::writes::WELCOME_MAX_BYTES`], the same ceiling a resubmit obeys.
-///   2. **The RECIPIENT is a current member.** The roster is written before the
-///      MLS tree is reconciled to it (`pollis-core`'s reconcile reads the
-///      desired roster from the remote DB and *then* issues the add commit), so
-///      an honest add always has the row already. A forged one never does.
+///   2. **The RECIPIENT is in this conversation's DESIRED ROSTER**
+///      ([`crate::writes::in_desired_roster`]) — `group_member` plus pending
+///      `group_invite` invitees, which is precisely the set `reconcile` diffs
+///      the MLS tree against. The roster row is always written before the tree
+///      is reconciled to it, so an honest add always has one; a Welcome aimed at
+///      a user/device pair simply named in the request body never does.
+///
+///      Not `is_member`: an invitee's devices are Welcomed at INVITE time so
+///      that accepting does not depend on the inviter being online, and
+///      `is_member` would refuse exactly that. See `in_desired_roster` for what
+///      the wider gate costs and for the client-side `GroupId` binding that is
+///      the other half of C1.
 ///   3. **One member may not steal another's pending Welcome.** The
 ///      `(conversation_id, recipient_id, recipient_device_id)` tuple is UNIQUE,
 ///      so writing it IS an overwrite. An UNDELIVERED Welcome published by a
@@ -293,17 +301,20 @@ pub async fn submit_commit(
         if welcome.is_empty() || welcome.len() > crate::writes::WELCOME_MAX_BYTES {
             return Ok(SubmitVerdict::Invalid("welcome size out of range"));
         }
-        let is_member = match membership.get(w.recipient_id.as_str()) {
+        let admissible = match membership.get(w.recipient_id.as_str()) {
             Some(known) => *known,
             None => {
-                let answer =
-                    crate::writes::is_member(main_conn, &body.conversation_id, &w.recipient_id)
-                        .await?;
+                let answer = crate::writes::in_desired_roster(
+                    main_conn,
+                    &body.conversation_id,
+                    &w.recipient_id,
+                )
+                .await?;
                 membership.insert(w.recipient_id.as_str(), answer);
                 answer
             }
         };
-        if !is_member {
+        if !admissible {
             return Ok(SubmitVerdict::Forbidden);
         }
     }

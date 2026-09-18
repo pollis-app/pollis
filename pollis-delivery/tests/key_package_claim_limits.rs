@@ -296,6 +296,34 @@ async fn a_stranger_cannot_touch_a_pool_at_all() {
     assert!(matches!(out, ClaimOutcome::Claimed { .. }), "got {out:?}");
 }
 
+/// The gate is the DESIRED roster, so a PENDING INVITEE is claimable. This is
+/// the shape `send_group_invite` produces: `/v1/invites/create` writes the
+/// pending `group_invite` row and the inviter reconciles immediately, claiming
+/// the invitee's KeyPackage so their Welcome is staged before they accept. A
+/// gate that demanded `group_member` would 403 there and break every invite.
+#[tokio::test]
+async fn a_pending_invitee_is_claimable_by_the_inviter() {
+    let db = fresh().await;
+    publish(&db, "newcomer", "n1", 5).await;
+    let conn = db.conn().await.unwrap();
+
+    // Alice is an admin of a group; `newcomer` has been invited but has not
+    // accepted, so there is no `group_member` row for them.
+    co_members(&db, "alice-grp", &["alice"]).await;
+    conn.execute(
+        "INSERT INTO group_invite (id, group_id, inviter_id, invitee_id) \
+         VALUES ('inv-1', 'alice-grp', 'alice', 'newcomer')",
+        (),
+    )
+    .await
+    .unwrap();
+
+    let out = apply_claim_key_package(&conn, Some("alice"), &claim("newcomer", "n1"))
+        .await
+        .unwrap();
+    assert!(matches!(out, ClaimOutcome::Claimed { .. }), "got {out:?}");
+}
+
 /// A DM is the other shape membership takes, and is what the "anybody may start
 /// a conversation with anybody" path produces: `/v1/dm/create` writes both
 /// `dm_channel_member` rows in one transaction before the client reconciles, so
