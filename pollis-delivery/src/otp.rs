@@ -483,6 +483,45 @@ async fn send_otp_email(api_key: &str, email: &str, code: &str) -> anyhow::Resul
     Ok(())
 }
 
+/// Tell the address an account has just MOVED OFF that it happened (L3).
+///
+/// Sent to the OLD mailbox, after the change has committed, and never allowed to
+/// fail it — the change is done, and swallowing the notice would only make the
+/// change quieter. The body names the new address so the owner can tell a change
+/// they made from one they did not, and says what to do about it.
+///
+/// `pub(crate)` rather than private because the caller is
+/// [`crate::email_change`]; it lives here beside [`send_otp_email`] so there is
+/// one place that knows how this service talks to Resend.
+pub(crate) async fn send_email_change_notice(
+    api_key: &str,
+    old_email: &str,
+    new_email: &str,
+) -> anyhow::Result<()> {
+    let body = serde_json::json!({
+        "from": "Pollis <noreply@mail.pollis.com>",
+        "to": [old_email],
+        "subject": "Your Pollis email address was changed",
+        "text": format!(
+            "The email address on your Pollis account was changed to {new_email}.\n\n\
+             If this was you, nothing further is needed.\n\n\
+             If it was not, someone has access to one of your devices. Revoke that \
+             device from Settings on a device you still control, and contact \
+             support@pollis.com."
+        ),
+    });
+    let resp = crate::util::http_post(crate::util::Upstream::Resend, "https://api.resend.com/emails")
+        .header("Authorization", format!("Bearer {api_key}"))
+        .json(&body)
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        let txt = resp.text().await.unwrap_or_default();
+        anyhow::bail!("Resend non-success: {txt}");
+    }
+    Ok(())
+}
+
 // ── POST /v1/auth/verify-otp ─────────────────────────────────────────────────
 
 /// POST /v1/auth/verify-otp — constant-time, attempt-limited code check; then

@@ -165,6 +165,104 @@ async fn email_change_happy_path() {
     assert_eq!(email_of(&db, "alice").await, new_email, "users.email must be updated");
 }
 
+// ── 1b. The change is not silent (L3) ────────────────────────────────────────
+
+/// **L3.** The OTP proves control of the NEW mailbox and the device signature
+/// proves the current account — but a stolen unlocked device satisfies both, and
+/// the change used to leave no trace: the old address was never told and nothing
+/// in the app recorded it, so the account's recovery address could be moved
+/// silently.
+///
+/// The DS now writes the audit row itself, so a client cannot suppress it by
+/// omitting a call, and it names the address that was left.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_completed_email_change_is_recorded_against_the_account() {
+    let db = fresh_db().await;
+    let state = dev_state(Arc::clone(&db));
+    let sk = gen_signing_key();
+    seed_user(&db, "alice", "alice@x.com", "dev-a", &sk.verifying_key()).await;
+    let new_email = "alice-new@x.com";
+
+    send_signed(
+        &state,
+        "/v1/auth/request-email-change-otp",
+        "alice",
+        "dev-a",
+        &sk,
+        serde_json::json!({ "new_email": new_email }),
+    )
+    .await;
+    let s = send_signed(
+        &state,
+        "/v1/auth/verify-email-change",
+        "alice",
+        "dev-a",
+        &sk,
+        serde_json::json!({ "new_email": new_email, "code": DEV_CODE }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+
+    let conn = db.conn().await.unwrap();
+    let mut rows = conn
+        .query(
+            "SELECT metadata FROM security_event \
+             WHERE user_id = 'alice' AND kind = 'email_changed'",
+            (),
+        )
+        .await
+        .unwrap();
+    let row = rows
+        .next()
+        .await
+        .unwrap()
+        .expect("a completed email change must leave an audit row");
+    let metadata: String = row.get::<Option<String>>(0).unwrap().expect("metadata");
+    let parsed: serde_json::Value = serde_json::from_str(&metadata).unwrap();
+    assert_eq!(parsed["from"], "alice@x.com", "the row names the address left");
+    assert_eq!(parsed["to"], new_email);
+}
+
+/// The other half: a REFUSED change writes no audit row, so the log records what
+/// happened rather than what was attempted through this endpoint (wrong-code
+/// attempts are the OTP store's business, not the account log's).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refused_email_change_records_nothing() {
+    let db = fresh_db().await;
+    let state = dev_state(Arc::clone(&db));
+    let sk = gen_signing_key();
+    seed_user(&db, "alice", "alice@x.com", "dev-a", &sk.verifying_key()).await;
+
+    send_signed(
+        &state,
+        "/v1/auth/request-email-change-otp",
+        "alice",
+        "dev-a",
+        &sk,
+        serde_json::json!({ "new_email": "alice-new@x.com" }),
+    )
+    .await;
+    let s = send_signed(
+        &state,
+        "/v1/auth/verify-email-change",
+        "alice",
+        "dev-a",
+        &sk,
+        serde_json::json!({ "new_email": "alice-new@x.com", "code": "000000" }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+
+    let conn = db.conn().await.unwrap();
+    let mut rows = conn
+        .query("SELECT COUNT(*) FROM security_event WHERE user_id = 'alice'", ())
+        .await
+        .unwrap();
+    let n: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
+    assert_eq!(n, 0);
+    assert_eq!(email_of(&db, "alice").await, "alice@x.com");
+}
+
 // ── 2. Wrong-code lockout ─────────────────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread")]

@@ -259,6 +259,10 @@ pub async fn apply_verify_email_change(
         return Ok(EmailChangeOutcome::EmailTaken);
     }
 
+    // The address being left, read BEFORE the write — it is who the notice goes
+    // to, and what the audit row records.
+    let old_email = email_of(conn, authed).await?;
+
     conn.execute(
         "UPDATE users SET email = ?1 WHERE id = ?2",
         libsql::params![trimmed.to_string(), authed.to_string()],
@@ -267,9 +271,69 @@ pub async fn apply_verify_email_change(
     // Applied: consume the code (single-use) now that the write has succeeded.
     store.otp.consume(trimmed);
     store.clear(trimmed);
+
+    // ── Tell the account the change happened (L3) ────────────────────────────
+    //
+    // The OTP proves control of the NEW mailbox and the device signature proves
+    // the current account — but a stolen or borrowed unlocked device satisfies
+    // both, and until now the change was completely silent: the old address was
+    // never told, and nothing in the app recorded it. The account's recovery
+    // address could be moved without leaving a trace anywhere the real owner
+    // would look.
+    //
+    // Two notices, neither of which can fail the change (it has already
+    // committed; refusing to report it would only make it quieter):
+    //
+    //   * a DS-AUTHORED `security_event`, which `/v1/read/security-events`
+    //     serves — it is written here rather than by the client so a client that
+    //     simply omits it cannot suppress it, and the append budget on
+    //     `/v1/security-events` does not apply to it, so a flood cannot bury it;
+    //   * an email to the OLD address, so the notice reaches somebody who has
+    //     lost control of the device as well.
+    //
+    // What this does NOT do is RE-PROVE the current address. That needs a second
+    // OTP, to the old mailbox, before the swap — a two-code flow, so a wire and
+    // client change rather than a Delivery Service one. Noted rather than
+    // half-done.
+    if let Some(old) = old_email.as_deref() {
+        if let Err(e) = conn
+            .execute(
+                "INSERT INTO security_event (id, user_id, kind, metadata) \
+                 VALUES (?1, ?2, 'email_changed', ?3)",
+                libsql::params![
+                    ulid::Ulid::new().to_string(),
+                    authed.to_string(),
+                    serde_json::json!({ "from": old, "to": trimmed }).to_string(),
+                ],
+            )
+            .await
+        {
+            tracing::warn!(error = %e, "email change: failed to record the security event");
+        }
+        if let Some(key) = &cfg.resend_api_key {
+            if let Err(e) = crate::otp::send_email_change_notice(key, old, trimmed).await {
+                tracing::warn!(error = %e, "email change: failed to notify the old address");
+            }
+        }
+    }
+
     Ok(EmailChangeOutcome::Updated {
         username: username_of(conn, authed).await?,
     })
+}
+
+/// The account's current email, read before it is replaced.
+async fn email_of(conn: &libsql::Connection, user_id: &str) -> anyhow::Result<Option<String>> {
+    let mut rows = conn
+        .query(
+            "SELECT email FROM users WHERE id = ?1",
+            libsql::params![user_id.to_string()],
+        )
+        .await?;
+    match rows.next().await? {
+        Some(row) => Ok(row.get::<Option<String>>(0)?),
+        None => Ok(None),
+    }
 }
 
 /// The caller's username, for the client's local accounts-index mirror.
