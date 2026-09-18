@@ -29,6 +29,11 @@ function ChangeEmail() {
   const [stage, setStage] = useState<Stage>("enter-email");
   const [newEmail, setNewEmail] = useState("");
   const [code, setCode] = useState("");
+  // The second proof (#1161): a code to the address the account is on today.
+  // The device signature and the new-address code are both satisfied by whoever
+  // is holding this phone unlocked, so without this one a borrowed device could
+  // move the account's recovery address.
+  const [currentCode, setCurrentCode] = useState("");
 
   const requestOtp = useMutation({
     mutationFn: async (email: string) => {
@@ -52,6 +57,7 @@ function ChangeEmail() {
         userId: currentUser.id,
         newEmail: newEmail.trim(),
         code: code.trim(),
+        currentCode: currentCode.trim(),
       });
     },
     onSuccess: () => {
@@ -70,7 +76,7 @@ function ChangeEmail() {
       }
       requestOtp.mutate(trimmed);
     } else {
-      if (code.trim().length === 0) {
+      if (code.trim().length === 0 || currentCode.trim().length === 0) {
         return;
       }
       verify.mutate();
@@ -121,21 +127,47 @@ function ChangeEmail() {
               />
             </View>
           ) : (
-            <View style={{ gap: 6 }}>
-              <Text style={ty.label}>
-                {upper(t("user.verificationCodeLabel"))}
-              </Text>
-              <Field
-                amber
-                value={code}
-                onChangeText={(v) =>
-                  setCode(v.replace(/[^0-9]/g, "").slice(0, 6))
-                }
-                testID="input-otp"
-                accessibilityLabel={t("user.verificationCodeLabel")}
-                keyboardType="number-pad"
-                icon={<Icon.key color={semantic.mute} />}
-              />
+            <View style={{ gap: 14 }}>
+              <View style={{ gap: 6 }}>
+                <Text style={ty.label}>
+                  {upper(
+                    t("mobile:self.changeEmail.newCodeLabel", {
+                      email: newEmail.trim(),
+                    }),
+                  )}
+                </Text>
+                <Field
+                  amber
+                  value={code}
+                  onChangeText={(v) =>
+                    setCode(v.replace(/[^0-9]/g, "").slice(0, 6))
+                  }
+                  testID="input-otp"
+                  accessibilityLabel={t("user.verificationCodeLabel")}
+                  keyboardType="number-pad"
+                  icon={<Icon.key color={semantic.mute} />}
+                />
+              </View>
+              <View style={{ gap: 6 }}>
+                <Text style={ty.label}>
+                  {upper(
+                    t("mobile:self.changeEmail.currentCodeLabel", {
+                      email: currentUser?.email ?? "",
+                    }),
+                  )}
+                </Text>
+                <Field
+                  amber
+                  value={currentCode}
+                  onChangeText={(v) =>
+                    setCurrentCode(v.replace(/[^0-9]/g, "").slice(0, 6))
+                  }
+                  testID="input-current-otp"
+                  accessibilityLabel={t("user.currentCodeLabel")}
+                  keyboardType="number-pad"
+                  icon={<Icon.key color={semantic.mute} />}
+                />
+              </View>
             </View>
           )}
 
@@ -166,7 +198,7 @@ function ChangeEmail() {
             pending ||
             (stage === "enter-email"
               ? !newEmail.trim()
-              : code.trim().length !== 6)
+              : code.trim().length !== 6 || currentCode.trim().length !== 6)
           }
           iconRight={<Icon.arrowRight color="#0a0907" />}
         >
@@ -183,6 +215,7 @@ function ChangeEmail() {
             testID="btn-use-different-email"
             onPress={() => {
               setCode("");
+              setCurrentCode("");
               setStage("enter-email");
             }}
           >

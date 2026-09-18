@@ -36,11 +36,17 @@ export const SettingsPage: React.FC = observer(() => {
   // Email-change flow lives entirely in this component:
   //   'idle'    → display current email + "Change" button
   //   'request' → input new address, send OTP
-  //   'verify'  → input the OTP, swap email
+  //   'verify'  → input BOTH OTPs, swap email
   // Distinct mutations would obscure the linear UX, so we hold state locally.
+  //
+  // Two codes, not one (#1161): one to the new address (you control where you
+  // are going) and one to the current address (you control the account you are
+  // moving). The second is the only proof a borrowed unlocked device cannot
+  // satisfy on its own, so the flow cannot complete without it.
   const [emailChangeStep, setEmailChangeStep] = useState<"idle" | "request" | "verify">("idle");
   const [pendingNewEmail, setPendingNewEmail] = useState("");
   const [emailOtpCode, setEmailOtpCode] = useState("");
+  const [currentEmailOtpCode, setCurrentEmailOtpCode] = useState("");
   const [emailChangeError, setEmailChangeError] = useState<string | null>(null);
   const [emailChangePending, setEmailChangePending] = useState(false);
   const queryClient = useQueryClient();
@@ -176,6 +182,7 @@ export const SettingsPage: React.FC = observer(() => {
     setEmailChangeStep("idle");
     setPendingNewEmail("");
     setEmailOtpCode("");
+    setCurrentEmailOtpCode("");
     setEmailChangeError(null);
   };
 
@@ -204,6 +211,10 @@ export const SettingsPage: React.FC = observer(() => {
       setEmailChangeError(t("user.verificationCodeRequired"));
       return;
     }
+    if (!currentEmailOtpCode.trim()) {
+      setEmailChangeError(t("user.currentCodeRequired"));
+      return;
+    }
     setEmailChangePending(true);
     setEmailChangeError(null);
     try {
@@ -211,9 +222,21 @@ export const SettingsPage: React.FC = observer(() => {
         userId: currentUser.id,
         newEmail: pendingNewEmail.trim(),
         code: emailOtpCode.trim(),
+        currentCode: currentEmailOtpCode.trim(),
       });
-      // Refetch the profile so the displayed email updates without a reload.
-      await queryClient.invalidateQueries({ queryKey: userQueryKeys.profile(currentUser.id) });
+      // The address the form renders comes from `appStore.currentUser`, NOT
+      // from the profile row — `useUserProfile` takes `email` off the session,
+      // because the row does not carry one. So invalidating refetched a value
+      // that had not changed and the page kept showing the old address until a
+      // reload. Update the store (the source) and write the cached profile
+      // through; a refetch would only re-derive the same two values. Mobile
+      // already updated its store here.
+      const changedTo = pendingNewEmail.trim();
+      appStore.setCurrentUser({ ...currentUser, email: changedTo });
+      queryClient.setQueryData(
+        userQueryKeys.profile(currentUser.id),
+        (prev: typeof userData) => (prev ? { ...prev, email: changedTo } : prev),
+      );
       cancelEmailChange();
     } catch (err) {
       setEmailChangeError(errorMessage(err));
@@ -331,6 +354,7 @@ export const SettingsPage: React.FC = observer(() => {
                     onClick={() => {
                       setPendingNewEmail("");
                       setEmailOtpCode("");
+                      setCurrentEmailOtpCode("");
                       setEmailChangeError(null);
                       setEmailChangeStep("request");
                     }}
@@ -396,6 +420,28 @@ export const SettingsPage: React.FC = observer(() => {
                     disabled={emailChangePending}
                   />
                   <input data-testid="settings-email-otp-input" type="hidden" value={emailOtpCode} readOnly />
+                  <p className="text-xs font-mono text-muted mt-2">
+                    <Trans
+                      t={t}
+                      i18nKey="user.currentCodeSent"
+                      values={{ email }}
+                      components={{ addr: <span className="text-fg" /> }}
+                    />
+                  </p>
+                  <TextInput
+                    label={t("user.currentCodeLabel")}
+                    value={currentEmailOtpCode}
+                    onChange={setCurrentEmailOtpCode}
+                    placeholder="000000"
+                    id="settings-email-current-otp"
+                    disabled={emailChangePending}
+                  />
+                  <input
+                    data-testid="settings-email-current-otp-input"
+                    type="hidden"
+                    value={currentEmailOtpCode}
+                    readOnly
+                  />
                   {emailChangeError && (
                     <p data-testid="settings-email-change-error" className="text-xs font-mono text-danger">
                       {emailChangeError}
@@ -417,6 +463,7 @@ export const SettingsPage: React.FC = observer(() => {
                       size="sm"
                       onClick={() => {
                         setEmailOtpCode("");
+                        setCurrentEmailOtpCode("");
                         setEmailChangeError(null);
                         setEmailChangeStep("request");
                       }}

@@ -63,6 +63,30 @@ function permissionPill(
   }
 }
 
+/// The two addresses in an `email_changed` row's metadata, or `null` when the
+/// row does not carry the expected JSON object. Never throws: the metadata
+/// column is free-form and a row written by some other build must render as an
+/// event with a vaguer detail line, not as a crashed page.
+function parseEmailChangeMetadata(
+  metadata: string | null | undefined,
+): { from: string; to: string } | null {
+  if (!metadata) {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(metadata);
+    if (parsed && typeof parsed === "object") {
+      const { from, to } = parsed as { from?: unknown; to?: unknown };
+      if (typeof from === "string" && typeof to === "string") {
+        return { from, to };
+      }
+    }
+  } catch {
+    // Not JSON. Fall through to the unknown-shape copy.
+  }
+  return null;
+}
+
 /// Human-readable summary for each `security_event.kind` the backend
 /// currently emits. Unknown kinds fall through to the raw string so we
 /// never silently drop new event types.
@@ -132,6 +156,20 @@ function describe(
         heading: t("security.eventSecretKeyRotatedHeading"),
         detail: t("security.eventSecretKeyRotatedDetail"),
       };
+    case "email_changed": {
+      // Written by the Delivery Service as part of the change (#1161), not by
+      // a client — a client that simply omits the call cannot suppress it.
+      // Metadata is `{"from":"…","to":"…"}`; both addresses matter, because
+      // "from" is the mailbox that had to approve the move and "to" is where
+      // account recovery now points.
+      const addresses = parseEmailChangeMetadata(event.metadata);
+      return {
+        heading: t("security.eventEmailChangedHeading"),
+        detail: addresses
+          ? t("security.eventEmailChangedDetail", addresses)
+          : t("security.eventEmailChangedDetailUnknown"),
+      };
+    }
     default:
       // The raw backend `kind` for an event type this build doesn't know
       // about: a wire value, deliberately not translated.

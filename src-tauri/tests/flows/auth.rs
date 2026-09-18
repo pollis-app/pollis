@@ -857,11 +857,27 @@ async fn email_change_through_ds_happy_and_security() {
         )
         .await;
 
+    // 0. A wrong CURRENT-address code is refused (#1161) — the proof a borrowed
+    //    unlocked device cannot produce. Checked before the new-address code, so
+    //    this attempt does not spend an attempt against it either: step 3 below
+    //    still succeeds with the same code.
+    let err = alice
+        .invoke_try(
+            "verify_email_change",
+            json!({ "userId": alice_id, "newEmail": new_email, "code": crate::harness::DEV_OTP, "currentCode": "999999" }),
+        )
+        .await
+        .expect_err("a change that cannot re-prove the current address must be refused");
+    assert!(
+        err.to_lowercase().contains("current email address"),
+        "expected a current-address error, got: {err}"
+    );
+
     // 1. A wrong code is refused (and keeps the binding so a retry is possible).
     let err = alice
         .invoke_try(
             "verify_email_change",
-            json!({ "userId": alice_id, "newEmail": new_email, "code": "999999" }),
+            json!({ "userId": alice_id, "newEmail": new_email, "code": "999999", "currentCode": crate::harness::DEV_OTP }),
         )
         .await
         .expect_err("a wrong code must be refused");
@@ -876,7 +892,7 @@ async fn email_change_through_ds_happy_and_security() {
     let cross = bob
         .invoke_try(
             "verify_email_change",
-            json!({ "userId": bob_id, "newEmail": new_email, "code": crate::harness::DEV_OTP }),
+            json!({ "userId": bob_id, "newEmail": new_email, "code": crate::harness::DEV_OTP, "currentCode": crate::harness::DEV_OTP }),
         )
         .await
         .expect_err("a different signed user must not consume alice's change");
@@ -889,7 +905,7 @@ async fn email_change_through_ds_happy_and_security() {
     alice
         .invoke_json(
             "verify_email_change",
-            json!({ "userId": alice_id, "newEmail": new_email, "code": crate::harness::DEV_OTP }),
+            json!({ "userId": alice_id, "newEmail": new_email, "code": crate::harness::DEV_OTP, "currentCode": crate::harness::DEV_OTP }),
         )
         .await;
 

@@ -421,6 +421,33 @@ pub async fn request_otp(State(state): State<AppState>, body: axum::body::Bytes)
 /// in-process integration harness drives the exact same store + throttle +
 /// DEV_OTP logic against the shared OTP store.
 pub async fn process_request_otp(otp: &OtpStore, cfg: &OtpConfig, email: &str) {
+    process_request_otp_for(otp, cfg, email, OtpPurpose::SignIn).await
+}
+
+/// What a code is being sent FOR — it selects the email the recipient reads, and
+/// nothing else. The store, throttle, lockout and DEV_OTP behaviour are
+/// identical for every purpose.
+///
+/// This exists because an unexplained "Your Pollis sign-in code" arriving at the
+/// address you are about to move OFF is both confusing and phishing-shaped: the
+/// one thing that mail has to say is which action it authorizes, so that a code
+/// requested by somebody else reads as an alarm rather than as noise.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum OtpPurpose {
+    /// Signup / sign-in to the address that will own the session.
+    SignIn,
+    /// #1161: re-proving the CURRENT address before the account's email is
+    /// changed away from it.
+    EmailChangeChallenge,
+}
+
+/// [`process_request_otp`], with the mail template chosen explicitly.
+pub async fn process_request_otp_for(
+    otp: &OtpStore,
+    cfg: &OtpConfig,
+    email: &str,
+    purpose: OtpPurpose,
+) {
     let code = match &cfg.dev_otp {
         Some(dev) => dev.clone(),
         None => format!("{:06}", OsRng.gen_range(0..1_000_000u32)),
@@ -443,7 +470,13 @@ pub async fn process_request_otp(otp: &OtpStore, cfg: &OtpConfig, email: &str) {
                 return;
             }
             if let Some(key) = &cfg.resend_api_key {
-                if let Err(e) = send_otp_email(key, email, &code).await {
+                let sent = match purpose {
+                    OtpPurpose::SignIn => send_otp_email(key, email, &code).await,
+                    OtpPurpose::EmailChangeChallenge => {
+                        send_email_change_challenge(key, email, &code).await
+                    }
+                };
+                if let Err(e) = sent {
                     // A send failure leaks nothing about account existence; log
                     // and still 200 so the response is uniform.
                     tracing::error!("OTP email send failed for {}: {e:#}", mask_email(email));
@@ -470,6 +503,46 @@ async fn send_otp_email(api_key: &str, email: &str, code: &str) -> anyhow::Resul
         "to": [email],
         "subject": "Your Pollis sign-in code",
         "text": format!("Your verification code is: {code}\n\nThis code expires in 10 minutes."),
+    });
+    let resp = crate::util::http_post(crate::util::Upstream::Resend, "https://api.resend.com/emails")
+        .header("Authorization", format!("Bearer {api_key}"))
+        .json(&body)
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        let txt = resp.text().await.unwrap_or_default();
+        anyhow::bail!("Resend non-success: {txt}");
+    }
+    Ok(())
+}
+
+/// Ask the CURRENT address to authorize moving the account off it (#1161).
+///
+/// Sent to the address that is about to be replaced, BEFORE the change commits.
+/// The device signature proves the account and the new-address code proves the
+/// new mailbox, but both of those are satisfied by whoever is holding the
+/// unlocked device; this is the one proof that reaches the party who actually
+/// controls the account today. The text therefore names the destination, so that
+/// a code the owner did not ask for is legible as an attack in progress rather
+/// than as a routine verification mail.
+async fn send_email_change_challenge(
+    api_key: &str,
+    current_email: &str,
+    code: &str,
+) -> anyhow::Result<()> {
+    let body = serde_json::json!({
+        "from": "Pollis <noreply@mail.pollis.com>",
+        "to": [current_email],
+        "subject": "Confirm the email change on your Pollis account",
+        "text": format!(
+            "Someone asked to change the email address on your Pollis account away \
+             from this one.\n\n\
+             To approve it, enter this code in Pollis: {code}\n\n\
+             It expires in 10 minutes.\n\n\
+             If this was not you, do NOT enter the code. Someone has access to one \
+             of your devices — revoke that device from Settings on a device you \
+             still control, and contact support@pollis.com."
+        ),
     });
     let resp = crate::util::http_post(crate::util::Upstream::Resend, "https://api.resend.com/emails")
         .header("Authorization", format!("Bearer {api_key}"))

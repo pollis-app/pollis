@@ -71,6 +71,30 @@ function shortId(id: string): string {
   return `${id.slice(0, 6)}…${id.slice(-4)}`;
 }
 
+// The two addresses in an `email_changed` row's metadata, or null when the row
+// does not carry the expected JSON object. Never throws — the metadata column
+// is free-form, and a row from another build must render with vaguer copy
+// rather than crash the screen.
+function parseEmailChangeMetadata(
+  metadata: string | null | undefined,
+): { from: string; to: string } | null {
+  if (!metadata) {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(metadata);
+    if (parsed && typeof parsed === "object") {
+      const { from, to } = parsed as { from?: unknown; to?: unknown };
+      if (typeof from === "string" && typeof to === "string") {
+        return { from, to };
+      }
+    }
+  } catch {
+    // Not JSON. Fall through to the unknown-shape copy.
+  }
+  return null;
+}
+
 // Human-readable summary per `security_event.kind` — mirrors desktop's
 // SecurityPage `describe()`. Unknown kinds fall through to the raw string so
 // new event types are never silently dropped.
@@ -143,6 +167,17 @@ function describeEvent(event: SecurityEvent): {
         heading: i18n.t("settings:security.eventSecretKeyRotatedHeading"),
         detail: i18n.t("settings:security.eventSecretKeyRotatedDetail"),
       };
+    case "email_changed": {
+      // DS-authored as part of the change (#1161), so a client cannot suppress
+      // it by omitting a call. Metadata is `{"from":"…","to":"…"}`.
+      const addresses = parseEmailChangeMetadata(event.metadata);
+      return {
+        heading: i18n.t("settings:security.eventEmailChangedHeading"),
+        detail: addresses
+          ? i18n.t("settings:security.eventEmailChangedDetail", addresses)
+          : i18n.t("settings:security.eventEmailChangedDetailUnknown"),
+      };
+    }
     default:
       return {
         heading: event.kind,
