@@ -854,8 +854,15 @@ pub async fn apply_create_invite(
     if invitee_id == inviter {
         return Ok(InviteOutcome::SelfInvite);
     }
+    // A block answers exactly as a missing user does (L3). `Blocked` used to be
+    // its own outcome, which told the inviter that THIS SPECIFIC account had
+    // blocked them — the one fact a block is supposed to withhold, and one the
+    // blocked party could re-probe at will. Discord and Slack both answer a
+    // blocked invite as an ordinary failure for the same reason. The
+    // `InviteCreated::Blocked` wire variant stays (a shipped client decodes it)
+    // but the DS no longer produces it.
     if crate::profile::is_blocked_either_way(conn, &inviter, &invitee_id).await? {
-        return Ok(InviteOutcome::Blocked);
+        return Ok(InviteOutcome::NoSuchUser);
     }
     if is_member(conn, &body.group_id, &invitee_id).await? {
         return Ok(InviteOutcome::AlreadyMember);

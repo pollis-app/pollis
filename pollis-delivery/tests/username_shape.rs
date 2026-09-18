@@ -268,6 +268,75 @@ async fn an_invite_for_an_email_resolves_to_the_account_with_that_email_not_a_sq
     assert_eq!(stored, VICTIM, "the stored invite row must name the victim, not the squatter");
 }
 
+/// **L3 — the block edge.** `apply_create_invite` answered a blocked invitee
+/// with its own `Blocked` outcome, which told the inviter that THIS SPECIFIC
+/// account had blocked them: the one fact a block exists to withhold, and one
+/// the blocked party could re-probe whenever they liked. It now answers exactly
+/// as a missing user does, so the two are indistinguishable.
+#[tokio::test]
+async fn a_block_is_indistinguishable_from_no_such_user() {
+    let db = fresh().await;
+    let conn = db.conn().await.unwrap();
+    conn.execute(
+        "INSERT INTO user_block (blocker_id, blocked_id) VALUES (?1, ?2)",
+        libsql::params![VICTIM, ADMIN],
+    )
+    .await
+    .expect("seed block");
+
+    let invite = |identifier: &str, id: &str| CreateInviteBody {
+        id: id.to_string(),
+        group_id: GROUP.to_string(),
+        inviter_id: Some(ADMIN.to_string()),
+        invitee_identifier: identifier.to_string(),
+    };
+
+    let blocked = apply_create_invite(&conn, Some(ADMIN), &invite(VICTIM_EMAIL, "inv-b"))
+        .await
+        .expect("apply");
+    let absent = apply_create_invite(&conn, Some(ADMIN), &invite("nobody@nowhere.test", "inv-n"))
+        .await
+        .expect("apply");
+
+    assert!(
+        matches!(blocked, InviteOutcome::NoSuchUser),
+        "a block must answer as a missing user, got {blocked:?}"
+    );
+    assert!(matches!(absent, InviteOutcome::NoSuchUser), "got {absent:?}");
+
+    // And no invite row was written for the blocked pair.
+    let mut rows = conn
+        .query(
+            "SELECT COUNT(*) FROM group_invite WHERE invitee_id = ?1",
+            libsql::params![VICTIM],
+        )
+        .await
+        .expect("query");
+    let n: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
+    assert_eq!(n, 0);
+}
+
+/// The control: with no block in place the same invite is Created, so the test
+/// above is not satisfied by refusing everything.
+#[tokio::test]
+async fn an_unblocked_invite_is_still_created() {
+    let db = fresh().await;
+    let conn = db.conn().await.unwrap();
+    let outcome = apply_create_invite(
+        &conn,
+        Some(ADMIN),
+        &CreateInviteBody {
+            id: "inv-ok".to_string(),
+            group_id: GROUP.to_string(),
+            inviter_id: Some(ADMIN.to_string()),
+            invitee_identifier: VICTIM_EMAIL.to_string(),
+        },
+    )
+    .await
+    .expect("apply");
+    assert!(matches!(outcome, InviteOutcome::Created { .. }), "got {outcome:?}");
+}
+
 /// The directory lookup (behind `/v1/directory/users`, hence the client's
 /// DM-start `search_user_by_username`) dispatches on `@`: an email matches
 /// `email` only, a username matches `username` only.

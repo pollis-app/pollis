@@ -347,7 +347,14 @@ fn classify(method: &Method, path: &str, cfg: &RateLimitConfig) -> Option<(&'sta
         // tighten it), and `account-probe` is deliberately unauthenticated (it
         // runs before any credential exists). Both therefore need a bound that
         // is about GUESSING, which the generic write backstop is not.
-        "/v1/directory/group-by-slug" | "/v1/auth/account-probe" => {
+        //
+        // `/v1/invites/create` joins them: it is a WRITE, but its input is a
+        // username-or-email typed by a human and its answer distinguishes "no
+        // such user" from every other outcome. Anyone can make a group and be its
+        // admin, so any account could walk the username and email space at the
+        // generic write rate. The guessable input, not the verb, is what decides
+        // the tier.
+        "/v1/directory/group-by-slug" | "/v1/auth/account-probe" | "/v1/invites/create" => {
             Some(("probe", cfg.probe_max, cfg.probe_window_secs))
         }
         // Every other read (#987). They are POSTs, so without this they would
@@ -457,6 +464,11 @@ mod tests {
         assert_eq!(tier("/v1/welcomes/fetch"), Some("read"));
         assert_eq!(tier("/v1/directory/group-by-slug"), Some("probe"));
         assert_eq!(tier("/v1/auth/account-probe"), Some("probe"));
+        // A WRITE whose input is guessable belongs in the probe tier too: the
+        // invite resolver takes a username-or-email and answers "no such user"
+        // distinguishably, and anybody can be an admin of a group they made, so
+        // at the write rate it walked the identifier space (L3).
+        assert_eq!(tier("/v1/invites/create"), Some("probe"));
     }
 
     /// GETs are no longer exempt wholesale.
