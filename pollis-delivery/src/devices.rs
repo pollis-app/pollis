@@ -396,17 +396,33 @@ async fn shares_a_desired_roster(
     a: &str,
     b: &str,
 ) -> anyhow::Result<bool> {
+    // Written as four explicit EXISTS legs rather than one `UNION` CTE: the CTE
+    // materializes all of `group_member` and `group_invite` before it can join,
+    // while these use `idx_gm_user` (`group_member(user_id)`) and
+    // `idx_invite_invitee` (`group_invite(invitee_id, status)`) to reach the
+    // handful of rows that matter. Both directions of each pairing are listed so
+    // an INVITER claiming for an INVITEE and a member claiming for a co-member
+    // both pass.
+    //
+    // No `status` filter on `group_invite`, deliberately:
+    // `directory::desired_roster` has none either, and this predicate must agree
+    // with the roster the MLS tree is reconciled against or the two disagree
+    // about who may be added.
     let mut rows = conn
         .query(
-            "WITH roster(group_id, user_id) AS ( \
-                 SELECT group_id, user_id FROM group_member \
-                 UNION \
-                 SELECT group_id, invitee_id FROM group_invite \
-             ) \
-             SELECT 1 WHERE \
-                EXISTS (SELECT 1 FROM roster ra \
-                        JOIN roster rb ON rb.group_id = ra.group_id \
-                        WHERE ra.user_id = ?1 AND rb.user_id = ?2) \
+            "SELECT 1 WHERE \
+                EXISTS (SELECT 1 FROM group_member ga \
+                        JOIN group_member gb ON gb.group_id = ga.group_id \
+                        WHERE ga.user_id = ?1 AND gb.user_id = ?2) \
+             OR EXISTS (SELECT 1 FROM group_member ga \
+                        JOIN group_invite gi ON gi.group_id = ga.group_id \
+                        WHERE ga.user_id = ?1 AND gi.invitee_id = ?2) \
+             OR EXISTS (SELECT 1 FROM group_invite gi \
+                        JOIN group_member gb ON gb.group_id = gi.group_id \
+                        WHERE gi.invitee_id = ?1 AND gb.user_id = ?2) \
+             OR EXISTS (SELECT 1 FROM group_invite gi \
+                        JOIN group_invite gj ON gj.group_id = gi.group_id \
+                        WHERE gi.invitee_id = ?1 AND gj.invitee_id = ?2) \
              OR EXISTS (SELECT 1 FROM dm_channel_member da \
                         JOIN dm_channel_member db ON db.dm_channel_id = da.dm_channel_id \
                         WHERE da.user_id = ?1 AND db.user_id = ?2) \
