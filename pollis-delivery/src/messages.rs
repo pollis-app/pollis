@@ -944,6 +944,12 @@ pub async fn apply_edit_message(
     {
         return Ok(WriteOutcome::Forbidden);
     }
+    // Read the capability the new edit will carry BEFORE the transaction opens.
+    // The DELETE below removes the edit this one replaces, and the fallback path
+    // reads that very row — on the same connection, so it would see the deleted
+    // state and inherit NULL.
+    let inherited_capability =
+        edit_capability_hash(conn, &body.conversation_id, &body.target_message_id).await?;
     let tx = conn.transaction().await?;
     tx.execute(
         "DELETE FROM message_envelope \
@@ -964,9 +970,7 @@ pub async fn apply_edit_message(
             body.target_message_id.clone().into(),
             // The edit envelope inherits the TARGET's capability, so the next
             // edit (or a delete) can replace it with the same proof.
-            edit_capability_hash(conn, &body.conversation_id, &body.target_message_id)
-                .await?
-                .into(),
+            inherited_capability.into(),
         ],
     )
     .await?;
@@ -1040,10 +1044,24 @@ pub(crate) async fn check_delete_capability(
     // TEXT, not BLOB: the value travels as base64 and is stored verbatim, so it
     // is a string all the way down. Reading it as bytes panics inside libsql.
     let stored: Option<String> = match rows.next().await? {
-        // A row with no hash: the legacy path. A row that does not exist at all:
-        // the delete is a no-op, so there is nothing to refuse.
+        // A row with no hash: the legacy path.
         Some(row) => row.get::<Option<String>>(0).ok().flatten(),
-        None => return Ok(DeleteCapability::NotRequired),
+        // The target row is GONE — but a delete/edit of it also removes the
+        // PENDING EDIT that names it, and that envelope outlives its target
+        // (envelope GC collects each row on its own watermark, and an edit is
+        // written later than what it edits, so the original goes first). With no
+        // row to read a hash from this used to answer `NotRequired`, and any
+        // member could then drop another author's pending edit uncontested — the
+        // exact loss #1086 exists to prevent, just with an extra step (L3).
+        //
+        // The edit INHERITED the target's capability precisely so it could stand
+        // in for it, so read it from there instead. `None` (no edit either, or a
+        // legacy edit carrying no hash) is still `NotRequired`: there is then
+        // nothing to remove, or nothing to prove.
+        None => {
+            drop(rows);
+            pending_edit_capability_hash(conn, conversation_id, message_id).await?
+        }
     };
     let Some(stored) = stored else {
         return Ok(DeleteCapability::NotRequired);
@@ -1066,12 +1084,40 @@ pub(crate) async fn check_delete_capability(
     }
 }
 
+/// The capability hash carried by the PENDING EDIT of `message_id`, if there is
+/// one.
+///
+/// The edit inherited the target's hash when it was written, so once the target
+/// itself is collected this is the last copy of the capability that guards both.
+async fn pending_edit_capability_hash(
+    conn: &Connection,
+    conversation_id: &str,
+    message_id: &str,
+) -> anyhow::Result<Option<String>> {
+    let mut rows = conn
+        .query(
+            "SELECT delete_token_hash FROM message_envelope \
+             WHERE conversation_id = ?1 AND target_message_id = ?2 AND type = 'edit' \
+             LIMIT 1",
+            libsql::params![conversation_id.to_string(), message_id.to_string()],
+        )
+        .await?;
+    Ok(match rows.next().await? {
+        Some(row) => row.get::<Option<String>>(0).ok().flatten(),
+        None => None,
+    })
+}
+
 /// The capability hash stored on `message_id`, for an edit envelope to inherit.
 ///
 /// An edit is a replaceable envelope: the next edit deletes it. Copying the
 /// TARGET's hash onto it means that next edit proves the same thing — authorship
 /// of the original — rather than needing a capability of the edit's own, which
 /// the DS could not check against anything.
+///
+/// Falls back to the capability already carried by the edit this one REPLACES.
+/// Otherwise an edit written after the original was collected would inherit
+/// `NULL` and hand the whole chain back to the legacy no-capability path (L3).
 async fn edit_capability_hash(
     conn: &Connection,
     conversation_id: &str,
@@ -1084,10 +1130,15 @@ async fn edit_capability_hash(
             libsql::params![message_id.to_string(), conversation_id.to_string()],
         )
         .await?;
-    Ok(match rows.next().await? {
+    let from_target = match rows.next().await? {
         Some(row) => row.get::<Option<String>>(0).ok().flatten(),
         None => None,
-    })
+    };
+    drop(rows);
+    match from_target {
+        Some(h) => Ok(Some(h)),
+        None => pending_edit_capability_hash(conn, conversation_id, message_id).await,
+    }
 }
 
 /// Take the next delivery sequence for `conversation_id` (#1087).
@@ -4570,6 +4621,128 @@ mod delete_capability_tests {
             .unwrap();
         assert!(matches!(out, WriteOutcome::Ok), "{out:?}");
         assert!(!envelope_exists(&c, "m1").await);
+    }
+
+    /// **L3 — the capability must outlive its target.** An edit envelope is a
+    /// separate row that names the message it edits, and envelope GC collects
+    /// each row on its own watermark — so the ORIGINAL goes first (it is older)
+    /// and the pending edit is left behind.
+    ///
+    /// The capability check reads the hash off the target row. With the target
+    /// collected there was no row to read, the check answered `NotRequired`, and
+    /// any member could then drop another author's pending edit uncontested —
+    /// the exact loss the capability exists to prevent, reached by waiting.
+    ///
+    /// The edit INHERITED the target's hash, so it is read from there now.
+    #[tokio::test]
+    async fn a_pending_edit_keeps_its_capability_after_the_original_is_collected() {
+        let c = conn().await;
+        apply_send_message(&c, Some("alice"), &send("m1", Some(hash_of(TOKEN))))
+            .await
+            .unwrap();
+        let edit = |id: &str, sender: &str, token: Option<String>| {
+            pollis_api::messages::EditMessageBody {
+                envelope_id: id.to_string(),
+                conversation_id: "c1".to_string(),
+                target_message_id: "m1".to_string(),
+                sender_id: Some(sender.to_string()),
+                ciphertext: "mls:01".to_string(),
+                sent_at: chrono::Utc::now().to_rfc3339(),
+                generation: None,
+                epoch: None,
+                delete_token: token,
+            }
+        };
+        let out = apply_edit_message(&c, Some("alice"), &edit("e1", "alice", Some(TOKEN.into())))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Ok), "{out:?}");
+
+        // Envelope GC collects the original; the edit that names it survives.
+        c.execute("DELETE FROM message_envelope WHERE id = 'm1'", ())
+            .await
+            .unwrap();
+        assert!(envelope_exists(&c, "e1").await);
+
+        // Bob, a member, tries to drop Alice's pending edit — as a delete of the
+        // (now absent) original, which is what removes it.
+        let out = apply_delete_message(&c, Some("bob"), &del("m1", "bob", None))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Forbidden), "{out:?}");
+        assert!(
+            envelope_exists(&c, "e1").await,
+            "the pending edit must survive a member who cannot prove the capability"
+        );
+
+        // ...and as a replacing EDIT, the other door onto the same row.
+        let out = apply_edit_message(&c, Some("bob"), &edit("e2", "bob", None))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Forbidden), "{out:?}");
+        assert!(envelope_exists(&c, "e1").await);
+
+        // The author, holding the capability, still can — through both doors.
+        let out = apply_edit_message(&c, Some("alice"), &edit("e3", "alice", Some(TOKEN.into())))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Ok), "{out:?}");
+        assert!(!envelope_exists(&c, "e1").await, "the edit was replaced");
+        assert!(
+            envelope_exists(&c, "e3").await,
+            "and the replacement landed"
+        );
+
+        let out = apply_delete_message(&c, Some("alice"), &del("m1", "alice", Some(TOKEN.into())))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Ok), "{out:?}");
+        assert!(!envelope_exists(&c, "e3").await);
+    }
+
+    /// The replacement edit must carry the capability forward even though the
+    /// original it inherited from is already gone — otherwise the chain drops
+    /// back to the legacy no-capability path one edit later.
+    #[tokio::test]
+    async fn a_replacement_edit_inherits_the_capability_from_the_edit_it_replaces() {
+        let c = conn().await;
+        apply_send_message(&c, Some("alice"), &send("m1", Some(hash_of(TOKEN))))
+            .await
+            .unwrap();
+        let edit = |id: &str, token: Option<String>| pollis_api::messages::EditMessageBody {
+            envelope_id: id.to_string(),
+            conversation_id: "c1".to_string(),
+            target_message_id: "m1".to_string(),
+            sender_id: Some("alice".to_string()),
+            ciphertext: "mls:01".to_string(),
+            sent_at: chrono::Utc::now().to_rfc3339(),
+            generation: None,
+            epoch: None,
+            delete_token: token,
+        };
+        apply_edit_message(&c, Some("alice"), &edit("e1", Some(TOKEN.into())))
+            .await
+            .unwrap();
+        c.execute("DELETE FROM message_envelope WHERE id = 'm1'", ())
+            .await
+            .unwrap();
+        apply_edit_message(&c, Some("alice"), &edit("e2", Some(TOKEN.into())))
+            .await
+            .unwrap();
+
+        let mut rows = c
+            .query(
+                "SELECT delete_token_hash FROM message_envelope WHERE id = 'e2'",
+                (),
+            )
+            .await
+            .unwrap();
+        let stored: Option<String> = rows.next().await.unwrap().unwrap().get(0).unwrap();
+        assert_eq!(
+            stored.as_deref(),
+            Some(hash_of(TOKEN).as_str()),
+            "the replacement must carry the capability forward"
+        );
     }
 
     /// A non-member is refused before the capability is even consulted — the
