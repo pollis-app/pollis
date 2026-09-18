@@ -23,6 +23,48 @@ tag date, UTC.
 
 ---
 
+## v1.13.0 — 2026-09-18
+
+- **Notifications no longer tell Apple, Google or Expo which conversation they
+  are for.** A push now carries a single random handle, different every time,
+  which your device trades for the real destination over its own authenticated
+  connection. Those three companies previously saw a conversation identifier on
+  every message — never the content, but enough to count who you talk to and
+  how often.
+- Deleting a message now requires proof that you are allowed to, on every
+  message rather than most of them. This closes the last way another member of a
+  shared conversation could remove a message you had not yet received.
+- Account keys are wiped from memory on the paths that create them.
+- The retired sidebar-index tables were removed from the database.
+
+## v1.12.0 — 2026-09-14
+
+- **Security release.** Upgraded the TLS library past an advisory affecting how
+  handshake messages are accepted (RUSTSEC-2026-0285).
+- Message delivery now orders on a server-assigned sequence instead of a
+  timestamp from the sending device. A wrong clock on someone else's machine can
+  no longer delay, bury, or lose a message — it can only make a timestamp look
+  odd.
+- **Approving a new device now asks you to type the code it shows**, instead of
+  displaying the code and a button. The previous screen meant the comparison the
+  code exists for was never actually performed by anyone.
+- Sign-in codes: the guess limit and lockout are now per mailbox rather than per
+  request, and email addresses are matched case-insensitively.
+- Push tokens are bound to the device that registered them, so a token cannot be
+  pointed at someone else's account.
+- Several fixes to group membership bookkeeping: a departing member is removed
+  promptly rather than at some other member's next cold start, and multi-user
+  additions record every added user.
+
+## v1.9.8 – v1.11.4
+
+Not written at the time. These releases shipped between 2026-08-16 and
+2026-09-04 and their changes are recorded only in the git history and the
+GitHub release pages. Left as an explicit gap rather than reconstructed after
+the fact, because a changelog that exists to be the trustworthy answer to "what
+am I installing" is worth less if some of its entries were inferred later from
+commit subjects.
+
 ## v1.9.7 — 2026-08-16
 
 - Dates, keyboard glyphs and role labels now localize correctly, and arrow-key

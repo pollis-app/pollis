@@ -626,7 +626,7 @@ deterministically by `eviction_then_readd_has_provable_blackout`.
 ### Ops → real commands (no invented seams)
 
 Each op maps to a method already used by the green suite; there is no
-rotate/self-update op because `self_update` does not exist in this repo. Ops that
+rotate/self-update op because the MODEL has no such op — `self_update` itself does exist (`pollis-core/src/commands/mls/self_update.rs`, #666); the gap is in the fuzzer model, not the codebase. Ops that
 are ill-formed against the shadow model (Send from a non-member, Remove of an
 absent actor, Add of a present one) are **skipped in execution and not recorded**.
 

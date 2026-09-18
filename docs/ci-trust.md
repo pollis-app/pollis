@@ -115,7 +115,7 @@ run. Workflows where a hand-fired run publishes or mutates something real:
   actions and reusable workflows"**, listing the owners the workflows actually use
   (`grep -rhoE 'uses: [^/]+/' .github/workflows` today gives `actions/*`, `docker/*`, `dtolnay/*`,
   `Swatinem/*`, `pnpm/*`, `sigstore/*`, `softprops/*`, `anchore/*`, `aws-actions/*`,
-  `dorny/*`, `dopplerhq/*`, `model-checking/*`, `taiki-e/*`, `tauri-apps/*`). Belt and
+  `dorny/*`, `dopplerhq/*`, `taiki-e/*`, `tauri-apps/*`). Belt and
   braces with the SHA pins: this one also stops a *new* unpinned action being added.
 - If self-hosted runners are ever attached, they must not be reachable from public-fork
   PRs. None are attached today.

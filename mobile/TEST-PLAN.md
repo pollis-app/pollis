@@ -13,7 +13,7 @@ Locked 2026-07-23. Tracking epic: **#342**. Stories: **#619 #620 #621 #622 #623*
 The app is **~95% feature-wired**. It is a standalone Expo app (`mobile/`, SDK 55
 / RN 0.83) that links `pollis-core` through a uniffi JSI turbo-module
 (`modules/pollis-native`) — the **same** command surface (`pollis-core/src/bridge.rs`,
-~82 commands) the desktop Tauri app uses. Every screen consumes real bridge
+~124 commands) the desktop Tauri app uses. Every screen consumes real bridge
 commands: auth (email → OTP → PIN → initialize → device enrollment → recovery),
 groups/channels CRUD, DMs + requests, messaging (send/edit/delete/reactions,
 optimistic + ingest-on-focus), search (message FTS + user lookup), profile,

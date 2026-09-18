@@ -253,7 +253,7 @@ modal, a portal, or a fixed overlay.
 | `frontend/src/components/ui/MentionSuggestList.tsx` | Refined skin's Slack-style suggestion list |
 | `frontend/src/components/Message/MessageBody.tsx` | Splits mention tokens out, delegates the rest to `LinkifiedText` |
 | `pollis-core/src/commands/messages/send.rs` | `mention_audience()` — who gets woken, + the inbox fanout |
-| `pollis-core/src/commands/push.rs` | `notify_new_message(..., only, ...)` recipient filter |
+| `pollis-delivery/src/push.rs` | `notify_new_message(..., only, ...)` recipient filter |
 | `frontend/src/utils/sfx.ts` | `playSfx()` wrapper around `play_sfx` Rust command |
 | `frontend/src/hooks/useLiveKitRealtime.ts` | Categorizes incoming Rust events, calls `notify(...)`, owns pref + permission sync |
 | `frontend/src/voice/voiceBridge.ts` | Calls `notify('voice_self_join'/'voice_self_leave')` for local actions (was `hooks/useVoiceChannel.ts`, deleted) |

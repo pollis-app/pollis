@@ -56,9 +56,10 @@ explicitly skips `actor_user_id`.
 
 Two call sites guarantee every conversation kind is covered:
 
-1. **DM message ingest** — `pollis-core/src/commands/messages/ingest.rs:317`
-   calls `check_and_pin_account_key` for each peer in the DM on every incoming
-   message. Single-peer, single-Turso-query.
+1. **DM message ingest** — `pollis-core/src/commands/messages/ingest.rs:981`
+   calls `batch_check_and_pin_account_keys` for the DM's peers on every incoming
+   message. Batched since #875 — one call for the whole peer set, the same
+   function `mls::reconcile` uses.
 
 2. **Group MLS reconcile** — `pollis-core/src/commands/mls/reconcile.rs` calls
    `batch_check_and_pin_account_keys` after the roster fetch and before the

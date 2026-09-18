@@ -127,12 +127,16 @@
           seconds; a member whose device is offline closes it when they next open the app.
         </p>
 
-        <h3 class="doc-sub-title">Encrypted traffic: it can still download it, but not read it</h3>
+        <h3 class="doc-sub-title">Encrypted traffic: a revoked device stops being served at all</h3>
         <p>
-          Apps read message envelopes directly from the database using a read-only credential that is compiled
-          into every copy of Pollis, so it can be extracted from any installation. A revoked device can therefore
-          keep pulling <em>ciphertext</em> and public metadata. It cannot decrypt anything sent after its removal.
-          This is a known limitation and is stated in the whitepaper.
+          A revoked device cannot fetch anything after revocation &mdash; not messages, not metadata. Every
+          request to the Delivery Service, reads included, is signed by the device&rsquo;s own key, and a revoked
+          device&rsquo;s signature is refused. The app holds no database credential of any kind, so there is
+          nothing to fall back on.
+        </p>
+        <p>
+          What a revoked device keeps is whatever it already downloaded before revocation, sitting in its local
+          encrypted database. It cannot decrypt anything sent afterwards, because the group rekeys without it.
         </p>
 
         <div class="doc-limit">

@@ -106,7 +106,7 @@ from the baseline:
    "revoke everyone"?
 5. `sweep::local_tree_has_stale_leaf` vs `reconcile::desired_set`: one rule or two copies?
 6. The `RosterChanged` banner diff: snapshot-plus-diff or a fresh tree walk after merge?
-7. `user_groups` / `user_dms`: still written-to-but-never-read?
+7. `user_groups` / `user_dms`: **dropped** by migration `000029` (#1143) — the tables no longer exist. Confirm nothing has recreated them rather than re-asking whether they are dead.
 
 ## Output
 

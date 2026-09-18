@@ -241,10 +241,10 @@
         <ul>
           <li>
             <strong>Advisories.</strong> Every RustSec advisory against the graph fails the build unless it has a
-            named exemption with a written reason. There are <strong>28</strong> exemptions and
+            named exemption with a written reason. There are <strong>29</strong> exemptions and
             <strong>no blanket suppression</strong> — each names a specific <code>RUSTSEC-</code> id. Twenty-one
             are unmaintained-crate notices with no vulnerability (ten of them the GTK3 bindings Tauri's WebKit
-            backend requires, for which no GTK4 Tauri backend exists). Seven are real vulnerabilities with no
+            backend requires, for which no GTK4 Tauri backend exists). Eight are real vulnerabilities with no
             reachable fix; those are listed individually below.
           </li>
           <li>
@@ -262,7 +262,7 @@
 
         <div class="doc-table-wrap">
           <table class="doc-table">
-            <caption>The seven exempted advisories that are actual vulnerabilities, with the reason recorded in
+            <caption>The eight exempted advisories that are actual vulnerabilities, with the reason recorded in
               <code>deny.toml</code>.</caption>
             <thead><tr><th>Advisory</th><th>Crate</th><th>Why it is exempt</th></tr></thead>
             <tbody>
@@ -275,6 +275,10 @@
                 <td class="doc-td-dim">Certificate-validation issues fixed only on the 0.103 line, which our own
                   direct TLS already uses. The old lines are pinned by LiveKit and libSQL upstream; waiting on
                   their rustls bump.</td></tr>
+              <tr><td><code>RUSTSEC-2026-0258</code></td><td class="doc-td-dim"><code>h2</code> 0.3</td>
+                <td class="doc-td-dim">Empty-DATA-frame denial of service, fixed only on the 0.4 line with no 0.3
+                  backport. Reachable only as libSQL's outbound client to Turso, never on the Delivery Service's
+                  inbound listener, which is hyper 1.9 and does not use it.</td></tr>
               <tr><td><code>RUSTSEC-2026-0194</code><br /><code>RUSTSEC-2026-0195</code></td>
                 <td class="doc-td-dim"><code>quick-xml</code></td>
                 <td class="doc-td-dim">Every vulnerable instance is build-time code generation or dev-only. No

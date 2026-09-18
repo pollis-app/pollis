@@ -355,9 +355,20 @@ Call and realtime-signalling state is held in memory for the life of the connect
 written to any first-party database. Media frames are E2EE under a key derived from the MLS group
 exporter secret; the SFU forwards ciphertext.
 
-LiveKit does see connection metadata inherent to routing: participant identity (`{user_id}:{device_id}`),
-which room, and when. Realtime signalling JSON no longer carries the sender
-(`docs/metadata-minimization-design.md` v2).
+LiveKit sees connection metadata inherent to routing — a participant, a room, and a time — but since
+#828/#835/#836 it sees **pseudonyms, not identities**. Room names are HMAC-derived
+(`pollis-delivery/src/room_id.rs::room_pseudonym`) and participant identities are SIV-encrypted per room
+(`pollis-delivery/src/participant_id.rs::participant_pseudonym`), both applied at token-mint and roster
+time, so the SFU cannot map a participant back to a user, a device, or a logical room. Tests pin both
+directions (`never_leaks_the_user_or_device_id`, `never_leaks_the_logical_name`). Realtime signalling JSON
+no longer carries the sender (`docs/metadata-minimization-design.md` v2).
+
+**Residual:** a pseudonym is stable within a room for the lifetime of the signing secret, so the SFU can
+still cluster co-present participants across a call — it just cannot name them.
+
+*(This paragraph previously stated LiveKit sees `{user_id}:{device_id}`. That was written before #828/#835/#836
+and was still here at the 2026-08-31 sign-off, which means the sign-off did not re-diff §7 against code that
+had already landed — worth knowing about this document's review process, not just this line.)*
 
 ---
 

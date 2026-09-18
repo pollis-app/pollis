@@ -7,9 +7,9 @@
 > `hooks/useNetworkStatus.ts` — #804), so treat the filesystem as the authority and
 > regenerate rather than patch when it disagrees.
 
-**36 library files** under `frontend/src/{services,utils,hooks}`
+**58 library files** under `frontend/src/{services,utils,hooks}` (recursive — `hooks/queries` included)
 
-## Frontend (36 files)
+## Frontend (58 files)
 
 - `frontend/src/services/api.ts` — requestOTP, AuthResult, verifyOTP, UnlockStateSnapshot, getUnlockState, setPin, …
 - `frontend/src/services/r2-upload.ts` — uploadAvatar, uploadGroupIcon, getFileDownloadUrl, downloadAndDecryptMedia, getMediaUrl

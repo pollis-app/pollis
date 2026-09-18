@@ -658,8 +658,10 @@ Current state:
   - Content-free fan-out — **`pollis_delivery::push::notify_new_message`, in the
     DS, not the client** (#987 moved it off every client so nobody needs a
     credential that can read other people's `push_token` rows). Driven by the
-    `push_to` field on `POST /v1/messages/send`. Payload is `{conversationId,
-    kind}` and a generic "New message" body — never plaintext or sender.
+    `push_to` field on `POST /v1/messages/send`. Payload is `{ h }` — an opaque
+    per-notification handle, resolved via `POST /v1/push/resolve` (#1122/#1157)
+    — and a generic "New message" body. Never plaintext, sender, or the
+    conversation id.
   - The DS authenticates the send with `EXPO_TOKEN` (#707), wired through the
     full Doppler → sync script → wrangler → `worker/index.ts` → container chain
     that `scripts/check-ds-config-chain.py` enforces. Optional until "Enhanced

@@ -77,11 +77,12 @@ proofs; TLA+ `CommitLog` / `Delivery`.
 
 ### PL-05 analysis — two separate things, do not conflate them
 
-**(a) A latent tombstone-ordering hazard. Real, but it does NOT explain #661.** — **FIXED in #692**;
-the analysis below is kept as the rationale. The floor is now the greater of `MAX(sent_at)` over
-`message_envelope` and `MAX(last_fetched_at)` over `conversation_watermark` (`TOMBSTONE_FLOOR` in
-`pollis-delivery/src/messages.rs`), pinned by `messages::tombstone_floor_tests` and
-`pollis-delivery/tests/envelope_retention.rs` (Part F).
+**(a) A latent tombstone-ordering hazard. Real, but it does NOT explain #661.** — **FIXED in #692, then
+SUPERSEDED ENTIRELY by #1087**; the analysis below is kept only as the rationale for why the problem
+existed. `TOMBSTONE_FLOOR`, `tombstone_floor` and `sent_at_after` have all been **deleted**: delivery no
+longer orders on a client-supplied `sent_at` at all. A tombstone takes the next DS-assigned `seq`, which is
+above every recipient's cursor by construction, so the clock-skew floor this section describes has nothing
+left to compute. See `docs/backend-core-invariants.md` (F4 / I3) for the mechanism that replaced it.
 
 Ingest selects envelopes with `sent_at > last_fetched_at` (strictly greater) and advances the
 watermark to the highest `sent_at` it consumed (`pollis-core/src/commands/messages/ingest.rs:148-159`).
