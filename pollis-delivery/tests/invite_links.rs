@@ -161,7 +161,36 @@ async fn is_member(db: &Db, group: &str, user: &str) -> bool {
     rows.next().await.unwrap().is_some()
 }
 
+/// The `now` a client puts in the body. **The server ignores it** (H3) — every
+/// time comparison is `datetime('now')` — so this is only ever a plausible-
+/// looking value to fill the wire field with. Tests that need a specific
+/// relationship to the clock express it with [`server_time_offset`] instead.
 const NOW: &str = "2026-08-15T12:00:00Z";
+
+/// An RFC3339 stamp `seconds` away from the SERVER's clock (negative = past).
+/// The expiry tests below are about the server's notion of time, so they have to
+/// be written against it rather than against a fixed literal that happens to sit
+/// on the right side of whatever day the suite runs.
+fn server_time_offset(seconds: i64) -> String {
+    (chrono::Utc::now() + chrono::Duration::seconds(seconds)).to_rfc3339()
+}
+
+/// Backdate every recorded redemption attempt by `seconds`, simulating the
+/// passage of time the way the SERVER sees it. The failure budget's window is
+/// `datetime('now', '-N seconds')` against `attempted_at`, so ageing the rows is
+/// the only way a test can leave the window — a body field no longer can (H3).
+async fn age_attempts(db: &Db, seconds: i64) {
+    db.conn()
+        .await
+        .unwrap()
+        .execute(
+            "UPDATE group_invite_link_redemption \
+             SET attempted_at = datetime(attempted_at, ?1)",
+            libsql::params![format!("-{seconds} seconds")],
+        )
+        .await
+        .unwrap();
+}
 
 // ── The token is never stored ────────────────────────────────────────────────
 
@@ -255,8 +284,8 @@ async fn a_revoked_token_is_rejected() {
 #[tokio::test(flavor = "multi_thread")]
 async fn an_expired_token_is_rejected() {
     let db = fresh().await;
-    // Expired an hour before `NOW`.
-    let link = create_link(&db, "link-1", Some("2026-08-15T11:00:00Z"), None).await;
+    // Expired an hour ago, by the SERVER's clock.
+    let link = create_link(&db, "link-1", Some(&server_time_offset(-3600)), None).await;
 
     assert_eq!(
         redeem(&db, &link.token, "att-1", NOW).await,
@@ -265,14 +294,77 @@ async fn an_expired_token_is_rejected() {
     assert!(!is_member(&db, GROUP, JOINER).await);
 }
 
-/// The boundary: a link that expires exactly at `now` is dead, not alive.
+/// The boundary: a link that expires exactly now is dead, not alive.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_token_expiring_exactly_now_is_rejected() {
     let db = fresh().await;
-    let link = create_link(&db, "link-1", Some(NOW), None).await;
+    // A whole second in the past is "exactly now" at `datetime()`'s resolution;
+    // a literal equal to the instant of the comparison cannot be written from
+    // outside the server.
+    let link = create_link(&db, "link-1", Some(&server_time_offset(-1)), None).await;
     assert_eq!(
         redeem(&db, &link.token, "att-1", NOW).await,
         RedeemOutcome::Rejected
+    );
+    assert!(!is_member(&db, GROUP, JOINER).await);
+}
+
+/// The control for the two above: a link that has NOT expired still admits. Put
+/// next to them so "expired is rejected" cannot be satisfied by rejecting
+/// everything.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_live_token_with_a_future_expiry_is_accepted() {
+    let db = fresh().await;
+    let link = create_link(&db, "link-1", Some(&server_time_offset(3600)), None).await;
+    assert_eq!(redeem(&db, &link.token, "att-1", NOW).await, joined());
+    assert!(is_member(&db, GROUP, JOINER).await);
+}
+
+// ── H3: the clock is the server's ────────────────────────────────────────────
+
+/// **H3.** `expires_at` used to be compared against `body.now` — a plain wire
+/// field — in both the main check and the in-transaction backstop. So
+/// `{"now": "2020-01-01T00:00:00Z"}` redeemed any expired-but-not-revoked link:
+/// an invite an admin time-boxed a year ago was still live to anyone who kept
+/// the URL. Expiry that the caller picks the comparison point for is not expiry.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_caller_supplied_clock_cannot_revive_an_expired_link() {
+    let db = fresh().await;
+    let link = create_link(&db, "link-1", Some(&server_time_offset(-3600)), None).await;
+
+    assert_eq!(
+        redeem(&db, &link.token, "att-backdated", "2020-01-01T00:00:00Z").await,
+        RedeemOutcome::Rejected,
+        "a backdated `now` must not revive an expired link"
+    );
+    assert!(!is_member(&db, GROUP, JOINER).await);
+}
+
+/// The same field also drove the durable failure-budget window
+/// (`datetime(attempted_at) > datetime(now, '-N seconds')`), so a `now` far in
+/// the FUTURE pushed every recorded failure out of the window and handed the
+/// caller an unlimited budget for guessing selectors — the exact bound #847
+/// added the audit table to enforce.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_future_clock_cannot_empty_the_failure_budget() {
+    let db = fresh().await;
+    let link = create_link(&db, "link-1", None, None).await;
+
+    let forged = format!("{}.{}", "A".repeat(16), "B".repeat(43));
+    for i in 0..11 {
+        redeem(&db, &forged, &format!("att-{i}"), NOW).await;
+    }
+    assert_eq!(
+        redeem(&db, &forged, "att-limited", NOW).await,
+        RedeemOutcome::RateLimited,
+        "the budget must be spent"
+    );
+
+    // A `now` a century ahead used to make every failure above fall outside the
+    // window. It must change nothing.
+    assert_eq!(
+        redeem(&db, &link.token, "att-future", "2126-01-01T00:00:00Z").await,
+        RedeemOutcome::RateLimited
     );
     assert!(!is_member(&db, GROUP, JOINER).await);
 }
@@ -589,8 +681,12 @@ async fn brute_force_is_rate_limited() {
     assert!(!is_member(&db, GROUP, JOINER).await);
 
     // Outside the window the actor recovers: the bound is a delay, not a ban.
+    // Time passes on the SERVER, so the test ages the audit rows rather than
+    // moving a field of the request (H3 — that is no longer a thing a caller can
+    // do, and the point of the bound is that it cannot be).
+    age_attempts(&db, 3600).await;
     assert_eq!(
-        redeem(&db, &link.token, "att-later", "2026-08-15T13:00:00Z").await,
+        redeem(&db, &link.token, "att-later", NOW).await,
         joined()
     );
     assert!(is_member(&db, GROUP, JOINER).await);
