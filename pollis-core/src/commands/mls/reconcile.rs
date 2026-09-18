@@ -562,7 +562,7 @@ where
     //    would otherwise inherit both the skipped verdict and the self-removal
     //    guard, making it the one leaf in the tree nothing could ever evict.
     let own_index = group.own_leaf_index();
-    let mut leaves: Vec<(( String, String), LeafNodeIndex, Option<String>)> = Vec::new();
+    let mut leaves: Vec<((String, String), LeafNodeIndex, Option<String>)> = Vec::new();
     for m in group.members() {
         let uid = parse_credential_user_id(&m.credential);
         let did = parse_credential_device_id(&m.credential).unwrap_or_default();
@@ -596,10 +596,10 @@ where
     }
 
     let mut actual: HashMap<(String, String), LeafNodeIndex> = HashMap::new();
-    let mut uncertified: Vec<((String, String), LeafNodeIndex, String)> = Vec::new();
+    let mut to_evict: Vec<((String, String), LeafNodeIndex, String)> = Vec::new();
     for (key, index, verdict) in leaves {
         if let Some(reason) = verdict {
-            uncertified.push((key, index, reason));
+            to_evict.push((key, index, reason));
             continue;
         }
         // The survivor for a `(user, device)` that several leaves claim. Our own
@@ -620,15 +620,10 @@ where
                     (*slot.get(), index)
                 };
                 slot.insert(keep);
-                eprintln!(
-                    "[mls] reconcile: {}:{} is claimed by more than one leaf — evicting the \
-                     duplicate at {drop:?}, keeping {keep:?}",
-                    key.0, key.1
-                );
-                uncertified.push((
+                to_evict.push((
                     key,
                     drop,
-                    "duplicate leaf for a credential the tree already holds".to_string(),
+                    format!("a second leaf claiming one credential; keeping {keep:?}"),
                 ));
             }
         }
@@ -645,16 +640,17 @@ where
     // 3. Diff.
     let actual_keys: HashSet<(String, String)> = actual.keys().cloned().collect();
 
-    // Leaves in tree but not desired → remove, plus every uncertified leaf.
+    // Leaves in tree but not desired → remove, plus every leaf already queued for
+    // eviction (uncertified, or a duplicate of a credential another leaf holds).
     let mut to_remove: Vec<((String, String), LeafNodeIndex)> = actual
         .iter()
         .filter(|(key, _)| !desired.contains(key))
         .map(|(key, &idx)| (key.clone(), idx))
         .collect();
-    for (key, idx, reason) in &uncertified {
+    for (key, idx, reason) in &to_evict {
         eprintln!(
-            "[mls] reconcile: evicting uncertified leaf {}:{} — {reason}",
-            key.0, key.1
+            "[mls] reconcile: evicting leaf {:?} for {}:{} — {reason}",
+            idx, key.0, key.1
         );
         to_remove.push((key.clone(), *idx));
     }

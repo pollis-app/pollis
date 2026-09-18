@@ -2190,9 +2190,11 @@ where
     // nothing else, and that is checked HERE — before openmls sees the message —
     // rather than inferred from what `process_message` hands back.
     //
-    // Both fields are authenticated: `group_id`, `epoch` and `content_type` are
-    // the AAD of a PrivateMessage's AEAD, so a member cannot relabel someone
-    // else's ciphertext and a non-member cannot produce one at all. What they
+    // Both fields are authenticated rather than advisory: for the PrivateMessage
+    // framing Pollis uses for handshakes they are the AEAD's AAD, and for the
+    // PublicMessage framing an external commit arrives in they are inside the
+    // signed `FramedContentTBS` — so a member cannot relabel someone else's
+    // message and a non-member cannot produce one at all. What they
     // are NOT is trustworthy by position: the DS does not parse commit bytes, so
     // ANY member can POST an application message to `/v1/commits`, and every
     // shape below used to reach a branch that advanced the replay counter (the
