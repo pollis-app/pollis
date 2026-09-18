@@ -19,11 +19,17 @@
 //!   * every client talking to `exp.host` directly, which is a non-first-party
 //!     host outside the overlay allowlist, so a relay could never carry it.
 //!
-//! What a push carries is unchanged: `{ conversationId, kind }` and nothing
-//! else — enough for the client to route and re-ingest the (still-encrypted)
-//! message locally, never the plaintext, the sender, or any content. Foreground
-//! delivery still uses the LiveKit realtime path; push is strictly the
-//! background/closed path.
+//! What a push carries has never included content — no plaintext, no sender.
+//! Since #1122 it does not include the conversation either: the payload carries
+//! an opaque `h` handle, and [`resolve_push_handle`] trades it for
+//! `{ conversation_id, kind }` over this client's own authenticated channel.
+//! Expo/APNs/FCM are outside the overlay by design, so anything in the payload
+//! is disclosed to three third parties on every message — and "which
+//! conversation, when" is exactly the signal the metadata-minimisation design
+//! sets out to withhold.
+//!
+//! Foreground delivery still uses the LiveKit realtime path; push is strictly
+//! the background/closed path.
 
 use std::sync::Arc;
 
@@ -51,4 +57,67 @@ pub async fn register_push_token(
     };
     crate::commands::mls::ds_post_ok(state, &body).await?;
     Ok(())
+}
+
+/// Trade an opaque push handle for the conversation it was minted for (#1122).
+///
+/// `None` means the handle is unknown, expired, swept, or not this user's — the
+/// DS answers all four identically on purpose, so possessing a handle proves
+/// nothing. The caller degrades to opening the app rather than the conversation.
+///
+/// **Cached, and deliberately not single-use.** A background data push resolves
+/// the handle to re-ingest, and a later tap resolves the SAME handle to
+/// navigate; burning it on first use would break tap-to-conversation for every
+/// notification already ingested. The cache makes the repeat free and survives
+/// the round trip being unavailable offline.
+pub async fn resolve_push_handle(
+    handle: String,
+    state: &Arc<AppState>,
+) -> Result<Option<(String, String)>> {
+    if let Some(hit) = handle_cache_get(&handle).await {
+        return Ok(Some(hit));
+    }
+    let body = pollis_api::devices::ResolvePushHandleBody {
+        handle: handle.clone(),
+    };
+    let resp: pollis_api::devices::ResolvePushHandleResponse =
+        crate::commands::mls::ds_client::ds_post_json(state, &body).await?;
+    match (resp.conversation_id, resp.kind) {
+        (Some(c), Some(k)) => {
+            handle_cache_put(&handle, &c, &k).await;
+            Ok(Some((c, k)))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// Resolved handles, in memory only.
+///
+/// Not persisted: a handle is worth minutes-to-days and the mapping is exactly
+/// the "which conversation" fact the payload stopped carrying, so writing it to
+/// disk would re-create locally what #1122 removed from the wire. A cold start
+/// simply resolves again.
+static HANDLE_CACHE: std::sync::LazyLock<
+    tokio::sync::Mutex<std::collections::HashMap<String, (String, String)>>,
+> = std::sync::LazyLock::new(|| tokio::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Bound on the cache, so a stream of notifications cannot grow it without end.
+const HANDLE_CACHE_MAX: usize = 256;
+
+async fn handle_cache_get(handle: &str) -> Option<(String, String)> {
+    HANDLE_CACHE.lock().await.get(handle).cloned()
+}
+
+async fn handle_cache_put(handle: &str, conversation_id: &str, kind: &str) {
+    let mut map = HANDLE_CACHE.lock().await;
+    // Crude but sufficient: a full cache is dropped rather than evicted
+    // one-by-one. Every entry is re-resolvable over the network, so the cost of
+    // being wrong here is one round trip, not a lost notification.
+    if map.len() >= HANDLE_CACHE_MAX {
+        map.clear();
+    }
+    map.insert(
+        handle.to_string(),
+        (conversation_id.to_string(), kind.to_string()),
+    );
 }

@@ -15,8 +15,6 @@
  * `SAS_ALPHABET` / `SAS_LEN`); these assertions quote it, so a change there that
  * is not mirrored here fails the build rather than silently rejecting every
  * legitimate code.
- *
-ical
  */
 
 import test from "node:test";

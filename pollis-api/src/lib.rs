@@ -318,6 +318,7 @@ endpoints! {
     Client   devices::ReplenishKeyPackagesBody  => "/v1/key-packages/replenish",         StatusOk;
     Client   devices::ResignDeviceCertsBody     => "/v1/devices/resign",                 StatusOk;
     Client   devices::PushTokenBody             => "/v1/push-tokens",                    StatusOk;
+    Client   devices::ResolvePushHandleBody     => "/v1/push/resolve",                   devices::ResolvePushHandleResponse;
 
     // ── Domains E + G — account lifecycle ────────────────────────────────────
     Client   account::RotateIdentityBody        => "/v1/account/rotate-identity",        account::RotateIdentityResponse;

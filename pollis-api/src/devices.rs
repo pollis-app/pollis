@@ -136,3 +136,31 @@ pub struct ClaimKeyPackageResponse {
     /// TLS-serialized MLS KeyPackage, base64 (STANDARD).
     pub key_package: String,
 }
+
+// ── POST /v1/push/resolve ────────────────────────────────────────────────────
+
+/// Resolve an opaque push handle to the conversation it was minted for (#1122).
+///
+/// The push payload carries only `h`, so Expo/APNs/FCM never see which
+/// conversation a notification is for. The client trades the handle for the
+/// routing information over its own authenticated channel.
+///
+/// Device-signed, and scoped to the authenticated user: a handle belonging to
+/// someone else answers **not found**, never forbidden — a distinct error would
+/// confirm the handle exists.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolvePushHandleBody {
+    pub handle: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolvePushHandleResponse {
+    /// `None` when the handle is unknown, expired, swept, or not this user's.
+    /// The caller degrades to opening the app rather than the conversation.
+    #[serde(default)]
+    pub conversation_id: Option<String>,
+    /// `"dm"` or `"channel"`. Moved out of the payload with the id — it is
+    /// low-entropy, but it still told the provider DM-vs-channel every time.
+    #[serde(default)]
+    pub kind: Option<String>,
+}

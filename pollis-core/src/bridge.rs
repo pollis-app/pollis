@@ -1002,6 +1002,18 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(())
         }
 
+        // #1122: the push payload carries an opaque handle, not the conversation
+        // id, so routing a tap (or a background re-ingest) means resolving it
+        // here first. Returns null when the handle is unknown, expired or not
+        // ours — the caller opens the app instead of a conversation.
+        "resolve_push_handle" => {
+            let handle: String = arg(&args, "handle")?;
+            let resolved = crate::commands::push::resolve_push_handle(handle, &state()?).await?;
+            ok(resolved.map(|(conversation_id, kind)| {
+                serde_json::json!({ "conversationId": conversation_id, "kind": kind })
+            }))
+        }
+
         // ----- livekit (realtime token) -----
         // Mobile joins the same SFU rooms as desktop via the JS LiveKit SDK
         // (data-only, see mobile/lib/realtime/). It only passes the room name;

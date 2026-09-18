@@ -385,6 +385,7 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route(<devices::ReplenishKeyPackagesBody as DsRequest>::PATH, post(devices::replenish_key_packages))
         .route(<devices::ResignDeviceCertsBody as DsRequest>::PATH, post(devices::resign_device_certs))
         .route(<devices::PushTokenBody as DsRequest>::PATH, post(devices::register_push_token))
+        .route(<devices::ResolvePushHandleBody as DsRequest>::PATH, post(push::resolve_push_handle))
         // Domains E + G (#419) — account lifecycle / identity rotation /
         // recovery / device-enrollment / security audit. All land on the MAIN
         // DB. The account-identity bootstrap (signup version-1 establishment),

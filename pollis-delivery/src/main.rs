@@ -159,6 +159,18 @@ fn spawn_envelope_gc_sweep(db: Arc<Db>, metrics: RetentionMetricsHandle) {
                             Ok(_) => {}
                             Err(e) => tracing::warn!("aged-record sweep failed: {e}"),
                         }
+                        // #1122: expired push handles, on the same schedule.
+                        // These are the ONLY durable record that a notification
+                        // for a given conversation went to a given user, so the
+                        // sweep is the mitigation, not housekeeping — an unswept
+                        // table would turn a momentary fact into a permanent one.
+                        match pollis_delivery::push::sweep_push_handles(&conn).await {
+                            Ok(n) if n > 0 => {
+                                tracing::info!("retention sweep: aged out {n} push_handle row(s)")
+                            }
+                            Ok(_) => {}
+                            Err(e) => tracing::warn!("push-handle sweep failed: {e}"),
+                        }
                     }
                     Err(e) => tracing::warn!("envelope-GC sweep failed: {e}"),
                 },

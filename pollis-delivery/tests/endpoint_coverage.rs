@@ -118,7 +118,12 @@ fn the_endpoint_table_covers_the_whole_write_surface() {
         // 105 since leaf cross-signing moved onto the committer:
         // `/v1/read/roster-identities` is the batched cert-material read a
         // reconcile verifies every added and retained leaf against.
-        105,
+        //
+        // 106 since #1122 stopped putting `conversationId` in the push payload:
+        // `/v1/push/resolve` trades the opaque handle for the conversation it
+        // was minted for, over the client's own authenticated channel, so
+        // Expo/APNs/FCM never see which conversation a notification is for.
+        106,
         "the DS write surface changed — update this count deliberately, and make \
          sure the new endpoint is routed in BOTH pollis-delivery and the flows harness"
     );

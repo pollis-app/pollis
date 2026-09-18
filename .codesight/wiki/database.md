@@ -1063,7 +1063,7 @@ global ordering + a UNIQUE index enforcing the per-subject invariant).
 - `platform` TEXT NOT NULL
 - `updated_at` TEXT NOT NULL
 - Mobile only — desktop never registers, so the fanout is a no-op for desktop-only users.
-- **Content bound:** the notification this routes carries only `{conversationId, kind}` — never plaintext, sender, or any content. Consulted solely by `commands::push::notify_new_message`.
+- **Content bound:** the notification this routes carries only an opaque handle (`{ "h": … }`, #1122) — never the conversation, plaintext, sender, or any content. Fan-out is the DS's (`pollis_delivery::push::notify_new_message`).
 - `device_id` TEXT _(#1090 — the **server-verified** `X-Pollis-Device` of the registering request, never a body field)_
 - `token` is the PK so a re-register from the same device upserts rather than duplicating.
 - Retention: rows unrefreshed for `POLLIS_DS_PUSH_TOKEN_RETENTION_DAYS` are swept by the DS.
@@ -1072,7 +1072,24 @@ global ordering + a UNIQUE index enforcing the per-subject invariant).
 
 **Two further bounds (#1090).** The token must be shaped like an Expo token (`devices::is_expo_push_token`), so the table cannot be padded with junk that inflates every fan-out; and a user keeps at most `PUSH_TOKENS_PER_USER` (10), oldest evicted first, so a reinstall loop cannot grow one message into an unbounded number of Expo calls.
 
-The payload's `conversationId`/`kind` disclosure to Expo/APNs/FCM is tracked separately in #1122 — it needs an opaque handle and a client-protocol change.
+### push_handle _(migration 000030, #1122)_
+- `handle` TEXT PK _(128 bits from the OS CSPRNG, base64url)_
+- `user_id` TEXT NOT NULL
+- `conversation_id` TEXT NOT NULL
+- `kind` TEXT NOT NULL _(`dm` | `channel`)_
+- `created_at` TEXT NOT NULL DEFAULT `datetime('now')`
+
+**Why the payload stopped naming the conversation.** It was already content-free — no plaintext, no sender — but it carried `conversationId`, and Expo/APNs/FCM sit **outside the overlay by design**, so every field was disclosed to three third parties on every message. "Which conversation, when" is precisely the signal the metadata-minimisation design sets out to withhold. The DS now mints a handle per notification, puts only that in the payload, and the client trades it at `POST /v1/push/resolve` over its own authenticated channel. `kind` moved into the response with the id — low-entropy, but it still told the provider DM-vs-channel every time.
+
+**Why random rather than an HMAC of the conversation id.** An HMAC is a *stable pseudonym per conversation*: the providers could not name it but could **count** it, and "this handle fires 40 times a day" is most of what the metadata was worth. A fresh handle per notification leaves nothing to count. It also needs no per-user secret and no rotation, and — unlike encrypting the id to each device key — does not couple push routing to the device-cert lifecycle, the churniest subsystem here.
+
+**Granularity is per (message, recipient user), not per device.** All of a user's devices share a handle, so a provider cannot correlate *across* users; correlating one user's own devices reveals nothing the authenticated resolve does not already assume.
+
+**Resolution is scoped and non-committal.** `user_id` is part of the SQL predicate rather than a check afterwards, so a handle belonging to someone else is indistinguishable from one that never existed — a distinct answer would confirm the handle is real, which is the one thing an opaque handle exists to avoid. Deliberately **not single-use**: a background data push resolves it to re-ingest and a later tap resolves the same handle to navigate.
+
+**The honest cost, and its mitigation.** The DS gains a durable record that a notification for conversation X went to user Y. It already knew that while building the payload; this makes it last for `PUSH_HANDLE_TTL_DAYS` (7), which it did not before. That argues for a short TTL and a real sweep — both in `push::sweep_push_handles`, on the same schedule as the other retention sweeps — not for a different design. Rows also go with account deletion and conversation teardown.
+
+**Rollout.** Additive, the same shape as #1086 → #1135: the DS sends **both** `h` and `conversationId` for one release, the client prefers `h` (`mobile/lib/push/routing.ts`), and a follow-up drops the plain id once clients that prefer it are the floor. An older client ignores `h`; a newer client against an older DS falls back.
 
 ### user_groups / user_dms _(migration 000009 — created, then retired #1085)_
 **Empty and unreferenced.** Created by migration `000009` as the directory index for the per-conversation-DB split (#261 Phase 2). #261 was dropped (not-planned) and the maintenance + reads were reverted, leaving a frozen backfill of the roster as of the moment the migration ran — never inserted into, never read, only deleted from. That is the worst shape a table can have: it could only drift further from `group_member` / `dm_channel_member`, so anything that started reading it would have served a confidently wrong sidebar while looking authoritative.

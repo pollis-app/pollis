@@ -77,6 +77,7 @@ pub const USER_PURGED_TABLES: &[&str] = &[
     "mls_commit_since",
     "mls_welcome",
     "pinned_message",
+    "push_handle",
     "push_token",
     "read_cursor_sync",
     "security_event",
@@ -113,6 +114,7 @@ pub const CONVERSATION_PURGED_TABLES: &[&str] = &[
     "mls_welcome",
     "pin_keystate",
     "pinned_message",
+    "push_handle",
 ];
 
 /// Tables that deliberately survive an account deletion, and why. Read by
@@ -297,6 +299,9 @@ pub async fn purge_user_rows(conn: &Connection, user_id: &str) -> anyhow::Result
     conn.execute("DELETE FROM mls_key_package WHERE user_id = ?1", uid()).await?;
     conn.execute("DELETE FROM conversation_watermark WHERE user_id = ?1", uid()).await?;
     conn.execute("DELETE FROM push_token WHERE user_id = ?1", uid()).await?;
+    // #1122: the only durable record that a notification for some conversation
+    // went to this user. A deleted account must not leave it behind.
+    conn.execute("DELETE FROM push_handle WHERE user_id = ?1", uid()).await?;
 
     // Account-scoped records.
     conn.execute("DELETE FROM account_recovery WHERE user_id = ?1", uid()).await?;
@@ -443,6 +448,9 @@ pub async fn purge_conversation_rows(
     // together. Leaving it would also let a recreated id inherit a stale
     // high-water mark.
     conn.execute("DELETE FROM conversation_seq WHERE conversation_id = ?1", cid()).await?;
+    // #1122: handles naming a conversation that no longer exists resolve to
+    // nothing useful, and holding them would outlive the thing they describe.
+    conn.execute("DELETE FROM push_handle WHERE conversation_id = ?1", cid()).await?;
     // Pins live on the channel/DM id (#99); the keystate row lives on the MLS
     // conversation id, which for a DM is this same id and for a group channel
     // is the group id (removed by `purge_group` below). Both statements are
