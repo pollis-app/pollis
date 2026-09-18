@@ -694,16 +694,26 @@ upload presign.
 - `content_hash` TEXT PK _(SHA-256 of plaintext)_
 - `r2_key` TEXT NOT NULL
 - `created_at` TEXT NOT NULL DEFAULT now
+- `uploaded_by` TEXT _(migration `000031`, #1161 M5 — the account that first registered this blob; NULL for rows predating the migration)_
 
 Global convergent-encryption dedup: one row (and one R2 blob) per unique file, shared by every message that carries it across all conversations and users. Written via the DS `/v1/attachments/register` endpoint (`apply_register_attachment`), never a client-side INSERT.
 
 **Deletion is reference-counted server-side (#690, migration 000012).** The row — and its R2 object — is collected **only when no still-existing message references the hash**, via a single conditional predicate: `DELETE FROM attachment_object WHERE content_hash = ?1 AND NOT EXISTS (SELECT 1 FROM attachment_ref ar JOIN message_envelope me ON me.id = ar.message_id WHERE ar.content_hash = ?1)` in `apply_delete_attachment`. The count is **derived** — a declaration counts only while its [message_envelope](#message_envelope) still exists (see [attachment_ref](#attachment_ref)). The old delete was unconditional and stranded any other conversation still referencing the file (its attachment 404'd). Legacy rows predating the migration hold no references and are collectable as before (no worse than the old unconditional delete); any send from an updated client re-references the hash and promotes it to counted protection.
+
+**Who may delete, and the trade-off it forces (#1161 M5, migration `000031`).** The 2026-09-18 review found the reference graph had no owner: anyone could declare a reference to anyone's `content_hash`, so pointing a victim's hash at your own live message **pinned their blob permanently** and made the real uploader's delete presign 403 — defeating the hard-delete guarantee outright. `attachment_object.uploaded_by` and `attachment_ref.registered_by` now record who did what, and `object_delete_is_blocked` is read by BOTH `apply_delete_attachment` and `/v1/r2/presign`, so the Turso row and the R2 blob can never disagree about whether a delete is allowed.
+
+The predicate is asymmetric on purpose. For the **recorded uploader**, other accounts' references are excluded — they can always destroy what they uploaded. For **everyone else** it is the pre-existing strict count, unchanged. A NULL `uploaded_by` (legacy row) reads as "unknown, therefore blocking", so nothing that worked before now deletes something it should not.
+
+**Collection is deliberately untouched**: `object_is_referenced` still counts *every* live reference, so no GC sweep and no third party can reach past somebody else's copy. Only the explicit, authenticated delete carries the uploader exemption.
+
+The unavoidable consequence, stated plainly because dedup makes it real: convergent encryption means **one blob backs every copy of the same bytes**. If two accounts independently send the same file and the recorded uploader then hard-deletes it, the other account's copy breaks. The alternative — letting any referrer veto the uploader's delete — is the pinning attack this fix exists to remove. For a product whose promise is that delete means delete, the uploader winning is the correct side of that trade, but it is a trade and not a free win.
 
 ### attachment_ref _(migration 000012, #690)_
 - PK: (`content_hash`, `message_id`)
 - `content_hash` TEXT NOT NULL _(the referenced [attachment_object](#attachment_object))_
 - `message_id` TEXT NOT NULL _(the message that carries the attachment)_
 - `created_at` TEXT NOT NULL DEFAULT now
+- `registered_by` TEXT _(migration `000031`, #1161 M5 — who declared this reference; NULL for pre-migration rows)_
 
 One row = "message `message_id` carries the file with `content_hash`". Because the DS cannot read message content (bodies are E2EE ciphertext in [message_envelope](#message_envelope)), it cannot parse attachment references itself — the client DECLARES each one on send (`/v1/attachments/register`, carrying the `message_id`).
 
