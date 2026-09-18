@@ -587,7 +587,8 @@ where
         if let Some((key, _, _)) = leaves.iter().find(|(_, index, _)| *index == own_index) {
             if key.0 != actor_user_id || key.1 != actor_device_id {
                 eprintln!(
-                    "[mls] reconcile: our own leaf {own_index:?} carries {}:{} but we are acting                      as {actor_user_id}:{actor_device_id}",
+                    "[mls] reconcile: our own leaf {own_index:?} carries {}:{} but we are acting \
+                     as {actor_user_id}:{actor_device_id}",
                     key.0, key.1
                 );
             }
@@ -620,7 +621,8 @@ where
                 };
                 slot.insert(keep);
                 eprintln!(
-                    "[mls] reconcile: {}:{} is claimed by more than one leaf — evicting the                      duplicate at {drop:?}, keeping {keep:?}",
+                    "[mls] reconcile: {}:{} is claimed by more than one leaf — evicting the \
+                     duplicate at {drop:?}, keeping {keep:?}",
                     key.0, key.1
                 );
                 uncertified.push((
@@ -1034,8 +1036,29 @@ pub(super) async fn load_pinned_identities(
     actor_user_id: &str,
 ) -> crate::error::Result<IdentityDirectory> {
     let rows = crate::commands::ds_reads::roster_identities(state, roster_user_ids).await?;
-    let mut dir = IdentityDirectory::new(rows);
+    pin_identities(state, IdentityDirectory::new(rows), actor_user_id).await
+}
 
+/// The two local substitutions [`load_pinned_identities`] applies, over a
+/// directory built from ANY source of DS rows.
+///
+/// Split out because the RECEIVE side needs the identical treatment and had
+/// none (#1161 M3): the replay loop built its directory straight from
+/// `conversation-state`'s `added_identities`, so a DS that substituted a user's
+/// `account_id_pub` along with a matching device cert could make a rogue leaf
+/// verdict `Certified` inbound. The self-substitution case is the sharpest —
+/// a leaf claiming YOUR OWN user id judged against a DS-supplied copy of your
+/// own account key rather than the one in your keystore — and it is exactly the
+/// case the first substitution below closes.
+///
+/// Both substitutions only ever make a verdict WEAKER (`Certified` →
+/// `Unverifiable`), never stronger, so applying them on a path that also has to
+/// stay live costs nothing but a flag the eviction reconcile self-corrects.
+pub(super) async fn pin_identities(
+    state: &Arc<AppState>,
+    mut dir: IdentityDirectory,
+    actor_user_id: &str,
+) -> crate::error::Result<IdentityDirectory> {
     // Our own root of trust is local. `load_account_id_key` fails only when this
     // device holds no account identity, in which case it could not have
     // certified any device either and the DS value is left to speak for itself.
@@ -1074,7 +1097,7 @@ pub(super) async fn load_pinned_identities(
             None => {}
         }
     }
-    Ok(dir)
+    Ok(dir.into_pinned())
 }
 
 /// Test-harness only: when set, `stage_reconcile_commit` adds a KeyPackage whose

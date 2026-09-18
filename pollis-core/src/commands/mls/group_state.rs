@@ -1528,12 +1528,37 @@ async fn process_one_generation<'h>(
     // and the DS is outside the trust boundary. A user the hint omitted is simply
     // absent, which verdicts `Unverifiable` — a committer can make its own
     // honest add look suspicious by lying here, never make a rogue one pass.
-    let directory = IdentityDirectory::new(snapshot.added_identities);
+    //
+    // …and then PINNED, through the same helper the committing side uses
+    // (#1161 M3). Without it the receive side judged leaves against a directory
+    // the DS supplied end to end — including, for a leaf claiming OUR OWN user
+    // id, a DS-supplied copy of our own account key instead of the one in the
+    // device keystore. Both substitutions only ever weaken a verdict, so the
+    // failure case is a flag the eviction reconcile self-corrects, never a
+    // stalled replay: an unpinnable directory degrades to an EMPTY one, which
+    // verdicts every leaf `Unverifiable`, rather than to a DS-authored one.
+    let directory = match super::reconcile::pin_identities(
+        state,
+        IdentityDirectory::new(snapshot.added_identities),
+        user_id,
+    )
+    .await
+    {
+        Ok(dir) => dir,
+        Err(e) => {
+            eprintln!(
+                "[mls] process_pending_commits: cannot pin the identity directory for \
+                 {mls_group_id} ({e}) — treating every added leaf as unverifiable this pass"
+            );
+            IdentityDirectory::new(Vec::new())
+        }
+    };
 
     // 3. Apply each commit in epoch order. Every leaf a commit GRAFTS — diffed
     //    out of the tree after the merge, whichever proposal type introduced it
-    //    (#1161 H4) — is checked against the added user's account key; a leaf that is not certified is flagged and evicted
-    //    afterwards (see `report_uncertified_leaves`). The commit is still
+    //    (#1161 H4) — is checked against the added user's account key; a leaf
+    //    that is not certified is flagged and evicted afterwards (see
+    //    `report_uncertified_leaves`). The commit is still
     //    merged: it won the epoch CAS and is canonical, so refusing it would
     //    strand this device behind the group with no honest way back (the
     //    ELECTRON-epoch-11 incident). Eviction is the append-only answer.
