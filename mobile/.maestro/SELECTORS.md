@@ -78,7 +78,7 @@ delete/remove/revoke), the record id is appended to keep the selector unique
 | `self/user-settings` | `screen-self-user-settings` | `input-display-name`, `input-handle`, `input-email` (read-only), `btn-change-email`, `btn-save`, `btn-cancel` |
 | `self/security` | `screen-self-security` | enrollment: `input-approval-code-<requestId>` (the code the approver TYPES off the new device — the card displays none, #1096), `btn-approve-<requestId>` (disabled until eight characters are entered), `btn-reject-<requestId>`; devices: `row-device-<deviceId>`, `btn-revoke-device-<deviceId>`; `row-blocked-users` (nav to blocked list); export (#856): `row-export-archive`, `text-export-summary`, `text-export-files`, `btn-export-fetch` (only when attachments are missing), `text-export-fetched`, `btn-export-share`, `text-export-error`; `btn-sign-out` |
 | `self/blocked` | `screen-self-blocked` | `row-blocked-<id>`, `btn-unblock-<id>` |
-| `self/change-email` | `screen-self-change-email` | `input-email` (enter-email stage), `input-otp` (enter-code stage), `btn-request-otp` (enter-email stage) / `btn-submit` (enter-code stage), `btn-use-different-email` |
+| `self/change-email` | `screen-self-change-email` | `input-email` (enter-email stage), `input-otp` + `input-current-otp` (enter-code stage — two codes since #1161: one to the new address, one to the address being left), `btn-request-otp` (enter-email stage) / `btn-submit` (enter-code stage, enabled only once BOTH codes are six digits), `btn-use-different-email` |
 
 ### Direct messages
 

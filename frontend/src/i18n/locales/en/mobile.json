@@ -268,8 +268,10 @@
     },
     "changeEmail": {
       "confirm": "Confirm",
-      "enterCodeIntro": "Enter the code we sent to {{email}}.",
-      "enterEmailIntro": "Enter the new email. We'll send a 6-digit code to confirm you own it.",
+      "currentCodeLabel": "Code sent to {{email}}",
+      "enterCodeIntro": "Enter the code we sent to {{email}}, and the one we sent to the address you are leaving. A change has to be approved from the address that owns the account.",
+      "enterEmailIntro": "Enter the new email. We'll send a 6-digit code to it, and another to your current address to approve the change.",
+      "newCodeLabel": "Code sent to {{email}}",
       "title": "Change email",
       "useDifferentEmail": "Use a different email"
     },

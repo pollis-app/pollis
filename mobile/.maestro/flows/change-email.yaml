@@ -1,0 +1,63 @@
+appId: com.pollis.mobile
+tags:
+  - parity
+---
+# CHANGE EMAIL — the two-code flow (#1161).
+#
+# The device signature proves the account and the new-address code proves the
+# new mailbox; a borrowed unlocked device has both. The second code goes to the
+# address being LEFT, and the Delivery Service refuses a change that does not
+# answer it — so the screen has to collect it, and Confirm must stay disabled
+# until it has.
+#
+# Stops short of submitting: completing the change needs codes delivered to two
+# mailboxes, and the DS-level proof that both are required lives in
+# `pollis-delivery/tests/email_change.rs` and the flows suite. What this covers
+# is the tier-specific half — that the mobile screen asks for both.
+
+- runFlow: ../subflows/sign-in.yaml
+
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-user-settings"
+- assertVisible:
+    id: "screen-self-user-settings"
+- tapOn:
+    id: "btn-change-email"
+- assertVisible:
+    id: "screen-self-change-email"
+- takeScreenshot: change-email-01-enter-email
+
+# Step 1: the new address.
+- tapOn:
+    id: "input-email"
+- inputText: "e2e-new@pollis.test"
+- tapOn:
+    id: "btn-request-otp"
+
+# Step 2: BOTH codes. The current-address field is the one #1161 added.
+- assertVisible:
+    id: "input-otp"
+- assertVisible:
+    id: "input-current-otp"
+- takeScreenshot: change-email-02-two-codes
+
+# Only the new-address code: Confirm must stay disabled, because a request
+# without the current-address code is one the service will always refuse.
+- tapOn:
+    id: "input-otp"
+- inputText: "000000"
+- assertVisible:
+    id: "btn-submit"
+    enabled: false
+- takeScreenshot: change-email-03-one-code-blocked
+
+# With both, the action becomes available.
+- tapOn:
+    id: "input-current-otp"
+- inputText: "000000"
+- assertVisible:
+    id: "btn-submit"
+    enabled: true
+- takeScreenshot: change-email-04-both-codes

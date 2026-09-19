@@ -285,7 +285,8 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let user_id: String = arg(&args, "userId")?;
             let new_email: String = arg(&args, "newEmail")?;
             let code: String = arg(&args, "code")?;
-            auth::verify_email_change(&state()?, user_id, new_email, code).await?;
+            let current_code: String = arg(&args, "currentCode")?;
+            auth::verify_email_change(&state()?, user_id, new_email, code, current_code).await?;
             ok(())
         }
         // ----- device enrollment -----

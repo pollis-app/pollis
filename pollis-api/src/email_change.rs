@@ -13,7 +13,24 @@ pub struct RequestEmailChangeBody {
 #[derive(Serialize, Deserialize)]
 pub struct VerifyEmailChangeBody {
     pub new_email: String,
+    /// The code sent to the NEW address — proof the caller controls the mailbox
+    /// they are moving to.
     pub code: String,
+    /// The code sent to the address the account is on TODAY (#1161) — proof the
+    /// caller controls the mailbox that owns the account.
+    ///
+    /// The device signature and `code` are both satisfied by whoever is holding
+    /// an unlocked device, so without this a borrowed or stolen device could
+    /// move the account's recovery address. This is the proof that has to reach
+    /// the real owner.
+    ///
+    /// `#[serde(default)]` is shape compatibility, not an opt-out: an account
+    /// that has an address and does not answer its challenge is refused (401,
+    /// `invalid current-address code`). A client that predates this field
+    /// therefore cannot complete an email change, which is the fail-closed
+    /// direction — a proof a caller may decline to give is not a proof.
+    #[serde(default)]
+    pub current_code: Option<String>,
 }
 
 /// `POST /v1/auth/verify-email-change` — the swap, plus the caller's username
