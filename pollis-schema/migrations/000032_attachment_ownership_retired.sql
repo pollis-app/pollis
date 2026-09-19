@@ -1,0 +1,39 @@
+-- Retire the attachment-ownership attribution that migration 000031 added.
+--
+-- 000031 recorded `attachment_object.uploaded_by` and
+-- `attachment_ref.registered_by` so the delete gate could grant the first
+-- uploader an exemption: for them, other accounts' references were excluded, so
+-- they could destroy a blob another account's still-live message depended on.
+--
+-- That exemption was a mistake, not a trade-off. Attachments are globally
+-- deduplicated by content hash — one R2 blob backs every copy of the same bytes
+-- — and the exemption let that storage optimisation leak onto users: account A
+-- deleting its own file silently 404'd account B's attachment, in a conversation
+-- A cannot see, for no security reason. The product's answer is that duplicate
+-- blobs would be better than that. The rule is once again the plain derived
+-- reference count #690 established: the object survives exactly while some
+-- still-existing `message_envelope` (or live vault entry) references the hash,
+-- and NOTHING about the caller's identity enters that decision.
+--
+-- What #1161 M5 correctly fixed stays fixed, and is not this: a reference
+-- declaration is bound to `message_envelope.sender_id` (#1165), so you cannot
+-- declare a reference naming a message you do not own. The forgery is refused at
+-- registration; nothing downstream needs to know who declared what.
+--
+-- BOTH COLUMNS ARE NOW DEAD. Migrations here are additive only, so neither is
+-- dropped — instead the Delivery Service no longer WRITES either one
+-- (`apply_register_attachment`) and no longer READS either one (the delete gate
+-- is `object_is_referenced`, and `apply_delete_attachment` and `/v1/r2/presign`
+-- both call it). The `idx_attachment_ref_registrar` index 000031 created is dead
+-- with them. A future release may drop all three once no deployed DS mentions
+-- them; until then they are columns no code path consults.
+--
+-- The two UPDATEs below erase the attribution already collected. They are data
+-- writes, not schema changes: additive in form, safe for a shipped DS in either
+-- direction (an older binary still carrying the exemption reads NULL as
+-- "unknown, therefore blocking", which is exactly the strict rule this migration
+-- restores), and they stop the operator holding an at-rest "which account stored
+-- this object" linkage that nothing needs.
+UPDATE attachment_object SET uploaded_by = NULL WHERE uploaded_by IS NOT NULL;
+
+UPDATE attachment_ref SET registered_by = NULL WHERE registered_by IS NOT NULL;
