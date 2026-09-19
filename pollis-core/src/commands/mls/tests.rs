@@ -2471,9 +2471,22 @@ fn pq_payloads_stay_under_their_ceilings() {
 
 use super::group_state::{
     apply_one_commit, build_external_commit, export_group_info_blob,
-    CommitApply, RecoverReason,
+    CommitApply, LineageProvenance, RecoverReason,
 };
 use openmls::prelude::group_info::VerifiableGroupInfo;
+
+/// The cross-signing material a device has when it can load none: an empty,
+/// unpinned directory, which verdicts every signer `Unverifiable`.
+///
+/// Paired with `roster: None` that is the provenance of a device whose reads all
+/// failed, and it ADOPTS — the bias `invariants::lineage_adoption` exists to
+/// keep (cert rows that have not replicated must not strand a migration). So it
+/// is also the right default for every test that is about something OTHER than
+/// provenance: those keep exercising the path they were written for instead of
+/// tripping a gate they never meant to address.
+fn no_identities() -> super::device::IdentityDirectory {
+    super::device::IdentityDirectory::new(Vec::new())
+}
 
 /// Layer 1 — the pure classifier. One case per openmls error we classify, plus
 /// the load-bearing #680 guarantee: an UNRECOGNISED error recovers conservatively
@@ -2873,6 +2886,7 @@ fn assert_rejoin_then_next_commit_works(
     };
 
     // Joiner external-joins from the GroupInfo, producing an external commit.
+    let identities = no_identities();
     let ext_commit = {
         let provider = PollisProvider::new(joiner_db);
         let (commit, _gi) = build_external_commit(
@@ -2883,6 +2897,10 @@ fn assert_rejoin_then_next_commit_works(
             &test_device_id("bob"),
             CS_PQ,
             vgi,
+            &LineageProvenance {
+                identities: &identities,
+                roster: None,
+            },
         )
         .expect("external join builds");
         commit
@@ -3100,4 +3118,748 @@ fn tree_before_reflects_the_pre_merge_not_the_pre_pass_snapshot() {
          merged, unlike the pre-pass snapshot; got {:?}",
         outcome.tree_before
     );
+}
+
+// ── #1161 C2 / H5 / H4: what a commit-log slot may carry, and what a merge
+//    grafted ─────────────────────────────────────────────────────────────────
+//
+// The DS does not parse commit bytes, so the commit log is an attacker-writable
+// channel in exactly the shape these three findings exploit: a row that is not a
+// commit at all (C2), a row that is one of OUR OWN envelopes replayed (H5), and
+// a commit that grafts a leaf without an Add proposal to read it off (H4).
+
+/// C2: a non-commit row must be damage, never a free advance.
+///
+/// Pre-fix, `process_message` handed back `ApplicationMessage` content, the
+/// catch-all `_` arm logged "skipping", and the function still returned
+/// `Applied` — so the caller's replay counter advanced while the group's real
+/// epoch stood still. From then on every envelope is bucketed at the wrong
+/// epoch, fails to decrypt (`max_past_epochs = 0`), and `watermark.rs` marks it
+/// permanently handled: a fourth message-loss mode, where exactly three are
+/// sanctioned.
+#[test]
+fn an_application_message_in_the_commit_log_is_damage_not_a_free_advance() {
+    let conv = "01JT1161APPMSGINCOMMITSLOT";
+    let (alice_db, bob_db) = alice_and_bob(conv);
+    assert_eq!(member_epoch(&bob_db, conv), 1, "precondition: bob is at epoch 1");
+
+    // Any member can post this to the commit endpoint: it is a perfectly valid
+    // envelope, simply not a commit.
+    let envelope = try_mls_encrypt(&alice_db, conv, b"not a commit").expect("alice seals");
+
+    let outcome = apply_one(&bob_db, conv, 1, &envelope);
+    assert!(
+        matches!(outcome, CommitApply::Recover(RecoverReason::NotACommit)),
+        "a non-commit row must recover, not advance the replay counter, got {outcome:?}",
+    );
+}
+
+/// H5: one of our OWN envelopes, replayed into a commit slot, must not be
+/// mistaken for our own commit.
+///
+/// openmls returns `OwnPrivateMessage` for ANY `PrivateMessage` whose sender leaf
+/// index is ours — the early return fires before the content is decrypted — so
+/// pre-fix this arm merged a staged commit the log had never accepted, landing
+/// the committer on a phantom epoch (#1079) that no other member shares.
+#[test]
+fn our_own_envelope_replayed_into_a_commit_slot_never_merges_a_staged_commit() {
+    let conv = "01JT1161OWNENVELOPEREPLAY0";
+    let (alice_db, bob_db, carol_db) = (make_db(), make_db(), make_db());
+    create_group(&alice_db, conv, "alice");
+    let bob_kp = gen_key_package(&bob_db, "bob");
+    let (_c1, welcome1) = add_member_to_group(&alice_db, conv, &bob_kp);
+    join_via_welcome(&bob_db, &welcome1);
+
+    // An ordinary envelope alice sealed at epoch 1 — the bytes an attacker
+    // replays.
+    let own_envelope = try_mls_encrypt(&alice_db, conv, b"lunch?").expect("alice seals");
+
+    // Alice then stages a commit adding carol and does NOT adopt it: the #411
+    // lost-response state, and the one in which the own-commit branch merges.
+    let carol_kp = gen_key_package(&carol_db, "carol");
+    let (_own_commit, _welcome2) = stage_add_without_merge(&alice_db, conv, &carol_kp);
+    assert_eq!(member_epoch(&alice_db, conv), 1, "precondition: alice unmerged at epoch 1");
+
+    let outcome = apply_one(&alice_db, conv, 1, &own_envelope);
+    assert!(
+        matches!(outcome, CommitApply::Recover(RecoverReason::NotACommit)),
+        "our own envelope in a commit slot must not read as our own commit, got {outcome:?}",
+    );
+}
+
+/// C2's second half: `Applied` reports the epoch the group ACTUALLY reached, so
+/// the caller can check the equality its watermark safety rests on rather than
+/// assume it.
+#[test]
+fn applied_reports_the_epoch_the_group_actually_reached() {
+    let conv = "01JT1161APPLIEDEPOCHREADS0";
+    let (alice_db, bob_db, carol_db) = (make_db(), make_db(), make_db());
+    let (commit2, _w2) = two_members_plus_valid_commit(conv, &alice_db, &bob_db, &carol_db);
+
+    match apply_one(&bob_db, conv, 1, &commit2) {
+        CommitApply::Applied { epoch_after, .. } => {
+            assert_eq!(epoch_after, 2, "the commit at epoch 1 lands the group at epoch 2");
+            assert_eq!(
+                epoch_after,
+                member_epoch(&bob_db, conv),
+                "the reported epoch must be read back off the merged group"
+            );
+        }
+        other => panic!("a valid commit must apply, got {other:?}"),
+    }
+}
+
+/// H4: a leaf grafted by an EXTERNAL JOIN is reported for cross-signing exactly
+/// like one an Add proposal introduced.
+///
+/// An external commit carries no Add — the joiner's leaf arrives in the
+/// UpdatePath — so the pre-fix check, which read the staged commit's Add
+/// proposals, returned an empty list and the leaf was never verdicted, never
+/// flagged, and never triggered the eviction reconcile. That is the whole
+/// defence `external_join_group`'s own doc names for admitting unverified
+/// external joins.
+#[test]
+fn an_externally_joined_leaf_is_reported_for_cross_signing() {
+    let conv = "01JT1161EXTERNALJOINLEAF00";
+    let (alice_db, bob_db) = alice_and_bob(conv);
+    let carol_db = make_db();
+
+    // Alice publishes GroupInfo at epoch 1; carol external-joins off it.
+    let gi_bytes = {
+        let provider = PollisProvider::new(&alice_db);
+        export_group_info_blob(&provider, conv, 0).unwrap().expect("GroupInfo").1
+    };
+    let vgi: VerifiableGroupInfo = {
+        let mut reader: &[u8] = &gi_bytes;
+        match MlsMessageIn::tls_deserialize(&mut reader).unwrap().extract() {
+            MlsMessageBodyIn::GroupInfo(gi) => gi,
+            _ => panic!("expected GroupInfo"),
+        }
+    };
+    let identities = no_identities();
+    let ext_commit = {
+        let provider = PollisProvider::new(&carol_db);
+        build_external_commit(
+            &provider,
+            conv,
+            0,
+            "carol",
+            &test_device_id("carol"),
+            CS_PQ,
+            vgi,
+            &LineageProvenance {
+                identities: &identities,
+                roster: None,
+            },
+        )
+        .expect("external join builds")
+        .0
+    };
+
+    // Bob replays it from the log, exactly as the DS serves it.
+    match apply_one(&bob_db, conv, 1, &ext_commit) {
+        CommitApply::Applied { adds, .. } => {
+            assert_eq!(
+                adds.len(),
+                1,
+                "only the joined leaf is new — a commit's ordinary UpdatePath rotates \
+                 encryption keys, not credentials or signature keys; got {adds:?}"
+            );
+            assert_eq!(adds[0].user_id, "carol", "the externally-joined leaf must be verdicted");
+            assert_eq!(adds[0].device_id, test_device_id("carol"));
+        }
+        other => panic!("the external commit must apply, got {other:?}"),
+    }
+}
+
+/// #1161 M7: two leaves claiming ONE `(user, device)` must not be
+/// unrepresentable in reconcile's model while being representable in the tree.
+///
+/// openmls rejects duplicate signature and encryption keys but NOT duplicate
+/// CREDENTIALS, so a second leaf can carry the same `"user:device"` as a real
+/// member. Keyed on the credential, reconcile's `actual` map silently kept one
+/// index, so the removal set could only ever name one of them and the shadowed
+/// leaf survived every reconcile — the step that turns a grafted leaf into a
+/// permanent one.
+#[test]
+fn a_duplicate_credential_leaf_is_evicted_rather_than_shadowed() {
+    let conv = "01JT1161DUPLICATELEAF00000";
+    let (alice_db, bob_db, rogue_db) = (make_db(), make_db(), make_db());
+    create_group(&alice_db, conv, "alice");
+
+    // Bob's genuine device joins.
+    let bob_kp = gen_key_package(&bob_db, "bob");
+    let (_c1, _w1) = add_member_to_group(&alice_db, conv, &bob_kp);
+
+    // A second leaf claiming the SAME "bob:bob_dev" credential, with its own
+    // signature key — the shape openmls permits.
+    let rogue_kp = gen_key_package(&rogue_db, "bob");
+    let (_c2, _w2) = add_member_to_group(&alice_db, conv, &rogue_kp);
+
+    let claims: Vec<(String, String)> = load_local_group(&alice_db, conv)
+        .unwrap()
+        .members()
+        .map(|m| {
+            (
+                parse_credential_user_id(&m.credential),
+                parse_credential_device_id(&m.credential).unwrap_or_default(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        claims.iter().filter(|(u, _)| u == "bob").count(),
+        2,
+        "precondition: the tree holds two leaves claiming one device — {claims:?}"
+    );
+
+    // A declarative reconcile against the honest roster.
+    let (outcome, data) = reconcile(
+        &alice_db,
+        conv,
+        &["alice", "bob"],
+        &[],
+        "alice",
+        &test_device_id("alice"),
+    );
+    assert!(data.is_some(), "the duplicate must produce a removal commit, not a no-op");
+    assert!(
+        outcome.removed.contains(&("bob".to_string(), test_device_id("bob"))),
+        "the duplicate leaf must be named in the removal set, got {:?}",
+        outcome.removed
+    );
+
+    let after: Vec<(String, String)> = load_local_group(&alice_db, conv)
+        .unwrap()
+        .members()
+        .map(|m| {
+            (
+                parse_credential_user_id(&m.credential),
+                parse_credential_device_id(&m.credential).unwrap_or_default(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        after.iter().filter(|(u, _)| u == "bob").count(),
+        1,
+        "exactly one leaf may claim bob's device after the reconcile — {after:?}"
+    );
+    assert!(
+        after.iter().any(|(u, _)| u == "alice"),
+        "the committer's own leaf survives — {after:?}"
+    );
+}
+
+/// The other half of M7: with the duplicate in the tree, removing that user from
+/// the roster must take BOTH leaves. Pre-fix the removal set could name only the
+/// index the map happened to hold, so the shadowed leaf kept its place — and its
+/// copy of the group's key schedule — through the very reconcile that was
+/// supposed to evict the user.
+#[test]
+fn removing_a_user_takes_every_leaf_claiming_their_device() {
+    let conv = "01JT1161DUPLICATEREMOVE000";
+    let (alice_db, bob_db, rogue_db) = (make_db(), make_db(), make_db());
+    create_group(&alice_db, conv, "alice");
+    let bob_kp = gen_key_package(&bob_db, "bob");
+    let (_c1, _w1) = add_member_to_group(&alice_db, conv, &bob_kp);
+    let rogue_kp = gen_key_package(&rogue_db, "bob");
+    let (_c2, _w2) = add_member_to_group(&alice_db, conv, &rogue_kp);
+
+    // Bob leaves the roster entirely.
+    let (_outcome, data) = reconcile(
+        &alice_db,
+        conv,
+        &["alice"],
+        &[],
+        "alice",
+        &test_device_id("alice"),
+    );
+    assert!(data.is_some(), "removing bob must produce a commit");
+
+    let after: Vec<String> = load_local_group(&alice_db, conv)
+        .unwrap()
+        .members()
+        .map(|m| parse_credential_user_id(&m.credential))
+        .collect();
+    assert_eq!(after, vec!["alice".to_string()], "no leaf of bob's may survive — {after:?}");
+}
+
+/// #1161 M6: an external join must refuse a GroupInfo for a different group.
+///
+/// The blob comes from the DS, while everything downstream of the join — which
+/// local group is deleted, which lineage the join is recorded under, which
+/// conversation this device then seals messages for — is keyed on the
+/// `(conversation_id, generation)` the caller asked for. Unchecked, a
+/// substituted GroupInfo made the device destroy one group's state and join a
+/// group of the server's choosing under that group's name.
+#[test]
+fn an_external_join_refuses_a_group_info_for_another_group() {
+    let target = "01JT1161EXTJOINPINTARGET00";
+    let elsewhere = "01JT1161EXTJOINPINELSEWHR0";
+
+    // A real group the joiner is NOT trying to join, and its GroupInfo.
+    let (alice_db, _bob_db) = alice_and_bob(elsewhere);
+    let gi_bytes = {
+        let provider = PollisProvider::new(&alice_db);
+        export_group_info_blob(&provider, elsewhere, 0).unwrap().expect("GroupInfo").1
+    };
+    let vgi: VerifiableGroupInfo = {
+        let mut reader: &[u8] = &gi_bytes;
+        match MlsMessageIn::tls_deserialize(&mut reader).unwrap().extract() {
+            MlsMessageBodyIn::GroupInfo(gi) => gi,
+            _ => panic!("expected GroupInfo"),
+        }
+    };
+
+    // Carol holds a working local group for the conversation she MEANT to
+    // rejoin, and is handed the wrong lineage's GroupInfo for it.
+    let carol_db = make_db();
+    create_group(&carol_db, target, "carol");
+    let epoch_before = member_epoch(&carol_db, target);
+
+    let provider = PollisProvider::new(&carol_db);
+    let identities = no_identities();
+    let err = build_external_commit(
+        &provider,
+        target,
+        0,
+        "carol",
+        &test_device_id("carol"),
+        CS_PQ,
+        vgi,
+        &LineageProvenance {
+            identities: &identities,
+            roster: None,
+        },
+    )
+    .expect_err("a GroupInfo for another group must be refused");
+    assert!(
+        err.to_string().contains("different group"),
+        "the refusal must name the mismatch, got {err}"
+    );
+
+    // And the refusal costs nothing: the local group it would have replaced is
+    // untouched.
+    assert_eq!(
+        member_epoch(&carol_db, target),
+        epoch_before,
+        "a refused external join must not have deleted or replaced the local group"
+    );
+}
+
+// ── #1161 M6 residual: who is allowed to have BUILT the lineage we adopt ─────
+//
+// The GroupId pin above fixes the lineage's NAME. A GroupId is not a capability
+// — every test in this section creates a group with an arbitrary one, which is
+// the whole point — so a hostile or compromised Delivery Service can stand up
+// its own MLS group under the successor's name, publish its GroupInfo as the
+// conversation's newest lineage, and answer `head_generation = N+1`.
+// `maybe_advance_generation` reads that head as proof a successor exists,
+// external-joins it, and `adopt_generation_locked` then deletes the
+// predecessor's key material. These tests are the gate that stops it.
+
+use super::device::{IdentityDirectory, LeafVerdict};
+
+/// The MLS signature public key of `user_id`'s leaf in the group `db` holds for
+/// `conv` — the key the roster's cross-signing material has to certify.
+fn leaf_signature_key(db: &rusqlite::Connection, conv: &str, user_id: &str) -> Vec<u8> {
+    load_local_group(db, conv)
+        .expect("group must exist")
+        .members()
+        .find(|m| parse_credential_user_id(&m.credential) == user_id)
+        .expect("member must be in the tree")
+        .signature_key
+        .to_vec()
+}
+
+/// A pinned directory in which `(user_id, device_id)` is certified — by a real
+/// account key, over a real v2 device cert — as holding `pq_pub`.
+///
+/// `pq_pub` is the caller's choice on purpose: pass the honest leaf's key and a
+/// leaf presenting any OTHER key verdicts `Uncertified`, which is precisely the
+/// forged-lineage case.
+fn directory_certifying(user_id: &str, device_id: &str, pq_pub: &[u8]) -> IdentityDirectory {
+    use crate::commands::account_identity::{device_cert_signed_payload, AccountSigningKey};
+    use base64::Engine as _;
+    use ml_dsa::{Keypair as _, Signer as _};
+    use pollis_api::reads::{AddedIdentity, DeviceCertRow};
+
+    let b64 = |b: &[u8]| base64::engine::general_purpose::STANDARD.encode(b);
+    let account = AccountSigningKey::from_seed(&[42u8; 32].into());
+    let ed_pub = vec![7u8; 32];
+    let payload = device_cert_signed_payload(device_id, &ed_pub, pq_pub, 1, 1_700_000_000).unwrap();
+    let cert = account.sign(&payload).encode().to_vec();
+    IdentityDirectory::new(vec![AddedIdentity {
+        user_id: user_id.to_string(),
+        account_id_pub: Some(b64(&account.verifying_key().encode())),
+        devices: vec![DeviceCertRow {
+            device_id: device_id.to_string(),
+            device_cert: Some(b64(&cert)),
+            cert_issued_at: Some("1700000000".to_string()),
+            cert_identity_version: Some(1),
+            mls_signature_pub: Some(b64(&ed_pub)),
+            revoked_at: None,
+            mls_signature_pub_pq: Some(b64(pq_pub)),
+        }],
+    }])
+    .into_pinned()
+}
+
+/// A pinned directory that KNOWS `user_id` but has none of their cert columns —
+/// the ordinary mid-publish state, which verdicts `Unverifiable`.
+fn directory_without_certs(user_id: &str, device_id: &str) -> IdentityDirectory {
+    use pollis_api::reads::{AddedIdentity, DeviceCertRow};
+
+    IdentityDirectory::new(vec![AddedIdentity {
+        user_id: user_id.to_string(),
+        account_id_pub: None,
+        devices: vec![DeviceCertRow {
+            device_id: device_id.to_string(),
+            device_cert: None,
+            cert_issued_at: None,
+            cert_identity_version: None,
+            mls_signature_pub: None,
+            revoked_at: None,
+            mls_signature_pub_pq: None,
+        }],
+    }])
+    .into_pinned()
+}
+
+/// Read the GroupInfo `db` would publish for `(conv, generation)`.
+fn published_group_info(
+    db: &rusqlite::Connection,
+    conv: &str,
+    generation: i64,
+) -> VerifiableGroupInfo {
+    let bytes = {
+        let provider = PollisProvider::new(db);
+        export_group_info_blob(&provider, conv, generation)
+            .unwrap()
+            .expect("GroupInfo")
+            .1
+    };
+    let mut reader: &[u8] = &bytes;
+    match MlsMessageIn::tls_deserialize(&mut reader).unwrap().extract() {
+        MlsMessageBodyIn::GroupInfo(gi) => gi,
+        _ => panic!("expected GroupInfo"),
+    }
+}
+
+/// The attack in full: a group the DS built itself, under the successor
+/// lineage's exact name, whose GroupInfo is signed by a leaf that CLAIMS a real
+/// roster member's real device but holds a signature key that member's account
+/// key never certified.
+///
+/// Everything the #1166 gates look at checks out — the GroupId is exactly
+/// `mls_group_id(conversation_id, generation)`, the roster lists the claimed
+/// signer, and the DS (which answers `may_rejoin_via_external_join`) says the
+/// joiner may rejoin. The only thing that does not is the cross-signing chain,
+/// which is rooted in an account identity key the DS does not hold.
+#[test]
+fn an_external_join_refuses_a_lineage_built_by_a_forged_signer() {
+    let conv = "01JT1167FORGEDLINEAGE00000";
+    let alice_device = test_device_id("alice");
+
+    // The honest conversation, and the key the roster certifies for alice.
+    let alice_db = make_db();
+    create_group(&alice_db, conv, "alice");
+    let honest_key = leaf_signature_key(&alice_db, conv, "alice");
+    let identities = directory_certifying("alice", &alice_device, &honest_key);
+    assert_eq!(
+        identities.leaf_verdict("alice", &alice_device, &honest_key, signature_scheme(CS_PQ)),
+        LeafVerdict::Certified,
+        "precondition: the honest leaf is the one the roster certifies"
+    );
+
+    // The DS stands up its OWN group under the successor's name, signing with a
+    // leaf that claims alice's credential and its own key.
+    let ds_db = make_db();
+    {
+        let provider = PollisProvider::new(&ds_db);
+        create_mls_group_in_suite(&provider, conv, 1, "alice", &alice_device, CS_PQ).unwrap();
+    }
+    let forged = published_group_info(&ds_db, conv, 1);
+    assert_eq!(
+        forged.group_id(),
+        &super::generation::mls_group_id(conv, 1),
+        "precondition: the forgery passes the #1166 GroupId pin — that is the gap"
+    );
+
+    // Carol, a member being advanced onto the "successor", refuses it.
+    let carol_db = make_db();
+    let roster: std::collections::HashSet<String> =
+        ["alice".to_string(), "carol".to_string()].into_iter().collect();
+    let provider = PollisProvider::new(&carol_db);
+    let err = build_external_commit(
+        &provider,
+        conv,
+        1,
+        "carol",
+        &test_device_id("carol"),
+        CS_PQ,
+        forged,
+        &LineageProvenance {
+            identities: &identities,
+            roster: Some(&roster),
+        },
+    )
+    .expect_err("a lineage whose GroupInfo is signed by an uncertified leaf must be refused");
+    assert!(
+        err.to_string().contains("not a certified device of a current member"),
+        "the refusal must name the provenance failure, got {err}"
+    );
+
+    // And nothing was adopted: no local group exists on the forged lineage, so
+    // `adopt_generation_locked` never gets the chance to delete the predecessor.
+    assert!(
+        MlsGroup::load(
+            PollisProvider::new(&carol_db).storage(),
+            &super::generation::mls_group_id(conv, 1),
+        )
+        .unwrap()
+        .is_none(),
+        "a refused lineage must leave no local group behind"
+    );
+}
+
+/// The second shape of the same attack: the DS does not bother claiming a
+/// member's identity and signs with a leaf of its own invention.
+///
+/// The cross-signing chain cannot speak to a user it has never heard of, so the
+/// verdict here is `Unverifiable` — which alone must NOT refuse. What refuses is
+/// the roster: the signer is demonstrably not a member of this conversation.
+#[test]
+fn an_external_join_refuses_a_lineage_signed_from_outside_the_roster() {
+    let conv = "01JT1167OFFROSTERSIGNER000";
+
+    let ds_db = make_db();
+    {
+        let provider = PollisProvider::new(&ds_db);
+        create_mls_group_in_suite(&provider, conv, 1, "mallory", "mallory_dev", CS_PQ).unwrap();
+    }
+    let forged = published_group_info(&ds_db, conv, 1);
+
+    let carol_db = make_db();
+    let identities = no_identities();
+    let roster: std::collections::HashSet<String> =
+        ["alice".to_string(), "carol".to_string()].into_iter().collect();
+    let provider = PollisProvider::new(&carol_db);
+    let err = build_external_commit(
+        &provider,
+        conv,
+        1,
+        "carol",
+        &test_device_id("carol"),
+        CS_PQ,
+        forged,
+        &LineageProvenance {
+            identities: &identities,
+            roster: Some(&roster),
+        },
+    )
+    .expect_err("a lineage signed by a non-member must be refused");
+    assert!(
+        err.to_string().contains("mallory"),
+        "the refusal must name the signer it rejected, got {err}"
+    );
+}
+
+/// The failure bias, end to end: a LEGITIMATE migration whose signer cannot be
+/// verified still goes through.
+///
+/// Alice really did found the successor; her cert columns simply have not been
+/// published (or replicated) yet, so the directory answers `Unverifiable`. That
+/// is a race, not evidence, and refusing on it would leave real users unable to
+/// follow their conversation onto its successor lineage — a worse outcome than
+/// the attack above. Mirrors the eviction rule: only a positive `Uncertified`
+/// acts.
+#[test]
+fn a_legitimate_migration_survives_an_unverifiable_signer() {
+    let conv = "01JT1167UNVERIFIABLESIGNER";
+    let alice_device = test_device_id("alice");
+
+    // Alice founds the successor lineage herself — an honest migration.
+    let alice_db = make_db();
+    {
+        let provider = PollisProvider::new(&alice_db);
+        create_mls_group_in_suite(&provider, conv, 1, "alice", &alice_device, CS_PQ).unwrap();
+    }
+    let group_info = published_group_info(&alice_db, conv, 1);
+
+    let carol_db = make_db();
+    let identities = directory_without_certs("alice", &alice_device);
+    let honest_key = leaf_signature_key(&alice_db, &format!("{conv}#g1"), "alice");
+    assert!(
+        matches!(
+            identities.leaf_verdict("alice", &alice_device, &honest_key, signature_scheme(CS_PQ)),
+            LeafVerdict::Unverifiable(_)
+        ),
+        "precondition: this is the unverifiable case, not the uncertified one"
+    );
+    let roster: std::collections::HashSet<String> =
+        ["alice".to_string(), "carol".to_string()].into_iter().collect();
+    let provider = PollisProvider::new(&carol_db);
+    build_external_commit(
+        &provider,
+        conv,
+        1,
+        "carol",
+        &test_device_id("carol"),
+        CS_PQ,
+        group_info,
+        &LineageProvenance {
+            identities: &identities,
+            roster: Some(&roster),
+        },
+    )
+    .expect("an unverifiable — as opposed to uncertified — signer must not block a migration");
+}
+
+/// …and the same join still works when NEITHER read landed: no roster, no
+/// cross-signing material. A device whose DS reads failed must recover, not
+/// wedge.
+#[test]
+fn a_migration_survives_a_device_that_could_read_neither_roster_nor_certs() {
+    let conv = "01JT1167NOTHINGREADABLE000";
+    let alice_db = make_db();
+    {
+        let provider = PollisProvider::new(&alice_db);
+        create_mls_group_in_suite(&provider, conv, 1, "alice", &test_device_id("alice"), CS_PQ)
+            .unwrap();
+    }
+    let group_info = published_group_info(&alice_db, conv, 1);
+
+    let carol_db = make_db();
+    let identities = no_identities();
+    let provider = PollisProvider::new(&carol_db);
+    build_external_commit(
+        &provider,
+        conv,
+        1,
+        "carol",
+        &test_device_id("carol"),
+        CS_PQ,
+        group_info,
+        &LineageProvenance {
+            identities: &identities,
+            roster: None,
+        },
+    )
+    .expect("a device that could read nothing must still recover");
+}
+
+// ── #1161 C1 (client half): what a Welcome is allowed to destroy ─────────────
+
+use super::welcomes::join_from_welcome;
+
+/// Extract the inner `Welcome` from serialised Welcome bytes.
+fn welcome_from_bytes(welcome_bytes: &[u8]) -> Welcome {
+    let mut reader: &[u8] = welcome_bytes;
+    match MlsMessageIn::tls_deserialize(&mut reader).unwrap().extract() {
+        MlsMessageBodyIn::Welcome(w) => w,
+        _ => panic!("expected Welcome"),
+    }
+}
+
+/// C1: a Welcome at or below our current epoch must never replace the group we
+/// already hold.
+///
+/// The GroupId lives inside the blob, so it names which of THIS device's groups
+/// gets deleted — and anyone who can claim one of our published KeyPackages can
+/// stand up a group whose GroupId is a conversation we are already in and send us
+/// a Welcome for it. The delete used to be unconditional, so that blob evicted a
+/// working group and replaced it with the attacker's.
+#[test]
+fn a_foreign_welcome_never_replaces_a_group_we_have_carried_past_it() {
+    let conv = "01JT1161WELCOMECLOBBER0000";
+    let (alice_db, bob_db, carol_db) = (make_db(), make_db(), make_db());
+    create_group(&alice_db, conv, "alice");
+    let bob_kp = gen_key_package(&bob_db, "bob");
+    let (_c1, welcome1) = add_member_to_group(&alice_db, conv, &bob_kp);
+    join_via_welcome(&bob_db, &welcome1);
+
+    // Bob's group moves on: alice adds carol at epoch 1 and bob applies it.
+    let carol_kp = gen_key_package(&carol_db, "carol");
+    let (commit2, _welcome2) = add_member_to_group(&alice_db, conv, &carol_kp);
+    apply_commit(&bob_db, conv, &commit2);
+    assert_eq!(member_epoch(&bob_db, conv), 2, "precondition: bob is at epoch 2");
+    let authenticator_before = member_auth(&bob_db, conv);
+
+    // Mallory stands up her own group under the SAME GroupId and welcomes bob
+    // into it off a freshly-claimed KeyPackage.
+    let mallory_db = make_db();
+    create_group(&mallory_db, conv, "mallory");
+    let bob_kp2 = gen_key_package(&bob_db, "bob");
+    let (_evil_commit, evil_welcome) = add_member_to_group(&mallory_db, conv, &bob_kp2);
+
+    let provider = PollisProvider::new(&bob_db);
+    let err = join_from_welcome(&provider, welcome_from_bytes(&evil_welcome), None)
+        .expect_err("a Welcome at or below our epoch must be refused");
+    assert!(
+        err.to_string().contains("refusing to replace"),
+        "the refusal must say what it protected, got {err}"
+    );
+
+    assert_eq!(
+        member_epoch(&bob_db, conv),
+        2,
+        "bob's working group must survive the foreign Welcome"
+    );
+    assert_eq!(
+        member_auth(&bob_db, conv),
+        authenticator_before,
+        "…and survive it unchanged, not be rebuilt from the blob"
+    );
+    // The tree is still the real one: alice and carol are in it, mallory is not.
+    let members: Vec<String> = load_local_group(&bob_db, conv)
+        .unwrap()
+        .members()
+        .map(|m| parse_credential_user_id(&m.credential))
+        .collect();
+    assert!(members.contains(&"alice".to_string()), "still the real group — {members:?}");
+    assert!(!members.contains(&"mallory".to_string()), "never mallory's group — {members:?}");
+}
+
+/// C1: once the row's `conversation_id` is available, a Welcome whose embedded
+/// GroupId disagrees with it is refused before anything is touched.
+#[test]
+fn a_welcome_whose_group_id_disagrees_with_its_row_is_refused() {
+    let conv = "01JT1161WELCOMEGROUPIDROW0";
+    let (alice_db, bob_db) = (make_db(), make_db());
+    create_group(&alice_db, conv, "alice");
+    let bob_kp = gen_key_package(&bob_db, "bob");
+    let (_c1, welcome1) = add_member_to_group(&alice_db, conv, &bob_kp);
+
+    let provider = PollisProvider::new(&bob_db);
+    let err = join_from_welcome(
+        &provider,
+        welcome_from_bytes(&welcome1),
+        Some("01JT1161WELCOMEOTHERCONV00"),
+    )
+    .expect_err("a Welcome filed under another conversation must be refused");
+    assert!(
+        err.to_string().contains("carries a group id for"),
+        "the refusal must name the disagreement, got {err}"
+    );
+    assert!(
+        load_local_group(&bob_db, conv).is_none(),
+        "a refused Welcome must not have created a group"
+    );
+}
+
+/// …and the same guard passes a Welcome that agrees with its row, so it refuses
+/// a mismatch rather than refusing Welcomes.
+#[test]
+fn a_welcome_matching_its_row_still_joins() {
+    let conv = "01JT1161WELCOMEROWMATCHES0";
+    let (alice_db, bob_db) = (make_db(), make_db());
+    create_group(&alice_db, conv, "alice");
+    let bob_kp = gen_key_package(&bob_db, "bob");
+    let (_c1, welcome1) = add_member_to_group(&alice_db, conv, &bob_kp);
+
+    let provider = PollisProvider::new(&bob_db);
+    let raw = join_from_welcome(&provider, welcome_from_bytes(&welcome1), Some(conv))
+        .expect("the honest Welcome must join");
+    assert_eq!(raw, conv);
+    assert_eq!(member_epoch(&bob_db, conv), 1);
 }

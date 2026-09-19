@@ -333,6 +333,14 @@ async fn reconcile_if_tree_has_stale_leaf(
 /// `kp_keys` is empty on purpose: the question is only "which leaves already in
 /// the tree does reconcile still want", i.e. the retention half. An add is not
 /// staleness.
+///
+/// The one thing it adds to `desired_set` is the DUPLICATE test (#1161 M7/H4).
+/// `desired_set` answers about `(user, device)` keys, so it cannot see that two
+/// leaves claim one of them — and a rogue leaf grafted by an external join
+/// naturally claims a REAL, on-roster device, which is precisely the case a
+/// set-based staleness test reads as settled. `tree_members` is a per-leaf list,
+/// so the duplicate is visible here and costs no extra read; reconcile then
+/// judges which of the two is the certified one.
 fn has_stale_leaf(
     tree_members: &[(String, String)],
     roster: &HashSet<String>,
@@ -344,7 +352,11 @@ fn has_stale_leaf(
         roster,
         Some(valid_devices),
     );
-    tree_members.iter().any(|key| !desired.contains(key))
+    if tree_members.iter().any(|key| !desired.contains(key)) {
+        return true;
+    }
+    let distinct: HashSet<&(String, String)> = tree_members.iter().collect();
+    distinct.len() != tree_members.len()
 }
 
 async fn local_tree_has_stale_leaf(
@@ -455,6 +467,19 @@ mod tests {
             &tree,
             &roster,
             &valid(&[("alice", "a1"), ("alice", "a2")])
+        ));
+    }
+
+    /// #1161 M7: two leaves claiming ONE `(user, device)` is stale even when the
+    /// device is a real, on-roster one — that is exactly the shape a leaf grafted
+    /// by an external join takes, and the set-based test above reads it as
+    /// settled. Only the per-leaf list can see it.
+    #[test]
+    fn two_leaves_claiming_one_device_are_stale() {
+        assert!(has_stale_leaf(
+            &[key("alice", "a1"), key("bob", "b1"), key("bob", "b1")],
+            &roster(&["alice", "bob"]),
+            &valid(&[("alice", "a1"), ("bob", "b1")]),
         ));
     }
 

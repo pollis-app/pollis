@@ -543,13 +543,18 @@ pub async fn resign_stale_device_certs(
 
 // ── Leaf cross-signing ───────────────────────────────────────────────────────
 
-/// One leaf an MLS commit adds, as read off the commit's OWN Add proposals.
+/// One leaf an MLS commit grafts, as read off the MERGED TREE.
 ///
-/// Derived from the `KeyPackage` inside each `AddProposal` of the staged commit
+/// Diffed out of the ratchet tree after the merge (`group_state::grafted_leaves`)
 /// — never from the `added_user_id` / `added_device_ids` columns the committing
 /// client wrote next to it. Those columns are a prefetch hint the DS uses to
 /// fold cert rows into the commit batch; a committer that NULLs or shortens them
 /// changes what is prefetched, not what is verified.
+///
+/// The tree, not the commit's Add proposals: an external-join commit carries no
+/// Add at all — the joiner's leaf arrives in the UpdatePath — so reading
+/// proposals made the check blind to exactly the path that needs it most
+/// (#1161 H4).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AddedLeaf {
     pub user_id: String,
@@ -594,6 +599,17 @@ pub enum LeafVerdict {
 /// answered "Certified" would be a DS that could add devices to groups.
 pub struct IdentityDirectory {
     by_user: std::collections::HashMap<String, pollis_api::reads::AddedIdentity>,
+    /// Whether [`Self::into_pinned`] has run, i.e. whether the two local
+    /// substitutions — our own account key from the keystore, peers dropped
+    /// where the DS disagrees with the TOFU pin — have been applied.
+    ///
+    /// A field rather than a convention because forgetting it is invisible and
+    /// total: the receive side judged every inbound leaf against an entirely
+    /// DS-authored directory for as long as it existed (#1161 M3), and nothing
+    /// about the resulting `Certified` looked different from an honest one. An
+    /// unpinned directory now answers `Unverifiable` to everything, which is
+    /// the weakest verdict and therefore safe to fail to.
+    pinned: bool,
 }
 
 impl IdentityDirectory {
@@ -602,7 +618,20 @@ impl IdentityDirectory {
             .into_iter()
             .map(|i| (i.user_id.clone(), i))
             .collect();
-        Self { by_user }
+        Self {
+            by_user,
+            pinned: false,
+        }
+    }
+
+    /// Declare the local substitutions applied — see [`Self::pinned`].
+    ///
+    /// Called ONLY at the end of `reconcile::pin_identities`, which is the one
+    /// place that performs them; every other route to a directory leaves it
+    /// unpinned and therefore unable to certify anything.
+    pub(super) fn into_pinned(mut self) -> Self {
+        self.pinned = true;
+        self
     }
 
     /// Replace one user's account key with a locally-trusted value, or drop it.
@@ -642,6 +671,9 @@ impl IdentityDirectory {
         signature_key: &[u8],
         scheme: SignatureScheme,
     ) -> LeafVerdict {
+        if !self.pinned {
+            return LeafVerdict::Unverifiable("identity directory not pinned to local trust");
+        }
         let Some(identity) = self.by_user.get(user_id) else {
             return LeafVerdict::Unverifiable("user not in directory");
         };
@@ -763,8 +795,41 @@ mod leaf_verdict_tests {
                 revoked_at: None,
                 mls_signature_pub_pq: Some(b64(&pq_pub)),
             }],
-        }]);
+        }])
+        .into_pinned();
         (dir, ed_pub, pq_pub)
+    }
+
+    /// #1161 M3: a directory that has NOT been through the local substitutions
+    /// cannot certify anything.
+    ///
+    /// The receive side built one straight from `conversation-state` rows for as
+    /// long as inbound verification existed — neither swapping in the keystore
+    /// copy of our own account key nor dropping peers the local
+    /// `contact_verification` pin disagrees with — so a DS that substituted a
+    /// user's `account_id_pub` along with a matching device cert produced a
+    /// `Certified` verdict for a leaf of its own choosing. It answers
+    /// `Unverifiable` now, which flags and evicts rather than admits.
+    #[test]
+    fn an_unpinned_directory_certifies_nothing() {
+        let (pinned, _ed_pub, pq_pub) = certified_identity();
+        assert_eq!(
+            pinned.leaf_verdict(UID, DID, &pq_pub, SignatureScheme::MLDSA44),
+            LeafVerdict::Certified,
+            "precondition: these inputs certify once the directory is pinned"
+        );
+
+        let unpinned = IdentityDirectory {
+            by_user: pinned.by_user,
+            pinned: false,
+        };
+        assert!(
+            matches!(
+                unpinned.leaf_verdict(UID, DID, &pq_pub, SignatureScheme::MLDSA44),
+                LeafVerdict::Unverifiable(_)
+            ),
+            "the same rows must not certify without the local substitutions"
+        );
     }
 
     #[test]

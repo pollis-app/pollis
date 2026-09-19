@@ -225,6 +225,134 @@ pub fn classify(current_epoch: u64, next_row_epoch: Option<u64>) -> ReplayStep {
     }
 }
 
+// ─── I1b: what a gap is allowed to destroy ───────────────────────────────────
+
+/// What a replay pass does when the next commit row does not bridge the local
+/// group's epoch.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum GapRecovery {
+    /// The server DECLARED why the bridging commit is absent — a retention prune
+    /// whose floor is above us, or a hole it detected while checking contiguity
+    /// inside the snapshot transaction. The commit is genuinely unreachable, so
+    /// drop the local MLS state and rebuild by external join.
+    Rebuild,
+    /// The batch is non-contiguous with no declared explanation. Hold position:
+    /// advance nothing, delete nothing, retry on the next pass.
+    HoldPosition,
+}
+
+/// Decide whether a gap at `current_epoch` licenses DESTROYING this device's MLS
+/// crypto state (#1161 M6).
+///
+/// `hole_expected` is the epoch the DS reported missing (`ConversationState::hole`)
+/// and `pruned_floor` its retention floor (`pruned_below`); both come from the
+/// same read transaction as the batch.
+///
+/// The destructive action is the point. `forget_local_mls_group_at` deletes the
+/// only keys that can still open envelopes sealed on this lineage, and every
+/// un-ingested envelope below the rejoin epoch is then classified handled and
+/// lost — a loss mode outside the three CLAUDE.md sanctions. Before this gate a
+/// batch that merely LOOKED non-contiguous was enough to trigger it, so a single
+/// malformed response destroyed state. Now the server has to have declared,
+/// in the same transaction that served the batch, an explanation that actually
+/// covers the epoch we are missing:
+///
+/// * `pruned_floor > current_epoch` — the bridging commit was retention-collected;
+/// * `hole_expected == current_epoch` — the DS's own contiguity check found
+///   exactly this epoch missing.
+///
+/// Anything else — including a hole declared at some OTHER epoch, which is a
+/// response that contradicts itself — holds position. Holding is not a wedge:
+/// nothing is deleted, the group keeps its keys, and the next pass re-reads. A
+/// log that really has lost the commit keeps saying so and the rebuild happens
+/// on the pass after; a transport or server glitch simply heals.
+pub fn gap_recovery(
+    current_epoch: u64,
+    hole_expected: Option<u64>,
+    pruned_floor: Option<u64>,
+) -> GapRecovery {
+    if pruned_floor.is_some_and(|floor| floor > current_epoch) {
+        return GapRecovery::Rebuild;
+    }
+    if hole_expected == Some(current_epoch) {
+        return GapRecovery::Rebuild;
+    }
+    GapRecovery::HoldPosition
+}
+
+// ─── I7: who is allowed to found the lineage we adopt ────────────────────────
+
+/// The standing of the leaf that SIGNED a GroupInfo, against the roster's
+/// cross-signing material — [`super::device::LeafVerdict`] with its payloads
+/// dropped, so this decision stays pure.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SignerStanding {
+    /// The signing leaf is the device key the claimed user's account key
+    /// certified, and that device is not revoked.
+    Certified,
+    /// The inputs to decide are missing — unknown user, no account key, no
+    /// device row, cert columns not yet published.
+    Unverifiable,
+    /// The inputs are present and the leaf is NOT that user's device: revoked,
+    /// a cert that does not verify, or a leaf key that is not the certified one.
+    Uncertified,
+}
+
+/// Whether a published GroupInfo may be adopted as a lineage of this
+/// conversation — i.e. external-joined, with everything that follows from it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LineageAdoption {
+    /// Nothing positively contradicts the signer's claim to have built this
+    /// group as a member of this conversation.
+    Adopt,
+    /// Positive evidence the signer is not a current member's certified device.
+    Refuse,
+}
+
+/// Decide whether the device that signed a GroupInfo is allowed to have founded
+/// the lineage we are about to adopt (#1161 M6 residual).
+///
+/// A `GroupId` is a name, not a capability: anyone can stand up an MLS group
+/// with an arbitrary one, so pinning the name (`build_external_commit`'s
+/// `mls_group_id` check) says nothing about who built the group behind it. The
+/// signer's leaf credential and signature key ARE available before adoption —
+/// the GroupInfo is signed by a member and carries the ratchet tree — and a
+/// Delivery Service holds no account identity key, so it cannot produce a leaf
+/// that the roster's cross-signing material certifies. That asymmetry is the
+/// whole of what this gate rests on.
+///
+/// `signer_on_roster` is `None` when the roster could not be read, NOT when the
+/// signer is absent from it — the two must stay distinguishable, because only
+/// the second is evidence.
+///
+/// **The failure bias is the load-bearing half.** `Unverifiable` means the
+/// inputs are missing (cert rows not yet published, a device row still
+/// replicating), which is an ordinary race on a legitimate migration; refusing
+/// on it would leave real users unable to follow their conversation onto its
+/// successor lineage, which is a worse outcome than the attack. So this refuses
+/// only on POSITIVE evidence, exactly as the eviction rule does:
+///
+/// * `Uncertified` — the cross-signing chain is present and says no;
+/// * a signer whose claimed user is demonstrably not on the roster.
+///
+/// Everything else adopts. A DS that wants past this has to either publish a
+/// leaf that a member's own account key certified (it holds no account identity
+/// key, so it cannot) or keep the conversation's cross-signing material
+/// permanently unreadable — which shows up as a conversation whose leaves never
+/// certify, and is what the eviction sweep acts on.
+pub fn lineage_adoption(
+    signer_on_roster: Option<bool>,
+    standing: SignerStanding,
+) -> LineageAdoption {
+    if matches!(standing, SignerStanding::Uncertified) {
+        return LineageAdoption::Refuse;
+    }
+    if signer_on_roster == Some(false) {
+        return LineageAdoption::Refuse;
+    }
+    LineageAdoption::Adopt
+}
+
 // ─── Kani proof harnesses ────────────────────────────────────────────────────
 #[cfg(kani)]
 mod proofs {
@@ -594,5 +722,96 @@ mod tests {
                 }
             }
         }
+    }
+
+    // ── I1b: a gap only destroys crypto state when the server explained it ────
+
+    /// The headline property: `Rebuild` implies the server declared an
+    /// explanation that covers the epoch we are missing.
+    #[test]
+    fn a_gap_destroys_state_only_when_the_server_explained_it() {
+        for current in 0u64..4 {
+            for hole in [None, Some(0), Some(1), Some(2), Some(3)] {
+                for floor in [None, Some(0), Some(1), Some(2), Some(3)] {
+                    if gap_recovery(current, hole, floor) == GapRecovery::Rebuild {
+                        assert!(
+                            hole == Some(current) || floor.is_some_and(|f| f > current),
+                            "rebuilt at {current} on hole={hole:?} floor={floor:?} with no \
+                             explanation covering the missing epoch"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// An unexplained non-contiguous batch — the shape a malicious or broken DS
+    /// serves — must not be able to delete anything.
+    #[test]
+    fn an_unexplained_gap_holds_position() {
+        assert_eq!(gap_recovery(7, None, None), GapRecovery::HoldPosition);
+        // A hole declared somewhere else is a self-contradicting response, not a
+        // licence.
+        assert_eq!(gap_recovery(7, Some(9), None), GapRecovery::HoldPosition);
+        // A retention floor at or below us explains nothing: the commit we need
+        // is not below the floor.
+        assert_eq!(gap_recovery(7, None, Some(7)), GapRecovery::HoldPosition);
+    }
+
+    /// …and the two genuine causes still rebuild, so a conversation that really
+    /// has lost the commit is not stuck forever.
+    #[test]
+    fn a_declared_prune_or_hole_still_rebuilds() {
+        assert_eq!(gap_recovery(7, Some(7), None), GapRecovery::Rebuild);
+        assert_eq!(gap_recovery(7, None, Some(8)), GapRecovery::Rebuild);
+    }
+
+    /// #1161 M6 residual: the whole 3×3 truth table of [`lineage_adoption`].
+    ///
+    /// Refusal is exactly the two POSITIVE cases. Enumerated rather than
+    /// asserted case-by-case so a later edit that widens refusal into the
+    /// `Unverifiable` column — the edit that would brick legitimate migrations
+    /// — fails here rather than in production.
+    #[test]
+    fn a_lineage_is_refused_only_on_positive_evidence() {
+        for roster in [None, Some(true), Some(false)] {
+            for standing in [
+                SignerStanding::Certified,
+                SignerStanding::Unverifiable,
+                SignerStanding::Uncertified,
+            ] {
+                let expected = if matches!(standing, SignerStanding::Uncertified)
+                    || roster == Some(false)
+                {
+                    LineageAdoption::Refuse
+                } else {
+                    LineageAdoption::Adopt
+                };
+                assert_eq!(
+                    lineage_adoption(roster, standing),
+                    expected,
+                    "roster={roster:?} standing={standing:?}"
+                );
+            }
+        }
+    }
+
+    /// The failure bias, pinned on its own: an unverifiable signer on a roster
+    /// we could read, and a certified signer whose roster we could NOT read,
+    /// both still adopt. Both are ordinary races on a legitimate migration.
+    #[test]
+    fn an_unverifiable_signer_does_not_block_a_migration() {
+        assert_eq!(
+            lineage_adoption(Some(true), SignerStanding::Unverifiable),
+            LineageAdoption::Adopt
+        );
+        assert_eq!(
+            lineage_adoption(None, SignerStanding::Unverifiable),
+            LineageAdoption::Adopt
+        );
+        assert_eq!(
+            lineage_adoption(None, SignerStanding::Certified),
+            LineageAdoption::Adopt
+        );
     }
 }

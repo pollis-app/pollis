@@ -540,7 +540,15 @@ where
     let epoch_before = group.epoch().as_u64();
     let scheme = signature_scheme(group.ciphersuite());
 
-    // 1. Actual state: walk the MLS tree.
+    // 1. Actual state: walk the MLS tree, ONE ENTRY PER LEAF.
+    //
+    //    Per leaf, not per `(user, device)`: openmls rejects duplicate signature
+    //    and encryption keys but NOT duplicate CREDENTIALS, so two leaves can
+    //    carry the same `"user:device"`. Keyed on the credential (as this was
+    //    before #1161 M7) the second insert overwrote the first index, the
+    //    removal set could only ever name one of them, and the shadowed leaf
+    //    survived every reconcile — including the removal of that user from the
+    //    roster. That is how a grafted leaf becomes permanent.
     //
     //    A leaf whose signature key is positively NOT the key its user certified
     //    is kept OUT of `actual` and queued for removal: excluding it from
@@ -548,23 +556,77 @@ where
     //    available) be added in the same commit, since the `(user, device)` key
     //    then reads as "not in tree". Our own leaf is never judged — a committer
     //    cannot remove itself, and its own cert is checked at publish time.
-    let mut actual: HashMap<(String, String), LeafNodeIndex> = HashMap::new();
-    let mut uncertified: Vec<((String, String), LeafNodeIndex, String)> = Vec::new();
+    //
+    //    "Our own leaf" is the leaf at our own INDEX, never merely one carrying
+    //    our credential: a duplicate claiming the committer's own `user:device`
+    //    would otherwise inherit both the skipped verdict and the self-removal
+    //    guard, making it the one leaf in the tree nothing could ever evict.
+    let own_index = group.own_leaf_index();
+    let mut leaves: Vec<((String, String), LeafNodeIndex, Option<String>)> = Vec::new();
     for m in group.members() {
         let uid = parse_credential_user_id(&m.credential);
         let did = parse_credential_device_id(&m.credential).unwrap_or_default();
-        let is_self = uid == actor_user_id && did == actor_device_id;
-        if !is_self {
-            if let Some(dir) = identities {
-                if let LeafVerdict::Uncertified(reason) =
-                    dir.leaf_verdict(&uid, &did, m.signature_key.as_slice(), scheme)
-                {
-                    uncertified.push(((uid, did), m.index, reason));
-                    continue;
-                }
+        let verdict = if m.index == own_index {
+            None
+        } else {
+            match identities
+                .map(|dir| dir.leaf_verdict(&uid, &did, m.signature_key.as_slice(), scheme))
+            {
+                Some(LeafVerdict::Uncertified(reason)) => Some(reason),
+                _ => None,
+            }
+        };
+        leaves.push(((uid, did), m.index, verdict));
+    }
+
+    // The credential the actor believes it holds, against the leaf it actually
+    // occupies. They can only disagree if the stored group belongs to a
+    // different device than the caller thinks — worth saying out loud, since
+    // every self-exemption below keys on the index.
+    if !actor_device_id.is_empty() {
+        if let Some((key, _, _)) = leaves.iter().find(|(_, index, _)| *index == own_index) {
+            if key.0 != actor_user_id || key.1 != actor_device_id {
+                eprintln!(
+                    "[mls] reconcile: our own leaf {own_index:?} carries {}:{} but we are acting \
+                     as {actor_user_id}:{actor_device_id}",
+                    key.0, key.1
+                );
             }
         }
-        actual.insert((uid, did), m.index);
+    }
+
+    let mut actual: HashMap<(String, String), LeafNodeIndex> = HashMap::new();
+    let mut to_evict: Vec<((String, String), LeafNodeIndex, String)> = Vec::new();
+    for (key, index, verdict) in leaves {
+        if let Some(reason) = verdict {
+            to_evict.push((key, index, reason));
+            continue;
+        }
+        // The survivor for a `(user, device)` that several leaves claim. Our own
+        // leaf always wins (MLS forbids removing it); otherwise the first in
+        // tree order, which is the older leaf — openmls fills the leftmost free
+        // slot, so the device that joined honestly holds it and a leaf grafted
+        // later sits to its right. Where the directory can tell the two apart,
+        // the loop above has already removed the uncertified one and this
+        // tie-break never runs.
+        match actual.entry(key.clone()) {
+            std::collections::hash_map::Entry::Vacant(slot) => {
+                slot.insert(index);
+            }
+            std::collections::hash_map::Entry::Occupied(mut slot) => {
+                let (keep, drop) = if index == own_index {
+                    (index, *slot.get())
+                } else {
+                    (*slot.get(), index)
+                };
+                slot.insert(keep);
+                to_evict.push((
+                    key,
+                    drop,
+                    format!("a second leaf claiming one credential; keeping {keep:?}"),
+                ));
+            }
+        }
     }
 
     // 2. Build the desired set. Pure set algebra, extracted so it can be tested
@@ -578,16 +640,17 @@ where
     // 3. Diff.
     let actual_keys: HashSet<(String, String)> = actual.keys().cloned().collect();
 
-    // Leaves in tree but not desired → remove, plus every uncertified leaf.
+    // Leaves in tree but not desired → remove, plus every leaf already queued for
+    // eviction (uncertified, or a duplicate of a credential another leaf holds).
     let mut to_remove: Vec<((String, String), LeafNodeIndex)> = actual
         .iter()
         .filter(|(key, _)| !desired.contains(key))
         .map(|(key, &idx)| (key.clone(), idx))
         .collect();
-    for (key, idx, reason) in &uncertified {
+    for (key, idx, reason) in &to_evict {
         eprintln!(
-            "[mls] reconcile: evicting uncertified leaf {}:{} — {reason}",
-            key.0, key.1
+            "[mls] reconcile: evicting leaf {:?} for {}:{} — {reason}",
+            idx, key.0, key.1
         );
         to_remove.push((key.clone(), *idx));
     }
@@ -598,11 +661,12 @@ where
         .cloned()
         .collect();
 
-    // 4. Committer-in-remove-set detection.
+    // 4. Committer-in-remove-set detection. On the INDEX, not the credential:
+    //    MLS forbids removing our own leaf, and that is a fact about one leaf,
+    //    not about everything claiming our `user:device` (#1161 M7).
     let mut skipped_self_removal = false;
-    let actor_key = (actor_user_id.to_string(), actor_device_id.to_string());
-    if to_remove.iter().any(|(key, _)| key == &actor_key) {
-        to_remove.retain(|(key, _)| key != &actor_key);
+    if to_remove.iter().any(|(_, idx)| *idx == own_index) {
+        to_remove.retain(|(_, idx)| *idx != own_index);
         skipped_self_removal = true;
     }
 
@@ -968,8 +1032,29 @@ pub(super) async fn load_pinned_identities(
     actor_user_id: &str,
 ) -> crate::error::Result<IdentityDirectory> {
     let rows = crate::commands::ds_reads::roster_identities(state, roster_user_ids).await?;
-    let mut dir = IdentityDirectory::new(rows);
+    pin_identities(state, IdentityDirectory::new(rows), actor_user_id).await
+}
 
+/// The two local substitutions [`load_pinned_identities`] applies, over a
+/// directory built from ANY source of DS rows.
+///
+/// Split out because the RECEIVE side needs the identical treatment and had
+/// none (#1161 M3): the replay loop built its directory straight from
+/// `conversation-state`'s `added_identities`, so a DS that substituted a user's
+/// `account_id_pub` along with a matching device cert could make a rogue leaf
+/// verdict `Certified` inbound. The self-substitution case is the sharpest —
+/// a leaf claiming YOUR OWN user id judged against a DS-supplied copy of your
+/// own account key rather than the one in your keystore — and it is exactly the
+/// case the first substitution below closes.
+///
+/// Both substitutions only ever make a verdict WEAKER (`Certified` →
+/// `Unverifiable`), never stronger, so applying them on a path that also has to
+/// stay live costs nothing but a flag the eviction reconcile self-corrects.
+pub(super) async fn pin_identities(
+    state: &Arc<AppState>,
+    mut dir: IdentityDirectory,
+    actor_user_id: &str,
+) -> crate::error::Result<IdentityDirectory> {
     // Our own root of trust is local. `load_account_id_key` fails only when this
     // device holds no account identity, in which case it could not have
     // certified any device either and the DS value is left to speak for itself.
@@ -1008,7 +1093,7 @@ pub(super) async fn load_pinned_identities(
             None => {}
         }
     }
-    Ok(dir)
+    Ok(dir.into_pinned())
 }
 
 /// Test-harness only: when set, `stage_reconcile_commit` adds a KeyPackage whose

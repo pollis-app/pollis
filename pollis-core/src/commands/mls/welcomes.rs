@@ -33,7 +33,11 @@ use super::provider::{welcome_ciphersuite, MlsProvider, PollisProvider};
 /// us to the *successor* lineage, whose GroupId carries a `#gN` suffix. Returning
 /// the bare conversation id keeps every caller — catch-up, self-update, the
 /// dedupe below — addressing the conversation, not the lineage.
-pub async fn apply_welcome(state: &Arc<AppState>, welcome_bytes: &[u8]) -> Result<(String, i64)> {
+pub async fn apply_welcome(
+    state: &Arc<AppState>,
+    welcome_bytes: &[u8],
+    expected_conversation_id: Option<&str>,
+) -> Result<(String, i64)> {
     let guard = state.local_db.lock().await;
     let db = guard.as_ref().ok_or_else(|| {
         crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
@@ -61,7 +65,7 @@ pub async fn apply_welcome(state: &Arc<AppState>, welcome_bytes: &[u8]) -> Resul
     })?;
 
     let provider = PollisProvider::new(db.conn());
-    let raw_group_id = join_from_welcome(&provider, welcome)?;
+    let raw_group_id = join_from_welcome(&provider, welcome, expected_conversation_id)?;
     Ok(super::generation::split_mls_group_id(&raw_group_id))
 }
 
@@ -78,7 +82,27 @@ pub async fn apply_welcome(state: &Arc<AppState>, welcome_bytes: &[u8]) -> Resul
 /// only keys that can still decrypt envelopes sealed before the migration, and
 /// it is dropped only once the predecessor has been drained
 /// (`adopt_generation_locked`).
-fn join_from_welcome<C>(provider: &MlsProvider<'_, C>, welcome: Welcome) -> Result<String>
+///
+/// That delete is the dangerous half (#1161 C1). The GroupId comes out of the
+/// Welcome blob — attacker-supplied, since a Welcome is just a row anyone who can
+/// write one can address at us — so it names which of THIS device's groups is
+/// destroyed. Two guards, in order:
+///
+/// * `expected`, when the caller knows which conversation the Welcome was filed
+///   under, must match the GroupId's conversation. A Welcome that disagrees with
+///   its own row is refused before anything is touched.
+/// * A local group at an epoch **at or above** the incoming Welcome's is never
+///   replaced. A Welcome that genuinely re-admits us is produced by a commit
+///   LATER than anything we hold, so it always arrives above our epoch; one at or
+///   below is a replay of an old Welcome, or a fabrication, and adopting it would
+///   trade a working group for an older (or foreign) one. Refusing costs nothing:
+///   the group we keep is the one the commit log corroborates, and the next
+///   catch-up advances it.
+pub(super) fn join_from_welcome<C>(
+    provider: &MlsProvider<'_, C>,
+    welcome: Welcome,
+    expected: Option<&str>,
+) -> Result<String>
 where
     C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
 {
@@ -90,8 +114,33 @@ where
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("process welcome: {e}")))?;
 
     let new_group_id = processed.unverified_group_info().group_id().clone();
+    let welcome_epoch = processed.unverified_group_info().epoch().as_u64();
+
+    let raw_group_id = String::from_utf8(new_group_id.as_slice().to_vec()).map_err(|_| {
+        crate::error::Error::Other(anyhow::anyhow!("welcome carries a non-UTF-8 group id"))
+    })?;
+    let (conversation_id, _generation) = super::generation::split_mls_group_id(&raw_group_id);
+    if let Some(expected) = expected {
+        if conversation_id != expected {
+            return Err(crate::error::Error::Other(anyhow::anyhow!(
+                "welcome filed under {expected} carries a group id for {conversation_id} — refusing"
+            )));
+        }
+    }
+
     if let Ok(Some(mut old_group)) = MlsGroup::load(provider.storage(), &new_group_id) {
-        eprintln!("[mls] apply_welcome: deleting stale group {:?} before re-joining", new_group_id);
+        let local_epoch = old_group.epoch().as_u64();
+        if local_epoch >= welcome_epoch {
+            return Err(crate::error::Error::Other(anyhow::anyhow!(
+                "welcome for {raw_group_id} is at epoch {welcome_epoch} but this device already \
+                 holds that group at epoch {local_epoch} — refusing to replace a group the commit \
+                 log has already carried past it"
+            )));
+        }
+        eprintln!(
+            "[mls] apply_welcome: replacing group {raw_group_id} at epoch {local_epoch} with the \
+             Welcome's epoch {welcome_epoch}"
+        );
         let _ = old_group.delete(provider.storage());
     }
 
@@ -101,9 +150,7 @@ where
     staged.into_group(provider)
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("into group: {e}")))?;
 
-    String::from_utf8(new_group_id.as_slice().to_vec()).map_err(|_| {
-        crate::error::Error::Other(anyhow::anyhow!("welcome carries a non-UTF-8 group id"))
-    })
+    Ok(raw_group_id)
 }
 
 /// Poll the remote `mls_welcome` table for undelivered Welcome messages
@@ -134,12 +181,19 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
     // into a newer lineage supersedes one into an older.
     let mut joined: Vec<(String, i64)> = Vec::new();
     for (id, bytes) in items {
-        match apply_welcome(state, &bytes).await {
+        // `None`: the drain (`POST /v1/welcomes/fetch`) does not report the
+        // `conversation_id` the row was filed under, so there is nothing yet to
+        // hold the blob's own GroupId against. The DS half of #1161 C1 adds it;
+        // `join_from_welcome` already enforces it the moment it arrives. Until
+        // then the corroboration below is what stands in for it.
+        match apply_welcome(state, &bytes, None).await {
             Ok((conversation_id, generation)) => {
                 eprintln!("[mls] poll_mls_welcomes: applied welcome {id}");
-                match joined.iter_mut().find(|(c, _)| c == &conversation_id) {
-                    Some(entry) => entry.1 = entry.1.max(generation),
-                    None => joined.push((conversation_id, generation)),
+                if welcome_is_corroborated(state, &conversation_id, generation).await {
+                    match joined.iter_mut().find(|(c, _)| c == &conversation_id) {
+                        Some(entry) => entry.1 = entry.1.max(generation),
+                        None => joined.push((conversation_id, generation)),
+                    }
                 }
             }
             Err(e) => {
@@ -196,6 +250,83 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
     self_update_joined_groups(state, user_id, &joined).await;
 
     Ok(())
+}
+
+/// Does the conversation a just-applied Welcome claims actually list us as a
+/// member? If not, drop the group it materialised (#1161 C1).
+///
+/// A Welcome is a row, and the GroupId inside it is chosen by whoever wrote that
+/// row — so absent the DS-side authorization half, anyone able to write one can
+/// point this device at a conversation of their choosing and have it stand up a
+/// group under that conversation's name, which every later send then seals for.
+/// `join_from_welcome` refuses to *replace* a group we already hold; this is the
+/// other case, where we held nothing and would simply have adopted the blob.
+///
+/// The second check is on the LINEAGE. `join_from_welcome` refuses a Welcome at
+/// or below our current epoch, so the only blob that can still displace a real
+/// group is one claiming an epoch ABOVE it — and that claim is checkable: the
+/// commit that produced a genuine Welcome is written to the log in the same DS
+/// transaction as the Welcome itself, so the log head for that lineage is never
+/// behind the epoch the Welcome lands us at. A head below it means the commit
+/// does not exist and the blob was fabricated. (The check has to run after the
+/// join rather than before: the GroupId lives inside the encrypted GroupInfo, so
+/// nothing about the blob is readable until the KeyPackage has opened it.)
+///
+/// Fails OPEN on anything short of a definite "no" — an unreachable DS, or a
+/// snapshot that does not answer the membership question, leaves the join alone.
+/// A false negative would be self-healing anyway (the no-group recovery path
+/// external-joins behind the same membership gate), but a legitimate join must
+/// not be spent on a network blip.
+async fn welcome_is_corroborated(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    generation: i64,
+) -> bool {
+    let snap = match super::ds_reads::conversation_snapshot(
+        state,
+        super::ds_reads::state_query(conversation_id, Some(generation)),
+    )
+    .await
+    {
+        Ok(snap) => snap,
+        Err(e) => {
+            eprintln!(
+                "[mls] poll_mls_welcomes: cannot corroborate the welcome for {conversation_id} \
+                 ({e}) — keeping the join"
+            );
+            return true;
+        }
+    };
+    let joined_epoch = {
+        let guard = state.local_db.lock().await;
+        guard.as_ref().and_then(|db| {
+            super::provider::load_stored_group_at(db.conn(), conversation_id, generation)
+                .map(|g| g.epoch().as_u64())
+        })
+    };
+    let epoch_is_in_the_log = match joined_epoch {
+        Some(epoch) => u64::try_from(snap.head).is_ok_and(|head| head >= epoch),
+        // Nothing stored — nothing to corroborate or discard.
+        None => true,
+    };
+    if snap.authorized && snap.is_member != Some(false) && epoch_is_in_the_log {
+        return true;
+    }
+    eprintln!(
+        "[mls] poll_mls_welcomes: a welcome admitted this device to {conversation_id} generation \
+         {generation} at epoch {joined_epoch:?}, but the conversation does not corroborate it \
+         (authorized={}, is_member={:?}, log head={}) — discarding the group it created",
+        snap.authorized, snap.is_member, snap.head
+    );
+    if let Err(e) =
+        super::group_state::forget_local_mls_group_at(state, conversation_id, generation).await
+    {
+        eprintln!(
+            "[mls] poll_mls_welcomes: could not discard the uncorroborated group for \
+             {conversation_id}: {e}"
+        );
+    }
+    false
 }
 
 /// Adopt a newly-joined lineage in the one case the catch-up backstop cannot
