@@ -127,7 +127,12 @@ pub fn mark_downloaded(path: &Path) -> Marking {
 
     #[cfg(target_os = "windows")]
     {
-        return match std::fs::write(zone_identifier_path(path), ZONE_IDENTIFIER) {
+        // Through `private_fs` like every other write in this module — not for
+        // the mode (an alternate data stream inherits the host file's ACL, and
+        // the helper is a no-op on Windows anyway) but so the source scan below
+        // can ban the raw `std::fs` creation calls outright, with no exception
+        // for a `cfg` branch the Linux CI never compiles.
+        return match crate::private_fs::write(&zone_identifier_path(path), ZONE_IDENTIFIER) {
             Ok(()) => Marking::Marked,
             // A non-NTFS destination (a FAT32 stick, a network share) has no
             // streams. The save itself succeeded; say so honestly.
@@ -146,8 +151,23 @@ pub fn mark_downloaded(path: &Path) -> Marking {
 /// provenance attribute.
 ///
 /// The two steps are one call on purpose — see the module docs.
+///
+/// The write goes through [`crate::private_fs`], so the file is 0600 rather than
+/// whatever the process umask happens to be. It used to be a bare `fs` write,
+/// which on a stock Linux or macOS account produces 0644: the
+/// DECRYPTED plaintext of an attachment, readable by every other local user, on
+/// the one path in the app whose entire job is taking bytes out of the encrypted
+/// store and putting them on the disk. The export path
+/// (`commands::export`) was guarded against exactly this by a source scan; "save
+/// as…" was written later and got neither the helper nor the guard.
+///
+/// Owner-only, not umask, even though the user picked the location: the security
+/// whitepaper's §7.2 claim is that everything this app creates is owner-only on
+/// unix, and a saved attachment is the most sensitive thing it creates. A user
+/// who wants the file shared can widen it themselves — the reverse, noticing
+/// that an attachment was world-readable all along, is not something anyone does.
 pub fn write_downloaded_file(path: &Path, bytes: &[u8]) -> std::io::Result<Marking> {
-    std::fs::write(path, bytes)?;
+    crate::private_fs::write(path, bytes)?;
     Ok(mark_downloaded(path))
 }
 
@@ -213,6 +233,84 @@ mod tests {
                 Marking::Unsupported,
                 "Linux has no enforced provenance marker; say so rather than claiming success"
             );
+        }
+    }
+
+    /// A saved attachment is decrypted plaintext someone else sent, written
+    /// wherever the picker pointed — often a shared-machine directory. At the
+    /// process umask that is 0644 on a stock Linux or macOS account, i.e.
+    /// world-readable, which is the one counterexample to the whitepaper's
+    /// §7.2 "everything this app creates is owner-only on unix".
+    ///
+    /// `#[cfg(unix)]` because the mode accessor is unix-only; the assertion is
+    /// gated on the platform predicate rather than assuming it.
+    #[cfg(unix)]
+    #[test]
+    fn a_saved_attachment_is_owner_only_not_umask() {
+        if !crate::private_fs::owner_only_is_enforced_by_mode() {
+            return;
+        }
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("payslip.pdf");
+        write_downloaded_file(&path, b"decrypted attachment bytes").unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            crate::private_fs::FILE_MODE,
+            "a saved attachment must be 0600, not whatever the umask says"
+        );
+    }
+
+    /// Even a file that was already there, world-readable, is tightened — the
+    /// picker routinely overwrites an earlier save.
+    #[cfg(unix)]
+    #[test]
+    fn overwriting_an_existing_loose_file_tightens_it() {
+        if !crate::private_fs::owner_only_is_enforced_by_mode() {
+            return;
+        }
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("again.pdf");
+        std::fs::write(&path, b"older save").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        write_downloaded_file(&path, b"newer save").unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            crate::private_fs::FILE_MODE
+        );
+    }
+
+    /// The guard the export path already had and the download path did not.
+    /// Scanning the source rather than the output is what keeps the NEXT save
+    /// site honest: a new `std::fs::write` here would be invisible to any test
+    /// that only checks the file this one call produces.
+    ///
+    /// `r2.rs` is in scope because it owns the only caller
+    /// (`save_media_to_path`) and the media cache writes next door to it.
+    #[test]
+    fn nothing_on_the_download_path_creates_a_file_outside_private_fs() {
+        for (name, src) in [
+            ("downloads.rs", include_str!("downloads.rs")),
+            ("commands/r2.rs", include_str!("commands/r2.rs")),
+        ] {
+            let body = src.split("#[cfg(test)]").next().unwrap();
+            for banned in [
+                "std::fs::write",
+                "std::fs::File::create",
+                "std::fs::create_dir_all",
+                "tokio::fs::write",
+                "tokio::fs::create_dir_all",
+                ".create(true)",
+            ] {
+                assert!(
+                    !body.contains(banned),
+                    "{name} must create files through private_fs; found `{banned}`"
+                );
+            }
         }
     }
 

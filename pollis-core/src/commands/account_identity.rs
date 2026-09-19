@@ -45,6 +45,20 @@ const DB_KEY_LEN: usize = 32;
 /// Keystore slot for this device's copy of the account identity private key.
 const ACCOUNT_ID_KEY_KEYSTORE_SLOT: &str = "account_id_key";
 
+/// Keystore slot for the account identity **public** key the Delivery Service
+/// last reported for this account at `verify-otp`.
+///
+/// Public material, so there is nothing here to keep secret — the keystore is
+/// used because it is the one store a device has BEFORE it is enrolled (no
+/// local DB, no signing key), and it survives the app restart that a
+/// half-finished enrollment routinely involves.
+const ACCOUNT_ID_PUB_SLOT: &str = "account_id_pub";
+
+/// Keystore slot marking "the Delivery Service says this account's identity is
+/// no longer the one this device holds". Its value is the pub key the DS
+/// claimed, kept so the reason is inspectable rather than a bare flag.
+const ACCOUNT_IDENTITY_SUPERSEDED_SLOT: &str = "account_identity_superseded";
+
 /// Crockford base32 alphabet (32 chars, drops I/L/O/U for visual clarity).
 const SECRET_KEY_ALPHABET: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
@@ -263,6 +277,13 @@ pub async fn generate_account_identity_material(
 
     *state.unlock.lock().await = Some(unlock_state_with_fresh_db_key(user_id, &*private_bytes));
 
+    // Pin the public half locally as this account's published identity. The
+    // caller POSTs it to `establish-identity` next; recording it here is what
+    // lets a LATER unwrap on this device be checked against something.
+    if let Err(e) = remember_published_account_id_pub(state, user_id, &public_bytes).await {
+        eprintln!("[identity] could not record the published account_id_pub: {e}");
+    }
+
     Ok((
         secret_key_display,
         AccountIdentityMaterial {
@@ -384,11 +405,152 @@ pub async fn has_matching_local_account_identity(
     Ok(account_id_pub_matches(&local_bytes, remote_pub))
 }
 
-fn account_id_pub_matches(private_bytes: &[u8], remote_pub: &[u8]) -> bool {
+pub(crate) fn account_id_pub_matches(private_bytes: &[u8], remote_pub: &[u8]) -> bool {
     let Ok(signing_key) = signing_key_from_bytes(private_bytes) else {
         return false;
     };
     signing_key.verifying_key().encode().as_slice() == remote_pub
+}
+
+// ── The published account identity, as this device last saw it ───────────────
+
+/// Record the account identity public key the Delivery Service published for
+/// `user_id`, so a later unwrap can be checked against it.
+///
+/// Called from every path that learns the value: `verify-otp` reconciliation,
+/// first-device signup, and identity reset. Best-effort by return value, never
+/// by silence — the caller logs a failure, and a *missing* record makes
+/// [`adopt_recovered_account_identity`] refuse rather than proceed unchecked.
+pub(crate) async fn remember_published_account_id_pub(
+    state: &AppState,
+    user_id: &str,
+    account_id_pub: &[u8],
+) -> Result<()> {
+    state
+        .keystore
+        .store_for_user(ACCOUNT_ID_PUB_SLOT, user_id, account_id_pub)
+        .await
+}
+
+/// The account identity public key this device last saw published for
+/// `user_id`, or `None` if it has never seen one.
+pub(crate) async fn published_account_id_pub(
+    state: &AppState,
+    user_id: &str,
+) -> Result<Option<Vec<u8>>> {
+    state
+        .keystore
+        .load_for_user(ACCOUNT_ID_PUB_SLOT, user_id)
+        .await
+}
+
+/// Note that the server's account identity for `user_id` is not the one this
+/// device holds — an identity reset performed elsewhere, or a server lying
+/// about one.
+///
+/// This REPLACES the wipe that used to happen here. Nothing authenticates the
+/// value that triggers it: it arrives inside a `verify-otp` response, the local
+/// database is still closed so there is no pin to compare against, and the
+/// transparency log is not consulted. Deleting the only local copy of the
+/// account identity key on an unauthenticated server claim hands any hostile
+/// (or merely buggy) Delivery Service a one-response way to strand a user on
+/// their Secret Key. Marking is reversible; deleting is not.
+pub(crate) async fn mark_account_identity_superseded(
+    state: &AppState,
+    user_id: &str,
+    claimed_pub: &[u8],
+) -> Result<()> {
+    state
+        .keystore
+        .store_for_user(ACCOUNT_IDENTITY_SUPERSEDED_SLOT, user_id, claimed_pub)
+        .await
+}
+
+/// Clear the marker set by [`mark_account_identity_superseded`].
+pub(crate) async fn clear_account_identity_superseded(
+    state: &AppState,
+    user_id: &str,
+) -> Result<()> {
+    state
+        .keystore
+        .delete_for_user(ACCOUNT_IDENTITY_SUPERSEDED_SLOT, user_id)
+        .await
+}
+
+/// True if this device has been told its account identity was superseded and
+/// has not yet re-enrolled.
+///
+/// Drives `enrollment_required`, which is what the wipe used to drive
+/// indirectly: the user still lands on the enrollment gate, but with their old
+/// key intact behind it.
+pub(crate) async fn account_identity_superseded(
+    state: &AppState,
+    user_id: &str,
+) -> Result<bool> {
+    Ok(state
+        .keystore
+        .load_for_user(ACCOUNT_IDENTITY_SUPERSEDED_SLOT, user_id)
+        .await?
+        .is_some())
+}
+
+/// Install an account identity seed this device just UNWRAPPED — from a
+/// sibling's enrollment approval, or from the Secret-Key recovery blob.
+///
+/// The one chokepoint for both, because both had the same hole: the bytes came
+/// out of a blob the Delivery Service served, and nothing checked that they were
+/// the account's actual identity key before they became this device's identity.
+/// Two concrete consequences, now both closed here:
+///
+///   * A forged approval blob (see `device_enrollment::unwrap_account_key` for
+///     how a non-contributory ECDH gets one) decrypts to an
+///     ATTACKER-CHOSEN seed. Unchecked, the device adopts it.
+///   * A SUPERSEDED `account_recovery` row replays: the old Secret Key still
+///     unwraps it, and the device silently adopts a key the account retired.
+///
+/// The check is against the public key the account PUBLISHES
+/// ([`published_account_id_pub`]). That value comes from the same server, which
+/// is the point: to pass this check a hostile DS must publish the forged key to
+/// EVERYONE — where it bumps `identity_version`, appends to the
+/// transparency-backed `account_key_log`, and invalidates every existing device
+/// cert — instead of aiming one blob at one enrollment.
+///
+/// Fails CLOSED when no published key is on record. `verify-otp` reports it
+/// whenever the account has an identity at all, and an account with no identity
+/// has nothing to enroll into, so the absent case is a server that withheld it —
+/// exactly the case that must not be a bypass.
+pub(crate) async fn adopt_recovered_account_identity(
+    state: &Arc<AppState>,
+    user_id: &str,
+    seed: &[u8],
+) -> Result<()> {
+    let published = published_account_id_pub(state, user_id)
+        .await?
+        .ok_or_else(|| {
+            Error::Crypto(format!(
+                "refusing to install an account identity for {user_id}: this device has no \
+                 record of the account's published identity key to check it against"
+            ))
+        })?;
+    if !account_id_pub_matches(seed, &published) {
+        return Err(Error::Crypto(format!(
+            "refusing to install an account identity for {user_id}: the unwrapped key is not \
+             the account's published identity key"
+        )));
+    }
+
+    // The user has now acted, which is the condition M2 keeps the stale key
+    // for. Drop it and the marker together, so a device that re-enrolls is not
+    // left holding a key it can never use.
+    if let Err(e) = wipe_local_account_identity(state, user_id).await {
+        eprintln!("[enrollment] clearing the superseded local key (non-fatal): {e}");
+    }
+    if let Err(e) = clear_account_identity_superseded(state, user_id).await {
+        eprintln!("[enrollment] clearing the superseded marker (non-fatal): {e}");
+    }
+
+    *state.unlock.lock().await = Some(unlock_state_with_fresh_db_key(user_id, seed));
+    Ok(())
 }
 
 /// Delete every local copy of the account identity private key —
@@ -520,6 +682,16 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
     //    device is enrolled under the new identity. The bytes never
     //    touch the keystore unwrapped — set_pin will wrap them.
     *state.unlock.lock().await = Some(unlock_state_with_fresh_db_key(user_id, &*private_bytes));
+
+    // 4b. The account now publishes a DIFFERENT identity key, and this device
+    //     is the one that rotated it. Re-pin, and drop any superseded marker —
+    //     this device is the account's identity now, by construction.
+    if let Err(e) = remember_published_account_id_pub(state, user_id, &public_bytes).await {
+        eprintln!("[reset] could not record the rotated account_id_pub: {e}");
+    }
+    if let Err(e) = clear_account_identity_superseded(state, user_id).await {
+        eprintln!("[reset] could not clear the superseded marker: {e}");
+    }
 
     // 5. Re-sign every existing `user_device` row for this user against
     //    the freshly rotated account identity. Without this, every
@@ -1132,6 +1304,175 @@ mod tests {
             );
             assert!(dup.is_err(), "duplicate (user_id, identity_version) must be rejected");
             assert_eq!(log_rows(&conn, "erin").len(), 1);
+        }
+    }
+
+    // ── M1/M2: what this device will adopt, and what it refuses to delete ────
+
+    mod adopting_and_superseding {
+        use super::*;
+
+        fn test_state() -> Arc<AppState> {
+            Arc::new(AppState::new_with_parts(
+                crate::config::Config::for_test().expect("test config"),
+                Arc::new(crate::keystore::InMemoryKeystore::new()),
+            ))
+        }
+
+        /// A `(seed, published public key)` pair for a real ML-DSA-44 identity.
+        fn identity(seed_byte: u8) -> ([u8; ACCOUNT_SEED_LEN], Vec<u8>) {
+            let seed = [seed_byte; ACCOUNT_SEED_LEN];
+            let pub_bytes = AccountSigningKey::from_seed(&seed.into())
+                .verifying_key()
+                .encode()
+                .to_vec();
+            (seed, pub_bytes)
+        }
+
+        /// The legitimate path still works: the account's own key is adopted
+        /// and lands in `AppState.unlock`.
+        #[tokio::test]
+        async fn the_accounts_own_key_is_adopted() {
+            let state = test_state();
+            let (seed, published) = identity(11);
+            remember_published_account_id_pub(&state, "u1", &published)
+                .await
+                .unwrap();
+
+            adopt_recovered_account_identity(&state, "u1", &seed)
+                .await
+                .expect("the published key must still be installable");
+
+            let guard = state.unlock.lock().await;
+            let unlocked = guard.as_ref().expect("unlock populated");
+            assert_eq!(unlocked.user_id, "u1");
+            assert_eq!(&**unlocked.account_id_key, &seed[..]);
+        }
+
+        /// M1: a forged approval blob decrypts to an ATTACKER-CHOSEN seed, and
+        /// nothing used to compare it against the account's published identity
+        /// — so the device adopted it. This is also the Secret-Key replay: a
+        /// superseded `account_recovery` row unwraps to the account's OLD seed,
+        /// which is just another seed that is not the published one.
+        #[tokio::test]
+        async fn a_seed_that_is_not_the_published_identity_is_refused() {
+            let state = test_state();
+            let (_current_seed, published) = identity(11);
+            let (attacker_seed, _) = identity(99);
+            remember_published_account_id_pub(&state, "u1", &published)
+                .await
+                .unwrap();
+
+            let err = adopt_recovered_account_identity(&state, "u1", &attacker_seed)
+                .await
+                .expect_err("a seed that is not the account's identity must be refused");
+            assert!(
+                format!("{err}").contains("published identity key"),
+                "refused for the wrong reason: {err}"
+            );
+            assert!(
+                state.unlock.lock().await.is_none(),
+                "nothing may be installed when the check fails"
+            );
+        }
+
+        /// Fails CLOSED: a server that simply withholds `account_id_pub` must
+        /// not be able to turn the check off.
+        #[tokio::test]
+        async fn an_unwrapped_key_is_refused_when_no_published_key_is_known() {
+            let state = test_state();
+            let (seed, _) = identity(11);
+            let err = adopt_recovered_account_identity(&state, "u1", &seed)
+                .await
+                .expect_err("with nothing to check against, installing must be refused");
+            assert!(format!("{err}").contains("no record"), "got: {err}");
+            assert!(state.unlock.lock().await.is_none());
+        }
+
+        /// M2: being told the identity changed marks the device instead of
+        /// deleting its key. `wipe_local_account_identity` still exists — it is
+        /// what `adopt_recovered_account_identity` runs once the user has acted
+        /// — but nothing unauthenticated reaches it any more.
+        #[tokio::test]
+        async fn being_told_the_identity_changed_keeps_the_local_key() {
+            let state = test_state();
+            let (seed, _published) = identity(11);
+            let (_, someone_elses_pub) = identity(99);
+            state
+                .keystore
+                .store_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, "u1", &seed)
+                .await
+                .unwrap();
+
+            mark_account_identity_superseded(&state, "u1", &someone_elses_pub)
+                .await
+                .unwrap();
+
+            assert!(
+                account_identity_superseded(&state, "u1").await.unwrap(),
+                "the device must know it needs to re-enroll"
+            );
+            assert!(
+                has_local_account_identity(&state, "u1").await.unwrap(),
+                "the key must survive an unauthenticated server claim"
+            );
+            assert_eq!(
+                state
+                    .keystore
+                    .load_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, "u1")
+                    .await
+                    .unwrap()
+                    .as_deref(),
+                Some(&seed[..]),
+                "and it must be the same bytes, not a re-derived stand-in"
+            );
+        }
+
+        /// The marker is reversible, which is the whole difference from a wipe:
+        /// re-enrolling clears it and retires the stale key at the same moment.
+        #[tokio::test]
+        async fn the_marker_clears_when_the_user_re_enrolls() {
+            let state = test_state();
+            let (old_seed, _) = identity(11);
+            let (new_seed, new_published) = identity(12);
+            state
+                .keystore
+                .store_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, "u1", &old_seed)
+                .await
+                .unwrap();
+            mark_account_identity_superseded(&state, "u1", &new_published)
+                .await
+                .unwrap();
+            remember_published_account_id_pub(&state, "u1", &new_published)
+                .await
+                .unwrap();
+
+            adopt_recovered_account_identity(&state, "u1", &new_seed)
+                .await
+                .unwrap();
+
+            assert!(
+                !account_identity_superseded(&state, "u1").await.unwrap(),
+                "re-enrolling clears the marker"
+            );
+            assert!(
+                state
+                    .keystore
+                    .load_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, "u1")
+                    .await
+                    .unwrap()
+                    .is_none(),
+                "and the stale key goes with it, now that the user has acted"
+            );
+        }
+
+        #[tokio::test]
+        async fn clearing_the_marker_is_idempotent() {
+            let state = test_state();
+            clear_account_identity_superseded(&state, "u1")
+                .await
+                .unwrap();
+            assert!(!account_identity_superseded(&state, "u1").await.unwrap());
         }
     }
 }
