@@ -49,11 +49,18 @@ jobs:
 
       - name: Resolve version
         id: resolve
+        # The dispatch input goes through env:, never interpolated straight
+        # into the script (#1161 Lane D — script-injection hygiene): a bare
+        # `${{ github.event.inputs.version }}` inline would let anyone who can
+        # trigger workflow_dispatch put shell metacharacters into a value that
+        # runs as code on this runner.
+        env:
+          VERSION_INPUT: ${{ github.event.inputs.version }}
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
             VERSION="${GITHUB_REF_NAME#v}"
           else
-            VERSION="${{ github.event.inputs.version }}"
+            VERSION="$VERSION_INPUT"
           fi
           if [ -z "$VERSION" ]; then
             VERSION=$(grep -m1 '^version = ' Cargo.toml | sed -E 's/version = "([^"]+)"/\1/')
