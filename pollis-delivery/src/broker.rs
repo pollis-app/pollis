@@ -1649,31 +1649,20 @@ pub async fn r2_presign(
     // so the substitution decrypts cleanly); deleting one 404s the attachment or
     // emoji for everyone else.
     //
-    // A DELETE of a `media/` object asks a narrower question than a PUT does
-    // (#1161 M5). Substituting bytes is something no account may do to a live
-    // shared object, so the PUT gate keeps the flat "is this referenced by
-    // anyone". Destroying one's OWN upload is different: gating it on the same
-    // flat predicate let any account that had legitimately received the file pin
-    // it from a message they simply never delete, and the uploader's hard delete
-    // then 403'd for as long as that message lived. `object_delete_is_blocked`
-    // asks the question with the uploader's identity in it; for every actor who
-    // is not the recorded uploader it is the unchanged predicate.
+    // DELETE and PUT ask the same question of a `media/` object, and the answer
+    // has no identity in it: "does any still-live message reference these
+    // bytes". Migration 000031 briefly gave the recorded uploader a delete that
+    // ignored other accounts' references; that let one user's delete 404 another
+    // user's attachment, which is our storage optimisation (one blob per unique
+    // file) leaking onto users. It is removed — `object_is_referenced` is the
+    // single predicate, and it is the same one `apply_delete_attachment` reads
+    // for the Turso row, so the row and the blob cannot disagree.
     if writing {
         if let Some(content_hash) = object.content_hash {
-            let deleting = http_method == "DELETE";
             let referenced = match object.family {
                 R2Family::Media => {
                     let conn = state.db.conn().await?;
-                    if deleting {
-                        crate::messages::object_delete_is_blocked(
-                            &conn,
-                            content_hash,
-                            Some(actor.as_str()),
-                        )
-                        .await?
-                    } else {
-                        crate::messages::object_is_referenced(&conn, content_hash).await?
-                    }
+                    crate::messages::object_is_referenced(&conn, content_hash).await?
                 }
                 R2Family::Emoji => {
                     let conn = state.db.conn().await?;

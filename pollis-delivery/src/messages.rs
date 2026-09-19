@@ -61,9 +61,11 @@
 //!     (`attachment_ref ⋈ message_envelope`, see [`live_ref_exists`]), so the
 //!     only way to release one is to delete its message envelope through the
 //!     already-authorized delete/GC/teardown paths above. `/v1/attachments/
-//!     register` and `/v1/attachments/delete` need only prove a real device:
-//!     the former adds a declaration that counts only against a live envelope, the
-//!     latter merely collects an already-unreferenced object.
+//!     register` additionally binds each declaration to the named message's
+//!     `sender_id` (#1165), so you cannot declare a reference for somebody
+//!     else's message; `/v1/attachments/delete` need only prove a real device,
+//!     because it merely collects an already-unreferenced object — for every
+//!     caller alike, uploader included.
 //!
 //! On the no-auth path (`authed == None`, only reachable when the DS runs with
 //! `POLLIS_DS_REQUIRE_AUTH` off) the membership/identity checks are skipped and
@@ -1926,42 +1928,9 @@ macro_rules! live_ref_exists {
     };
 }
 
-/// The half of [`live_ref_exists`] that the OBJECT'S OWN UPLOADER has to
-/// respect (#1161 M5): a live reference they declared themselves, a live vault
-/// entry of theirs, or any reference whose declarer is not recorded.
-///
-/// `?1` is the content hash, `?2` the uploader.
-///
-/// Every other account's reference is deliberately absent. It still pins the
-/// object against COLLECTION — [`live_ref_exists`] is unchanged and is what
-/// `apply_delete_attachment` and the PUT-substitution gate read — but it does
-/// not stand between the uploader and the removal of their own upload. The two
-/// questions had been conflated into one predicate, and conflating them is what
-/// let any account that had ever seen a file deny the uploader its deletion for
-/// as long as they cared to keep one message alive.
-///
-/// NULL `registered_by` counts as the uploader's. Rows written before migration
-/// 000031 carry no attribution and could equally be the uploader's own, so an
-/// unattributed row blocks — the legacy corpus keeps exactly today's behaviour
-/// instead of being silently reclassified as somebody else's.
-macro_rules! live_own_ref_exists {
-    () => {
-        "(EXISTS (SELECT 1 FROM attachment_ref ar \
-                  JOIN message_envelope me ON me.id = ar.message_id \
-                  WHERE ar.content_hash = ?1 \
-                    AND (ar.registered_by IS NULL OR ar.registered_by = ?2)) \
-          OR EXISTS (SELECT 1 FROM vault_attachment_ref var \
-                     JOIN vault_message vm ON vm.id = var.vault_message_id \
-                     WHERE var.content_hash = ?1 AND vm.user_id = ?2))"
-    };
-}
-
 /// `SELECT` form of [`live_ref_exists`] — yields a single `0`/`1` row for
 /// [`object_is_referenced`].
 const OBJECT_IS_REFERENCED_SQL: &str = concat!("SELECT ", live_ref_exists!());
-
-/// `SELECT` form of [`live_own_ref_exists`].
-const OBJECT_IS_REFERENCED_BY_UPLOADER_SQL: &str = concat!("SELECT ", live_own_ref_exists!());
 
 /// Collect the shared dedup row iff NO live reference remains. One predicate, no
 /// Rust-side count — the row cannot go while a referencing envelope survives even
@@ -1969,15 +1938,6 @@ const OBJECT_IS_REFERENCED_BY_UPLOADER_SQL: &str = concat!("SELECT ", live_own_r
 const COLLECT_UNREFERENCED_OBJECT_SQL: &str = concat!(
     "DELETE FROM attachment_object WHERE content_hash = ?1 AND NOT ",
     live_ref_exists!()
-);
-
-/// The recorded uploader's form of [`COLLECT_UNREFERENCED_OBJECT_SQL`] (#1161
-/// M5): blocked by the uploader's own live references and by unattributed
-/// legacy ones, not by another account's. `uploaded_by = ?2` is re-asserted in
-/// the statement so the caller's ownership read cannot be raced.
-const COLLECT_OWN_OBJECT_SQL: &str = concat!(
-    "DELETE FROM attachment_object WHERE content_hash = ?1 AND uploaded_by = ?2 AND NOT ",
-    live_own_ref_exists!()
 );
 
 /// Reap declaration rows whose message envelope is gone (GC'd, deleted, aged out,
@@ -2038,6 +1998,8 @@ pub async fn delete_attachment(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
+    // The verified actor is passed and deliberately unused: the collect asks
+    // only whether anything still references the object, never who is asking.
     outcome_response::<AttachmentDeleteBody>(apply_delete_attachment(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -2053,9 +2015,9 @@ pub async fn delete_attachment(
 ///
 /// The REFERENCE row is different, and used to be ungated — the handler took
 /// `_authed` and discarded it. A reference pins a shared R2 blob against
-/// collection (see [`live_ref_exists`]) and, through `/v1/r2/presign`'s delete
-/// gate, decides whether the UPLOADER may hard-delete their own bytes. So a
-/// reference is now bound to the account that owns the message it names: the
+/// collection (see [`live_ref_exists`]), so an ungated declaration is a write
+/// into somebody else's retention decision. A reference is therefore bound to
+/// the account that owns the message it names (#1165, #1161 M5): the
 /// actor must be the `message_envelope.sender_id` of `message_id`. Declaring
 /// "this file belongs to somebody else's message" is not a claim any account
 /// other than that message's author can make.
@@ -2070,11 +2032,15 @@ pub async fn delete_attachment(
 ///
 /// A member of a conversation can still pin a hash they legitimately received
 /// onto their OWN live message, and that is indistinguishable server-side from
-/// an honest re-send — so it is not refused. What migration 000031 changes is
-/// what such a pin can DO: `uploaded_by` and `registered_by` are recorded here,
-/// and [`object_delete_is_blocked`] reads them, so the pin keeps the object from
-/// being collected (correct — somebody's message carries it) without being able
-/// to veto the uploader's deletion of their own upload (#1161 M5).
+/// an honest re-send — so it is not refused, and it needs no answer. Under a
+/// plain reference count the two acts have the same effect and neither denies
+/// anyone anything: whoever uploaded the bytes still drops their own reference
+/// by deleting their own message, and the object outlives them only while some
+/// other account's live message legitimately carries that file. Migration
+/// 000031 briefly gave the first uploader a delete that ignored other accounts'
+/// references; that was a mistake (one account deleting its file broke
+/// another's message) and it is gone — nothing here records who uploaded or who
+/// declared.
 ///
 /// Skipped when `authed` is `None`: the no-auth (harness/dev) path has no actor
 /// to bind to, exactly as the membership gates elsewhere in this module are.
@@ -2099,21 +2065,13 @@ pub async fn apply_register_attachment(
         }
     }
     let tx = conn.transaction().await?;
-    // `uploaded_by` is the FIRST registrant (the INSERT is `OR IGNORE`, so a
-    // later uploader of byte-identical content does not take over an owned row).
-    // That is the right reading of "who put these bytes in the bucket": the
-    // second uploader's client never PUT anything, because the dedup probe told
-    // it to skip the upload. NULL on the no-auth path, which is the same
-    // "unknown, therefore unprivileged" value migration 000031 leaves on legacy
-    // rows.
+    // No uploader is recorded. The object's lifetime is decided entirely by
+    // whether a live message still references it, never by who put the bytes
+    // there, so an uploader column would be an at-rest identity linkage with no
+    // consumer — `attachment_object.uploaded_by` is dead (migration 000032).
     tx.execute(
-        "INSERT OR IGNORE INTO attachment_object (content_hash, r2_key, uploaded_by) \
-         VALUES (?1, ?2, ?3)",
-        libsql::params![
-            body.content_hash().to_string(),
-            body.r2_key().to_string(),
-            authed.map(|a| a.to_string()),
-        ],
+        "INSERT OR IGNORE INTO attachment_object (content_hash, r2_key) VALUES (?1, ?2)",
+        libsql::params![body.content_hash().to_string(), body.r2_key().to_string()],
     )
     .await?;
     // The reference row exists only on the send path, which is now a distinct
@@ -2121,18 +2079,13 @@ pub async fn apply_register_attachment(
     // message but recorded no reference to it" is not a state a caller can
     // construct.
     if let Some(message_id) = body.message_id() {
-        // `registered_by` is the verified actor, which the gate above has
-        // already proved equal to the envelope's `sender_id`. It is recorded
-        // rather than joined for because GC removes the envelope the join would
-        // need, and the delete gate has to keep answering afterwards.
+        // No registrar is recorded either. Every predicate counts references,
+        // not registrars: one live reference blocks collection for everybody,
+        // so there is no question whose answer depends on who declared it —
+        // `attachment_ref.registered_by` is dead (migration 000032).
         tx.execute(
-            "INSERT OR IGNORE INTO attachment_ref (content_hash, message_id, registered_by) \
-             VALUES (?1, ?2, ?3)",
-            libsql::params![
-                body.content_hash().to_string(),
-                message_id.to_string(),
-                authed.map(|a| a.to_string()),
-            ],
+            "INSERT OR IGNORE INTO attachment_ref (content_hash, message_id) VALUES (?1, ?2)",
+            libsql::params![body.content_hash().to_string(), message_id.to_string()],
         )
         .await?;
     }
@@ -2140,11 +2093,10 @@ pub async fn apply_register_attachment(
     Ok(WriteOutcome::Ok)
 }
 
-/// COLLECT the shared `attachment_object` row once no LIVE reference the caller
-/// must respect remains (#690, resolving the second `TODO(#419)`). Authz: any
-/// authenticated user — deliberately, because for anyone but the object's own
-/// uploader this endpoint performs no destructive act that the reference count
-/// did not already permit.
+/// COLLECT the shared `attachment_object` row once NO live reference remains
+/// (#690, resolving the second `TODO(#419)`). Authz: any authenticated user —
+/// deliberately, because this endpoint performs no destructive act that the
+/// reference count did not already permit, for any caller.
 ///
 /// It does NOT release a reference. Releasing is not an action of this endpoint
 /// (Blocking 1): a reference is released only by deleting the message envelope
@@ -2158,23 +2110,25 @@ pub async fn apply_register_attachment(
 /// message_id)` here, which is exactly the deliberate-strand path this revision
 /// closes.
 ///
-/// The collect is a SINGLE conditional `DELETE`: the object goes iff no
-/// reference the ACTOR must respect remains for the hash. One predicate, no
-/// Rust-side count, so the row cannot be removed while a reference that binds
-/// this actor survives even under concurrent deletes (CLAUDE.md "invalid states
-/// unrepresentable").
+/// The collect is a SINGLE conditional `DELETE`: the object goes iff no live
+/// reference remains for the hash, for ANY caller. One predicate, no Rust-side
+/// count and no identity in it, so the row cannot be removed while a
+/// referencing envelope survives even under concurrent deletes (CLAUDE.md
+/// "invalid states unrepresentable"). Collecting the row also clears the
+/// declarations naming it — see [`clear_declarations`] — as those now point at
+/// bytes the service does not hold.
 ///
-/// Which predicate binds this actor is [`object_delete_is_blocked`]: for anyone
-/// but the object's recorded uploader it is the unchanged "no live reference at
-/// all"; for the uploader it excludes other accounts' references, so a recipient
-/// cannot veto the removal of somebody else's upload (#1161 M5). Collecting the
-/// row also clears the declarations naming it — see [`clear_declarations`] — as
-/// those now point at bytes the service does not hold.
+/// Migration 000031 carved out an exemption here: the recorded uploader could
+/// collect an object other accounts' live messages still referenced. That was
+/// wrong. One blob backs every copy of the same bytes, so "the uploader wins"
+/// means one user deleting their file silently breaks another user's message —
+/// a storage optimisation leaking onto users. The exemption is removed and the
+/// derived count is the whole rule again.
 ///
 /// The R2 object is gated separately and by the SAME evidence: `/v1/r2/presign`
-/// refuses to mint a `delete` while [`object_delete_is_blocked`] holds for the
-/// same actor (`broker.rs`). Turso row and R2 blob are collected together, by
-/// one rule, so neither can outlive the other.
+/// refuses to mint a `delete` while [`object_is_referenced`] holds
+/// (`broker.rs`). Turso row and R2 blob are collected by one predicate, so
+/// neither can outlive the other and the two cannot disagree.
 ///
 /// Legacy / pre-#690 rows and messageless hashes have no live reference, so the
 /// predicate treats them as collectable — today's behaviour, no worse. Any send
@@ -2182,7 +2136,7 @@ pub async fn apply_register_attachment(
 /// promotes it to counted protection.
 pub async fn apply_delete_attachment(
     conn: &Connection,
-    authed: Option<&str>,
+    _authed: Option<&str>,
     body: &AttachmentDeleteBody,
 ) -> anyhow::Result<WriteOutcome> {
     // Collect only. No unconditional `attachment_ref` mutation — release happens
@@ -2191,29 +2145,17 @@ pub async fn apply_delete_attachment(
     // the object row is gone, every declaration naming it points at bytes the
     // service no longer holds.
     //
-    // Either way the collect stays a SINGLE conditional `DELETE` — the row goes
-    // iff the predicate that governs THIS actor holds, evaluated by SQLite in
-    // the same statement, so a concurrent reference cannot slip in between the
-    // test and the removal. The uploader's form additionally re-asserts
-    // `uploaded_by = ?2` in the statement, so a change of ownership under the
-    // read below can only make it collect nothing.
-    let uploader = uploaded_by(conn, &body.content_hash).await?;
-    let collected = match (authed, uploader.as_deref()) {
-        (Some(actor), Some(owner)) if actor == owner => {
-            conn.execute(
-                COLLECT_OWN_OBJECT_SQL,
-                libsql::params![body.content_hash.clone(), actor.to_string()],
-            )
-            .await?
-        }
-        _ => {
-            conn.execute(
-                COLLECT_UNREFERENCED_OBJECT_SQL,
-                libsql::params![body.content_hash.clone()],
-            )
-            .await?
-        }
-    };
+    // The collect is a SINGLE conditional `DELETE` — the row goes iff no live
+    // reference remains, evaluated by SQLite in the same statement, so a
+    // concurrent reference cannot slip in between the test and the removal. The
+    // actor is not part of the predicate: no account, uploader included, may
+    // reach past a reference another account's live message holds.
+    let collected = conn
+        .execute(
+            COLLECT_UNREFERENCED_OBJECT_SQL,
+            libsql::params![body.content_hash.clone()],
+        )
+        .await?;
     if collected > 0 {
         clear_declarations(conn, &body.content_hash).await?;
     }
@@ -2239,77 +2181,6 @@ async fn clear_declarations(conn: &Connection, content_hash: &str) -> anyhow::Re
     )
     .await?;
     Ok(())
-}
-
-/// The account that first registered the object behind `content_hash`, if the
-/// row records one. `None` for a row written before migration 000031, and for
-/// one registered on the no-auth (harness/dev) path.
-async fn uploaded_by(conn: &Connection, content_hash: &str) -> anyhow::Result<Option<String>> {
-    let mut rows = conn
-        .query(
-            "SELECT uploaded_by FROM attachment_object WHERE content_hash = ?1 LIMIT 1",
-            libsql::params![content_hash.to_string()],
-        )
-        .await?;
-    Ok(match rows.next().await? {
-        Some(row) => row.get::<Option<String>>(0)?,
-        None => None,
-    })
-}
-
-/// THE delete decision for the convergent object behind `content_hash` (#1161
-/// M5) — read by [`apply_delete_attachment`] for the Turso row and by
-/// `/v1/r2/presign` for the R2 blob, so the two cannot disagree about whether
-/// those bytes may go.
-///
-/// Two rules, and which one applies turns on the identity migration 000031 now
-/// records:
-///
-///   * **The recorded uploader** is blocked only by a live reference of their
-///     OWN (or an unattributed legacy one) — [`live_own_ref_exists`]. Another
-///     account's declaration does not stand between them and the removal of
-///     their own upload. Before this, it did, permanently and by design: the
-///     gate asked "is this referenced" with no notion of by whom, so a single
-///     member who had legitimately received the file could pin it from a message
-///     they never delete and the uploader's hard delete 403'd forever. A
-///     promise of deletion that any recipient can veto is not one.
-///   * **Everyone else** — a non-uploader, an object with no recorded uploader
-///     (legacy or no-auth), or the no-auth path itself — keeps exactly today's
-///     rule: blocked while ANY live reference remains. This is not a weakening
-///     anywhere; it is the pre-existing predicate, unchanged.
-///
-/// The cost of the first rule, stated plainly: when the uploader destroys the
-/// bytes, an account that had independently sent the SAME file — deduped onto
-/// this one object, because that is what convergent encryption does — loses the
-/// attachment on their message too. That is inherent to one blob backing every
-/// copy; the only two possible answers are "the uploader may delete" and "the
-/// uploader may be vetoed", and the second is the finding. Collection is
-/// deliberately NOT moved onto this rule: [`object_is_referenced`] still counts
-/// every live reference, so nothing is collected out from under a second sender
-/// by the sweep, by a stranger's `/v1/attachments/delete`, or by the
-/// PUT-substitution gate. Only the uploader, acting deliberately on their own
-/// object, can reach past another reference.
-pub async fn object_delete_is_blocked(
-    conn: &Connection,
-    content_hash: &str,
-    actor: Option<&str>,
-) -> anyhow::Result<bool> {
-    let uploader = uploaded_by(conn, content_hash).await?;
-    match (actor, uploader.as_deref()) {
-        (Some(actor), Some(uploader)) if actor == uploader => {
-            let mut rows = conn
-                .query(
-                    OBJECT_IS_REFERENCED_BY_UPLOADER_SQL,
-                    libsql::params![content_hash.to_string(), actor.to_string()],
-                )
-                .await?;
-            Ok(match rows.next().await? {
-                Some(row) => row.get::<i64>(0)? != 0,
-                None => false,
-            })
-        }
-        _ => object_is_referenced(conn, content_hash).await,
-    }
 }
 
 /// True when at least one STILL-EXISTING message references the convergent
