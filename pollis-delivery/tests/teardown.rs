@@ -470,6 +470,72 @@ async fn account_deletion_tears_down_a_dm_it_empties() {
     assert_eq!(count(&c, "dm_channel_member").await, 0);
 }
 
+/// **L3 — two doors into one state.** `/v1/dm/leave` tore an emptied DM down;
+/// `/v1/dm/members/remove` did not, and it is reachable for the same act (a
+/// member removing THEMSELVES). So leaving a DM through the second door left an
+/// orphan `dm_channel` full of ciphertext and — because the `conversation`
+/// registry is append-only on purpose — the conversation id claimed forever by a
+/// conversation nobody is in.
+#[tokio::test]
+async fn self_removal_tears_down_a_dm_it_empties() {
+    let c = conn().await;
+    seed_user(&c, "victim", "bystander", true).await;
+
+    let (outcome, torn_down) = pollis_delivery::profile::apply_remove_dm_member(
+        &c,
+        Some("victim"),
+        &pollis_api::profile::RemoveDmMemberBody {
+            dm_channel_id: "victim_dm".into(),
+            user_id: "victim".into(),
+            requester_id: "victim".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(matches!(outcome, WriteOutcome::Ok));
+    assert!(torn_down, "the last member left, so the DM is gone");
+
+    assert_eq!(
+        count_where(&c, "dm_channel", "id", "victim_dm").await,
+        0,
+        "the emptied DM must not survive a self-removal"
+    );
+    assert_eq!(
+        count_where(&c, "dm_channel_member", "dm_channel_id", "victim_dm").await,
+        0
+    );
+}
+
+/// The other half: a DM that still has somebody in it is NOT torn down. Without
+/// this the check above would pass just as well if the endpoint deleted every
+/// DM it touched.
+#[tokio::test]
+async fn self_removal_leaves_a_dm_that_still_has_members() {
+    let c = conn().await;
+    seed_user(&c, "victim", "bystander", false).await;
+
+    let (outcome, torn_down) = pollis_delivery::profile::apply_remove_dm_member(
+        &c,
+        Some("victim"),
+        &pollis_api::profile::RemoveDmMemberBody {
+            dm_channel_id: "victim_dm".into(),
+            user_id: "victim".into(),
+            requester_id: "victim".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(matches!(outcome, WriteOutcome::Ok));
+    assert!(!torn_down);
+
+    assert_eq!(count_where(&c, "dm_channel", "id", "victim_dm").await, 1);
+    assert_eq!(
+        count_where(&c, "dm_channel_member", "user_id", "bystander").await,
+        1,
+        "the remaining member keeps their seat"
+    );
+}
+
 /// Identity reset sheds membership and devices but is NOT deletion — the account
 /// and its own records stay.
 #[tokio::test]

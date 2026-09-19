@@ -944,6 +944,12 @@ pub async fn apply_edit_message(
     {
         return Ok(WriteOutcome::Forbidden);
     }
+    // Read the capability the new edit will carry BEFORE the transaction opens.
+    // The DELETE below removes the edit this one replaces, and the fallback path
+    // reads that very row — on the same connection, so it would see the deleted
+    // state and inherit NULL.
+    let inherited_capability =
+        edit_capability_hash(conn, &body.conversation_id, &body.target_message_id).await?;
     let tx = conn.transaction().await?;
     tx.execute(
         "DELETE FROM message_envelope \
@@ -964,9 +970,7 @@ pub async fn apply_edit_message(
             body.target_message_id.clone().into(),
             // The edit envelope inherits the TARGET's capability, so the next
             // edit (or a delete) can replace it with the same proof.
-            edit_capability_hash(conn, &body.conversation_id, &body.target_message_id)
-                .await?
-                .into(),
+            inherited_capability.into(),
         ],
     )
     .await?;
@@ -1040,10 +1044,24 @@ pub(crate) async fn check_delete_capability(
     // TEXT, not BLOB: the value travels as base64 and is stored verbatim, so it
     // is a string all the way down. Reading it as bytes panics inside libsql.
     let stored: Option<String> = match rows.next().await? {
-        // A row with no hash: the legacy path. A row that does not exist at all:
-        // the delete is a no-op, so there is nothing to refuse.
+        // A row with no hash: the legacy path.
         Some(row) => row.get::<Option<String>>(0).ok().flatten(),
-        None => return Ok(DeleteCapability::NotRequired),
+        // The target row is GONE — but a delete/edit of it also removes the
+        // PENDING EDIT that names it, and that envelope outlives its target
+        // (envelope GC collects each row on its own watermark, and an edit is
+        // written later than what it edits, so the original goes first). With no
+        // row to read a hash from this used to answer `NotRequired`, and any
+        // member could then drop another author's pending edit uncontested — the
+        // exact loss #1086 exists to prevent, just with an extra step (L3).
+        //
+        // The edit INHERITED the target's capability precisely so it could stand
+        // in for it, so read it from there instead. `None` (no edit either, or a
+        // legacy edit carrying no hash) is still `NotRequired`: there is then
+        // nothing to remove, or nothing to prove.
+        None => {
+            drop(rows);
+            pending_edit_capability_hash(conn, conversation_id, message_id).await?
+        }
     };
     let Some(stored) = stored else {
         return Ok(DeleteCapability::NotRequired);
@@ -1066,12 +1084,40 @@ pub(crate) async fn check_delete_capability(
     }
 }
 
+/// The capability hash carried by the PENDING EDIT of `message_id`, if there is
+/// one.
+///
+/// The edit inherited the target's hash when it was written, so once the target
+/// itself is collected this is the last copy of the capability that guards both.
+async fn pending_edit_capability_hash(
+    conn: &Connection,
+    conversation_id: &str,
+    message_id: &str,
+) -> anyhow::Result<Option<String>> {
+    let mut rows = conn
+        .query(
+            "SELECT delete_token_hash FROM message_envelope \
+             WHERE conversation_id = ?1 AND target_message_id = ?2 AND type = 'edit' \
+             LIMIT 1",
+            libsql::params![conversation_id.to_string(), message_id.to_string()],
+        )
+        .await?;
+    Ok(match rows.next().await? {
+        Some(row) => row.get::<Option<String>>(0).ok().flatten(),
+        None => None,
+    })
+}
+
 /// The capability hash stored on `message_id`, for an edit envelope to inherit.
 ///
 /// An edit is a replaceable envelope: the next edit deletes it. Copying the
 /// TARGET's hash onto it means that next edit proves the same thing — authorship
 /// of the original — rather than needing a capability of the edit's own, which
 /// the DS could not check against anything.
+///
+/// Falls back to the capability already carried by the edit this one REPLACES.
+/// Otherwise an edit written after the original was collected would inherit
+/// `NULL` and hand the whole chain back to the legacy no-capability path (L3).
 async fn edit_capability_hash(
     conn: &Connection,
     conversation_id: &str,
@@ -1084,10 +1130,15 @@ async fn edit_capability_hash(
             libsql::params![message_id.to_string(), conversation_id.to_string()],
         )
         .await?;
-    Ok(match rows.next().await? {
+    let from_target = match rows.next().await? {
         Some(row) => row.get::<Option<String>>(0).ok().flatten(),
         None => None,
-    })
+    };
+    drop(rows);
+    match from_target {
+        Some(h) => Ok(Some(h)),
+        None => pending_edit_capability_hash(conn, conversation_id, message_id).await,
+    }
 }
 
 /// Take the next delivery sequence for `conversation_id` (#1087).
@@ -1329,10 +1380,57 @@ pub async fn remove_reaction(
     outcome_response::<RemoveReaction>(apply_remove_reaction(&conn, authed.as_deref(), &parsed.0).await?)
 }
 
-/// A reaction is membership-gated through the reacted-to message's envelope.
-/// When the envelope has aged out we cannot resolve the conversation, so we
-/// allow the write (it is already scoped to the actor's own `user_id`) —
-/// reacting to a still-locally-visible but GC'd message must keep working.
+/// Resolve the conversation a reaction is to be gated against, and refuse if it
+/// cannot be established (#1161).
+///
+/// Reactions are membership-gated through the reacted-to message's envelope.
+/// That was the whole gate, and it had a hole the size of the feature: envelope
+/// GC (#689) collects a row as soon as every member device has fetched it, so
+/// for anything but a very recent message `conversation_for_message` answers
+/// `None` — and the gate was SKIPPED in exactly that case. Any authenticated
+/// account that knew a message id could write a `message_reaction` row against
+/// it. The skip was not careless; refusing outright would break reacting to an
+/// older message, which is an ordinary thing to do, and there was nothing else
+/// to check against.
+///
+/// There is now: `ReactionBody.conversation_id`, which the client fills from its
+/// own decrypted local copy of the message. So:
+///
+///   * envelope present → its `conversation_id` is authoritative, and a body
+///     that declares a DIFFERENT one is a lie, refused rather than ignored (it
+///     would otherwise ask the membership question about a conversation the
+///     actor is in, on behalf of a message in one they are not);
+///   * envelope gone, body declares one → gate on that;
+///   * neither → refuse. Treating a missing declaration as "unknown, therefore
+///     allowed" would close nothing at all, since the attacker composes the body
+///     and would simply omit the field. A client that predates the field loses
+///     the ability to react to messages whose envelope has been collected, and
+///     gets a 403 rather than a silent no-op; that is the fail-closed direction.
+///
+/// `is_member`, not the wider `in_desired_roster` that #1161 put on the Welcome
+/// and KeyPackage gates. That widening exists for the invite handshake — an
+/// invitee's devices are Welcomed BEFORE they accept, so those two gates have to
+/// count pending invitees or the shipped invite flow refuses itself. A reaction
+/// has no such pre-acceptance step: it is ordinary in-conversation activity, and
+/// the envelope-present path has always used `is_member`. Using the wider
+/// predicate here would loosen an existing gate rather than repair a missing
+/// one.
+async fn reaction_conversation(
+    conn: &Connection,
+    body: &ReactionBody,
+) -> anyhow::Result<Option<String>> {
+    match conversation_for_message(conn, &body.message_id).await? {
+        Some(envelope_conv) => match body.conversation_id.as_deref() {
+            Some(declared) if declared != envelope_conv => Ok(None),
+            _ => Ok(Some(envelope_conv)),
+        },
+        None => Ok(body.conversation_id.clone().filter(|c| !c.is_empty())),
+    }
+}
+
+/// A reaction is membership-gated against [`reaction_conversation`] — the
+/// envelope's conversation when the envelope survives, the body's declared one
+/// when GC has collected it, and a refusal when neither is available.
 pub async fn apply_add_reaction(
     conn: &Connection,
     authed: Option<&str>,
@@ -1343,10 +1441,11 @@ pub async fn apply_add_reaction(
         Err(o) => return Ok(o),
     };
     if authed.is_some() {
-        if let Some(conv) = conversation_for_message(conn, &body.message_id).await? {
-            if !is_member(conn, &conv, &user).await? {
-                return Ok(WriteOutcome::Forbidden);
-            }
+        let Some(conv) = reaction_conversation(conn, body).await? else {
+            return Ok(WriteOutcome::Forbidden);
+        };
+        if !is_member(conn, &conv, &user).await? {
+            return Ok(WriteOutcome::Forbidden);
         }
     }
     let id = Ulid::new().to_string();
@@ -1372,8 +1471,16 @@ pub async fn apply_remove_reaction(
     // A user may only ever remove their OWN reaction — the DELETE is scoped to
     // `user_id = :user`, so even without a membership lookup it cannot touch
     // anyone else's row. We still membership-gate when determinable.
+    //
+    // Unlike the add path (#1161) this one does NOT fail closed on an
+    // unresolvable conversation. The add gate had to, because it WRITES a row
+    // and the skip was what let a non-member write one; removal can only ever
+    // unwrite a row the actor already got past the add gate to create, so an
+    // unresolvable conversation grants nothing here. Refusing would instead
+    // strand an un-react on a message whose envelope has been collected and
+    // whose local copy this device has since evicted.
     if authed.is_some() {
-        if let Some(conv) = conversation_for_message(conn, &body.message_id).await? {
+        if let Some(conv) = reaction_conversation(conn, body).await? {
             if !is_member(conn, &conv, &user).await? {
                 return Ok(WriteOutcome::Forbidden);
             }
@@ -1819,9 +1926,42 @@ macro_rules! live_ref_exists {
     };
 }
 
+/// The half of [`live_ref_exists`] that the OBJECT'S OWN UPLOADER has to
+/// respect (#1161 M5): a live reference they declared themselves, a live vault
+/// entry of theirs, or any reference whose declarer is not recorded.
+///
+/// `?1` is the content hash, `?2` the uploader.
+///
+/// Every other account's reference is deliberately absent. It still pins the
+/// object against COLLECTION — [`live_ref_exists`] is unchanged and is what
+/// `apply_delete_attachment` and the PUT-substitution gate read — but it does
+/// not stand between the uploader and the removal of their own upload. The two
+/// questions had been conflated into one predicate, and conflating them is what
+/// let any account that had ever seen a file deny the uploader its deletion for
+/// as long as they cared to keep one message alive.
+///
+/// NULL `registered_by` counts as the uploader's. Rows written before migration
+/// 000031 carry no attribution and could equally be the uploader's own, so an
+/// unattributed row blocks — the legacy corpus keeps exactly today's behaviour
+/// instead of being silently reclassified as somebody else's.
+macro_rules! live_own_ref_exists {
+    () => {
+        "(EXISTS (SELECT 1 FROM attachment_ref ar \
+                  JOIN message_envelope me ON me.id = ar.message_id \
+                  WHERE ar.content_hash = ?1 \
+                    AND (ar.registered_by IS NULL OR ar.registered_by = ?2)) \
+          OR EXISTS (SELECT 1 FROM vault_attachment_ref var \
+                     JOIN vault_message vm ON vm.id = var.vault_message_id \
+                     WHERE var.content_hash = ?1 AND vm.user_id = ?2))"
+    };
+}
+
 /// `SELECT` form of [`live_ref_exists`] — yields a single `0`/`1` row for
 /// [`object_is_referenced`].
 const OBJECT_IS_REFERENCED_SQL: &str = concat!("SELECT ", live_ref_exists!());
+
+/// `SELECT` form of [`live_own_ref_exists`].
+const OBJECT_IS_REFERENCED_BY_UPLOADER_SQL: &str = concat!("SELECT ", live_own_ref_exists!());
 
 /// Collect the shared dedup row iff NO live reference remains. One predicate, no
 /// Rust-side count — the row cannot go while a referencing envelope survives even
@@ -1829,6 +1969,15 @@ const OBJECT_IS_REFERENCED_SQL: &str = concat!("SELECT ", live_ref_exists!());
 const COLLECT_UNREFERENCED_OBJECT_SQL: &str = concat!(
     "DELETE FROM attachment_object WHERE content_hash = ?1 AND NOT ",
     live_ref_exists!()
+);
+
+/// The recorded uploader's form of [`COLLECT_UNREFERENCED_OBJECT_SQL`] (#1161
+/// M5): blocked by the uploader's own live references and by unattributed
+/// legacy ones, not by another account's. `uploaded_by = ?2` is re-asserted in
+/// the statement so the caller's ownership read cannot be raced.
+const COLLECT_OWN_OBJECT_SQL: &str = concat!(
+    "DELETE FROM attachment_object WHERE content_hash = ?1 AND uploaded_by = ?2 AND NOT ",
+    live_own_ref_exists!()
 );
 
 /// Reap declaration rows whose message envelope is gone (GC'd, deleted, aged out,
@@ -1847,6 +1996,26 @@ DELETE FROM attachment_ref \
 const REAP_ORPHANED_VAULT_REFS_SQL: &str = "\
 DELETE FROM vault_attachment_ref \
  WHERE NOT EXISTS (SELECT 1 FROM vault_message vm WHERE vm.id = vault_attachment_ref.vault_message_id)";
+
+/// True when `message_id` names a STILL-EXISTING envelope authored by `user_id`.
+///
+/// Both halves matter. Existence alone was the pre-#690 story and is what made a
+/// forged reference merely inert rather than refused; authorship is what binds
+/// the declaration to an account. A deleted or GC'd envelope answers `false`,
+/// which is correct — there is no message left to declare an attachment for.
+async fn envelope_is_authored_by(
+    conn: &Connection,
+    message_id: &str,
+    user_id: &str,
+) -> anyhow::Result<bool> {
+    let mut rows = conn
+        .query(
+            "SELECT 1 FROM message_envelope WHERE id = ?1 AND sender_id = ?2 LIMIT 1",
+            libsql::params![message_id.to_string(), user_id.to_string()],
+        )
+        .await?;
+    Ok(rows.next().await?.is_some())
+}
 
 pub async fn register_attachment(
     State(state): State<AppState>,
@@ -1874,17 +2043,41 @@ pub async fn delete_attachment(
 
 /// Register a convergent-encryption dedup row (`content_hash → r2_key`) and,
 /// when a `message_id` is supplied, a `(content_hash, message_id)` REFERENCE
-/// declaration (#690). Authz: any authenticated user. There is no conversation
-/// context at upload time — the row is content-addressed and identical for every
-/// uploader — so there is nothing finer to gate on. The signature still proves a
-/// real device, which is all the no-token model can assert here.
+/// declaration (#690).
 ///
-/// A forged register is inert, not merely fail-safe: the declaration only counts
-/// while a `message_envelope` with that id exists (see [`live_ref_exists`]), and
-/// a member does not control whether a given id names a live envelope. Forging a
-/// reference for a `message_id` it does not own therefore adds a row that never
-/// counts (reaped by [`sweep_envelope_gc`]); it cannot even over-retain, let
-/// alone release someone else's reference.
+/// ## Authz
+///
+/// The OBJECT row is content-addressed and identical for every uploader, so any
+/// authenticated device may register one; there is no conversation context at
+/// upload time and nothing finer to gate on.
+///
+/// The REFERENCE row is different, and used to be ungated — the handler took
+/// `_authed` and discarded it. A reference pins a shared R2 blob against
+/// collection (see [`live_ref_exists`]) and, through `/v1/r2/presign`'s delete
+/// gate, decides whether the UPLOADER may hard-delete their own bytes. So a
+/// reference is now bound to the account that owns the message it names: the
+/// actor must be the `message_envelope.sender_id` of `message_id`. Declaring
+/// "this file belongs to somebody else's message" is not a claim any account
+/// other than that message's author can make.
+///
+/// The old defence was that a forged reference is *inert* — it counts only while
+/// an envelope with that id exists, and the forger does not control that. True
+/// for an id they do not own; useless for an id they do, which is the shape the
+/// attack actually takes. Binding the declaration is what removes the class:
+/// afterwards every `attachment_ref` row joined to a live envelope was written
+/// by that envelope's own author, so the liveness predicate can no longer be
+/// satisfied by an unrelated account's forgery.
+///
+/// A member of a conversation can still pin a hash they legitimately received
+/// onto their OWN live message, and that is indistinguishable server-side from
+/// an honest re-send — so it is not refused. What migration 000031 changes is
+/// what such a pin can DO: `uploaded_by` and `registered_by` are recorded here,
+/// and [`object_delete_is_blocked`] reads them, so the pin keeps the object from
+/// being collected (correct — somebody's message carries it) without being able
+/// to veto the uploader's deletion of their own upload (#1161 M5).
+///
+/// Skipped when `authed` is `None`: the no-auth (harness/dev) path has no actor
+/// to bind to, exactly as the membership gates elsewhere in this module are.
 ///
 /// The object INSERT stays `OR IGNORE` (the row is convergent — identical for
 /// every uploader). The reference INSERT is likewise `OR IGNORE`: the PK
@@ -1894,13 +2087,33 @@ pub async fn delete_attachment(
 /// carries it, and the count must track messages, not uploads.
 pub async fn apply_register_attachment(
     conn: &Connection,
-    _authed: Option<&str>,
+    authed: Option<&str>,
     body: &AttachmentRegisterBody,
 ) -> anyhow::Result<WriteOutcome> {
+    // Decided BEFORE the transaction opens, so a refused registration writes
+    // nothing at all — not even the (harmless) object row, which would otherwise
+    // let a refused caller confirm the shape of the refusal.
+    if let (Some(actor), Some(message_id)) = (authed, body.message_id()) {
+        if !envelope_is_authored_by(conn, message_id, actor).await? {
+            return Ok(WriteOutcome::Forbidden);
+        }
+    }
     let tx = conn.transaction().await?;
+    // `uploaded_by` is the FIRST registrant (the INSERT is `OR IGNORE`, so a
+    // later uploader of byte-identical content does not take over an owned row).
+    // That is the right reading of "who put these bytes in the bucket": the
+    // second uploader's client never PUT anything, because the dedup probe told
+    // it to skip the upload. NULL on the no-auth path, which is the same
+    // "unknown, therefore unprivileged" value migration 000031 leaves on legacy
+    // rows.
     tx.execute(
-        "INSERT OR IGNORE INTO attachment_object (content_hash, r2_key) VALUES (?1, ?2)",
-        libsql::params![body.content_hash().to_string(), body.r2_key().to_string()],
+        "INSERT OR IGNORE INTO attachment_object (content_hash, r2_key, uploaded_by) \
+         VALUES (?1, ?2, ?3)",
+        libsql::params![
+            body.content_hash().to_string(),
+            body.r2_key().to_string(),
+            authed.map(|a| a.to_string()),
+        ],
     )
     .await?;
     // The reference row exists only on the send path, which is now a distinct
@@ -1908,9 +2121,18 @@ pub async fn apply_register_attachment(
     // message but recorded no reference to it" is not a state a caller can
     // construct.
     if let Some(message_id) = body.message_id() {
+        // `registered_by` is the verified actor, which the gate above has
+        // already proved equal to the envelope's `sender_id`. It is recorded
+        // rather than joined for because GC removes the envelope the join would
+        // need, and the delete gate has to keep answering afterwards.
         tx.execute(
-            "INSERT OR IGNORE INTO attachment_ref (content_hash, message_id) VALUES (?1, ?2)",
-            libsql::params![body.content_hash().to_string(), message_id.to_string()],
+            "INSERT OR IGNORE INTO attachment_ref (content_hash, message_id, registered_by) \
+             VALUES (?1, ?2, ?3)",
+            libsql::params![
+                body.content_hash().to_string(),
+                message_id.to_string(),
+                authed.map(|a| a.to_string()),
+            ],
         )
         .await?;
     }
@@ -1918,9 +2140,11 @@ pub async fn apply_register_attachment(
     Ok(WriteOutcome::Ok)
 }
 
-/// COLLECT the shared `attachment_object` row once no LIVE reference remains
-/// (#690, resolving the second `TODO(#419)`). Authz: any authenticated user —
-/// deliberately, because this endpoint no longer performs the destructive act.
+/// COLLECT the shared `attachment_object` row once no LIVE reference the caller
+/// must respect remains (#690, resolving the second `TODO(#419)`). Authz: any
+/// authenticated user — deliberately, because for anyone but the object's own
+/// uploader this endpoint performs no destructive act that the reference count
+/// did not already permit.
 ///
 /// It does NOT release a reference. Releasing is not an action of this endpoint
 /// (Blocking 1): a reference is released only by deleting the message envelope
@@ -1935,15 +2159,22 @@ pub async fn apply_register_attachment(
 /// closes.
 ///
 /// The collect is a SINGLE conditional `DELETE`: the object goes iff no
-/// `attachment_ref ⋈ message_envelope` row remains for the hash. One predicate,
-/// no Rust-side count, so the row cannot be removed while a referencing envelope
-/// survives even under concurrent deletes (CLAUDE.md "invalid states
+/// reference the ACTOR must respect remains for the hash. One predicate, no
+/// Rust-side count, so the row cannot be removed while a reference that binds
+/// this actor survives even under concurrent deletes (CLAUDE.md "invalid states
 /// unrepresentable").
 ///
+/// Which predicate binds this actor is [`object_delete_is_blocked`]: for anyone
+/// but the object's recorded uploader it is the unchanged "no live reference at
+/// all"; for the uploader it excludes other accounts' references, so a recipient
+/// cannot veto the removal of somebody else's upload (#1161 M5). Collecting the
+/// row also clears the declarations naming it — see [`clear_declarations`] — as
+/// those now point at bytes the service does not hold.
+///
 /// The R2 object is gated separately and by the SAME evidence: `/v1/r2/presign`
-/// refuses to mint a `delete` while [`object_is_referenced`] holds (`broker.rs`).
-/// Turso row and R2 blob are collected together, only once the last live
-/// reference is gone.
+/// refuses to mint a `delete` while [`object_delete_is_blocked`] holds for the
+/// same actor (`broker.rs`). Turso row and R2 blob are collected together, by
+/// one rule, so neither can outlive the other.
 ///
 /// Legacy / pre-#690 rows and messageless hashes have no live reference, so the
 /// predicate treats them as collectable — today's behaviour, no worse. Any send
@@ -1951,17 +2182,134 @@ pub async fn apply_register_attachment(
 /// promotes it to counted protection.
 pub async fn apply_delete_attachment(
     conn: &Connection,
-    _authed: Option<&str>,
+    authed: Option<&str>,
     body: &AttachmentDeleteBody,
 ) -> anyhow::Result<WriteOutcome> {
-    // Collect only. No `attachment_ref` mutation — release happens when the
-    // envelope is deleted (authorized), not here.
+    // Collect only. No unconditional `attachment_ref` mutation — release happens
+    // when the envelope is deleted (authorized), not here. The one exception is
+    // below, and it is a consequence of the collect rather than a release: once
+    // the object row is gone, every declaration naming it points at bytes the
+    // service no longer holds.
+    //
+    // Either way the collect stays a SINGLE conditional `DELETE` — the row goes
+    // iff the predicate that governs THIS actor holds, evaluated by SQLite in
+    // the same statement, so a concurrent reference cannot slip in between the
+    // test and the removal. The uploader's form additionally re-asserts
+    // `uploaded_by = ?2` in the statement, so a change of ownership under the
+    // read below can only make it collect nothing.
+    let uploader = uploaded_by(conn, &body.content_hash).await?;
+    let collected = match (authed, uploader.as_deref()) {
+        (Some(actor), Some(owner)) if actor == owner => {
+            conn.execute(
+                COLLECT_OWN_OBJECT_SQL,
+                libsql::params![body.content_hash.clone(), actor.to_string()],
+            )
+            .await?
+        }
+        _ => {
+            conn.execute(
+                COLLECT_UNREFERENCED_OBJECT_SQL,
+                libsql::params![body.content_hash.clone()],
+            )
+            .await?
+        }
+    };
+    if collected > 0 {
+        clear_declarations(conn, &body.content_hash).await?;
+    }
+    Ok(WriteOutcome::Ok)
+}
+
+/// Drop every declaration naming `content_hash`, message-side and vault-side.
+///
+/// Called only after the `attachment_object` row is actually collected. A
+/// declaration for an object the service no longer stores is not a reference to
+/// anything: leaving it would make [`object_is_referenced`] keep answering
+/// `true` for bytes that are gone, which pins nothing but does refuse the
+/// content-addressed PUT that would restore them.
+async fn clear_declarations(conn: &Connection, content_hash: &str) -> anyhow::Result<()> {
     conn.execute(
-        COLLECT_UNREFERENCED_OBJECT_SQL,
-        libsql::params![body.content_hash.clone()],
+        "DELETE FROM attachment_ref WHERE content_hash = ?1",
+        libsql::params![content_hash.to_string()],
     )
     .await?;
-    Ok(WriteOutcome::Ok)
+    conn.execute(
+        "DELETE FROM vault_attachment_ref WHERE content_hash = ?1",
+        libsql::params![content_hash.to_string()],
+    )
+    .await?;
+    Ok(())
+}
+
+/// The account that first registered the object behind `content_hash`, if the
+/// row records one. `None` for a row written before migration 000031, and for
+/// one registered on the no-auth (harness/dev) path.
+async fn uploaded_by(conn: &Connection, content_hash: &str) -> anyhow::Result<Option<String>> {
+    let mut rows = conn
+        .query(
+            "SELECT uploaded_by FROM attachment_object WHERE content_hash = ?1 LIMIT 1",
+            libsql::params![content_hash.to_string()],
+        )
+        .await?;
+    Ok(match rows.next().await? {
+        Some(row) => row.get::<Option<String>>(0)?,
+        None => None,
+    })
+}
+
+/// THE delete decision for the convergent object behind `content_hash` (#1161
+/// M5) — read by [`apply_delete_attachment`] for the Turso row and by
+/// `/v1/r2/presign` for the R2 blob, so the two cannot disagree about whether
+/// those bytes may go.
+///
+/// Two rules, and which one applies turns on the identity migration 000031 now
+/// records:
+///
+///   * **The recorded uploader** is blocked only by a live reference of their
+///     OWN (or an unattributed legacy one) — [`live_own_ref_exists`]. Another
+///     account's declaration does not stand between them and the removal of
+///     their own upload. Before this, it did, permanently and by design: the
+///     gate asked "is this referenced" with no notion of by whom, so a single
+///     member who had legitimately received the file could pin it from a message
+///     they never delete and the uploader's hard delete 403'd forever. A
+///     promise of deletion that any recipient can veto is not one.
+///   * **Everyone else** — a non-uploader, an object with no recorded uploader
+///     (legacy or no-auth), or the no-auth path itself — keeps exactly today's
+///     rule: blocked while ANY live reference remains. This is not a weakening
+///     anywhere; it is the pre-existing predicate, unchanged.
+///
+/// The cost of the first rule, stated plainly: when the uploader destroys the
+/// bytes, an account that had independently sent the SAME file — deduped onto
+/// this one object, because that is what convergent encryption does — loses the
+/// attachment on their message too. That is inherent to one blob backing every
+/// copy; the only two possible answers are "the uploader may delete" and "the
+/// uploader may be vetoed", and the second is the finding. Collection is
+/// deliberately NOT moved onto this rule: [`object_is_referenced`] still counts
+/// every live reference, so nothing is collected out from under a second sender
+/// by the sweep, by a stranger's `/v1/attachments/delete`, or by the
+/// PUT-substitution gate. Only the uploader, acting deliberately on their own
+/// object, can reach past another reference.
+pub async fn object_delete_is_blocked(
+    conn: &Connection,
+    content_hash: &str,
+    actor: Option<&str>,
+) -> anyhow::Result<bool> {
+    let uploader = uploaded_by(conn, content_hash).await?;
+    match (actor, uploader.as_deref()) {
+        (Some(actor), Some(uploader)) if actor == uploader => {
+            let mut rows = conn
+                .query(
+                    OBJECT_IS_REFERENCED_BY_UPLOADER_SQL,
+                    libsql::params![content_hash.to_string(), actor.to_string()],
+                )
+                .await?;
+            Ok(match rows.next().await? {
+                Some(row) => row.get::<i64>(0)? != 0,
+                None => false,
+            })
+        }
+        _ => object_is_referenced(conn, content_hash).await,
+    }
 }
 
 /// True when at least one STILL-EXISTING message references the convergent
@@ -4525,6 +4873,128 @@ mod delete_capability_tests {
         assert!(!envelope_exists(&c, "m1").await);
     }
 
+    /// **L3 — the capability must outlive its target.** An edit envelope is a
+    /// separate row that names the message it edits, and envelope GC collects
+    /// each row on its own watermark — so the ORIGINAL goes first (it is older)
+    /// and the pending edit is left behind.
+    ///
+    /// The capability check reads the hash off the target row. With the target
+    /// collected there was no row to read, the check answered `NotRequired`, and
+    /// any member could then drop another author's pending edit uncontested —
+    /// the exact loss the capability exists to prevent, reached by waiting.
+    ///
+    /// The edit INHERITED the target's hash, so it is read from there now.
+    #[tokio::test]
+    async fn a_pending_edit_keeps_its_capability_after_the_original_is_collected() {
+        let c = conn().await;
+        apply_send_message(&c, Some("alice"), &send("m1", Some(hash_of(TOKEN))))
+            .await
+            .unwrap();
+        let edit = |id: &str, sender: &str, token: Option<String>| {
+            pollis_api::messages::EditMessageBody {
+                envelope_id: id.to_string(),
+                conversation_id: "c1".to_string(),
+                target_message_id: "m1".to_string(),
+                sender_id: Some(sender.to_string()),
+                ciphertext: "mls:01".to_string(),
+                sent_at: chrono::Utc::now().to_rfc3339(),
+                generation: None,
+                epoch: None,
+                delete_token: token,
+            }
+        };
+        let out = apply_edit_message(&c, Some("alice"), &edit("e1", "alice", Some(TOKEN.into())))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Ok), "{out:?}");
+
+        // Envelope GC collects the original; the edit that names it survives.
+        c.execute("DELETE FROM message_envelope WHERE id = 'm1'", ())
+            .await
+            .unwrap();
+        assert!(envelope_exists(&c, "e1").await);
+
+        // Bob, a member, tries to drop Alice's pending edit — as a delete of the
+        // (now absent) original, which is what removes it.
+        let out = apply_delete_message(&c, Some("bob"), &del("m1", "bob", None))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Forbidden), "{out:?}");
+        assert!(
+            envelope_exists(&c, "e1").await,
+            "the pending edit must survive a member who cannot prove the capability"
+        );
+
+        // ...and as a replacing EDIT, the other door onto the same row.
+        let out = apply_edit_message(&c, Some("bob"), &edit("e2", "bob", None))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Forbidden), "{out:?}");
+        assert!(envelope_exists(&c, "e1").await);
+
+        // The author, holding the capability, still can — through both doors.
+        let out = apply_edit_message(&c, Some("alice"), &edit("e3", "alice", Some(TOKEN.into())))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Ok), "{out:?}");
+        assert!(!envelope_exists(&c, "e1").await, "the edit was replaced");
+        assert!(
+            envelope_exists(&c, "e3").await,
+            "and the replacement landed"
+        );
+
+        let out = apply_delete_message(&c, Some("alice"), &del("m1", "alice", Some(TOKEN.into())))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Ok), "{out:?}");
+        assert!(!envelope_exists(&c, "e3").await);
+    }
+
+    /// The replacement edit must carry the capability forward even though the
+    /// original it inherited from is already gone — otherwise the chain drops
+    /// back to the legacy no-capability path one edit later.
+    #[tokio::test]
+    async fn a_replacement_edit_inherits_the_capability_from_the_edit_it_replaces() {
+        let c = conn().await;
+        apply_send_message(&c, Some("alice"), &send("m1", Some(hash_of(TOKEN))))
+            .await
+            .unwrap();
+        let edit = |id: &str, token: Option<String>| pollis_api::messages::EditMessageBody {
+            envelope_id: id.to_string(),
+            conversation_id: "c1".to_string(),
+            target_message_id: "m1".to_string(),
+            sender_id: Some("alice".to_string()),
+            ciphertext: "mls:01".to_string(),
+            sent_at: chrono::Utc::now().to_rfc3339(),
+            generation: None,
+            epoch: None,
+            delete_token: token,
+        };
+        apply_edit_message(&c, Some("alice"), &edit("e1", Some(TOKEN.into())))
+            .await
+            .unwrap();
+        c.execute("DELETE FROM message_envelope WHERE id = 'm1'", ())
+            .await
+            .unwrap();
+        apply_edit_message(&c, Some("alice"), &edit("e2", Some(TOKEN.into())))
+            .await
+            .unwrap();
+
+        let mut rows = c
+            .query(
+                "SELECT delete_token_hash FROM message_envelope WHERE id = 'e2'",
+                (),
+            )
+            .await
+            .unwrap();
+        let stored: Option<String> = rows.next().await.unwrap().unwrap().get(0).unwrap();
+        assert_eq!(
+            stored.as_deref(),
+            Some(hash_of(TOKEN).as_str()),
+            "the replacement must carry the capability forward"
+        );
+    }
+
     /// A non-member is refused before the capability is even consulted — the
     /// membership gate stays, the capability is added to it.
     #[tokio::test]
@@ -5308,5 +5778,196 @@ mod envelope_insert_site_tests {
                 out.push(path);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod reaction_membership_tests {
+    //! A reaction must be membership-gated even when the envelope is gone
+    //! (#1161).
+    //!
+    //! The gate resolved the conversation from `message_envelope`, and envelope
+    //! GC (#689) collects that row as soon as every member device has fetched
+    //! it — so for anything but a very recent message there was nothing to
+    //! resolve, and the check was SKIPPED. That is the common case, not an edge:
+    //! any authenticated account holding a message id could write a reaction row
+    //! against a conversation it has never been in.
+    //!
+    //! `ReactionBody.conversation_id` closes it, and the tests pin all three
+    //! arms: the declared conversation is gated, a declaration that contradicts
+    //! a surviving envelope is refused, and a request that declares nothing at
+    //! all against a collected envelope is refused rather than waved through.
+
+    use super::*;
+    use libsql::Connection;
+
+    async fn conn() -> Connection {
+        let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
+        let c = db.connect().unwrap();
+        c.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
+        pollis_schema::apply::single_db(&c).await.expect("schema");
+        // `alice` is in g1. `mallory` is in a group of her own, so she is a real
+        // authenticated account with a real membership — just not this one.
+        c.execute_batch(
+            "INSERT INTO conversation (id, kind) VALUES ('g1', 'group');
+             INSERT INTO conversation (id, kind) VALUES ('g2', 'group');
+             INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'g1', 'alice');
+             INSERT INTO groups (id, name, owner_id) VALUES ('g2', 'g2', 'mallory');
+             INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');
+             INSERT INTO group_member (group_id, user_id) VALUES ('g2', 'mallory');",
+        )
+        .await
+        .unwrap();
+        c
+    }
+
+    async fn seed_envelope(c: &Connection, id: &str, conv: &str) {
+        c.execute(
+            "INSERT INTO message_envelope (id, conversation_id, sender_id, ciphertext, sent_at) \
+             VALUES (?1, ?2, 'alice', 'x', '2026-01-01T00:00:00.000000000+00:00')",
+            libsql::params![id.to_string(), conv.to_string()],
+        )
+        .await
+        .unwrap();
+    }
+
+    fn body(message_id: &str, conversation_id: Option<&str>) -> ReactionBody {
+        ReactionBody {
+            message_id: message_id.to_string(),
+            emoji: "🔥".to_string(),
+            user_id: None,
+            conversation_id: conversation_id.map(str::to_string),
+        }
+    }
+
+    async fn reaction_count(c: &Connection, message_id: &str) -> i64 {
+        let mut rows = c
+            .query(
+                "SELECT COUNT(*) FROM message_reaction WHERE message_id = ?1",
+                libsql::params![message_id.to_string()],
+            )
+            .await
+            .unwrap();
+        rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap()
+    }
+
+    /// **The finding.** The envelope has been collected, so the old gate had
+    /// nothing to check and allowed the write. FAILS before the change: the
+    /// outcome is `Ok` and the row lands.
+    #[tokio::test]
+    async fn a_non_member_cannot_react_to_a_collected_envelope() {
+        let c = conn().await;
+        let out = apply_add_reaction(&c, Some("mallory"), &body("m-gone", Some("g1")))
+            .await
+            .unwrap();
+        assert!(
+            matches!(out, WriteOutcome::Forbidden),
+            "a declared conversation the actor is not in must be refused"
+        );
+        assert_eq!(reaction_count(&c, "m-gone").await, 0);
+    }
+
+    /// Declaring nothing is not an opt-out. An attacker composes the body, so a
+    /// missing `conversation_id` treated as "unknown, therefore allowed" would
+    /// leave the hole exactly where it was.
+    #[tokio::test]
+    async fn an_undeclared_conversation_is_refused_when_the_envelope_is_gone() {
+        let c = conn().await;
+        let out = apply_add_reaction(&c, Some("mallory"), &body("m-gone", None))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Forbidden));
+        assert_eq!(reaction_count(&c, "m-gone").await, 0);
+
+        // And the same refusal for an account that IS a member somewhere — the
+        // refusal is about the absent evidence, not about who is asking.
+        let out = apply_add_reaction(&c, Some("alice"), &body("m-gone", None))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Forbidden));
+        assert_eq!(reaction_count(&c, "m-gone").await, 0);
+    }
+
+    /// The control: a member reacting to a collected envelope — the ordinary act
+    /// the old skip existed to allow — still works.
+    #[tokio::test]
+    async fn a_member_can_still_react_to_a_collected_envelope() {
+        let c = conn().await;
+        let out = apply_add_reaction(&c, Some("alice"), &body("m-gone", Some("g1")))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Ok));
+        assert_eq!(reaction_count(&c, "m-gone").await, 1);
+    }
+
+    /// A surviving envelope stays authoritative, and a body that names a
+    /// DIFFERENT conversation is refused rather than ignored. Ignoring it would
+    /// be safe here but silently accepting it would not be: the membership
+    /// question has to be asked about the conversation the message is actually
+    /// in.
+    #[tokio::test]
+    async fn a_declaration_that_contradicts_the_envelope_is_refused() {
+        let c = conn().await;
+        seed_envelope(&c, "m-live", "g1").await;
+
+        let out = apply_add_reaction(&c, Some("mallory"), &body("m-live", Some("g2")))
+            .await
+            .unwrap();
+        assert!(
+            matches!(out, WriteOutcome::Forbidden),
+            "mallory is a member of g2, but the message is in g1"
+        );
+        assert_eq!(reaction_count(&c, "m-live").await, 0);
+
+        // The envelope-present path is otherwise unchanged: a member lands, a
+        // non-member does not.
+        let out = apply_add_reaction(&c, Some("alice"), &body("m-live", Some("g1")))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Ok));
+        let out = apply_add_reaction(&c, Some("mallory"), &body("m-live", None))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Forbidden));
+        assert_eq!(reaction_count(&c, "m-live").await, 1);
+    }
+
+    /// Removal deliberately does NOT fail closed on an unresolvable
+    /// conversation: the DELETE is scoped to the actor's own row, so it can only
+    /// unwrite something the add gate already admitted, and refusing would
+    /// strand an un-react on a message whose envelope has been collected.
+    #[tokio::test]
+    async fn removal_stays_possible_once_the_envelope_is_gone() {
+        let c = conn().await;
+        apply_add_reaction(&c, Some("alice"), &body("m-gone", Some("g1")))
+            .await
+            .unwrap();
+        assert_eq!(reaction_count(&c, "m-gone").await, 1);
+
+        let out = apply_remove_reaction(&c, Some("alice"), &body("m-gone", None))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Ok));
+        assert_eq!(reaction_count(&c, "m-gone").await, 0);
+    }
+
+    /// And removal still cannot reach anyone else's row, declared conversation
+    /// or not — the property that makes the permissive arm above safe.
+    #[tokio::test]
+    async fn removal_cannot_reach_another_accounts_reaction() {
+        let c = conn().await;
+        apply_add_reaction(&c, Some("alice"), &body("m-gone", Some("g1")))
+            .await
+            .unwrap();
+
+        let out = apply_remove_reaction(&c, Some("mallory"), &body("m-gone", None))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Ok));
+        assert_eq!(
+            reaction_count(&c, "m-gone").await,
+            1,
+            "the DELETE is scoped to the actor's own user_id"
+        );
     }
 }

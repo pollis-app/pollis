@@ -234,7 +234,14 @@ pub struct RedeemInviteLinkBody {
     pub user_id: Option<String>,
     /// Client-generated id for the audit row.
     pub attempt_id: String,
-    /// RFC3339 "now", used for the expiry comparison and the audit stamp.
+    /// **IGNORED by the server, and kept only for wire compatibility.**
+    ///
+    /// This used to be the clock the Delivery Service compared `expires_at`
+    /// against — a plain wire field, so `{"now":"2020-01-01T00:00:00Z"}`
+    /// redeemed any expired link, and a `now` far in the future emptied the
+    /// failed-attempt rate-limit window. Expiry, the rate-limit window and the
+    /// audit stamp are all `datetime('now')` on the server now. A shipped
+    /// client still sends the field; nothing reads it.
     pub now: String,
 }
 

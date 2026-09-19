@@ -36,9 +36,25 @@ mod common;
 const CIPHERSUITE_LEGACY: i64 = 0x0001;
 
 
+/// `alice` and `bob` in one group.
+///
+/// A claim requires a SHARED CONVERSATION as well as the absence of a block
+/// (`devices::may_claim_from`) — every real claim path writes the roster row
+/// before reconciling the MLS tree to it — so the mechanics tested here are
+/// exercised in the state they actually run in. `key_package_claim_limits.rs`
+/// owns the gate itself.
 async fn fresh_db() -> common::TempDb {
     let db = common::TempDb::open("kp.db").await;
     pollis_schema::apply::single_db(&db.conn().await.unwrap()).await.expect("schema");
+    let conn = db.conn().await.unwrap();
+    for u in ["alice", "bob"] {
+        conn.execute(
+            "INSERT OR IGNORE INTO group_member (group_id, user_id) VALUES ('kp-grp', ?1)",
+            libsql::params![u],
+        )
+        .await
+        .unwrap();
+    }
     db
 }
 

@@ -424,6 +424,17 @@ pub async fn remove_emoji(
 /// Authz: the row's creator, or an admin of the group. A plain member cannot
 /// delete someone else's emoji — that asymmetry with `create` is deliberate:
 /// adding costs the adder (quota), removing costs everyone who was using it.
+///
+/// ## Membership comes FIRST, and that is not cosmetic (L3)
+///
+/// A missing row answers `Ok` (a retried remove is idempotent, not a 404) and an
+/// existing one the caller may not touch answers `Forbidden`. Run in that order
+/// with no membership gate, the pair is an EXISTENCE ORACLE: a stranger could
+/// probe `(group_id, shortcode)` and read a group's whole emoji set — and with
+/// it a slice of its culture and membership — off the difference between 200 and
+/// 403. Checking membership before the row is read collapses both answers to
+/// `Forbidden` for anyone outside the group, so the oracle only ever answers
+/// people who can already enumerate the set through `/v1/read/emoji`.
 pub async fn apply_remove_emoji(
     conn: &Connection,
     authed: Option<&str>,
@@ -439,8 +450,14 @@ pub async fn apply_remove_emoji(
         ));
     }
 
-    // Read the row first: we need its hash to run the conditional collect, and
-    // its creator to authorize the delete.
+    // Membership BEFORE the row read, so a non-member's answer never depends on
+    // whether the shortcode exists.
+    if authed.is_some() && !is_group_member(conn, &body.group_id, &actor).await? {
+        return Ok(EmojiOutcome::Forbidden);
+    }
+
+    // Read the row: we need its hash to run the conditional collect, and its
+    // creator to authorize the delete.
     let mut rows = conn
         .query(
             "SELECT content_hash, created_by FROM group_emoji \

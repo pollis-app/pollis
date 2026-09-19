@@ -693,9 +693,13 @@ pub async fn pending_welcomes(
     user_id: &str,
     device_id: &str,
 ) -> anyhow::Result<Vec<PendingWelcome>> {
+    // `conversation_id` rides along so the client can bind the blob to the row
+    // it arrived on (C1's client half — see `PendingWelcome::conversation_id`).
+    // The column was always there; it simply was not returned, which left the
+    // client with nothing to compare the Welcome's embedded `GroupId` against.
     let mut rows = log
         .query(
-            "SELECT id, welcome_data FROM mls_welcome \
+            "SELECT id, welcome_data, conversation_id FROM mls_welcome \
              WHERE recipient_id = ?1 AND delivered = 0 \
              AND (recipient_device_id = ?2 OR recipient_device_id IS NULL) \
              ORDER BY created_at ASC",
@@ -708,6 +712,7 @@ pub async fn pending_welcomes(
         out.push(PendingWelcome {
             id: row.get(0)?,
             welcome: b64(&bytes),
+            conversation_id: Some(row.get(2)?),
         });
     }
     Ok(out)

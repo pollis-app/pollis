@@ -854,8 +854,15 @@ pub async fn apply_create_invite(
     if invitee_id == inviter {
         return Ok(InviteOutcome::SelfInvite);
     }
+    // A block answers exactly as a missing user does (L3). `Blocked` used to be
+    // its own outcome, which told the inviter that THIS SPECIFIC account had
+    // blocked them — the one fact a block is supposed to withhold, and one the
+    // blocked party could re-probe at will. Discord and Slack both answer a
+    // blocked invite as an ordinary failure for the same reason. The
+    // `InviteCreated::Blocked` wire variant stays (a shipped client decodes it)
+    // but the DS no longer produces it.
     if crate::profile::is_blocked_either_way(conn, &inviter, &invitee_id).await? {
-        return Ok(InviteOutcome::Blocked);
+        return Ok(InviteOutcome::NoSuchUser);
     }
     if is_member(conn, &body.group_id, &invitee_id).await? {
         return Ok(InviteOutcome::AlreadyMember);
@@ -1565,6 +1572,18 @@ fn redeem_rate_limited() -> Response {
 /// cannot reach this at all. "Authenticated but not yet a member" is already a
 /// first-class case on this service (`/v1/join-requests/create`,
 /// `/v1/invites/accept`), so no new auth machinery is involved.
+///
+/// ## The clock is the SERVER's (H3)
+///
+/// Every time comparison here — the expiry check, the guarded UPDATE's
+/// in-transaction re-check, the failed-attempt rate-limit window, and the audit
+/// stamp — used to be evaluated against `body.now`, an ordinary field of the
+/// request. So `{"now": "2020-01-01T00:00:00Z"}` redeemed any expired (but not
+/// revoked) link, and a `now` set far in the FUTURE pushed every past failure
+/// out of the rate-limit window, handing the caller an unlimited budget for
+/// guessing selectors. Both are now `datetime('now')`, which is what the rest of
+/// this service already used. `body.now` is still accepted on the wire so a
+/// shipped client keeps working, and is read by nothing.
 pub async fn apply_redeem_invite_link(
     conn: &Connection,
     authed: Option<&str>,
@@ -1582,10 +1601,9 @@ pub async fn apply_redeem_invite_link(
         .query(
             "SELECT COUNT(*) FROM group_invite_link_redemption \
              WHERE user_id = ?1 AND succeeded = 0 \
-               AND datetime(attempted_at) > datetime(?2, ?3)",
+               AND datetime(attempted_at) > datetime('now', ?2)",
             libsql::params![
                 user.clone(),
-                body.now.clone(),
                 format!("-{REDEEM_FAILURE_WINDOW_SECS} seconds"),
             ],
         )
@@ -1601,7 +1619,7 @@ pub async fn apply_redeem_invite_link(
 
     // A malformed token is recorded and rejected exactly like a wrong one.
     let Some((selector, secret)) = crate::invite_token::parse(&body.token) else {
-        record_redemption(conn, &body.attempt_id, None, &user, &body.now, false).await?;
+        record_redemption(conn, &body.attempt_id, None, &user, false).await?;
         return Ok(RedeemOutcome::Rejected);
     };
 
@@ -1634,7 +1652,7 @@ pub async fn apply_redeem_invite_link(
         ),
         None => {
             drop(rows);
-            record_redemption(conn, &body.attempt_id, None, &user, &body.now, false).await?;
+            record_redemption(conn, &body.attempt_id, None, &user, false).await?;
             return Ok(RedeemOutcome::Rejected);
         }
     };
@@ -1649,7 +1667,7 @@ pub async fn apply_redeem_invite_link(
     );
     let not_revoked = revoked_at.is_none();
     let not_expired = match expires_at.as_deref() {
-        Some(exp) => !expiry_passed(conn, exp, &body.now).await?,
+        Some(exp) => !expiry_passed(conn, exp).await?,
         None => true,
     };
     let uses_left = match max_uses {
@@ -1662,7 +1680,7 @@ pub async fn apply_redeem_invite_link(
         // specific live link being probed. The attacker never reads this table,
         // so it leaks nothing back to them.
         let probed = if secret_ok { Some(link_id.as_str()) } else { None };
-        record_redemption(conn, &body.attempt_id, probed, &user, &body.now, false).await?;
+        record_redemption(conn, &body.attempt_id, probed, &user, false).await?;
         return Ok(RedeemOutcome::Rejected);
     }
 
@@ -1690,25 +1708,21 @@ pub async fn apply_redeem_invite_link(
             "UPDATE group_invite_link SET uses = uses + 1 \
              WHERE id = ?1 \
                AND revoked_at IS NULL \
-               AND (expires_at IS NULL OR datetime(expires_at) > datetime(?2)) \
+               AND (expires_at IS NULL OR datetime(expires_at) > datetime('now')) \
                AND (max_uses IS NULL OR uses < max_uses)",
-            libsql::params![link_id.clone(), body.now.clone()],
+            libsql::params![link_id.clone()],
         )
         .await?;
     if updated == 0 {
         tx.rollback().await?;
-        record_redemption(conn, &body.attempt_id, Some(&link_id), &user, &body.now, false).await?;
+        record_redemption(conn, &body.attempt_id, Some(&link_id), &user, false).await?;
         return Ok(RedeemOutcome::Rejected);
     }
     tx.execute(
         "INSERT INTO group_invite_link_redemption \
-           (id, link_id, user_id, attempted_at, succeeded) VALUES (?1, ?2, ?3, ?4, 1)",
-        libsql::params![
-            body.attempt_id.clone(),
-            link_id,
-            user.clone(),
-            body.now.clone(),
-        ],
+           (id, link_id, user_id, attempted_at, succeeded) \
+         VALUES (?1, ?2, ?3, datetime('now'), 1)",
+        libsql::params![body.attempt_id.clone(), link_id, user.clone()],
     )
     .await?;
     tx.commit().await?;
@@ -1735,15 +1749,18 @@ async fn group_name(conn: &Connection, group_id: &str) -> anyhow::Result<Option<
     }
 }
 
-/// Whether `expires_at` is at or before `now`, compared BY SQLITE via
-/// `datetime()` so the two RFC3339 strings normalise the same way the guarded
-/// UPDATE normalises them. Comparing in Rust with string ordering would disagree
-/// with SQL for offsets like `+00:00` versus `Z`.
-async fn expiry_passed(conn: &Connection, expires_at: &str, now: &str) -> anyhow::Result<bool> {
+/// Whether `expires_at` is at or before the SERVER's clock, compared BY SQLITE
+/// via `datetime()` so the stored RFC3339 string normalises the same way the
+/// guarded UPDATE normalises it. Comparing in Rust with string ordering would
+/// disagree with SQL for offsets like `+00:00` versus `Z`.
+///
+/// The clock is `datetime('now')` and never a caller-supplied one (H3): an
+/// expiry a caller can choose the comparison point for is not an expiry.
+async fn expiry_passed(conn: &Connection, expires_at: &str) -> anyhow::Result<bool> {
     let mut rows = conn
         .query(
-            "SELECT datetime(?1) <= datetime(?2)",
-            libsql::params![expires_at.to_string(), now.to_string()],
+            "SELECT datetime(?1) <= datetime('now')",
+            libsql::params![expires_at.to_string()],
         )
         .await?;
     // An unparseable timestamp yields NULL, not 0/1. Treat anything that is not
@@ -1754,7 +1771,10 @@ async fn expiry_passed(conn: &Connection, expires_at: &str, now: &str) -> anyhow
     })
 }
 
-/// Append one row to the redemption audit trail.
+/// Append one row to the redemption audit trail, stamped with the SERVER's
+/// clock — this table is also the durable rate-limit counter, and a caller that
+/// chooses its own `attempted_at` chooses which of its failures are still inside
+/// the window (H3).
 ///
 /// `OR IGNORE` so a replayed `attempt_id` cannot error the request — the point
 /// is the count, not the individual row.
@@ -1763,17 +1783,16 @@ async fn record_redemption(
     attempt_id: &str,
     link_id: Option<&str>,
     user_id: &str,
-    now: &str,
     succeeded: bool,
 ) -> anyhow::Result<()> {
     conn.execute(
         "INSERT OR IGNORE INTO group_invite_link_redemption \
-           (id, link_id, user_id, attempted_at, succeeded) VALUES (?1, ?2, ?3, ?4, ?5)",
+           (id, link_id, user_id, attempted_at, succeeded) \
+         VALUES (?1, ?2, ?3, datetime('now'), ?4)",
         libsql::params![
             attempt_id.to_string(),
             link_id.map(|s| s.to_string()),
             user_id.to_string(),
-            now.to_string(),
             i64::from(succeeded),
         ],
     )

@@ -13,6 +13,35 @@ pub struct Reaction {
     pub count: u32,
 }
 
+/// The conversation this device has the message filed under, if it holds it.
+///
+/// The DS membership-gates a reaction through the message's `message_envelope`
+/// row, but envelope GC collects that row once every member device has fetched
+/// it — so for any message older than the current fetch window the server has
+/// nothing left to resolve the conversation from, and before #1161 it skipped
+/// the check entirely. This device does still know: the local `message` row
+/// carries `conversation_id`, and it got there by decrypting the message, which
+/// is proof of membership no attacker composing a request can manufacture.
+///
+/// `None` only when this device has no local copy, which for a reaction means
+/// the user is reacting to something they cannot see. The DS then falls back to
+/// the envelope and, failing that, refuses.
+async fn local_conversation_of(state: &Arc<AppState>, message_id: &str) -> Result<Option<String>> {
+    use rusqlite::OptionalExtension as _;
+    let guard = state.local_db.lock().await;
+    let db = guard
+        .as_ref()
+        .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+    Ok(db
+        .conn()
+        .query_row(
+            "SELECT conversation_id FROM message WHERE id = ?1",
+            rusqlite::params![message_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?)
+}
+
 /// Add an emoji reaction to a message.
 /// Silently succeeds if the reaction already exists (UNIQUE constraint).
 pub async fn add_reaction(
@@ -23,10 +52,12 @@ pub async fn add_reaction(
 ) -> Result<()> {
     // DS seam: the server generates the row id + timestamp and binds the
     // reacting user to the authenticated identity.
+    let conversation_id = local_conversation_of(state, &message_id).await?;
     let body = pollis_api::messages::AddReaction(pollis_api::messages::ReactionBody {
         message_id,
         emoji,
         user_id: Some(user_id),
+        conversation_id,
     });
     crate::commands::mls::ds_post_ok(state, &body).await?;
 
@@ -41,10 +72,12 @@ pub async fn remove_reaction(
     emoji: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
+    let conversation_id = local_conversation_of(state, &message_id).await?;
     let body = pollis_api::messages::RemoveReaction(pollis_api::messages::ReactionBody {
         message_id,
         emoji,
         user_id: Some(user_id),
+        conversation_id,
     });
     crate::commands::mls::ds_post_ok(state, &body).await?;
 

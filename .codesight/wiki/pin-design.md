@@ -51,7 +51,7 @@ The current login/session model has three overlapping failure modes that all fee
 - Delete the `session` concept entirely. `UserProfile` is reconstructed from `accounts.json` plus an in-memory unlock bit.
 - Remove the four legacy `identity_key_*` delete sites and the `SESSION_KEY` constant.
 - Make `accounts.json` writes crash-safe and loud on parse failure.
-- OTP's only jobs going forward: brand-new-user signup, new-device enrollment via Secret Key, future email-change flow.
+- OTP's only jobs going forward: brand-new-user signup, new-device enrollment via Secret Key, and the email-change flow — which since #1161 takes **two** codes, not one: the CURRENT address must approve the change before the new address confirms it. The current-address challenge is keyed on the account's address as **read from the database, never from the request body**, and is checked first, so a failed challenge spends no attempt against the new address. Before that, a hijacked session could move the account's email with no challenge to the address that actually controls it — the old address was notified after the fact, which is a receipt, not a gate.
 
 Out of scope for this doc (one-liners):
 - Ephemeral "borrowed device" sign-in via OTP without PIN — possibly future.

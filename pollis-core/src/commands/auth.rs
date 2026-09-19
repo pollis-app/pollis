@@ -700,9 +700,13 @@ pub async fn request_email_change_otp(
 }
 
 /// Verify the OTP sent to a new email address and atomically swap
-/// `users.email` for the calling user. The OTP proves the caller controls
-/// the new mailbox; the device's signing identity proves they're the one
-/// asking.
+/// `users.email` for the calling user. Three proofs, and they bind different
+/// facts: the device's signing identity proves the account is asking, `code`
+/// (sent to the new address) proves the caller controls the mailbox they are
+/// moving to, and `current_code` (sent to the address the account is on today,
+/// #1161) proves they control the mailbox that owns the account. Only the last
+/// is out of reach of somebody holding a borrowed unlocked device, which is why
+/// it exists.
 ///
 /// The OTP validation, requester binding, and `UPDATE users` all run server-side
 /// behind the device-signature gate (`POST /v1/auth/verify-email-change`) — the
@@ -714,6 +718,7 @@ pub async fn verify_email_change(
     user_id: String,
     new_email: String,
     code: String,
+    current_code: String,
 ) -> Result<()> {
     let trimmed = new_email.trim().to_string();
 
@@ -722,6 +727,7 @@ pub async fn verify_email_change(
         &pollis_api::email_change::VerifyEmailChangeBody {
             new_email: trimmed.clone(),
             code,
+            current_code: Some(current_code),
         },
     )
     .await?;
@@ -738,7 +744,19 @@ pub async fn verify_email_change(
                 .await?;
             username
         }
-        401 => return Err(anyhow::anyhow!("Invalid code. Please check and try again.").into()),
+        401 => {
+            // The DS distinguishes the two codes (#1161) and says which one
+            // failed; surfacing "invalid code" for both would leave the user
+            // retyping the wrong field.
+            let txt = resp.text().await.unwrap_or_default();
+            if txt.contains("current-address") {
+                return Err(anyhow::anyhow!(
+                    "The code sent to your current email address didn't match. Check it and try again."
+                )
+                .into());
+            }
+            return Err(anyhow::anyhow!("Invalid code. Please check and try again.").into());
+        }
         429 => {
             return Err(anyhow::anyhow!("Too many attempts. Please request a new code.").into())
         }

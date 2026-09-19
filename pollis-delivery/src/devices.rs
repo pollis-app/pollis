@@ -321,18 +321,55 @@ where
 /// May `claimer` draw from `target`'s key-package pool at all?
 ///
 /// Claiming is cross-account by construction — it is the mechanism for adding
-/// someone — so the gate cannot be "the target is you". What it CAN be is the
-/// product's own reachability rule, which is the same one `/v1/dm/create`
-/// applies: anybody may start a conversation with anybody they have not blocked
-/// and who has not blocked them. A shared conversation and a pending invite are
-/// both strictly inside that set, so the rule reduces to the block check — the
-/// one relationship state in which the two accounts have no business exchanging
-/// anything at all, and exactly the state in which draining a pool is pure
-/// harassment.
+/// someone — so the gate cannot be "the target is you". It used to be the
+/// product's reachability rule instead (not blocked either way), on the argument
+/// that anybody may start a conversation with anybody, so a claim from a
+/// stranger is a claim from a prospective correspondent.
 ///
-/// A claimer acting on its OWN account (adding its own second device) is always
-/// allowed; a user cannot block themselves, but saying so here means the
-/// self-add path does not depend on that.
+/// That argument does not survive contact with the numbers. A claim is a ONE-WAY
+/// flip and a device publishes a pool of FIVE
+/// (`pollis_core::commands::mls::key_packages`'s `TARGET`), while the per-pair
+/// budget is sixty an hour — so the budget never bound anything, and any
+/// unblocked stranger could empty a device's pool in five requests. A device with
+/// an empty pool cannot be added to a group at all, so that is targeted exclusion
+/// from every NEW conversation until the device next comes online to replenish —
+/// indefinitely, for a device that is offline.
+///
+/// So the gate is now a RELATIONSHIP, not merely the absence of a block: the
+/// claimer and the target must share a conversation's DESIRED ROSTER (or be the
+/// same account). That is the same set the MLS tree is reconciled against —
+/// `group_member` plus pending `group_invite` invitees — and it is what every
+/// claim path has already written by the time it claims:
+///
+///   * group invite — `/v1/invites/create` writes the pending `group_invite`
+///     row, and `send_group_invite` then reconciles IMMEDIATELY so the invitee's
+///     Welcome is staged before they accept (that is what makes accepting
+///     independent of the inviter being online). The invitee is not yet a
+///     `group_member`, which is why the gate is the desired roster and not
+///     [`crate::writes::is_member`];
+///   * join-request approval and invite-link redemption write the member row
+///     first, then the client reconciles;
+///   * DM — `/v1/dm/create` writes `dm_channel` and every `dm_channel_member`
+///     row in ONE transaction, and only then does the client initialise and
+///     reconcile the MLS group. A DM request's recipient row exists from that
+///     moment (un-accepted, which membership does not depend on);
+///   * suite migration — the roster is the group's existing members;
+///   * a user's own second device — `claimer == target`.
+///
+/// The block check stays underneath it: being in a roster with someone you have
+/// since blocked is not a licence to drain their pool.
+///
+/// What this leaves is narrower but not nothing. Anyone may invite anyone, so an
+/// attacker can put a victim in their own group's pending roster and claim from
+/// there — but that is now a VISIBLE act (the victim gets a pending invite),
+/// blockable, and budgeted (`/v1/invites/create` moved to the rate limiter's
+/// `probe` tier), instead of a silent request from a stranger. And a co-member
+/// can still drain a pool they have honest reason to draw from; no budget fixes
+/// that while the pool is five and an honest adder spends one per add — any cap
+/// low enough to matter would refuse real adds. The structural answer is a
+/// LAST-RESORT KeyPackage (the RFC 9420 / X3DH device: one package handed out
+/// repeatedly rather than consumed, so a pool can be depleted but never
+/// emptied), which is a client and protocol change rather than a DS one.
 async fn may_claim_from(
     conn: &Connection,
     claimer: &str,
@@ -341,7 +378,59 @@ async fn may_claim_from(
     if claimer == target {
         return Ok(true);
     }
-    Ok(!crate::profile::is_blocked_either_way(conn, claimer, target).await?)
+    if crate::profile::is_blocked_either_way(conn, claimer, target).await? {
+        return Ok(false);
+    }
+    shares_a_desired_roster(conn, claimer, target).await
+}
+
+/// Do these two accounts sit in any one conversation's desired roster?
+///
+/// Both shapes a roster takes: a group — counting a pending invitee as present,
+/// exactly as [`crate::directory::desired_roster`] does, and in either position
+/// so an INVITER claiming for an INVITEE and a member claiming for a co-member
+/// both pass — and a DM channel. A group's channels share its MLS group, so the
+/// group leg covers them.
+async fn shares_a_desired_roster(
+    conn: &Connection,
+    a: &str,
+    b: &str,
+) -> anyhow::Result<bool> {
+    // Written as four explicit EXISTS legs rather than one `UNION` CTE: the CTE
+    // materializes all of `group_member` and `group_invite` before it can join,
+    // while these use `idx_gm_user` (`group_member(user_id)`) and
+    // `idx_invite_invitee` (`group_invite(invitee_id, status)`) to reach the
+    // handful of rows that matter. Both directions of each pairing are listed so
+    // an INVITER claiming for an INVITEE and a member claiming for a co-member
+    // both pass.
+    //
+    // No `status` filter on `group_invite`, deliberately:
+    // `directory::desired_roster` has none either, and this predicate must agree
+    // with the roster the MLS tree is reconciled against or the two disagree
+    // about who may be added.
+    let mut rows = conn
+        .query(
+            "SELECT 1 WHERE \
+                EXISTS (SELECT 1 FROM group_member ga \
+                        JOIN group_member gb ON gb.group_id = ga.group_id \
+                        WHERE ga.user_id = ?1 AND gb.user_id = ?2) \
+             OR EXISTS (SELECT 1 FROM group_member ga \
+                        JOIN group_invite gi ON gi.group_id = ga.group_id \
+                        WHERE ga.user_id = ?1 AND gi.invitee_id = ?2) \
+             OR EXISTS (SELECT 1 FROM group_invite gi \
+                        JOIN group_member gb ON gb.group_id = gi.group_id \
+                        WHERE gi.invitee_id = ?1 AND gb.user_id = ?2) \
+             OR EXISTS (SELECT 1 FROM group_invite gi \
+                        JOIN group_invite gj ON gj.group_id = gi.group_id \
+                        WHERE gi.invitee_id = ?1 AND gj.invitee_id = ?2) \
+             OR EXISTS (SELECT 1 FROM dm_channel_member da \
+                        JOIN dm_channel_member db ON db.dm_channel_id = da.dm_channel_id \
+                        WHERE da.user_id = ?1 AND db.user_id = ?2) \
+             LIMIT 1",
+            libsql::params![a.to_string(), b.to_string()],
+        )
+        .await?;
+    Ok(rows.next().await?.is_some())
 }
 
 /// Recent claims by `claimer` against `target`, and against that target device

@@ -259,6 +259,25 @@ pub struct PendingWelcome {
     pub id: String,
     /// TLS-serialized MLS Welcome, base64.
     pub welcome: String,
+    /// The conversation the Welcome row was FILED UNDER — `mls_welcome.
+    /// conversation_id`, i.e. the conversation whose commit bundle wrote it.
+    ///
+    /// The client compares this against the `GroupId` embedded in the (signed,
+    /// server-opaque) Welcome blob and refuses the join if they disagree. That
+    /// is the half of C1 the Delivery Service cannot do: the DS may only check
+    /// that the recipient is somebody the conversation is trying to admit
+    /// (`writes::in_desired_roster`), and since anyone may invite anyone, an
+    /// attacker can satisfy that for their OWN group. What they cannot do is
+    /// make a Welcome whose `GroupId` is the victim's real conversation arrive
+    /// on a row filed under their own — so the blob and the row disagree, and
+    /// the client drops it instead of destroying the real group.
+    ///
+    /// `Option` + `#[serde(default)]` on purpose: the field is ADDITIVE, so a
+    /// Delivery Service that predates it decodes as `None` and a client that
+    /// predates it ignores it. `None` means "this server does not say", which
+    /// the client treats as the legacy path rather than as a mismatch.
+    #[serde(default)]
+    pub conversation_id: Option<String>,
 }
 
 // ── Contiguity, as a pure function ───────────────────────────────────────────

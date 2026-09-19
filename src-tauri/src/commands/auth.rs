@@ -34,8 +34,8 @@ pub async fn request_email_change_otp(state: State<'_, Arc<AppState>>, user_id: 
 }
 
 #[tauri::command]
-pub async fn verify_email_change(state: State<'_, Arc<AppState>>, user_id: String, new_email: String, code: String) -> Result<()> {
-    pollis_core::commands::auth::verify_email_change(&state, user_id, new_email, code).await
+pub async fn verify_email_change(state: State<'_, Arc<AppState>>, user_id: String, new_email: String, code: String, current_code: String) -> Result<()> {
+    pollis_core::commands::auth::verify_email_change(&state, user_id, new_email, code, current_code).await
 }
 
 #[tauri::command]

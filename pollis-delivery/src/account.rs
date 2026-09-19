@@ -366,9 +366,32 @@ pub async fn record_security_event(
     outcome_response::<SecurityEventBody>(apply_record_security_event(&conn, authed.as_deref(), &parsed).await?)
 }
 
+/// How far back [`SECURITY_EVENT_MAX_PER_WINDOW`] counts.
+const SECURITY_EVENT_WINDOW_SECS: i64 = 3600;
+
+/// Client-reported security events one account may append per
+/// [`SECURITY_EVENT_WINDOW_SECS`].
+///
+/// `/v1/read/security-events` serves `ORDER BY created_at DESC LIMIT n` with `n`
+/// clamped to 500 and no cursor, so the audit log is a FIXED-SIZE WINDOW onto the
+/// newest rows. Appending is otherwise unbounded, which makes eviction an
+/// available move: a device that has just done something the log records can bury
+/// it under hundreds of rows of its own and the user, reading their own log, sees
+/// only the flood. Evidence that a caller can push out of view is not evidence.
+///
+/// Sixty an hour is far above what a client produces — the shipped events are
+/// enrollment approvals, identity rotations and key changes, a handful a week —
+/// and far below the volume needed to shift a 500-row window, so the cap bites
+/// only abuse. It applies ONLY to this endpoint: the DS's own rows (the
+/// `identity_rotated` event `rotate_identity` writes, and everything else written
+/// server-side) never pass through here, so a flood cannot crowd out the entries
+/// the DS authored either.
+const SECURITY_EVENT_MAX_PER_WINDOW: i64 = 60;
+
 /// INSERT a `security_event` with `user_id = actor`. The row is always
 /// attributed to the signer, so a caller can never forge an audit entry under
-/// another user.
+/// another user, and is rate-bounded so it cannot evict its own history
+/// ([`SECURITY_EVENT_MAX_PER_WINDOW`]).
 pub async fn apply_record_security_event(
     conn: &Connection,
     authed: Option<&str>,
@@ -378,6 +401,27 @@ pub async fn apply_record_security_event(
         Ok(a) => a,
         Err(o) => return Ok(o),
     };
+    // Counted from the table, not from memory, so a rolling deploy does not hand
+    // out a fresh allowance and every DS instance sees the same total (#847's
+    // durable-budget pattern).
+    let mut rows = conn
+        .query(
+            "SELECT COUNT(*) FROM security_event \
+             WHERE user_id = ?1 AND datetime(created_at) > datetime('now', ?2)",
+            libsql::params![
+                actor.clone(),
+                format!("-{SECURITY_EVENT_WINDOW_SECS} seconds"),
+            ],
+        )
+        .await?;
+    let recent: i64 = match rows.next().await? {
+        Some(row) => row.get(0)?,
+        None => 0,
+    };
+    drop(rows);
+    if recent >= SECURITY_EVENT_MAX_PER_WINDOW {
+        return Ok(WriteOutcome::Forbidden);
+    }
     conn.execute(
         "INSERT INTO security_event (id, user_id, kind, device_id, metadata) \
          VALUES (?1, ?2, ?3, ?4, ?5)",

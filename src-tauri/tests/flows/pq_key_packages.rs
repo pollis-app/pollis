@@ -110,6 +110,21 @@ async fn login_publishes_one_pool_in_the_current_suite() {
     // classic, and keeping that reading would have made every untagged claim
     // miss.
     let conn = world().await.remote.conn().await.expect("remote conn");
+    // A claim is gated on the claimer and the target sharing a conversation's
+    // DESIRED roster, not merely on neither having blocked the other (#1161 L3:
+    // the old gate let any stranger empty a five-package pool in five requests
+    // and hold the device out of every new conversation). This test drives
+    // `apply_claim_key_package` directly with a claimer that exists nowhere
+    // else, so it has to state the relationship the real add paths have already
+    // written by the time they claim.
+    for member in [&user_id, &"alice".to_string()] {
+        conn.execute(
+            "INSERT OR IGNORE INTO group_member (group_id, user_id) VALUES ('pq-kp-grp', ?1)",
+            libsql::params![member.as_str()],
+        )
+        .await
+        .expect("seed the claimer's shared roster");
+    }
     let untagged_claim = ClaimKeyPackageBody {
         target_user_id: user_id.clone(),
         target_device_id: Some(device_id.clone()),

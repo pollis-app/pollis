@@ -812,7 +812,18 @@ pub async fn remove_dm_member(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
-    outcome_response::<RemoveDmMemberBody>(apply_remove_dm_member(&conn, authed.as_deref(), &parsed).await?)
+    let (outcome, torn_down) = apply_remove_dm_member(&conn, authed.as_deref(), &parsed).await?;
+    // Same follow-through `/v1/dm/leave` has: the control-plane tables live on
+    // the log DB, which the main-DB transaction cannot reach.
+    if matches!(outcome, WriteOutcome::Ok) && torn_down {
+        let log_conn = state.log_db.conn().await?;
+        crate::teardown::purge_conversation_log(
+            &log_conn,
+            std::slice::from_ref(&parsed.dm_channel_id),
+        )
+        .await?;
+    }
+    outcome_response::<RemoveDmMemberBody>(outcome)
 }
 
 /// Delete a `dm_channel_member` row. Authz (replicates the client's current
@@ -820,14 +831,29 @@ pub async fn remove_dm_member(
 /// user) may remove only themselves, or — as the channel's creator — any member.
 /// The creator check is re-derived from `dm_channel.created_by`; skipped only on
 /// the no-auth path.
+///
+/// ## Emptying a DM tears it down, by whichever door (L3)
+///
+/// `/v1/dm/leave` checks for survivors and purges the channel when the last one
+/// goes; this path did not, and it is reachable for exactly the same act — a
+/// member removing THEMSELVES. So leaving a two-person DM through
+/// `/v1/dm/members/remove` left an orphan `dm_channel` row behind, with its
+/// envelopes, watermarks and Welcomes, and — because the `conversation` registry
+/// is append-only on purpose (`writes::claim_conversation_id`) — the
+/// conversation id claimed forever by a conversation nobody is in. Two doors
+/// into one state must not disagree about what that state means, so the
+/// emptiness check and the purge are the same on both.
+///
+/// Returns `(outcome, torn_down)` like [`apply_leave_dm`]; the caller does the
+/// log-DB half.
 pub async fn apply_remove_dm_member(
     conn: &Connection,
     authed: Option<&str>,
     body: &RemoveDmMemberBody,
-) -> anyhow::Result<WriteOutcome> {
+) -> anyhow::Result<(WriteOutcome, bool)> {
     let actor = match resolve_actor(authed, Some(body.requester_id.as_str())) {
         Ok(a) => a,
-        Err(o) => return Ok(o),
+        Err(o) => return Ok((o, false)),
     };
     if authed.is_some() && actor != body.user_id {
         // Not a self-removal — the actor must be the channel creator.
@@ -841,12 +867,12 @@ pub async fn apply_remove_dm_member(
             Some(row) => {
                 let creator: String = row.get(0)?;
                 if actor != creator {
-                    return Ok(WriteOutcome::Forbidden);
+                    return Ok((WriteOutcome::Forbidden, false));
                 }
             }
             // Channel doesn't exist — nothing to remove; refuse rather than
             // silently no-op a write the actor isn't entitled to.
-            None => return Ok(WriteOutcome::Forbidden),
+            None => return Ok((WriteOutcome::Forbidden, false)),
         }
     }
     let tx = conn.transaction().await?;
@@ -855,8 +881,22 @@ pub async fn apply_remove_dm_member(
         libsql::params![body.dm_channel_id.clone(), body.user_id.clone()],
     )
     .await?;
+    // Existence, not a tally — see `groups::apply_leave_group`. Same check and
+    // same purge `/v1/dm/leave` runs, in the same transaction as the delete, so
+    // an emptied DM cannot survive either door.
+    let mut survivors = tx
+        .query(
+            "SELECT 1 FROM dm_channel_member WHERE dm_channel_id = ?1 LIMIT 1",
+            libsql::params![body.dm_channel_id.clone()],
+        )
+        .await?;
+    let torn_down = survivors.next().await?.is_none();
+    drop(survivors);
+    if torn_down {
+        crate::teardown::purge_dm_channel(&tx, &body.dm_channel_id).await?;
+    }
     tx.commit().await?;
-    Ok(WriteOutcome::Ok)
+    Ok((WriteOutcome::Ok, torn_down))
 }
 
 // ── POST /v1/dm/leave ────────────────────────────────────────────────────────

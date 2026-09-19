@@ -98,7 +98,7 @@ async fn register_ref(db: &Db, hash: &str, key: &str, msg: &str) {
         r2_key: key.into(),
         message_id: msg.into(),
     };
-    let out = apply_register_attachment(&db.conn().await.unwrap(), Some("u1"), &body)
+    let out = apply_register_attachment(&db.conn().await.unwrap(), Some("sender"), &body)
         .await
         .unwrap();
     assert!(matches!(out, WriteOutcome::Ok));
@@ -476,5 +476,371 @@ async fn r2_presign_get_is_not_gated_but_put_of_a_referenced_object_is() {
         put_new.status(),
         StatusCode::OK,
         "a first upload of an unreferenced hash must still be allowed"
+    );
+}
+
+// ── M5: a reference is bound to the message's author ─────────────────────────
+
+/// **M5.** `/v1/attachments/register` took the authenticated user and discarded
+/// it, so a `(content_hash, message_id)` declaration could name ANY message. A
+/// reference pins the shared R2 blob against collection and, through
+/// `/v1/r2/presign`'s delete gate, decides whether the UPLOADER may hard-delete
+/// their own bytes — so an ungated declaration is a write into somebody else's
+/// retention decision.
+///
+/// The declaration is now bound to `message_envelope.sender_id`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reference_cannot_be_declared_for_another_users_message() {
+    let db = fresh().await;
+    let hash = "f".repeat(64);
+    // The envelope fixture's author is `sender`.
+    add_envelope(&db, "m-owned-by-sender").await;
+
+    let body = AttachmentRegisterBody::ForMessage {
+        content_hash: hash.clone(),
+        r2_key: format!("media/{hash}.enc"),
+        message_id: "m-owned-by-sender".into(),
+    };
+    let out = apply_register_attachment(&db.conn().await.unwrap(), Some("mallory"), &body)
+        .await
+        .unwrap();
+    assert!(
+        matches!(out, WriteOutcome::Forbidden),
+        "a declaration naming another account's message must be refused"
+    );
+    assert!(
+        !referenced(&db, &hash).await,
+        "the forged declaration must not pin the object"
+    );
+    assert!(
+        !object_exists(&db, &hash).await,
+        "a refused registration writes nothing at all"
+    );
+
+    // The author's own declaration for the same message still lands.
+    let out = apply_register_attachment(&db.conn().await.unwrap(), Some("sender"), &body)
+        .await
+        .unwrap();
+    assert!(matches!(out, WriteOutcome::Ok));
+    assert!(referenced(&db, &hash).await);
+}
+
+/// A declaration naming a message that does not exist is refused too, rather
+/// than left as an inert row: there is no message to declare an attachment for,
+/// and the row would only be reaped later by the GC sweep.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reference_cannot_be_declared_for_a_message_that_does_not_exist() {
+    let db = fresh().await;
+    let hash = "e".repeat(64);
+    let body = AttachmentRegisterBody::ForMessage {
+        content_hash: hash.clone(),
+        r2_key: format!("media/{hash}.enc"),
+        message_id: "no-such-message".into(),
+    };
+    let out = apply_register_attachment(&db.conn().await.unwrap(), Some("sender"), &body)
+        .await
+        .unwrap();
+    assert!(matches!(out, WriteOutcome::Forbidden));
+    assert!(!referenced(&db, &hash).await);
+}
+
+/// The upload-time, messageless registration stays open to any authenticated
+/// device: the object row is convergent — identical bytes for every uploader —
+/// and carries no reference, so there is nothing to bind it to.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_object_only_registration_stays_ungated() {
+    let db = fresh().await;
+    let hash = "d".repeat(64);
+    let body = AttachmentRegisterBody::ObjectOnly {
+        content_hash: hash.clone(),
+        r2_key: format!("media/{hash}.enc"),
+    };
+    let out = apply_register_attachment(&db.conn().await.unwrap(), Some("anyone"), &body)
+        .await
+        .unwrap();
+    assert!(matches!(out, WriteOutcome::Ok));
+    assert!(object_exists(&db, &hash).await);
+    assert!(
+        !referenced(&db, &hash).await,
+        "an object with no message reference is not pinned"
+    );
+}
+
+// ── M5 residual (#1161): a reference is attributed, and a veto is not ─────────
+
+/// Insert an envelope authored by `sender` — the fixture `add_envelope` always
+/// writes `'sender'`, and these tests need two different authors.
+async fn add_envelope_from(db: &Db, msg: &str, sender: &str) {
+    db.conn().await
+        .unwrap()
+        .execute(
+            "INSERT OR IGNORE INTO message_envelope \
+               (id, conversation_id, sender_id, ciphertext, sent_at) \
+             VALUES (?1, 'conv', ?2, 'ct', '2026-01-01T00:00:00Z')",
+            libsql::params![msg.to_string(), sender.to_string()],
+        )
+        .await
+        .unwrap();
+}
+
+/// `register_ref` for an explicit actor: creates the actor's envelope, then
+/// registers the `(hash, message)` declaration as that actor.
+async fn register_ref_as(db: &Db, hash: &str, key: &str, msg: &str, actor: &str) {
+    add_envelope_from(db, msg, actor).await;
+    let body = AttachmentRegisterBody::ForMessage {
+        content_hash: hash.into(),
+        r2_key: key.into(),
+        message_id: msg.into(),
+    };
+    let out = apply_register_attachment(&db.conn().await.unwrap(), Some(actor), &body)
+        .await
+        .unwrap();
+    assert!(matches!(out, WriteOutcome::Ok));
+}
+
+/// `/v1/attachments/delete` as `actor` — the conditional collect.
+async fn collect_as(db: &Db, hash: &str, actor: &str) {
+    let out = apply_delete_attachment(
+        &db.conn().await.unwrap(),
+        Some(actor),
+        &AttachmentDeleteBody { content_hash: hash.into(), message_id: None },
+    )
+    .await
+    .unwrap();
+    assert!(matches!(out, WriteOutcome::Ok));
+}
+
+/// **The M5 residual.** #1161 bound a reference declaration to the message's
+/// author, which stops you pointing a victim's hash at a message you do not own.
+/// What it left: a member who legitimately received the file can pin it from
+/// their OWN live message. The reference graph is the sole authority for both R2
+/// collection and the delete presign, so that pin kept the uploader's blob alive
+/// indefinitely AND made the uploader's own hard delete 403 — a deletion promise
+/// any recipient could veto by never deleting one message.
+///
+/// Migration 000031 records `attachment_object.uploaded_by` and
+/// `attachment_ref.registered_by`, and the delete gate now asks the question
+/// with the uploader's identity in it. FAILS before the change: `alice` is
+/// refused because `mallory`'s reference is live.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_uploaders_delete_is_not_vetoed_by_another_accounts_reference() {
+    let db = fresh().await;
+    let hash = "a".repeat(64);
+    let key = format!("media/{hash}.enc");
+
+    // Alice uploads and sends it. She is the recorded uploader.
+    register_ref_as(&db, &hash, &key, "m-alice", "alice").await;
+    // Mallory pins the same hash from her own live message.
+    register_ref_as(&db, &hash, &key, "m-mallory", "mallory").await;
+
+    // Alice deletes her message. Her own reference is gone; Mallory's is not.
+    delete_envelope(&db, "m-alice").await;
+    assert!(
+        referenced(&db, &hash).await,
+        "the object is still referenced — that is true, and it is why collection \
+         by anyone else must stay blocked"
+    );
+
+    collect_as(&db, &hash, "alice").await;
+    assert!(
+        !object_exists(&db, &hash).await,
+        "the account that uploaded the bytes must be able to destroy them"
+    );
+    assert!(
+        !referenced(&db, &hash).await,
+        "collecting the object clears the declarations naming it — a reference to \
+         an object the service no longer stores would otherwise keep refusing the \
+         content-addressed PUT that could restore it"
+    );
+}
+
+/// The other half, and the one that keeps #690 true: the privilege is the
+/// UPLOADER's alone. Anybody else — including a member who holds their own
+/// reference — still cannot collect an object somebody's live message carries.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_foreign_reference_still_blocks_every_actor_but_the_uploader() {
+    let db = fresh().await;
+    let hash = "b".repeat(64);
+    let key = format!("media/{hash}.enc");
+
+    register_ref_as(&db, &hash, &key, "m-alice", "alice").await;
+    register_ref_as(&db, &hash, &key, "m-bob", "bob").await;
+    delete_envelope(&db, "m-alice").await;
+
+    // Bob is not the uploader. Alice's envelope is gone but his own is not, and
+    // either way the strict predicate applies to him.
+    collect_as(&db, &hash, "bob").await;
+    assert!(object_exists(&db, &hash).await, "a non-uploader may not collect a referenced object");
+
+    // Nor may an unrelated third party.
+    collect_as(&db, &hash, "carol").await;
+    assert!(object_exists(&db, &hash).await, "a stranger may not collect a referenced object");
+
+    // Nor may the no-auth (harness) path, which has no actor to privilege.
+    let out = apply_delete_attachment(
+        &db.conn().await.unwrap(),
+        None,
+        &AttachmentDeleteBody { content_hash: hash.clone(), message_id: None },
+    )
+    .await
+    .unwrap();
+    assert!(matches!(out, WriteOutcome::Ok));
+    assert!(object_exists(&db, &hash).await, "the no-auth path keeps the strict rule");
+}
+
+/// The uploader's OWN live reference still blocks them — the privilege is "your
+/// upload is not hostage to someone else's message", not "delete regardless".
+#[tokio::test(flavor = "multi_thread")]
+async fn the_uploaders_own_live_reference_still_blocks_their_delete() {
+    let db = fresh().await;
+    let hash = "c".repeat(64);
+    let key = format!("media/{hash}.enc");
+
+    register_ref_as(&db, &hash, &key, "m-one", "alice").await;
+    register_ref_as(&db, &hash, &key, "m-two", "alice").await;
+
+    delete_envelope(&db, "m-one").await;
+    collect_as(&db, &hash, "alice").await;
+    assert!(
+        object_exists(&db, &hash).await,
+        "alice's second message still carries the file"
+    );
+
+    delete_envelope(&db, "m-two").await;
+    collect_as(&db, &hash, "alice").await;
+    assert!(!object_exists(&db, &hash).await, "with her last reference gone it collects");
+}
+
+/// Legacy rows are not reclassified. An object written before migration 000031
+/// has no `uploaded_by`, so nobody is privileged over it and the pre-existing
+/// strict predicate governs — and an `attachment_ref` row with no
+/// `registered_by` could equally have been the uploader's own, so it blocks
+/// rather than being read as somebody else's.
+#[tokio::test(flavor = "multi_thread")]
+async fn legacy_rows_keep_the_strict_predicate() {
+    let db = fresh().await;
+    let conn = db.conn().await.unwrap();
+
+    // An object and a declaration as a pre-000031 deployment left them: both
+    // attribution columns NULL.
+    conn.execute(
+        "INSERT INTO attachment_object (content_hash, r2_key) \
+         VALUES ('legacyhash', 'media/legacyhash.enc')",
+        (),
+    )
+    .await
+    .unwrap();
+    add_envelope_from(&db, "m-legacy", "alice").await;
+    conn.execute(
+        "INSERT INTO attachment_ref (content_hash, message_id) VALUES ('legacyhash', 'm-legacy')",
+        (),
+    )
+    .await
+    .unwrap();
+
+    // Nobody is the recorded uploader, so nobody gets the privileged path.
+    collect_as(&db, "legacyhash", "alice").await;
+    assert!(
+        object_exists(&db, "legacyhash").await,
+        "with no recorded uploader the strict predicate governs, exactly as before"
+    );
+
+    // And an unattributed declaration blocks the uploader of a row that DOES
+    // record one: it may well be theirs.
+    conn.execute(
+        "UPDATE attachment_object SET uploaded_by = 'alice' WHERE content_hash = 'legacyhash'",
+        (),
+    )
+    .await
+    .unwrap();
+    collect_as(&db, "legacyhash", "alice").await;
+    assert!(
+        object_exists(&db, "legacyhash").await,
+        "an unattributed reference is unknown, and unknown blocks"
+    );
+}
+
+/// The R2 half of the same decision, through the real `/v1/r2/presign` handler:
+/// the uploader gets their `delete` minted despite a foreign reference, and
+/// everyone else is still refused for the same object in the same state. Without
+/// this the Turso row and the R2 blob would disagree about what may go.
+#[tokio::test(flavor = "multi_thread")]
+async fn r2_presign_delete_is_minted_for_the_uploader_despite_a_foreign_reference() {
+    let db = fresh().await;
+    let hash = "d".repeat(64);
+    let key = format!("media/{hash}.enc");
+
+    register_ref_as(&db, &hash, &key, "m-alice", "alice").await;
+    register_ref_as(&db, &hash, &key, "m-mallory", "mallory").await;
+    delete_envelope(&db, "m-alice").await;
+
+    let state = AppState::new(Arc::clone(&db), false).with_broker_config(r2_broker());
+    let router = build_router_with_state(state);
+
+    let status_for = |user: &str| {
+        let router = router.clone();
+        let key = key.clone();
+        let body = serde_json::json!({ "operation": "delete", "key": key, "user_id": user });
+        async move {
+            let req = Request::builder()
+                .method("POST")
+                .uri("/v1/r2/presign")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                .unwrap();
+            router.oneshot(req).await.unwrap().status()
+        }
+    };
+
+    assert_eq!(
+        status_for("mallory").await,
+        StatusCode::FORBIDDEN,
+        "the account that pinned the hash may not delete somebody else's object"
+    );
+    assert_eq!(
+        status_for("bob").await,
+        StatusCode::FORBIDDEN,
+        "nor may an unrelated account"
+    );
+    assert_eq!(
+        status_for("alice").await,
+        StatusCode::OK,
+        "the uploader's hard delete must not be vetoable by a foreign reference"
+    );
+}
+
+/// A PUT is NOT moved onto the uploader-aware rule. Substituting bytes under a
+/// live shared object is something no account may do, uploader included: every
+/// recipient derives the AEAD key from the hash, so chosen bytes would decrypt
+/// cleanly for all of them.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_put_substitution_gate_stays_strict_for_the_uploader() {
+    let db = fresh().await;
+    let hash = "e".repeat(64);
+    let key = format!("media/{hash}.enc");
+
+    register_ref_as(&db, &hash, &key, "m-alice", "alice").await;
+    register_ref_as(&db, &hash, &key, "m-mallory", "mallory").await;
+    delete_envelope(&db, "m-alice").await;
+
+    let state = AppState::new(Arc::clone(&db), false).with_broker_config(r2_broker());
+    let router = build_router_with_state(state);
+
+    let body = serde_json::json!({
+        "operation": "put",
+        "key": key,
+        "user_id": "alice",
+        "content_length": 64,
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/v1/r2/presign")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    assert_eq!(
+        router.oneshot(req).await.unwrap().status(),
+        StatusCode::FORBIDDEN,
+        "the uploader may destroy their object, never overwrite one others still hold"
     );
 }

@@ -358,13 +358,27 @@ async fn delivery_submit(
         _ => {}
     }
 
-    // The commit log lives on the LOG DB.
+    // The commit log lives on the LOG DB; MEMBERSHIP — which the bundle's
+    // Welcome rows are now checked against — lives on the MAIN DB, so
+    // `submit_commit` takes both.
     let conn = match state.log.conn().await {
         Ok(c) => c,
         Err(e) => return ds_internal_error(format!("conn: {e}")),
     };
-    match pollis_delivery::commit::submit_commit(&conn, &parsed).await {
-        Ok(outcome) => {
+    let main_conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::commit::submit_commit(&main_conn, &conn, &parsed).await {
+        Ok(pollis_delivery::commit::SubmitVerdict::Forbidden) => {
+            pollis_delivery::error::AuthRejection::Forbidden.into_response()
+        }
+        Ok(pollis_delivery::commit::SubmitVerdict::Invalid(why)) => (
+            axum::http::StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({ "error": why })),
+        )
+            .into_response(),
+        Ok(pollis_delivery::commit::SubmitVerdict::Response(outcome)) => {
             // Post-write faults: the commit + GroupInfo + any Welcomes have
             // already LANDED above; turn the success response into a 500 so the
             // client must recover by observing the commit is canonical and

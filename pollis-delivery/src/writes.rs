@@ -528,6 +528,64 @@ pub async fn is_member(
     Ok(rows.next().await?.is_some())
 }
 
+/// Is `user_id` someone this conversation's MLS tree is SUPPOSED to hold a leaf
+/// for — i.e. in [`crate::directory::desired_roster`]?
+///
+/// [`is_member`] is the narrower question, and it is the wrong one for a
+/// Welcome. The tree is reconciled against the DESIRED roster, which is
+/// `group_member` **plus pending `group_invite` invitees** — an invitee's
+/// devices are added and Welcomed at INVITE time, deliberately, so that
+/// accepting does not depend on the inviter being online at that moment. Gating
+/// a Welcome on `is_member` therefore refuses the staged Welcome that the
+/// shipped invite flow exists to produce.
+///
+/// Same three id shapes [`is_member`] accepts, so a channel id resolves through
+/// its owning group. Kept as an EXISTS predicate rather than a call to
+/// `desired_roster` because the question is about ONE user, not the whole set.
+///
+/// ## What this costs, and why it is still the right gate (C1)
+///
+/// Anyone may invite anyone they have not blocked, so an attacker CAN put a
+/// victim into their own group's desired roster and then write a Welcome for
+/// them. The Delivery Service cannot tell that apart from an honest invite —
+/// that is what an invite IS — so the server-side half of C1 is: a Welcome may
+/// only be addressed to somebody this conversation is actually trying to admit,
+/// never to an arbitrary user/device pair chosen in the request body.
+///
+/// The half that refuses the forged Welcome itself is the CLIENT's, and it is
+/// cryptographic rather than relational: `pollis-core`'s `join_from_welcome`
+/// checks the `GroupId` embedded in the Welcome blob against the
+/// `conversation_id` the row arrived on, so a Welcome that claims to admit you
+/// to the attacker's group while actually carrying your real conversation's
+/// `GroupId` is refused. That check needs `conversation_id` on the fetched row,
+/// which `reads::pending_welcomes` now returns.
+pub async fn in_desired_roster(
+    conn: &Connection,
+    conversation_id: &str,
+    user_id: &str,
+) -> anyhow::Result<bool> {
+    let mut rows = conn
+        .query(
+            "SELECT 1 WHERE \
+                EXISTS (SELECT 1 FROM dm_channel_member \
+                        WHERE dm_channel_id = ?1 AND user_id = ?2) \
+             OR EXISTS (SELECT 1 FROM group_member \
+                        WHERE group_id = ?1 AND user_id = ?2) \
+             OR EXISTS (SELECT 1 FROM group_invite \
+                        WHERE group_id = ?1 AND invitee_id = ?2) \
+             OR EXISTS (SELECT 1 FROM channels c \
+                        JOIN group_member gm ON gm.group_id = c.group_id \
+                        WHERE c.id = ?1 AND gm.user_id = ?2) \
+             OR EXISTS (SELECT 1 FROM channels c \
+                        JOIN group_invite gi ON gi.group_id = c.group_id \
+                        WHERE c.id = ?1 AND gi.invitee_id = ?2) \
+             LIMIT 1",
+            libsql::params![conversation_id.to_string(), user_id.to_string()],
+        )
+        .await?;
+    Ok(rows.next().await?.is_some())
+}
+
 // ── the conversation-id namespace (#880) ─────────────────────────────────────
 
 /// The kinds of conversation that share one id namespace — exactly the three
@@ -1158,7 +1216,14 @@ pub async fn apply_welcomes_resubmit(
             return Ok(ResubmitOutcome::Forbidden);
         }
     }
-    if !is_member(main_conn, &body.conversation_id, &body.recipient_id).await? {
+    // The DESIRED roster, not `is_member` — the same predicate `/v1/commits` now
+    // applies to the Welcomes in a bundle, so the two writers of `mls_welcome`
+    // cannot disagree about who may receive one. It also fixes a liveness bug
+    // this check had on its own: an invitee's Welcome is staged at INVITE time
+    // (that is what makes accepting independent of the inviter being online), and
+    // `is_member` refused to re-drive one until after the invite was accepted —
+    // exactly the window in which a lost Welcome needs re-driving.
+    if !in_desired_roster(main_conn, &body.conversation_id, &body.recipient_id).await? {
         return Ok(ResubmitOutcome::Forbidden);
     }
 

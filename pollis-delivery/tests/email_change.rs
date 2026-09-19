@@ -158,11 +158,236 @@ async fn email_change_happy_path() {
         "alice",
         "dev-a",
         &sk,
-        serde_json::json!({ "new_email": new_email, "code": DEV_CODE }),
+        serde_json::json!({ "new_email": new_email, "code": DEV_CODE, "current_code": DEV_CODE }),
     )
     .await;
     assert_eq!(s, StatusCode::OK, "correct code should swap the email");
     assert_eq!(email_of(&db, "alice").await, new_email, "users.email must be updated");
+}
+
+// ── 1b. The change is not silent (L3) ────────────────────────────────────────
+
+/// **L3.** The OTP proves control of the NEW mailbox and the device signature
+/// proves the current account — but a stolen unlocked device satisfies both, and
+/// the change used to leave no trace: the old address was never told and nothing
+/// in the app recorded it, so the account's recovery address could be moved
+/// silently.
+///
+/// The DS now writes the audit row itself, so a client cannot suppress it by
+/// omitting a call, and it names the address that was left.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_completed_email_change_is_recorded_against_the_account() {
+    let db = fresh_db().await;
+    let state = dev_state(Arc::clone(&db));
+    let sk = gen_signing_key();
+    seed_user(&db, "alice", "alice@x.com", "dev-a", &sk.verifying_key()).await;
+    let new_email = "alice-new@x.com";
+
+    send_signed(
+        &state,
+        "/v1/auth/request-email-change-otp",
+        "alice",
+        "dev-a",
+        &sk,
+        serde_json::json!({ "new_email": new_email }),
+    )
+    .await;
+    let s = send_signed(
+        &state,
+        "/v1/auth/verify-email-change",
+        "alice",
+        "dev-a",
+        &sk,
+        serde_json::json!({ "new_email": new_email, "code": DEV_CODE, "current_code": DEV_CODE }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+
+    let conn = db.conn().await.unwrap();
+    let mut rows = conn
+        .query(
+            "SELECT metadata FROM security_event \
+             WHERE user_id = 'alice' AND kind = 'email_changed'",
+            (),
+        )
+        .await
+        .unwrap();
+    let row = rows
+        .next()
+        .await
+        .unwrap()
+        .expect("a completed email change must leave an audit row");
+    let metadata: String = row.get::<Option<String>>(0).unwrap().expect("metadata");
+    let parsed: serde_json::Value = serde_json::from_str(&metadata).unwrap();
+    assert_eq!(parsed["from"], "alice@x.com", "the row names the address left");
+    assert_eq!(parsed["to"], new_email);
+}
+
+/// The other half: a REFUSED change writes no audit row, so the log records what
+/// happened rather than what was attempted through this endpoint (wrong-code
+/// attempts are the OTP store's business, not the account log's).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refused_email_change_records_nothing() {
+    let db = fresh_db().await;
+    let state = dev_state(Arc::clone(&db));
+    let sk = gen_signing_key();
+    seed_user(&db, "alice", "alice@x.com", "dev-a", &sk.verifying_key()).await;
+
+    send_signed(
+        &state,
+        "/v1/auth/request-email-change-otp",
+        "alice",
+        "dev-a",
+        &sk,
+        serde_json::json!({ "new_email": "alice-new@x.com" }),
+    )
+    .await;
+    let s = send_signed(
+        &state,
+        "/v1/auth/verify-email-change",
+        "alice",
+        "dev-a",
+        &sk,
+        serde_json::json!({ "new_email": "alice-new@x.com", "code": "000000", "current_code": DEV_CODE }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+
+    let conn = db.conn().await.unwrap();
+    let mut rows = conn
+        .query("SELECT COUNT(*) FROM security_event WHERE user_id = 'alice'", ())
+        .await
+        .unwrap();
+    let n: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
+    assert_eq!(n, 0);
+    assert_eq!(email_of(&db, "alice").await, "alice@x.com");
+}
+
+// ── 1c. The CURRENT address has to approve the change (#1161) ────────────────
+
+/// **#1161.** The device signature proves the account and the new-address code
+/// proves the new mailbox — and a borrowed or stolen unlocked device satisfies
+/// BOTH: it signs because the keystore is unlocked, and it receives the
+/// new-address code because the attacker chose the destination. Nothing in the
+/// flow ever asked the mailbox that actually owns the account. So the account's
+/// recovery address could be moved by whoever picked up the device, with the
+/// real owner finding out only from the notice sent afterwards.
+///
+/// A second code, to the address being LEFT, is what turns that into a change
+/// the owner has to approve. FAILS before the change: the swap goes through.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_email_change_without_the_current_address_code_is_refused() {
+    let db = fresh_db().await;
+    let state = dev_state(Arc::clone(&db));
+    let sk = gen_signing_key();
+    seed_user(&db, "alice", "alice@x.com", "dev-a", &sk.verifying_key()).await;
+    let new_email = "attacker-controlled@x.com";
+
+    send_signed(
+        &state,
+        "/v1/auth/request-email-change-otp",
+        "alice",
+        "dev-a",
+        &sk,
+        serde_json::json!({ "new_email": new_email }),
+    )
+    .await;
+
+    // Everything the old flow required, and nothing more: a valid signature and
+    // the code from the mailbox the attacker chose.
+    let s = send_signed(
+        &state,
+        "/v1/auth/verify-email-change",
+        "alice",
+        "dev-a",
+        &sk,
+        serde_json::json!({ "new_email": new_email, "code": DEV_CODE }),
+    )
+    .await;
+    assert_eq!(
+        s,
+        StatusCode::UNAUTHORIZED,
+        "a change that never proved the current address must be refused"
+    );
+    assert_eq!(email_of(&db, "alice").await, "alice@x.com", "the address must not move");
+
+    // An empty string is not an answer either — it is the same omission with a
+    // key present.
+    let s = send_signed(
+        &state,
+        "/v1/auth/verify-email-change",
+        "alice",
+        "dev-a",
+        &sk,
+        serde_json::json!({ "new_email": new_email, "code": DEV_CODE, "current_code": "" }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    assert_eq!(email_of(&db, "alice").await, "alice@x.com");
+
+    // And the control: with the current address's code, the same request lands.
+    let s = send_signed(
+        &state,
+        "/v1/auth/verify-email-change",
+        "alice",
+        "dev-a",
+        &sk,
+        serde_json::json!({ "new_email": new_email, "code": DEV_CODE, "current_code": DEV_CODE }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(email_of(&db, "alice").await, new_email);
+}
+
+/// A WRONG current-address code is refused the same way, and — because the
+/// current-address challenge is checked FIRST — it does not burn an attempt
+/// against the new address's counter, so the legitimate owner's retry is not
+/// spent by somebody else's guessing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_wrong_current_address_code_is_refused_and_spends_no_new_address_attempt() {
+    let db = fresh_db().await;
+    let state = dev_state(Arc::clone(&db));
+    let sk = gen_signing_key();
+    seed_user(&db, "alice", "alice@x.com", "dev-a", &sk.verifying_key()).await;
+    let new_email = "alice-new@x.com";
+
+    send_signed(
+        &state,
+        "/v1/auth/request-email-change-otp",
+        "alice",
+        "dev-a",
+        &sk,
+        serde_json::json!({ "new_email": new_email }),
+    )
+    .await;
+
+    // More wrong current-address guesses than the new address's attempt budget.
+    for _ in 0..8 {
+        let s = send_signed(
+            &state,
+            "/v1/auth/verify-email-change",
+            "alice",
+            "dev-a",
+            &sk,
+            serde_json::json!({
+                "new_email": new_email,
+                "code": DEV_CODE,
+                "current_code": "000000",
+            }),
+        )
+        .await;
+        assert_ne!(s, StatusCode::OK, "a wrong current-address code must never swap");
+        assert_eq!(email_of(&db, "alice").await, "alice@x.com");
+    }
+
+    // The audit log records nothing: no change happened.
+    let conn = db.conn().await.unwrap();
+    let mut rows = conn
+        .query("SELECT COUNT(*) FROM security_event WHERE user_id = 'alice'", ())
+        .await
+        .unwrap();
+    let n: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
+    assert_eq!(n, 0);
 }
 
 // ── 2. Wrong-code lockout ─────────────────────────────────────────────────────
@@ -194,7 +419,7 @@ async fn email_change_wrong_code_lockout() {
             "alice",
             "dev-a",
             &sk,
-            serde_json::json!({ "new_email": new_email, "code": "000000" }),
+            serde_json::json!({ "new_email": new_email, "code": "000000", "current_code": DEV_CODE }),
         )
         .await;
         assert_eq!(s, StatusCode::UNAUTHORIZED);
@@ -206,7 +431,7 @@ async fn email_change_wrong_code_lockout() {
         "alice",
         "dev-a",
         &sk,
-        serde_json::json!({ "new_email": new_email, "code": "000000" }),
+        serde_json::json!({ "new_email": new_email, "code": "000000", "current_code": DEV_CODE }),
     )
     .await;
     assert_eq!(s, StatusCode::TOO_MANY_REQUESTS);
@@ -218,7 +443,7 @@ async fn email_change_wrong_code_lockout() {
         "alice",
         "dev-a",
         &sk,
-        serde_json::json!({ "new_email": new_email, "code": DEV_CODE }),
+        serde_json::json!({ "new_email": new_email, "code": DEV_CODE, "current_code": DEV_CODE }),
     )
     .await;
     assert_ne!(s, StatusCode::OK, "a locked-out code must not succeed");
@@ -259,7 +484,7 @@ async fn email_change_rejects_cross_user() {
         "bob",
         "dev-b",
         &bob_sk,
-        serde_json::json!({ "new_email": new_email, "code": DEV_CODE }),
+        serde_json::json!({ "new_email": new_email, "code": DEV_CODE, "current_code": DEV_CODE }),
     )
     .await;
     assert_eq!(s, StatusCode::FORBIDDEN, "a different signed user must be refused");
@@ -274,7 +499,7 @@ async fn email_change_rejects_cross_user() {
         "alice",
         "dev-a",
         &alice_sk,
-        serde_json::json!({ "new_email": new_email, "code": DEV_CODE }),
+        serde_json::json!({ "new_email": new_email, "code": DEV_CODE, "current_code": DEV_CODE }),
     )
     .await;
     assert_eq!(s, StatusCode::OK);

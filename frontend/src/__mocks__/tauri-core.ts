@@ -61,7 +61,12 @@ interface MockProfile {
   preferred_name?: string;
   phone?: string;
   avatar_url?: string;
+  email?: string;
 }
+
+/// The only code the mocked email-change flow accepts, for BOTH of its codes.
+/// Mirrors the real `DEV_OTP` the Delivery Service honours in dev.
+const MOCK_OTP_CODE = '000000';
 
 interface MockGroupMember {
   user_id: string;
@@ -1091,6 +1096,35 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'set_revoke_media_on_exit':
     case 'mark_update_required':
       return null;
+
+    // Email change is a two-code flow (#1161): one code to the new address,
+    // one to the address being left. The mock enforces the same fail-closed
+    // rule the Delivery Service does — a request that does not answer the
+    // current-address challenge is refused — so the spec exercises the real
+    // shape of the UI rather than a version of it that always succeeds.
+    case 'request_email_change_otp':
+      return null;
+
+    case 'verify_email_change': {
+      const { newEmail, code, currentCode } = args as {
+        newEmail: string;
+        code: string;
+        currentCode?: string;
+      };
+      if (code !== MOCK_OTP_CODE) {
+        throw new Error('Invalid code. Please check and try again.');
+      }
+      if (currentCode !== MOCK_OTP_CODE) {
+        throw new Error(
+          "The code sent to your current email address didn't match. Check it and try again.",
+        );
+      }
+      if (!store.profile) {
+        store.profile = { id: store.session?.id ?? '' };
+      }
+      store.profile.email = newEmail;
+      return null;
+    }
 
     case 'get_user_profile': {
       if (!store.session) {

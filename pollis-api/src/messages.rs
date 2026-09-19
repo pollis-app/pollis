@@ -170,6 +170,28 @@ pub struct ReactionBody {
     /// No-auth fallback for the reacting user.
     #[serde(default)]
     pub user_id: Option<String>,
+    /// The conversation the reacted-to message belongs to — what the DS checks
+    /// membership against (#1161).
+    ///
+    /// Reactions are membership-gated through the message's `message_envelope`
+    /// row, and envelope GC collects that row as soon as every member device has
+    /// fetched it, so for anything but a very recent message there is nothing
+    /// left to resolve the conversation from. The gate used to be SKIPPED in
+    /// that case, which is the common case — a non-member who knows a message id
+    /// could write a reaction row for it. The client knows the conversation from
+    /// its own local copy of the message, so it declares it here and the DS
+    /// checks membership without needing the envelope.
+    ///
+    /// `#[serde(default)]` for shape compatibility only, NOT as a way to opt out
+    /// of the check: when the envelope is gone and no conversation is declared,
+    /// the DS refuses. An optional-and-ignored field would close nothing — an
+    /// attacker composes the body and would simply omit it.
+    ///
+    /// A declared value is cross-checked against the envelope whenever one still
+    /// exists, so it cannot be used to have the membership question asked about
+    /// some other conversation.
+    #[serde(default)]
+    pub conversation_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]

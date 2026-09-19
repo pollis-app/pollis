@@ -1,0 +1,75 @@
+-- #1161 M5 residual: record WHO uploaded an attachment object and WHO declared
+-- each reference to it.
+--
+-- #690 made the attachment reference count DERIVED — an `attachment_ref` row
+-- counts only while the `message_envelope` it names still exists — and #1161
+-- bound the declaration to `message_envelope.sender_id`, so a reference can no
+-- longer name somebody else's message. What that left open is the shape the
+-- attack actually takes: a member who legitimately RECEIVED a file learns its
+-- content hash, and may pin that hash from their OWN live message. The row is
+-- then well-formed by every rule the server has, and it has two effects the
+-- declarer should not get to impose on the uploader:
+--
+--   * it keeps the shared R2 blob alive for as long as the declarer keeps that
+--     message alive — indefinitely, at the uploader's expense;
+--   * it makes `/v1/r2/presign` refuse the UPLOADER a `delete`, because the
+--     gate asks only "is this referenced", with no notion of BY WHOM. The
+--     account that put the bytes there can be denied their removal, forever, by
+--     anyone who ever saw the file.
+--
+-- The second is the one that matters: it defeats hard deletion, which is a
+-- promise this product makes (`docs/metadata-retention-policy.md`). Neither
+-- column can tell an abusive pin from an honest re-send — they are the same act
+-- — so this migration does not try to. It records the two identities the gate
+-- was missing, so the gate can stop conflating "somebody still needs these
+-- bytes" (true, and it keeps collection blocked) with "the uploader may not
+-- remove their own upload" (false, and it no longer does).
+--
+-- `attachment_object.uploaded_by` — the account that first registered the
+-- convergent dedup row. First writer wins: the INSERT is `OR IGNORE`, so a
+-- later uploader of byte-identical content does not take ownership of a row
+-- that already has an owner. That is the right reading of "who put these bytes
+-- in the bucket" — the second uploader never uploaded anything, because the
+-- dedup probe told their client to skip the PUT.
+ALTER TABLE attachment_object ADD COLUMN uploaded_by TEXT;
+
+-- `attachment_ref.registered_by` — the account whose declaration this is. Since
+-- #1161 it is necessarily `message_envelope.sender_id` of `message_id` at the
+-- time of the write, but that envelope is exactly what GC removes, so the
+-- attribution has to be stored rather than joined for.
+ALTER TABLE attachment_ref ADD COLUMN registered_by TEXT;
+
+-- The delete gate asks "is there a live reference to this hash that is NOT the
+-- actor's own", which is a `content_hash` probe with a `registered_by`
+-- comparison; putting the registrar in the index keeps it a covering probe
+-- rather than a PK lookup plus a row fetch. `attachment_ref`'s PK already
+-- indexes `content_hash` left-most, so this is additive.
+CREATE INDEX IF NOT EXISTS idx_attachment_ref_registrar
+    ON attachment_ref (content_hash, registered_by);
+
+-- BOTH COLUMNS ARE NULLABLE AND NOT BACKFILLED, and the gate reads NULL as
+-- "unknown, therefore blocking":
+--
+--   * a legacy `attachment_object` with no `uploaded_by` has no uploader to
+--     privilege, so the delete gate keeps exactly today's rule for it (any
+--     authenticated device, only while nothing references the hash);
+--   * a legacy `attachment_ref` with no `registered_by` could have been written
+--     by anyone including the uploader, so it blocks the uploader's delete just
+--     as it does today.
+--
+-- Backward compatibility is therefore total in both directions: a shipped
+-- Delivery Service that never selects these columns behaves exactly as it does
+-- now, and a shipped client neither sends nor reads them (both values are taken
+-- from the verified signature, never from a body field). The privileged path
+-- switches on only for objects uploaded after this migration lands, which is
+-- the correct end state rather than a staged dual-read.
+--
+-- WHAT THIS ADMITS TO THE OPERATOR, stated plainly: `attachment_object` gains
+-- "which account first stored this object" and `attachment_ref` gains "which
+-- account declared this reference". Both facts were already derivable from
+-- data the DS stores — the upload presign (`/v1/r2/presign`) is device-signed
+-- and names the user and the object key, and since #1161 every reference row
+-- equals its envelope's `sender_id` — so this makes two already-conceded
+-- linkages durable rather than creating new ones. It does not touch sealed
+-- sender: `message_envelope.sender_id` is the message AUTHOR the DS already
+-- holds for authorization, not the per-envelope recipient-visible sender.
