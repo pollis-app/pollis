@@ -13,12 +13,26 @@ name: Rebuild ledger
 # same `scripts/rebuild-ledger.sh` a human would run — this workflow merely
 # runs it at the right moment and opens the pull request.
 #
-# A pull request rather than a push: `main` is ruleset-protected (PRs only),
-# and a verdict landing on the public assurance page deserves one human glance
-# — the ledger carries hand-written classifications of every red, and a new
-# red is a prompt to write one. `website-verify.yml` keeps its daily
-# `--check` as the backstop: it goes red while the PR sits unmerged, exactly as
-# it did when nobody had run the script at all.
+# A pull request rather than a push: `main` is ruleset-protected (PRs only).
+#
+# THE PR AUTO-MERGES WHEN THE VERDICT IS GREEN, and waits for a human only when
+# it is not. The original design asked for "one human glance" at every verdict,
+# and that was wrong in the green case: a green entry carries `classification:
+# null` and `evidence: null`, the whole file is regenerated mechanically by
+# `scripts/rebuild-ledger.sh`, and `website-verify.yml` re-runs that same script
+# with `--check` every day. There is nothing for a person to look at, so asking
+# for a glance only created a queue.
+#
+# It did not stay theoretical. The v1.13.0 ledger PR sat unmerged for four days
+# — its own checks were stuck on `action_required`, because a GitHub App opened
+# it — and `website-verify.yml` went red every one of those days pointing at it,
+# while the public assurance page advertised a stale verdict. Nobody noticed
+# until someone asked what the open PR was for.
+#
+# A NON-green verdict still waits, and should: that is exactly when a `CLASSIFIED`
+# entry has to be written by hand, and publishing an unexplained red is worse
+# than publishing nothing. `website-verify.yml` keeps its daily `--check` as the
+# backstop for that case.
 #
 # The branch is fixed and force-pushed: the ledger is regenerated whole from
 # the run history every time, so the branch is always "main + one commit" and
@@ -36,8 +50,10 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  # The public run history of rebuild-verify.yml, through the Actions API.
-  actions: read
+  # `read` for the public run history of rebuild-verify.yml (through the Actions
+  # API); `write` because a landed green verdict dispatches website-deploy.yml,
+  # without which pollis.com keeps serving the previous one.
+  actions: write
 
 concurrency:
   group: rebuild-ledger
@@ -142,3 +158,47 @@ jobs:
             exit 1
           fi
           echo "$err"
+
+      # A green verdict lands without waiting for anybody. See the header for
+      # why this is not a rubber stamp: the file is script-generated, a green
+      # entry holds no hand-written judgement, and website-verify re-derives it
+      # daily. The failure this removes is a stale PUBLIC page, which is the
+      # thing the ledger exists to prevent.
+      #
+      # `|| true` throughout: a ledger that cannot land must never fail the run
+      # red and leave the impression the verdict itself was bad. The commit is
+      # already pushed to the branch, website-verify still catches the lag, and
+      # the step says plainly what a human has to do instead.
+      - name: Land a green verdict, and refresh the public page
+        if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          branch="bot/rebuild-ledger"
+          pr="$(gh pr list --head "$branch" --base main --state open --json number --jq '.[0].number // empty')"
+          if [ -z "$pr" ]; then
+            echo "no open ledger PR — nothing to land (the ledger was already current)."
+            exit 0
+          fi
+
+          # Keep the branch: this workflow force-pushes to the SAME fixed branch
+          # every time, so deleting it on merge would break the next run.
+          if gh pr merge "$pr" --squash; then
+            echo "landed ledger PR #${pr}"
+          else
+            echo "::warning::could not auto-merge ledger PR #${pr} — merge it by hand."
+            echo "::warning::  website-verify.yml will go red daily until you do."
+            exit 0
+          fi
+
+          # The ledger is SERVED: website/rebuild-ledger.json is what
+          # assurance.html renders. Merging alone leaves pollis.com advertising
+          # the previous verdict, because website-deploy.yml is manual — which
+          # is the second half of the same stale-page problem.
+          if gh workflow run website-deploy.yml --ref main; then
+            echo "dispatched website-deploy so the public page reflects the new verdict"
+          else
+            echo "::warning::ledger merged but website-deploy could not be dispatched;"
+            echo "::warning::  pollis.com will show the previous verdict until it is run."
+          fi
