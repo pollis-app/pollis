@@ -1,79 +1,73 @@
 # verifiable-log-serve
 
-The **serve layer** for the verifiable log — slice 3 of the Key Transparency
-work (issue #330). It turns a signed monitor bundle (the output of
-`verifiable-log-builder`) into an immutable, host-agnostic **static artifact
-tree** that implements the log's public read API, plus a tiny dev HTTP server
-and an end-to-end "fetch over HTTP and verify" path.
+The serve layer for the transparency log (#330). It turns a signed bundle from
+`verifiable-log-builder` into a static directory of JSON files that is the log's
+public read API, and it ships two binaries:
 
-Slices 1 (`verifiable-log` core + `monitor`) and 2 (`verifiable-log-builder` +
-`builder`) are **depended on, never reimplemented**: all Merkle/STH/proof logic
-and every verifier comes from `verifiable_log`. This crate is transport and
-orchestration only, and the core crate stays dependency-pure (no HTTP).
+- `pollis-verify`, the auditor CLI that fetches that API over HTTP(S) and verifies it;
+- `serve`, the operator tool that generates the directory, runs a local dev server,
+  and runs the `live` server.
 
-## Why static (the load-bearing idea)
+All Merkle, STH and proof logic comes from [`verifiable-log`](../verifiable-log);
+this crate only handles layout, transport and orchestration.
 
-Every artifact a transparency log serves is **deterministic and immutable**: an
-STH for `tree_size = N` never changes; an inclusion or consistency proof for a
-given `(leaf, tree_size)` is fixed forever. So the serve layer is **not** a query
-service over a database — it is a precomputed directory of immutable JSON files
-served as static assets.
+## Why static files
 
-Generate the tree once, drop it on any static host — R2, Cloudflare Pages, an
-edge CDN (none chosen here, deliberately) — and reads are trivially cacheable.
-The read API is **public and unauthenticated by design**: there are no
-credentials anywhere on this path.
+A transparency log's artifacts never change once written: the STH for
+`tree_size = N` is fixed, and so is any proof for a given `(leaf, tree_size)`. So
+the read API is a precomputed directory of JSON files, not a query service. It can
+sit on any static host and is easy to cache. It is public and needs no credentials.
 
-## Read API (URL → file mapping)
+## Read API
 
-The file path under the output root mirrors the URL exactly (drop the leading
-`/`), so serving is a literal static-file mapping.
+The file path under the output directory is the URL path without the leading `/`.
 
-| URL                                                   | Contents                            | Cache policy |
-|-------------------------------------------------------|-------------------------------------|--------------|
-| `/v1/public_key.json`                                 | the log's ML-DSA-44 public key       | immutable    |
-| `/v1/index.json`                                      | discovery manifest (see below)      | short        |
-| `/v1/sth/latest.json`                                 | newest STH                          | short        |
-| `/v1/sth/<tree_size>.json`                            | STH at that tree size               | immutable    |
-| `/v1/entries.json`                                    | full ordered `[Entry]` (small logs) | immutable    |
-| `/v1/entries/<index>.json`                            | one entry                           | immutable    |
-| `/v1/proof/inclusion/<tree_size>/<leaf_index>.json`   | inclusion proof                     | immutable    |
-| `/v1/proof/consistency/<first>-<second>.json`         | consistency proof                   | immutable    |
-| `/verify/group/<conversation_id>`                     | `GroupReport`, **dynamic only** (#701) | n/a       |
-| `/v1/account-keys/...`                                | the account-key tree, same layout   | mixed        |
-| `/verify/account/<user_id>`                           | precomputed per-user `AccountReport` | short       |
-| `/v1/binaries/...`                                    | the released-binaries tree, same layout | mixed    |
-| `/verify/release/<tag>`                               | precomputed per-release `ReleaseReport` | short    |
+| URL | Contents | Cache |
+|---|---|---|
+| `/v1/public_key.json` | the log's ML-DSA-44 public key(s) | immutable |
+| `/v1/index.json` | manifest (below) | short |
+| `/v1/sth/latest.json` | newest STH | short |
+| `/v1/sth/<tree_size>.json` | STH at that size | immutable |
+| `/v1/entries.json` | full ordered `[Entry]` | immutable |
+| `/v1/entries/<index>.json` | one entry | immutable |
+| `/v1/proof/inclusion/<tree_size>/<leaf_index>.json` | inclusion proof | immutable |
+| `/v1/proof/consistency/<first>-<second>.json` | consistency proof | immutable |
+| `/v1/account-keys/...` | account-key tree, same layout | as above |
+| `/v1/binaries/...` | released-binaries tree, same layout | as above |
+| `/verify/account/<user_id>` | precomputed `AccountReport` | short |
+| `/verify/release/<tag>` | precomputed `ReleaseReport` | short |
+| `/verify/group/<conversation_id>` | `GroupReport`, computed per request by a server (not a file) | `no-cache` |
+| `/v1/key-set.json` | root-signed key-set statement, only if `generate --key-set` was given (#754) | immutable |
 
-All wire shapes (`Entry`, `Sth`, `InclusionProof`, `ConsistencyProof`) are the
-frozen contract documented in `verifiable-log/README.md`.
+`Entry`, `Sth`, `InclusionProof` and `ConsistencyProof` are defined in
+[`verifiable-log/README.md`](../verifiable-log/README.md).
 
-### Per-group verification is dynamic and member-gated (`/verify/group/<id>`, #701)
+### Per-group verification needs the real conversation id (#701)
 
-Since #701 the commit-log leaf carries a **windowed pseudonym**, not the raw
-`conversation_id`, so `serve generate` writes **no** precomputed per-group report
-and `index.json` no longer enumerates conversations — either would re-expose the
-group set the pseudonyms exist to hide. Per-group verification is instead the
-dynamic `GET /verify/group/<conversation_id>` endpoint (dev + live servers) and
-`pollis-verify group <conversation_id>`: both take the *real* conversation id
-(which only a member knows), re-derive the windowed pseudonyms, select every
-window of the conversation, and check the full-strength invariant across windows
-via the shared `verify_group_in_bundle`. A pure static host (no server) therefore
-does not answer `/verify/group/<id>`; a member runs `pollis-verify group` (which
-fetches `entries.json` and computes locally) or points the explorer at a live
-server. The account-key tree keeps its precomputed `/verify/account/<user_id>`
-reports — its `user_id` is load-bearing (key transparency looks a user up by
-identity) and out of #701's scope.
+Commit-log leaves carry windowed pseudonyms, not raw `conversation_id`s, so
+`generate` writes no per-group reports and the manifest lists no conversations;
+either would expose the set of groups the pseudonyms hide. To check one
+conversation you need its real id, which only members have:
+
+- `pollis-verify group <base-url> <conversation_id>` fetches `entries.json` and does
+  the work locally, so it works against a plain static host;
+- `GET /verify/group/<conversation_id>` does the same work on a server (`serve serve`
+  or `serve live`). A static host alone does not answer it.
+
+Both re-derive the conversation's pseudonym for every window and check the
+invariant across windows with the shared `verify_group_in_bundle`.
+
+The account-key tree still publishes `user_id` and keeps its precomputed
+`/verify/account/<user_id>` reports, because key transparency has to look users up
+by identity.
 
 ### Manifest (`/v1/index.json`)
-
-So a monitor or explorer can discover everything available without guessing:
 
 ```json
 {
   "format_version": 2,
   "version": "v1",
-  "public_key": "<ed25519 public key, 32 bytes hex>",
+  "public_key": "<ML-DSA-44 public key, 1312 bytes hex>",
   "entry_count": 5,
   "latest_tree_size": 5,
   "sth_sizes": [3, 5],
@@ -83,78 +77,85 @@ So a monitor or explorer can discover everything available without guessing:
 }
 ```
 
-`format_version` (`bundle::FORMAT_VERSION`) is the **served wire format** version a
-verifier reads *first*: a log published in a format newer than the binary
-understands is reported as version skew (`pollis-verify` exits `2`, "upgrade your
-verifier"), never as a verification failure — so the next breaking wire change does
-not surface to an auditor as a serde error. It was bumped to `2` at #701 (the
-`conversations` list removed, the precomputed `/verify/group/<id>` artifacts gone,
-the commit leaf moved to windowed pseudonyms). A manifest with no `format_version`
-is treated as the legacy pre-#701 shape (`0`) and still verifies.
+`format_version` (`bundle::FORMAT_VERSION`) is the served wire format, and verifiers
+read it before anything else. If it is newer than the binary supports,
+`pollis-verify` exits `2` ("upgrade your verifier") instead of failing with a parse
+error. It became `2` at #701, when the commit leaf moved to windowed pseudonyms and
+the `conversations` list was removed. A manifest without the field counts as `0`.
+`remote` still verifies such a log; `group` refuses it (it needs at least
+`MIN_LEAF_FORMAT_VERSION`, currently 2), because decoding pre-#701 leaves would
+report an empty, passing result for a conversation that is present.
 
-### Cache policy
+### Cache headers
 
-Every artifact is **write-once / immutable** except the ones that move as the log
-grows — `sth/latest.json`, `index.json`, and the `verify/account/*` /
-`verify/release/*` reports (the commit-log tree has no static `verify/group/*`
-since #701). Hosts should serve them so:
+Everything is write-once except `sth/latest.json`, `index.json` and the
+`verify/account/*` and `verify/release/*` reports, which change as the log grows.
 
-- immutable artifacts (`v1/sth/<size>.json`, `v1/entries*`, `v1/proof/**`,
-  `v1/public_key.json`) → `Cache-Control: public, max-age=31536000, immutable`
-- mutable artifacts (`v1/sth/latest.json`, `v1/index.json`,
-  `verify/account/*`, `verify/release/*`) → `Cache-Control: public, max-age=300`
+- immutable artifacts: `Cache-Control: public, max-age=31536000, immutable`
+- moving artifacts: `Cache-Control: public, max-age=300`
 
-The production publish (`.github/workflows/transparency-publish.yml`) applies
-exactly this split during the R2 sync — immutable files first, then the mutable
-head and reports — so a published head never points at a missing artifact. The
-dev server below sets short-cache headers on the moving documents and immutable
-on the rest.
+The production publish (`.github/workflows/transparency-publish.yml`) uploads in
+that split: immutable files first, then the moving heads and reports, so a
+published head never points at a file that is not there yet. The dev server sends
+`no-cache` for `latest.json` and `index.json` and the immutable header for
+everything else.
 
-## CLI (`serve`)
+## Usage
 
 ```bash
 cargo build -p verifiable-log-serve
 
-# 1. Generate the immutable static tree from a signed bundle.
+# 1. Generate the static tree from a signed bundle. Add --account-bundle and
+#    --binaries-bundle to include the other two trees.
 ./target/debug/serve generate --bundle bundle.json --out ./site
 
-# 2. Serve it locally for testing/demo (NOT the production path).
+# 2. Serve it locally (testing and demos only).
 ./target/debug/serve serve --dir ./site --port 8787
 
-# 3. From anywhere, verify the log over HTTP — trusting only the public key.
-#    `pollis-verify` is the auditor CLI; the `serve` binary carries the same
-#    verifiers for local dev.
+# 3. Verify it over HTTP. pollis-verify trusts only its compiled-in key, so a log
+#    signed with your own dev key needs that key added explicitly.
+export POLLIS_VERIFY_PINNED_KEYS_HEX=<your log's public key hex>
 ./target/debug/pollis-verify remote http://127.0.0.1:8787
 
-# Or verify one tenant's slice: a conversation, a user's key history, or a
-# release's binaries (each trusts only the pinned key, under its own STH context).
-./target/debug/pollis-verify group   http://127.0.0.1:8787 conv-1
-./target/debug/pollis-verify account http://127.0.0.1:8787 u-alice
+# Verify one conversation, one user's key history, or one release.
+./target/debug/pollis-verify group   http://127.0.0.1:8787 <conversation-id>
+./target/debug/pollis-verify account http://127.0.0.1:8787 <user-id>
 ./target/debug/pollis-verify release http://127.0.0.1:8787 v1.3.0
 ```
 
 `pollis-verify remote` fetches the public key and manifest, then every STH, the
-entries, and all proofs, and runs slice 1's verifiers: STH signatures,
-equivocation, entry/STH-root replay (through the tenant invariants), inclusion,
-and consistency. It prints a per-check report and **exits non-zero** if anything
-fails — a tampered entry, a forged proof, a bad signature, or a mismatched
-`latest.json` are all rejected.
+entries and all proofs, for the commit-log tree and (if published) the account-key
+and binaries trees. It checks that the served key is the pinned key, then STH
+signatures, equivocation, entry replay against each STH root, and every inclusion
+and consistency proof. A missing account-key or binaries tree is a `NOTE`, not a
+failure. `group`, `account` and `release` each take `--json` to print the report
+instead of a summary.
 
-**Exit codes** (stable, so scripts and CI can branch on them):
+`serve` also has `verify-remote <base-url>` and
+`verify-group --base <url> --group <id> [--json]`, which run the same code for local
+development.
+
+### Exit codes
 
 | code | meaning |
 |---|---|
 | `0` | verification passed |
-| `1` | verification **failed** (bad signature, forged proof, fork, epoch regression) or a transport/parse error |
-| `2` | **version skew** — the log's `format_version` is newer than this binary understands; upgrade `pollis-verify`. Deliberately distinct from `1`: it is *not* a tampering finding, so a stale binary the day after a republish reads as "upgrade me", not "verification failed". |
+| `1` | verification failed (bad signature, forged proof, fork, epoch regression, served key not pinned), or a transport or parse error |
+| `2` | version skew: the log's `format_version` is newer than this binary supports. Upgrade `pollis-verify`. This is not a tampering finding. |
 
-## Production note
+## Deployment
 
-The `serve` subcommand is for **local testing and demos only**. The real
-deployment is "generate the directory and drop it on a static host"; there is no
-server process, database, or app logic to run in production. Point a CDN/edge/R2
-bucket at the generated tree, apply the cache headers above, and the read API is
-live.
+**https://verify.pollis.com** is this static tree on Cloudflare R2.
+`.github/workflows/transparency-publish.yml` rebuilds it daily (and on
+`workflow_dispatch`): it builds the signed bundles in CI, runs `serve generate`,
+syncs to R2 with the cache split above, then runs `pollis-verify remote` against
+the live site. No server process sits on the trust path. The host can serve stale
+or broken data, but it cannot forge a head without the signing key, and STH
+timestamps make staleness visible.
+
+`serve live` (used by the Docker image, see `docker-entrypoint.sh`) serves the same
+`/v1` surface and `/verify/group/<id>`, rebuilt in memory from the commit-log
+database at most once per `--ttl-secs`.
 
 ## Tests
 
@@ -162,23 +163,7 @@ live.
 cargo test -p verifiable-log-serve
 ```
 
-The gate covers: (a) the layout generator writes every documented file for a
-fixture bundle; (b) the dev server serves them and `verify_remote` verifies the
-whole log over HTTP end to end; (c) tampering with a served artifact (an entry,
-the entries list, or an STH signature) makes remote verification fail.
-
-## Production deployment
-
-The live read API at **https://verify.pollis.com** is this static tree on
-Cloudflare R2, rebuilt daily by `.github/workflows/transparency-publish.yml`
-(cron + `workflow_dispatch`): the workflow builds a signed bundle from
-`mls_commit_log`, runs `serve generate`, and syncs the output to R2 with the
-cache split above. There is **no server on the trust path** — the tree is signed
-in CI and served as static files. The STH timestamp makes staleness
-self-evident, and a malicious or compromised host can only serve stale or broken
-data *detectably*, never forge it.
-
-## Out of scope (later slices)
-
-No browser/WASM explorer (slice 4), no auth on the read API (intentionally
-public), no signing-key custody beyond the CI secret, no account-key tenant.
+The suite checks that `generate` writes every documented file for a fixture bundle;
+that the dev server serves them and `verify_remote` passes end to end over HTTP; and
+that tampering with a served entry, the entries list, or an STH signature makes
+remote verification fail.
