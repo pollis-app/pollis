@@ -36,7 +36,7 @@
       <div class="doc-header">
         <h1 class="doc-title">Lost or stolen device</h1>
         <p class="doc-subtitle">
-          What to do, what it fixes, and — the part most guides skip — what it does not.
+          What to do, what it fixes, and what it does not.
         </p>
       </div>
 
@@ -46,30 +46,27 @@
         <strong>Devices</strong>, and press <strong>Revoke</strong>. You will be asked to type the device's name
         to confirm.
         <br /><br />
-        That single action removes the device from every conversation you are in and rotates the encryption keys,
-        so it cannot read anything sent afterwards. It also stops the device authenticating to our servers at all,
-        from the very next request.
+        This removes the device from every conversation you are in and rotates the encryption keys, so it cannot
+        read anything sent afterwards. From its next request, our servers also refuse to talk to it.
         <br /><br />
-        If that device was your <strong>only</strong> device, skip to
-        <a href="#only-device">"If it was your only device"</a> — the answer is different and more drastic.
+        If that was your only device, skip to
+        <a href="#only-device">"If it was your only device"</a>. The answer there is more drastic.
       </div>
 
       <!-- ─────────────────────────────────────────────────────────── -->
       <section class="doc-section">
         <h2 class="doc-section-title">What revoking actually does</h2>
-        <p>Revocation is not a flag someone might ignore. Four separate things happen:</p>
+        <p>Four things happen:</p>
         <ul>
           <li>
-            <strong>It is removed from every conversation's encryption group.</strong> Your revoking device
-            immediately issues a removal for each group and DM you share, and that removal rotates the group keys.
-            This is the part that matters: the removed device cannot derive the new keys, so messages sent after
-            the removal lands are unreadable to it. Forever, not until it reconnects.
+            <strong>It is removed from every conversation's encryption group.</strong> Your device issues a
+            removal for each group and DM, and each removal rotates the group keys. The removed device cannot
+            derive the new keys, so it can never read messages sent after the removal lands.
           </li>
           <li>
             <strong>It can no longer authenticate.</strong> Every request to our Delivery Service is signed by the
-            device, and the server checks the revocation tombstone before accepting a signature. The cached copy
-            of that device's key is evicted at the moment of revocation, so this takes effect on the next request
-            rather than when some timer lapses.
+            device, and the server checks for a revocation before accepting the signature. Its cached key is
+            evicted at revocation, so this applies from the next request, not after a timeout.
           </li>
           <li>
             <strong>Its leftover credentials are deleted.</strong> Its unclaimed key material and its delivery
@@ -77,76 +74,65 @@
             it published earlier.
           </li>
           <li>
-            <strong>Other members enforce it too.</strong> If your removal never lands — you go offline
-            mid-revocation, say — every other member's app re-checks the roster on launch and reconnect, and will
-            perform the removal itself. It does not depend on your device staying online.
+            <strong>Other members enforce it too.</strong> If your removal never lands (say you go offline
+            mid-revocation), every other member's app re-checks the roster on launch and reconnect and performs the
+            removal itself.
           </li>
         </ul>
         <p>
-          You cannot revoke the device you are currently using; log out instead. That restriction is deliberate,
-          and it is why a second device matters.
+          You cannot revoke the device you are using; log out instead. This is why a second device matters.
         </p>
       </section>
 
       <!-- ─────────────────────────────────────────────────────────── -->
       <section class="doc-section">
         <h2 class="doc-section-title">What someone holding the device can still get</h2>
-        <p>
-          This is the honest part, and it is the reason to act on the thief's device as well as on your account.
-        </p>
 
         <h3 class="doc-sub-title">Your existing history on that device: yes, if they get past the PIN</h3>
         <p>
-          Revocation is a forward-looking control. It cannot reach into a machine you no longer hold and delete
-          anything — <strong>there is no remote wipe</strong>, and the sign-out that a cooperative device performs
-          deliberately leaves local data in place.
+          Revocation only affects the future. It cannot delete anything on a machine you no longer hold. There is
+          <strong>no remote wipe</strong>, and even a cooperative device's sign-out leaves local data in place.
         </p>
         <p>
-          The messages on that device are stored in a database encrypted with AES-256. The key to it is not on
-          disk in usable form: it is sealed with a key derived from your PIN using a deliberately slow function,
-          and the sealed blob lives in the operating system's keychain. So the practical question is whether an
-          attacker can read that keychain.
+          Messages on the device sit in a database encrypted with AES-256. Its key is sealed under a key derived
+          from your PIN with a deliberately slow function (Argon2id), and the sealed blob is kept in the operating
+          system's keychain. So the question is whether an attacker can read that keychain.
         </p>
         <p>
-          <strong>If they can</strong> — because they know your computer's login password, or found it unlocked —
-          then a four-digit PIN is on the order of an hour of computation to search exhaustively. The ten-attempt
-          limit inside the app bounds someone typing at the screen; it does not bound someone working offline
-          against a copy of the disk. <strong>If they cannot</strong> read the keychain, the database is
-          indistinguishable from random noise and the history is safe.
+          If they can (they know your login password, or found the computer unlocked), every four-digit PIN can be
+          tried in under an hour. The app's ten-attempt limit stops someone typing at the screen, not someone
+          working offline on a copy of the disk. If they cannot read the keychain, the database is just ciphertext
+          and the history is safe.
         </p>
         <p>
-          The action that follows from this is simple and it is not about Pollis: <strong>change your computer's
-          login password and make sure full-disk encryption is on.</strong> A longer PIN helps too.
+          So <strong>change your computer's login password and make sure full-disk encryption is on.</strong>
         </p>
 
         <h3 class="doc-sub-title">New messages: no</h3>
         <p>
-          Once the removal commit lands, the device is outside the group and the keys have moved on. There is a
-          window — between your revocation and each member's app processing it — in which it still holds the
-          previous keys and can read anything sealed under them. Members who are online close that window in
-          seconds; a member whose device is offline closes it when they next open the app.
+          Once the removal commit lands, the device is outside the group and the keys have moved on. Until each
+          member's app processes the removal, the device still holds the previous keys and can read anything sent
+          under them. Online members close that window in seconds; an offline member closes it when they next open
+          the app.
         </p>
 
         <h3 class="doc-sub-title">Encrypted traffic: a revoked device stops being served at all</h3>
         <p>
-          A revoked device cannot fetch anything after revocation &mdash; not messages, not metadata. Every
-          request to the Delivery Service, reads included, is signed by the device&rsquo;s own key, and a revoked
-          device&rsquo;s signature is refused. The app holds no database credential of any kind, so there is
-          nothing to fall back on.
+          After revocation the device cannot fetch anything, messages or metadata. Every Delivery Service request,
+          reads included, is signed by the device&rsquo;s key, and a revoked device&rsquo;s signature is refused.
+          The app holds no database credential to fall back on.
         </p>
         <p>
-          What a revoked device keeps is whatever it already downloaded before revocation, sitting in its local
-          encrypted database. It cannot decrypt anything sent afterwards, because the group rekeys without it.
+          It keeps whatever it had already downloaded, in its local encrypted database.
         </p>
 
         <div class="doc-limit">
-          <span class="doc-limit-title">One thing revocation does not do, that you might expect</span>
+          <span class="doc-limit-title">Revocation does not notify your contacts</span>
           <p>
-            <strong>Your contacts are not notified.</strong> Safety numbers in Pollis identify a
-            <em>person</em>, not a device — every device chains to one account identity, which is what lets you
-            verify someone once instead of once per device. Revoking a device does not change that account
-            identity, so nobody's safety number changes and no key-change warning appears for anyone you talk to.
-            If you want your contacts to see something, you have to tell them.
+            Safety numbers in Pollis identify a <em>person</em>, not a device: every device chains to one account
+            identity, so you verify someone once rather than once per device. Revoking a device leaves that identity
+            unchanged, so no safety number changes and nobody sees a key-change warning. If you want your contacts
+            to know, tell them.
           </p>
         </div>
 
@@ -154,9 +140,8 @@
         <p>
           Revoking a device writes a <strong>Device revoked</strong> entry to
           <strong>Settings → Security</strong>, alongside the enrollments and rejections already logged there,
-          naming the device and the time. That is the answer to the question this whole page exists for — "did
-          it actually take effect?" — and it does not depend on the device you revoked ever coming back online.
-          Until recently it was not recorded at all, and this page said so.
+          with the device name and time. That is how you confirm the revocation took effect, and it does not
+          depend on the revoked device ever coming back online.
         </p>
       </section>
 
@@ -165,10 +150,10 @@
         <h2 class="doc-section-title">If it was your only device</h2>
         <p>
           There is no way to revoke a device from itself, and no second device to do it from. The only remaining
-          path is a full identity reset, performed from a new device at the sign-in screen — the link reads
+          path is a full identity reset from a new device, via the sign-in screen link
           <strong>"I've lost my Secret Key — reset my account"</strong>. You confirm by typing your email address.
         </p>
-        <p>This is genuinely destructive, and you should know the price before you start:</p>
+        <p>This is destructive:</p>
         <ul>
           <li><strong>Every other device is removed</strong>, including the lost one.</li>
           <li>
@@ -177,8 +162,8 @@
           </li>
           <li>
             <strong>Your message history does not come with you.</strong> There is no key backup and no server-side
-            copy of your history, by design. A new device starts empty. That is one of the small number of
-            deliberate, disclosed limits in Pollis — the price of us never holding a key that could restore it.
+            copy of your history, so a new device starts empty. This is a deliberate limit: we never hold a key that
+            could restore it.
           </li>
           <li>
             <strong>Your account identity changes</strong>, so your contacts <em>will</em> see a key-change
@@ -186,9 +171,8 @@
           </li>
         </ul>
         <p>
-          One thing to be aware of: this path is gated on receiving a one-time code by email and typing your own
-          address. Whoever controls your email account can therefore trigger it. Securing that mailbox is worth
-          more than any setting inside Pollis.
+          The reset is gated on a one-time code sent to your email, so whoever controls your mailbox can trigger
+          it. Securing that mailbox matters more than any setting inside Pollis.
         </p>
       </section>
 
@@ -196,9 +180,9 @@
       <section class="doc-section">
         <h2 class="doc-section-title">If you think someone read your messages</h2>
         <p>
-          Revoking handles the device. If you suspect the compromise went further — someone had your account, not
-          just your hardware — the reset above rotates your account identity and is the stronger move, at the cost
-          of your group memberships and history.
+          Revoking handles the device. If you suspect someone had your account, not just your hardware, the reset
+          above rotates your account identity. It is the stronger move, at the cost of your memberships and
+          history.
         </p>
         <p>
           If you have found a weakness in Pollis itself rather than lost a laptop, please report it privately

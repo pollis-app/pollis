@@ -177,7 +177,7 @@
             <p>A desktop messaging app with group channels and direct messages, like Slack, but your messages are encrypted on your device before they leave it. The people running Pollis can't read them.</p>
           </div>
           <div class="dev">
-            <p>Tauri desktop client with a React UI and a Rust core for cryptography, MLS group state, and real-time media. The Rust core talks only to the Delivery Service &mdash; an in-repo axum server &mdash; for every remote read and every write; it holds no database credential of its own, and <code>pollis-core</code> does not link a database driver at all. Messages are end-to-end encrypted with MLS (RFC 9420) via <code>openmls</code>; neither the database nor the Delivery Service can read plaintext — they see ciphertext envelopes plus routing metadata.</p>
+            <p>Tauri desktop client with a React UI and a Rust core for cryptography, MLS group state, and real-time media. Every remote read and write goes through the Delivery Service (an in-repo axum server); the client holds no database credential, and <code>pollis-core</code> does not link a database driver. Messages are end-to-end encrypted with MLS (RFC 9420) via <code>openmls</code>. The database and Delivery Service see ciphertext envelopes and routing metadata, never plaintext.</p>
           </div>
         </div>
       </div>
@@ -198,12 +198,12 @@
         <div class="faq-question">Is it really end-to-end encrypted?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>Yes. Messages, files, and voice are all encrypted on your device using the same kind of cryptography banks and secure messengers use. Your private keys never leave your computer.</p>
+            <p>Yes. Messages, files, and voice are encrypted on your device, and your private keys never leave it.</p>
             <p>The server can see <strong>who</strong> is messaging <strong>when</strong>, but not <strong>what</strong>.</p>
           </div>
           <div class="dev">
-            <p>Client-side MLS encryption (RFC 9420) via <code>openmls</code>. Private keys live in the OS keystore (macOS Keychain / Windows Credential Manager / Linux Secret Service) through the <code>keyring</code> crate, never on disk, never sent anywhere.</p>
-            <p>Voice is end-to-end encrypted too: audio frames are AES-GCM encrypted by libwebrtc's <code>FrameCryptor</code> post-Opus / pre-SRTP, keyed by a 32-byte secret derived from the channel's MLS group via <code>MlsGroup::export_secret("pollis/voice/v1", epoch, 32)</code>. The LiveKit SFU forwards ciphertext only; the key rotates on every MLS epoch advance.</p>
+            <p>Client-side MLS encryption (RFC 9420) via <code>openmls</code>. Private keys live in the OS keystore (macOS Keychain / Windows Credential Manager / Linux Secret Service) via the <code>keyring</code> crate. Where no keystore is available, they go in an encrypted file bound to the machine, never in plaintext. They are never sent anywhere.</p>
+            <p>Voice: audio frames are AES-GCM encrypted by libwebrtc's <code>FrameCryptor</code> after Opus and before SRTP, keyed by a 32-byte secret from <code>MlsGroup::export_secret("pollis/voice/v1", epoch, 32)</code> on the channel's MLS group. The LiveKit SFU forwards ciphertext only, and the key rotates with every MLS epoch.</p>
             <p>Server sees: user IDs, group/channel membership, message timestamps, sizes, public keys, voice presence and RTP routing metadata. Server does not see: message plaintext, file contents, voice audio, private keys.</p>
           </div>
         </div>
@@ -213,12 +213,12 @@
         <div class="faq-question">Can the server tell who sent a message?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>Not from what it stores. The saved record of a message no longer says who sent it, only the people in the conversation can tell, from the sealed contents. So a database breach, or a legal demand for stored data, can't reveal who said what.</p>
-            <p>One honest caveat, stated plainly: at the instant you hit send, the delivery server still checks that you're allowed to post in that conversation, so in that moment it does see it's you. Removing even that is future work.</p>
+            <p>Not from what it stores. The stored message does not say who sent it; only people in the conversation can tell, from the sealed contents. A database breach or a legal demand for stored data can't reveal who said what.</p>
+            <p>The caveat: when you hit send, the delivery server checks that you're allowed to post in that conversation, so at that moment it does see it's you. Removing that is future work.</p>
           </div>
           <div class="dev">
-            <p>Sealed sender (shipped). MLS already authenticates the sender inside the ciphertext via the message's <code>BasicCredential</code> (<code>{user_id}:{device_id}</code>), so the plaintext <code>sender_id</code> the server used to store was cryptographically redundant. The stored envelope is now sealed (migration <code>000008_message_envelope_sealed_sender.sql</code>) and the recipient attributes the message from the MLS credential on decrypt, not from a server column.</p>
-            <p>Scope is at-rest only: the Delivery Service still authenticates the send with an <code>X-Pollis-User</code> header, so it sees the sender at the live moment. Anonymous membership proofs (which would remove even that) are future work, not shipped.</p>
+            <p>Sealed sender (shipped). MLS already authenticates the sender inside the ciphertext via the message's <code>BasicCredential</code> (<code>{user_id}:{device_id}</code>), so the plaintext <code>sender_id</code> the server used to store was redundant. The stored envelope is now sealed (migration <code>000008_message_envelope_sealed_sender.sql</code>), and the recipient attributes the message from the MLS credential on decrypt.</p>
+            <p>This covers data at rest only. The Delivery Service still authenticates the send with an <code>X-Pollis-User</code> header, so it sees the sender at send time. Anonymous membership proofs, which would remove that, are not shipped.</p>
           </div>
         </div>
       </div>
@@ -227,10 +227,10 @@
         <div class="faq-question">Does the length of my messages give anything away?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>No. Every text message is padded out to a standard size before it's sealed, so its length reveals nothing, the server can't tell a one-word reply from a long paragraph by measuring it. (Attachments are handled separately and aren't padded.)</p>
+            <p>No. Every text message is padded to a standard size before it's sealed, so the server can't tell a one-word reply from a long paragraph. Attachments are not padded.</p>
           </div>
           <div class="dev">
-            <p>Text plaintext is padded to fixed size buckets before MLS encryption (<code>pollis-core/src/commands/messages/framing.rs</code>), so ciphertext size no longer correlates with message length. Attachments are the exception, they're shared via convergent encryption keyed on real file size, so they aren't bucketed.</p>
+            <p>Text plaintext is padded to fixed size buckets before MLS encryption (<code>pollis-core/src/commands/messages/framing.rs</code>), so ciphertext size does not track message length. Attachments are the exception: they use convergent encryption keyed on the real file size, so they aren't bucketed.</p>
           </div>
         </div>
       </div>
@@ -239,10 +239,10 @@
         <div class="faq-question">Do notifications leak who's messaging me?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>No. The real-time "new message" ping that tells your app to go fetch something no longer carries who sent it. It's just a nudge, your device learns the real sender only after it opens the sealed message.</p>
+            <p>No. The real-time "new message" ping that tells your app to fetch doesn't say who sent it. Your device learns the sender only when it opens the sealed message.</p>
           </div>
           <div class="dev">
-            <p>The realtime signalling payload for <code>new_message</code> is stripped of <code>sender_id</code>, it's a wake-up ping only, and the recipient re-derives the sender from the decrypted MLS envelope. Same metadata-minimization work as sealed sender.</p>
+            <p>The realtime <code>new_message</code> payload carries no <code>sender_id</code>; it is a wake-up ping, and the recipient takes the sender from the decrypted MLS envelope.</p>
           </div>
         </div>
       </div>
@@ -251,11 +251,11 @@
         <div class="faq-question">What happens if someone's cryptographic key changes?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>Pollis detects it automatically and warns you. A red shield appears next to that person's name in every conversation you share (direct messages, group member lists, channels) and an inline notice shows up in the chat so you can re-verify them out-of-band (in person, by phone, however you trust).</p>
-            <p>You only need to verify a person once. After that, the green shield follows them everywhere they appear in your account. If their key ever changes, all those shields turn red at the same moment.</p>
+            <p>Pollis warns you. A red shield appears next to that person's name everywhere you share (DMs, group member lists, channels), and a notice appears in the chat so you can re-verify them another way, in person or by phone.</p>
+            <p>You verify a person once, and the green shield follows them across your account. If their key changes, all those shields turn red together.</p>
           </div>
           <div class="dev">
-            <p>Signal-style 60-digit safety numbers derived from both parties' <code>account_id_pub</code> (SHA-512^5200, see <code>pollis-core/src/commands/safety.rs</code>). First-seen keys are pinned silently (TOFU) and surfaced on mismatch via a <code>KeyChanged</code> realtime event. Pinning runs on every DM ingest <em>and</em> on every group-reconcile commit (<code>batch_check_and_pin_account_keys</code>), so a Turso-side key swap is caught regardless of conversation type. Verification state lives in <code>contact_verification</code> keyed by <code>peer_user_id</code> (not per-conversation), which is what gives the per-user "shield follows the contact" behavior.</p>
+            <p>Signal-style 60-digit safety numbers derived from both parties' <code>account_id_pub</code> (SHA-512^5200, see <code>pollis-core/src/commands/safety.rs</code>). First-seen keys are pinned silently (TOFU) and surfaced on mismatch via a <code>KeyChanged</code> realtime event. Pinning runs on every DM ingest <em>and</em> on every group-reconcile commit (<code>batch_check_and_pin_account_keys</code>), so a server-side key swap is caught in any conversation type. Verification state lives in <code>contact_verification</code>, keyed by <code>peer_user_id</code> rather than per conversation, which is why the shield follows the contact.</p>
           </div>
         </div>
       </div>
@@ -264,12 +264,12 @@
         <div class="faq-question">What happens to my messages if I get a new device or reset my account?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>You will likely lose your old messages. This is on purpose.</p>
-            <p>A new device only sees messages sent after it's added. Resetting your account wipes prior messages. We don't back up your history to the cloud, because doing so would be a target for attackers and subpoenas.</p>
+            <p>You will likely lose your old messages, on purpose.</p>
+            <p>A new device only sees messages sent after it's added, and resetting your account wipes prior messages. We don't back up your history to the cloud, because a backup would be a target for attackers and subpoenas.</p>
             <p>If you need a permanent archive of everything you've ever said, Pollis isn't the right tool.</p>
           </div>
           <div class="dev">
-            <p>Message history is not a product guarantee. A new device joining an existing MLS group receives keys for the current epoch only, no historical backfill. Identity reset wipes local message storage. No encrypted cloud backup (no Megolm-style key-backup), and none is planned. This is explicit in <code>CLAUDE.md</code> as a design principle: simpler model, smaller attack surface, no key escrow.</p>
+            <p>A new device joining an MLS group gets keys for the current epoch only; there is no historical backfill. Identity reset wipes local message storage. There is no encrypted cloud backup (no Megolm-style key backup), and none is planned: no key escrow, smaller attack surface.</p>
           </div>
         </div>
       </div>
@@ -281,7 +281,7 @@
             <p>macOS, Windows, and Linux.</p>
           </div>
           <div class="dev">
-            <p>macOS (universal binary, Apple Silicon + Intel), Windows x64, Linux (<code>.deb</code>, <code>.rpm</code>, <code>.AppImage</code>, AUR). Binaries are code-signed: Apple Developer ID on macOS, Azure Trusted Signing on Windows.</p>
+            <p>macOS (Apple Silicon), Windows x64, Linux (<code>.deb</code>, <code>.rpm</code>, <code>.AppImage</code>, AUR). Binaries are code-signed: Apple Developer ID on macOS, Azure Trusted Signing on Windows.</p>
           </div>
         </div>
       </div>
@@ -290,10 +290,10 @@
         <div class="faq-question">Is there an iOS or Android app?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>No.</p>
+            <p>Not yet. A mobile app is in development but has not been released.</p>
           </div>
           <div class="dev">
-            <p>No. Voice/media is implemented directly in Rust (not in the webview), so mobile isn't a UI-only port, it would require native clients.</p>
+            <p>Not released. A React Native / Expo app in <code>mobile/</code> uses the same Rust core (<code>pollis-core</code>) through uniffi bindings; it is not yet distributed through the App Store or Play Store.</p>
           </div>
         </div>
       </div>
@@ -302,12 +302,12 @@
         <div class="faq-question">Is Pollis open source?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>No, not in the strict sense of that phrase. The right word is <strong>source-available</strong>. The whole source is public on <a href="https://github.com/actuallydan/pollis" target="_blank" rel="noopener noreferrer">GitHub</a> and you can read it, build it, and check our work — that part is real, and it is the part every verification claim on this site depends on. But the licence only permits personal and noncommercial use. Using Pollis inside a business needs a separate commercial licence from us.</p>
+            <p>Not strictly. It is <strong>source-available</strong>: the whole source is public on <a href="https://github.com/actuallydan/pollis" target="_blank" rel="noopener noreferrer">GitHub</a>, and you can read it, build it, and check our work, which is what the verification claims on this site rely on. The licence permits personal and noncommercial use only. Using Pollis inside a business needs a separate commercial licence from us.</p>
           </div>
           <div class="dev">
-            <p>No — source-available, not OSI open source, and we would rather say so than let the word do work it hasn't earned.</p>
-            <p>The repo at <a href="https://github.com/actuallydan/pollis" target="_blank" rel="noopener noreferrer">github.com/actuallydan/pollis</a> is published under the <a href="https://polyformproject.org/licenses/noncommercial/1.0.0" target="_blank" rel="noopener noreferrer">PolyForm Noncommercial License 1.0.0</a>. Any noncommercial purpose is permitted, which includes personal use, hobby projects, academic and public research, and use by charities, schools and government institutions — you may run it, modify it, and redistribute it for those purposes, provided you pass the licence terms along. Any commercial or business use requires a separate commercial licence; contact <a href="mailto:dankral01@gmail.com">dankral01@gmail.com</a>. The canonical text is <a href="https://github.com/actuallydan/pollis/blob/main/LICENSE.md" target="_blank" rel="noopener noreferrer"><code>LICENSE.md</code></a> in the repo.</p>
-            <p>What this does not restrict is auditing. Nothing about the licence limits reading the source, rebuilding a release to compare it against the transparency log, or building and running <code>pollis-verify</code> yourself. The licence governs what you may ship, not what you may check.</p>
+            <p>No. It is source-available, not OSI open source.</p>
+            <p>The repo at <a href="https://github.com/actuallydan/pollis" target="_blank" rel="noopener noreferrer">github.com/actuallydan/pollis</a> is published under the <a href="https://polyformproject.org/licenses/noncommercial/1.0.0" target="_blank" rel="noopener noreferrer">PolyForm Noncommercial License 1.0.0</a>. Any noncommercial purpose is permitted, including personal use, hobby projects, academic and public research, and use by charities, schools and government institutions. For those purposes you may run, modify, and redistribute it, provided you pass the licence terms along. Any commercial or business use requires a separate commercial licence; contact <a href="mailto:dankral01@gmail.com">dankral01@gmail.com</a>. The canonical text is <a href="https://github.com/actuallydan/pollis/blob/main/LICENSE.md" target="_blank" rel="noopener noreferrer"><code>LICENSE.md</code></a> in the repo.</p>
+            <p>The licence does not restrict auditing: reading the source, rebuilding a release to compare against the transparency log, or building and running <code>pollis-verify</code> yourself.</p>
           </div>
         </div>
       </div>
@@ -316,15 +316,20 @@
         <div class="faq-question">How do I know the app I downloaded hasn't been tampered with?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>Pollis publishes a fingerprint of every version it releases into a public, tamper-evident log. A small tool, <code>pollis-verify</code>, lets anyone confirm that the app they're running is one Pollis has publicly published, so nobody can quietly slip a single person a tampered build without it either showing up in that public log forever or being conspicuously missing from it.</p>
-            <p>On Linux this goes one step further: after every release an automated rebuild from the public source confirms the released app matches, byte for byte. On macOS and Windows that last step isn't there yet, so on those two the log proves the app matches what Pollis published, not yet that those bytes came from the source you can read.</p>
+            <p>Pollis publishes a fingerprint of every release to a public, tamper-evident log. A small tool, <code>pollis-verify</code>, lets anyone confirm that the app they're running is one Pollis published. A tampered build given to one person would either appear in the public log permanently or be missing from it, and either is detectable.</p>
+            <p>On Linux, an automated rebuild from the public source after every release also confirms the released app matches byte for byte. macOS and Windows don't have that step yet, so there the log proves the app matches what Pollis published, not that it was built from the public source.</p>
           </div>
           <div class="dev">
-            <p>Binary transparency (shipped). Each released artifact's hashes are appended to an append-only log at <code>verify.pollis.com/v1/binaries</code>, anchored to a single pinned log key (post-quantum <strong>ML-DSA-44</strong>; the key is published on the <a href="artifacts.html">artifacts page</a>). <code>pollis-verify release &lt;tag&gt;</code> checks a build against the log, trusting only that key rather than Pollis's word.</p>
-            <p>Each leaf also carries a <code>toolchain</code> field meant to record the exact build recipe — and here it has to be said plainly that <strong>every leaf published so far records <code>unknown</code> in it.</strong> No workflow ever set those values, so all <strong>258</strong> entries in the log today, through v1.9.7, carry <code>"rustc": "unknown"</code>. The log is append-only, so those leaves cannot be corrected; they are permanently wrong about the recipe, while remaining correct about the hashes, which is what the log is actually relied on for. The release workflow now hard-fails rather than recording <code>unknown</code>, so <strong>leaves from the next release onward carry a real recipe</strong>. Do not read the existing 258 as containing one.</p>
-            <p>Also published per release, from the next release onward: a <strong>CycloneDX SBOM</strong> (<code>pollis-&lt;tag&gt;.cdx.json</code>) listing every Rust and JavaScript dependency the build resolved, and a build-recipe sidecar per platform. The SBOM is itself a provenance subject, so its digest is anchored in Sigstore's public log and a quieter replacement could not go unnoticed.</p>
-            <p>Also shipped: a post-release workflow that rebuilds the Linux AppImage from public source and asserts its hash against the log, failing the job on any mismatch; SLSA build provenance plus keyless <code>cosign</code> signatures on every artifact for all three platforms, published beside the downloads and anchored in Sigstore's public Rekor log, so verification needs no Pollis-held key; and an in-app "verify this build" button on the security screen, which hashes the running binary and re-runs the same release check the CLI does.</p>
-            <p>Their limits, stated plainly: the rebuild covers the Linux AppImage only (not <code>.deb</code>/<code>.rpm</code>, not macOS, not Windows) and needs the published build recipe rather than source alone, because a build-time value is baked in; every release's verdict is now published as a durable ledger on the <a href="assurance.html">assurance page</a>, including the two historical red runs that were a since-fixed reporting bug and the one whose rebuild landed on a different CI machine image than the release — re-run on a matching image, that release reproduced byte-for-byte, and the page explains why. Provenance is not a release gate, and two earlier releases shipped without it. The in-app check is advisory, proves log inclusion rather than reproduction from source, and reports <code>pending</code> until the log's next daily rebuild covers a new release.</p>
+            <p>Binary transparency (shipped). Each released artifact's hashes are appended to an append-only log at <code>verify.pollis.com/v1/binaries</code>, anchored to a single pinned log key (post-quantum ML-DSA-44, published on the <a href="artifacts.html">artifacts page</a>). <code>pollis-verify release &lt;tag&gt;</code> checks a build against the log, trusting only that key.</p>
+            <p>Each leaf also has a <code>toolchain</code> field meant to record the build recipe. No workflow ever set it, so all 258 leaves through v1.9.7 carry <code>"rustc": "unknown"</code>. The log is append-only, so they cannot be corrected: their hashes are right, their recipe field is not. The release workflow now fails rather than record <code>unknown</code>, so leaves from later releases carry a real recipe.</p>
+            <p>Each release from then on also publishes a CycloneDX SBOM (<code>pollis-&lt;tag&gt;.cdx.json</code>) listing every Rust and JavaScript dependency the build resolved, plus a build-recipe sidecar per platform. The SBOM is itself a provenance subject, so its digest is anchored in Sigstore's public log and a swapped SBOM would be detectable.</p>
+            <p>Also shipped:</p>
+            <ul>
+              <li>a post-release workflow that rebuilds the Linux AppImage from public source and fails on any hash mismatch with the log;</li>
+              <li>SLSA build provenance and keyless <code>cosign</code> signatures on every artifact for all three platforms, anchored in Sigstore's Rekor log, so verification needs no Pollis-held key;</li>
+              <li>an in-app "verify this build" button on the security screen, which hashes the running binary and runs the same release check as the CLI.</li>
+            </ul>
+            <p>Limits: the rebuild covers the Linux AppImage only (not <code>.deb</code>/<code>.rpm</code>, macOS, or Windows), and it needs the published build recipe as well as the source, because a build-time value is baked in. Every release's verdict is recorded on the <a href="assurance.html">assurance page</a>, including two historical failures caused by a since-fixed reporting bug, and one rebuild that ran on a different CI machine image than the release (re-run on a matching image, it reproduced byte for byte). Provenance is not a release gate, and two earlier releases shipped without it. The in-app check is advisory: it proves log inclusion, not reproduction from source, and reports <code>pending</code> until the log's next daily rebuild covers a new release.</p>
           </div>
         </div>
       </div>
@@ -333,10 +338,10 @@
         <div class="faq-question">Is it free?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>For personal and other noncommercial use, yes — free to download and free to run, with no account tier to buy. Using it inside a business is the one exception: that needs a separate commercial licence.</p>
+            <p>For personal and other noncommercial use, yes, with no paid tier. Using it inside a business needs a separate commercial licence.</p>
           </div>
           <div class="dev">
-            <p>Free for any noncommercial purpose under PolyForm Noncommercial 1.0.0. Commercial or business use requires a separate commercial licence — see the licensing question above.</p>
+            <p>Free for any noncommercial purpose under PolyForm Noncommercial 1.0.0. Commercial or business use requires a separate commercial licence (see the licensing question above).</p>
           </div>
         </div>
       </div>
@@ -345,10 +350,10 @@
         <div class="faq-question">Why MLS instead of Signal Protocol?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>Pollis is built around group chats. MLS is a newer standard designed for groups; Signal's protocol is great for 1:1 but gets slow and expensive at group scale.</p>
+            <p>Pollis is built around group chats. MLS is a newer standard designed for groups; Signal's protocol is built for 1:1 and gets expensive in large groups.</p>
           </div>
           <div class="dev">
-            <p>MLS (RFC 9420) provides a single group key ratchet with O(log n) membership changes. Signal's Double Ratchet pairwise-ratchets between every member, so a group of N costs O(N) per sender per message. For a Slack-style product with large channels, MLS is the right primitive.</p>
+            <p>MLS (RFC 9420) gives a group a single shared key schedule with O(log n) membership changes. Signal groups build on pairwise Double Ratchet sessions (sender keys distributed pairwise), so adding or removing a member costs O(N) pairwise messages per sender. For Slack-style channels with many members, MLS scales better.</p>
           </div>
         </div>
       </div>
@@ -381,7 +386,7 @@
         <div class="faq-question">What happens if the server goes down?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>You won't be able to send or receive new messages until it's back, but you can still open the app and read what you already have. A server outage is never a privacy problem, only a reachability one.</p>
+            <p>You can't send or receive new messages until it's back, but you can still open the app and read what you already have. An outage doesn't affect privacy.</p>
           </div>
           <div class="dev">
             <p>The server is required for message delivery, MLS commit routing, and R2 uploads. Read-only operation against the local encrypted SQLite store still works during an outage. Because the server can't decrypt, downtime has no confidentiality impact.</p>
@@ -393,7 +398,7 @@
         <div class="faq-question">Where do my files go when I attach something?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>Files are encrypted on your device before upload. The storage provider only ever sees scrambled bytes; only people in the group can decrypt them.</p>
+            <p>Files are encrypted on your device before upload. The storage provider sees only encrypted bytes, and only people in the group can decrypt them.</p>
           </div>
           <div class="dev">
             <p>Attachments are encrypted client-side and uploaded to Cloudflare R2. The decryption key travels inside the MLS-encrypted message, so R2 only ever holds ciphertext. Recipients fetch by key and decrypt locally.</p>

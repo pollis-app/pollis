@@ -54,16 +54,16 @@
       <p class="description">
         Secure, private communication for teams and individuals.
         <br />
-        Your messages, files, and voice calls are end-to-end encrypted using MLS (Messaging Layer Security), the server stores or forwards only ciphertext it can never read.
+        Messages, files, and voice calls are end-to-end encrypted with MLS (Messaging Layer Security). Our servers store and forward only ciphertext.
       </p>
 
       <div class="cta-group">
         <a href="#download" class="btn btn-primary">Download</a>
       </div>
 
-      <p class="status">Open preview — expect rough edges in the app. Not in the delivery.</p>
+      <p class="status">Open preview: expect rough edges in the app, not in delivery.</p>
       <p class="small-print">
-        Every message reaches every device that was in the room. That one is not a rough edge.
+        Every message reaches every device that was in the conversation when it was sent.
       </p>
     </div>
 
@@ -124,18 +124,16 @@
           <span class="verify-tag" data-verify-tag></span>
         </h3>
         <p class="verify-intro">
-          Pollis publishes the SHA-256 of every release into a public, append-only
-          transparency log. Hash the file you just downloaded and compare it with the
-          value below — if they match, you have exactly the bytes Pollis published,
-          and not a copy someone altered in transit or on a mirror.
+          The SHA-256 of every release is published to a public, append-only
+          transparency log. Hash your download and compare it with the value below.
+          If they match, you have the exact bytes Pollis published.
         </p>
         <ul class="verify-list" data-verify-list>
           <li class="verify-note">Loading published hashes…</li>
         </ul>
         <p class="verify-foot">
-          This compares bytes, not intent. For the full picture — inclusion proofs
-          against the signed log, and whether a build reproduces from source —
-          see <a href="/artifacts">artifacts</a>.
+          For inclusion proofs against the signed log, and whether a build
+          reproduces from source, see <a href="/artifacts">artifacts</a>.
         </p>
       </section>
     </section>
@@ -166,10 +164,9 @@
     <section id="terminal" class="terminal-section">
       <h2 class="terminal-heading">Or never leave the terminal</h2>
       <p class="terminal-desc">
-        Pollis also ships as <code>pollis</code>, a full terminal client, no desktop app required.
-        Same MLS end-to-end encryption, same conversations, one self-contained binary, no Tauri, no WebView, no desktop app.
-        Sign in, browse channels and DMs, read and send, over SSH, in a tmux pane, on a box with no display.
-        It's IRC's spirit with real end-to-end encryption bolted on, for people who live in a shell.
+        Pollis also ships as <code>pollis</code>, a terminal client in one self-contained binary.
+        Same MLS encryption, same conversations, no desktop app or WebView.
+        Sign in, browse channels and DMs, read and send over SSH, in a tmux pane, or on a headless box.
       </p>
       <div class="install-block">
         <span class="install-label">macOS &amp; Linux</span>
