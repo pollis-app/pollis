@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pollis — If the Operator Stops</title>
+  <meta name="description"
+    content="What breaks, in what order, if the single person operating Pollis stops, and how to tell a stalled transparency log from a withheld one." />
+  <meta name="theme-color" content="#0f1117" />
+
+  <meta property="og:title" content="Pollis — If the Operator Stops" />
+  <meta property="og:description"
+    content="Pollis operational continuity: singly held assets, degradation order, and how to read a stalled log." />
+  <meta property="og:type" content="website" />
+
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;700&display=swap"
+    rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="doc-page.css" />
+</head>
+
+<body>
+  <!-- Dot matrix background -->
+  <div id="dot-matrix-bg"></div>
+
+  <main>
+    <div class="doc-main reading-surface">
+      <a href="index.html" class="doc-back">&larr; Back to Pollis</a>
+
+      <div class="doc-header">
+        <h1 class="doc-title">If the operator stops</h1>
+        <p class="doc-subtitle">
+          Pollis is run by one person. This is what breaks, in what order, if that person stops, and what an
+          outside observer can and cannot conclude while it happens.
+        </p>
+      </div>
+
+      <div class="doc-explainer">
+        Every credential that runs Pollis has <strong>one holder</strong>: no second holder, no escrow, no
+        successor organisation. If that person stopped tomorrow, <strong>running services would keep
+        running</strong> and messages would keep being delivered. What stops is everything that needs a
+        person: releases, security fixes, key rotation, incident response and publishing the transparency log.
+        <br /><br />
+        None of this is a confidentiality risk. No asset below can read a message, because the servers never
+        hold plaintext or private message keys. The risks are availability, distribution, and the quiet
+        decay of guarantees that depend on someone publishing.
+      </div>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">What is singly held</h2>
+        <div class="doc-table-wrap">
+          <table class="doc-table">
+            <thead>
+              <tr><th>Asset</th><th>What it does</th><th>If it is lost</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>GitHub repository</td><td>Source, CI, releases</td><td>No releases or CI gates. Source already published stays available</td></tr>
+              <tr><td>Updater signing key</td><td>Signs auto-update manifests</td><td><strong>The worst single loss.</strong> Its public half is built into every installed app, so no future build could be accepted as an update. Every user would reinstall by hand</td></tr>
+              <tr><td>Transparency log signing key</td><td>Signs all three transparency trees</td><td>The log cannot be republished, and rotating to a new key is not yet cleanly recoverable (below)</td></tr>
+              <tr><td>Apple and Azure signing</td><td>macOS notarization, Windows signing</td><td>No new signed builds. Installed apps keep working</td></tr>
+              <tr><td>Cloudflare</td><td>DNS, website, Delivery Service, CDN</td><td><strong>Everything user-facing stops.</strong> The largest single concentration</td></tr>
+              <tr><td>Turso</td><td>Metadata and commit-log databases</td><td>The Delivery Service cannot serve. Message content is unaffected; it was never there</td></tr>
+              <tr><td>AWS</td><td>Optional relay overlay</td><td>The overlay stops. Pollis still works without IP-metadata protection</td></tr>
+              <tr><td>LiveKit server</td><td>Voice, video, screenshare</td><td>Calls stop. Text messaging is unaffected</td></tr>
+              <tr><td>Resend</td><td>Sign-in email codes</td><td>Nobody can sign in or add a device. Existing sessions keep working</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">What breaks, in what order</h2>
+        <div class="doc-table-wrap">
+          <table class="doc-table">
+            <thead>
+              <tr><th>When</th><th>What happens</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Immediately</td><td>Nothing. Messages deliver, the site stays up</td></tr>
+              <tr><td>~2 days</td><td>The daily transparency publish stops. New keys and builds stop being anchored. <a href="https://status.pollis.com/" target="_blank" rel="noopener noreferrer">status.pollis.com</a> still reports the service as up, because it is</td></tr>
+              <tr><td>~60 days</td><td>GitHub disables scheduled workflows on an inactive repository; every cron stops</td></tr>
+              <tr><td>Months</td><td>Apple and Azure signing credentials lapse; no new signed builds are possible</td></tr>
+              <tr><td>Any time</td><td>A vulnerability or outage goes unfixed</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          The system is at its most misleading between day two and month two, when everything a user touches
+          still works while every guarantee that depends on someone publishing has quietly stopped.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">A stalled log looks exactly like a withheld one</h2>
+        <p>
+          The transparency trees are republished daily, and a signed tree head for a given size is
+          deliberately byte-identical forever. So from outside, three situations look the same: the log is
+          healthy and idle, the publisher has been abandoned, or entries are being deliberately withheld.
+          Polling <a href="transparency.html">the served log</a> cannot tell them apart.
+        </p>
+        <p>What separates them is the publisher's run history, which anyone can read without credentials:</p>
+        <code class="doc-cmd">gh run list --repo actuallydan/pollis --workflow=transparency-publish.yml --limit 5 --json conclusion,createdAt,url</code>
+        <p><strong>How to read a stall:</strong></p>
+        <ul>
+          <li>A stalled publisher is <strong>evidence of nothing about honesty</strong>. The supported claim is
+            "the log is not currently being published", not "Pollis is withholding entries".</li>
+          <li>Equally, a served-but-stale head with a dead publisher is not "healthy": it is also what a coerced
+            operator would produce.</li>
+          <li>The check that actually resolves it is to <strong>keep the heads you were served and compare them
+            later and with other people</strong>. Two signed heads that disagree are permanent proof. That is
+            what <a href="artifacts.html">pollis-verify</a> is for.</li>
+        </ul>
+        <p>
+          The operator's commitment: a publisher stall longer than 48 hours is treated as a correctness
+          incident, and one that cannot be fixed within seven days is acknowledged publicly on
+          <a href="https://status.pollis.com/" target="_blank" rel="noopener noreferrer">status.pollis.com</a>.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">What is not solved yet</h2>
+        <ul>
+          <li><strong>No second key holder.</strong> The two pinned signing keys have one custodian. Adding a
+            second is the highest-value continuity step and needs a second person.</li>
+          <li><strong>Log-key loss is not cleanly recoverable.</strong> The same key signs the binaries tree,
+            and a new log key can only reach users through a client update verified by that same tree. Splitting
+            the two anchors is designed and tracked in
+            <a href="https://github.com/actuallydan/pollis/issues/754" target="_blank" rel="noopener noreferrer">#754</a>.</li>
+          <li><strong>Nobody independent watches the log.</strong> Witness and gossip monitoring is designed but
+            unbuilt (<a href="https://github.com/actuallydan/pollis/issues/763" target="_blank" rel="noopener noreferrer">#763</a>).
+            Until it exists, "no alarm" means "nobody looked".</li>
+          <li><strong>No legal succession.</strong> Ownership, inheritance and escrow need a legal entity to
+            hold them. A timer that publishes a key automatically would be worse than nothing: an unattended path
+            to the signing key.</li>
+        </ul>
+        <p>
+          The full engineering plan, including the complete asset register and handover order, is in
+          <a href="https://github.com/actuallydan/pollis/blob/main/docs/operational-continuity.md" target="_blank"
+            rel="noopener noreferrer"><code>docs/operational-continuity.md</code></a>.
+        </p>
+      </section>
+
+      <div class="footer-links">
+        <a href="index.html" class="footer-link">Home</a>
+        <a href="security.html" class="footer-link">Security</a>
+        <a href="assurance.html" class="footer-link">Assurance</a>
+        <a href="subprocessors.html" class="footer-link">Subprocessors</a>
+        <a href="privacy.html" class="footer-link">Privacy</a>
+        <a href="terms.html" class="footer-link">Terms</a>
+        <a href="retention.html" class="footer-link">Retention</a>
+        <a href="legal-requests.html" class="footer-link">Legal requests</a>
+        <a href="https://status.pollis.com/" class="footer-link" target="_blank" rel="noopener noreferrer">Status</a>
+        <a href="learn.html" class="footer-link">Learn</a>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <p id="year-copyright"></p>
+  </footer>
+
+  <script src="script.js"></script>
+  <script>
+    document.getElementById("year-copyright").textContent =
+      "© " + new Date().getFullYear() + " Pollis. All rights reserved.";
+  </script>
+</body>
+
+</html>

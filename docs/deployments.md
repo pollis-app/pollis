@@ -97,6 +97,13 @@ stop someone moving the tag that fires it.
   - `retention.html` — the public retention and deletion policy, derived from
     `docs/metadata-retention-policy.md` (owner sign-off given 2026-08-28), including §6's answer to
     "what happens to the permanent append-only ledger when I delete my account".
+  - `continuity.html` — the public rendering of `docs/operational-continuity.md`: singly held assets,
+    degradation order, and how to read a stalled transparency log. Edit the doc first, then the page.
+  - `legal-requests.html` — the transparency report (legal demands received / complied with) and the
+    warrant canary. **The canary is renewed by hand at least every three months**: bump both dates
+    and the "next renewal" date, and the half-yearly report table. A missed renewal is the signal, so
+    letting it lapse by accident is a false alarm to every reader.
+  - `assurance.html` §5 publishes both security reviews (#1091/#1102, #1161) with per-finding status.
   - `doc-page.css` — the shared long-form page shell these pages use, so the layout lives once.
 - **`website/rebuild-ledger.json` is regenerated after every rebuild-verify run — by a bot PR.**
   `scripts/rebuild-ledger.sh` rebuilds it from the public Actions API. `rebuild-ledger.yml` (#1041) runs

@@ -419,6 +419,71 @@
 
       <!-- ─────────────────────────────────────────────────────────── -->
       <section class="doc-section">
+        <h2 class="doc-section-title">5 · Security reviews</h2>
+        <p>
+          Pollis has had two full adversarial security reviews. Both were carried out by teams of AI agents
+          working in parallel, read-only, each required to cite the exact source line behind every finding and
+          to assert nothing it had not read. That is <strong>not the same as a paid human audit firm</strong>,
+          and nothing here claims otherwise. It is published in full so you can judge it yourself, findings and
+          fixes included.
+        </p>
+
+        <div class="doc-table-wrap">
+          <table class="doc-table">
+            <thead><tr><th>Review</th><th>Scope</th><th>Findings</th><th>Status</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>September 2026, first<br />commit <code>521b551</code></td>
+                <td>Static review of the client, Delivery Service and release pipeline, plus an OWASP ZAP run
+                  (~47,000 requests) against a locally built Delivery Service</td>
+                <td>9 High, 13 Medium, 1 Low</td>
+                <td><span class="doc-badge doc-badge--pass">all fixed</span><br /><a href="https://github.com/actuallydan/pollis/pull/1091" target="_blank" rel="noopener noreferrer">#1091</a>, <a href="https://github.com/actuallydan/pollis/pull/1102" target="_blank" rel="noopener noreferrer">#1102</a>, <a href="https://github.com/actuallydan/pollis/issues/1113" target="_blank" rel="noopener noreferrer">#1113</a></td>
+              </tr>
+              <tr>
+                <td>18 September 2026, second<br />v1.13.0, commit <code>62db0805</code></td>
+                <td>Six parallel audits across the MLS client, Delivery Service authorization, enrollment and
+                  key material, and the supply chain, plus two documentation-versus-code sweeps</td>
+                <td>2 Critical, 5 High, 8 Medium, 4 Low</td>
+                <td><span class="doc-badge doc-badge--pass">fixed</span><br /><a href="https://github.com/actuallydan/pollis/issues/1161" target="_blank" rel="noopener noreferrer">#1161</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Every finding that was fixed ships with a regression test confirmed to fail against the pre-fix code.
+          Of the second review's findings, two were addressed differently from the audit's suggestion, with the
+          reasoning recorded on <a href="https://github.com/actuallydan/pollis/issues/1161" target="_blank" rel="noopener noreferrer">#1161</a>. One, two identity columns (who reacted with which emoji, who pinned a
+          message) stored in the clear, is an <strong>accepted exposure</strong> rather than a fixed defect:
+          no document claims they are protected, and sealing them is a product decision still open. The
+          repository-settings finding (no required checks, unprotected release tags) was GitHub configuration and
+          was closed separately on <a href="https://github.com/actuallydan/pollis/issues/1101" target="_blank" rel="noopener noreferrer">#1101</a>.
+        </p>
+        <div class="doc-limit">
+          <span class="doc-limit-title">Where this guarantee ends</span>
+          <p>
+            Both reviews were static, and so were most of their checks. Live testing of TLS configuration,
+            signed-request replay, adversarial two-client MLS behaviour, updater tampering and the voice SFU was
+            scoped in a handoff brief but has not been run by an independent human tester. An independent human
+            audit remains welcome, and the <a href="https://github.com/actuallydan/pollis/blob/main/docs/security-whitepaper.md"
+            target="_blank" rel="noopener noreferrer">whitepaper</a> is written for exactly that reader.
+          </p>
+        </div>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">6 · Operations</h2>
+        <p>
+          Live service status, running version and daily uptime are published at
+          <a href="https://status.pollis.com/" target="_blank" rel="noopener noreferrer">status.pollis.com</a>.
+          What happens if the one person operating Pollis stops, and how to tell a stalled transparency log from a
+          withheld one, is on <a href="continuity.html">if the operator stops</a>. Legal demands for user data and
+          the warrant canary are on <a href="legal-requests.html">legal requests</a>.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
         <h2 class="doc-section-title">Reporting a vulnerability</h2>
         <p>
           Report privately through a
@@ -447,6 +512,9 @@
         <a href="privacy.html" class="footer-link">Privacy</a>
         <a href="terms.html" class="footer-link">Terms</a>
         <a href="retention.html" class="footer-link">Retention</a>
+        <a href="legal-requests.html" class="footer-link">Legal requests</a>
+        <a href="continuity.html" class="footer-link">Continuity</a>
+        <a href="https://status.pollis.com/" class="footer-link" target="_blank" rel="noopener noreferrer">Status</a>
         <a href="learn.html" class="footer-link">Learn</a>
       </div>
     </div>
