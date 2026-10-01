@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pollis — Legal Requests</title>
+  <meta name="description"
+    content="Pollis transparency report and warrant canary: every legal demand for user data received, and what was disclosed." />
+  <meta name="theme-color" content="#0f1117" />
+
+  <meta property="og:title" content="Pollis — Legal Requests" />
+  <meta property="og:description"
+    content="Transparency report and warrant canary for Pollis." />
+  <meta property="og:type" content="website" />
+
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;700&display=swap"
+    rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="doc-page.css" />
+</head>
+
+<body>
+  <!-- Dot matrix background -->
+  <div id="dot-matrix-bg"></div>
+
+  <main>
+    <div class="doc-main reading-surface">
+      <a href="index.html" class="doc-back">&larr; Back to Pollis</a>
+
+      <div class="doc-header">
+        <h1 class="doc-title">Legal requests</h1>
+        <p class="doc-subtitle">
+          Every legal or government demand for user data Pollis has received, what was handed over, and a
+          warrant canary. Last updated 1 October 2026.
+        </p>
+      </div>
+
+      <div class="doc-explainer">
+        This is a conventional transparency report: legal process served on the operator, and what came of it.
+        The <a href="transparency.html">transparency log</a> is something else, a signed record of keys and
+        builds.
+        <br /><br />
+        Message content is end-to-end encrypted, so the operator has no messages to hand over. The most a
+        request could obtain is the metadata listed in the <a href="privacy.html">privacy policy</a> and on the
+        <a href="retention.html">retention page</a>.
+      </div>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">Transparency report</h2>
+        <p>
+          Covers every request received from the launch of the open preview through
+          <strong>30 September 2026</strong>. Published every six months; the next one covers October 2026
+          through March 2027.
+        </p>
+        <div class="doc-table-wrap">
+          <table class="doc-table">
+            <thead>
+              <tr><th>Category</th><th>Received</th><th>Complied with</th><th>Accounts affected</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Subpoenas and court orders for user data</td><td>0</td><td>0</td><td>0</td></tr>
+              <tr><td>Search warrants</td><td>0</td><td>0</td><td>0</td></tr>
+              <tr><td>Emergency disclosure requests</td><td>0</td><td>0</td><td>0</td></tr>
+              <tr><td>National security requests (NSLs, FISA orders)</td><td>0</td><td>0</td><td>0</td></tr>
+              <tr><td>Foreign government requests</td><td>0</td><td>0</td><td>0</td></tr>
+              <tr><td>Requests to remove content or accounts</td><td>0</td><td>0</td><td>0</td></tr>
+              <tr><td>Requests to modify the software or keys</td><td>0</td><td>0</td><td>0</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">How requests are handled</h2>
+        <ul>
+          <li>
+            <strong>Users are notified</strong> before anything is disclosed, unless a court order legally
+            prohibits it. When a gag order expires, notice is sent then.
+          </li>
+          <li>
+            <strong>Only valid legal process is honoured</strong>, scoped to named accounts. Informal or
+            bulk requests are refused, and overbroad ones are challenged.
+          </li>
+          <li>
+            <strong>What can be disclosed is limited</strong> to account email, public keys, device list,
+            group and channel membership, and timestamps, for as long as the
+            <a href="retention.html">retention rules</a> keep them. With sealed sender the server does not
+            record who sent a given message, so that cannot be produced.
+          </li>
+          <li>
+            <strong>Nothing is built on demand.</strong> A request to ship a modified build, add a key or
+            weaken encryption would be refused. Such a build would also be visible: every release is recorded
+            in the signed <a href="transparency.html">binaries tree</a>, and the Linux build is independently
+            rebuilt from source (see <a href="assurance.html">assurance</a>).
+          </li>
+        </ul>
+        <p>
+          Legal process goes to <a href="mailto:dankral01@gmail.com">dankral01@gmail.com</a>. Pollis is
+          currently operated by an individual, not a company; see <a href="privacy.html">who runs Pollis</a>.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">Warrant canary</h2>
+        <div class="doc-card">
+          <p>As of <strong>1 October 2026</strong>, the operator of Pollis states that:</p>
+          <ol>
+            <li>No warrant, subpoena or court order for user data has been received.</li>
+            <li>No National Security Letter, FISA order, or other secret legal process has been received.</li>
+            <li>No gag order preventing disclosure of any of the above is in effect.</li>
+            <li>No request has been received, or complied with, to modify the software, insert a backdoor,
+              or disclose or change any signing key.</li>
+            <li>No user data has been disclosed to any government, law enforcement agency or other third
+              party. The infrastructure providers that host the service store and carry its encrypted traffic
+              without being given access to it; what each one can observe is listed on the
+              <a href="subprocessors.html">subprocessors page</a>.</li>
+          </ol>
+          <p>This statement is renewed at least every three months. The next renewal is due by
+            <strong>1 January 2027</strong>.</p>
+        </div>
+        <p>
+          <strong>How to read it.</strong> A canary works by absence: if this page is not renewed by its due
+          date, or a numbered statement disappears without explanation, assume the worst about that statement.
+          Its history is in the
+          <a href="https://github.com/actuallydan/pollis/commits/main/website/legal-requests.html" target="_blank"
+            rel="noopener noreferrer">repository's commit log</a>, so a quiet edit is visible too.
+        </p>
+        <div class="doc-limit">
+          <span class="doc-limit-title">Where this ends</span>
+          <p>
+            The canary is one person's statement, published through the GitHub account and website it
+            describes. It is not anchored in the signed transparency log, so it rests on that person's word and
+            the public edit history, not a cryptographic signature. The legal effect of canaries varies by
+            jurisdiction and has never been tested in court.
+          </p>
+        </div>
+      </section>
+
+      <div class="footer-links">
+        <a href="index.html" class="footer-link">Home</a>
+        <a href="security.html" class="footer-link">Security</a>
+        <a href="assurance.html" class="footer-link">Assurance</a>
+        <a href="subprocessors.html" class="footer-link">Subprocessors</a>
+        <a href="privacy.html" class="footer-link">Privacy</a>
+        <a href="terms.html" class="footer-link">Terms</a>
+        <a href="retention.html" class="footer-link">Retention</a>
+        <a href="continuity.html" class="footer-link">Continuity</a>
+        <a href="https://status.pollis.com/" class="footer-link" target="_blank" rel="noopener noreferrer">Status</a>
+        <a href="learn.html" class="footer-link">Learn</a>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <p id="year-copyright"></p>
+  </footer>
+
+  <script src="script.js"></script>
+  <script>
+    document.getElementById("year-copyright").textContent =
+      "© " + new Date().getFullYear() + " Pollis. All rights reserved.";
+  </script>
+</body>
+
+</html>

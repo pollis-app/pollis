@@ -1,78 +1,67 @@
 # Verify the Pollis transparency log yourself
 
 Pollis publishes an append-only [transparency log](./transparency.md) of every MLS
-commit. This guide shows you how to **independently verify it** — proving the
-server has not forked, rolled back, or rewritten any conversation's history.
+commit, every account identity-key version and every released binary. This guide
+shows how to check it yourself: that the server has not forked, rolled back or
+rewritten any of it.
 
-The one rule that makes this meaningful:
+The verifier trusts the log's ML-DSA-44 public key and nothing else. Signed tree
+heads and Merkle proofs are checked against that key; the server, the database and
+the host serving the files are not trusted. If any byte is altered, a signature or
+proof check fails and the tool exits non-zero.
 
-> **You trust only the log's published ML-DSA-44 public key, the signed tree head,
-> and the Merkle proofs checked against it.** Not the server, not the database,
-> not the host serving the files. If a single byte is tampered with, a signature
-> or proof check fails and the tool exits non-zero.
+Below, `<base-url>` is where the log is published: **https://verify.pollis.com** in
+production, or a dev server you run yourself.
 
-Everywhere below, `<base-url>` is wherever the static log is published. In
-production that is **https://verify.pollis.com**; locally it is a dev server you
-run yourself.
-
-`pollis-verify` trusts **only its compiled-in pinned public key** — it never
-verifies against the key a server hands it, so a hostile or man-in-the-middled
-log cannot substitute its own key and self-sign a forged history. Verifying a
-**non-production** log you run yourself (which is signed by your own key, not
-the pinned one) is the one case you must opt into: set
-`POLLIS_VERIFY_PINNED_KEYS_HEX` to that log's public key(s) (comma-separated hex,
-1312 bytes each) — it is additive to the pinned key, and only you (not the
-server) can set it. Against production, leave it unset.
+`pollis-verify` checks the served key against a key compiled into the binary and
+refuses to continue if they differ. A hostile host therefore cannot swap in its own
+key and sign a forged history. To verify a log you run yourself, signed with your
+own key, set `POLLIS_VERIFY_PINNED_KEYS_HEX` to that key (hex, 1312 bytes;
+comma-separate several). It adds to the compiled key rather than replacing it, and
+only you can set it. Leave it unset for production.
 
 ## 1. Get the verifier
 
-The auditor CLI is **`pollis-verify`**. You can download a prebuilt binary or
-build it from source — it needs no credentials, since the read API is public.
+The CLI is `pollis-verify`. It needs no credentials.
 
-**Download (recommended).** Grab the binary for your platform from the
-[GitHub Releases](https://github.com/actuallydan/pollis/releases) page (tags
-`pollis-verify-v*`), then make it executable and verify its checksum:
+**Download.** Prebuilt binaries for Linux x86_64 and macOS (arm64 and x86_64) are on
+[GitHub Releases](https://github.com/actuallydan/pollis/releases) under tags
+`pollis-verify-v*`. Check the checksum and make it executable:
 
 ```bash
-chmod +x pollis-verify-linux-x86_64
 sha256sum -c pollis-verify-linux-x86_64.sha256
+chmod +x pollis-verify-linux-x86_64
 ```
 
-**Build from source.** With a Rust toolchain (`cargo`):
+**Build from source** (any platform with a Rust toolchain):
 
 ```bash
-# Builds the `pollis-verify` auditor CLI (and the operator `serve` binary).
+# pollis-verify (and the operator `serve` binary)
 cargo build -p verifiable-log-serve --release
 
-# For the fully offline path, also build the `monitor` bundle verifier.
+# monitor, the offline bundle verifier (section 6)
 cargo build -p verifiable-log --release
 ```
 
-The binaries land in `target/release/`:
+Both land in `target/release/`. The examples below assume `pollis-verify` is on
+your `PATH`. `pollis-verify --version` prints the release number, plus the commit
+for release builds or `(source build)` for local ones.
 
-```
-target/release/pollis-verify   # auditor CLI: remote + group + account + release
-target/release/monitor         # offline bundle verifier
-```
-
-This guide uses `pollis-verify` (assume it's on your `PATH`, or prefix
-`./target/release/`) and, for the offline path, `monitor`.
-
-## 2. Verify the whole log over HTTP — `pollis-verify remote`
-
-This fetches the entire public log over HTTP(S) and verifies it end to end:
-every STH signature, equivocation across heads, that each entry replays to the
-signed root, every inclusion proof, and every consistency proof — trusting only
-the published public key.
+## 2. Verify the whole log: `pollis-verify remote`
 
 ```bash
 pollis-verify remote <base-url>
 ```
 
-A passing run prints a `PASS` line per check and exits `0`:
+This fetches all three trees and checks, for each: that the served key is the
+pinned key, every STH signature, that `latest.json` matches the newest STH, that no
+two heads equivocate, that the entries replay to each signed root, and every
+inclusion and consistency proof. A passing run prints one `PASS` line per check and
+exits `0` (output shortened; numbers are illustrative):
 
 ```
 $ pollis-verify remote https://verify.pollis.com
+PASS  served public_key.json is the pinned log key
 PASS  STH[24] tree_size matches its URL
 PASS  STH[24] signature
 PASS  STH[49] tree_size matches its URL
@@ -88,50 +77,50 @@ PASS  STH[49] root matches replayed entries
 PASS  inclusion: leaf 0 in size 49
 …
 PASS  consistency: size 24 -> size 49
+PASS  account-keys: STH[12] signature (account context)
+…
+PASS  binaries: consistency: size 14 -> size 21
 
 OK: all checks passed
 ```
 
-If **anything** fails — a tampered entry, a forged proof, a bad signature, a
-`latest.json` that disagrees with the newest head — the offending line reads
-`FAIL`, the summary reads `FAILED: one or more checks did not pass`, and the
-command **exits non-zero**. That exit code is the whole point: it is computed from
-the signature and the proofs, not from anything the server told you to believe.
+Any failure prints `FAIL` on the offending line, ends with
+`FAILED: one or more checks did not pass`, and exits non-zero. If the served key is
+not the pinned key, it stops immediately with an error and exits `1`.
 
 ```bash
 pollis-verify remote <base-url> && echo "log is intact" || echo "VERIFICATION FAILED"
 ```
 
-### Exit codes, and "your verifier is too old"
+### Exit codes
 
-The exit code is stable so you can script it: `0` = passed, `1` = a real
-verification failure (a bad signature, a forged proof, a fork, a regression) or a
-transport error, and `2` = **version skew**. Skew means the log has been published
-in a wire format newer than your binary understands — for example after a key
-rotation and full republish (the #672 ML-DSA-44 ceremony bumped the served format).
-`pollis-verify` reads the log's `format_version` *before* it checks anything, so it
-can tell you *"your pollis-verify is too old for this log — upgrade it"* and exit
-`2` instead of raising a false alarm. **Exit `2` is not a tampering finding** — the
-log has not been shown to be wrong; you just need a newer binary (a
-`pollis-verify-v*` release ≥ the one that introduced the format). Older binaries
-that predate this mechanism can't say this: against a newer log, `remote` still
-passes but `group` silently reports `Found: no`, so if in doubt, upgrade.
+| code | meaning |
+|---|---|
+| `0` | passed |
+| `1` | verification failed (bad signature, forged proof, fork, regression, unpinned key) or a network/parse error |
+| `2` | version skew: the log uses a wire format newer than this binary supports |
 
-## 3. Verify one conversation — `pollis-verify group`
+`pollis-verify` reads the log's `format_version` before checking anything else. If
+the log is newer than the binary, it says *"your pollis-verify is too old for this
+log — upgrade it"* and exits `2`. That is not evidence of tampering; install a newer
+`pollis-verify-v*` release. Binaries built before this check existed cannot report
+skew: against a newer log, `remote` still passes but `group` reports `Found: no`.
+If in doubt, upgrade.
 
-To check a single conversation's commit chain — that every one of its commits is
-provably included in the signed log, and that its epochs are append-only and
-fork-free — pass the base URL and the conversation id. The id is an opaque MLS
-**conversation id** (a ULID like `01KP443BSBXS3W1SZNTV5MXQ9C`), **not** a group
-name or slug — the public log deliberately carries no human-readable names.
+## 3. Verify one conversation: `pollis-verify group`
 
 ```bash
 pollis-verify group <base-url> <conversation-id>
 ```
 
-It verifies the STH signature **first** (an unsigned head is worth nothing), then
-selects that conversation's commits, checks each one's inclusion proof against the
-signed head, and replays them through the no-fork / no-epoch-regression invariant:
+The id is the opaque MLS conversation id (a ULID such as
+`01KP443BSBXS3W1SZNTV5MXQ9C`), not a group name; the log contains no names. Only
+members know it: leaves carry per-window pseudonyms, and `group` re-derives them
+from the real id.
+
+`group` verifies the latest STH signature first, selects the conversation's
+commits, checks each one's inclusion proof against that head, and replays them
+through the no-fork / no-regression invariant:
 
 ```
 $ pollis-verify group https://verify.pollis.com 01KP443BSBXS3W1SZNTV5MXQ9C
@@ -139,20 +128,22 @@ Group:   01KP443BSBXS3W1SZNTV5MXQ9C
 Found:   yes
 STH:     tree_size 49  root b3f0f8a8f675996002633a03c50a2dd733f66ba6c3fe95e39ee4f04935dbe25f
 Commits (seq order):
-  epoch 0    seq 14     sender 01KP43…GN5H  commit 79b6e5…cf7a  [included ✓]
-  epoch 1    seq 15     sender 01KP3G…02RF  commit 3beb61…ba37  [included ✓]
-  epoch 2    seq 16     sender 01KP3G…02RF  commit 42cf88…e057  [included ✓]
+  epoch 0    seq 14     sender 4be1a0…9c3d  commit 79b6e5…cf7a  [included ✓]
+  epoch 1    seq 15     sender e07f52…11ab  commit 3beb61…ba37  [included ✓]
+  epoch 2    seq 16     sender e07f52…11ab  commit 42cf88…e057  [included ✓]
 
 PASS: group chain is valid
 ```
 
-A valid chain exits `0`; a missing inclusion proof, a fork, or an epoch regression
-lists the reason under `Violations:`, prints `FAIL: group chain is NOT valid`, and
-exits non-zero. (A conversation id that isn't in the log reports `Found: no` with
-an empty — and therefore vacuously valid — chain.)
+A missing inclusion proof, a fork or an epoch regression is listed under
+`Violations:`, followed by `FAIL: group chain is NOT valid` and a non-zero exit. An
+id that is not in the log reports `Found: no` with an empty chain, which passes.
 
-Add `--json` to get the machine-readable `GroupReport` (the exact shape the HTTP
-endpoint and the website explorer consume):
+`group` refuses a log published before the pseudonym change (`format_version` below
+2) with an error, rather than report an empty result.
+
+`--json` prints the `GroupReport`, the same shape the `/verify/group/<id>` endpoint
+returns:
 
 ```bash
 pollis-verify group <base-url> <conversation-id> --json
@@ -166,17 +157,11 @@ pollis-verify group <base-url> <conversation-id> --json
   "root_hex": "b3f0f8a8f675996002633a03c50a2dd733f66ba6c3fe95e39ee4f04935dbe25f",
   "commits": [
     {
+      "generation": 0,
       "epoch": 0,
       "seq": 14,
-      "sender_id": "01KP43R2QK8N0M5VHE3WXGN5H",
+      "sender_pseudonym": "4be1a0…9c3d",
       "commit_sha256": "79b6e5…cf7a",
-      "included": true
-    },
-    {
-      "epoch": 1,
-      "seq": 15,
-      "sender_id": "01KP3GRSY1QY760ZEC12R102RF",
-      "commit_sha256": "3beb61…ba37",
       "included": true
     }
   ],
@@ -185,28 +170,24 @@ pollis-verify group <base-url> <conversation-id> --json
 }
 ```
 
-Field notes: `chain_valid` is the overall verdict (STH signature valid **and**
-every commit included **and** the invariant holds); `included` is per-commit;
-`sender_id` is a user id, recorded but **not** authorization-checked in this slice;
-`violations` is empty exactly when `chain_valid` is true.
+`chain_valid` is the overall verdict: the STH signature is valid, every commit is
+included, and the invariant holds. `violations` is empty exactly when `chain_valid`
+is true. `sender_pseudonym` is the published per-window pseudonym, not a user id,
+and is not checked against group membership.
 
-## 4. Verify one user's account-key history — `pollis-verify account`
+## 4. Verify one user's key history: `pollis-verify account`
 
-Pollis publishes a second tree — the **account-key directory** — under
-`/v1/account-keys/...`, with one leaf per account identity-key version. To check
-a single user's key history — that every published version is provably included
-in the signed account tree, and that `identity_version` is append-only and never
-regresses (no silent key substitution) — pass the base URL and the opaque
-`user_id`:
+The account-key tree, under `/v1/account-keys/...`, has one leaf per version of an
+account's identity key.
 
 ```bash
 pollis-verify account <base-url> <user-id>
 ```
 
-It verifies the account STH signature **first** (under the account tree's own
-domain context — a commit-log head cannot stand in here), selects that user's
-key versions, checks each one's inclusion proof against the signed head, and
-replays them through the no-regression / no-duplicate-version invariant:
+`account` verifies the account tree's latest STH under that tree's own signing
+context (a commit-log head will not verify here), selects the user's key versions,
+checks each inclusion proof, and checks that `identity_version` strictly increases
+with no duplicates. That is what rules out a silent key substitution.
 
 ```
 $ pollis-verify account https://verify.pollis.com 01KP43R2QK8N0M5VHE3WXGN5H
@@ -220,32 +201,27 @@ Key history (seq order):
 PASS: account key chain is valid
 ```
 
-A valid chain exits `0`; a missing inclusion proof, a duplicate version, or a
-version regression lists the reason under `Violations:`, prints `FAIL: account
-key chain is NOT valid`, and exits non-zero. As with `group`, add `--json` for
-the machine-readable `AccountReport`. (A `user_id` not in the log reports
-`Found: no` with a vacuously-valid empty chain.)
+Failures are listed under `Violations:`, followed by
+`FAIL: account key chain is NOT valid` and a non-zero exit. `--json` prints the
+`AccountReport`. An unknown `user_id` reports `Found: no` and passes.
 
-The Pollis app runs this same verifier internally — `self_audit_account_key`
-checks your own key, `audit_peer_account_key` checks a contact you've verified —
-so the desktop client and an independent auditor reach the identical verdict.
+The desktop app runs the same verifier: `self_audit_account_key` for your own key
+and `audit_peer_account_key` for a contact you have verified.
 
-## 5. Verify a shipped release — `pollis-verify release`
+## 5. Verify a release: `pollis-verify release`
 
-Pollis publishes a third tree — the **binaries directory** — with one leaf per
-shipped release artifact **layer**: `payload` is the reproducible bytes with any
-signing material normalized out, `signed` is the wrapper users actually download,
-and the two are bound
-by a shared `payload_sha256`. To check that a release tag's artifacts are
-provably recorded in the signed binaries tree, pass the base URL and the tag:
+The binaries tree has one leaf per release artifact layer. `payload` is the
+reproducible bytes with signing material normalized out; `signed` is the file users
+download. The two are linked by a shared `payload_sha256`.
 
 ```bash
 pollis-verify release <base-url> <tag>
 ```
 
-It verifies the binaries STH signature **first** (under the binaries tree's own
-domain context), selects the tag's artifacts, checks each one's inclusion proof
-against the signed head, and asserts the tree-wide binary invariant:
+`release` verifies the binaries tree's latest STH under its own context, selects the
+tag's artifacts, checks each inclusion proof, and checks the binary invariant over
+the whole tree (no re-issued artifact, no tag reappearing after a newer one, every
+`signed` leaf preceded by its `payload` leaf):
 
 ```
 $ pollis-verify release https://verify.pollis.com v1.3.6
@@ -264,42 +240,44 @@ Artifacts (publish order):
 PASS: release binaries tree is valid
 ```
 
-A valid release exits `0`; a missing inclusion proof or a violated binary
-invariant lists the reason under `Violations:`, prints `FAIL`, and exits
-non-zero. Add `--json` for the machine-readable `ReleaseReport` — the exact
-shape the static `/verify/release/<tag>` report carries, computed by the same
-function, so the CLI and the hosted report can never disagree.
+Failures end in `FAIL` and a non-zero exit. `--json` prints the `ReleaseReport`,
+which is the same function and shape as the published `/verify/release/<tag>`
+report.
 
-To connect the log to **the file you downloaded**, hash it and compare against
-the logged `artifact_sha256` of the matching `signed` leaf (or `payload` for
-unsigned artifacts, where the two hashes are equal):
+To tie the log to the file you downloaded, hash it and compare with the logged
+`artifact_sha256` of the matching `signed` leaf (or the `payload` leaf for unsigned
+artifacts, where both hashes are equal). Use `--json` to get full hashes:
 
 ```bash
 sha256sum pollis-v1.3.6-linux.AppImage
 ```
 
-## 6. Fully offline — `monitor verify`
+## 6. Fully offline: `monitor verify`
 
-If you would rather not trust the network at all during verification, download the
-signed **bundle** once and verify it with zero further network access. The bundle
-aggregates the public key, the STHs, the full ordered entries, and the proofs into
-a single JSON file.
+To avoid trusting the network during verification, download a signed bundle once
+and verify it locally. A bundle holds the public key, the STHs, the full ordered
+entries and the proofs in one JSON file.
 
 ```bash
-# No network is used during this command — it reads only the local file.
+# Reads only the local file.
 ./target/release/monitor verify <bundle.json>
+
+# Account-key and binaries bundles need --tree (default: commit-log).
+./target/release/monitor verify --tree binaries <binaries-bundle.json>
 ```
 
-To try it end to end with no server involved at all, generate a known-good
-bundle and verify it:
+`monitor` checks the bundle against the key the bundle itself carries; it has no
+compiled-in pin. Compare that key with the pinned key in
+[`SECURITY.md`](../SECURITY.md) yourself.
 
-```bash
-./target/release/monitor gen-example fixture.json
-./target/release/monitor verify fixture.json
-```
+To try it without any server, generate a known-good bundle and verify it:
 
 ```
+$ ./target/release/monitor gen-example fixture.json
+wrote example fixture to fixture.json
 $ ./target/release/monitor verify fixture.json
+verifying against tree `commit-log`
+PASS  bundle publishes at least one usable verifying key
 PASS  STH[0] signature (tree_size=3)
 PASS  STH[1] signature (tree_size=5)
 PASS  no equivocation between STH[0] and STH[1] (tree_size=3)
@@ -312,23 +290,19 @@ PASS  consistency[0] STH[0] -> STH[1]
 OK: all checks passed
 ```
 
-As with the HTTP path, a tampered leaf, forged proof, broken consistency, bad
-signature, or equivocation makes `verify` print a `FAIL` report and **exit
-non-zero**. Same checks, same trust model — just no network.
+A tampered leaf, forged proof, broken consistency, bad signature or equivocation
+produces `FAIL` lines and a non-zero exit.
 
-## 7. Verify the keyless build provenance yourself — cosign + SLSA (no Pollis key)
+## 7. Verify build provenance with cosign and SLSA
 
-The transparency log above (steps 1–6) is anchored by **Pollis's own** ML-DSA-44
-key. Released artifacts carry a **second, independent** anchor that Pollis does
-**not** control: a keyless **cosign** signature and a **SLSA build-provenance**
-attestation, both bound to Pollis's **GitHub Actions OIDC identity** via
-sigstore/Fulcio and recorded in the **public Rekor** log. Verifying them trusts
-**only** the GitHub Actions identity + Rekor — *no Pollis-held key is on this
-path at all*, which is the point: it holds even against a compromised or
-compelled Pollis signing key.
+Sections 1–6 rest on Pollis's own log key. Release artifacts also carry a keyless
+cosign signature and a SLSA build-provenance attestation, both tied to Pollis's
+GitHub Actions OIDC identity through sigstore/Fulcio and recorded in the public
+Rekor log. Checking them involves no Pollis-held key, so they still hold if that
+key were compromised or compelled.
 
-Both live next to each artifact on the CDN. For a release `vX.Y.Z` and, say, the
-Linux AppImage:
+Both sit next to each artifact on the CDN. For release `vX.Y.Z` and the Linux
+AppImage:
 
 ```bash
 BASE=https://cdn.pollis.com/releases/vX.Y.Z
@@ -339,12 +313,7 @@ curl -sSLO "$BASE/$ART.pem"             # cosign signing certificate
 curl -sSLO "$BASE/$ART.intoto.jsonl"    # SLSA build-provenance attestation
 ```
 
-### cosign — confirm the raw bytes were signed by the Pollis workflow
-
-`cosign verify-blob` checks the signature + certificate against Rekor and
-asserts the signing identity is the Pollis release workflow. Trust is pinned by
-the `--certificate-identity-regexp` (the workflow that is allowed to sign) and
-`--certificate-oidc-issuer` (GitHub's OIDC issuer) — nothing else:
+### cosign: the bytes were signed by the release workflow
 
 ```bash
 cosign verify-blob \
@@ -355,18 +324,15 @@ cosign verify-blob \
   "$ART"
 ```
 
-A passing run prints `Verified OK` and exits `0`. If the bytes were tampered
-with, or signed by any identity other than the Pollis `desktop-release.yml`
-workflow, verification fails and the command exits non-zero. Note there is **no
-`--key` flag** — verification rests entirely on the Fulcio certificate's OIDC
-identity and the Rekor transparency-log inclusion, not on any Pollis key.
+Trust is pinned by the workflow identity and GitHub's OIDC issuer; there is no
+`--key`. A pass prints `Verified OK` and exits `0`. Altered bytes, or a signature
+from any other identity, fail with a non-zero exit.
 
-### SLSA provenance — confirm where and how it was built
+### SLSA: where and how it was built
 
-The `.intoto.jsonl` is a SLSA v1 in-toto build-provenance attestation produced by
-`actions/attest-build-provenance` (a single release-wide attestation carrying
-each artifact as a subject). Verify the artifact against it offline with the
-GitHub CLI, trusting only the GitHub Actions identity + issuer:
+The `.intoto.jsonl` is a SLSA v1 provenance attestation from
+`actions/attest-build-provenance`, one per release, listing every artifact as a
+subject. Verify it with the GitHub CLI:
 
 ```bash
 gh attestation verify "$ART" \
@@ -376,59 +342,45 @@ gh attestation verify "$ART" \
   --cert-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-It confirms the artifact's digest is a subject of a provenance statement signed
-by the pinned Pollis workflow and logged in Rekor, and prints the source repo +
-commit + workflow it was built from. (`slsa-verifier verify-artifact
---provenance-path "$ART.intoto.jsonl" --source-uri github.com/actuallydan/pollis
---source-tag vX.Y.Z "$ART"` is an equivalent check with the standalone SLSA
-verifier.)
+This confirms the artifact's digest is a subject of a provenance statement signed
+by that workflow and logged in Rekor, and prints the source repo, commit and
+workflow. `slsa-verifier verify-artifact --provenance-path "$ART.intoto.jsonl"
+--source-uri github.com/actuallydan/pollis --source-tag vX.Y.Z "$ART"` is an
+alternative.
 
-> **What this proves — and what it does not.** cosign + SLSA prove **build
-> provenance**: these exact bytes were produced by the pinned Pollis GitHub
-> Actions workflow at a specific commit, recorded in a public log Pollis does not
-> control. They do **not**, by themselves, prove the bytes **reproduce from
-> source** — that is the reproducible-build story (`docs/reproducible-builds-residuals.md`
-> + the independent rebuilder in `.github/workflows/rebuild-verify.yml`, asserted
-> for the Linux payload). The two anchors are complementary: the binaries
-> transparency log + rebuilder say "the honest source produces these bytes";
-> cosign/SLSA say "the Pollis CI built them, provably, in a log no single party
-> owns."
+**What this does not prove.** cosign and SLSA show that the Pollis release workflow
+built these bytes at a specific commit. They do not show that the bytes rebuild
+from source. That is the job of the reproducible build and the independent
+rebuilder (`.github/workflows/rebuild-verify.yml`, Linux payload only; see
+[`reproducible-builds-residuals.md`](./reproducible-builds-residuals.md)).
 
-## The website explorer is a convenience, not the trust anchor
+## The website explorer
 
-The page at [`website/transparency.html`](../website/transparency.html) lets you
-type a conversation id in a browser and see its commit chain rendered. It is a
-**demo for convenience only**: the browser does no verification itself — it calls
-the serve layer's `GET /verify/group/<id>` endpoint, which runs the *same*
-`group` verification code you ran in step 3, and just visualizes the returned
-`GroupReport`.
+[`website/transparency.html`](../website/transparency.html) takes a conversation id
+and shows its commit chain. The browser does no verification: it calls a server's
+`GET /verify/group/<id>` endpoint, which runs the same code as
+`pollis-verify group`, and draws the returned `GroupReport`. It is only as
+trustworthy as that server. For a verdict that rests on checks you ran, use
+`pollis-verify` or `monitor` on your own machine.
 
-That means the explorer is exactly as trustworthy as the server hosting it. The
-**trustworthy path is running the tool yourself** — `pollis-verify remote`,
-`pollis-verify group`, or `monitor verify` on your own machine — because only then
-does the verdict rest on the signature and the proofs you checked locally, rather
-than on a server's word.
+## Run the pipeline locally
 
-## Run it locally end to end (optional)
-
-You can stand up the whole pipeline yourself to see every step. The dev server is
-for **testing/demos only** — production is just a static host serving the
-generated directory. Generating and serving use the operator `serve` binary;
-verifying uses `pollis-verify` exactly as above.
+The dev server is for testing; production is a static host serving the generated
+directory.
 
 ```bash
-# Generate the immutable static tree from a signed bundle.
+# Generate the static tree from a signed bundle.
 ./target/release/serve generate --bundle bundle.json --out ./site
 
-# Serve it locally (dev/demo only).
+# Serve it locally.
 ./target/release/serve serve --dir ./site --port 8787
 
-# In another shell, verify it over HTTP — trusting only the public key.
+# In another shell. The bundle is signed with your key, so pin it.
+export POLLIS_VERIFY_PINNED_KEYS_HEX=<the bundle's public_key>
 pollis-verify remote http://127.0.0.1:8787
 pollis-verify group http://127.0.0.1:8787 <conversation-id>
 ```
 
-(The signed `bundle.json` itself is produced from the real `mls_commit_log` by the
-[`builder`](../verifiable-log-builder/README.md) — `builder build --db <url|path>
---out bundle.json --timestamp <ms>` — which hashes each commit and never stores
-the raw bytes.)
+`monitor gen-example` produces a bundle you can use here. A real `bundle.json` comes
+from the [`builder`](../verifiable-log-builder/README.md):
+`builder build --db <url|path> --out bundle.json --timestamp <ms>`.

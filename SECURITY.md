@@ -6,19 +6,17 @@ Report vulnerabilities privately via [GitHub private vulnerability reporting](ht
 Please do not open public issues for security problems.
 
 A useful report names the affected component, the impact, and steps to
-reproduce. You'll get a response through the advisory thread.
+reproduce. We respond in the advisory thread.
 
-This file is what `https://pollis.com/.well-known/security.txt` names in its
-`Policy` field, so it has to answer the questions a researcher asks *before*
-touching anything: am I allowed to test, how long until someone replies, and
-what is out of bounds.
+This is the policy that `https://pollis.com/.well-known/security.txt` links to. It
+covers what you may test, how quickly we respond, and what is out of scope.
 
 ## Safe harbour
 
 If you are acting in good faith under this policy, Pollis will not pursue or
 support legal action against you, and will not report you to law enforcement,
-for your research. Concretely, we consider the following to be authorised
-testing of our production hosts:
+for your research. We consider the following authorised testing of our
+production hosts:
 
 - probing `api.pollis.com`, `verify.pollis.com`, `cdn.pollis.com` and
   `pollis.com` for vulnerabilities,
@@ -41,8 +39,7 @@ here and is governed by their own policies.
 
 ## Response times
 
-These are commitments, not aspirations. They are measured in business days from
-when the advisory is filed.
+These are commitments, measured from when the advisory is filed.
 
 | Stage | Target |
 | --- | --- |
@@ -51,8 +48,8 @@ when the advisory is filed.
 | Fix or a dated remediation plan | 90 calendar days |
 | Public disclosure | coordinated, by default at fix release or 90 days, whichever is first |
 
-Pollis is a small project. If a deadline is going to slip, you will be told
-before it slips rather than after, with the reason.
+Pollis is a small project. If we are going to miss a deadline, we will tell you
+before it passes, and why.
 
 ## Scope
 
@@ -74,34 +71,32 @@ them:
 - Findings that require an already-compromised device or OS. The device, its
   local database, the signed binary and the device keystore (the OS keychain,
   or a machine-bound encrypted file where no keychain exists) are inside the trust
-  boundary by design (see the security model in `CLAUDE.md`); "malware on the
-  machine can read the plaintext" is a documented property, not a bug.
-- Metadata that Pollis states it exposes to the server. Servers see who talks to
-  whom at the envelope level; that is written down in
-  `docs/metadata-retention-policy.md` and the whitepaper, and reporting it as a
-  leak is a scope disagreement rather than a vulnerability.
+  boundary by design (see the security model in `CLAUDE.md`). Malware on the
+  machine being able to read plaintext is documented behaviour.
+- Metadata that Pollis documents as visible to the server. Servers see who talks
+  to whom at the envelope level, as stated in `docs/metadata-retention-policy.md`
+  and the whitepaper.
 - Missing hardening headers or TLS configuration nits on the static site with no
   demonstrated impact.
 - Vulnerabilities in third-party services, reported to us rather than to them.
 - The three documented accepted message losses (see `CLAUDE.md`).
 
 Anything touching key handling, MLS state, the delivery service's authorisation
-checks, or the release/attestation pipeline is emphatically in scope, however
-small it looks.
+checks, or the release/attestation pipeline is in scope, however small it looks.
 
 ## Verifying Pollis yourself
 
 Every release is recorded in a public append-only transparency log and carries
-keyless cosign / SLSA build provenance. To check our work from your own
-machine, start at [docs/verify-transparency-log.md](docs/verify-transparency-log.md).
+keyless cosign / SLSA build provenance. To check them yourself, start at
+[docs/verify-transparency-log.md](docs/verify-transparency-log.md).
 
-Pinned transparency-log public key (ML-DSA-44). The log's Ed25519 key is
-retired, and the seed it was derived from was rotated out entirely in #732 — this
-key is fresh material, not a re-encoding of the old one. It is published here, in
-the `pollis-verify` release body, and on <https://pollis.com/artifacts.html>.
+Pinned transparency-log public key (ML-DSA-44). It replaced the retired Ed25519 key
+and was generated from new key material in #732, not derived from the old seed. It
+is also published in the `pollis-verify` release notes and on
+<https://pollis.com/artifacts.html>.
 
 ```
 56ab128f3f10107382802e69d3de8659d0127c711feb9c849f5b213c6f2d0af3b5fe41f581b202b385906fc42e4421747e84939054d160c551536131e41508a82b1f3ff0a07bcc4cee5e2eae8e85155d5c9e0dbc6e7683811649fb9e3b1f18c7ed070dbf61f2a058915b33f8ad3edcd135dd18770053e5ac971b13d17d95e16e98f47a852d600c47cbc0349354af2898803cfec7112660076d20027cb67870e18fb25ee327a36743fa812ccf93ba0769ddbd3d42ab40849ac8c98357b64eaf1ffc242abb12fddef4d8cdfa02448b4d99546b448e589657f898a47c6f30ddd88edd3f4456470e0a151e5fd601750c8b0489d3471897cfa78e0d7a00d938dfe876ef243117c972e041fdb00aa7af30d34184153cfd7b1e3b481dc562bbfc82bc20fe8ac4d9845f41de49fc33b6f94494df7088b06c7cb9ae35db86ac0fd293ca403046cec46ca9b12c755670d3d9b14c300b11ec292cd5e37d9f9e5e5d1729222a33bf1e13440f44dbf1b4d4104c612db4e269760868be5ff99f9ed269625fa4f39e21713a14293285e95f8a8e8cecd9db8e6a70c36340280322eab3490270ac640f706a23e81d79111dead641eaf7b926582ed0b0422f9addc0091d731a4fe1b9079be8bd75df23f5f9bf287beab7f67f763e04f0245bf9c705136d04eb8391fb4b4f12bfba44ae49bb6f32ddb0d539e59cd0159120b2fb1718f57e12a846638dbe0b650bfcd5a6cc74cd315b49136ea4e13d431a7f3a4c38fc783a82ca2b4c44a2f379c8aa9704d4639de3f94466662c97fbbd834db97a90405c382b5039803f4e4ed5c6b57487c8d23ad9e4d319df3466c49ef1e1cef526ddad1db5fa14f3b067b40580e068582dc428e21dbdc3df848e8e00fe1181f8e0d1409ab9a8757aef008b67191f4368f37cbd587ff65acdf07adbb989d09cc3318e346ca71c029557f2c523c204defab472b3dcb09bfbb95d5d1665a360a00faeb09b660f13fdc00f7b53fbfeaa58f87a208ad4551bcbe4307bf4d8451e027f4cc33cd55700016795c3164b1bc90d9dd1737b49d2e9e4b190128d2e62a44a80c1375c616aa2871ae7ad4a914102551380a8f8edb68c2df02bdf52607a7432ea7026f6a1efcdb37ecc11ecf1623ec6979e5d65c2812a997121010cd5fd9a98b9ed34edc17b667bfd37ef2be6dfe67fbdde03fa95bb80d0e1c7336263042ef44c4f9d28f1bf959bdc24c09cf8269378705022ff476fce91dbba6c8ffec00b27572eaa4835b59948d7a625ccc84ff4ac062176f4972f5131a961b17c7ff0010d2f2f3f8c12b7bf05fb9771d64a24fdab058f4bf3a155ade6a496b9a09d43a7673b5d8fb6519e01bf911ca78cc23f95943f63db72883d522fe24d4b7c7a26c7fd43b4f6f7496acf9ea2cab2e3cd6fc274964b576084c820bae79dbaa331d11751ec718660cd8e7847b7bacf31180803f681fb349b96338c98c791f74bc95e0d37b2810632159bc3175fed2e16038d45d35e4628250e8c9fb66c5bb2238f6456901f657e9655d3d5a09ff4952a0b9eb9c614f78c27626a136ef281f7099f68e898628530ef690851c179ef6a02448d498e49b2c362c839832100f4a9bf4abf17d496c71bfb5263da345d952b275f04707b31b9f6575da6dd2be799b90cc615f52ec32b4833a7e619d7f34f91f16edc38bc0a869c7211473f3ab90255446e0b7efbb2b97e8111d43b039ec0469b020f38925aad61e229836c96fad5bf3c3cad8f2c1c8b56cd819e8972d108dbfa8cd518177feaa7f4e0b547584a9a5d39ad4f1e8010cfead998ec18991cb89031a11c03cbd1ee7e0a1436da10ef154db13d4850c687c0a668215c9c8b7b1c
 ```
 
-`pollis-verify` never falls back to trusting whatever the server serves.
+`pollis-verify` refuses a log whose served key does not match this one.

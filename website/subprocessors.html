@@ -36,19 +36,17 @@
       <div class="doc-header">
         <h1 class="doc-title">Subprocessors</h1>
         <p class="doc-subtitle">
-          Every third party that touches Pollis, what each one actually sees, and where it runs.
+          Every third party that touches Pollis, what each one sees, and where it runs.
         </p>
       </div>
 
       <div class="doc-explainer">
         <strong>No third party on this page can read a message.</strong> Message content is end-to-end encrypted
-        under MLS and the keys never leave your devices — that part is cryptographic, not a policy promise, and
-        it is the same for every row below.
+        under MLS and the keys never leave your devices. That is enforced by cryptography, not policy, and holds
+        for every row below.
         <br /><br />
-        What they <em>do</em> see is metadata, and that varies a great deal. One of them sees your email address
-        and your one-time login code in plain text. Another sees which conversation had activity and when. The
-        table says which is which, because "we can't read your messages" is a much smaller claim than most
-        products let it sound.
+        What they do see is metadata, and that varies a lot. One sees your email address and one-time login code
+        in plain text; others see when you were active. The table says which is which.
       </div>
 
       <!-- ─────────────────────────────────────────────────────────── -->
@@ -67,9 +65,9 @@
                 <td class="doc-td-dim">
                   <strong>In the clear:</strong> account records including your <strong>email address</strong> and
                   username, group and DM membership, blocks, conversation timestamps, device registrations,
-                  security events, and the connecting IP.<br />
-                  <strong>Ciphertext only:</strong> message bodies. Since sealed sender landed, the stored row no
-                  longer records who sent what.
+                  and security events.<br />
+                  <strong>Ciphertext only:</strong> message bodies. With sealed sender, the stored row does not
+                  record who sent what.
                 </td>
                 <td class="doc-td-dim">AWS <code>us-east-1</code></td>
               </tr>
@@ -77,9 +75,9 @@
                 <td>Cloudflare<br /><span class="doc-td-dim">Workers &amp; Containers</span></td>
                 <td class="doc-td-dim">Hosts the Delivery Service — the only writer to the database</td>
                 <td class="doc-td-dim">
-                  Every write as it happens, including the <strong>sender's identity</strong>, which is
-                  authenticated live on each request. Sealed sender is an at-rest guarantee, not an in-flight one,
-                  and this is where that distinction bites. Also the connecting IP, as any edge does.
+                  Every write as it happens, including the <strong>sender's identity</strong>, which each request
+                  authenticates. Sealed sender protects stored rows only, so it does not hide the sender here. Also
+                  the connecting IP, as any edge does.
                 </td>
                 <td class="doc-td-dim">Cloudflare's global network; placement is not pinned</td>
               </tr>
@@ -88,9 +86,9 @@
                 <td class="doc-td-dim">Attachments, download CDN, transparency-log hosting</td>
                 <td class="doc-td-dim">
                   Encrypted attachment blobs, their size and upload time, and an object key derived from the
-                  content hash — no filename, no user or conversation id.
-                  <strong>Avatars and group icons are an exception: they are not encrypted</strong> and are public
-                  to anyone with the URL.
+                  content hash; no filename, user or conversation id.
+                  <strong>Avatars and group icons are not encrypted</strong> and are public to anyone with the
+                  URL.
                 </td>
                 <td class="doc-td-dim">Cloudflare global</td>
               </tr>
@@ -98,9 +96,9 @@
                 <td>Resend</td>
                 <td class="doc-td-dim">Sends the login email</td>
                 <td class="doc-td-dim">
-                  <strong>Your email address and your six-digit one-time code, both in plain text</strong>, for
-                  the duration of the send. This is the single largest plaintext exposure in the system. The
-                  message is sent by the Delivery Service; the app never holds a Resend credential.
+                  <strong>Your email address and six-digit one-time code, in plain text</strong>, for the
+                  duration of the send. This is the largest plaintext exposure in the system. The Delivery Service
+                  sends the email; the app never holds a Resend credential.
                 </td>
                 <td class="doc-td-dim">Provider-determined</td>
               </tr>
@@ -108,12 +106,10 @@
                 <td>Expo<br /><span class="doc-td-dim">then Apple APNs / Google FCM</span></td>
                 <td class="doc-td-dim">Background push notifications</td>
                 <td class="doc-td-dim">
-                  Your device's push token, a fixed string ("New message"), the <strong>conversation id</strong>
-                  and whether it is a channel or a DM. No content, no sender, no preview. Not a bare wake signal
-                  either: it says <em>this device had activity in this conversation at this time</em>. The push is
-                  sent by the sending device directly, so <strong>Expo also sees the sender's IP address</strong>
-                  — it is deliberately not routed through the relay overlay, and moving it server-side is a known
-                  open item.
+                  Your device's push token, fixed text ("New message") and an opaque per-recipient handle that
+                  names no conversation and cannot be matched across users. No content, sender or preview. It
+                  still reveals that <em>this device had activity at this time</em>. The Delivery Service sends
+                  the push, so Expo sees Cloudflare's address, not the sender's.
                 </td>
                 <td class="doc-td-dim">Provider-determined</td>
               </tr>
@@ -121,9 +117,9 @@
                 <td>Amazon Web Services</td>
                 <td class="doc-td-dim">The relay pool, its signed directory, and the control plane</td>
                 <td class="doc-td-dim">
-                  A relay sees the ciphertext it forwards and the two ends of its hop — so the first hop sees your
-                  IP, and every hop learns which <em>account</em> built the circuit, because each hop verifies
-                  your device certificate. Never content. See the roster below.
+                  A relay sees the ciphertext it forwards and the two ends of its hop. The first hop sees your IP,
+                  and every hop learns which account built the circuit, because each verifies your device
+                  certificate. Never content. See the roster below.
                 </td>
                 <td class="doc-td-dim">Nodes across four US regions; control plane <code>us-west-2</code></td>
               </tr>
@@ -131,9 +127,9 @@
                 <td>A single leased virtual server</td>
                 <td class="doc-td-dim">Runs the self-hosted LiveKit media server and TURN relay</td>
                 <td class="doc-td-dim">
-                  Who is in a call, which room, when, and your IP. <strong>Call audio and video are end-to-end
-                  encrypted</strong> and forwarded as ciphertext, but the realtime signalling JSON is not
-                  encrypted at the application layer. No call record is written to any database.
+                  Who is in a call, which room, when, and your IP. Call audio and video are end-to-end encrypted
+                  and forwarded as ciphertext; the realtime signalling JSON is not encrypted at the application
+                  layer. No call record is written to any database.
                 </td>
                 <td class="doc-td-dim">One host, one location</td>
               </tr>
@@ -141,9 +137,9 @@
                 <td>GitHub</td>
                 <td class="doc-td-dim">Source, CI, releases, container registry</td>
                 <td class="doc-td-dim">
-                  No user data. It is, however, <strong>inside the publishing trust boundary</strong>: the
-                  transparency log is built and signed in GitHub Actions, and the release-signing keys live there
-                  too. <a href="assurance.html">Assurance</a> covers what that does and does not mean.
+                  No user data, but it is <strong>inside the publishing trust boundary</strong>: the transparency
+                  log is built and signed in GitHub Actions, which also holds the release-signing keys.
+                  <a href="assurance.html">Assurance</a> covers what that means.
                 </td>
                 <td class="doc-td-dim">Global</td>
               </tr>
@@ -157,8 +153,8 @@
                 <td>Sigstore<br /><span class="doc-td-dim">Fulcio &amp; Rekor</span></td>
                 <td class="doc-td-dim">Keyless signatures and build provenance</td>
                 <td class="doc-td-dim">
-                  Artifact digests and the build workflow's identity — <strong>deliberately public</strong>, in an
-                  append-only log Pollis does not operate. No user data.
+                  Artifact digests and the build workflow's identity, published on purpose in an append-only log
+                  Pollis does not operate. No user data.
                 </td>
                 <td class="doc-td-dim">Global</td>
               </tr>
@@ -176,17 +172,16 @@
           <span class="doc-limit-title">Where this list ends</span>
           <p>
             <strong>There is no analytics, telemetry, crash-reporting or advertising subprocessor</strong>, and no
-            payment processor. That is not a policy statement — there is no such SDK in the codebase.
+            payment processor. No such SDK is in the codebase.
           </p>
           <p>
-            <strong>These providers' own operational data is theirs, not ours.</strong> Cloudflare edge logs,
-            Turso platform logs, the media server's telemetry and APNs/FCM delivery records are governed by those
-            companies' policies. This page describes what Pollis retains and what each party can observe; it
-            cannot promise what they keep.
+            <strong>Providers' own operational data is governed by their policies.</strong> That includes
+            Cloudflare edge logs, Turso platform logs, the media server's telemetry and APNs/FCM delivery records.
+            This page says what each party can observe; it cannot promise what they keep.
           </p>
           <p>
-            <strong>Your recipients are not a subprocessor, but they are a limit.</strong> Delivered messages live
-            in recipients' local encrypted databases, and there is no mechanism to reach them.
+            <strong>Recipients are a limit too.</strong> Delivered messages live in recipients' local encrypted
+            databases, which Pollis cannot reach.
           </p>
         </div>
       </section>
@@ -195,9 +190,9 @@
       <section class="doc-section">
         <h2 class="doc-section-title">The relay pool, and who operates it</h2>
         <p>
-          Pollis has an optional relay overlay that hides your IP address from the first-party services. It is
-          worth being blunt about its status and its shape, because the design documents describe an arrangement
-          that is stronger than what currently runs.
+          Pollis has an optional relay overlay that hides your IP address from the first-party services. The
+          design documents describe a stronger arrangement than what actually runs, so here is the current
+          state.
         </p>
 
         <p>
@@ -206,13 +201,11 @@
         </p>
 
         <p>
-          <strong>The pool is currently switched off.</strong> No relay nodes are running. The pool was small and
-          barely used, and it was costing money to leave up, so it was taken down rather than left running as
-          decoration. If you have network privacy set to <em>off</em> or <em>prefer</em>, nothing changes for you —
-          <em>prefer</em> simply connects directly, which is what it already did whenever the pool was unreachable.
-          If you set it to <em>strict</em>, sending will pause rather than connect directly, which is exactly what
-          strict is for; switch to <em>prefer</em> if you would rather keep sending. The table below describes the
-          pool as it was configured and as it will be again if it is switched back on.
+          <strong>The pool is currently switched off.</strong> No relay nodes are running; the pool was small,
+          barely used and cost money to keep up. With network privacy set to <em>off</em> or <em>prefer</em>,
+          nothing changes: <em>prefer</em> connects directly, as it always did when the pool was unreachable. With
+          <em>strict</em>, sending pauses rather than connecting directly; switch to <em>prefer</em> to keep
+          sending. The table describes the pool as configured, and as it will run if switched back on.
         </p>
 
         <div class="doc-table-wrap">
@@ -224,28 +217,26 @@
                 <td class="doc-td-dim">Guidance for self-hosters is to run nodes across at least two unrelated
                   providers, so one provider's outage or subpoena cannot take the pool.</td>
                 <td class="doc-td-dim"><strong>Every node is first-party, in one AWS account.</strong> The
-                  two-provider guidance is advice to third parties running their own; it is not a description of
-                  the Pollis pool, and it should not be read as one.</td>
+                  two-provider guidance is for third parties running their own nodes; it does not describe the
+                  Pollis pool.</td>
               </tr>
               <tr>
                 <td>Jurisdiction</td>
                 <td class="doc-td-dim">Placement is drawn from an allowed region set with a jurisdiction
                   denylist available.</td>
-                <td class="doc-td-dim">Four US regions — Virginia, Ohio, California, Oregon — with the denylist
-                  currently <strong>empty</strong>. All nodes are therefore in the United States.</td>
+                <td class="doc-td-dim">Four US regions (Virginia, Ohio, California, Oregon), with the denylist
+                  empty. All nodes are in the United States.</td>
               </tr>
               <tr>
                 <td>Placement</td>
                 <td class="doc-td-dim">A pool-wide node count, not a per-region map.</td>
-                <td class="doc-td-dim">Each node's region is redrawn at random <strong>every 24 hours</strong>,
-                  sampling with replacement — so two nodes in the same region is expected, not a fault. There is
-                  no stable per-region roster to publish.</td>
+                <td class="doc-td-dim">Each node's region is redrawn at random every 24 hours, with
+                  replacement, so two nodes can share a region. There is no stable per-region roster.</td>
               </tr>
               <tr>
                 <td>Size</td>
                 <td class="doc-td-dim">Floor of 2 nodes, hard cap of 3, bounded by a $20/month budget.</td>
-                <td class="doc-td-dim">Small, and openly so. These are the cheapest ARM instances AWS sells,
-                  bought on spot pricing.</td>
+                <td class="doc-td-dim">The cheapest ARM instances AWS sells, on spot pricing.</td>
               </tr>
               <tr>
                 <td>Control plane</td>
@@ -258,49 +249,47 @@
 
         <h3 class="doc-sub-title">Check the roster yourself</h3>
         <p>
-          The directory is public and signed. You do not have to take the table above on trust:
+          The directory is public and signed:
         </p>
         <code class="doc-cmd">curl -fsSL https://relays.pollis.com/directory.json \
   | jq -r .payload_b64 | base64 -d \
   | jq '{issued_at, expires_at, relays: [.relays[] | {addr, region}]}'</code>
         <span class="doc-cmd-note">
-          Returns the pool with each node's address and region. <strong>While the pool is switched off this
-          returns the last directory that was signed, and its <code>expires_at</code> is in the past</strong> — an
-          expired directory is one every Pollis client refuses, which is the point: there is no way for a stale
-          roster to keep being used. When the pool is on, placement rotates daily, so what you see will differ
-          from what anyone else saw yesterday — that is the design working, not drift.
+          Returns each node's address and region. While the pool is off, this returns the last signed directory,
+          with an <code>expires_at</code> in the past; clients refuse an expired directory, so a stale roster
+          cannot stay in use. When the pool is on, placement rotates daily, so the output changes from day to
+          day.
         </span>
 
         <div class="doc-limit">
           <span class="doc-limit-title">Where this guarantee ends</span>
           <p>
-            <strong>A pool of only first-party nodes is still one operator at both ends.</strong> Multi-hop
-            routing means no <em>single</em> node holds both your IP and your destination — but with a first hop
-            and a last hop we both run, those two logs can in principle be joined. What genuinely breaks that is a
-            middle hop in a different trust domain, which is why volunteer relays exist in the design and why a
-            volunteer is never given the first or last position. Today there are no volunteer relays.
+            <strong>A first-party pool means one operator at both ends.</strong> With multiple hops no single node
+            holds both your IP and your destination, but we run the first and last hop, so those two logs could be
+            joined. A middle hop in a different trust domain prevents that, which is why the design has volunteer
+            relays and never gives a volunteer the first or last position. There are no volunteer relays today.
           </p>
           <p>
-            <strong>This is network-address unlinkability, not anonymity.</strong> Every hop verifies your device
-            certificate, so every hop learns which account built the circuit. Hiding the account needs anonymous
+            <strong>This hides your network address, not your identity.</strong> Every hop verifies your device
+            certificate and so learns which account built the circuit. Hiding the account needs anonymous
             credentials, which are not built.
           </p>
           <p>
             <strong>An observer who can watch both ends of a circuit can correlate it</strong> by timing and
-            volume, regardless of how many hops it has. No overlay of this kind fixes that.
+            volume, however many hops it has. No overlay of this kind fixes that.
           </p>
           <p>
             <strong>The whole pool currently shares one QUIC identity certificate</strong>, so the client pins the
             certificate rather than any address.
           </p>
           <p>
-            <strong>The directory-signing key is Ed25519, not post-quantum</strong> — a deliberate exception to
-            the post-quantum migration, because the signer runs in an environment with no ML-DSA implementation.
-            And one key signs both the directory and the revocation list, so a signature proves who signed but not
-            <em>which</em> document was signed.
+            <strong>The directory-signing key is Ed25519, not post-quantum</strong>, because the signer runs in an
+            environment with no ML-DSA implementation. One key signs both the directory and the revocation list, so
+            a signature proves who signed but not which document.
           </p>
           <p>
-            <strong>Push notifications bypass the overlay entirely.</strong> See the Expo row above.
+            <strong>Push notifications do not use the overlay.</strong> APNs and FCM reach your device directly.
+            See the Expo row above.
           </p>
         </div>
         <p style="margin-top: 1rem;">
@@ -324,6 +313,9 @@
         <a href="privacy.html" class="footer-link">Privacy</a>
         <a href="terms.html" class="footer-link">Terms</a>
         <a href="retention.html" class="footer-link">Retention</a>
+        <a href="legal-requests.html" class="footer-link">Legal requests</a>
+        <a href="continuity.html" class="footer-link">Continuity</a>
+        <a href="https://status.pollis.com/" class="footer-link" target="_blank" rel="noopener noreferrer">Status</a>
         <a href="learn.html" class="footer-link">Learn</a>
       </div>
     </div>

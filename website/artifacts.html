@@ -416,34 +416,32 @@
       <div class="art-header">
         <h1 class="art-title">Artifacts &amp; Proofs</h1>
         <p class="art-subtitle">
-          Every public thing Pollis ships (desktop app, terminal client, verifier) and the append-only
-          transparency-log proof that the bytes you download are the exact bytes we published.
+          Everything Pollis ships publicly (desktop app, terminal client, verifier), with the transparency-log
+          proof that the bytes you download are the bytes we published.
         </p>
       </div>
 
       <div class="art-explainer">
-        This page is a <strong>live demonstration</strong>. Everything below is fetched fresh on load from our
-        <strong>server-computed</strong> verification API, the browser here <strong>verifies nothing</strong> except
-        one local string comparison (the pinned signing key). You don't have to take our word for any of it: re-run the
-        exact same checks yourself with our
+        Everything below is fetched on load from our verification API, and every verdict is
+        <strong>computed by the server</strong>. Your browser checks one thing: that the served signing key matches
+        the key pinned in this page. To check the rest yourself, run the
         <a href="https://github.com/actuallydan/pollis/tree/main/verifiable-log-serve" target="_blank"
           rel="noopener noreferrer"><code>pollis-verify</code> command-line tool</a> (source-available; see the
-        <a href="faq.html">FAQ</a> on licensing), or query the
+        <a href="faq.html">FAQ</a> on licensing) or query the
         <a href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md" target="_blank"
-          rel="noopener noreferrer">public verification API</a> directly (rate limits apply). Only the CLI gives you a
-        trustless verdict.
+          rel="noopener noreferrer">public verification API</a> directly (rate limits apply). Only the CLI gives a
+        verdict that doesn't depend on trusting us.
         <br /><br />
-        New to any of this? <a href="learn.html#reading-the-dashboards">Learn: reading this page</a> is the legend for
-        the map, what a root is, what an inclusion tick actually means, and what green here does
-        <strong>not</strong> prove.
+        New to this? <a href="learn.html#reading-the-dashboards">Learn: reading this page</a> explains what a root
+        is, what an inclusion tick means, and what a green badge does not prove.
       </div>
 
       <!-- B. Latest releases -->
       <section class="art-section">
         <h2 class="art-section-title">Latest releases</h2>
         <p class="art-section-lede">
-          The current version of each public output and where to get it. For the desktop app, the table shows every
-          shipped installer and whether its bytes are provably committed to the public binaries transparency log.
+          The current version of each output and where to get it. For the desktop app, the table lists every
+          installer and whether its bytes are committed to the public binaries transparency log.
         </p>
 
         <!-- Desktop app card -->
@@ -468,12 +466,11 @@
             <span class="art-badge art-badge--info">build from source</span>
           </div>
           <p class="art-card-desc">
-            This is the tool auditors run to independently re-check everything on this page, trusting only the one
-            pinned key, with no server on the path. Prebuilt Linux and macOS binaries (with <code>.sha256</code>
-            files) ship on the <code>pollis-verify-*</code> releases, but building it from the public repo is the
-            stronger move, since a verifier we hand you is a verifier we could have tampered with. The source is
-            readable and buildable by anyone; the licence is PolyForm Noncommercial 1.0.0, which is source-available
-            rather than OSI open source, and that limits what you may ship — not what you may audit.
+            Re-checks everything on this page against the one pinned key, without trusting our server. Prebuilt
+            Linux and macOS binaries (with <code>.sha256</code> files) ship on the <code>pollis-verify-*</code>
+            releases, but building from source is better: a verifier we hand you is one we could have tampered with.
+            The licence is PolyForm Noncommercial 1.0.0. That is source-available, not OSI open source; it limits what
+            you may ship, not what you may audit.
           </p>
           <ul class="art-cmds">
             <li>
@@ -496,18 +493,17 @@
       <section class="art-section">
         <h2 class="art-section-title">Daily transparency self-audit</h2>
         <p class="art-section-lede">
-          Pollis publishes three separate append-only Merkle logs: the <strong>commit log</strong> (conversation
-          history), <strong>account keys</strong> (published identity keys), and <strong>binaries</strong> (shipped
-          release hashes). A scheduled job re-audits all three every day and republishes their signed tree heads. Those
-          signed heads are what prove each log is append-only and fork-free (no rollback, no equivocation) trusting
-          <strong>only</strong> the one pinned log key. This displays the current published heads; it does not, and
-          cannot, prove consistency in your browser, the
+          Pollis publishes three append-only Merkle logs: the commit log (conversation history), account keys
+          (published identity keys) and binaries (release hashes). A scheduled job re-audits all three daily and
+          republishes their signed tree heads, which let anyone holding the pinned log key check that each log is
+          append-only and unforked. This section only displays the current heads; it cannot prove consistency in
+          your browser. The
           <a class="art-inline" href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md"
             target="_blank" rel="noopener noreferrer">verification docs</a> and the
           <a class="art-inline"
             href="https://github.com/actuallydan/pollis/blob/main/.github/workflows/transparency-publish.yml"
             target="_blank" rel="noopener noreferrer">transparency-publish workflow / run logs</a> show how to check
-          that yourself.
+          it yourself.
         </p>
         <div class="art-card" id="art-trees">
           <p class="art-loading">Loading signed tree heads…</p>
@@ -518,11 +514,9 @@
       <section class="art-section">
         <h2 class="art-section-title">The one key you trust</h2>
         <p class="art-section-lede">
-          All of the above trusts exactly one thing: a single pinned public key. Every signature, on every tree head, on
-          every release, is checked against it. If you trust this key, you can verify everything; if you don't, verify
-          nothing. It is an <strong>ML-DSA-44</strong> post-quantum key, so a signed statement about history stays
-          meaningful for as long as anyone might want to re-check the past (#668). The key below is fresh material:
-          the earlier Ed25519 key, and the seed it was derived from, were retired outright rather than re-encoded.
+          Every signature above, on every tree head and every release, is checked against one pinned public key. It
+          is an ML-DSA-44 (post-quantum) key, so signed statements about history stay checkable long after they were
+          made (#668). It is new key material: the earlier Ed25519 key and its seed were retired, not re-encoded.
         </p>
         <div class="art-card">
           <div class="art-key-block">
@@ -531,11 +525,10 @@
               <p class="art-loading">Checking served key against the pinned constant…</p>
             </div>
             <p class="art-note">
-              That comparison is the <strong>only</strong> verification your browser ever performs: it fetches the key
-              the server serves and compares it, character by character, to the constant baked into this page. If the
-              constant were ever absent the browser would perform no verification at all, and would say so rather than
-              imply a match. Everything else on this page is a <strong>server-computed</strong> verdict, re-run it with
-              <code>pollis-verify</code> to make it trustless.
+              This is the only check your browser performs: it compares the key the server serves, character by
+              character, with the constant in this page. If the constant were missing, the page would say no check
+              ran rather than imply a match. Every other verdict here is computed by the server; re-run it with
+              <code>pollis-verify</code> to check it yourself.
             </p>
 
             <p class="art-key-label" style="margin-top: 1.5rem;">WHAT AN AUDITOR RUNS</p>
@@ -572,12 +565,11 @@
       <section class="art-section">
         <h2 class="art-section-title">The second anchor: Sigstore, SLSA and the SBOM</h2>
         <p class="art-section-lede">
-          Everything above trusts one Pollis-held key. This section trusts <strong>none</strong>. Every release
+          Everything above trusts one Pollis-held key. These checks trust no Pollis key at all. Every release
           artifact also carries a keyless <code>cosign</code> signature and a SLSA build-provenance attestation,
-          both anchored in <a class="art-inline" href="https://docs.sigstore.dev/" target="_blank"
-            rel="noopener noreferrer">Sigstore</a>'s public Rekor transparency log — which Pollis does not operate,
-          cannot write to selectively, and cannot retract from. There is no Pollis key anywhere in these checks. The
-          signing identity is the release workflow itself, so what a signature asserts is
+          both recorded in <a class="art-inline" href="https://docs.sigstore.dev/" target="_blank"
+            rel="noopener noreferrer">Sigstore</a>'s public Rekor log, which Pollis does not operate and cannot
+          retract from. The signing identity is the release workflow, so a signature asserts
           "<em>this file came out of <code>desktop-release.yml</code> at this tag</em>", not "someone at Pollis
           approved this".
         </p>
@@ -585,9 +577,8 @@
         <div class="art-card">
           <p class="art-key-label">1 · FETCH THE ARTIFACT AND ITS EVIDENCE</p>
           <p class="art-note" style="margin-bottom: 0.75rem;">
-            Use the <strong>version-pinned</strong> path. The <code>releases/latest/</code> shortcut carries the
-            installers only — no signature, certificate or attestation is published under it — so a verification
-            recipe written against <code>latest</code> cannot work.
+            Use the version-pinned path. <code>releases/latest/</code> holds installers only, with no signature,
+            certificate or attestation, so verification against it cannot work.
           </p>
           <ul class="art-cmds">
             <li>
@@ -612,10 +603,9 @@ curl -sSLO "$BASE/$ART.intoto.jsonl"    # SLSA build-provenance attestation</cod
   --signature   "$ART.sig" \
   --certificate "$ART.pem" \
   "$ART"</code>
-              <span class="art-cmd-note">Prints <code>Verified OK</code>. The identity pattern is the point:
-                without it, cosign would accept a signature from <em>any</em> Sigstore identity, which proves
-                nothing. cosign 3.x also prints a deprecation notice for <code>--signature</code> and
-                <code>--certificate</code>; the check still runs and still passes.</span>
+              <span class="art-cmd-note">Prints <code>Verified OK</code>. Don't drop the identity pattern: without
+                it cosign accepts a signature from any Sigstore identity. cosign 3.x prints a deprecation notice for
+                <code>--signature</code> and <code>--certificate</code>; the check still passes.</span>
             </li>
           </ul>
 
@@ -627,28 +617,26 @@ curl -sSLO "$BASE/$ART.intoto.jsonl"    # SLSA build-provenance attestation</cod
   --repo actuallydan/pollis \
   --cert-identity-regex '^https://github\.com/actuallydan/pollis/\.github/workflows/desktop-release\.yml@refs/tags/v.*$' \
   --cert-oidc-issuer https://token.actions.githubusercontent.com</code>
-              <span class="art-cmd-note">Prints <code>✓ Verification succeeded!</code> and names the build workflow
-                and tag. Exit status <code>0</code> is the verdict — <code>gh</code> prints the banner only to a
-                terminal, so in a script check the status, not the output. The flag is
-                <code>--cert-identity-regex</code>, with no trailing "p".</span>
+              <span class="art-cmd-note">Prints <code>✓ Verification succeeded!</code> and names the workflow and
+                tag. <code>gh</code> prints that banner only to a terminal, so in a script check for exit status
+                <code>0</code>. The flag is <code>--cert-identity-regex</code> (no trailing "p").</span>
             </li>
             <li>
               <code class="art-cmd">slsa-verifier verify-artifact "$ART" \
   --provenance-path "$ART.intoto.jsonl" \
   --source-uri github.com/actuallydan/pollis \
   --source-tag v1.9.7</code>
-              <span class="art-cmd-note">The same check with a standalone verifier, if you would rather not
-                trust GitHub's own CLI to grade GitHub's own attestation.</span>
+              <span class="art-cmd-note">The same check with a standalone verifier, if you'd rather not have
+                GitHub's CLI grade GitHub's attestation.</span>
             </li>
           </ul>
 
           <p class="art-key-label" style="margin-top: 1.5rem;">4 · READ THE DEPENDENCY LIST (SBOM)</p>
           <p class="art-note">
-            Each release publishes a CycloneDX software bill of materials at
-            <code>$BASE/pollis-&lt;tag&gt;.cdx.json</code>, catalogued from <code>Cargo.lock</code> and
-            <code>pnpm-lock.yaml</code> at the tagged commit. It is also a provenance subject, so its digest is
-            recorded in Rekor alongside the installers — a quieter SBOM published later cannot replace it without
-            the substitution being provable. Verify it exactly like any other artifact, then read it:
+            Each release publishes a CycloneDX SBOM at <code>$BASE/pollis-&lt;tag&gt;.cdx.json</code>, built from
+            <code>Cargo.lock</code> and <code>pnpm-lock.yaml</code> at the tagged commit. It is a provenance subject,
+            so its digest is in Rekor with the installers and a later replacement would be detectable. Verify it like
+            any other artifact, then read it:
           </p>
           <ul class="art-cmds">
             <li>
@@ -662,28 +650,25 @@ curl -sSLO "$BASE/$ART.intoto.jsonl"    # SLSA build-provenance attestation</cod
         <div class="art-note art-note--strong">
           <p><strong>Where this guarantee ends:</strong></p>
           <p style="margin-top: 0.6rem;">
-            cosign and SLSA prove <strong>build provenance</strong> — that these exact bytes were produced by that
-            workflow, at that tag, in that repository, and that the record is in a public log Pollis does not
-            control. They do <strong>not</strong> prove the bytes reproduce from source; that is the separate
-            rebuild check, and it covers the Linux AppImage only. They also do not prove the source was good: a
-            workflow faithfully building bad source produces a perfectly valid attestation.
+            cosign and SLSA prove build provenance: these bytes came from that workflow, at that tag, in that
+            repository, and the record sits in a public log Pollis does not control. They do not prove the bytes
+            reproduce from source (that is the separate rebuild check, which covers the Linux AppImage only), and
+            they do not prove the source was good. A workflow building bad source produces a valid attestation.
           </p>
           <p style="margin-top: 0.6rem;">
-            <strong>GitHub Actions is inside the trust boundary here</strong>, and the whitepaper says so. The
-            signing identity is a workflow running on GitHub's infrastructure, so anyone able to alter that
-            workflow, or GitHub itself, can mint a signature that verifies. This anchor removes Pollis's key from
-            the trust path; it does not remove GitHub from it.
+            GitHub Actions is inside the trust boundary, as the whitepaper states. Anyone who can alter the release
+            workflow, or GitHub itself, can mint a signature that verifies. This anchor takes Pollis's key out of the
+            trust path, not GitHub.
           </p>
           <p style="margin-top: 0.6rem;">
-            Provenance is <strong>not</strong> a release gate, and two early releases shipped without it. Signatures
-            and attestations are retained on the CDN indefinitely, but <strong>installers older than the last three
-            releases are pruned</strong> — for those, GitHub Releases remains the permanent archive.
+            Provenance is not a release gate, and two early releases shipped without it. Signatures and attestations
+            stay on the CDN indefinitely, but installers older than the last three releases are pruned; GitHub
+            Releases is the permanent archive for those.
           </p>
           <p style="margin-top: 0.6rem;">
-            The SBOM lists what the <strong>lockfiles</strong> resolved to, not what the linker actually consumed.
-            Vendored C and C++ compiled inside build scripts — notably <code>webrtc-sys</code> and
-            <code>webrtc-audio-processing-sys</code> — is <strong>not</strong> catalogued. It is also not yet a leaf
-            in the binaries transparency log.
+            The SBOM lists what the lockfiles resolved to, not what the linker consumed. Vendored C and C++ compiled
+            in build scripts (notably <code>webrtc-sys</code> and <code>webrtc-audio-processing-sys</code>) is not
+            listed. The SBOM is also not yet a leaf in the binaries transparency log.
           </p>
         </div>
       </section>
@@ -691,26 +676,24 @@ curl -sSLO "$BASE/$ART.intoto.jsonl"    # SLSA build-provenance attestation</cod
       <!-- Honest scope -->
       <section class="art-section">
         <div class="art-note art-note--strong">
-          <p><strong>What these proofs do and don't say, precisely:</strong></p>
+          <p><strong>What these proofs do and don't say:</strong></p>
           <p style="margin-top: 0.6rem;">
-            The binaries log and payload hashes prove the <strong>published bytes match</strong> and are committed to a
-            public append-only log. That is <strong>not</strong> a claim that every platform is byte-for-byte
-            reproducible from source. Linux payload reproduction is documented
+            The binaries log and payload hashes prove the published bytes match and are committed to a public
+            append-only log. They do not show that every platform reproduces byte-for-byte from source. Linux payload
+            reproduction is documented
             (<a class="art-inline"
               href="https://github.com/actuallydan/pollis/blob/main/docs/reproducible-builds-residuals.md"
               target="_blank" rel="noopener noreferrer">reproducible-builds-residuals.md</a>); macOS and Windows are
             published-bytes-match only.
           </p>
           <p style="margin-top: 0.6rem;">
-            The transparency logs prove <strong>no fork, no rollback, no equivocation</strong> of commit history and
-            published keys and binaries, trusting only the one pinned log key, nothing more. They do
-            <strong>not</strong> prove the server behaves correctly in real time, and they are <strong>not</strong>
-            anonymity.
+            The transparency logs prove that commit history, published keys and binaries were not forked, rolled
+            back or shown differently to different people, trusting only the pinned log key. They do not prove the
+            server behaves correctly in real time, and they provide no anonymity.
           </p>
           <p style="margin-top: 0.6rem;">
-            The Delivery Service exposes no build or version endpoint by design (metadata minimization), so it isn't
-            listed here. The browser on this page verifies nothing but the local pinned-key string match; treat every
-            other verdict as server-computed until you re-check it with the CLI.
+            The Delivery Service is a hosted service, not a download, so it isn't listed here. Its
+            <code>/version</code> endpoint reports the git SHA of the running build.
           </p>
         </div>
       </section>
@@ -727,6 +710,9 @@ curl -sSLO "$BASE/$ART.intoto.jsonl"    # SLSA build-provenance attestation</cod
         <a href="privacy.html" class="footer-link">Privacy</a>
         <a href="terms.html" class="footer-link">Terms</a>
         <a href="retention.html" class="footer-link">Retention</a>
+        <a href="legal-requests.html" class="footer-link">Legal requests</a>
+        <a href="continuity.html" class="footer-link">Continuity</a>
+        <a href="https://status.pollis.com/" class="footer-link" target="_blank" rel="noopener noreferrer">Status</a>
         <a href="learn.html" class="footer-link">Learn</a>
         <a href="https://github.com/actuallydan/pollis" class="footer-link" target="_blank" rel="noopener noreferrer">
           <svg viewBox="0 0 20 20" fill="currentColor" width="20" height="20" aria-hidden="true">

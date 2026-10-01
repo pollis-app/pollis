@@ -36,21 +36,18 @@
       <div class="doc-header">
         <h1 class="doc-title">Assurance</h1>
         <p class="doc-subtitle">
-          What Pollis checks about its own code, and what those checks actually found — including the times
-          they found something.
+          What Pollis checks about its own code, and what those checks found.
         </p>
       </div>
 
       <div class="doc-explainer">
-        Four independent things run on this codebase: an <strong>independent rebuild</strong> of every release,
-        <strong>machine-checked proofs</strong> of the parts where a bug loses messages, a
-        <strong>dependency policy</strong> enforced on every pull request, and a set of
-        <strong>signing keys</strong> whose custody is written down. All four have run for months. None of them
-        was published, which meant you had to take our word for results we were already producing.
+        Four things run on this codebase: an independent rebuild of every release, machine-checked proofs of the
+        code where a bug would lose messages, a dependency policy enforced on every pull request, and signing keys
+        with documented custody. They have run for months; this page publishes their results, with links to the
+        machine-generated records.
         <br /><br />
-        Everything below is a link to a machine-generated record, not a summary you have to trust.
-        The <a href="artifacts.html">artifacts page</a> is the companion: it covers the transparency log and the
-        commands that check a download.
+        The <a href="artifacts.html">artifacts page</a> covers the transparency log and the commands that check a
+        download.
       </div>
 
       <!-- ─────────────────────────────────────────────────────────── -->
@@ -59,12 +56,11 @@
         <p>
           After each release, a workflow rebuilds the Linux AppImage payload from the public source at that tag,
           on a clean runner, and asserts that the hash it gets is the hash already recorded in the public
-          transparency log. It uses <strong>no Pollis secrets</strong> — that is deliberate and load-bearing, so
-          that anyone can fork it and run the identical check with no credentials from us. It trusts exactly one
-          pinned ML-DSA-44 key.
+          transparency log. It uses no Pollis secrets, so anyone can fork it and run the same check, and it
+          trusts one pinned ML-DSA-44 key.
         </p>
         <p>
-          Until now that verdict went to a job log and a CI artifact that expires after 90 days. Below is the
+          The verdict used to live only in a job log and a CI artifact that expires after 90 days. This is the
           durable record.
         </p>
 
@@ -78,53 +74,48 @@
         <div class="doc-limit">
           <span class="doc-limit-title">Where this guarantee ends</span>
           <p>
-            <strong>It covers the Linux AppImage payload only.</strong> Not the <code>.deb</code>, not the
-            <code>.rpm</code>, not macOS, not Windows. Those platforms have published-bytes-match and build
-            provenance, but nothing yet re-derives them from source.
+            <strong>It covers the Linux AppImage payload only.</strong> The <code>.deb</code>, <code>.rpm</code>,
+            macOS and Windows builds have published-bytes-match and build provenance, but nothing re-derives them
+            from source yet.
           </p>
           <p>
-            <strong>Reproduction needs the published build recipe, not source alone</strong>, because one
-            build-time value is compiled in. A third party with no recipe can still prove log inclusion — that
-            half needs no build inputs at all — but not bit-for-bit reproduction.
+            <strong>Reproduction needs the published build recipe as well as the source</strong>, because one
+            build-time value is compiled in. Without the recipe a third party can still prove log inclusion, but
+            not bit-for-bit reproduction.
           </p>
           <p>
-            <strong>Two releases were never checked.</strong> The rebuild only runs when the release workflow
-            concludes successfully, so v1.9.0 and v1.9.1 were skipped entirely and no verdict exists for them.
-            They are in the table, marked as such, rather than quietly omitted.
+            <strong>Two releases were never checked.</strong> The rebuild runs only when the release workflow
+            succeeds, so v1.9.0 and v1.9.1 have no verdict. They are in the table, marked as unchecked.
           </p>
           <p>
             <strong>Some historical red runs were not real failures.</strong> Before commit
             <code>564353ae</code> (16 August 2026) the workflow could report "did not reproduce" for a release
-            that was merely not yet published into the log — the underlying check exits cleanly over an empty
-            artifact set, so the wait loop gave up immediately and compared the rebuild against nothing. Two runs
-            failed exactly that way (v1.9.4 and v1.9.5) and both in fact reproduced byte-identically.
-            The reds are left in the table rather than deleted.
+            not yet published to the log: the check exited cleanly over an empty artifact set, so the wait loop
+            stopped at once and compared the rebuild against nothing. v1.9.4 and v1.9.5 failed this way; both
+            reproduce byte-identically. The red runs stay in the table.
           </p>
           <p>
-            <strong>v1.9.3 reproduces.</strong> Its August 13 rebuild did not, and sat unexplained. Re-running
-            exactly the same check on 17 August — same tag, same public source, no other change — landed on the
-            same CI machine image the release had used and produced a payload
-            <strong>byte-identical</strong> to the one in the log
+            <strong>v1.9.3 reproduces.</strong> Its 13 August rebuild did not, and went unexplained. The same
+            check re-run on 17 August (same tag, same source) landed on the CI machine image the release had used
+            and produced a payload byte-identical to the one in the log
             (<code>07bccca8…</code>,
             <a href="https://github.com/actuallydan/pollis/actions/runs/32036282718">run 32036282718</a>).
-            One variable was different in August; holding it constant makes the bytes match.
           </p>
           <p>
-            <strong>What that variable was.</strong> A Linux AppImage is not purely a function of our source:
-            the bundler copies the app's system libraries off the build machine into the bundle. GitHub rebuilds
-            the machine image behind its <code>ubuntu-22.04</code> label every few weeks and rolls it out
-            gradually, so the release build and its rebuild — 36 minutes apart — landed on <em>different</em>
-            images, and seven vendored libraries (Kerberos, SQLite, systemd, udev) came out different. Nothing
-            built from Pollis source changed except the order of a list of content hashes inside the executable,
-            which a compile-time dependency emits in filesystem order and which carries no meaning.
+            <strong>Why the August run differed.</strong> An AppImage is not purely a function of our source: the
+            bundler copies system libraries from the build machine into the bundle. GitHub rebuilds the image
+            behind its <code>ubuntu-22.04</code> label every few weeks and rolls it out gradually, so the release
+            build and its rebuild, 36 minutes apart, ran on different images and seven bundled libraries
+            (Kerberos, SQLite, systemd, udev) differed. The only change in code built from Pollis source was the
+            order of a list of content hashes in the executable, which a compile-time dependency emits in
+            filesystem order and which carries no meaning.
           </p>
           <p>
-            The August run stays in the table, still red, rather than being deleted or quietly recoloured: it
-            genuinely could not perform the comparison it reported on. What changed is that the workflow now
-            reads the machine image the release recorded, compares it against its own, and says which situation
-            it is in — <em>did not reproduce</em>, <em>build environment drifted</em>, or <em>no recorded
-            recipe</em>. All three still fail, because an inconclusive rebuild is not a passing one; only the
-            first is a claim about the shipped binary. The full write-up, with the byte evidence, is in
+            The August run stays in the table, still red, because it could not make the comparison it reported
+            on. The workflow now compares the machine image the release recorded with its own and reports one of
+            <em>did not reproduce</em>, <em>build environment drifted</em> or <em>no recorded recipe</em>. All
+            three fail, since an inconclusive rebuild is not a pass; only the first is a claim about the shipped
+            binary. The write-up, with the byte evidence, is in
             <code>docs/reproducible-builds-residuals.md</code>.
           </p>
         </div>
@@ -134,16 +125,16 @@
       <section class="doc-section">
         <h2 class="doc-section-title">2 · Machine-checked correctness</h2>
         <p>
-          Pollis's hard promise is <em>messages must work</em>: delivery to every current member, decryption,
-          offline and online cycles, reconnects. The places where that promise can break are small, pure decision
-          functions — when a delivery cursor may advance, when a commit may be accepted at an epoch, when old data
-          may be deleted. Those are checked by machine, not by testing a happy path.
+          Pollis promises that messages work: delivery to every current member, decryption, offline and online
+          cycles, reconnects. Where that promise can break is in a few small, pure decision functions: when a
+          delivery cursor may advance, when a commit may be accepted at an epoch, when old data may be deleted.
+          Those are checked by machine.
         </p>
 
         <h3 class="doc-sub-title">TLA+ — the design</h3>
         <p>
-          Two specifications are checked exhaustively by TLC on every relevant pull request. Exhaustive means
-          every reachable state of the model is enumerated, not sampled.
+          TLC checks two specifications on every relevant pull request, enumerating every reachable state of
+          each model.
         </p>
         <div class="doc-table-wrap">
           <table class="doc-table">
@@ -176,8 +167,8 @@
           </table>
         </div>
         <p>
-          A passing check is worthless if the invariant has quietly stopped being able to fail, so three
-          deliberately broken variants run alongside and each <strong>must</strong> produce a counterexample.
+          A passing check means nothing if the invariant can no longer fail, so three deliberately broken
+          variants run alongside and each must produce a counterexample.
           Dropping the commit-log head guard violates <code>OnePerEpoch</code>; dropping the migration
           compare-and-swap violates <code>OpeningClosesTheHead</code>; guarding retention on the
           <em>fastest</em> member rather than the slowest violates <code>NoLossForCurrentMember</code>. If any of
@@ -186,18 +177,15 @@
 
         <h3 class="doc-sub-title">Kani — the actual Rust</h3>
         <p>
-          TLA+ checks the design; the design is not the shipped code. <strong>35 Kani harnesses</strong> —
-          19 proofs and 16 teeth — run bounded model checking over the real functions, not a model of them:
-          the delivery watermark, the rejoin gate that keeps a revoked device out of the tree, own-commit
-          canonicalization, gap detection, the Delivery Service's head arithmetic, and the retention floor.
+          TLA+ checks the design, not the shipped code. 35 Kani harnesses (19 proofs, 16 teeth) run bounded
+          model checking over the real Rust functions: the delivery watermark, the rejoin gate that keeps a
+          revoked device out of the tree, own-commit canonicalization, gap detection, the Delivery Service's head
+          arithmetic, and the retention floor. Each proof is paired with a mutant that Kani must refute, such as
+          an off-by-one in the watermark, a fail-open rejoin gate, or a retention floor that adds slack instead of
+          subtracting it.
         </p>
         <p>
-          The same teeth discipline applies. Each proof is paired with a mutant — an off-by-one in the watermark,
-          a fail-open rejoin gate, a retention floor that adds slack instead of subtracting it — that Kani is
-          required to refute.
-        </p>
-        <p>
-          Both results are now published as a run summary and a downloadable artifact on every run:
+          Every run publishes a summary and a downloadable artifact:
           <a href="https://github.com/actuallydan/pollis/actions/workflows/tla.yml" target="_blank"
             rel="noopener noreferrer">TLA+ runs</a> ·
           <a href="https://github.com/actuallydan/pollis/actions/workflows/kani.yml" target="_blank"
@@ -211,19 +199,18 @@
         <div class="doc-limit">
           <span class="doc-limit-title">Where this guarantee ends</span>
           <p>
-            <strong>Both are bounded.</strong> TLC checks a small model — three clients, a handful of epochs — not
-            an unbounded network, and Kani checks small input domains, not all inputs. A bug that only appears at
-            larger scale is outside both. This is the standard trade: exhaustive over a small space beats sampled
-            over a large one, but it is not a proof about the running system.
+            <strong>Both are bounded.</strong> TLC checks a small model (three clients, a few epochs) and Kani
+            checks small input domains. A bug that only appears at larger scale is outside both. Exhaustive over a
+            small space is stronger than sampling a large one, but it is not a proof about the running system.
           </p>
           <p>
             <strong>They cover the decision functions, not the program.</strong> The proofs range over pure
-            functions deliberately extracted for the purpose. The database calls, the network, the MLS library and
-            the UI around them are not verified — they are covered by ordinary tests and a nightly fuzzing soak.
+            functions extracted for the purpose. Database calls, the network, the MLS library and the UI are
+            covered by ordinary tests and a nightly fuzzing soak, not by proofs.
           </p>
           <p>
-            <strong>One invariant has no machine-checked defence at all</strong> — that the test schema equals the
-            production schema. It is enforced by a mechanical equality check instead, and the design doc says so.
+            <strong>One invariant has no machine-checked proof:</strong> that the test schema equals the production
+            schema. A mechanical equality check enforces it instead, as the design doc notes.
           </p>
         </div>
       </section>
@@ -234,29 +221,28 @@
         <p>
           Pollis's Rust lockfile resolves to <strong>1,094 crates</strong>. Two gates run on every pull request
           and every push to <code>main</code>, both against pinned tool versions
-          (<code>cargo-deny 0.19.9</code>, <code>cargo-vet 0.10.2</code>) so the gate itself cannot drift.
+          (<code>cargo-deny 0.19.9</code>, <code>cargo-vet 0.10.2</code>) so the gate itself does not drift.
         </p>
 
         <h3 class="doc-sub-title">cargo-deny — advisories, licences, sources</h3>
         <ul>
           <li>
-            <strong>Advisories.</strong> Every RustSec advisory against the graph fails the build unless it has a
-            named exemption with a written reason. There are <strong>29</strong> exemptions and
-            <strong>no blanket suppression</strong> — each names a specific <code>RUSTSEC-</code> id. Twenty-one
-            are unmaintained-crate notices with no vulnerability (ten of them the GTK3 bindings Tauri's WebKit
-            backend requires, for which no GTK4 Tauri backend exists). Eight are real vulnerabilities with no
-            reachable fix; those are listed individually below.
+            <strong>Advisories.</strong> Any RustSec advisory against the graph fails the build unless it has an
+            exemption naming its <code>RUSTSEC-</code> id with a written reason; there is no blanket suppression.
+            There are 29 exemptions. Twenty-one are unmaintained-crate notices with no vulnerability (ten are the
+            GTK3 bindings Tauri's WebKit backend requires; no GTK4 Tauri backend exists). Eight are real
+            vulnerabilities with no reachable fix, listed below.
           </li>
           <li>
-            <strong>Licences.</strong> An allow-list of 17 identifiers, each one verified as actually present in
-            the graph rather than allowed speculatively. MPL-2.0 is permitted with the reasoning written down
-            (file-level copyleft, no reach across a module boundary).
+            <strong>Licences.</strong> An allow-list of 17 identifiers, each one actually present in the graph.
+            MPL-2.0 is permitted with the reasoning written down (file-level copyleft, no reach across a module
+            boundary).
           </li>
           <li>
             <strong>Sources.</strong> <code>crates.io</code> only, plus exactly one git dependency: an
-            <code>openmls</code> commit pinned by revision, needed for the post-quantum MLS ciphersuite that no
-            published release carries yet. The entry matches a repository URL, and the revision is pinned in
-            <code>Cargo.toml</code>, so it cannot silently follow upstream <code>main</code>.
+            <code>openmls</code> commit, needed for the post-quantum MLS ciphersuite that no published release
+            carries yet. The revision is pinned in <code>Cargo.toml</code>, so it cannot follow upstream
+            <code>main</code>.
           </li>
         </ul>
 
@@ -289,34 +275,34 @@
 
         <h3 class="doc-sub-title">cargo-vet — review provenance</h3>
         <p>
-          <code>cargo-vet</code> records, per crate version, who has reviewed it. Pollis imports
-          <strong>517 audits</strong> from six organisations that publish theirs — Mozilla (206), Google (117),
-          Bytecode Alliance (84), ISRG (52), Zcash (42) and Embark (16) — plus 35 crates trusted by publisher
-          identity. The remainder sit in an exemption baseline.
+          <code>cargo-vet</code> records who has reviewed each crate version. Pollis imports 517 audits from six
+          organisations that publish theirs: Mozilla (206), Google (117), Bytecode Alliance (84), ISRG (52), Zcash
+          (42) and Embark (16). Another 35 crates are trusted by publisher identity. The rest sit in an exemption
+          baseline.
         </p>
 
         <div class="doc-limit">
           <span class="doc-limit-title">Where this guarantee ends</span>
           <p>
-            <strong>Pollis has audited zero crates itself.</strong> <code>supply-chain/audits.toml</code> is
-            empty. 858 exemption entries cover 716 crates, which is the dependency graph as it stood when the
-            gate was switched on. What the gate actually enforces is a <em>ratchet</em>: no new or bumped crate
-            can enter without a deliberate, reviewable change to that file. It is not, and should not be read as,
-            "every dependency has been reviewed".
+            <strong>Pollis has audited no crates itself.</strong> <code>supply-chain/audits.toml</code> is empty.
+            867 exemption entries cover 725 crates, essentially the dependency graph as it stood when the gate was
+            switched on. The gate is a ratchet: no new or bumped crate gets in without a reviewable change to that
+            file. It does not mean every dependency has been reviewed.
           </p>
           <p>
-            <strong>Duplicate-version and wildcard checks warn rather than fail.</strong> A large native tree
-            carries transitive duplicates we do not control, so those are visible in the job log but do not block.
+            <strong>Existing duplicate versions are allow-listed, and wildcards only warn.</strong> A large native
+            tree carries transitive duplicates we do not control. The ones present today sit in a generated skip
+            list; a new duplicate fails the check. Wildcard version requirements are logged but do not block.
           </p>
           <p>
-            <strong>There is no scheduled re-scan and no automated dependency-update bot.</strong> Advisories are
-            checked when a pull request runs or on a push to <code>main</code>. A newly published advisory against
-            an unchanged dependency is not caught until the next such run.
+            <strong>There is no scheduled re-scan, and no bot updates Rust or JavaScript dependencies</strong>
+            (Dependabot bumps GitHub Actions pins only). Advisories are checked on pull requests and pushes to
+            <code>main</code>, so a new advisory against an unchanged dependency waits for the next such run.
           </p>
           <p>
-            <strong>Neither gate covers the JavaScript half or vendored C/C++.</strong> The renderer's
-            <code>pnpm</code> tree appears in the per-release SBOM but is not vetted by these tools, and the C and
-            C++ compiled inside build scripts (notably the WebRTC crates) is in neither.
+            <strong>Neither gate covers JavaScript or vendored C/C++.</strong> The renderer's <code>pnpm</code>
+            tree is in the per-release SBOM but not vetted, and C and C++ compiled in build scripts (notably the
+            WebRTC crates) is in neither.
           </p>
         </div>
         <p style="margin-top: 1rem;">
@@ -335,8 +321,8 @@
         <h2 class="doc-section-title">4 · Signing keys, custody and rotation</h2>
         <p>
           Every claim on the <a href="artifacts.html">artifacts page</a> reduces to one pinned
-          <strong>ML-DSA-44</strong> key, key id <code>6cbd4b2aed5c4bf1</code>. This section is about who holds
-          it, what happens if it is stolen, and what has already been done to it.
+          ML-DSA-44 key, key id <code>6cbd4b2aed5c4bf1</code>. This section covers who holds it, what happens if
+          it is stolen, and its history.
         </p>
 
         <div class="doc-table-wrap">
@@ -349,52 +335,47 @@
               <tr><td>Offline root key<br /><span class="doc-td-dim">ML-DSA-44</span></td>
                 <td class="doc-td-dim">Nothing but key-set statements: "these keys may sign these logs, until
                   this date"</td>
-                <td class="doc-td-dim">Offline. Deliberately absent from CI, from the secrets manager and from
-                  the repository</td></tr>
+                <td class="doc-td-dim">Offline. Not in CI, the secrets manager or the repository</td></tr>
               <tr><td>Release code-signing</td>
                 <td class="doc-td-dim">macOS (Apple Developer ID) and Windows (Azure Trusted Signing) installers</td>
                 <td class="doc-td-dim">GitHub Actions secrets</td></tr>
               <tr><td>Sigstore identity</td>
                 <td class="doc-td-dim">cosign signatures and SLSA provenance</td>
-                <td class="doc-td-dim"><strong>No held key at all</strong> — a short-lived certificate bound to
-                  the release workflow's OIDC identity</td></tr>
+                <td class="doc-td-dim">No held key: a short-lived certificate bound to the release workflow's
+                  OIDC identity</td></tr>
             </tbody>
           </table>
         </div>
 
         <p>
-          <strong>A real rotation has been executed.</strong> In August 2026 the log signing key was replaced
-          with fresh material and all three trees were republished from source data under new domain-separation
-          contexts. It was not a formality: the previous key had been derived from the same 32-byte seed as its
-          Ed25519 predecessor, so the earlier post-quantum migration had changed the format without changing the
-          secret. The rotation was rehearsed against production with the old key still installed first, which
-          caught two bugs that would each have made it a silent no-op. The result was verified independently, from
-          a machine that had not performed the rotation.
+          <strong>The key has been rotated once.</strong> In August 2026 the log signing key was replaced with
+          fresh material and all three trees were republished from source data under new domain-separation
+          contexts. The previous key had been derived from the same 32-byte seed as its Ed25519 predecessor, so
+          the earlier post-quantum migration had changed the format but not the secret. A rehearsal against
+          production, with the old key still installed, caught two bugs that would each have made the rotation a
+          silent no-op. The result was verified from a machine that had not performed the rotation.
         </p>
         <p>
-          <strong>A compromise does not require shipping a new build.</strong> Because clients pin a key
-          <em>set</em> authorised by the offline root, the response to a stolen signing key is to sign a new key
-          set that omits the compromised key entirely and republish — no client update, no flag day. The runbook
-          is explicit that a compromised key is dropped rather than given a short expiry, because an attacker who
-          can delay a client's fetch keeps it alive for exactly that long. It is equally explicit that you act on
-          suspicion: you do not need proof.
+          <strong>A compromised signing key does not need a new build.</strong> Clients pin a key set authorised
+          by the offline root, so the response is to sign and publish a new key set without the compromised key;
+          no client update is needed. The runbook drops a compromised key outright rather than giving it a short
+          expiry, since an attacker who can delay a client's fetch keeps the key alive that long. It also says to
+          act on suspicion, without waiting for proof.
         </p>
 
         <div class="doc-limit">
           <span class="doc-limit-title">Where this guarantee ends</span>
           <p>
-            <strong>GitHub Actions is inside the publishing trust boundary, and the whitepaper says so.</strong>
-            The log signing key lives in Actions secrets and the trees are built and signed in CI, so a compromise
-            of that environment could sign a tree. The post-publish self-audit and the equivocation tripwire
-            <em>detect</em> that after the fact; they cannot prevent it. The same is true of the release-signing
-            keys. Pollis operates the only log, which is why the independent verifier is released — so a third
-            party can audit without asking us for anything.
+            <strong>GitHub Actions is inside the publishing trust boundary</strong>, as the whitepaper states. The
+            log signing key is an Actions secret and the trees are built and signed in CI, so a compromise there
+            could sign a tree. The post-publish self-audit and the equivocation tripwire detect that afterwards;
+            they cannot prevent it. The same holds for the release-signing keys. Pollis operates the only log,
+            which is why the verifier is released: a third party can audit without asking us for anything.
           </p>
           <p>
-            <strong>The rotation shipped without an overlap window.</strong> The custody design calls for a
-            minimum 90-day period in which both keys are pinned; the rotation that was actually performed did not
-            have one. An auditor holding cached pre-rotation tree heads sees the change as equivocation and has to
-            re-pin from the announcement rather than verify the transition.
+            <strong>The rotation had no overlap window.</strong> The custody design calls for at least 90 days
+            with both keys pinned; the actual rotation skipped it. An auditor holding cached pre-rotation tree
+            heads sees the change as equivocation and has to re-pin from the announcement.
           </p>
           <p>
             <strong>Root compromise has no in-band recovery.</strong> If the offline root is lost or stolen, the
@@ -402,9 +383,11 @@
             then publish under the new root alone.
           </p>
           <p>
-            <strong>The pinned key is copied by hand into eight places</strong> — the Rust core, this website, two
-            workflows, the key-set statement, and three documents — with no check that they agree. One deployed
-            copy going stale has already shown a false tamper alarm to every visitor once.
+            <strong>The pinned key is copied by hand</strong> into the Rust core, the verifier, this website, two
+            workflows, the key-set statement and several documents. A stale deployed copy once showed every visitor
+            a false tamper alarm. CI now checks that the copies agree on every pull request
+            (<code>scripts/check-pinned-log-key.py</code>), and a separate workflow checks that the deployed site
+            pins the same key, but nothing stops the copies being edited by hand in the first place.
           </p>
         </div>
         <p style="margin-top: 1rem;">
@@ -414,6 +397,66 @@
             target="_blank" rel="noopener noreferrer">Custody &amp; rotation design</a> ·
           <a href="https://github.com/actuallydan/pollis/blob/main/key-set.json" target="_blank"
             rel="noopener noreferrer">The signed key set</a>.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">5 · Security reviews</h2>
+        <p>
+          Pollis has had two full adversarial security reviews, both by teams of AI agents working read-only in
+          parallel, each required to cite the source line behind every finding. That is not the same as a paid
+          human audit firm. Findings and fixes are published in full.
+        </p>
+
+        <div class="doc-table-wrap">
+          <table class="doc-table">
+            <thead><tr><th>Review</th><th>Scope</th><th>Findings</th><th>Status</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>September 2026, first<br />commit <code>521b551</code></td>
+                <td>Static review of the client, Delivery Service and release pipeline, plus an OWASP ZAP run
+                  (~47,000 requests) against a locally built Delivery Service</td>
+                <td>9 High, 13 Medium, 1 Low</td>
+                <td><span class="doc-badge doc-badge--pass">all fixed</span><br /><a href="https://github.com/actuallydan/pollis/pull/1091" target="_blank" rel="noopener noreferrer">#1091</a>, <a href="https://github.com/actuallydan/pollis/pull/1102" target="_blank" rel="noopener noreferrer">#1102</a>, <a href="https://github.com/actuallydan/pollis/issues/1113" target="_blank" rel="noopener noreferrer">#1113</a></td>
+              </tr>
+              <tr>
+                <td>18 September 2026, second<br />v1.13.0, commit <code>62db0805</code></td>
+                <td>Six parallel audits across the MLS client, Delivery Service authorization, enrollment and
+                  key material, and the supply chain, plus two documentation-versus-code sweeps</td>
+                <td>2 Critical, 5 High, 8 Medium, 4 Low</td>
+                <td><span class="doc-badge doc-badge--pass">fixed</span><br /><a href="https://github.com/actuallydan/pollis/issues/1161" target="_blank" rel="noopener noreferrer">#1161</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Every fixed finding ships with a regression test confirmed to fail against the pre-fix code. Two of the
+          second review's findings were addressed differently from the audit's suggestion, with the reasoning on <a href="https://github.com/actuallydan/pollis/issues/1161" target="_blank" rel="noopener noreferrer">#1161</a>. One, two identity columns (who reacted with which emoji, who pinned a
+          message) stored in the clear, is an accepted exposure rather than a fixed defect: no document claims they
+          are protected, and whether to seal them is an open product decision. The repository-settings finding (no
+          required checks, unprotected release tags) was closed separately on <a href="https://github.com/actuallydan/pollis/issues/1101" target="_blank" rel="noopener noreferrer">#1101</a>.
+        </p>
+        <div class="doc-limit">
+          <span class="doc-limit-title">Where this guarantee ends</span>
+          <p>
+            Both reviews were mostly static. Live testing of TLS configuration, signed-request replay, adversarial
+            two-client MLS behaviour, updater tampering and the voice SFU has been scoped but not run by an
+            independent human tester. An independent human audit is welcome, and the <a href="https://github.com/actuallydan/pollis/blob/main/docs/security-whitepaper.md"
+            target="_blank" rel="noopener noreferrer">whitepaper</a> is written for that reader.
+          </p>
+        </div>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">6 · Operations</h2>
+        <p>
+          Live service status, running version and daily uptime are published at
+          <a href="https://status.pollis.com/" target="_blank" rel="noopener noreferrer">status.pollis.com</a>.
+          What happens if the one person operating Pollis stops, and how to tell a stalled transparency log from a
+          withheld one, is on <a href="continuity.html">if the operator stops</a>. Legal demands for user data and
+          the warrant canary are on <a href="legal-requests.html">legal requests</a>.
         </p>
       </section>
 
@@ -430,9 +473,9 @@
             rel="noopener noreferrer">disclosure policy</a>.
         </p>
         <p>
-          Pollis is <strong>source-available, not open source</strong>: PolyForm Noncommercial 1.0.0. You may
-          read, build, audit and modify it for noncommercial purposes; commercial use needs a separate licence.
-          Auditing the code and publishing what you find is explicitly permitted.
+          Pollis is source-available, not open source: PolyForm Noncommercial 1.0.0. You may read, build, audit
+          and modify it for noncommercial purposes; commercial use needs a separate licence. Auditing the code and
+          publishing what you find is permitted.
         </p>
       </section>
 
@@ -447,6 +490,9 @@
         <a href="privacy.html" class="footer-link">Privacy</a>
         <a href="terms.html" class="footer-link">Terms</a>
         <a href="retention.html" class="footer-link">Retention</a>
+        <a href="legal-requests.html" class="footer-link">Legal requests</a>
+        <a href="continuity.html" class="footer-link">Continuity</a>
+        <a href="https://status.pollis.com/" class="footer-link" target="_blank" rel="noopener noreferrer">Status</a>
         <a href="learn.html" class="footer-link">Learn</a>
       </div>
     </div>

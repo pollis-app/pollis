@@ -1,6 +1,7 @@
 # Operational Continuity — the engineering half
 
-**Status:** Live. This is the **engineering** half of continuity planning and it is complete as written.
+**Status:** Live, and published at pollis.com/continuity (`website/continuity.html`, derived from this
+document; edit here first). This is the **engineering** half of continuity planning and it is complete as written.
 The **legal** half — who owns these assets, who inherits them, and what contract obliges anyone to hand
 them over — depends on the legal entity and is deferred to **#723**. Every place that boundary is
 reached is marked **→ #723** rather than answered with something that sounds reassuring.
@@ -171,11 +172,11 @@ Not written here, because writing it without a legal entity would be writing fic
 - **Escrow or a dead-man's switch.** Both need a counterparty who is contractually obliged to act. A
   technical dead-man's switch that publishes a key on a timer is *worse* than none: it is an unattended
   path to the signing key in §2, and it would be the first thing to attack.
-- **Any commitment about legal process** — a warrant canary or a transparency report. Those are
-  statements by an entity about process served on that entity.
-- **A privacy policy or terms of service.** The factual half is already written from the code
-  (`docs/metadata-retention-policy.md`, published at `/retention`); what is missing is the counterparty
-  they bind.
+
+The warrant canary, transparency report, privacy policy and terms of service were originally deferred
+here too. They have since been published with the individual operator as the counterparty
+(`website/legal-requests.html`, `privacy.html`, `terms.html`); a legal entity would re-issue them, not
+unblock them.
 
 ## 7. Standing commitments this document makes
 
