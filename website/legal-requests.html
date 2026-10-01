@@ -36,20 +36,19 @@
       <div class="doc-header">
         <h1 class="doc-title">Legal requests</h1>
         <p class="doc-subtitle">
-          Every government or legal demand for user data Pollis has received, what was handed over, and a
-          canary that stops being renewed if that ever cannot be said. Last updated 1 October 2026.
+          Every legal or government demand for user data Pollis has received, what was handed over, and a
+          warrant canary. Last updated 1 October 2026.
         </p>
       </div>
 
       <div class="doc-explainer">
-        Not to be confused with the <a href="transparency.html">transparency log</a>, which is a signed
-        cryptographic record of keys and builds. This page is the conventional <strong>transparency
-        report</strong>: legal process served on the operator, and what came of it.
+        This is a conventional transparency report: legal process served on the operator, and what came of it.
+        The <a href="transparency.html">transparency log</a> is something else, a signed record of keys and
+        builds.
         <br /><br />
-        Because message content is end-to-end encrypted, the most any request could ever obtain is the
-        metadata listed in the <a href="privacy.html">privacy policy</a> and on the
-        <a href="retention.html">retention page</a>. No request can obtain a message, because the operator
-        never has one to give.
+        Message content is end-to-end encrypted, so the operator has no messages to hand over. The most a
+        request could obtain is the metadata listed in the <a href="privacy.html">privacy policy</a> and on the
+        <a href="retention.html">retention page</a>.
       </div>
 
       <!-- ─────────────────────────────────────────────────────────── -->
@@ -91,16 +90,16 @@
             bulk requests are refused, and overbroad ones are challenged.
           </li>
           <li>
-            <strong>What can be disclosed is bounded by design</strong>: account email, public keys,
-            device list, group and channel membership, and timestamps, for as long as the
-            <a href="retention.html">retention rules</a> keep them. Sealed sender means the server does not
-            record who sent a given message, so it cannot be produced.
+            <strong>What can be disclosed is limited</strong> to account email, public keys, device list,
+            group and channel membership, and timestamps, for as long as the
+            <a href="retention.html">retention rules</a> keep them. With sealed sender the server does not
+            record who sent a given message, so that cannot be produced.
           </li>
           <li>
             <strong>Nothing is built on demand.</strong> A request to ship a modified build, add a key or
-            weaken encryption would be refused. Any such build would also be visible: every release is
-            recorded in the signed <a href="transparency.html">binaries tree</a> and independently rebuilt
-            (see <a href="assurance.html">assurance</a>).
+            weaken encryption would be refused. Such a build would also be visible: every release is recorded
+            in the signed <a href="transparency.html">binaries tree</a>, and the Linux build is independently
+            rebuilt from source (see <a href="assurance.html">assurance</a>).
           </li>
         </ul>
         <p>
@@ -129,17 +128,17 @@
         <p>
           <strong>How to read it.</strong> A canary works by absence: if this page is not renewed by its due
           date, or a numbered statement disappears without explanation, assume the worst about that statement.
-          Its full history is in the
+          Its history is in the
           <a href="https://github.com/actuallydan/pollis/commits/main/website/legal-requests.html" target="_blank"
             rel="noopener noreferrer">repository's commit log</a>, so a quiet edit is visible too.
         </p>
         <div class="doc-limit">
           <span class="doc-limit-title">Where this ends</span>
           <p>
-            The canary is a statement by one person, published through the same GitHub account and website it
-            describes. It is not yet anchored in the signed transparency log, so it carries the weight of that
-            person's word and the public edit history, not of a cryptographic signature. The legal effect of
-            a canary also varies by jurisdiction and has never been tested in court.
+            The canary is one person's statement, published through the GitHub account and website it
+            describes. It is not anchored in the signed transparency log, so it rests on that person's word and
+            the public edit history, not a cryptographic signature. The legal effect of canaries varies by
+            jurisdiction and has never been tested in court.
           </p>
         </div>
       </section>

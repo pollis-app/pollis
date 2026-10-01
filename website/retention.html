@@ -36,40 +36,36 @@
       <div class="doc-header">
         <h1 class="doc-title">What we keep</h1>
         <p class="doc-subtitle">
-          What Pollis's servers retain, for how long, what deleting removes — and what cannot be deleted at all.
+          What Pollis's servers retain, for how long, what deleting removes, and what cannot be deleted.
         </p>
       </div>
 
       <div class="doc-explainer">
-        Pollis stores <strong>no message text anywhere</strong>. What the servers hold is routing metadata: which
+        Pollis stores <strong>no message text anywhere</strong>. The servers hold routing metadata: which
         conversations exist, who belongs to them, when envelopes were written, and how the encryption state
         evolved.
         <br /><br />
-        The important thing to understand is that <strong>the main rule is not a timer</strong>. An encrypted
-        message envelope is deleted when every current member device has actually collected it — bounded by the
-        slowest device, not by a clock. That is a deliberate choice: a time limit would delete mail belonging to
-        someone who was simply away, and messages must work.
+        The main rule is not a timer. An encrypted message envelope is deleted once every current member device
+        has collected it, so the slowest device sets the pace. A time limit would delete mail belonging to someone
+        who was simply away.
       </div>
 
       <!-- ─────────────────────────────────────────────────────────── -->
       <section class="doc-section">
         <h2 class="doc-section-title">Undelivered messages: bounded by devices, not by time</h2>
         <p>
-          An encrypted envelope sits on the server only until every current member device of that conversation has
-          reported collecting it. Then it is deleted. There is <strong>no maximum age</strong> — a message does not
-          expire because it got old.
+          An encrypted envelope stays on the server until every current member device of the conversation has
+          reported collecting it, and is then deleted. There is <strong>no maximum age</strong>.
         </p>
         <p>
-          There is one bound on that, and it is on devices rather than messages. A member device that has not
-          checked in for <strong>twelve months</strong> stops holding envelopes back for itself. This is not a
-          time limit on messages: a device that checked in yesterday still pins every envelope below its cursor,
-          however old those messages are. And it reverses the moment the device comes back — the device is not
-          revoked or removed from anything.
+          The one bound is on devices, not messages. A member device that has not checked in for
+          <strong>twelve months</strong> stops holding envelopes back for itself. A device that checked in
+          yesterday still holds every envelope below its cursor, however old. The bound lifts as soon as the
+          device checks in again; the device is not revoked or removed from anything.
         </p>
         <p>
-          The consequence, stated plainly because it is a real cost: a device left dormant for more than a year
-          may find gaps when it returns. This is one of exactly three kinds of message loss Pollis accepts, and it
-          is disclosed rather than discovered.
+          The cost: a device left unused for more than a year may find gaps when it returns. This is one of the
+          three kinds of message loss Pollis accepts.
         </p>
       </section>
 
@@ -89,16 +85,14 @@
                 <td class="doc-td-dim">Life of the account; removed when the account is deleted</td></tr>
               <tr><td>Security events<br /><span class="doc-td-dim">device added, device rejected, identity
                     reset</span></td>
-                <td class="doc-td-dim"><strong>90 days.</strong> Long enough to investigate something you noticed
-                  late; short enough that it is not a standing record of when you change devices</td></tr>
+                <td class="doc-td-dim"><strong>90 days.</strong> Long enough to investigate something noticed
+                  late, short enough not to be a standing record of your device changes</td></tr>
               <tr><td>Push notification tokens</td>
                 <td class="doc-td-dim"><strong>180 days</strong> since the device last refreshed, or until the
-                  account is deleted. Apps re-register on launch, so a device in use refreshes long before
-                  this</td></tr>
+                  account is deleted. Apps re-register on launch, so a device in use never reaches this</td></tr>
               <tr><td>Per-device delivery cursors</td>
-                <td class="doc-td-dim"><strong>Kept, deliberately.</strong> These are what stop undelivered mail
-                  being collected early, so removing them to save space would risk deleting messages. Removed with
-                  the device, and when you delete your account</td></tr>
+                <td class="doc-td-dim"><strong>Kept.</strong> They stop undelivered mail being collected early,
+                  so aging them out would risk deleting messages. Removed with the device or the account</td></tr>
               <tr><td>Attachments</td>
                 <td class="doc-td-dim">Reference-counted: an encrypted file is collected once no surviving message
                   refers to it. No timer</td></tr>
@@ -106,11 +100,10 @@
                 <td class="doc-td-dim">Pruned to what the slowest member still needs, with a per-conversation cap
                   so one permanently absent device cannot grow it without limit</td></tr>
               <tr><td>Your published identity-key history</td>
-                <td class="doc-td-dim"><strong>Never deleted.</strong> This is the record that lets your contacts
-                  prove your key did not change behind their back — deleting it would remove a protection, not
-                  restore privacy</td></tr>
+                <td class="doc-td-dim"><strong>Never deleted.</strong> It lets your contacts prove your key did
+                  not change behind their back</td></tr>
               <tr><td>Downloaded media on your own device</td>
-                <td class="doc-td-dim">Encrypted, capped at 500 MB, oldest evicted first</td></tr>
+                <td class="doc-td-dim">Encrypted, capped at 500 MiB, least recently used evicted first</td></tr>
             </tbody>
           </table>
         </div>
@@ -120,15 +113,14 @@
       <section class="doc-section">
         <h2 class="doc-section-title">IP addresses</h2>
         <p>
-          <strong>No client IP address is written to any database, log or table.</strong> IPs are read to enforce
-          rate limits and held in memory only — a counter that does not survive a restart. The relay reads a peer
+          <strong>No client IP address is written to any database, log or table.</strong> IPs are read for rate
+          limiting and kept only in an in-memory counter that does not survive a restart. The relay reads a peer
           address for the same reason and stores nothing.
         </p>
         <p>
-          Stated honestly rather than buried: our edge provider necessarily sees your IP, as does any network
-          between you and us. The optional <a href="subprocessors.html">relay overlay</a> exists precisely to hide
-          your IP from our own services, and it is off unless you turn it on. This section describes what
-          <em>we</em> retain; it does not claim our providers see nothing.
+          Our edge provider still sees your IP, as does any network between you and us. The optional
+          <a href="subprocessors.html">relay overlay</a> hides your IP from our own services and is off unless you
+          turn it on. This section covers what we retain, not what providers see.
         </p>
       </section>
 
@@ -139,38 +131,34 @@
           Deleting your account removes your user record, your devices and their delivery cursors, your
           membership of every group and DM, your reactions, your invites and join requests, your blocks, your
           settings, your account-recovery blob, your push tokens, your security events, your custom emoji and
-          your undelivered envelopes. Each of those is removed by name, in one transaction, rather than left to
-          the database to work out.
+          your undelivered envelopes. Each table is deleted from explicitly, in one transaction, rather than left
+          to database cascades.
         </p>
         <p>
           A group or DM you were the last member of is torn down with you: its channels, its stored envelopes,
-          its invites and its encryption state all go. A conversation that still has other people in it stays,
-          minus everything that identified you — and if you were its last admin, someone else is promoted so the
-          group is not left ownerless.
+          its invites and its encryption state all go. A conversation with other members stays, minus everything
+          that identified you; if you were its last admin, someone else is promoted.
         </p>
 
         <div class="doc-limit">
           <span class="doc-limit-title">What deletion cannot reach</span>
           <p>
             <strong>Entries in the public transparency ledger.</strong> Pollis publishes append-only Merkle logs
-            so that nobody — including us — can rewrite history behind your back. That property only exists
-            because entries are permanent, so deleting an account cannot remove past entries. The tension is real
-            and the resolution is to publish less rather than to promise deletion we cannot perform: the
-            conversation and sender identifiers in the commit log are replaced with rotating pseudonyms, so an
-            outside observer cannot build a long-term map of who talks to whom. Your identity-key history remains
-            deliberately identifiable, because looking a person up by name is the entire point of key
-            transparency.
+            so that nobody, including us, can rewrite history. That only works if entries are permanent, so
+            deleting an account cannot remove past entries. Instead the logs publish less: conversation and sender
+            identifiers in the commit log are rotating pseudonyms, so an outside observer cannot build a long-term
+            map of who talks to whom. Your identity-key history stays identifiable, because key transparency
+            depends on looking a person up.
           </p>
           <p>
             <strong>Your encryption commits in a conversation that outlives you.</strong> A group's encryption
-            history is a chain, and every remaining member walks it to catch up. Cutting a departed member's
-            links out of the middle would strand everyone still in the group, so those entries stay for as long
-            as the conversation does — and are deleted the moment it is. They contain no message content and, in
-            the published ledger, no lasting identifier for you.
+            history is a chain that remaining members walk to catch up, and removing links from the middle would
+            strand them. Those entries last as long as the conversation and are deleted with it. They contain no
+            message content and, in the published ledger, no lasting identifier for you.
           </p>
           <p>
             <strong>Messages already delivered to other people's devices.</strong> They are in recipients' local
-            encrypted databases. There is no mechanism to reach them and no backup of history anywhere.
+            encrypted databases, which we cannot reach. There is no history backup anywhere.
           </p>
           <p>
             <strong>Our providers' own operational records.</strong> Edge logs, platform logs and notification

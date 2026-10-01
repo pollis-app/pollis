@@ -37,22 +37,22 @@
         <h1 class="doc-title">Privacy Policy</h1>
         <p class="doc-subtitle">
           What Pollis collects, what it cannot see by design, and what happens when you leave.
-          Last updated 17 August 2026.
+          Last updated 1 October 2026.
         </p>
       </div>
 
       <div class="doc-explainer">
-        <strong>Message content is end-to-end encrypted and the operator cannot read it.</strong> That is a
-        cryptographic property of the MLS protocol (RFC 9420), not a policy promise — the servers store and
-        forward only ciphertext, and the keys never leave your devices. What follows is the honest account of
-        everything else: the metadata that <em>is</em> visible, why, and for how long.
+        <strong>Message content is end-to-end encrypted and the operator cannot read it.</strong> This is
+        enforced by the MLS protocol (RFC 9420): the servers store and forward only ciphertext, and the keys never
+        leave your devices. The rest of this policy covers the metadata that is visible, why, and for how
+        long.
       </div>
 
       <!-- ─────────────────────────────────────────────────────────── -->
       <section class="doc-section">
         <h2 class="doc-section-title">Who runs Pollis</h2>
         <p>
-          Pollis is operated by <strong>Daniel Kral</strong>, an individual developer — not a company. It is an
+          Pollis is operated by <strong>Daniel Kral</strong>, an individual developer, not a company. It is an
           open preview of a proof-of-concept service. For anything in this policy, contact
           <a href="mailto:dankral01@gmail.com">dankral01@gmail.com</a>.
         </p>
@@ -62,8 +62,8 @@
       <section class="doc-section">
         <h2 class="doc-section-title">What is collected</h2>
         <p>
-          Pollis collects the minimum an account-based messenger needs to function. All of it is used for app
-          functionality only — never for advertising, profiling, or tracking.
+          Pollis collects the minimum an account-based messenger needs, and uses it only to run the app, never
+          for advertising, profiling or tracking.
         </p>
 
         <div class="doc-table-wrap">
@@ -95,8 +95,8 @@
                 <td>Membership and activity metadata</td>
                 <td class="doc-td-dim">Which groups and DMs your account is in, blocks, and conversation activity
                   timestamps — the routing data delivery requires.</td>
-                <td class="doc-td-dim">Yes, in the clear. Since sealed sender landed, stored message rows no
-                  longer record who sent what.</td>
+                <td class="doc-td-dim">Yes, in the clear. With sealed sender, stored message rows do not record
+                  who sent what.</td>
               </tr>
               <tr>
                 <td>Push token</td>
@@ -113,21 +113,20 @@
               <tr>
                 <td>Avatars and group icons</td>
                 <td class="doc-td-dim">Profile and group images.</td>
-                <td class="doc-td-dim"><strong>Yes — these are the exception.</strong> They are not encrypted and
-                  are public to anyone with the URL. Don't put anything sensitive in an avatar.</td>
+                <td class="doc-td-dim"><strong>Yes.</strong> They are not encrypted and are public to anyone
+                  with the URL. Don't put anything sensitive in an avatar.</td>
               </tr>
             </tbody>
           </table>
         </div>
 
         <p>
-          Your IP address is <strong>not stored</strong> anywhere. It is read in memory for rate-limiting and
-          discarded; it does not survive a server restart. The network edge (Cloudflare) necessarily sees it in
-          transit, as any edge does.
+          Your IP address is <strong>not stored</strong>. It is read in memory for rate limiting and does not
+          survive a server restart. The network edge (Cloudflare) sees it in transit, as any edge does.
         </p>
         <p>
-          Your device PIN never leaves your device — it locks the local keystore and is not sent to any server.
-          The local message database on your device is encrypted at rest.
+          Your device PIN never leaves your device; it locks the local keystore. The local message database on
+          your device is encrypted at rest.
         </p>
       </section>
 
@@ -137,10 +136,10 @@
         <p>
           No location, no contacts, no calendar, no photo-library scanning, no health or financial data, no
           browsing or search history, no advertising identifiers. <strong>There is no analytics, telemetry,
-          crash-reporting, or advertising SDK in the apps</strong> — that is verifiable in the
+          crash-reporting or advertising SDK in the apps</strong>, which you can check in the
           <a href="https://github.com/actuallydan/pollis" target="_blank" rel="noopener noreferrer">source
-          code</a>, not just stated here. Nothing is sold, and nothing is shared with third parties for
-          advertising or marketing. No tracking, in Apple's sense of the word or anyone else's.
+          code</a>. Nothing is sold or shared with third parties for advertising or marketing. No tracking, in
+          Apple's sense of the word or anyone else's.
         </p>
       </section>
 
@@ -148,10 +147,10 @@
       <section class="doc-section">
         <h2 class="doc-section-title">Push notifications are content-free</h2>
         <p>
-          A push notification carries a fixed string ("New message"), the conversation ID, and whether it is a
-          channel or a DM. <strong>No message content, no sender, no preview.</strong> Pushes are routed through
+          A push notification carries fixed text ("New message") and an opaque handle that only your app can
+          resolve to a conversation. <strong>No message content, no sender, no preview.</strong> Pushes go through
           Expo's push service to Apple (APNs) or Google (FCM); those providers see the token and that your device
-          had activity in some conversation at some time, never what was said.
+          had activity at some time, never what was said or in which conversation.
         </p>
       </section>
 
@@ -159,11 +158,11 @@
       <section class="doc-section">
         <h2 class="doc-section-title">Who else touches the data</h2>
         <p>
-          A small set of infrastructure providers process data on Pollis's behalf — the database host (Turso),
-          the edge and storage host (Cloudflare), the login-email sender (Resend), the push relay (Expo, then
-          APNs/FCM), and a leased server for realtime media. None of them can read message content. The
-          <a href="subprocessors.html">subprocessors page</a> lists every one of them, exactly what each can see,
-          and where it runs — including the uncomfortable rows.
+          A few infrastructure providers process data on Pollis's behalf: the database host (Turso), the edge
+          and storage host (Cloudflare), the login-email sender (Resend), the push relay (Expo, then APNs/FCM),
+          and a leased server for realtime media. None of them can read message content. The
+          <a href="subprocessors.html">subprocessors page</a> lists each one, what it can see, and where it
+          runs.
         </p>
       </section>
 
@@ -172,17 +171,15 @@
         <h2 class="doc-section-title">How long things are kept</h2>
         <p>
           Encrypted message envelopes are kept on the server <strong>until every current member device has
-          fetched them</strong>, then garbage-collected — retention is a delivery watermark, not a time-to-live,
-          because dropping undelivered mail is worse than storing it. One bound keeps that from meaning
-          "forever": a device that has not checked in for <strong>12 months</strong> stops holding messages back,
-          and starts holding them again the moment it reappears. Messages you delete are removed from the server
-          immediately. Account and directory metadata lives for the life of the account. Call signalling is not
-          written to any database.
+          fetched them</strong>, then deleted. There is no time limit, because dropping undelivered mail is worse
+          than storing it. The one bound: a device that has not checked in for <strong>12 months</strong> stops
+          holding messages back, and resumes as soon as it checks in again. Messages you delete are removed from
+          the server immediately. Account and directory metadata lasts for the life of the account. Call
+          signalling is not written to any database.
         </p>
         <p>
-          The full version — every category, its period, what deleting your account removes, and what the
-          permanent transparency ledger keeps anyway — is on the
-          <a href="retention.html">retention page</a>.
+          Every category, its retention period, what deleting your account removes, and what the permanent
+          transparency ledger keeps are on the <a href="retention.html">retention page</a>.
         </p>
       </section>
 
@@ -190,8 +187,8 @@
       <section class="doc-section" id="deletion">
         <h2 class="doc-section-title">Your data, your rights</h2>
         <p>
-          <strong>See it:</strong> everything the server holds about you in the clear — email, username, display
-          name, devices, memberships — is visible and editable in the app's settings.
+          <strong>See it:</strong> everything the server holds about you in the clear (email, username, display
+          name, devices, memberships) is visible and editable in the app's settings.
         </p>
         <p>
           <strong>Delete it:</strong> account deletion is built into the app (Settings → Security → Delete
@@ -206,14 +203,13 @@
           <span class="doc-limit-title">What deletion cannot reach</span>
           <p>
             <strong>Messages already delivered to other people</strong> live in their devices' local encrypted
-            databases. There is no mechanism to reach into someone else's device, and no honest messenger can
-            claim otherwise.
+            databases, which we cannot reach.
           </p>
           <p>
-            <strong>The public transparency log is append-only by design.</strong> It records your account's key
-            history and group-membership change fingerprints — identifiers and timestamps, never content — so
-            that key-substitution attacks are detectable. Append-only means entries are never rewritten,
-            including after account deletion. That trade-off is deliberate and documented on the
+            <strong>The public transparency log is append-only.</strong> It records your account's key history
+            and fingerprints of group-membership changes (identifiers and timestamps, never content) so that
+            key-substitution attacks can be detected. Entries are never rewritten, including after account
+            deletion. The trade-off is documented on the
             <a href="transparency.html">transparency page</a>.
           </p>
         </div>

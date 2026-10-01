@@ -36,20 +36,20 @@
       <div class="doc-header">
         <h1 class="doc-title">If the operator stops</h1>
         <p class="doc-subtitle">
-          Pollis is run by one person. This is what breaks, in what order, if that person stops, and what an
-          outside observer can and cannot conclude while it happens.
+          Pollis is run by one person. This is what breaks, and in what order, if that person stops, and what
+          an outside observer can conclude while it happens.
         </p>
       </div>
 
       <div class="doc-explainer">
-        Every credential that runs Pollis has <strong>one holder</strong>: no second holder, no escrow, no
-        successor organisation. If that person stopped tomorrow, <strong>running services would keep
-        running</strong> and messages would keep being delivered. What stops is everything that needs a
-        person: releases, security fixes, key rotation, incident response and publishing the transparency log.
+        Every credential that runs Pollis has <strong>one holder</strong>, with no escrow and no successor
+        organisation. If that person stopped tomorrow, running services would keep running and messages would
+        keep being delivered. Anything that needs a person would stop: releases, security fixes, key rotation,
+        incident response and publishing the transparency log.
         <br /><br />
-        None of this is a confidentiality risk. No asset below can read a message, because the servers never
-        hold plaintext or private message keys. The risks are availability, distribution, and the quiet
-        decay of guarantees that depend on someone publishing.
+        None of this puts message confidentiality at risk: no asset below can read a message, because the
+        servers never hold plaintext or private message keys. The risks are availability, distribution, and
+        guarantees that depend on someone publishing.
       </div>
 
       <!-- ─────────────────────────────────────────────────────────── -->
@@ -62,12 +62,12 @@
             </thead>
             <tbody>
               <tr><td>GitHub repository</td><td>Source, CI, releases</td><td>No releases or CI gates. Source already published stays available</td></tr>
-              <tr><td>Updater signing key</td><td>Signs auto-update manifests</td><td><strong>The worst single loss.</strong> Its public half is built into every installed app, so no future build could be accepted as an update. Every user would reinstall by hand</td></tr>
-              <tr><td>Transparency log signing key</td><td>Signs all three transparency trees</td><td>The log cannot be republished, and rotating to a new key is not yet cleanly recoverable (below)</td></tr>
+              <tr><td>Updater signing key</td><td>Signs auto-update manifests</td><td><strong>The worst single loss.</strong> Its public half is built into every installed app, so no future build could be accepted as an update and every user would have to reinstall by hand</td></tr>
+              <tr><td>Transparency log signing key</td><td>Signs all three transparency trees</td><td>The log cannot be republished, and moving to a new key is not yet cleanly recoverable (below)</td></tr>
               <tr><td>Apple and Azure signing</td><td>macOS notarization, Windows signing</td><td>No new signed builds. Installed apps keep working</td></tr>
-              <tr><td>Cloudflare</td><td>DNS, website, Delivery Service, CDN</td><td><strong>Everything user-facing stops.</strong> The largest single concentration</td></tr>
-              <tr><td>Turso</td><td>Metadata and commit-log databases</td><td>The Delivery Service cannot serve. Message content is unaffected; it was never there</td></tr>
-              <tr><td>AWS</td><td>Optional relay overlay</td><td>The overlay stops. Pollis still works without IP-metadata protection</td></tr>
+              <tr><td>Cloudflare</td><td>DNS, website, Delivery Service, CDN</td><td><strong>Everything user-facing stops.</strong> The largest single dependency</td></tr>
+              <tr><td>Turso</td><td>Metadata and commit-log databases</td><td>The Delivery Service cannot serve. Message content was never stored there</td></tr>
+              <tr><td>AWS</td><td>Optional relay overlay</td><td>The overlay stops. Pollis still works, without IP-address protection</td></tr>
               <tr><td>LiveKit server</td><td>Voice, video, screenshare</td><td>Calls stop. Text messaging is unaffected</td></tr>
               <tr><td>Resend</td><td>Sign-in email codes</td><td>Nobody can sign in or add a device. Existing sessions keep working</td></tr>
             </tbody>
@@ -85,7 +85,7 @@
             </thead>
             <tbody>
               <tr><td>Immediately</td><td>Nothing. Messages deliver, the site stays up</td></tr>
-              <tr><td>~2 days</td><td>The daily transparency publish stops. New keys and builds stop being anchored. <a href="https://status.pollis.com/" target="_blank" rel="noopener noreferrer">status.pollis.com</a> still reports the service as up, because it is</td></tr>
+              <tr><td>~2 days</td><td>The daily transparency publish stops, so new keys and builds are no longer anchored. <a href="https://status.pollis.com/" target="_blank" rel="noopener noreferrer">status.pollis.com</a> still reports the service as up, because it is</td></tr>
               <tr><td>~60 days</td><td>GitHub disables scheduled workflows on an inactive repository; every cron stops</td></tr>
               <tr><td>Months</td><td>Apple and Azure signing credentials lapse; no new signed builds are possible</td></tr>
               <tr><td>Any time</td><td>A vulnerability or outage goes unfixed</td></tr>
@@ -93,8 +93,8 @@
           </table>
         </div>
         <p>
-          The system is at its most misleading between day two and month two, when everything a user touches
-          still works while every guarantee that depends on someone publishing has quietly stopped.
+          Between day two and month two the system is at its most misleading: everything a user touches still
+          works, but every guarantee that depends on someone publishing has stopped.
         </p>
       </section>
 
@@ -102,26 +102,26 @@
       <section class="doc-section">
         <h2 class="doc-section-title">A stalled log looks exactly like a withheld one</h2>
         <p>
-          The transparency trees are republished daily, and a signed tree head for a given size is
-          deliberately byte-identical forever. So from outside, three situations look the same: the log is
-          healthy and idle, the publisher has been abandoned, or entries are being deliberately withheld.
-          Polling <a href="transparency.html">the served log</a> cannot tell them apart.
+          The transparency trees are republished daily, and the signed tree head for a given size stays
+          byte-identical forever. From outside, three situations look the same: the log is healthy and idle, the
+          publisher has been abandoned, or entries are being withheld. Polling
+          <a href="transparency.html">the served log</a> cannot tell them apart.
         </p>
-        <p>What separates them is the publisher's run history, which anyone can read without credentials:</p>
+        <p>The publisher's run history separates them, and anyone can read it without credentials:</p>
         <code class="doc-cmd">gh run list --repo actuallydan/pollis --workflow=transparency-publish.yml --limit 5 --json conclusion,createdAt,url</code>
         <p><strong>How to read a stall:</strong></p>
         <ul>
-          <li>A stalled publisher is <strong>evidence of nothing about honesty</strong>. The supported claim is
-            "the log is not currently being published", not "Pollis is withholding entries".</li>
-          <li>Equally, a served-but-stale head with a dead publisher is not "healthy": it is also what a coerced
-            operator would produce.</li>
-          <li>The check that actually resolves it is to <strong>keep the heads you were served and compare them
-            later and with other people</strong>. Two signed heads that disagree are permanent proof. That is
-            what <a href="artifacts.html">pollis-verify</a> is for.</li>
+          <li>A stalled publisher says nothing about honesty. The supported claim is "the log is not currently
+            being published", not "Pollis is withholding entries".</li>
+          <li>A stale head with a dead publisher is not "healthy" either: a coerced operator would produce the
+            same thing.</li>
+          <li>What resolves it is to <strong>keep the heads you were served and compare them later and with
+            other people</strong>. Two signed heads that disagree are permanent proof. That is what
+            <a href="artifacts.html">pollis-verify</a> is for.</li>
         </ul>
         <p>
-          The operator's commitment: a publisher stall longer than 48 hours is treated as a correctness
-          incident, and one that cannot be fixed within seven days is acknowledged publicly on
+          The operator treats a publisher stall longer than 48 hours as a correctness incident, and
+          acknowledges publicly any stall not fixed within seven days on
           <a href="https://status.pollis.com/" target="_blank" rel="noopener noreferrer">status.pollis.com</a>.
         </p>
       </section>
@@ -130,21 +130,21 @@
       <section class="doc-section">
         <h2 class="doc-section-title">What is not solved yet</h2>
         <ul>
-          <li><strong>No second key holder.</strong> The two pinned signing keys have one custodian. Adding a
-            second is the highest-value continuity step and needs a second person.</li>
+          <li><strong>No second key holder.</strong> The two pinned signing keys have one custodian. A second
+            holder is the most valuable continuity step, and needs a second person.</li>
           <li><strong>Log-key loss is not cleanly recoverable.</strong> The same key signs the binaries tree,
-            and a new log key can only reach users through a client update verified by that same tree. Splitting
-            the two anchors is designed and tracked in
+            and a new log key can only reach users in a client update verified by that tree. Splitting the two
+            anchors is designed and tracked in
             <a href="https://github.com/actuallydan/pollis/issues/754" target="_blank" rel="noopener noreferrer">#754</a>.</li>
           <li><strong>Nobody independent watches the log.</strong> Witness and gossip monitoring is designed but
             unbuilt (<a href="https://github.com/actuallydan/pollis/issues/763" target="_blank" rel="noopener noreferrer">#763</a>).
             Until it exists, "no alarm" means "nobody looked".</li>
           <li><strong>No legal succession.</strong> Ownership, inheritance and escrow need a legal entity to
-            hold them. A timer that publishes a key automatically would be worse than nothing: an unattended path
-            to the signing key.</li>
+            hold them. A timer that publishes a key automatically would be worse than nothing, since it is an
+            unattended path to the signing key.</li>
         </ul>
         <p>
-          The full engineering plan, including the complete asset register and handover order, is in
+          The engineering plan, with the full asset register and handover order, is in
           <a href="https://github.com/actuallydan/pollis/blob/main/docs/operational-continuity.md" target="_blank"
             rel="noopener noreferrer"><code>docs/operational-continuity.md</code></a>.
         </p>
