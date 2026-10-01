@@ -1,8 +1,8 @@
 # Pollis Security Whitepaper
 
-**Audience:** independent security auditors evaluating the cryptographic protocol design and surrounding flows.
-**Scope:** the desktop application in this repository, its Delivery Service (`pollis-delivery`), its remote services (Turso, Cloudflare R2, LiveKit, Resend), and the trust boundaries between them. Web-app concerns (XSS, CSP, SOP) are out of scope; this document covers cryptographic protocol design, key custody, identity, group membership, and the data-flow paths that move plaintext or key material across trust boundaries.
-**Status:** authoritative. `ARCHITECTURE.md` at the repo root and the wiki under `.codesight/wiki/` are also authoritative for implementation specifics. Where this document disagrees with those sources on cryptographic claims, this document wins.
+**Audience:** independent security auditors evaluating the protocol design and the flows around it.
+**Scope:** the desktop and mobile clients built from this repository (`pollis-core` behind a Tauri or React Native shell), the Delivery Service (`pollis-delivery`), the remote services (Turso, Cloudflare R2, LiveKit, Resend, Expo push), and the trust boundaries between them. Covers cryptographic protocol design, key custody, identity, group membership, and every path that moves plaintext or key material across a trust boundary. Web-app concerns (XSS, CSP, SOP) are out of scope.
+**Status:** authoritative for cryptographic claims. `ARCHITECTURE.md` and `.codesight/wiki/` are authoritative for implementation detail; where they disagree with this document on a cryptographic claim, this document wins.
 
 ---
 
@@ -12,315 +12,256 @@
 
 | Trusted | Untrusted |
 |---|---|
-| The user's device | Network (any path between the device and any remote service) |
-| The device keystore — the OS keychain (Keychain / Secret Service / Credential Manager) where one exists, otherwise a machine-bound encrypted file (§3.5), which is weaker | Turso (libSQL) — the remote relational database |
-| The signed Tauri application binary (Tauri host + WebView renderer + `pollis-core`) at the version the user installed | Cloudflare R2 — object storage for attachments |
-| The local SQLCipher database file — encrypted at rest on every platform, with the crypto provider differing per platform (§7.0) | LiveKit — SFU and signalling for voice and realtime events |
-| The user-held Secret Key (printed once, expected to be stored offline) | Resend — outbound email transit for OTPs |
-| — | The Delivery Service (`pollis-delivery`) — the sole writer to the remote database, and the broker that now holds the Resend, R2 and LiveKit credentials on the client's behalf (§4, §9.3, §10.1) |
-| The user-held PIN (in the user's head) | Anyone with read access to a copy of `accounts.json` or the keystore who does not also have the PIN |
-| `accounts.json` — the local "who has signed in on this device" index (§1.1.1) | — |
+| The user's device | The network, on every path |
+| The device keystore: the OS keychain (Keychain / Secret Service / Credential Manager) where one exists, otherwise a weaker machine-bound encrypted file (§3.5) | Turso (libSQL), the remote relational database |
+| The signed application binary at the version the user installed | Cloudflare R2, object storage for attachments |
+| The local SQLCipher database, encrypted at rest on every platform; the crypto provider differs per platform (§7.0) | LiveKit, the SFU and realtime-event channel |
+| The user-held Secret Key (shown once, stored offline) | Resend, which carries OTP email |
+| The user-held PIN | Expo / APNs / FCM, which carry mobile push |
+| `accounts.json`, the local index of accounts signed in on this device (§1.1.1) | The Delivery Service (`pollis-delivery`): the only party holding the database credential, and the broker for the Resend, R2, LiveKit and Expo credentials (§4, §8, §9.3, §10.1) |
+| — | Anyone holding a copy of `accounts.json` or the keystore but not the PIN |
 
-The application is built and shipped by the operators of the Pollis services. The trust delegation is the same as Signal Desktop or WhatsApp Desktop: the binary is trusted at install time, after which the cryptographic protocol is what defends against the *server* side of the same operator. Binary integrity now rests on two layers. The first is platform code-signing (Apple Developer ID + notarization on macOS, Azure Trusted Signing on Windows — see `.codesight/wiki/windows-signing.md`); the auto-update path verifies the same OS-native signature on every downloaded installer before launch (Gatekeeper on macOS, Authenticode on Windows), so an attacker who tampers with a release artifact in transit cannot get the running binary to install it.
+The operators of the Pollis services also build and ship the app. As with Signal Desktop or WhatsApp Desktop, the binary is trusted at install time, and from then on the protocol defends against the server side of the same operator. Two mechanisms back binary integrity.
 
-The second layer, **now shipped**, is **binary transparency**. Every released build's reproducible pre-signature payload *and* its signed artifact are content-hashed and appended as leaves to a third append-only, ML-DSA-44-signed Merkle tree — served alongside the commit-log and account-key trees (§6.9) at **https://verify.pollis.com/v1/binaries**, under its own domain-separated STH context so a binary head can never be replayed as a commit-log or account-key head. Anyone can confirm that every artifact published for a given release tag is provably included in that log by running `pollis-verify release <tag>`, which trusts **only** the pinned log key (ML-DSA-44, rotated to fresh material in #732) — not Pollis, not Turso, not the host serving the files. Code-signing proves only "the holder of Pollis's key produced these bytes"; the transparency log additionally makes the *set of bytes Pollis has ever published for a release* public and non-repudiable, so a compromised or compelled operator cannot quietly ship a targeted per-user build — its hash is either logged (permanently, publicly, and cross-checkable by any monitor) or conspicuously absent from the log. **Honest limits** (full design in `docs/verifiable-builds-design.md`; P0–P2 shipped, and P5 Linux reproducibility + independent rebuilder, P3 keyless SLSA/cosign provenance, and P4 in-app verify all shipped in #484): the log records a correct leaf structure — both hashes plus the pinned build recipe — and the release pipeline appends them; and the **Linux AppImage payload is now reproducible modulo a documented residual list** (`docs/reproducible-builds-residuals.md`), with the toolchain pinned to an exact version, absolute build paths remapped out of the binary, and a `SOURCE_DATE_EPOCH` derived from the tag commit. An independent, fork-runnable rebuilder (`.github/workflows/rebuild-verify.yml`) rebuilds that payload from public source at a tag and asserts the reproduced hash is the one logged, trusting **only** the pinned key. **This is demonstrated, not merely implemented:** at `v1.8.4` the rebuild matched the logged payload `1a4213a1…` exactly, and the rebuilder now runs automatically after every release, so the property is continuously checked rather than asserted. Two honest bounds on that result: it is the *Linux AppImage payload* only, and reproduction currently requires building at the same filesystem path, because `--remap-path-prefix` is a rustc flag and does not cover C/C++ compiled through `cc-rs` (`docs/reproducible-builds-residuals.md`). **macOS and Windows payload reproducibility remains best-effort** (cross-platform, not asserted by the rebuilder), and the signing/notarization outer layer is non-reproducible *by construction* — transparency-logged and cryptographically bound to the payload, not reproduced. On **macOS and Windows**, however, the logged payload digest is now **recomputable by anyone holding the public `.dmg` / `.exe`** (#750): it is defined as the shipped artifact with that platform's per-signing material normalized back out — on macOS the stapled notarization ticket, each Mach-O code signature and the `_CodeSignature` manifests; on Windows the Authenticode certificate table and the PE checksum signtool recomputes over it, stripped from every executable inside the installer — so a third party can open the release, apply the same normalization, and check the result against the log. This is the ordinary reproducible-builds treatment of signatures (exclude, don't reproduce; cf. F-Droid's "identical apart from the signature"). It replaced a scheme that hashed a separate unsigned build existing only inside CI, which no outside party could obtain and therefore could not check — and which additionally made each release conditional on the Rust compiler emitting identical bytes across two compiles of one source tree, a gate that failed a real release twice in a row for reasons unrelated to that release's soundness. It does **not** by itself establish that the macOS or Windows bytes rebuild from source — that remains best-effort, pending a matching-platform reproducer and the compiler-determinism work itemized in `docs/reproducible-builds-residuals.md`. **A second, independent transparency anchor now ships (P3, #484):** every released installer and updater bundle additionally carries a keyless **SLSA v1 build-provenance attestation** (GitHub's `actions/attest-build-provenance`) *and* a **cosign signature**, both anchored in the **public Rekor** log and cryptographically bound to Pollis's **GitHub Actions OIDC identity** — published next to the artifact on `cdn.pollis.com`, the attestation at exactly the `provenance_uri` each binaries-log leaf records. Anyone can run `cosign verify-blob` (or a SLSA verifier) and confirm the bytes were produced by the pinned Pollis release workflow, checked against Rekor, with **no Pollis-held key on that verification path** — defense in depth against a compromised or compelled Pollis signing key, and a transparency anchor Pollis does not control. This proves *build provenance* and adds a *non-Pollis* anchor; it does **not**, by itself, prove the bytes reproduce from source — that remains the reproducibility story above. Remaining gaps, itemized in the residual list: the client no longer bakes any R2 or LiveKit credentials — those moved off-client in the #506 secrets-broker cutover — so the only baked credentials left are the publishable read-only Turso token and an **optional** observability log-DB token. It is that optional log-DB token that, when a release bakes it, still prevents a *fully secretless* third party from bit-reproducing even the Linux payload (a party given the published recipe reproduces it, as before). (An optional in-app **"Verify this build"** affordance on the Security page already lets the running app confirm its own payload is published in the log — P4, #484.) For the platforms and inputs not yet reproducible, the log still proves *what* Pollis published for a tag; independent proof that those bytes *match public source* holds today for the Linux payload (given the recipe, on a matching runner) and is the remaining work elsewhere.
+**Platform code-signing.** Apple Developer ID plus notarization on macOS; Azure Trusted Signing on Windows (`.codesight/wiki/windows-signing.md`). The updater checks the OS-native signature on every downloaded installer before launch (Gatekeeper, Authenticode), so an installer tampered with in transit does not install.
+
+**Binary transparency.** Code-signing proves only that the holder of Pollis's key produced some bytes. The binaries log makes the set of bytes Pollis has published for each release public and append-only, so a targeted per-user build is either logged permanently or visibly absent. Design: `docs/verifiable-builds-design.md`; residuals: `docs/reproducible-builds-residuals.md`.
+
+- Each release's pre-signature payload hash and signed-artifact hash, plus the pinned build recipe, are appended to a third ML-DSA-44-signed Merkle tree at `https://verify.pollis.com/v1/binaries`, beside the commit-log and account-key trees (§6.9). It has its own STH context (`pollis-verifiable-log:sth:v2:binaries`), so its heads cannot be replayed as either other tree's.
+- `pollis-verify release <tag>` checks that every artifact for a tag is included, trusting only the pinned log key. The Security page has an in-app "Verify this build" check that does the same for the running binary.
+- **Linux AppImage payload: reproducible, and checked.** The toolchain is pinned, absolute build paths are remapped, and `SOURCE_DATE_EPOCH` comes from the tag commit. `.github/workflows/rebuild-verify.yml` rebuilds the payload from public source after every desktop release and asserts the hash matches the logged leaf, trusting only the pinned key. At `v1.8.4` the rebuild matched the logged payload `1a4213a1…` exactly.
+  - Bound: reproduction needs the same build path, because `--remap-path-prefix` is a rustc flag and does not reach C/C++ built through `cc-rs`.
+  - Every compile-time input (`option_env!` in `pollis-core/src/config.rs`) is a public endpoint URL or public verification key. The client bakes no credential, so a party with no secrets can reproduce the payload from the published recipe. `scripts/check-build-recipe.py` fails CI if the release job, the rebuilder and `config.rs` disagree on that recipe.
+- **macOS and Windows: recomputable, not reproducible.** The logged payload digest is the shipped `.dmg` / `.exe` with per-signing material removed: on macOS the stapled notarization ticket, each Mach-O code signature and the `_CodeSignature` manifests; on Windows the Authenticode certificate table and the PE checksum, stripped from every executable in the installer (#750). Anyone with the public artifact can apply the same normalization and compare with the log. This is the usual reproducible-builds treatment of signatures (cf. F-Droid). It does not show that those bytes rebuild from source; that waits on a matching-platform reproducer and the compiler-determinism items in the residuals doc. The signing/notarization wrapper is non-reproducible by construction; it is logged and bound to the payload.
+- **Independent anchor.** Every installer and updater bundle also carries a keyless SLSA v1 build-provenance attestation (`actions/attest-build-provenance`) and a cosign signature, both recorded in the public Rekor log and bound to Pollis's GitHub Actions OIDC identity. They are published on `cdn.pollis.com`, the attestation at the `provenance_uri` each binaries-log leaf records. `cosign verify-blob` or a SLSA verifier confirms the bytes came from the pinned release workflow with no Pollis-held key on the path. This proves provenance, not reproducibility.
 
 #### 1.1.1 `accounts.json`
 
-The one client-side store that is neither encrypted nor machine-bound. It is
-called out here because until #997 it appeared in this document *only* on the
-untrusted side of the table above — as something an attacker might read, with no
-statement of what it holds or what protects it. That omission is how it came to
-hold a plaintext email address.
+The one client-side store that is neither encrypted nor machine-bound.
 
-**What it holds, per account:** the account's `user_id` (an opaque 128-bit
-ULID), the `username` and `avatar_url` the user chose — which every peer they
-talk to already sees — and a `last_seen` timestamp; plus one top-level
-`last_active_user`. That is the complete list.
+**Contents, per account:** the opaque `user_id` (a 128-bit ULID), the `username` and `avatar_url` (which every peer already sees), and `last_seen`; plus one top-level `last_active_user`. Nothing else.
 
-**What protects it:** file permissions, and nothing else. It is **not**
-encrypted, **not** machine-bound, and **not** in the keystore. Owner-only mode
-is what it should carry, and the separate client-wide file-permission hardening
-is what sets that; today it is created at the process umask, so on a default
-Linux or macOS box it is world-readable. Either way a same-UID attacker or a
-full-disk image reads it — and both of those already have the keystore, whose
-contents are worth far more.
+**Protection:** file permissions only. Since #1000 it is created through `pollis-core/src/private_fs.rs` (0600, in a 0700 directory) on unix; on Windows it inherits the profile directory's ACL. A same-UID attacker or a full-disk image reads it regardless, but both already have the keystore, which is worth far more.
 
-**Why that is acceptable:** the file holds no secret and no PII — an argument
-that does not lean on the mode at all, which is the point. Every field is
-either an opaque identifier or a display string the user publishes to their
-contacts anyway, so a reader learns *that this machine has accounts* and their
-opaque ids — not who owns them. Its job is bootstrap: it is the only store
-readable pre-unlock (local DB closed, no signer, no session, hence no
-credential of any kind), and `get_session` / `get_unlock_state` need a `user_id`
-before any credential exists.
+**Why that is acceptable:** it holds no secret and no PII, an argument that does not depend on the mode. A reader learns that the machine has accounts and their opaque ids, not who owns them. The file exists for bootstrap: it is the only store readable before unlock (local DB closed, no signer, no session), and `get_session` / `get_unlock_state` need a `user_id` before any credential exists.
 
-**The login address is not in it (#997).** It used to be: the single field that
-mapped an opaque id to a *person*, and the input to OTP sign-in and the recovery
-flow. It now lives in the per-user keystore slot `login_email_{user_id}`, under
-the same protection as the account identity key and the DB key. The pre-unlock
-email → `user_id` resolution still reaches it, because the keystore is readable
-at exactly that moment — `device_id_{user_id}` is already read there, for the
-returning-device path. Masking and hashing were both rejected for that
-resolution: it is a case-insensitive *equality* test, so every masked address at
-a shared domain collides and would resolve a returning user to an arbitrary
-account, and email is low-entropy enough that a hash buys
-confirmation-resistance rather than secrecy while still costing the login
-screen's one-click "continue as" chip.
+**The login email is not in it (#997).** It lives in the per-user keystore slot `login_email_{user_id}`, under the same protection as the account identity key and the DB key. Pre-unlock email → `user_id` resolution still works because the keystore is readable then (`device_id_{user_id}` is already read at that point). Masking and hashing were rejected: the resolution is a case-insensitive equality test, so masked addresses at a shared domain collide, and email is low-entropy enough that a hash adds confirmation-resistance, not secrecy.
 
-An install that predates #997 still has the address in its file. The first
-launch on the new build moves it into the keystore and then rewrites the index
-without it — keystore write first, erase second, and nothing is erased unless
-every address was taken, so an interrupted or failed migration retries on the
-next launch rather than losing the address. Until that point ordinary writes
-carry the field through untouched, for the same reason. Nothing ever *sets* the
-field, so the erase is final.
+An install older than #997 still has the address in its file. The first launch on a newer build writes it to the keystore and only then rewrites the file without it, and erases nothing unless every address was moved. An interrupted migration retries next launch. Nothing ever sets the field again.
 
-Corrupt-index snapshots (`accounts.bad-<unix-ms>.json`, written when the file
-fails to parse) inherit the same contents and the same permissions, and are pruned to
-the newest three on the next successful write. A snapshot taken from a
-pre-migration file therefore still carries the old address; the prune bounds how
-many such copies can survive, where previously they accumulated forever.
+Corrupt-index snapshots (`accounts.bad-<unix-ms>.json`) have the same contents and permissions and are pruned to the newest three on the next good write. A snapshot of a pre-migration file still carries the old address; the prune bounds how many such copies survive.
 
 ### 1.2 What the server can and cannot see
 
-Turso is the canonical store of *metadata*. It can observe, in plaintext: user records (id, email, username, avatar URL), social graph (group membership, DM channel membership, blocks), conversation metadata (timestamp, MLS commit and welcome timing), key-package availability, device registration (cert blobs and `mls_signature_pub`), security events (`security_event`), and connection patterns (IP address, libSQL Hrana streams). Two former per-message leaks have been closed by the metadata-minimization work (see the shipped paragraph below): the stored `message_envelope` row **no longer carries the per-message sender** (sealed sender), and text-message **ciphertext size is padded to coarse buckets**, so a stored-row dump reveals neither *who sent* a message nor its exact length.
+**The Delivery Service** is the only client-facing server for data (§8). It sees everything Turso stores, plus live request metadata: the authenticated user and device on every signed request (`X-Pollis-User` / `X-Pollis-Device`, `pollis-delivery/src/auth.rs`) and the client IP (unless the user has opted into the relay overlay, below).
 
-Turso cannot recover, by design: any message plaintext, any private key (the `account_id_key` is only present on the server in the form of a `account_recovery` blob whose key derivation input — the user's Secret Key — is never sent to the server), MLS group state, MLS application secrets, or attachment plaintext (R2 attachments are convergent-encrypted by the device before upload).
+**Turso** holds metadata in plaintext:
+- user records (id, email, username, avatar URL);
+- the social graph: group membership, DM membership, blocks;
+- conversation metadata: timestamps, MLS commit and Welcome timing, key-package availability;
+- device registration (cert blobs, `mls_signature_pub`, `mls_signature_pub_pq`), push tokens, and `security_event` rows.
 
-LiveKit can see: real-time data-channel events (`new_message`, `membership_changed`, `enrollment_requested`, voice presence) — these payloads are JSON, not encrypted at the application layer; they are signalling, not message content. As of the signalling-minimization work, the `new_message` wake-up is a bare conversation-routing ping and **no longer carries `sender_id` / `sender_username`** — the recipient re-derives the true sender from the decrypted MLS credential (§6.6), so the field was pure leakage and is gone. The same rule now covers the two shared-room broadcasts that still named their actor: `typing` and `voice_joined`/`voice_left` no longer carry `user_id`/`username`/`display_name`, and the recipient attributes them from the **publishing participant** (#836). **What LiveKit sees of *identity* is also pseudonymous now:** room names have been opaque per-conversation pseudonyms since #828, and since #836 so are participant identities — the user and device are encrypted into a per-room handle, and the JWT carries no username — so the SFU can no longer map a participant to an account, nor recognise the same account across two rooms, which is what previously let it rebuild the social graph by co-membership independently of Turso. It remains able to count participants in a room and to recognise a returning participant *within* that room: these are stable pseudonyms, not unlinkable ones (for 1:1 calls that is already per-call, since `call-<ulid>` rooms are ephemeral). Voice audio is forwarded by the SFU as ciphertext: every audio frame is encrypted with AES-128-GCM by libwebrtc's `FrameCryptor` before it leaves the device (see §10.2), so LiveKit operators see RTP routing metadata but not voice plaintext.
+Turso sees only the Delivery Service's connections. Since #987 no client connects to it (§8).
 
-**Metadata minimization (shipped, with an honest live-request caveat).** Three application-layer minimizations have shipped (full design and threat model in `docs/metadata-minimization-design.md`; v1/v2 shipped, v1.5/v3/v4 tracked in #489):
+Turso cannot recover message plaintext, any private key, MLS group state or secrets, or attachment plaintext. The account identity key exists server-side only inside the `account_recovery` blob, wrapped under the user's Secret Key, which is never sent (§5.2). Attachments are encrypted on the device before upload (§9.1).
 
-- **Sealed sender (v1)** — the delivery path no longer writes the real sender into the `message_envelope` row; it writes a non-identifying sentinel with `sealed = 1`, and recipients attribute each message from the MLS-authenticated `{user_id}:{device_id}` credential inside the ciphertext (§2.3, §6.6) rather than from the server-visible column. **Scope is at-rest only.** A Turso breach, subpoena, or cold dump of `message_envelope` no longer reveals who sent which message — the persistent, retrospectively-subpoenable sender artifact stops existing. It does **not** hide the sender from a Delivery Service operator watching *live* requests: the DS still authenticates every send by a device signature carrying the sender's `X-Pollis-User` header (`pollis-delivery/src/auth.rs`), so it sees the sender in real time. Closing that live axis needs anonymous membership proofs (v1.5, deferred, #489); until then, do not read sealed sender as "the server can't tell who sent it" — the *stored row* can't, the *live DS* still can.
-- **Size padding (v2)** — text plaintext is padded to size buckets (PADMÉ, ~12% worst-case overhead, above a 256 B floor) *inside* the MLS ciphertext before encryption and stripped after decryption, so `message_envelope` sizes collapse to coarse bands. This is **text envelopes only**: attachment blobs ride convergent-encrypted R2 objects whose size is inherent to cross-user dedup (§9.1), so their sizes are not padded.
-- **Signalling minimization (v2)** — the LiveKit `new_message` payload carries no sender (above).
+**Metadata minimization** (design and threat model: `docs/metadata-minimization-design.md`):
 
-What remains visible — and is **irreducible** for a store-and-forward server — is that conversations exist, roughly how many members each has, and when they are active; the social graph is still keyed by `user_id` in membership rows (per-conversation pseudonyms are the deferred v3, #489). Pollis does **not** claim anonymity or IP-hiding (the relay overlay, #455, is deferred). It **does** claim post-quantum *confidentiality* for group traffic (#454, shipped — §6.1, §6.10): the key exchange is a hybrid X25519 + ML-KEM-768 KEM, so a recording made today is not decryptable by a future quantum computer. Post-quantum *authentication* now ships alongside it (#668, §6.1): account identity keys, device certs, Delivery-Service request auth, transparency-log tree heads, and the PQ suite's MLS leaves are all ML-DSA-44 (FIPS 204). #669 has since retired the classic suite, so every MLS leaf now signs ML-DSA-44 — but any group created before the fleet finished adopting the PQ suite ran classic until it migrated, and traffic sealed before that boundary stays classically sealed.
+- **Sealed sender (v1).** The `message_envelope` row stores a non-identifying sentinel with `sealed = 1` instead of the sender. Recipients attribute each message from the MLS-authenticated `{user_id}:{device_id}` credential inside the ciphertext (§2.3, §6.6). A breach, subpoena or dump of `message_envelope` no longer shows who sent what. **This is at-rest only:** the DS still authenticates every send by the sender's device signature, so a live DS operator sees the sender. Closing that needs anonymous membership proofs (v1.5), which are not built.
+- **Size padding (v2).** Text plaintext is padded to PADMÉ buckets (≈12% worst-case overhead, 256 B floor) inside the MLS ciphertext (`pollis-core/src/commands/messages/framing.rs`). Attachment blobs are not padded: their size is inherent to cross-user dedup (§9.1).
+- **Signalling minimization (v2).** See LiveKit below.
 
-R2 can see: opaque AEAD ciphertext at deterministic content-hash-derived keys. The plaintext, content-hash, and AEAD key are never on-wire to R2.
+Still visible, and irreducible for a store-and-forward server: which conversations exist, roughly how many members each has, and when they are active. Membership rows are keyed by `user_id`; per-conversation pseudonyms (v3) and timing batching (v4) are not built.
 
-Resend sees: an email address and a 6-digit OTP, in plaintext, for the duration of the email-delivery transaction.
+**Network address.** An opt-in relay overlay (`docs/relay-overlay-design.md` §13; #455, #813) hides the client IP from the first-party services. It is built but off by default, and release builds do not turn it on. Pollis claims no anonymity.
+
+**Post-quantum.** Group traffic uses a hybrid X25519 + ML-KEM-768 KEM (#454; §6.1, §6.10), so a recording made today is not decryptable by a future quantum computer. Account identity keys, device certs, DS request auth, transparency-log tree heads and every MLS leaf sign with ML-DSA-44 (#668, #669). Groups created before the PQ suite ran classic until they migrated, and traffic sealed before that boundary stays classically sealed.
+
+**LiveKit** sees realtime data-channel events (`new_message`, `membership_changed`, `enrollment_requested`, `typing`, voice presence). These are JSON signalling, not message content, and are not encrypted at the application layer.
+- `new_message` is a bare conversation-routing ping with no sender; the recipient attributes the message from the decrypted MLS credential (§6.6).
+- `typing` and `voice_joined` / `voice_left` carry no `user_id` / `username` / `display_name`; recipients attribute them from the publishing participant (#836).
+- Room names are opaque per-conversation pseudonyms derived server-side (#828, `pollis-delivery/src/room_id.rs`), and participant identities are per-room encrypted handles with no username in the JWT (#836, `participant_id.rs`). The SFU cannot map a participant to an account or link one account across rooms. It can count participants in a room and recognise a returning participant within one room. 1:1 call rooms (`call-<ulid>`) are per-call.
+- Voice audio is frame-encrypted with AES-128-GCM before it leaves the device (§10.2). LiveKit sees RTP routing metadata, not audio.
+
+**R2** sees opaque AEAD ciphertext at content-hash-derived keys (§9.2). It never sees the plaintext or the AEAD key.
+
+**Resend** sees an email address and a 6-digit OTP in plaintext while delivering the message.
+
+**Push (mobile only).** The DS sends push notifications through Expo, which hands them to APNs/FCM (`pollis-delivery/src/push.rs`). Desktop registers no push token. Each push has a fixed title and body and a `data` blob containing only an opaque handle `h`: 128 random bits, minted fresh per recipient per notification (#1122, #1157). The app trades `h` for `{conversation_id, kind}` over its own signed channel (`POST /v1/push/resolve`), which answers only the user it was minted for. The DS keeps the handle mapping for `PUSH_HANDLE_TTL_DAYS` (7). Expo, Apple and Google therefore see the device token, the notification time, and an unlinkable handle, but not the conversation, sender or content.
 
 ---
 
 ## 2. Identity Layers
 
-Pollis carries three nested identities. Distinguishing them is essential for the rest of the document.
+Pollis has three nested identities. The rest of the document depends on keeping them apart.
 
 ### 2.1 Account identity (per user)
 
-A long-lived **ML-DSA-44** keypair (FIPS 204), generated on the device that completes signup — Ed25519 (RFC 8032) until #668. Source: `pollis-core/src/commands/account_identity.rs::generate_account_identity`. The public half is published to `users.account_id_pub` (BLOB, **1312 bytes**) at signup. The private half is canonically the **32-byte seed** the key expands from, exactly the size the Ed25519 private was, so every place that holds, wraps, or transports it (§3.2, §5.1, §5.2) is byte-identical in size to the pre-#668 era. It exists in exactly two places:
+A long-lived **ML-DSA-44** keypair (FIPS 204), generated on the device that completes signup (`pollis-core/src/commands/account_identity.rs::generate_account_identity_material`); it was Ed25519 until #668. The public half is published to `users.account_id_pub` (BLOB, 1312 bytes). The private half is stored as its 32-byte seed, the same size as the old Ed25519 private key, so every slot that holds, wraps or transports it (§3.2, §5.1, §5.2) kept its size. It exists in exactly two places:
 
-1. On the user's enrolled devices, on disk only as ciphertext in the OS keystore slot `account_id_key_wrapped_{user_id}` (see §3 for wrapping).
-2. On the server, on disk only as ciphertext in the `account_recovery` table, wrapped under a key derived from a user-held *Secret Key* the server has never seen.
+1. On the user's enrolled devices, only as ciphertext in the keystore slot `account_id_key_wrapped_{user_id}` (§3).
+2. On the server, only as ciphertext in `account_recovery`, wrapped under a key derived from the user's Secret Key, which the server never sees.
 
-When `users.account_id_pub` rotates (`reset_identity`), `users.identity_version` increments. Every device whose locally-held private key does not derive a public key matching the current `account_id_pub` is treated as orphaned and wiped on next sign-in (`auth.rs::verify_otp` orphan-wipe branch, `account_identity.rs::has_matching_local_account_identity`).
+When `users.account_id_pub` rotates (`reset_identity`), `users.identity_version` increments. A device whose local private key no longer derives the published key is treated as orphaned and wiped on its next sign-in (`auth.rs::verify_otp`, `account_identity.rs::has_matching_local_account_identity`).
 
 ### 2.2 Device identity (per device per user)
 
-Each device gets a stable ULID `device_id` on first sign-in (`auth.rs::register_device`), persisted in the OS keystore at `device_id_{user_id}`. The device also generates stable per-device MLS signing keypairs — **one per signature scheme**, a split introduced by #668 when the two suites then in use stopped agreeing on one: Ed25519 for the classic suite's leaves, ML-DSA-44 for the PQ suite's (`pollis-core/src/commands/mls/device.rs`, keyed on the scheme rather than the suite so two suites sharing a scheme share a key). #669 retired the classic suite, so no live suite mints an Ed25519 leaf any more, but both keys are still generated, published and certified — the scheme, not the suite, decides whether a stored key can verify a given leaf, and a group persisted under an older code point must stay readable. The public halves are stored in `mls_kv` locally and in `user_device.mls_signature_pub` (Ed25519) and `user_device.mls_signature_pub_pq` (ML-DSA-44, nullable, migration `000011_device_pq_signature_pub.sql`) remotely. A device that is in groups of both suites at once holds both keys; a device that has only ever run a pre-#668 build has only the Ed25519 one, and the legacy unsuffixed `mls_kv` row it lives in is still read, since that key is what its existing classic groups' leaves are signed with.
+Each device gets a stable ULID `device_id` on first sign-in (`auth.rs::register_device`), stored in the keystore at `device_id_{user_id}`. It also generates one stable MLS signing keypair **per signature scheme** (`pollis-core/src/commands/mls/device.rs`): ML-DSA-44 for the current suite's leaves and Ed25519 for the classic suite's. #669 retired the classic suite, so nothing mints an Ed25519 leaf any more. The Ed25519 key is still generated, published and certified, because the scheme decides which stored key verifies a leaf and a group persisted under an older code point must stay readable. A device that only ever ran a pre-#668 build has just the Ed25519 key, in the legacy unsuffixed `mls_kv` row, which is still read.
 
-The ML-DSA-44 key does double duty as the device's Delivery-Service request-auth key: every write the client routes through the DS is signed with it and verified against `user_device.mls_signature_pub_pq` (`pollis-core/src/commands/mls/ds_client.rs`, `pollis-delivery/src/auth.rs`). The `X-Pollis-Signature` header is base64 of a 2420-byte signature — ~3228 characters, up from 88 for Ed25519.
+Public halves are stored locally in `mls_kv` and remotely in `user_device.mls_signature_pub` (Ed25519) and `user_device.mls_signature_pub_pq` (ML-DSA-44, nullable, migration `000011_device_pq_signature_pub.sql`).
 
-Both of a device's MLS signing public keys are *cross-signed* by the user's account identity key, in **one** signature. This produces a `device_cert`: an ML-DSA-44 signature over a domain-separated, length-prefixed payload binding `device_id`, *both* device public keys, the `identity_version` at issuance, and the issuance timestamp (`pollis-device-cert/src/lib.rs::device_cert_signed_payload`, domain separator `pollis-device-cert-v2\0`). Certifying both keys at once is what keeps every leaf covered across the classic→PQ overlap: there is no window in which a device presents a leaf key the account key has not certified. Cross-signing is what lets every other client decide whether to admit a particular leaf into an MLS group.
+The ML-DSA-44 key is also the device's DS request-auth key. Every DS request is signed with it and verified against `user_device.mls_signature_pub_pq` (`pollis-core/src/commands/mls/ds_client.rs`, `pollis-delivery/src/auth.rs`). The `X-Pollis-Signature` header is base64 of a 2420-byte signature, about 3228 characters.
+
+Both device public keys are cross-signed by the account identity key in **one** signature, the `device_cert`: ML-DSA-44 over a domain-separated, length-prefixed payload binding `device_id`, both device public keys, the `identity_version` at issuance, and the issuance time (`pollis-device-cert/src/lib.rs::device_cert_signed_payload`, domain `pollis-device-cert-v2\0`; format in §5.3). Certifying both keys at once means no leaf key is ever in use uncertified. Other clients use the cert to decide whether to admit a leaf into an MLS group.
 
 ### 2.3 MLS leaf identity (per device per group)
 
-Each device's stable MLS signing keypair populates a `BasicCredential` (RFC 9420 §5.3) whose serialised content is the UTF-8 string `{user_id}:{device_id}` (`mls.rs::make_credential`). One credential per device covers every KeyPackage and every leaf node that device produces in any MLS group, so a single `device_cert` is sufficient cross-signing for the device's entire MLS surface.
+Each device's signing key populates a `BasicCredential` (RFC 9420 §5.3) whose content is the UTF-8 string `{user_id}:{device_id}` (`pollis-core/src/commands/mls/provider.rs::make_credential`). One credential covers every KeyPackage and leaf node the device produces in any group, so one `device_cert` covers the device's whole MLS surface.
 
 ---
 
 ## 3. PIN-Wrapped Key Storage
 
-The local PIN is a *device-local unlock* factor, not a server credential. It does not travel; the server has no record of it.
+The PIN is a device-local unlock factor, not a server credential. It never leaves the device and the server has no record of it.
 
 ### 3.1 KDF and AEAD choices
 
 Source: `pollis-core/src/commands/pin.rs`.
 
-- **PIN format:** 4 ASCII digits — `validate_pin`. ~13 bits of entropy.
-- **KDF:** Argon2id (RFC 9106), Argon2 crate `0.5`, version 0x13. Parameters: `m_cost = 64 MiB`, `t_cost = 3`, `p_cost = 1`, output 32 bytes. Tuned to ~250 ms on a mid-range Apple-silicon or Ryzen 5 device, deliberately above the OWASP 2024 first-choice password-storage minimum (m=19 MiB, t=2). Parameters are stored inside the `pin_meta_{user_id}` blob, not hard-coded at unwrap time, so they can be bumped on any future re-wrap without a migration.
-- **Salt:** 16 bytes, `OsRng::fill_bytes` (rand 0.8). Per-user, per re-wrap.
-- **AEAD:** XChaCha20-Poly1305 (Mehegan / Nir, IRTF CFRG draft, `chacha20poly1305` crate `0.10`) with 24-byte random nonces. Chosen over AES-256-GCM specifically because the 24-byte nonce eliminates nonce-reuse risk across the small number of wrap events (initial set, change-PIN, lockout-recovery).
+- **PIN format:** 4 ASCII digits (`validate_pin`), about 13 bits.
+- **KDF:** Argon2id (RFC 9106), `argon2` 0.5, version 0x13, `m_cost = 64 MiB`, `t_cost = 3`, `p_cost = 1`, 32-byte output. About 250 ms on a mid-range Apple-silicon or Ryzen 5 machine, above the OWASP 2024 minimum (m=19 MiB, t=2). Parameters are stored in the `pin_meta_{user_id}` blob, so they can change on any re-wrap without a migration.
+- **Salt:** 16 bytes from `OsRng`, fresh per user per re-wrap.
+- **AEAD:** XChaCha20-Poly1305 (`chacha20poly1305` 0.10) with 24-byte random nonces, chosen over AES-256-GCM because random 24-byte nonces remove nonce-reuse risk.
 
 ### 3.2 Wrapped material
 
-Three slots are written under the PIN-derived KEK:
+Three slots sit under the PIN-derived KEK:
 
-- `pin_meta_{user_id}` (verifier blob): a fixed plaintext `b"pollis-pin-ok\0\0\0"` AEAD-encrypted under the KEK. Letting unlock reject a wrong PIN by AEAD failure on this 16-byte plaintext, without unwrapping the two larger blobs, costs one Argon2 evaluation rather than three.
+- `pin_meta_{user_id}`: the fixed plaintext `b"pollis-pin-ok\0\0\0"` under the KEK. A wrong PIN fails on this 16-byte blob, so rejecting it costs one Argon2 evaluation, not three.
 - `db_key_wrapped_{user_id}`: 32 random bytes, the SQLCipher key for `pollis_{user_id}.db`.
-- `account_id_key_wrapped_{user_id}`: the 32-byte ML-DSA-44 seed of §2.1 (32-byte Ed25519 private before #668 — same length, so the wrapped blob's size is unchanged).
+- `account_id_key_wrapped_{user_id}`: the 32-byte ML-DSA-44 seed (§2.1).
 
-The `pin_meta` blob also carries `failed_attempts` (u32, big-endian) and `last_attempt_unix` (u64, BE), outside the AEAD. They are not secret — the threat model is a local attacker who already has keystore read access and can count attempts independently.
+`pin_meta` also stores `failed_attempts` (u32 BE) and `last_attempt_unix` (u64 BE) outside the AEAD. They are not secret: the relevant attacker already has keystore read access and can count attempts themselves.
 
 ### 3.3 Lockout
 
-`MAX_FAILED_ATTEMPTS = 10`. On the 10th wrong attempt, all three keystore slots are deleted (`pin.rs::nuke_wrapped`). The local SQLCipher file and its WAL/SHM siblings are **not** removed by that path — they are left in place and inert, because the `db_key` that opened them is gone with the slots. (An earlier revision of this section claimed the file was deleted too; it never was.) The Turso-side account is untouched. The device is now in the same state as a brand-new device: the user must re-enrol via Secret Key recovery (§5.2) or another device's approval (§5.1).
+`MAX_FAILED_ATTEMPTS = 10`. The 10th wrong PIN deletes all three slots (`pin.rs::nuke_wrapped`). The SQLCipher file and its WAL/SHM are left on disk but are unreadable, because their key is gone. The server-side account is untouched. The device is now equivalent to a new one and must re-enrol by Secret Key (§5.2) or by another device's approval (§5.1).
 
-There is no time-based backoff. The Argon2id ~250 ms-per-attempt cost combined with a 10-attempt ceiling is the offline-brute-force defence; for online (UI-driven) attempts the same ceiling is the rate limit.
+There is no time-based backoff. Against offline brute force the defence is ~250 ms of Argon2id per guess plus the 10-attempt ceiling; for attempts through the UI, the ceiling is the rate limit.
 
 ### 3.4 Key custody at rest
 
-After PIN setup, raw `db_key` and raw `account_id_key` exist on disk only inside AEAD ciphertext. In-process they live in `Zeroizing<Vec<u8>>` containers (`AppState.unlock`) which scrub on drop (`zeroize` crate). `lock()` drops the unlock state and closes the SQLCipher handle, returning the device to a "needs PIN" state without forcing a full sign-out.
+After PIN setup, `db_key` and `account_id_key` exist on disk only inside AEAD ciphertext. In process they live in `Zeroizing<Vec<u8>>` (`AppState.unlock`) and are scrubbed on drop. `lock()` drops the unlock state and closes the SQLCipher handle, returning to "needs PIN" without signing out.
 
 ### 3.5 Where the wrapped blobs physically sit (#882)
 
-The keystore backend is selected **at runtime**, once per process, and frozen for
-that process's lifetime (a store split across two backends is worse than either):
+The keystore backend is chosen at runtime, once per process, and fixed for that process (a store split across two backends is worse than either):
 
-1. **OS keychain** — macOS Keychain, Windows Credential Manager, Linux Secret
-   Service — wherever a credential store answers a read probe. Preferred always;
-   the OS guards the key.
-2. **Machine-bound encrypted file** — where none answers. This is the headless
-   case: a server reached over SSH has no secret-service, and before #882 the
-   only options were "the client refuses to start" or "the keys go to disk in
-   the clear" (#879 chose the former).
+1. **OS keychain** (macOS Keychain, Windows Credential Manager, Linux Secret Service) wherever one answers a read probe. Always preferred.
+2. **Machine-bound encrypted file** (`keystore.pks`) where none answers, typically a headless server reached over SSH. Before #882 the choice there was refusing to start or writing keys in the clear.
 
-The file's bytes are AES-256-GCM under a KEK derived as
-`HKDF-SHA256(ikm = platform machine ID, salt = fresh 16 bytes per write)`. The
-machine ID is `/etc/machine-id` or `/var/lib/dbus/machine-id` (Linux),
-IOPlatformUUID (macOS), MachineGuid (Windows) — a 128-bit host-unique value that
-does **not** travel with a copy of the data directory. HKDF and not Argon2id
-because the input is already high-entropy; the memory-hard cost belongs on the
-PIN, where §3.1 already puts it. Where no machine ID exists, the keystore errors
-and names `POLLIS_KEYSTORE_MACHINE_ID` rather than degrading to a constant.
+The file is AES-256-GCM under `HKDF-SHA256(ikm = machine ID, salt = fresh 16 bytes per write)`. The machine ID is `/etc/machine-id` or `/var/lib/dbus/machine-id` (Linux), IOPlatformUUID (macOS) or MachineGuid (Windows): a 128-bit host-unique value that does not travel with a copy of the data directory. HKDF rather than Argon2id because the input is already high-entropy; the memory-hard cost is on the PIN (§3.1). With no machine ID available the keystore errors and names `POLLIS_KEYSTORE_MACHINE_ID` instead of falling back to a constant.
 
-**What the machine binding defends against:** the keystore file *leaving the
-machine* — a home-directory backup, an `scp` of the data dir, a synced folder, a
-container image built over a live data dir, a resold disk read on other hardware.
-Those bytes are inert elsewhere.
+**Defends against** the file leaving the machine: a home-directory backup, an `scp` of the data dir, a synced folder, a container image built over a live data dir, a resold disk read on other hardware.
 
-**What it does not:**
+**Does not defend against:**
+- A local attacker with the **same UID**, who can derive whatever the process derives. Only the OS keychain raises that bar, which is why it stays preferred.
+- A **full-disk image or VM snapshot**, which includes the world-readable `/etc/machine-id`.
+- **Forensic recovery** of pre-migration plaintext blocks. The migration replaces the file atomically but cannot securely erase the old inode on a modern SSD or CoW filesystem.
 
-- A local attacker running as the **same UID**. Whatever this process derives to
-  decrypt, they derive too. No userspace design changes that; the OS keychain is
-  what raises this bar, which is why it stays preferred.
-- A **full-disk image or VM snapshot** — `/etc/machine-id` is on the same disk
-  and world-readable. This defeats selective exfiltration, not an image of
-  everything.
-- **Forensic recovery** of the pre-migration plaintext blocks. The migration
-  replaces the file atomically; the old inode's blocks are not securely erased,
-  and no userspace API can promise that on a modern SSD or CoW filesystem.
+The PIN layer and the machine layer cover each other's gaps. The PIN alone is weak against an exfiltrated file (10⁴ candidates, about 40 minutes single-core at ~250 ms each). The machine binding alone is weak against a same-UID attacker. Together the attacker needs both the host identity and the PIN.
 
-This is one of two layers, and each covers the other's gap. The PIN layer (§3.1)
-alone is weak against an exfiltrated file — 4 digits is 10⁴ candidates, roughly
-40 minutes of single-core offline sweep at the tuned ~250 ms/guess. The machine
-layer alone is weak against a same-UID local attacker. Together an attacker needs
-both the host's identity and the PIN.
+The PIN is not mixed into the file KEK. It cannot be: the keystore is read before any PIN exists (boot reads `pin_meta_{uid}` to choose between "enter PIN" and "set PIN", and `device_id_{uid}`). It also need not be, because the secrets inside are already PIN-wrapped.
 
-The PIN is deliberately **not** mixed into the file KEK. It cannot be: the
-keystore is read before the PIN exists (boot reads `pin_meta_{uid}` to choose
-between the "enter PIN" and "set PIN" screens, and `device_id_{uid}` to identify
-the device). And it need not be — the secrets inside the file are already
-PIN-wrapped one layer down.
+TPM / Secure Enclave sealing would improve the same-UID and disk-image cases, since a sealed key appears in no image. It is not used: `tss-esapi` is a heavy C dependency, needs a TPM and resource manager reachable by the user, and would take three platform integrations. A partial integration with silent fallback would advertise protection a deployment might not have.
 
-A TPM or Secure Enclave would strictly improve the first bullet, since a sealed
-key appears in no backup and no disk image. It is **not** used: `tss-esapi` is a
-heavy C dependency on `tpm2-tss`, requires both a TPM and a resource manager
-reachable by the invoking user, and would need three separate platform
-integrations. A partial integration with a silent fallback would advertise a
-protection the deployment might not have.
-
-Mobile has always worked this way — the same file, sealed under a key held by the
-Android Keystore or the iOS Keychain. Desktop was the outlier until #882.
+Mobile uses the same file format, sealed under a key held by the Android Keystore or iOS Keychain.
 
 ### 3.6 Migrating an existing plaintext keystore
 
-Installs predating #882 have a plaintext keystore. It stays readable — locking a
-user out of their identity key is unrecoverable and worse than one more session
-of plaintext — and the first read or write re-encrypts it in place through the
-existing tempfile + fsync + rename. Because the encoding completes before the old
-file is touched, every interruption leaves either the complete old file or the
-complete new one, never a mixture. A file that fails to *decrypt* is never
-rewritten, never backed away, and never treated as empty: those bytes are
-somebody's identity key, and starting fresh would orphan it.
+Installs older than #882 have a plaintext keystore. It stays readable (locking a user out of their identity key is unrecoverable), and the first read or write re-encrypts it in place via tempfile + fsync + rename. Encoding completes before the old file is touched, so an interruption leaves either the whole old file or the whole new one.
 
-The same reasoning governs a file that decrypts but does not *parse*. Until #950
-that case renamed the file to a timestamped sidecar, which reads like a backup
-and behaves like a wipe: the next operation finds no store, treats the device as
-new, and the first write establishes an empty one. It now leaves the bytes exactly
-where they are and reports a stable error, so the content stays recoverable and
-the only way to start over is the user's explicit "wipe this computer".
+A file that fails to decrypt, or decrypts but fails to parse, is never rewritten, moved aside, or treated as empty: those bytes are someone's identity key. The keystore reports a stable error and the only way to start over is the user's explicit "wipe this computer". (Before #950 a parse failure renamed the file to a sidecar, which behaved like a wipe.)
 
-#950 also renamed the file itself, from `dev-keystore.json` to `keystore.pks`.
-Both halves of the old name had become false — it is the production store on
-every headless install and its contents are ciphertext, not JSON — but a rename
-is a delete of live key material, so it runs as write-new, read-the-new-one-back,
-then unlink-old. An interruption leaves both files, never neither, and the next
-start finishes the job.
+#950 also renamed `dev-keystore.json` to `keystore.pks`. The rename runs as write-new, read-back, unlink-old, so an interruption leaves both files, never neither, and the next start finishes it.
 
 ### 3.7 Comparable systems
 
-- **Signal Desktop** uses an OS-keystore-stored randomly generated key to encrypt its local SQLCipher store, with no user PIN. Pollis adds the PIN factor; the consequence is that an attacker who clones the keystore but not the PIN cannot decrypt local data, at the cost of requiring the user to enter a PIN to unlock. This is closer to iOS message-cache encryption (PIN/biometric) than to Signal Desktop.
-- **1Password / Bitwarden** use Argon2id with comparable parameters as their master-password KDF; the difference is that they have a high-entropy master password to begin with, while Pollis has a 4-digit PIN. The 10-attempt nuke-and-recover policy is what closes that gap.
-- **WhatsApp Desktop** retains a database key on disk without a user-supplied factor — equivalent to Pollis' pre-PIN behaviour, kept only as a migration path.
+- **Signal Desktop** encrypts its SQLCipher store with a random key held in the OS keystore, with no user factor. Pollis adds the PIN: cloning the keystore without the PIN does not decrypt local data. This is closer to iOS message-cache protection.
+- **1Password / Bitwarden** use Argon2id with similar parameters, but over a high-entropy master password. Pollis has a 4-digit PIN; the 10-attempt wipe is what closes that gap.
+- **WhatsApp Desktop** keeps its database key on disk with no user factor, like Pollis before PIN. Legacy unwrapped slots are now read only to wrap them at `set_pin`.
 
 ---
 
 ## 4. Authentication Flow (OTP)
 
-Source: `pollis-delivery/src/otp.rs` (the OTP machinery) and `pollis-core/src/commands/auth.rs::request_otp`, `verify_otp` (thin clients of it).
+Source: `pollis-delivery/src/otp.rs` (the OTP machinery) and `pollis-core/src/commands/auth.rs::request_otp`, `verify_otp` (thin clients).
 
-The OTP factor exists only to prove control of an email address. It is *not* the device unlock factor (that's the PIN) and it is *not* the account-recovery factor (that's the Secret Key).
+The OTP proves control of an email address and nothing else. It is not the unlock factor (the PIN) or the recovery factor (the Secret Key).
 
-- Generated, stored, verified and emailed **server-side, by the Delivery Service** (`pollis-delivery/src/otp.rs`). The client calls `POST /v1/auth/request-otp` and `POST /v1/auth/verify-otp` (`pollis-core/src/commands/auth.rs::request_otp`, `verify_otp`) and never handles a code it did not receive from the user.
-- 6-digit numeric, drawn from `OsRng` with `gen_range(0..1_000_000u32)` and zero-padded.
-- Held in DS memory as a **salted** hash — `SHA-256(salt ‖ code)` with a fresh 16-byte `OsRng` salt — never the plaintext. TTL: 10 minutes, single-shot: deleted on first successful verification.
-- Email transit: HTTPS POST from the **DS** to Resend's `api.resend.com`, with the bearer `RESEND_API_KEY` supplied to the DS by its environment. **The client does not hold a Resend key.** It once did; that moved off-client with the rest of the credentials (§9.3, §10.1), so extracting a Pollis binary yields no ability to send mail as Pollis.
-- Comparison is **constant-time** (`pollis-delivery/src/otp.rs::constant_time_eq`) against the stored hash. Earlier versions of this document noted that constant-time comparison was *not* used and argued the 20-bit secret made it immaterial; the server-side rewrite took the hardening anyway, so the caveat is obsolete rather than merely tolerable.
-- **Rate limiting is now application-layer, at the DS.** `OtpConfig` enforces a resend throttle (30 s between sends for one address, `PrepareOutcome::Throttled`), a per-mailbox send budget (3 codes per OTP lifetime), and an attempt cap (5 wrong codes, after which the **mailbox** — not merely the code — is locked for 15 minutes) — `pollis-delivery/src/otp.rs`. The unit of all three is the mailbox and the state survives a fresh `request-otp`, which it did not until #1088: `prepare` used to replace the stored record, so the guess budget refilled on every request and the persisted lockout flag was unreachable. Codes also accumulate rather than replace, so asking for a new code no longer invalidates the one its owner is about to type. Earlier versions of this document said there was no application-layer limit and deferred entirely to Resend and DNS reputation; that was true of the client-side implementation and is no longer true of the DS. A per-client-IP window over the same endpoints (`pollis-delivery/src/ratelimit.rs`) bounds the cross-address case; provider-level limits remain a third layer rather than the only one. See §11.1.
+- Generated, stored, verified and emailed by the **DS**. The client calls `POST /v1/auth/request-otp` and `POST /v1/auth/verify-otp` and only ever handles a code the user typed.
+- 6 digits from `OsRng` (`gen_range(0..1_000_000u32)`), zero-padded.
+- Stored in DS memory as `SHA-256(salt ‖ code)` with a fresh 16-byte salt. TTL 10 minutes; deleted on first successful verification. Compared in constant time (`otp.rs::constant_time_eq`).
+- Sent by the DS to `api.resend.com` using `RESEND_API_KEY` from the DS environment. The client holds no Resend key.
+- **Throttling** (`OtpConfig`, all keyed on the mailbox, and surviving a fresh `request-otp` since #1088):
+  - 30 s between sends to one address (`PrepareOutcome::Throttled`);
+  - at most 3 codes per TTL window;
+  - after 5 wrong codes the mailbox, not just the code, is locked for 15 minutes.
+  - Codes accumulate rather than replace, so requesting a new code does not invalidate one the user is about to type.
+  - A per-client-IP window (`pollis-delivery/src/ratelimit.rs`) covers the many-addresses case. See §11.1.
+- **The counters are not durable (#1142).** The store is an in-process map, and the DS container scales to zero after `sleepAfter` of idle time, which drops every counter and lockout. This is safe only while `sleepAfter >= ttl_secs`: an attacker must go silent long enough to reset the counter, and that silence also expires the code they were guessing. `pollis-delivery/tests/otp_state_durability.rs` pins the inequality across the TypeScript and Rust sources.
 
-OTP is consumed in two scenarios:
-1. First-time signup (user has no `users` row). `verify_otp` creates the row, calls `generate_account_identity` to mint the account-identity ML-DSA-44 keypair and a Secret Key, and seeds `AppState.unlock` with the freshly-generated material. The frontend then transitions to the PIN-create screen, which is what causes that material to be persisted to disk (as ciphertext under the PIN-derived KEK).
-2. Soft-recovery (`reset_identity_and_recover`). This *requires* both the OTP and a constant-time match of the user-typed email against `users.email` (constant-time via the local helper `constant_time_eq`).
+OTP is used in two places:
+1. **Signup** (no `users` row yet). `verify_otp` creates the row, generates the ML-DSA-44 account identity and a Secret Key, and seeds `AppState.unlock`. The PIN-create screen that follows is what persists that material, as ciphertext under the PIN KEK.
+2. **Soft recovery** (`reset_identity_and_recover`, §11.5), which requires the OTP plus a constant-time match of the typed email against `users.email`.
 
-Returning users on a previously-enrolled device do *not* go through OTP. They go through PIN entry against `pin_meta_{user_id}`. This is by deliberate design: in pre-PIN versions, transient OS-keystore read failures (macOS keychain hiccups, Linux secret-service races) caused returning users to be bounced back to the OTP screen on every cold start. The PIN gate replaced that. See `pin-design.md` for the full rationale and `accounts.json`'s atomic write / loud-parse-failure protocol that was added in the same change.
+Returning users on an enrolled device skip OTP and enter their PIN against `pin_meta_{user_id}`. Before the PIN gate, transient keystore read failures (macOS keychain hiccups, Secret Service races) sent returning users back to OTP on every cold start. Rationale: `.codesight/wiki/pin-design.md`.
 
 ---
 
 ## 5. Multi-Device Enrollment
 
-A user with an existing `account_id_pub` can add a second device through one of two paths. Both end with the same outcome: the new device holds a copy of the account-identity private key, has published a `device_cert`, has published `KeyPackage`s, and has joined every existing MLS group via external commit.
+A user with an existing `account_id_pub` adds a device in one of two ways. Both end with the new device holding the account identity private key, having published a `device_cert` and `KeyPackage`s, and having joined every existing MLS group by external commit. Both tiers (desktop and mobile) can be either side.
 
 ### 5.1 Approval path (in-band, sibling-device-mediated)
 
 Source: `pollis-core/src/commands/device_enrollment.rs`.
 
-1. New device generates an **ephemeral X25519 keypair** (`x25519-dalek` 2.0, `StaticSecret` from `OsRng` bytes). The private half is held in `AppState.enrollment_ephemeral_keys: HashMap<request_id, Vec<u8>>` — *in memory only*. App restart mid-enrollment forfeits the request.
-2. New device **derives** the verification code from its own ephemeral public key: `HKDF-SHA256(ikm = ephemeral_pub, info = "pollis-enrollment-sas-v1")`, mapped 5 bits per character onto the 32-symbol Secret-Key alphabet, 8 characters (40 bits). It is not random and it is not a secret — the server can compute it too. The approving device derives it independently from the ephemeral public key it fetched, and checks the user's input against *that*, never against the server's stored copy (#793).
-3. The request row is inserted into `device_enrollment_request` (Turso), carrying the new device's ephemeral *public* X25519 key, the verification code, status `pending`, a 10-minute TTL.
-4. New device fans out a notification to LiveKit room `inbox-{user_id}` so any online sibling device sees the request immediately.
-5. The sibling device fetches the request and renders an **empty input**; the user reads the code off the NEW device and types it in, and the sibling calls `approve_device_enrollment(request_id, verification_code)`. The typed value is compared with `subtle::constant_time_eq` against the code the sibling **re-derives from the ephemeral public key it fetched itself** — not against the server's stored copy (#1096).
-6. The sibling generates a **second** ephemeral X25519 keypair, computes ECDH(approver_priv, requester_pub), and feeds the 32-byte shared secret to **HKDF-SHA256** (RFC 5869) with `info = b"pollis-enrollment-wrap-v1"` and no salt to derive a 32-byte wrap key. AES-256-GCM (12-byte random nonce) wraps the account-identity private key — the 32-byte ML-DSA-44 seed (§2.1). The on-wire blob is a fixed-layout `approver_pub || nonce || ciphertext+tag` (92 bytes total, unchanged by #668 because the seed is the same length as the Ed25519 private it replaced). The approver writes this blob to `device_enrollment_request.wrapped_account_key` and flips the status to `approved`. A `security_event` row of kind `device_enrolled` (metadata `via=approval,approver={device_id}`) is inserted.
-7. The new device's `poll_enrollment_status` sees `approved`, recovers the ephemeral private from in-memory state, and unwraps. The unwrapped 32 bytes plus a freshly generated `db_key` populate `AppState.unlock`. The frontend transitions to PIN-create; `set_pin` writes the wrapped slots.
-8. `finalize_device_enrollment` runs: the new device publishes its own `device_cert`, writes 5 fresh `KeyPackage`s to `mls_key_package`, and for each existing group / DM the user belongs to, fetches the latest `mls_group_info` and joins via MLS external commit (§6.4).
+1. The new device generates an **ephemeral X25519 keypair** (`x25519-dalek` 2.x). The private half lives only in memory (`AppState.enrollment_ephemeral_keys`); restarting the app forfeits the request.
+2. It **derives** an 8-character verification code (SAS) from its ephemeral public key: `HKDF-SHA256(salt = "pollis-enrollment-sas-salt-v1" ‖ len‖request_id ‖ len‖user_id ‖ len‖created_at, ikm = ephemeral_pub, info = "pollis-enrollment-sas-v1")`, 5 bits per character onto the Crockford base32 alphabet, 40 bits. Lengths are 4-byte big-endian, so the encoding is injective. The code is not secret; the server can compute it. It is displayed on the new device.
+3. It writes a `device_enrollment_request` row (ephemeral public key, code, `pending`, 10-minute TTL) through a session-gated DS endpoint (`/v1/auth/enrollment-request`), since it has no signing key yet. The **DS** then sends `enrollment_requested` to the user's inbox room so online siblings see it at once; an offline sibling picks it up on its next login.
+4. The sibling shows an **empty input**. The user reads the code off the new device and types it. The sibling re-derives the code from the ephemeral public key it fetched itself and compares in constant time (#1096). It never shows or trusts the DS's stored copy.
+5. The sibling generates its own ephemeral X25519 keypair and computes ECDH, refusing a non-contributory (low-order) result. The wrap key is `HKDF-SHA256(ikm = ECDH, info = "pollis-enrollment-wrap-v1" ‖ requester_pub ‖ approver_pub)`. AES-256-GCM (12-byte random nonce) wraps the 32-byte ML-DSA-44 seed. The blob is `approver_pub ‖ nonce ‖ ciphertext+tag`, 92 bytes. It is written through `POST /v1/enrollment/approve`, which flips the status to `approved` and is bound server-side to the signer's own account. A `security_event` of kind `device_enrolled` (`via=approval,approver={device_id}`) is recorded.
+6. The new device's `poll_enrollment_status` sees `approved`, unwraps with its in-memory private key, and checks that the seed's public half equals the published `account_id_pub` (a successful AEAD open only says the blob was sealed to this device). The seed and a fresh `db_key` populate `AppState.unlock`; PIN-create follows.
+7. `finalize_device_enrollment` publishes the new device's `device_cert` and 5 `KeyPackage`s, then external-joins every group and DM the user belongs to (§6.4).
 
-This is a one-shot ECDH-then-AEAD scheme analogous to a sealed-sender envelope. It is **not** an authenticated key exchange — there is no signature on the approver's ephemeral public from the long-term account identity key. The replacement for AKE authentication is a user-typed short authentication string: since #793 the code is a function of the new device's ephemeral public key rather than an independent random value, and since #1096 the approver **does not display it** — it renders an empty input and compares what the human types against the value it re-derives from the ephemeral public key it fetched itself. That second half matters as much as the first: while the approver displayed the DS's stored copy and submitted it back on one tap, the comparison the SAS exists to force was performed by nobody, and a DS that swapped both the ephemeral key and its stored code satisfied every programmatic check. This is what makes the human channel load-bearing: an attacker who can write Turso and substitutes their own ephemeral public key changes the code the approving device derives, so the two screens disagree and the user stops. Searching for a substitute keypair that reproduces the victim's code costs ~2^40 keygens; at the previous 6-digit width it would have cost ~2^20, which is seconds, so the width is part of the mitigation and not cosmetic. **That cost is now per-request.** The 2026-09-18 review found the derivation took the public key and nothing else, which made the 2^40 search a one-time table reusable against every user forever; the code is now salted with a length-prefixed `request_id ‖ user_id ‖ created_at` transcript, so a table is valid for exactly one request and the attacker must grind inside that request's 10-minute TTL. The wrap key is additionally bound to the transcript — `HKDF(ikm = ECDH, info = "pollis-enrollment-wrap-v1" ‖ requester_pub ‖ approver_pub)`. The 10-minute TTL bounds exposure. Residual: the scheme still has no signature from the long-term account identity key over the approver's ephemeral public, so its authentication rests entirely on the human comparison.
+This is one-shot ECDH-then-AEAD, not an authenticated key exchange: nothing signs the approver's ephemeral key with the long-term account key. Authentication rests on the human comparison:
 
-This is broadly comparable to Signal's "PIN-based reregistration" flow combined with its "approval QR code" linked-device flow, with the simplifying property that Pollis runs on desktop only — there is no QR code; the user just types the displayed digits.
+- Because the code is a function of the ephemeral public key (#793), an attacker who can write Turso and swaps in their own key changes the code the approver derives, and the two screens disagree.
+- Because the approver shows an empty input and compares against its own derivation (#1096), the comparison is actually performed. When the approver displayed the DS's stored code and submitted it on one tap, a DS that swapped both the key and the stored code passed every check.
+- Finding a substitute keypair that yields the same code costs ~2^40 keygens. The per-request salt makes that work per request, inside the 10-minute TTL; unsalted (before the 2026-09-18 review), one precomputed table worked against every user forever. The 8-character width matters: 6 digits would have been ~2^20.
+
+Residual: no long-term-key signature over the approver's ephemeral key, so authentication is only as good as the human comparison.
 
 ### 5.2 Secret Key recovery path (out-of-band)
 
 Source: `device_enrollment.rs::recover_with_secret_key`, `account_identity.rs::unwrap_recovery_blob`.
 
-The Secret Key is a 30-character Crockford base32 string (alphabet drops I/L/O/U for visual disambiguation), prefixed with the version `A3-`, with dashes inserted every 5 characters for legibility. Entropy: 30 × 5 = **150 bits**, comfortably above the 128-bit floor for offline-uncrackable secrets.
+The Secret Key is 30 Crockford base32 characters (no I/L/O/U), prefixed `A3-`, dashed every 5 characters: 150 bits.
 
-Recovery wraps and unwraps via:
+- **KDF:** HKDF-SHA256, `info = b"pollis-account-key-wrap-v1"`, a per-user 32-byte `OsRng` salt chosen at signup. IKM is the normalized key body (case-folded, dashes and whitespace removed).
+- **AEAD:** AES-256-GCM, 12-byte random nonce.
+- **Stored row** (`account_recovery`): `salt` (32 B), `nonce` (12 B), `wrapped_key` (48 B: 32 B seed + 16 B tag).
 
-- **KDF:** HKDF-SHA256 (RFC 5869) with `info = b"pollis-account-key-wrap-v1"` and a per-user 32-byte salt drawn from `OsRng` at signup. The IKM is the *normalized* Secret Key body (case-folded, dash-stripped, whitespace-stripped).
-- **AEAD:** AES-256-GCM with 12-byte random nonces.
-- **On-disk format:** the `account_recovery` row carries `salt` (32 B), `nonce` (12 B), and `wrapped_key` (48 B = the 32 B ML-DSA-44 seed + 16 B AEAD tag).
+There is no Argon2 here: a 150-bit random secret needs no stretching, which is why it is generated rather than chosen. HKDF derives a uniform 256-bit key from it with a domain-separating `info`.
 
-Argon2 is **not** used for the Secret Key, because a 150-bit truly-random secret does not need PBKDF stretching — that's the entire point of generating it for the user rather than asking them to come up with one. HKDF is the right primitive: it derives a uniformly-distributed 256-bit key from a high-entropy IKM with a domain-separating `info` string.
-
-The user is shown the formatted Secret Key exactly once at signup. It is also returned (once) by `reset_identity` on identity rotation. The application does not store or retransmit it. This is the same shape as 1Password's Secret Key and Apple's iCloud Recovery Key — a user-held high-entropy secret that allows the operator to deliver an encrypted backup blob without ever holding the key to it.
+The key is shown once at signup and once more on `reset_identity`. The app neither stores nor retransmits it. The shape matches 1Password's Secret Key and Apple's iCloud Recovery Key: the operator stores an encrypted backup it cannot open.
 
 ### 5.3 Device cross-signing
 
-Cross-signing is what stops the server from inserting a rogue device into a user's MLS groups by writing a fake `user_device` row.
+Cross-signing stops the server from inserting a rogue device into a user's MLS groups by writing a fake `user_device` row.
 
-Source: `account_identity.rs::sign_device_cert`, `verify_device_cert`, both thin wrappers over the canonical format in the dependency-free `pollis-device-cert` crate, which `pollis-delivery` re-verifies through verbatim at `POST /v1/auth/publish-device-cert` so client and server cannot drift on the wire format. The signed payload is:
+Source: `account_identity.rs::sign_device_cert`, over the canonical format in the dependency-free `pollis-device-cert` crate, which `pollis-delivery` also uses to re-verify at `POST /v1/auth/publish-device-cert`, so client and server cannot drift. Signed payload:
 
 ```
 DEVICE_CERT_DOMAIN ("pollis-device-cert-v2\x00", 22 bytes)
@@ -331,14 +272,22 @@ DEVICE_CERT_DOMAIN ("pollis-device-cert-v2\x00", 22 bytes)
 || u64(issued_at, BE)
 ```
 
-Length prefixes prevent payload-extension and concatenation ambiguity; the trailing-NUL'd domain separator prevents the same account key being abused to forge a signature that passes verification under some other format — and the `v1`→`v2` bump is what stops a v1 cert (which bound only one device key) being reinterpreted under the two-key schema. The `u8` length prefixes of v1 became `u16` because an ML-DSA-44 public key is 1312 bytes; `device_id` keeps its `u8` prefix (ULIDs are 26 bytes). Signatures are ML-DSA-44 (FIPS 204), 2420 bytes — up from Ed25519's 64.
+Length prefixes rule out concatenation ambiguity. The NUL-terminated domain separator stops the account key's signature being reinterpreted under another format, and the `v2` bump stops a v1 cert (one device key) being read under the two-key layout. Key lengths take `u16` prefixes because an ML-DSA-44 public key is 1312 bytes; `device_id` keeps `u8` (ULIDs are 26 bytes). Signatures are ML-DSA-44, 2420 bytes.
 
-The cert is enforced by one function, `mls/device.rs::IdentityDirectory::leaf_verdict(user, device, leaf_signature_key, scheme)`, on both sides of every add. Its inputs (`account_id_pub`, and the device row's `device_cert`, `cert_issued_at`, `cert_identity_version`, `mls_signature_pub`, `mls_signature_pub_pq`, `revoked_at`) come from the Delivery Service; the verdict is computed on the client, because it is a signature check over a chain rooted in the user's own identity key and the DS is outside the trust boundary. A leaf is `Certified` only if the device row is live, `verify_device_cert` passes under the user's account key, **and the leaf's signature key is byte-equal to the certified key for the group's scheme** (`mls_signature_pub_pq` for ML-DSA-44 leaves). That last clause is what stops a genuine cert for the real device vouching for an attacker's leaf that merely claims the same `user:device` credential.
+One function enforces the cert on both sides of every add: `mls/device.rs::IdentityDirectory::leaf_verdict(user, device, leaf_signature_key, scheme)`. Its inputs (`account_id_pub`, and the device row's `device_cert`, `cert_issued_at`, `cert_identity_version`, `mls_signature_pub`, `mls_signature_pub_pq`, `revoked_at`) come from the DS, but the verdict is computed on the client, because the DS is outside the trust boundary. A leaf is `Certified` only if the device row is live, the cert verifies under the account key, **and the leaf's signature key is byte-equal to the certified key for the group's scheme**. The last clause stops a genuine cert for a real device vouching for an attacker's leaf that claims the same `user:device` credential.
 
-1. **Committer** — `reconcile_group_mls_impl` (and suite migration, which reuses its staging) reads the whole roster's cert material in one `POST /v1/read/roster-identities`, pins it (the actor's own account key comes from the device keystore; a peer whose reported key differs from the local TOFU pin has its key dropped), and refuses to turn a claimed KeyPackage into an Add unless its leaf is `Certified`. `KeyPackageIn::validate` only proves the package is self-consistent — that *someone* holds the leaf key — which is exactly what a DS substituting an attacker's package at claim time can satisfy. A refused package is burnt and reported (`ReconcileOutcome::refused_uncertified`); nothing is committed and no Welcome exists. The same pass evicts any leaf already in the tree that is *positively* uncertified (revoked, bad cert, or a key that is not the certified one), append-only, with a normal remove commit.
-2. **Replaying members** — `process_pending_commits_inner` reads the leaves a commit added off the staged commit's **own Add proposals** (`apply_one_commit` → `AddedLeaf`), never off the committer-written `added_user_id` / `added_device_ids` columns, which are now only the hint the DS uses to prefetch cert rows into the commit batch. A leaf that is not `Certified` is written to the member's own audit log as an `uncertified_mls_leaf` `security_event` (listed on the Security page) and answered with an immediate, detached eviction reconcile. The commit itself is still merged: it won the epoch CAS and is canonical, and refusing it would strand the refusing device behind the rest of the group with no honest way back, while a staged commit cannot be dropped and re-processed later (its ratchet generation is consumed).
+1. **Committer.** `reconcile_group_mls_impl` (and suite migration, which reuses its staging) reads the roster's cert material in one `POST /v1/read/roster-identities` and pins it. The actor's own account key comes from the local keystore; a peer whose reported key differs from the local TOFU pin (§5.4) has its key dropped. A claimed KeyPackage becomes an Add only if its leaf is `Certified`. `KeyPackageIn::validate` alone only proves someone holds the leaf key, which a DS substituting a package at claim time can satisfy. A refused package is burnt and reported (`ReconcileOutcome::refused_uncertified`); nothing is committed. The same pass evicts any existing leaf that is positively uncertified (revoked, bad cert, or not the certified key) with a normal remove commit.
+2. **Replaying members.** `process_pending_commits_inner` reads the added leaves from the staged commit's own Add proposals (`apply_one_commit` → `AddedLeaf`), never from the committer-written `added_user_id` / `added_device_ids` columns, which are only a hint the DS uses to prefetch cert rows. An uncertified leaf is logged as an `uncertified_mls_leaf` `security_event` (shown on the Security page) and triggers an immediate eviction reconcile. The commit is still merged: it won the epoch and is canonical, refusing it would strand the device behind the group, and a staged commit cannot be re-processed later.
 
-The honest description for an audit: *a KeyPackage whose leaf the claimed account did not certify is never added by a conforming committer; a leaf that a non-conforming (malicious or pre-fix) committer adds anyway is detected by every honest member from the commit itself, recorded, and evicted by the next honest reconcile.* The residual is the window between that commit landing and the eviction commit landing — bounded by one honest member's reconcile, which is kicked the moment the leaf is seen, not by anything the attacker controls — during which the rogue leaf holds the group's key schedule. Both halves are pinned by `src-tauri/tests/flows/cross_signing.rs`, in which the DS hands the committer a forged KeyPackage for a real device.
+For the audit: a KeyPackage whose leaf the claimed account did not certify is never added by a conforming committer. A leaf that a non-conforming (malicious or pre-fix) committer adds anyway is detected by every honest member from the commit itself, recorded, and evicted by the next honest reconcile. The residual is the window between that commit and the eviction commit, during which the rogue leaf holds the group's key schedule; it is bounded by one honest member's reconcile, which starts as soon as the leaf is seen. Both halves are tested in `src-tauri/tests/flows/cross_signing.rs`, where the DS hands the committer a forged KeyPackage for a real device.
+
+### 5.4 Safety numbers and key pinning
+
+Cross-signing protects the tree against rogue devices under an unchanged account key. It does not help if the server swaps the account key itself. Two mechanisms cover that:
+
+- **TOFU pinning.** `batch_check_and_pin_account_keys` (`pollis-core/src/commands/safety.rs`) runs on every inbound DM message and every group reconcile, before roster devices are added. It pins first-seen `account_id_pub` values and emits a `KeyChanged` event on mismatch, which shows an inline banner in every conversation with that peer and clears their verified shield. The committer's leaf check (§5.3) uses the pin as its root.
+- **Safety numbers.** A 60-digit number (twelve 5-digit blocks, SHA-512-derived from both parties' account keys, plus a QR payload) for out-of-band comparison. Verification is per user and applies everywhere that user appears.
+- The account-key transparency log (§6.9) makes the full key history of every user publicly checkable, not just the keys this device has seen.
 
 ---
 
@@ -346,119 +295,136 @@ The honest description for an audit: *a KeyPackage whose leaf the claimed accoun
 
 ### 6.1 Standard and library
 
-- **Specification:** RFC 9420 — The Messaging Layer Security (MLS) Protocol.
-- **Implementation:** `openmls` 0.8 (https://github.com/openmls/openmls) — since #668 pinned by a workspace-wide `[patch.crates-io]` to an exact upstream `main` revision, because the `draft-ietf-mls-pq-ciphersuites` feature carrying the ML-DSA suite is not in a release; the patch covers every `openmls_*` crate so the dependency graph cannot split. Bumping that revision is a protocol-visible act: the draft renumbers provisional code points between revisions. Storage is a Pollis-defined `MlsStore` (`pollis-core/src/signal/mls_storage.rs`) implementing the `openmls_traits::storage::StorageProvider` trait against the local SQLCipher `mls_kv` table. **One crypto/rand provider, and since #669 one suite for it to serve** (`pollis-core/src/commands/mls/provider.rs`): `openmls_rust_crypto` over the `RustCrypto` AEAD/HKDF/HPKE primitives, whose AES-GCM tag check is constant-time (`subtle`). Under #454 the provider was *routed* per suite instead: the hybrid suite was X-Wing / `0x004D`, which only `openmls_libcrux_crypto` implemented, and the classic suite had to be kept away from that backend because its AES-GCM decryption has an unpatched non-constant-time tag check (RUSTSEC-2026-0211). #668 dissolved the problem rather than routing around it — the PQ suite moved to `0x0052`, which keeps the same X-Wing KEM but pairs it with ChaCha20-Poly1305 and ML-DSA-44, and which RustCrypto implements while libcrux implements no ML-DSA suite at all. The second backend left the dependency graph entirely, and with it six advisory ignores in `deny.toml` (`-0211`, `-0209`, `-0210`, `-0124`, `-0075`, `-0073`) — retired by removal, not by re-arguing reachability. The single-backend invariant is pinned by `mls_backend_is_rustcrypto` in `pollis-core/src/commands/mls/tests.rs`; reintroducing a second backend means re-arguing every one of those advisories from scratch.
-- **Cipher suite (one, and every group is on it).** Every group carries its suite in its own `GroupContext`; there is no global switch and no per-message negotiation.
+- **Specification:** RFC 9420, Messaging Layer Security.
+- **Implementation:** `openmls` 0.8, pinned through a workspace `[patch.crates-io]` to an exact upstream `main` revision, because the `draft-ietf-mls-pq-ciphersuites` feature with the ML-DSA suite is not in a release. The patch covers every `openmls_*` crate so the graph cannot split. Bumping it is protocol-visible: the draft renumbers provisional code points.
+- **Storage:** `MlsStore` (`pollis-core/src/signal/mls_storage.rs`) implements `openmls_traits::storage::StorageProvider` over the local SQLCipher `mls_kv` table.
+- **Crypto provider:** one, `openmls_rust_crypto` over RustCrypto AEAD/HKDF/HPKE (`pollis-core/src/commands/mls/provider.rs`). Its AES-GCM tag check is constant-time (`subtle`). The PQ suite used to be `0x004D`, which only `openmls_libcrux_crypto` implemented; that backend's AES-GCM decryption has an unpatched non-constant-time tag check (RUSTSEC-2026-0211), so the classic suite was routed away from it. Moving to `0x0052` (#668), which RustCrypto implements, removed libcrux from the graph along with six `deny.toml` advisory ignores (`-0211`, `-0209`, `-0210`, `-0124`, `-0075`, `-0073`). `mls_backend_is_rustcrypto` (`pollis-core/src/commands/mls/tests.rs`) pins the single backend.
+- **Cipher suite.** One, and every group is on it. A group's suite is part of its `GroupContext`; there is no global switch and no negotiation.
 
   | | `CS_PQ` |
   |---|---|
   | Name | `MLS_128_MLKEM768X25519_CHACHA20POLY1305_SHA384_MLDSA44` |
-  | RFC 9420 code point | `0x0052` |
-  | KEM | **X-Wing** — X25519 **+ ML-KEM-768** (FIPS 203) |
+  | Code point | `0x0052` (provisional) |
+  | KEM | **X-Wing**: X25519 + ML-KEM-768 (FIPS 203) |
   | AEAD | ChaCha20-Poly1305 |
   | Hash / KDF | SHA-384 / HKDF-SHA384 |
   | Signature | **ML-DSA-44** (FIPS 204), scheme `0x0904` |
 
-  X-Wing is a *hybrid* KEM: the shared secret is derived from both the X25519 and the ML-KEM-768 encapsulations, so the suite is at least as strong against a classical adversary as the classical DHKEM it replaced, and additionally resists a cryptographically-relevant quantum computer. An attacker must break **both** to recover a group secret.
+  X-Wing derives the shared secret from both encapsulations, so it is at least as strong classically as the DHKEM it replaced and also resists a quantum adversary. An attacker must break both.
 
-  **There were two suites, and now there are not.** #454 shipped this one *alongside* the RFC 9420 mandatory-to-implement `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519` (`0x0001`, DHKEM(X25519, HKDF-SHA256) / AES-128-GCM / SHA-256 / Ed25519) — the same tier as Wire's OpenMLS deployment and the Cisco MLS reference — so that a fleet mid-upgrade could still add each other; §6.10 records how a group chose between them. **#669 retired the classic suite**: `CS_CLASSIC` is deleted, `CS_HYBRID` is renamed `CS_PQ`, and there is nothing left to choose. Traffic sealed under the classic suite before its retirement stays sealed under it — nothing is re-encrypted.
+- **Suite history.** #454 shipped this KEM alongside the RFC 9420 mandatory suite `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519` (`0x0001`) so a mid-upgrade fleet could still add each other; §6.10 covers how a group chose. #668 then moved the PQ suite in place from `0x004D` to `0x0052`: same X-Wing KEM, but ML-DSA-44 signatures and therefore SHA-384. #669 retired the classic suite (`CS_CLASSIC` deleted, `CS_HYBRID` renamed `CS_PQ`). Traffic sealed under the classic suite stays sealed under it. Because `0x0052` is provisional and the draft has renumbered before, the suite remains a parameter of the functions that mint suite-bound material, and a renumber would be handled as a lineage migration (§6.10).
 
-  #668 had earlier moved the PQ suite **in place**, from `0x004D` to `0x0052`. The KEM is unchanged — the same X-Wing construction, so the hybrid-confidentiality argument #454 made carries over untouched — and what changed is the signature (Ed25519 → ML-DSA-44) and, as a consequence of the registry entry, the KDF (SHA-256 → SHA-384). The code point is provisional: `draft-ietf-mls-pq-ciphersuites` has already renumbered once, and a further renumber is a wire-format break for every group already on the suite, to be handled as a lineage migration (§6.10) rather than a version bump. That is why the suite is still an argument to the functions that mint suite-bound material, and why `signature_scheme` is still a function of the suite rather than a constant, even with one suite live.
+- **Why signatures are post-quantum too.** The #454 argument for leaving signatures classical holds for messages: a harvest-now adversary attacks confidentiality, and a future quantum computer cannot forge a signature that was already verified. It does not hold for material whose verifiability must outlast the moment:
+  - an account identity key is checked by every device that admits a leaf for that user, for the life of the account;
+  - a device cert is a standing claim, re-checked by every client that admits the device and by the DS at publish time, and its verification is pure (no clock), so it stays checkable as long as it is on file;
+  - the transparency log (§6.9) exists so its signed history stays re-checkable indefinitely. An auditor in 2040 replaying it is checking signatures made today; a forgeable scheme would let a future operator rewrite the past.
 
-- **Signatures are post-quantum too, and the reason is longevity, not harvest-now-decrypt-later.** The argument #454 made for leaving signatures classical was sound as far as it went, and it still is: a *store-and-forward* adversary recording traffic today and decrypting it after a CRQC exists is defeated by the KEM change, because confidentiality is what a recording attacks; forging a signature, by contrast, requires being live at the moment of use, so a future CRQC cannot reach back and forge a commit that was already delivered and verified. What that argument does not cover is the material whose *verifiability* is meant to outlive the moment. An account identity key is checked by every device that ever admits a leaf for that user, for the life of the account. A device cert is a standing claim re-checked by every client that admits the device's leaf and by the DS at publish time, and the verification primitive is pure — no clock, no I/O — so a cert stays checkable by anyone holding the account key, for as long as the cert is on file. And the public transparency log (§6.9) exists precisely so that its signed statements about history stay re-checkable *indefinitely*: an auditor in 2040 replaying the account-key or commit-log tree is verifying signatures made today, and a signature scheme a CRQC can forge is one that lets a future operator rewrite the past and produce a tree that verifies. Those are the things #668 moved. ML-DSA-44 (FIPS 204) now signs account identity keys, device certs, DS request auth, the transparency log's tree heads, and the hybrid suite's MLS leaves.
+  ML-DSA-44 now signs account identity keys, device certs, DS request auth, transparency-log tree heads and MLS leaves.
 
-  **The cost is size, and it is not small.** An ML-DSA-44 public key is 1312 bytes against Ed25519's 32, and a signature 2420 bytes against 64. Those sit on every leaf node in a group's ratchet tree, in every KeyPackage, in every device cert, and on every request the client makes to the Delivery Service — roughly an **8× payload increase** on the authentication material, stacked on top of the PQ encapsulations §6.7 already accounts for. The DS `X-Pollis-Signature` header grows from 88 to ~3228 base64 characters — inside every default header-size limit on the path (hyper 16 KiB per header, Cloudflare 16 KiB total), but it is the reason no proxy in front of the DS may be configured below an 8 KiB header budget. The classic suite's leaves signed Ed25519 and escaped that cost; since #669 retired the suite, every live leaf pays it. The Ed25519 device key itself is still minted, published to `user_device.mls_signature_pub` and bound by the same v2 device cert, so a group persisted under the older code point stays readable — but no live suite mints a leaf under it.
+- **The cost is size.** An ML-DSA-44 public key is 1312 bytes (Ed25519: 32) and a signature 2420 bytes (Ed25519: 64). They sit on every leaf node, every KeyPackage, every device cert and every DS request: roughly 8× more authentication material, on top of the PQ encapsulations (§6.7). The `X-Pollis-Signature` header grows from 88 to ~3228 characters, within default limits on the path (hyper 16 KiB per header, Cloudflare 16 KiB total); no proxy in front of the DS may be configured below an 8 KiB header budget.
 
 ### 6.2 Group lifecycle
 
-- **One MLS group per Pollis Group.** Every channel in the same Group shares the Group's MLS group; the channel ID is metadata on the application message. (Source: `messages.rs::send_message`, ~lines 173-186.)
-- **One MLS group per DM channel.**
-- **Group ID:** the Pollis conversation ID (a ULID for groups, a ULID for DM channels).
-- **Group creator** seeds the tree (epoch 0) at `init_mls_group`; `MlsGroupCreateConfig::use_ratchet_tree_extension(true)` is set so every Welcome carries the full ratchet tree inline (no separate tree-fetch).
-- **Membership changes** flow through one function: `reconcile_group_mls_impl` (`mls.rs::reconcile_group_mls_impl`). It builds the *desired* roster from `group_member` ∪ `group_invite` (for groups) or `dm_channel_member` (for DMs), peeks at the actual MLS tree, claims unclaimed `KeyPackage`s for devices not yet in the tree, and emits a single combined commit with both `Add` and `Remove` proposals. Pending invitees are pre-added so that accepting an invite is a no-MLS-roundtrip operation — the Welcome is already in `mls_welcome` at invite time.
+- **One MLS group per Pollis group.** All channels in a group share its MLS group; the channel ID is metadata on the application message.
+- **One MLS group per DM.**
+- **Group ID:** the Pollis conversation ID (a ULID).
+- **Creation:** `init_mls_group` (`mls/group_state.rs`) seeds epoch 0 with `use_ratchet_tree_extension(true)`, so every Welcome carries the full ratchet tree.
+- **Membership changes** go through one function, `mls/reconcile.rs::reconcile_group_mls_impl`. It builds the desired roster from `group_member` ∪ `group_invite` (groups) or `dm_channel_member` (DMs), compares it with the actual tree, claims KeyPackages for missing devices, and emits one commit with all `Add` and `Remove` proposals. Pending invitees are added at invite time, so the Welcome already exists when they accept.
 
 ### 6.3 Commit/Welcome ordering
 
-The remote DB is the source of truth for MLS state. The reconcile staging order (inside `reconcile_group_mls_impl`) is:
+The remote commit log is the source of truth for MLS state. Every commit (reconcile and self-update alike) is published through `reconcile.rs::publish_staged_commit`:
 
-1. Build and **stage** the commit locally (persisted to MLS storage as a *pending* commit, no local epoch advance).
-2. Open a **fresh** libsql connection (the original may have had its Hrana stream evicted during the slow MLS crypto work — the wiki explicitly calls this out as the cause of the "9-user churn flake," commit 83df6ef).
-3. Insert the commit row into `mls_commit_log` and per-recipient Welcome rows into `mls_welcome`.
-4. Only on remote success: `merge_pending_commit` locally, advancing the epoch.
-5. On remote failure: `clear_pending_commit` locally, leaving the device at the prior epoch so a retry recomputes from scratch.
+1. Build the commit and **stage** it locally as a pending commit; the local epoch does not advance.
+2. Submit the commit, the resulting-epoch GroupInfo and the Welcomes for added members to the DS in one request (`POST /v1/commits`). The DS accepts it only if this `(conversation, generation, epoch)` is unclaimed, and writes all three atomically, so no Welcome can point at a losing branch.
+3. **Won:** `merge_pending_commit` advances the local epoch.
+4. **Lost race or transport error:** ambiguous, because the commit may have landed with the response lost. The client checks the canonical log (`our_commit_is_canonical`, Kani-proved decision core; #411). If its exact bytes are at this epoch it adopts the win. Otherwise it calls `clear_pending_commit`, stays at the prior epoch and converges on the winner.
 
-This ordering is the explicit defence against "local is ahead of remote" split-brain and is invariant for the audit. A device that attempted to break it (e.g. by merging locally first) would create permanent forward-secrecy violations: members at the new epoch could no longer decrypt because their tree state would never converge.
+The invariant is that the local group is never ahead of the log. Merging before the remote write succeeds would leave this device at an epoch no other member can reach: permanent split-brain.
 
 ### 6.4 External commit / new-device join
 
-Source: `mls.rs::external_join_group`. New devices joining an existing group post-enrollment (§5) cannot rely on a Welcome from a sibling — sibling devices may be offline. They use the MLS *external commit* mechanism (RFC 9420 §11.2.1):
+Source: `mls/group_state.rs::external_join_group`. A new device (§5) cannot wait for a Welcome from a sibling that may be offline, so it uses MLS external commit (RFC 9420 §11.2.1):
 
-1. Fetch `mls_group_info` for the conversation. The row carries the latest TLS-serialised `GroupInfo` snapshot, plus its epoch.
-2. Build a `MlsGroup::external_commit_builder` with the `GroupInfo` and the new device's `BasicCredential`. The ratchet tree extension carried in the GroupInfo is sufficient for the joining device to reconstruct enough state to issue a commit.
-3. Post the resulting commit to `mls_commit_log` at the GroupInfo's epoch. Existing members merge it on their next `process_pending_commits` pass. The new device immediately sees itself as a member at the new epoch.
+1. Fetch the conversation's latest GroupInfo (with its epoch) from the DS.
+2. Build `MlsGroup::external_commit_builder` with that GroupInfo and the device's `BasicCredential`; the embedded ratchet tree is enough to issue a commit.
+3. Publish through the same DS commit path at the GroupInfo's epoch. Existing members merge it on their next `process_pending_commits` pass.
 
-The path **does** populate `added_user_id` (the joining user) and `added_device_ids` (the single joining device) on the `mls_commit_log` row it writes — the prefetch hint that lets existing members verify the joining leaf from the commit batch without a further round trip. Existing members verify the joining leaf exactly as for a `reconcile_group_mls_impl` add (§5.3): off the commit's own Add proposal, against the joiner's `device_cert`, with the same flag-and-evict answer to a leaf the account did not certify.
+The commit row carries `added_user_id` / `added_device_ids` for the joining device as the prefetch hint. Members verify the joining leaf exactly as for any add (§5.3): from the commit's own Add proposal, against the joiner's `device_cert`, with the same flag-and-evict response.
 
 ### 6.5 KeyPackage lifecycle
 
-Each device publishes 5 `KeyPackage`s at `initialize_identity` (`mls.rs::ensure_mls_key_package`, target = 5). KeyPackages are one-shot — claiming one increments `mls_key_package.claimed = 1` atomically (libSQL `UPDATE … WHERE ref_hash = (SELECT … LIMIT 1) RETURNING …`). Replenishment happens after every Welcome a device processes (`mls.rs::replenish_key_packages` callsite from `poll_mls_welcomes_inner`).
+Each device keeps 5 KeyPackages published (`mls/key_packages.rs::ensure_mls_key_package`, `TARGET = 5`). They are single-use: the DS claims one atomically by setting `claimed = 1` in a single statement (`pollis-delivery/src/devices.rs`). The device tops up after processing each Welcome (`replenish_key_packages`, called from `poll_mls_welcomes_inner`).
 
-KeyPackages are validated by the consumer at claim time — `KeyPackageIn::validate(crypto, ProtocolVersion::Mls10)` checks the embedded leaf-node signature against the credential's public key, the cipher suite, and the protocol version. An attacker who tampers with a published KeyPackage cannot make it pass `validate`; the worst they can do is make it fail and waste a slot.
+The consumer validates each claimed package (`KeyPackageIn::validate(crypto, ProtocolVersion::Mls10)`): leaf-node signature against the credential key, cipher suite, protocol version. Tampering can make a package fail validation and waste a slot, not pass. Validation does not prove the account certified the leaf; §5.3 does that.
 
 ### 6.6 Application message encryption
 
-`send_message` (in `messages.rs`) is the single entry point. The path is:
+`pollis-core/src/commands/messages/send.rs::send_message` is the single entry point:
 
-1. Poll Welcomes for this device (`poll_mls_welcomes_inner`).
-2. Process pending commits (`process_pending_commits_inner`) — falls through to external-join if no local group.
-3. `try_mls_encrypt(local_db, mls_group_id, plaintext)` produces a TLS-serialised `MlsMessageOut` (an MLS `application_data` message).
-4. Hex-encode the ciphertext, prefix `mls:`, and `INSERT INTO message_envelope`.
-5. Fire a LiveKit data event (`new_message`) to wake online recipients. Non-fatal — offline recipients catch up via `poll_pending_messages` on next read.
+1. Resolve the conversation (`/v1/conversations/catch-up`). For a DM with a block in either direction, store the message locally and stop (§11.4).
+2. Apply pending Welcomes (`poll_mls_welcomes_inner`) and commits (`process_pending_commits_inner`); with no local group, external-join.
+3. Pad the plaintext (§1.2) and encrypt it as an MLS `application_data` message (`try_mls_encrypt`). The stored form is `mls:` + hex of the TLS-serialised `MlsMessageOut`.
+4. `POST /v1/messages/send` with the sealed-sender sentinel, `sealed = 1`, and the `(generation, epoch)` the envelope was sealed at. If a commit has landed since, the DS refuses (#1041) and the client catches up, re-seals at the new epoch and posts again (`messages/seal.rs::post_resealing`).
+5. The DS fans out content-free push to the `push_to` audience (§1.2).
+6. The client publishes a LiveKit `new_message` ping to wake online recipients. Non-fatal: offline recipients fetch on their next read.
 
-The `mls:` prefix is a *forward-compatibility marker* from the migration; the codebase no longer has a non-MLS path on the inbound side, but the prefix is preserved so that a stored ciphertext from before MLS rollout is still recognisable. Decrypt (`messages.rs::list_messages` → `try_mls_decrypt`) hex-decodes after the prefix and feeds bytes to `MlsGroup::process_message`.
+The `mls:` prefix is a format marker kept from the MLS rollout. Decryption (`messages/read.rs::list_messages` → `try_mls_decrypt`) strips it, hex-decodes, and calls `MlsGroup::process_message`.
 
 ### 6.7 Forward secrecy and post-compromise security
 
-Both follow directly from MLS (RFC 9420 §15.4-§15.6):
+Both come from MLS (RFC 9420 §15.4–§15.6).
 
-- **Forward secrecy** is provided by the TreeKEM ratchet: an attacker who recovers a member's leaf private key at epoch N can decrypt only messages within epoch N, because every commit advances the tree and rotates path secrets. In Pollis, every membership change triggers at least one commit, and group state is rotated whenever members are added or removed — there is no minimum heartbeat ratchet, but typical group activity (sends, opens, membership churn) keeps the epoch advancing.
-- **Post-compromise security** is provided by the same mechanism: an attacker holding a member's leaf private key at epoch N retains plaintext access only until that member's next *self-update* commit, at which point their leaf path secret rotates and the attacker is locked out. It must be the victim's *own* commit — a commit by anyone else re-keys its issuer's direct path and addresses the copath, which still contains the victim's leaf, so the attacker rides straight through it. Pollis issues self-updates from two places (#666): every device rotates its leaf immediately after joining a group, and the cold-launch/reconnect sweep rotates any group in which this device has not committed for 7 days plus a deterministic per-conversation jitter of up to 2 further days, at most 3 groups per sweep. The jitter keeps a many-group device from firing every rotation in one burst; the per-sweep cap bounds the cost of a device returning from a long absence. Idle groups therefore *do* heal — on the next launch of any member rather than on a background timer, because Pollis runs no periodic polling by design (`CLAUDE.md`). The residual is that a group all of whose members stay offline does not heal while they are gone, which is inherent: there is nobody to issue the commit. The lockout is proved end-to-end rather than argued: `a_stolen_leaf_is_locked_out_once_the_victim_rotates` (`src-tauri/tests/flows/adversarial.rs`) exfiltrates a real device's whole MLS state, shows it reading live traffic, shows a *third party's* commit failing to evict it, and only then asserts the victim's own rotation does.
-- **Post-join rotation is also what keeps commits logarithmic.** A member added by someone else knows none of the secrets above its leaf, so every node on its direct path stays blank and the leaf lands in a copath resolution on its own — one HPKE ciphertext per such member in every commit anyone issues, forever, until that member itself commits. That is a linear cost in roster size that never decays on its own, and on the hybrid suite each of those ciphertexts is ~35× the classic one. The post-join self-update collapses it back to TreeKEM's logarithm. Measured in `self_update_turns_linear_commit_growth_into_logarithmic` (`pollis-core/src/commands/mls/tests.rs`): on the hybrid suite, doubling a group from 8 to 16 members costs +10.6 KB per commit with unmerged leaves versus +2.4 KB with every leaf merged.
+- **Forward secrecy.** TreeKEM advances on every commit and rotates path secrets, so a leaf private key stolen at epoch N decrypts only epoch N. Every membership change commits; there is no heartbeat ratchet, but ordinary activity keeps epochs moving.
+- **Post-compromise security.** A thief holding a leaf key at epoch N keeps access until the **victim's own** self-update commit. Someone else's commit re-keys its issuer's path and encrypts to the copath, which still contains the victim's leaf, so the thief rides through it. Pollis issues self-updates from two places (#666):
+  - immediately after a device joins a group;
+  - from the cold-launch/reconnect sweep, for any group in which the device has not committed for 7 days plus a deterministic per-conversation jitter of up to 2 days, at most 3 groups per sweep (`mls/self_update.rs`).
 
-### 6.8 Bounded-history property (deliberate)
+  Idle groups heal on the next launch of any member, not on a timer, because Pollis does no periodic polling. A group whose members all stay offline does not heal while they are gone. `a_stolen_leaf_is_locked_out_once_the_victim_rotates` (`src-tauri/tests/flows/adversarial.rs`) exfiltrates a real device's MLS state, shows it reading live traffic, shows a third party's commit failing to evict it, and asserts the victim's own rotation does.
+- **Post-join rotation also keeps commits logarithmic.** A member added by someone else knows no secrets above its leaf, so its direct path is blank and it appears alone in a copath resolution: one HPKE ciphertext for that member in every commit, until it commits itself. On the PQ suite each such ciphertext is ~35× an X25519 one. `self_update_turns_linear_commit_growth_into_logarithmic` (`mls/tests.rs`) measures doubling a group from 8 to 16 members: +10.6 KB per commit with unmerged leaves, +2.4 KB with all leaves merged.
 
-The product principle in `CLAUDE.md` is exactly stated: messages sent before a member joined an epoch are not visible to that member. This is a property of MLS, not an additional restriction. New devices for an existing user begin empty; Pollis does not implement Megolm-style key backup. The deliberate consequence is that `account_recovery` only restores account *identity*, not message history — anyone reviewing the protocol who expects a backup blob to also seal historical message keys should note that no such mechanism exists by design.
+### 6.8 Bounded history (deliberate)
+
+Messages sent before a member joined are not visible to that member. That is a property of MLS. New devices start empty; there is no Megolm-style key backup. `account_recovery` restores account identity only, never message history. Anyone expecting a backup blob that also seals historical message keys should note that none exists, by design.
 
 ### 6.9 Verifiable transparency logs (commit history + account keys)
 
-Pollis publishes two append-only, ML-DSA-44-signed Merkle trees (RFC 6962 / RFC 9162) at **https://verify.pollis.com**, so anyone — a user, a journalist, an independent researcher — can prove for themselves that the server has not quietly rewritten history. The two trees are domain-separated: signed by the same key under different STH contexts (`pollis-verifiable-log:sth:v2` for commits, `pollis-verifiable-log:sth:v2:account-keys` for account keys), so a head minted for one tree can never be replayed as the other.
+Pollis publishes append-only, ML-DSA-44-signed Merkle trees (RFC 6962 / RFC 9162) at `https://verify.pollis.com` so anyone can check that the server has not rewritten history. Each tree has its own STH context (`pollis-verifiable-log:sth:v2` for commits, `…:sth:v2:account-keys`, `…:sth:v2:binaries` for §1.1), so a head for one cannot be replayed as another.
 
-- **The MLS commit log** records every membership/key-change commit. Replaying it under its invariant proves no fork (no two commits share a `(conversation_id, generation, epoch)`), no epoch regression/replay (`(generation, epoch)` increases lexicographically), and that a new suite generation opens only at epoch 0. This closes the server's ability to fork a conversation, roll an epoch back, or equivocate between auditors (§1.1). Full detail in `docs/transparency.md`.
-- **The account-key directory** records one leaf per account identity-key version — `(user_id, identity_version, account_id_pub)` — written to the append-only `account_key_log` table (§12) in lock-step with every `users.account_id_pub` change (signup and `reset_identity`). Replaying it under its invariant proves each user's published key history is append-only and that `identity_version` only ever increases: no silent key substitution, no replay of a revoked key. This is the auditable backstop for the TOFU pinning / safety-number layer of §11.4: where TOFU catches a swap only on the *next* message and only for keys *this* device has seen, the log makes the *entire* key history of *every* user publicly checkable by anyone.
+- **MLS commit log.** Every membership/key-change commit. Replay proves no fork (no two commits share `(conversation_id, generation, epoch)`), no epoch regression (`(generation, epoch)` increases lexicographically), and that a new generation opens only at epoch 0. This removes the server's ability to fork a conversation, roll an epoch back, or show different histories to different auditors. Detail: `docs/transparency.md`.
+- **Account-key directory.** One leaf per identity-key version, `(user_id, identity_version, account_id_pub)`, written to the append-only `account_key_log` table in step with every `users.account_id_pub` change (signup, `reset_identity`). Replay proves each user's key history is append-only with strictly increasing `identity_version`. This backs the TOFU layer (§5.4): TOFU catches a swap only on the next message and only for keys this device has seen; the log exposes every user's whole history.
 
-The trust model is the one in `docs/transparency.md`: a verifier trusts **only** the log's published ML-DSA-44 public key, the signed tree head, and the Merkle proofs checked against it — not the server, not Turso, not the host serving the files. The auditor CLI `pollis-verify` (released to researchers) verifies the whole log (`remote`), one conversation (`group`), or one user's key history (`account <user_id>`) over plain HTTP, trusting only that key. After every publish, CI re-verifies its own freshly-served tree and runs an equivocation tripwire that compares the new heads against the previously-published ones; a regression aborts the publish and alerts rather than serving a forked head.
+A verifier trusts only the log's ML-DSA-44 public key, the signed tree head and the Merkle proofs. `pollis-verify` checks the whole log (`remote`), one conversation (`group`), one user's key history (`account <user_id>`), or one release (`release <tag>`). After every publish, CI re-verifies the served tree and compares the new heads with the previous ones; a regression aborts the publish.
 
-The running client self-audits too. `self_audit_account_key` verifies this user's own published key history — reusing the *same* `verify_account` function the CLI runs, never a re-implementation — and compares the chain's latest published version against this device's current key; `audit_peer_account_key` does the same against a TOFU-pinned peer. The log's public key is pinned in the client (`PINNED_LOG_PUBLIC_KEYS`, `pollis-core/src/commands/transparency.rs`; the copies of it elsewhere in the repo and on the website are held in agreement by `scripts/check-pinned-log-key.py` on every PR — #945); a served key that differs from the pin is a hard alarm, because any key can sign a self-consistent forged tree. #668 moved the STH signature from Ed25519 to ML-DSA-44 under bumped domain contexts (`pollis-verifiable-log:sth:v2`, `…:sth:v2:account-keys`, `…:sth:v2:binaries`), but derived the v2 key from the same 32-byte seed — a format migration, not a rotation. #732 rotated to fresh material and republished all three trees under it, and that key is what is pinned today. Were the pin ever absent it could only *withhold* trust — every audit resolving to *unverified*, never `ok` and never `alarm`.
+The client audits itself too. `self_audit_account_key` runs the same `verify_account` the CLI runs over this user's history and compares the latest version with the device's key; `audit_peer_account_key` does the same for a pinned peer. The log key is pinned in the client (`PINNED_LOG_PUBLIC_KEYS`, `pollis-core/src/commands/transparency.rs`), and `scripts/check-pinned-log-key.py` keeps the other copies in the repo and on the website in agreement (#945). A served key that matches no pin is a hard alarm, since any key can sign a self-consistent forged tree. An empty pin set can only withhold trust (status *unverified*, never `ok` or `alarm`).
 
-**Honest limits.** (1) *Daily publish lag* — the tree is rebuilt and signed on a schedule, so a brand-new signup or a key rotation is invisible to the log (and to every auditor) until the next publish; a `pending` status, never an alarm, covers that window. (2) *Client checks are advisory* — both commands alert, they never block a send; the app keeps working whether or not the log agrees, exactly as the TOFU layer does. (3) *No private lookups (no VRF)* — `user_id`s and account public keys are enumerable in the tree. This is acceptable because those keys are public by design (they are what every device cert chains to), but it does leak the set of users and their rotation cadence; a VRF-backed private-lookup layer (CONIKS / Key-Transparency style) is the noted upgrade path. (4) *Single first-party log and auditor* — Pollis runs the only log and the only first-party auditor today; the defence against a dishonest operator is that the verifier and `pollis-verify` are released so **anyone** can run an independent auditor, but no third party is contractually watching yet. (5) *CI/GitHub is in the publishing TCB* — the signing key lives in GitHub Actions secrets and the tree is built and signed in CI, so a compromise of the Actions environment could sign a tree; this is the same custody trade-off as the release-signing keys (§3.4), mitigated only in that the post-publish self-audit and equivocation tripwire *detect* (they cannot prevent) a bad head after the fact. (6) *A rotation is indistinguishable from equivocation* — re-signing every published head under a new key changes every signature, which is byte-identical to what a rewriting operator would do. #732's rotation shipped without an overlap window, so any auditor holding cached pre-rotation heads must re-pin from the announcement rather than verify the transition. A small pinned key set with an overlap window, designed before it is next needed, is the fix (#700).
+Key history: #668 moved the STH signature to ML-DSA-44 but derived it from the old Ed25519 seed (a format change, not a rotation). #732 rotated to fresh material and re-signed all three trees; that key is pinned today. Clients now pin a key *set* whose entries carry an optional `not_after`, so the next rotation can overlap (#740). An offline root key (#754) is pinned as `PINNED_LOG_ROOT_KEYS` to vouch for signer keys via a root-signed key-set statement (`key-set.json`).
+
+**Limits.**
+1. **Daily publish lag.** The trees are rebuilt and signed once a day (`transparency-publish.yml`). A new signup or key rotation is invisible to auditors until then; the client reports `pending`, not an alarm.
+2. **Client checks are advisory.** They alert; they never block a send.
+3. **No private lookups (no VRF).** `user_id`s and account keys are enumerable. The keys are public by design, but the tree leaks the user set and rotation cadence. A CONIKS / Key-Transparency-style VRF layer is the upgrade path.
+4. **One first-party log and auditor.** Pollis runs the only log. `pollis-verify` is released so anyone can run an independent auditor, but no third party is contractually watching.
+5. **CI is in the publishing TCB.** The signing key is a GitHub Actions secret (`STH_SIGNING_KEY`) and trees are signed in CI, so a compromised Actions environment could sign a bad tree. The post-publish self-audit and equivocation check detect that after the fact; they cannot prevent it. Custody decision and rationale: `docs/sth-signing-key-custody.md`.
+6. **#732's rotation had no overlap window.** Re-signing every head under a new key is byte-identical to what a rewriting operator would do. An auditor holding cached pre-rotation heads must re-pin from the announcement; the transition itself is not verifiable. The key set with `not_after` addresses future rotations.
 
 ### 6.10 Which suite a group runs, and how a group changes suite
 
-A group's ciphersuite is decided once, at creation, and thereafter changes only by an explicit migration. The answer to a suite question is never "negotiate at runtime".
+A group's suite is fixed at creation and changes only by explicit migration. It is never negotiated at runtime.
 
-**Birth.** `CS_PQ`, unconditionally (`init_mls_group`, `pollis-core/src/commands/mls/group_state.rs`). There is one suite, so there is no decision and no code that makes one.
+**Birth.** Always `CS_PQ` (`init_mls_group`, `mls/group_state.rs`).
 
-**What the decision used to be, and why it is gone.** Under #454 the two suites ran side by side and `suite_for_new_group` chose between them, behind two gates that both had to hold before a group was born hybrid: a **roster gate** (every registered device of every user on the conversation's desired roster was `pq_capable`) and a deployment-wide **fleet gate** (no unrevoked device seen within a 90-day dormancy window was still classic-only). Capability was *measured, not advertised*: a device was `pq_capable` because it had published a hybrid KeyPackage pool, and the DS set the flag in the same write that landed the pool — no self-declared version string entered the decision anywhere. The fleet gate existed because the roster gate alone was nearly vacuous at creation time: a new group's roster is only its creator, and the first classic-only device invited a second later has no hybrid KeyPackage, so membership reconcile could only *skip* it — leaving it on the roster, never in the tree, permanently unable to read its own conversation. The question a new group actually had to answer was not "can today's roster take hybrid" but "can whoever is invited tomorrow", and the only sound answer was fleet-wide. Both gates failed toward **availability**, and `may_birth_hybrid` (`pollis-core/src/commands/mls/invariants.rs`) was proved exhaustively under Kani alongside a refuted mutant encoding the roster-only version.
+**What #454 required, and why it is gone.** While two suites coexisted, `suite_for_new_group` allowed a hybrid birth only if two gates held. The **roster gate** required every registered device of every desired-roster user to be `pq_capable`. The **fleet gate** required no unrevoked device seen within 90 days to be classic-only. Capability was measured, not self-declared: the DS set `pq_capable` in the same write that landed a device's hybrid KeyPackage pool. The fleet gate was needed because a new group's roster is just its creator, so a classic-only device invited later would have no hybrid KeyPackage and could never join. Both gates failed toward availability, and the decision (`may_birth_hybrid`) was proved under Kani.
 
-**#669 retired the classic suite, and the whole apparatus with it.** With one suite there is no classic-only device to strand, so `suite_for_new_group`, both capability predicates, the dormancy constant, `may_birth_hybrid` and its Kani harnesses, and the DS's `mark_pq_capable` writer are all deleted; `user_device.pq_capable` survives only as a dead column, retired in place because migrations must stay additive. The reasoning above is not withdrawn — it is what a *mixed* fleet requires, and it shipped and worked. What dissolved is its premise: this deployment has no active users, so there was no old app in the field for the gradual path to protect, and no fleet turnover to wait out.
+#669 deleted all of it: `suite_for_new_group`, both predicates, the dormancy constant, `may_birth_hybrid` and its harnesses, and the DS's `mark_pq_capable`. `user_device.pq_capable` remains as a dead column because migrations must stay additive. The reasoning still holds for a mixed fleet; this deployment had no active users and therefore no old clients to protect.
 
-**Migration (`pollis-core/src/commands/mls/migrate.rs`).** MLS has no in-place suite change, so a group moves suite by standing up a **successor group** and moving the roster across by Welcome. `migrate_to_current_suite_if_due` fires for any conversation whose stored suite is not `CS_PQ`. It survives the retirement of the classic suite it was written for because `0x0052` is a provisional code point: a renumber is this same migration with a different constant, and the receiving half of the mechanism — generations, the DS's `(conversation, generation, epoch)` key — is load-bearing either way. The pair `(conversation_id, generation)` names a lineage — generation 0 is the group as originally created — and the monotone key the transparency log and the DS both order by is `(conversation_id, generation, epoch)` lexicographically. Opening generation *N+1* at epoch 0 is accepted by the DS only when the submitter names the head of generation *N* in `closes_epoch` (`pollis_delivery::commit::accepts()`, Kani-proved), so a lineage can be succeeded exactly once and never forked.
+**Migration (`mls/migrate.rs`).** MLS cannot change a group's suite in place, so a group moves by creating a **successor group** and moving the roster across by Welcome. `migrate_to_current_suite_if_due` fires for any conversation whose stored suite is not `CS_PQ`. It is kept because `0x0052` is provisional: a renumber is this same migration with a different constant.
+- `(conversation_id, generation)` names a lineage; generation 0 is the original group. The DS and the transparency log both order by `(conversation_id, generation, epoch)`.
+- The DS accepts generation *N+1* at epoch 0 only if the submitter names the head of generation *N* in `closes_epoch` (`pollis_delivery::commit::accepts()`, Kani-proved), so a lineage is succeeded exactly once and never forked.
+- **No member is stranded.** Before creating anything, the migration claims a target-suite KeyPackage for every roster device and aborts on the first miss: everyone moves or nobody does.
+- The successor starts at epoch 0 with key material not derivable from the predecessor's, so a leaf stolen before the boundary is evicted at it. Members keep history they already decrypted. A member offline across the boundary drains the old lineage to its head before adopting the successor (`max_past_epochs = 0` makes that order necessary). A member whose successor Welcome is lost external-joins the successor. Each case is a `flows` scenario (`src-tauri/tests/flows/pq_migration.rs`), and the model-based fuzzer crosses the boundary under generated churn, offline periods and DS faults.
 
-**No member is stranded by a migration.** Before anything is created, the migration claims a KeyPackage in the *target* suite for every roster device and aborts on the first miss: move everyone or nobody. A partial move would leave a device on the roster but never in the tree. #454 additionally gated migration on the same two `pq_capable` predicates as birth; #669 removed both reads, because the flag was only ever a *predictor* of this claim, and the claim is the direct test.
-
-**What the transition costs and does not cost.** The successor restarts at MLS epoch 0 with fresh key material that is *not* derivable from the predecessor's, so an adversary holding a leaf stolen before the boundary is evicted at it. Members keep the history they already decrypted (it is stored locally, decrypted, and the migration does not touch it), and a member offline across the boundary drains the retired lineage to its head *before* adopting the successor, so nothing in the window is lost — `max_past_epochs = 0` makes that ordering load-bearing rather than merely tidy. A member whose successor Welcome is lost external-joins the successor instead of stalling on a lineage that will never take another commit. Each of these is a headless `flows` scenario (`src-tauri/tests/flows/pq_migration.rs`), and the model-based fuzzer additionally crosses the boundary under generated membership churn, offline stints, and injected DS faults.
-
-**Honest scope.** Traffic sealed *before* a group migrated was sealed under X25519 and stays that way; a migration is forward-only and cannot retract a recording an adversary already holds. That is exactly why the fleet gate is a completion target rather than a permanent tolerance — the value of the boundary is measured from the moment it is crossed.
+**Scope.** Traffic sealed before a group migrated stays under X25519. Migration is forward-only and cannot retract a recording an adversary already holds.
 
 ---
 
@@ -466,14 +432,14 @@ A group's ciphersuite is decided once, at creation, and thereafter changes only 
 
 Source: `pollis-core/src/db/local.rs`.
 
-- **Library:** `rusqlite` 0.37 linking SQLCipher 4 — on Linux, macOS and mobile via its `bundled-sqlcipher` features, and on Windows via the `pollis-sqlcipher` crate (§7.0). SQLCipher is a fork of SQLite providing page-level AES-256-CBC with per-page HMAC-SHA512 for tamper detection; PBKDF2-HMAC-SHA512 page-key derivation is part of the default profile but is not used by Pollis — see "Key application" below.
-- **Key application:** `PRAGMA key = "x'{hex}'";` with the 32-byte raw key; this skips SQLCipher's own KDF and uses the raw key directly as the page key — appropriate because the input is a CSPRNG-generated 32-byte uniform key, not a passphrase.
-- **Path:** `pollis_{user_id}.db` under the OS-appropriate data dir (Linux `~/.local/share/pollis`, macOS `~/Library/Application Support/com.pollis.app`, Windows `%APPDATA%\pollis`). PRAGMAs: `journal_mode=WAL`, `foreign_keys=ON`.
-- **Schema-version semantics:** if `LOCAL_SCHEMA_VERSION` mismatches, the DB file is wiped and recreated. The wipe is *narrow* — it triggers only on missing schema-version row, version-string mismatch, or `SqliteError::NotADatabase` (wrong key). Any other rusqlite error surfaces, refusing to eat the local database on an unfamiliar failure.
+- **Library:** `rusqlite` 0.37 linking SQLCipher 4 (via `bundled-sqlcipher` features on Linux, macOS and mobile; via the `pollis-sqlcipher` crate on Windows, §7.0). Page-level AES-256-CBC with per-page HMAC-SHA512.
+- **Key:** `PRAGMA key = "x'{hex}'"` with the 32-byte raw key, which bypasses SQLCipher's PBKDF2. Appropriate because the key is 32 CSPRNG bytes, not a passphrase.
+- **Path:** `pollis_{user_id}.db` under the platform data dir (Linux `~/.local/share/pollis`, macOS `~/Library/Application Support/com.pollis.app`, Windows `%APPDATA%\pollis`; mobile passes `POLLIS_DATA_DIR`). `journal_mode=WAL`, `foreign_keys=ON`.
+- **Schema version:** on a `LOCAL_SCHEMA_VERSION` mismatch the DB and its sidecars are destroyed and recreated. This triggers only on a missing version row, a version mismatch, or `NotADatabase` (wrong key); any other error surfaces rather than deleting the database.
 
 ### 7.0 Where SQLCipher's crypto comes from, per platform (#992)
 
-The database format above is the same everywhere; the library that performs the AES and HMAC is not, because SQLCipher takes its primitives from a pluggable provider and the sensible provider differs by platform:
+The on-disk format is identical everywhere; the library supplying AES and HMAC is not.
 
 | Platform | rusqlite feature | SQLCipher crypto provider |
 |---|---|---|
@@ -482,129 +448,74 @@ The database format above is the same everywhere; the library that performs the 
 | iOS / Android | `bundled-sqlcipher-vendored-openssl` | Statically vendored OpenSSL |
 | Windows | `sqlcipher` (linked) + the `pollis-sqlcipher` crate | `-DSQLCIPHER_CRYPTO_LIBTOMCRYPT`, backed by RustCrypto (`aes`, `sha1`, `sha2`, `hmac`, `pbkdf2`) |
 
-All four produce identical ciphertext — AES-256-CBC pages, per-page HMAC-SHA512, the same SQLCipher 4 profile — because the provider supplies primitives, not format.
+All four produce the same SQLCipher 4 ciphertext; the provider supplies primitives, not format.
 
-Windows needs its own arrangement for one reason: it has no shared system libcrypto, so `bundled-sqlcipher` there links a **static** OpenSSL, and MSVC resolves a static archive by pulling whole object files. SQLCipher compiled against OpenSSL 3 headers reaches the provider API (`EVP_CIPHER_fetch`), which BoringSSL does not implement; the first such symbol drags in OpenSSL's provider core and, transitively, 169 objects covering the whole X.509/PEM/RSA/EC surface — most of which the BoringSSL that `libwebrtc-sys` puts in the same image for voice/video also defines. That is 1,253 hard `LNK2005` duplicate-symbol errors. ELF simply prefers one definition; MSVC makes it fatal. Pointing SQLCipher at the BoringSSL already in the image is not the answer either: BoringSSL changed `PKCS5_PBKDF2_HMAC` and friends from `int` lengths to `size_t`, so those calls would link and then pass 32-bit arguments into 64-bit parameters. `pollis-sqlcipher` sidesteps the whole question by not putting a second libcrypto in the image at all — it compiles the stock SQLCipher amalgamation against a ~20-function header whose implementations are the RustCrypto crates already in the graph.
+**Why Windows differs.** Windows has no shared system libcrypto, so `bundled-sqlcipher` links static OpenSSL, and MSVC pulls whole object files from a static archive. SQLCipher built against OpenSSL 3 headers drags in OpenSSL's provider core and with it much of X.509/PEM/RSA/EC, most of which the BoringSSL that `libwebrtc-sys` links also defines; MSVC treats the duplicate symbols as fatal. Pointing SQLCipher at BoringSSL is also wrong: BoringSSL changed `PKCS5_PBKDF2_HMAC` and related lengths from `int` to `size_t`. `pollis-sqlcipher` compiles the stock SQLCipher amalgamation against a small header implemented by RustCrypto crates already in the graph, so no second libcrypto enters the image.
 
-This is recent. Every Windows build shipped before #992 wrote `pollis_{user_id}.db` **in the clear**: until #988 the dependency graph also contained `libsql`, whose `libsql-ffi` bundles its own sqlite3 amalgamation, and it won every `sqlite3_*` symbol — so SQLCipher's object was never pulled into the link, `PRAGMA key` was an unknown pragma, and SQLite ignores unknown pragmas silently. #988 removed `libsql`, the conflict above became visible, #991 pinned the state, and #992 closed it. Because such a file cannot be opened once the codec is real, `LocalDb::open_at` now detects a plaintext database by its unencrypted `SQLite format 3\0` header, overwrites it and its `-wal`/`-shm`/`-journal` sidecars, and recreates the database empty — the "a new device starts empty" loss CLAUDE.md sanctions, chosen over an `ATTACH ... KEY` + `sqlcipher_export` migration because there is no Windows user base to migrate and a conversion that half-completes leaves plaintext on disk.
+**Windows builds before #992 stored the database in the clear.** Until #988 the graph also contained `libsql`, whose bundled sqlite3 won every `sqlite3_*` symbol; SQLCipher was never linked and SQLite silently ignored `PRAGMA key`. #988 removed `libsql`, #991 pinned the state, #992 fixed it. Because a plaintext file cannot be opened once the codec is real, `LocalDb::open_at` detects the unencrypted `SQLite format 3\0` header, overwrites the file and its `-wal`/`-shm`/`-journal` sidecars, and recreates it empty. This is the sanctioned "a new device starts empty" loss, chosen over an `ATTACH … KEY` + `sqlcipher_export` migration because there was no Windows user base and a half-finished conversion leaves plaintext on disk.
 
-That disposal path is itself a destructive operation aimed by a path, so since #1000 it resolves the path **exactly once** and does every later step on the resulting handle. The open is `O_NOFOLLOW` (`FILE_FLAG_OPEN_REPARSE_POINT` on Windows) and the handle's own metadata must say regular file, so a symlink planted at `pollis_{user_id}.db` is declined rather than followed; the unlink is guarded by a device+inode comparison on unix so it cannot remove a file that was swapped in afterwards. It also tolerates one honest half-state: SQLite's Windows VFS opens without `FILE_SHARE_DELETE`, so a connection another process holds can make the unlink fail after the overwrite succeeded. The file is truncated to zero length through the same handle before the unlink is attempted, so that case leaves an empty file — which opens as a fresh encrypted database — rather than aborting sign-in with the bytes already destroyed. Two further gaps closed with it: the schema-mismatch wipe now runs through the same shredder **including the sidecars** (it used to `remove_file` the main database alone, leaving a plaintext `-wal` full of message bodies beside the fresh encrypted one — reachable whenever the SQLCipher probe declined to answer), and a symlink in that position is unlinked as a link, never written through.
+**The disposal path resists path games (#1000).** It resolves the path once and does every later step on the handle. The open is `O_NOFOLLOW` (`FILE_FLAG_OPEN_REPARSE_POINT` on Windows) and must yield a regular file, so a symlink at `pollis_{user_id}.db` is declined, not followed. On unix the unlink is guarded by a device+inode comparison so it cannot remove a file swapped in afterwards. SQLite's Windows VFS opens without `FILE_SHARE_DELETE`, so another process's connection can make the unlink fail after the overwrite; the file is truncated to zero through the handle first, so that case leaves an empty file (which opens as a fresh encrypted DB) rather than aborting sign-in. The schema-mismatch wipe uses the same shredder, including sidecars; it previously removed only the main file and could leave a plaintext `-wal` behind.
 
-The claim is checked rather than asserted. `sqlcipher_is_the_sqlite_we_actually_linked` requires `PRAGMA cipher_version` to answer on **every** platform, with no `cfg` exception; `the_local_database_file_is_encrypted_at_rest` writes a message through `LocalDb::open_for_user`, reads the file back as raw bytes, and requires that the message body does not appear in them, that the file does not begin with the plaintext SQLite header, and that neither an unkeyed nor a wrongly-keyed connection can read it; and `the_crypto_provider_is_the_one_this_platform_documents` (#998) requires `PRAGMA cipher_provider` to name the provider the table above gives for the platform being built. That last one exists because the table records a *build outcome*: `libsqlite3-sys` selects CommonCrypto on Apple targets only when it finds no OpenSSL, so an `OPENSSL_DIR` — or `OPENSSL_LIB_DIR` + `OPENSSL_INCLUDE_DIR` — on a build machine moves macOS onto OpenSSL with nothing in this repository changing and every other test still passing. The crypto provider additionally carries known-answer tests against the RFC 6070, RFC 4231 and NIST SP 800-38A vectors.
+**Tests.**
+- `sqlcipher_is_the_sqlite_we_actually_linked`: `PRAGMA cipher_version` must answer on every platform, no `cfg` exception.
+- `the_local_database_file_is_encrypted_at_rest`: writes a message via `LocalDb::open_for_user`, reads the file's raw bytes, and requires that the body is absent, the plaintext SQLite header is absent, and neither an unkeyed nor a wrong-keyed connection can read it.
+- `the_crypto_provider_is_the_one_this_platform_documents` (#998): `PRAGMA cipher_provider` must match the table above. The table records a build outcome: `libsqlite3-sys` picks CommonCrypto on Apple only when it finds no OpenSSL, so an `OPENSSL_DIR` (or `OPENSSL_LIB_DIR` + `OPENSSL_INCLUDE_DIR`) on a build machine silently moves macOS to OpenSSL.
+- The Windows provider has known-answer tests against RFC 6070, RFC 4231 and NIST SP 800-38A vectors.
 
-**Where those tests run, exactly (#998).** Linux on `ubuntu-24.04` in `.github/workflows/mls-tests.yml` (they are part of the whole `pollis-core` unit suite); Windows natively on `windows-latest` in `.github/workflows/windows-link.yml`; macOS natively on `macos-latest` in the `macos-at-rest` job of `mls-tests.yml`. All three are path-filtered to Rust/workspace changes; the Linux and macOS jobs report through `mls-tests.yml`'s always-reporting `gate`, and the Windows one through `windows-link.yml`'s `windows-gate`. One bound on the macOS job, stated because it is the only difference between it and the shipping build: it builds `pollis-core` with `--no-default-features`, so the desktop media stack is absent. That changes nothing these tests measure — `cargo tree -i libsqlite3-sys` is identical with and without `media`, so the same single sqlite3 is in the link either way — and it is what keeps a 10x-billed runner to minutes instead of pulling libwebrtc and a vendored C++ audio build onto it. The architecture matches what ships: `macos-latest` is Apple Silicon, and the release builds `aarch64-apple-darwin`. **Before #998 no macOS runner in this repository executed any test at all** — the only macOS jobs were `mobile-core-check`'s iOS cross-compile `cargo check` and the tag-triggered release builds (desktop, CLI, verifier), none of which executes a test — so the platform with the odd-one-out crypto provider was the one platform with no evidence. An earlier revision of this section claimed these tests ran "on Linux and macOS"; that was never true, and the sentence is retracted rather than softened.
+**Where they run (#998).** Linux on `ubuntu-24.04` in `.github/workflows/mls-tests.yml`; Windows on `windows-latest` in `.github/workflows/windows-link.yml`; macOS on `macos-latest` (Apple Silicon, matching the shipped `aarch64-apple-darwin`) in `mls-tests.yml`'s `macos-at-rest` job. All are path-filtered to Rust changes and report through each workflow's always-reporting gate. The macOS job builds `pollis-core` with `--no-default-features`, dropping the media stack; `cargo tree -i libsqlite3-sys` is identical with and without `media`, so the linked sqlite3 is the same. Before #998 no macOS runner executed any test.
 
-One honest caveat about *test* coverage, not about the product: the end-to-end flows harness runs the Delivery Service in-process and so links `libsql`'s own sqlite3 beside SQLCipher, which wins the symbols there — so that harness's clients run unencrypted and a green flows run says nothing either way. The shipped binaries contain exactly one sqlite3; `.codesight/wiki/testing.md` records the harness's state and it is asserted in both directions by `tests/flows/linked_sqlite.rs`.
+**Test-harness caveat.** The `flows` integration harness runs the DS in-process and so links `libsql`'s sqlite3 beside SQLCipher, which wins the symbols there. Harness clients run on unencrypted databases, so a green flows run says nothing about at-rest encryption. `src-tauri/tests/flows/linked_sqlite.rs` asserts this, and fails if `libsql` ever leaves that binary. Shipped binaries contain one sqlite3.
 
 ### 7.1 What's local-only
 
 - Decrypted message plaintext (`message.content`).
-- MLS group state (`mls_kv` rows: epoch state, ratchet tree state, leaf private keys, signature keypairs, KeyPackage private halves).
-- Per-device stable MLS signing-key public references (`mls_kv` scope `PollisDeviceSigPub`, one row per signature scheme since #668 — Ed25519 and ML-DSA-44).
-- UI/preferences cache.
+- MLS group state (`mls_kv`: epoch state, ratchet tree, leaf private keys, signature keypairs, KeyPackage private halves).
+- Per-device MLS signing public keys (`mls_kv` scope `PollisDeviceSigPub`, one row per signature scheme).
+- UI and preference caches.
 
 ### 7.2 Plaintext at rest outside the database (#1000)
 
-SQLCipher covers the message store. Five other things this device writes were not covered, and are now:
+SQLCipher covers the message store. #1000 closed five other places the app wrote plaintext:
 
-1. **Pasted and dropped files are never written to disk.** Paste and drag-and-drop arrive in the WebView as `File` objects with no filesystem path, and the upload path wanted one — so the renderer wrote the raw source file into the OS temp directory as `pollis-<timestamp>-<original filename>` and never removed it. Not on upload, not on removal, not on send, not on exit: there was no `removeFile` call anywhere in the renderer. So the plaintext of every file a user had ever pasted was still there, under its own name — while `r2.rs` deliberately strips filenames from R2 keys because a filename is content. The fix is not disciplined cleanup on six exit paths; it is that no file is created. Bytes cross the IPC as a raw body into an in-memory registry (`pollis-core/src/commands/staging.rs`), the renderer holds only an opaque id, `upload_media_staged` reads them from there and releases them **on success**, and `lock` / `logout` / `wipe_local_data` release everything. The same applies to clipboard images: the Rust command returns PNG bytes instead of saving `pollis-paste-<nanos>.png`.
-2. **The loopback media server forbids caching.** `serve_media` returned decrypted image, audio and video bytes with no cache directives at all, which under RFC 9111 §3 makes a 200 storable by default — so WebKitGTK, WKWebView and WebView2 were each entitled to write that plaintext into their own on-disk cache, which nothing in this app clears. Every response now carries `Cache-Control: no-store, no-cache, must-revalidate, max-age=0` and `Pragma: no-cache`, on the 206 range path (video seeking) as much as on the 200.
-3. **The media-cache wipe now wipes the right directory.** The cache is AES-256-GCM at rest under the session `db_key`, and `logout`, `set_pin` and `unlock` each promised to empty it. All three resolved the directory from ambient state (`CURRENT_CACHE_USER`) at a moment when that state named the wrong user — logout after `unload_user_db` had cleared it, both PIN paths before the load that sets it — so all three emptied `media-cache/_anon/` and reported success. The wipe now takes an explicit `CacheScope`, which makes the call order unable to matter. Separately, `wipe_local_data` removed only `db::local::dirs_path()`, while the cache root is the shell's `app_data_dir().join("media-cache")` — different directories on Linux and Windows (they coincide only on macOS) — so "wipe this computer" left the entire cache behind. It now clears the cache root too.
-4. **Everything this app creates is owner-only on unix.** There was no `set_permissions` / `PermissionsExt` / `from_mode` call anywhere in `pollis-core`, `src-tauri` or `pollis-tui`, so every file was created at the process umask — typically 0644, i.e. readable by every other local user. That included `accounts.json` (which holds the user's real email address), `keystore.pks`, `pollis_{user_id}.db` and its WAL sidecars, `overlay-guards.json`, the media cache, and `pollis-tui.log`. One helper (`pollis-core/src/private_fs.rs`) now owns creation: files 0600, directories 0700, the mode passed to `open(2)`/`mkdir(2)` so the file is never briefly world-readable and re-applied through the open handle so a file left by an older build is tightened too. The SQLite database and its sidecars are opened by the SQLite VFS rather than by that helper, so `open_at` tightens all three after the connection exists. **On Windows this is deliberately a no-op**: files under `%APPDATA%` inherit the user profile directory's ACL, which already grants only the owning user, SYSTEM and Administrators, and hand-rolling a DACL would be new code that can only be wrong in ways the inherited one cannot.
+1. **Pasted and dropped files never touch disk.** They arrive in the WebView as `File` objects with no path. The renderer used to write each to the OS temp directory as `pollis-<timestamp>-<original filename>` and never delete it. Bytes now cross IPC into an in-memory registry (`pollis-core/src/commands/staging.rs`); the renderer holds an opaque id, `upload_media_staged` reads and releases on success, and `lock` / `logout` / `wipe_local_data` release everything. Clipboard images come back as PNG bytes instead of a `pollis-paste-<nanos>.png` file.
+2. **The loopback media server forbids caching.** `serve_media` sent decrypted media with no cache directives, which RFC 9111 §3 lets WebKitGTK, WKWebView and WebView2 store on disk. Every response, including 206 range responses, now carries `Cache-Control: no-store, no-cache, must-revalidate, max-age=0` and `Pragma: no-cache`.
+3. **The media-cache wipe hits the right directory.** The cache is AES-256-GCM under the session `db_key`. `logout`, `set_pin` and `unlock` resolved the cache directory from ambient state that named the wrong user at that moment, so they emptied `media-cache/_anon/`. The wipe now takes an explicit `CacheScope`. `wipe_local_data` also clears the shell's `app_data_dir()/media-cache`, which differs from `db::local::dirs_path()` on Linux and Windows.
+4. **Everything the app creates is owner-only on unix.** One helper (`pollis-core/src/private_fs.rs`) creates files 0600 and directories 0700, passing the mode to `open(2)`/`mkdir(2)` so a file is never briefly world-readable, and re-applies it through the handle to tighten files left by older builds. That covers `accounts.json`, `keystore.pks`, `overlay-guards.json`, the media cache and `pollis-tui.log`. SQLite opens the database and sidecars itself, so `open_at` tightens all three afterwards. "Save attachment as…" (`downloads.rs`) writes through the helper, and a source-scan guard bans `std::fs::write` in the export module, `downloads.rs` and `commands/r2.rs`. **Windows is a deliberate no-op:** files under `%APPDATA%` inherit the profile ACL (owner, SYSTEM, Administrators), and a hand-rolled DACL could only be worse.
+5. **The terminal client's log masks the account email.** `pollis-tui` redirects stderr into `pollis-tui.log` (the OS temp dir when `POLLIS_DATA_DIR` is unset), and `commands/auth.rs` logged the email on `request_otp` and `verify_otp`. The log is now 0600 and those lines mask the local part (`pollis_core::util::mask_email`, same shape as `pollis-delivery/src/redact.rs`). This was not a general logging review.
 
-   The 2026-09-18 review found one live exception — "save attachment as…" wrote decrypted plaintext at the process umask, bypassing the helper — and it is now fixed: `downloads.rs` writes through `private_fs`, and the source-scan guard that already banned `std::fs::write` in the export module was extended to cover `downloads.rs` and `commands/r2.rs` so it cannot regress.
-5. **The terminal client's log no longer records the account email.** `pollis-tui` `dup2`s fd 2 into `pollis-tui.log`, which lands in the OS temp directory when `POLLIS_DATA_DIR` is unset, and `commands/auth.rs` logged `email={email}` verbatim on both `request_otp` and `verify_otp`. The log file is created 0600 and those two lines now mask the local part (`pollis_core::util::mask_email`, the same shape the DS has used since #345 in `pollis-delivery/src/redact.rs`). This is not a general logging review — only these two lines and this file's mode.
-
-None of this changes the threat model in §1: a same-UID local attacker is still outside what any of it defends against. What it changes is the *other local user* on a shared machine, and the copy of a temp directory or a WebView cache that outlives the session it came from.
+None of this changes §1: a same-UID attacker is still out of scope. It protects against other local users on a shared machine, and against copies of temp directories or WebView caches that outlive the session.
 
 ### 7.3 What's deliberately not local
 
-User profile rows, group/channel metadata, membership, blocks: those live on Turso and are fetched at read time, through the Delivery Service. The argument for this separation is partial-trust, and #987 sharpened it: a stolen device with the SQLCipher key cannot enumerate the user's social graph, because the device holds no database credential at all — it can only ask the DS, which answers for the authenticated signer and no one else.
+User profiles, group/channel metadata, membership and blocks live on Turso and are fetched through the DS at read time. A stolen device with the SQLCipher key therefore cannot enumerate the social graph: it holds no database credential (§8), and the DS answers only for the authenticated signer.
 
 ---
 
 ## 8. Remote Database Access (there is none from the client)
 
-Source: `pollis-core/src/commands/ds_reads.rs`, `pollis-core/src/commands/mls/ds_reads.rs`,
-`pollis-delivery/src/{reads,directory,account_reads}.rs`.
+Source: `pollis-core/src/commands/ds_reads.rs`, `pollis-core/src/commands/mls/ds_reads.rs`, `pollis-delivery/src/{reads,directory,account_reads}.rs`.
 
-**Since #987 the client cannot reach the database.** Not "is not allowed to" —
-cannot: neither `pollis-core` nor `pollis` — the crate that becomes the
-installed binary — links a database driver, and the binary bakes no
-`TURSO_URL`, `TURSO_TOKEN`, `LOG_DB_URL` or `LOG_DB_TOKEN`. (`pollis` keeps an
-*optional* `libsql`, reached only through its `test-harness` feature, which the
-flows harness needs to stand up a process-local "remote" and no release build
-selects; `pollis-core/tests/no_client_side_remote_reads.rs` walks both graphs
-and fails if a driver appears in either.) Every remote read is
-a typed `POST /v1/read/…` (or `/v1/directory/…`) to the Delivery Service, carried
-on the SAME ML-DSA-44 device-signed transport as the writes (§10.1), and the DS
-holds the only database credential.
+**Since #987 the client cannot reach the database.** Neither `pollis-core` nor `pollis` (the installed binary's crate) links a database driver, and no database URL or token is compiled in. `pollis` has an optional `libsql` reachable only through its `test-harness` feature, which the flows harness uses for a process-local "remote" and no release build enables; `pollis-core/tests/no_client_side_remote_reads.rs` fails if a driver appears in either graph. Every remote read is a typed POST to the DS (`/v1/read/…`, `/v1/directory/…`, `/v1/mls/…` and a few others) on the same ML-DSA-44 device-signed transport as writes (`ds_client.rs`), and only the DS holds the database credential.
 
 ### 8.1 What this replaced, and why
 
-The client used to open a libSQL connection with a **read-only** bearer token
-baked into the binary, and issue `SELECT`s directly — 102 call sites across 34
-files. Read-only meant it could not write, which was a real property; what it
-did not mean was *scoped*. The token was **whole-database**. A user who ignored
-the app's own guards and ran `SELECT * FROM group_member` read any group's
-roster, and #917 recorded exactly that as an open residual: the client-side
-membership checks made group metadata un-served by the app, not unreadable.
-
-#393 shortened the credential's life (the DS minted a short-TTL read-only token
-on unlock, keeping the baked one as a fallback) but could not change its scope: a
-short-lived whole-database token is still a whole-database token for its
-lifetime. The fix that closes the residual is not a smaller token but no token,
-which is what this section now documents. `POST /v1/turso/token`, the mint, is
-deleted too — with no client connection left, an endpoint that hands out database
-credentials is pure attack surface.
+The client used to open a libSQL connection with a read-only token baked into the binary and issue `SELECT`s directly (102 call sites in 34 files). Read-only, but not scoped: the token was whole-database, so a user bypassing the app's guards could `SELECT * FROM group_member` and read any group's roster (#917). #393 shortened the token's life (a DS-minted short-TTL token on unlock) but not its scope. #987 removed the connection, the token, and the minting endpoint (`POST /v1/turso/token`).
 
 ### 8.2 Properties of the read path
 
-- **POST, never GET.** The canonical signing message is
-  `{METHOD}\n{PATH}\n{TIMESTAMP}\n{hex sha256(body)}` and the PATH excludes the
-  query string, so a signed `GET …?since=N&device_id=…` would carry
-  *unauthenticated* parameters. That is the #681 shape, where an unauthenticated
-  `GET /v1/commits` was a remote commit-log wipe primitive. Read parameters live
-  in the JSON body, where the signature covers them.
-- **The server decides what a caller may read**, using the same predicate it uses
-  to decide what they may write (`pollis_schema::authz::GROUP_ROLE_SQL`, shared
-  by both crates). A body-supplied `user_id` / `device_id` is the no-auth path's
-  input only; with auth on, both come from the verified signature.
-- **The MLS control plane is one snapshot.** `POST /v1/read/conversation-state`
-  answers GroupInfo, the pending-Welcome flag, the lineage heads, the commit
-  batch and the two membership gates from ONE read transaction, and refuses a
-  non-contiguous commit batch rather than serving it. Both properties are
-  correctness, not performance: a torn GroupInfo/Welcome pair strands a device
-  permanently, and a hole in a batch makes the client delete its MLS crypto
-  state. See `pollis-delivery/tests/conversation_snapshot.rs`.
-- **Three reads are unsigned, because no credential exists at that moment.**
-  `POST /v1/auth/account-probe` runs pre-PIN at launch (local DB closed, no
-  signer, no session) and answers `{ exists, has_identity, identity_version }`
-  for a 128-bit ULID the caller read out of its own `accounts.json`. That
-  argument rests on the id being unguessable and on the file it came from being
-  non-sensitive; §1.1.1 now states both on the record, including the #997 move
-  of the login address out of that file, so an endpoint reachable with no
-  credential is answering about an opaque identifier and nothing else.
-  `POST /v1/read/enrollment` is gated on possession of the enrollment
-  `request_id` — a session cannot serve it, because the DS session TTL and the
-  enrollment TTL are both 600s and the session is minted strictly earlier, so a
-  session-gated poll is *guaranteed* to 401 before the request expires; the
-  payload is sealed to an ephemeral X25519 key the id does not confer.
-  `POST /v1/read/recovery-blob` takes the OTP session and records a security
-  event per fetch. All three sit on the DS's tightest per-IP rate-limit tier.
+- **POST, never GET.** The signed message is `{METHOD}\n{PATH}\n{TIMESTAMP}\n{hex sha256(body)}`, and PATH excludes the query string, so query parameters on a GET would be unauthenticated. That was the #681 bug: an unauthenticated `GET /v1/commits` could wipe a commit log. Read parameters go in the signed JSON body.
+- **The server decides what a caller may read,** using the same predicate as for writes (`pollis_schema::authz::GROUP_ROLE_SQL`, shared by both crates). With auth on, `user_id` and `device_id` come from the verified signature; body-supplied values are used only when auth is off.
+- **The MLS control plane is one snapshot.** `POST /v1/mls/conversation-state` returns GroupInfo, the pending-Welcome flag, lineage heads, the commit batch and both membership gates from one read transaction, and refuses to serve a non-contiguous commit batch. Both are correctness requirements: a torn GroupInfo/Welcome pair strands a device permanently, and a gap in a batch makes the client delete its MLS state. Tests: `pollis-delivery/tests/conversation_snapshot.rs`.
+- **Three reads have no device signature, because no device credential exists yet:**
+  - `POST /v1/auth/account-probe` runs before unlock and answers `{ exists, has_identity, identity_version }` for a ULID the caller read from its own `accounts.json`. This rests on the id being unguessable and the file being non-sensitive (§1.1.1). It has its own per-IP `probe` rate-limit tier.
+  - `POST /v1/read/enrollment` is gated on knowing the enrollment `request_id`. A session cannot gate it: the DS session TTL and enrollment TTL are both 600 s and the session is minted first, so a session-gated poll would always 401 before the request expired. The payload is sealed to an ephemeral X25519 key that the id does not confer.
+  - `POST /v1/read/recovery-blob` requires the OTP session and records a security event per fetch.
 
 ### 8.3 What an attacker gets from a built binary
 
-Nothing that reads the database. There is no token to extract. The strongest
-remaining position is the one §10.1 describes: a device key stolen from the OS
-keychain of a compromised machine, which authenticates as **that device** — so
-the DS answers only for that device's own account, and MLS still denies the
-plaintext.
+Nothing that reads the database; there is no token to extract. The strongest position left is a device signing key stolen from a compromised machine's keystore, which authenticates as that device: the DS answers only for that device's account, and MLS still protects plaintext.
 
-This is a stronger position than Signal Desktop's, where a per-account auth token
-issued at registration is held on the device; Pollis holds a per-DEVICE signing
-key and no database credential. The earlier shape — a *single shared* read-only
-`TURSO_TOKEN` in every binary — was weaker than both, and is gone.
+Signal Desktop holds a per-account auth token issued at registration. Pollis holds a per-device signing key and no database credential.
 
 ---
 
@@ -614,50 +525,50 @@ Source: `pollis-core/src/commands/r2.rs`.
 
 ### 9.1 Convergent encryption (attachments)
 
-- **Content hash:** SHA-256(plaintext). Used as the dedup anchor and the input to key derivation.
-- **Key/nonce derivation:** HKDF-SHA256 with the content-hash as IKM, `info = b"pollis-att-key"` for the 32-byte AES-256-GCM key and `info = b"pollis-att-nonce"` for a 12-byte base nonce. No salt (the input is already uniformly random for any non-pathological input file).
-- **AEAD:** AES-256-GCM (NIST SP 800-38D), 12-byte nonces. The plaintext is split into 4 MiB chunks; each chunk's nonce = `base_nonce XOR LE(u32(chunk_index))` in the first 4 bytes. The chunked construction lets large files stream without buffering, while the per-chunk nonce derivation ensures uniqueness without state.
-- **Object key:** `media/{content_hash}/{sanitised_filename}.enc`. Same input → same R2 object; cross-user dedup falls out naturally.
+- **Content hash:** SHA-256(plaintext), the dedup anchor and KDF input.
+- **Key/nonce:** HKDF-SHA256 over the content hash, no salt; `info = b"pollis-att-key"` for the 32-byte AES-256-GCM key, `info = b"pollis-att-nonce"` for a 12-byte base nonce.
+- **AEAD:** AES-256-GCM over 4 MiB chunks. Chunk nonce = base nonce XOR the little-endian u32 chunk index in the first 4 bytes, so large files stream without buffering and nonces are unique without state.
+- **Object key:** `media/{content_hash}.enc`. The original filename is no longer part of the key (#762); objects written under the older `media/{hash}/{filename}.enc` form still resolve because each object's key is stored in `attachment_object.r2_key`. Same plaintext → same object, so cross-user dedup is automatic.
 
 ### 9.2 Visibility on R2
 
-R2 sees: opaque AEAD ciphertext, the deterministic object key (which includes the content hash), the size, and the upload time. R2 *does not* see the AEAD key — it never leaves the device.
+R2 sees ciphertext, the object key (which contains the content hash), the size and the upload time. It never sees the AEAD key.
 
-This is the same shape as MEGA's "Convergent Encrypted" layer (without its block-level dedup) and Tresorit's deduplication scheme. The intentional security trade-off is the **confirmation-of-file attack**: an adversary who already has a candidate plaintext can compute its content-hash and check whether the corresponding R2 key exists. Pollis accepts this trade as the cost of cross-user dedup. A dedicated audit recommendation could replace this with per-conversation key wrapping (drop convergence, lose dedup), if the threat model warrants it.
+This is the shape of MEGA's and Tresorit's convergent schemes. The accepted trade-off is **confirmation-of-file**: someone holding a candidate plaintext can hash it and check whether that object exists. Pollis accepts this for cross-user dedup. Per-conversation key wrapping would remove it at the cost of dedup.
 
 ### 9.3 R2 transport
 
-**The client holds no R2 credentials.** It asks the Delivery Service for a short-lived **presigned URL** (`POST /v1/r2/presign`, via `pollis-core/src/commands/r2.rs::presign_r2`) and then does a plain HTTPS `PUT`/`GET`/`DELETE` against that URL. The SigV4 signing — canonical request → string-to-sign → date-region-service-derived signing key (HMAC-SHA256) → signature — happens **in the DS**, which is where `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` live (`pollis-delivery/src/broker.rs`). Only `R2_S3_ENDPOINT` and `R2_PUBLIC_URL` — endpoint URLs, not secrets — are compiled into the client (`pollis-core/src/config.rs`).
+**The client holds no R2 credentials.** It requests a short-lived presigned URL from the DS (`POST /v1/r2/presign`, `r2.rs::presign_r2`) and then does a plain HTTPS `PUT`/`GET`/`DELETE`. SigV4 signing happens in the DS, which holds `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` (`pollis-delivery/src/broker.rs`). Only `R2_S3_ENDPOINT` and `R2_PUBLIC_URL`, both public, are compiled into the client.
 
-This is a real reduction, not a relocation: a presigned URL authorises **one operation on one key for a short window**, so extracting a Pollis binary no longer yields the ability to enumerate, overwrite or delete the bucket. For `emoji/…` uploads the DS additionally signs `content-length` into the URL, so R2 itself rejects a body of any other size — a cap the client merely honoured was not a cap (#848). Earlier versions of this document described the R2 keys as baked into the binary under the same shared-credential trust model as `TURSO_TOKEN`; that stopped being true at the #506 secrets-broker cutover, which §1 already recorded and these sections did not. `TURSO_TOKEN` itself followed at #987 (§8) — the client now bakes no service credential at all, only endpoint URLs.
+A presigned URL authorises one operation on one key for a short window, so a binary yields no ability to list, overwrite or delete the bucket. For `emoji/…` uploads the DS signs `content-length` into the URL, so R2 itself rejects a body of any other size (#848).
 
-The `upload_media` command reads files from disk by path inside `pollis-core` (in the Tauri host process), rather than marshalling bytes across the `invoke` IPC boundary, so arbitrary-size attachments do not hit IPC framing limits. That path is for a file the **user** already has. An attachment that reaches the WebView as bytes with no path — a paste, or a drop surfaced as a `File` — goes to `upload_media_staged` instead, which reads it from the in-memory staging registry; see §7.2 item 1 for why it does not become a temp file first.
+`upload_media` reads files from disk by path inside `pollis-core`, so large attachments do not cross the IPC boundary. Bytes with no path (paste, drop) go through `upload_media_staged` (§7.2 item 1).
 
 ### 9.4 Avatars and group icons
 
-These go through `upload_file` / `download_file` (the non-`upload_media` path) and are **not** encrypted. They are public to anyone with the R2 URL. This is intentional — avatars and group icons are visible to anyone who can see the user/group on Turso anyway, so the additional surface from making them public bytes is zero. It is, however, worth flagging in an audit: an attacker who guesses or scrapes Turso `users.avatar_url` / `groups.icon_url` can fetch the underlying images without authentication. The dedup-via-hash property does not apply to this path.
+These use `upload_file` / `download_file` and are **not** encrypted. Anyone with the R2 URL can fetch them. This is intentional: anyone who can see the user or group already sees the avatar. Worth flagging: whoever obtains a `users.avatar_url` or `groups.icon_url` can fetch the image without authentication. Dedup does not apply on this path.
 
 ---
 
 ## 10. Real-Time Media (LiveKit)
 
-Source: `pollis-core/src/commands/livekit/`, `voice/`, `realtime.rs`.
+Source: `pollis-core/src/commands/livekit/`, `voice/`, `voice_e2ee.rs`, `voice_key_ring.rs`.
 
 ### 10.1 Authentication
 
-LiveKit uses room-scoped JWT tokens, **minted by the Delivery Service**:
+LiveKit uses room-scoped HS256 JWTs **minted by the DS** (`pollis-delivery/src/broker.rs`): 15-minute participant tokens (`LIVEKIT_TOKEN_TTL_SECS`) and 5-minute admin tokens for `RoomService`.
 
-- HS256, 1-hour validity for participant tokens, 5-minute for admin tokens used by RoomService.
-- **The client holds no LiveKit credential.** `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` are DS environment (`pollis-delivery/src/broker.rs`); only `LIVEKIT_URL` is compiled into the client. The on-device `livekit_jwt` module that once held the secret has been **deleted**, and the client now calls `POST /v1/livekit/token` (`pollis-core/src/commands/mls/ds_client.rs::ds_livekit_token`).
-- This closes the caveat this section used to carry. It is no longer true that "any client can mint any token": the token's `user_id` and `device_id` are derived **server-side from the verified request signature**, so a client cannot mint a token as another user or device, and a reverse-engineer with the binary cannot mint one at all. Room authorisation is still re-derived by the DS rather than by LiveKit, which remains the enforcement point for *which* room a caller may join.
+- The client holds no LiveKit credential. `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` are DS environment; only `LIVEKIT_URL` is compiled in. The client calls `POST /v1/livekit/token` (`mls/ds_client.rs::ds_livekit_token`).
+- The token's identity is derived server-side from the verified request signature, so a client cannot mint a token as another user or device, and a reverse-engineered binary cannot mint one at all. The DS decides which room a caller may join and maps it to the room pseudonym (§1.2).
+- Server-side sends (inbox nudges, notifications to rooms the caller has not joined) go through `POST /v1/livekit/send-data`; the DS restricts which event kinds a client may ask it to publish (`broker.rs`).
 
 ### 10.2 Voice frame-level E2EE
 
-LiveKit is a Selective Forwarding Unit (SFU). The peer-to-SFU hop is encrypted with **DTLS-SRTP** (RFC 5763, RFC 5764) like every WebRTC application, but DTLS-SRTP terminates at the SFU — in a vanilla deployment that means the SFU sees plaintext audio, the same posture Slack Huddles, Microsoft Teams, and Google Meet ship.
+LiveKit is an SFU. DTLS-SRTP (RFC 5763/5764) protects each peer-to-SFU hop but terminates at the SFU, so in a stock deployment the SFU hears plaintext audio, as with Slack Huddles, Teams and Meet.
 
-Pollis adds a second layer of encryption applied per-frame, post-Opus and pre-SRTP. The cipher is **AES-128-GCM**; the implementation is libwebrtc's native `FrameCryptor` (the same machinery that backs the `livekit-client` JS SDK's `setupE2EE` and Discord's 2024 DAVE protocol). It is wired up via `livekit::e2ee::E2eeOptions { encryption_type: EncryptionType::Gcm, key_provider }` passed into `RoomOptions::encryption` at `Room::connect` time in `pollis-core/src/commands/voice/lifecycle.rs::join_voice_channel`. The SFU still routes the RTP packets — packet headers stay readable — but the payload is opaque ciphertext to anyone without the shared key.
+Pollis adds per-frame encryption after Opus and before SRTP: **AES-128-GCM** via libwebrtc's native `FrameCryptor` (the machinery behind `livekit-client`'s `setupE2EE`). `voice_e2ee::build_e2ee_options` builds `E2eeOptions { encryption_type: EncryptionType::Gcm, key_provider }`, which `voice/lifecycle.rs::join_voice_channel` passes into `Room::connect`. RTP headers stay readable for routing; payloads are ciphertext.
 
-**Key derivation.** The shared 32-byte voice key is exported from the channel's MLS group at the current epoch:
+**Key derivation** (`voice_e2ee.rs::derive_voice_key`):
 
 ```text
 voice_key = MlsGroup::export_secret(
@@ -667,25 +578,32 @@ voice_key = MlsGroup::export_secret(
 )
 ```
 
-The MLS group used is the same group that protects the channel's text messages (group channels share their parent group's MLS group; DMs use their `conversation_id` as the MLS group id). Because every current MLS member already holds the exporter secret, every member derives the same voice key without server involvement; non-members and the SFU cannot. The implementation is in `pollis-core/src/commands/voice_e2ee.rs::derive_voice_key`.
+The group is the one protecting the channel's text (group channels share their group's MLS group; DMs use the conversation id). Every current member holds the exporter secret and derives the same key without the server; non-members and the SFU cannot. LiveKit's key provider then PBKDF2-derives the 128-bit frame key from it.
 
-**Key ring.** libwebrtc's `FrameCryptor` keeps a 16-slot key ring per participant. A sender encrypts each frame with the slot its own `key_index` points at and writes that index into the frame trailer; a receiver decrypts with whatever key it holds in the slot the trailer names. Two facts of the SDK shape the design: `KeyProvider::set_shared_key(key, idx)` only *stores* a key (it never moves a cryptor, and it rejects any `idx >= 16`), and every cryptor is created on slot 0 — nothing in the SDK ever advances it. So a rotation that merely stores a new key leaves every sender encrypting under the old one.
+**Key ring.** `FrameCryptor` keeps a 16-slot ring per participant. A sender encrypts with the slot its `key_index` names and writes that index into the frame trailer; a receiver decrypts with the slot the trailer names. In the SDK, `KeyProvider::set_shared_key(key, idx)` only stores a key (and rejects `idx >= 16`), and every cryptor starts on slot 0 and never advances on its own. Storing a new key therefore does not change what senders use.
 
-**Key rotation.** Whenever the MLS epoch advances — i.e., on any add or remove commit that lands locally — `mls::process_pending_commits_inner` calls `voice_e2ee::on_mls_epoch_changed`, which (1) re-derives the voice key for the new epoch, (2) installs it in ring slot `voice_key_index(epoch) = epoch mod 16` (`pollis-core/src/commands/voice_key_ring.rs`) and reads the slot back to confirm the install was not rejected, and (3) calls `FrameCryptor::set_key_index(slot)` on every *local sender* cryptor of the room, so the next outgoing frame is encrypted under the new key and tagged with the new slot. Receivers need no call: the trailer carries the slot. Every later local publication (screen share, camera) is re-pointed the same way on `RoomEvent::LocalTrackPublished`, and the join path installs the join-epoch key in its own slot rather than only in the slot-0 seed. No reconnect. The previous epoch's slot keeps its key for a 10-second grace period so in-flight frames — and peers that have not yet applied the commit — still decrypt, then is overwritten with random bytes so a member removed at that epoch cannot keep injecting frames under the retired index. Removed members lose the ability to decrypt subsequent frames because they no longer hold the new epoch's exporter secret; newly added members gain decryption from the moment the new epoch lands.
+**Rotation.** When the MLS epoch advances, `process_pending_commits_inner` calls `voice_e2ee::on_mls_epoch_changed`, which:
+1. re-derives the key for the new epoch;
+2. installs it in slot `voice_key_index(epoch) = epoch mod 16` (`voice_key_ring.rs`) and reads the slot back to confirm;
+3. calls `FrameCryptor::set_key_index(slot)` on every local sender cryptor in the room.
 
-**Residual.** Two live epochs exactly 16 apart share a ring slot. Sixteen commits landing inside one 10-second grace window would retire the older key early; the cost is a few dropped frames from a lagging peer, never plaintext exposure. The slot arithmetic is unit-tested on every target, and `src-tauri/tests/flows/voice.rs` asserts that a rotation installs the new key at the in-ring slot the senders are pointed at and leaves the previous slot populated for the grace window.
+Receivers need nothing: the trailer carries the slot. Later local publications (screen share, camera) are re-pointed on `RoomEvent::LocalTrackPublished`, and the join path installs the join-epoch key in its own slot. No reconnect is needed. The previous slot keeps its key for a 10-second grace period (`VOICE_KEY_SLOT_GRACE_SECS`) for in-flight frames and lagging peers, then is overwritten with random bytes so a member removed at that epoch cannot keep injecting frames under it. Removed members lose decryption because they lack the new exporter secret; added members gain it from the new epoch.
 
-**Defaults.** `KeyProviderOptions::default()` with `key_ring_size` passed explicitly as `VOICE_KEY_RING_SIZE = 16` — PBKDF2 derivation, `LKFrameEncryptionKey` salt, 16-entry key ring, ratchet window 16. These match `livekit-client` JS so a future web or mobile peer that derives its key from the same MLS group can interoperate.
+**Residual.** Epochs exactly 16 apart share a slot, so 16 commits inside one grace window would retire the older key early. The cost is a few dropped frames from a lagging peer, never plaintext. The slot arithmetic is unit-tested, and `src-tauri/tests/flows/voice.rs` asserts that a rotation installs the key in the slot senders point at and keeps the previous slot populated through the grace window.
 
-**No opt-out.** Voice E2EE is unconditional. The per-frame AES-GCM overhead is on the order of microseconds in libwebrtc's native cryptor; "sometimes-on" was rejected as a footgun where users might misjudge their threat model.
+**Defaults.** `KeyProviderOptions::default()` with `key_ring_size = VOICE_KEY_RING_SIZE = 16`: PBKDF2, `LKFrameEncryptionKey` salt, ratchet window 16. These match `livekit-client` JS so a future web peer deriving from the same MLS group can interoperate.
+
+**No opt-out.** Voice E2EE is unconditional. Its cost is microseconds per frame, and an optional mode invites users to misjudge their threat model.
+
+Mobile is LiveKit data-only by product decision; voice, video and screenshare are desktop features.
 
 ### 10.3 Audio pipeline (defensive context)
 
-Mic capture: `cpal` in 10 ms i16 mono frames → optional RNNoise (`nnnoiseless`) → WebRTC AudioProcessing module (AGC2 + NS + HPF + AEC, via `webrtc-audio-processing`) → LiveKit `NativeAudioSource.capture_frame` → SRTP. The entire pipeline runs in the Rust core (the Tauri host process); audio never enters the renderer. This is a deliberate architecture choice (cross-platform parity with mobile, and predictable allocation that avoids JS-heap GC pressure on multi-MB media buffers), enforced by the surrounding code and described in `CLAUDE.md`.
+`cpal` capture in 10 ms i16 mono frames → optional RNNoise (`nnnoiseless`) → WebRTC AudioProcessing (AGC2, NS, HPF, AEC; `webrtc-audio-processing`) → LiveKit `NativeAudioSource.capture_frame` → SRTP. The whole pipeline runs in the Rust core; audio never enters the renderer.
 
 ### 10.4 Signalling channel
 
-LiveKit data packets carry application-level events: `new_message` (a wake-up; the actual ciphertext is fetched from Turso), `membership_changed`, `enrollment_requested` with the verification code in cleartext (rationale: the verification code is a *human* channel for the user to compare across screens — it's not authenticating; the cryptographic authentication is the ECDH wrap in §5.1). LiveKit operators see all of these. They do not see message ciphertext, MLS state, or any private key material.
+LiveKit data packets carry application events: `new_message` (a wake-up; the ciphertext comes from the DS), `membership_changed`, typing and voice presence, and `enrollment_requested`. The last is published by the DS and carries the verification code in cleartext. That is acceptable because the code is not secret and authenticates nothing on its own; it is the human comparison channel for §5.1. LiveKit operators see all of these events. They do not see message ciphertext, MLS state or private keys.
 
 ---
 
@@ -693,55 +611,51 @@ LiveKit data packets carry application-level events: `new_message` (a wake-up; t
 
 ### 11.1 OTP request rate limiting
 
-Throttling is enforced by the Delivery Service, at two independent scopes:
+The DS throttles at two scopes:
 
-- **Per email address** (`pollis-delivery/src/otp.rs`): a 30-second resend throttle, and a 5-attempt cap on wrong codes after which the entry is locked out and deleted.
-- **Per client IP** (`pollis-delivery/src/ratelimit.rs`): fixed windows over the unauthenticated `request-otp` / `verify-otp` endpoints, keyed on `CF-Connecting-IP`. The per-email limit alone bounds abuse of *one* address; it does nothing about a client spraying requests across thousands of addresses to email-bomb arbitrary mailboxes or burn Resend quota, which is what this second scope covers.
-- Resend's own per-domain reputation and per-key limits sit underneath both, as a third layer rather than the only one.
-
-This section previously described the absence of any application-layer throttle as a known gap. That gap closed when the OTP flow moved server-side: the client had no durable, shared place to keep a counter, which is precisely why it could not enforce one.
+- **Per mailbox** (`pollis-delivery/src/otp.rs`): 30 s resend throttle, 3 codes per window, and a 15-minute mailbox lockout after 5 wrong codes (§4).
+- **Per client IP** (`pollis-delivery/src/ratelimit.rs`): fixed windows over the unauthenticated OTP endpoints, keyed on `CF-Connecting-IP`. This covers a client spraying requests across many addresses to email-bomb mailboxes or burn Resend quota, which the per-mailbox limit cannot.
+- Resend's own reputation and per-key limits sit underneath both.
 
 ### 11.2 PIN attempt rate limiting
 
-Local, per-user, capped at 10 then nuke. No backoff. See §3.3.
+Local, per user: 10 attempts, then the wrapped keys are deleted. No backoff. See §3.3.
 
 ### 11.3 Enrollment verification code
 
-8 characters of Crockford base32, 40 bits, single-use (10-minute TTL on the `device_enrollment_request` row), constant-time compared. Since #793 it is **derived from the new device's ephemeral public key**, not random, so substituting the key changes the code; since #1096 the approver compares against its own re-derivation rather than a server round-trip.
-
-The 2026-09-18 review found this derivation unsalted — it took the public key and nothing else, so the 40-bit search was a **one-time precomputation reusable against every user and every enrollment** rather than per-attempt work. It is now salted with a length-prefixed `request_id ‖ user_id ‖ created_at` transcript (length-prefixed because the three are free-form strings and a delimiter is only a delimiter until someone puts one in a `user_id`), so the encoding is injective and a precomputed table is valid for exactly one request. The mitigation now costs what this section always claimed it cost.
+8 Crockford base32 characters (40 bits), single-use within the request's 10-minute TTL, compared in constant time. It is derived from the new device's ephemeral public key (#793), salted with a length-prefixed `request_id ‖ user_id ‖ created_at` transcript (2026-09-18 review), and the approver compares against its own re-derivation (#1096). Details and attack cost: §5.1.
 
 ### 11.4 Block enforcement
 
-`user_block` is a directional table (A blocking B does not imply B blocks A) but enforcement is symmetric — both directions are checked at DM creation and at message send (`messages.rs::send_message`'s `suppress_delivery` branch; `blocks::is_blocked_either_way`).
+`user_block` is directional (A blocking B does not mean B blocks A); enforcement checks both directions, at DM creation (re-checked by the DS) and at send (`messages/send.rs`, `blocks::any_blocked_either_way`).
 
-DM block mechanics (deliberately asymmetric in observability):
-- The *blocker* sees the conversation disappear from their list (`list_dm_channels` filters by `user_block.blocker_id = me`).
-- The *blockee* still sees the conversation. Sending succeeds locally — an entry appears in their local `message` table — but the message is *not* MLS-encrypted, *not* posted to `message_envelope`, and *not* broadcast on LiveKit. The blocker never receives it. The blockee sees no observable signal that they have been blocked.
+DM blocks are deliberately asymmetric in what each side can observe:
+- The **blocker** no longer sees the conversation; the DS's DM listing hides channels whose other member the caller has blocked.
+- The **blockee** still sees it. Sending appears to succeed and the message is stored in their local `message` table, but it is not encrypted, not posted to the DS, and not announced on LiveKit. The blocker never receives it, and the blockee gets no signal that they are blocked.
 
-This is the same observability pattern as Signal/iMessage. The privacy property is: "blocked" is not a backchannel for the blocker to signal anything about themselves to the blockee.
+This matches Signal and iMessage: a block is not a channel through which the blocker reveals anything.
 
-Group-channel blocks are render-side only — the blocker filters out blocked senders client-side, and the encrypted plaintext is still written to `message_envelope` and forwarded over LiveKit. The MLS group is not aware of blocks.
+Group-channel blocks are render-side only. The blocker's client hides blocked senders; their messages are still encrypted, stored and announced normally. MLS is unaware of blocks.
 
 ### 11.5 Identity reset (destructive)
 
-`reset_identity_and_recover` (in `device_enrollment.rs`) is the destructive recovery path. It requires:
+`reset_identity_and_recover` (`device_enrollment.rs`) is the destructive recovery path. It requires:
 
-- A valid OTP for the `users.email` (proven via prior `verify_otp`).
-- A constant-time match between user-typed `confirm_email` and stored `users.email`.
+- a verified OTP for `users.email`;
+- a constant-time match between the typed `confirm_email` and `users.email`.
 
 It then:
 
-1. Generates a fresh account-identity ML-DSA-44 keypair, bumps `users.identity_version`, replaces the `account_recovery` blob (`POST /v1/account/rotate-identity`, CAS-guarded on `account_key_log`).
-2. Deletes the user from every `group_member`, `dm_channel_member`, `mls_key_package`, `conversation_watermark` and `mls_welcome` row, and orphans their other `user_device` rows. Promotes a new admin if the user was sole admin (handing `groups.owner_id` over with the role). Tears down groups and DMs left with nobody in them — explicitly, table by table, because production Turso runs `foreign_keys=OFF` and the schema's `ON DELETE CASCADE` clauses do not fire (`pollis-delivery/src/teardown.rs`). The `users` row and the account's own records survive: this is a reset, not a deletion.
+1. Generates a fresh ML-DSA-44 account identity, bumps `users.identity_version`, and replaces the `account_recovery` blob (`POST /v1/account/rotate-identity`, CAS-guarded on `account_key_log`).
+2. Removes the user from every `group_member`, `dm_channel_member`, `mls_key_package`, `conversation_watermark` and `mls_welcome` row and orphans their other devices. If the user was sole admin it promotes a new admin and hands over `groups.owner_id`. Groups and DMs left empty are torn down table by table, because production Turso runs `foreign_keys=OFF` and `ON DELETE CASCADE` does not fire (`pollis-delivery/src/teardown.rs`). The `users` row survives: this is a reset, not a deletion.
 3. Wipes the local SQLCipher DB and its WAL/SHM.
-4. The Delivery Service records a `security_event` of kind `identity_rotated` whose metadata names the credential that authorised the rotation (`credential=session` for this path, `credential=signature` for a rotation issued by an enrolled device). The row is written by the DS inside the rotation transaction, never by the client.
+4. The DS writes a `security_event` of kind `identity_rotated` inside the rotation transaction, naming the authorising credential (`credential=session` here, `credential=signature` for a rotation from an enrolled device). The client cannot suppress it.
 
-**Steps 1 and 2 are one server-side transaction whenever the credential is the OTP session.** The pre-enrollment device that performs a soft reset has no device signing key, so `rotate-identity` accepts a verified-OTP session — and the DS treats that credential as *meaning* the reset: `apply_rotate_identity` (`pollis-delivery/src/account.rs`) runs the whole `reset-recover` wipe (memberships, key packages, every device except the one the session was minted for — taken from the session record, not the body) in the same transaction as the key rotation and the audit row. There is no server state in which a session-minted account key sits on an account that still holds its memberships and devices, and no way for a client to rotate "quietly" by skipping the follow-up wipe. The client still calls `reset-recover` and `welcomes/purge` afterwards for symmetry with the device-signed path; on the session path they are idempotent no-ops. A device-signed `rotate-identity` (an enrolled device that already holds the account key) remains a plain rotation, and the client's `reset-recover` is then load-bearing.
+**With the OTP session as credential, steps 1 and 2 are one server-side transaction.** A pre-enrollment device has no signing key, so `rotate-identity` accepts a verified-OTP session, and the DS treats that credential as meaning a full reset: `apply_rotate_identity` (`pollis-delivery/src/account.rs`) runs the whole wipe (memberships, key packages, every device except the one the session was minted for, taken from the session record) in the same transaction as the rotation and the audit row. No server state exists in which a session-minted key sits on an account that still has its memberships and devices. The client's follow-up `reset-recover` and `welcomes/purge` calls are idempotent no-ops on this path. A device-signed `rotate-identity` is a plain rotation, and there the client's `reset-recover` does the wipe.
 
-The cryptographic effect is that every other device the user previously enrolled is *cryptographically* orphaned: their locally-held account-identity private key no longer derives the published `account_id_pub`, so their `device_cert`s no longer verify, so their MLS leaves no longer admit into any new commit. This is the strongest action available without server cooperation, and it requires only the user's email and a working OTP delivery — which is the deliberate "soft recovery" UX.
+Every other device the user enrolled is cryptographically orphaned: its account private key no longer matches `account_id_pub`, so its `device_cert` no longer verifies and its leaves are not admitted to new commits. This requires only the user's email and a working OTP, which is the intended soft-recovery UX.
 
-The audit-relevant property is: an attacker who compromises only the user's email account can mount this against the user. The defence is the user's `security_event` log (visible in the Security settings page; the `identity_rotated` row is server-authored, so the attacker cannot suppress it) and the catastrophic, observable nature of the attack — the attacker's new identity owns no conversations, and every other device the user owned will be locked out the next time it tries to do anything. What an email compromise cannot do is *inherit* the account: the atomic coupling above means the OTP-only path can never yield a rotated key that keeps the victim's memberships or leaves the victim's devices enrolled beside the attacker's. Property tests: `pollis-delivery/tests/reset_session.rs`.
+**Audit-relevant property:** an attacker who controls only the user's email can do this. Defences: the server-authored `identity_rotated` row in the user's Security page, and the attack's visibility (the attacker's new identity owns no conversations, and the user's other devices are locked out on next use). What email compromise cannot do is inherit the account: the session path can never produce a rotated key that keeps the victim's memberships or leaves the victim's devices enrolled. Tests: `pollis-delivery/tests/reset_session.rs`.
 
 ---
 
@@ -749,77 +663,80 @@ The audit-relevant property is: an attacker who compromises only the user's emai
 
 | Material | Algorithm | Where it lives | Where it does not live |
 |---|---|---|---|
-| Account identity private | ML-DSA-44 seed (32 B) | Device keystore (`account_id_key_wrapped_{uid}`, AEAD under PIN-derived KEK — and, on the file backend, inside a second AES-256-GCM layer under a machine-bound KEK, §3.5); `AppState.unlock` (Zeroizing, in-process) | Anywhere unwrapped on disk; any server endpoint as plaintext |
-| Account identity public | ML-DSA-44 (1312 B) | `users.account_id_pub` (Turso); local `mls_kv` indirectly via leaf nodes | — |
-| Secret Key (recovery) | 150-bit Crockford base32 | User's offline backup | Any Pollis-operated system |
-| Account recovery wrap key | HKDF-SHA256 → 32 B | Derived on-demand from Secret Key + per-user salt | Stored anywhere |
-| Per-device MLS signing private (one per scheme) | ML-DSA-44 seed (32 B) for `CS_PQ` leaves and DS request auth; Ed25519 (32 B), which the retired classic suite's leaves signed with and which is still minted so an older code point stays readable | Local `mls_kv` (under SQLCipher), keyed by signature scheme | Off-device |
-| Per-device MLS signing public (one per scheme) | Ed25519 (32 B) / ML-DSA-44 (1312 B) | `user_device.mls_signature_pub` (Ed25519) and `user_device.mls_signature_pub_pq` (ML-DSA-44) on Turso; local `mls_kv`. Both are bound by one v2 `device_cert` | — |
-| Device cert | ML-DSA-44 signature (2420 B) by the account identity key over both device signing publics | `user_device.device_cert` (Turso) | — |
-| MLS leaf / commit / welcome material | TreeKEM, RFC 9420 | Local `mls_kv` (under SQLCipher) | — |
-| MLS HPKE init private | X-Wing = X25519 + ML-KEM-768 decapsulation key | Local `mls_kv` (under SQLCipher) | Off-device |
-| Published KeyPackages | Public halves only, one pool in `CS_PQ` | `mls_key_package` (Turso), tagged with its suite and claimed once each | Any private half, ever |
+| Account identity private | ML-DSA-44 seed (32 B) | Keystore `account_id_key_wrapped_{uid}` under the PIN KEK (and, on the file backend, a second AES-256-GCM layer under a machine-bound KEK, §3.5); `AppState.unlock` (zeroizing) | Unwrapped on disk; any server as plaintext |
+| Account identity public | ML-DSA-44 (1312 B) | `users.account_id_pub`; `account_key_log`; local `mls_kv` indirectly | — |
+| Secret Key (recovery) | 150-bit Crockford base32 | The user's offline copy | Any Pollis system |
+| Recovery wrap key | HKDF-SHA256 → 32 B | Derived on demand from Secret Key + per-user salt | Stored anywhere |
+| Device MLS signing private (one per scheme) | ML-DSA-44 seed (32 B), used for `CS_PQ` leaves and DS request auth; Ed25519 (32 B), still minted so older code points stay readable | Local `mls_kv` (SQLCipher), keyed by scheme | Off-device |
+| Device MLS signing public (one per scheme) | Ed25519 (32 B) / ML-DSA-44 (1312 B) | `user_device.mls_signature_pub` / `mls_signature_pub_pq`; local `mls_kv`; both bound by one v2 `device_cert` | — |
+| Device cert | ML-DSA-44 signature (2420 B) by the account key over both device publics | `user_device.device_cert` | — |
+| MLS leaf / commit / Welcome material | TreeKEM, RFC 9420 | Local `mls_kv` (SQLCipher) | — |
+| MLS HPKE init private | X-Wing (X25519 + ML-KEM-768) decapsulation key | Local `mls_kv` (SQLCipher) | Off-device |
+| Published KeyPackages | Public halves, `CS_PQ` | `mls_key_package`, suite-tagged, claimed once | Any private half |
 | MLS application secrets | RFC 9420 | Ephemeral, per epoch | Persisted past their epoch |
-| DB encryption key (SQLCipher) | 32 random bytes | Device keystore (`db_key_wrapped_{uid}`, AEAD under PIN-derived KEK, §3.5); `AppState.unlock` | Anywhere unwrapped on disk |
-| PIN | 4 ASCII digits | User's head | Stored anywhere on disk or wire |
-| KEK (PIN-derived) | Argon2id → 32 B | Ephemeral, derived from PIN at unwrap time | Stored anywhere |
-| OTP | 6-digit numeric | In-memory **on the Delivery Service** as a salted hash, 10-min TTL, attempt-capped | Stored on disk; held by the client |
-| Device enrollment ephemeral X25519 private | X25519 (32 B) | `AppState.enrollment_ephemeral_keys` (in-memory) | Disk, server, anywhere persistent |
-| Attachment AEAD key | HKDF-SHA256 over content-hash → 32 B | Derived on-demand from content-hash | Persisted; transmitted to R2 |
-| `TURSO_TOKEN` / `LOG_DB_TOKEN` | bearer | **Delivery Service environment only** since #987 — the client binary bakes neither, and `pollis-core` does not link `libsql` (§8) | The client binary |
-| `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | AWS SigV4 creds | **Delivery Service environment only** | The client binary |
-| `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | JWT signing key | **Delivery Service environment only** | The client binary |
-| `RESEND_API_KEY` | bearer | **Delivery Service environment only** | The client binary |
+| SQLCipher DB key | 32 random bytes | Keystore `db_key_wrapped_{uid}` under the PIN KEK (§3.5); `AppState.unlock` | Unwrapped on disk |
+| PIN | 4 ASCII digits | The user's head | Disk or wire |
+| PIN KEK | Argon2id → 32 B | Derived at unwrap time | Stored anywhere |
+| OTP | 6 digits | DS memory, as a salted hash; 10-min TTL; attempt-capped | Disk; the client |
+| Enrollment ephemeral private | X25519 (32 B) | `AppState.enrollment_ephemeral_keys` (memory) | Disk, server |
+| Attachment key | HKDF-SHA256 over content hash → 32 B | Derived on demand | Persisted; sent to R2 |
+| Voice frame key | MLS exporter (32 B) → PBKDF2 → AES-128-GCM | LiveKit key provider ring, in memory | Off-device; the SFU |
+| Database credentials (`TURSO_TOKEN`, `LOG_DB_TOKEN`) | bearer | DS environment only (§8) | The client binary |
+| `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | SigV4 | DS environment only | The client binary |
+| `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | JWT signing | DS environment only | The client binary |
+| `RESEND_API_KEY`, `EXPO_TOKEN` | bearer | DS environment only | The client binary |
+| Transparency-log signing key | ML-DSA-44 seed | GitHub Actions secret `STH_SIGNING_KEY` (§6.9 limit 5) | The client; the DS |
 
 ---
 
 ## 13. Known Gaps and Audit Focus Recommendations
 
-Items below are ordered by adversary cost — easiest first.
+Ordered by adversary cost, cheapest first. Item numbers are stable; closed items are kept so references stay valid.
 
-1. **Voice E2EE has no end-to-end integration test.** Section 10.2. The frame cryptor wiring (key derivation, key rotation on MLS epoch advance, KeyProvider lifecycle) is covered only by unit-level assertions and manual two-client testing. An adversarial review found that the rotation used to store the new key in a ring slot no sender cryptor was ever pointed at (and, from epoch 16, in no slot at all), so a member removed mid-call kept decrypting until everyone left — exactly the class of defect a frame-level test would have caught. The rotation now advances every sender cryptor's key index (§10.2) and the harness asserts the ring state, but there is still no automated test that spins up a real LiveKit server, sends audio between two harness clients, and asserts that a removed member's `FrameCryptor` reports `MissingKey`/`DecryptionFailed` on post-removal frames. Standing up that harness is the right next step before a third-party audit.
-2. **A rogue leaf is evicted, not refused: the window is one honest reconcile.** Section 5.3 / 6.4. Cross-signing is enforced on the committer (a claimed KeyPackage whose leaf key is not the one the claimed account certified is never added — this closes the server-substitutes-a-KeyPackage vector) and on every replaying member (the added leaves are read off the commit's own Add proposals, so the committer-written add columns cannot suppress or narrow the check). What remains: a *non-conforming* committer — a malicious member, or a pre-fix client — can still land a commit adding an uncertified leaf, and honest members **merge it** (it is canonical; refusing would strand them behind the log) before recording an `uncertified_mls_leaf` security event and kicking an eviction reconcile. Until that eviction commit lands the rogue leaf holds the group's key schedule. Closing this residual would need the quarantine-and-resync state machine that this section previously described as the whole fix; the committer-side refusal and commit-derived verification shipped instead, and are the larger share of the exposure. **Partial mitigation since the group-reconcile TOFU work (refs #277):** the batch `account_id_pub` check (`batch_check_and_pin_account_keys` in `pollis-core/src/commands/safety.rs`) runs on every reconcile *before* roster devices are added to the MLS tree, and the committer-side leaf check now uses that pin as its root: a peer whose server-reported account key differs from the local pin has every leaf refused. **Further backstopped since the account-key transparency work (#330):** the account-key axis is also covered by a publicly-auditable, append-only log of every key version (§6.9), so a swap is not only caught live by TOFU but is permanently visible to anyone running `pollis-verify account` — see the residual limits in item 10.
-3. **A single shared read-only Turso token is baked into the binary.** Section 8.1. Reverse-engineering the binary yields *read* access to the metadata tables equivalent to any client — not write access, and not the R2, LiveKit or Resend credentials, none of which the client carries any more (#393/#506). Mitigated further by the DS-minted short-TTL token that supersedes it at runtime, by application-layer enforcement in the DS, by MLS-layer cryptographic floors, and by cross-signing. The residual is real: the token is whole-DB rather than row-scoped, so it reads any group's metadata. Row-scoped tokens are the standard fix and are not built. *(This item previously read "single shared Turso/R2/LiveKit/Resend tokens"; three of those four moved off-client, and it is narrowed accordingly.)*
-4. **~~No server-side rate limiting on `request_otp`.~~ Closed.** Section 11.1. The DS throttles per email address and per client IP.
-5. **Avatars and group icons are public R2 objects.** Section 9.4. Anyone who guesses or scrapes `avatar_url` / `icon_url` from Turso (not directly exposed, but available to any client holding the read-only bearer token) can read them.
-6. **PCS healing is launch-driven, not timer-driven.** Section 6.7. Self-updates now fire on join and from the cold-launch sweep at a 7-day (+ up to 2 days jitter) interval, capped at 3 groups per sweep, so idle groups do heal — but only when some member launches the app. A group whose entire membership stays offline does not rotate while they are gone; there is nobody to issue the commit. The per-sweep cap also means a device returning from a very long absence takes several launches to work through a large group list.
-7. **No Megolm-style key backup is by design.** Section 6.8. New devices and historical messages from before a member's join are not recoverable. Auditors should *not* report this as a gap unless the requirement statement they're auditing against asks for it; the product principle (`CLAUDE.md`) explicitly accepts it.
-8. **Soft-recovery via OTP + email match alone (`reset_identity_and_recover`).** Section 11.5. Compromise of email account ⇒ ability to nuke the user's identity — and *only* to nuke it: a session-authenticated rotation is, server-side, atomically the membership/device wipe, so the attacker's fresh key owns nothing and the victim's devices are cut off rather than left enrolled beside it. Recorded by a DS-authored `identity_rotated` security event naming the credential. The nuke itself (including destruction of the Secret-Key recovery blob) is not preventable with the current factor set.
-9. **OTP comparison uses non-constant-time string equality.** Section 4. The compared values are SHA-256 hex digests of a single-use, low-entropy code on a single-shot path; this is a best-practice item rather than a live attack.
-10. **Account-key transparency now exists, but with residual limits.** Section 6.9. The account-key directory closes the *systemic* version of the swap attack in items 2 and §11.4 — every user's key history is now publicly auditable and CI self-audits each publish — but four caveats remain. (a) *Daily publish lag*: a rotation is invisible to any auditor until the next publish, so the window between a swap and the next build is covered only by the live TOFU check, not the log. (b) *Advisory, not blocking*: the client `self_audit_account_key` / `audit_peer_account_key` commands alert; they do not block sends. (c) *Enumerable, no VRF*: `user_id`s and public keys are listable in the tree — acceptable, since those keys are public by design, but it leaks the user set and rotation cadence; a VRF-backed private-lookup layer is the upgrade path. (d) *Single first-party log + CI in the TCB*: Pollis runs the only log and signs it in GitHub Actions, so the publishing pipeline is trusted to the same degree as the release-signing keys (§3.4); the mitigation is that `pollis-verify` is released so any third party can run an independent auditor. (e) *Key rotation has no overlap window (#700)*: #732 rotated the log key to fresh material and re-signed all three trees, which changes every published signature and so is byte-indistinguishable from equivocation to anyone holding cached heads. The pin is set and in-app audits resolve normally, but the transition itself was not verifiable — only re-pinnable. None of these reintroduce the original attack — they bound how quickly and by whom it is detected.
-11. **Sealed sender is at-rest only; the live DS still sees the sender.** Section 1.2. The metadata-minimization work (sealed sender v1, size padding v2, signalling minimization v2 — all **shipped**) removed the stored sender-per-message artifact, padded text-ciphertext sizes, and stripped `sender_id` from LiveKit `new_message` payloads. The residual axis is a **live** Delivery Service operator: every send still authenticates with the sender's `X-Pollis-User` header (`pollis-delivery/src/auth.rs`), so the DS learns the sender in real time even though the persisted `message_envelope` row does not. Closing this requires anonymous membership proofs (v1.5, `docs/metadata-minimization-design.md`, deferred → #489). Conversation existence, cardinality, and the `user_id`-keyed social graph remain visible (per-conversation membership pseudonyms are the deferred v3, #489). No anonymity or IP-hiding (relay overlay, #455, deferred) is claimed. Post-quantum confidentiality **is** claimed for group traffic (#454, shipped — §6.1, §6.10) and post-quantum authentication alongside it (#668, shipped — §6.1), with the scope stated there: hybrid KEM, ML-DSA-44 signatures on everything but the classic suite's leaves (retired in #669), forward-only from each group's migration boundary.
+1. **Voice E2EE has no end-to-end decryption test.** §10.2. Key derivation, rotation and ring state are covered by unit tests and `flows/voice.rs`; a manually triggered two-client e2e (`e2e-two-client-voice-channel.yml`) runs a real LiveKit SFU but asserts only the participant roster. An adversarial review found the rotation used to store the new key in a slot no sender used (and from epoch 16 in no slot at all), so a member removed mid-call kept decrypting until everyone left. That is fixed, but nothing yet runs real LiveKit with two clients and asserts that a removed member's `FrameCryptor` reports `MissingKey`/`DecryptionFailed` after removal. Build that before a third-party audit.
+2. **A rogue leaf is evicted, not refused; the window is one honest reconcile.** §5.3, §6.4. Conforming committers refuse uncertified KeyPackages (closing server substitution at claim time), and every replaying member verifies added leaves from the commit's own proposals. A non-conforming committer (malicious member or pre-fix client) can still land a commit adding an uncertified leaf; honest members merge it, record `uncertified_mls_leaf`, and evict it. Until the eviction lands, the rogue leaf holds the key schedule. Closing this needs a quarantine-and-resync state machine. Mitigations: TOFU pins (`batch_check_and_pin_account_keys`, refs #277) run before adds and anchor the leaf check; the account-key log (#330, §6.9) makes key swaps publicly auditable (limits in item 10).
+3. **Closed (#987): shared database token in the binary.** The client holds no database credential (§8).
+4. **Closed: no server-side OTP rate limiting.** The DS throttles per mailbox and per IP (§11.1). The counters are in memory; see §4 for why a container restart does not widen the guess budget.
+5. **Avatars and group icons are public R2 objects.** §9.4. Anyone who obtains an `avatar_url` / `icon_url` can fetch the image without authentication.
+6. **PCS healing is launch-driven, not timer-driven.** §6.7. Self-updates fire on join and from the launch sweep (7 days + up to 2 days jitter, at most 3 groups per sweep). A group whose members all stay offline does not rotate, and a device back from a long absence needs several launches to work through many groups.
+7. **No Megolm-style key backup, by design.** §6.8. New devices and pre-join history are not recoverable. Do not report this as a gap unless your requirements demand backup; the product principle (`CLAUDE.md`) accepts it.
+8. **Soft recovery needs only OTP + email match.** §11.5. Email compromise allows destroying the user's identity, including the Secret-Key recovery blob, but not inheriting it: the session-authenticated rotation is atomically a full membership/device wipe. It is recorded as a DS-authored `identity_rotated` event. The destruction itself is not preventable with the current factors.
+9. **Closed: OTP comparison.** The DS compares salted SHA-256 hashes in constant time (§4).
+10. **Account-key transparency has residual limits.** §6.9. (a) Daily publish lag: between a swap and the next publish, only live TOFU covers it. (b) Client audits alert but do not block. (c) No VRF: the user set and rotation cadence are enumerable. (d) One first-party log, signed in GitHub Actions, so CI is in the TCB; `pollis-verify` lets anyone run an independent auditor. (e) #732's rotation had no overlap window, so it was indistinguishable from equivocation to anyone holding cached heads; clients now pin a key set with expiries (#740) and an offline root (#754) for future rotations. None of these reopen the swap attack; they bound how fast and by whom it is detected.
+11. **Sealed sender is at-rest only; the live DS still sees the sender.** §1.2. Sealed sender, size padding and signalling minimization are shipped. Every send still authenticates with the sender's device signature, so the DS learns the sender in real time. Anonymous membership proofs (v1.5), per-conversation membership pseudonyms (v3) and timing batching (v4) are not built. Conversation existence, member counts and the `user_id`-keyed graph remain visible to the DS and Turso. IP hiding exists only as the opt-in relay overlay, off by default. Post-quantum confidentiality (#454) and authentication (#668) are claimed with the scope in §6.1 and §6.10: forward-only from each group's migration.
 
 ---
 
 ## 14. References
 
 **Core standards**
-- RFC 9420 — *The Messaging Layer Security (MLS) Protocol*. Barnes et al., 2023.
-- RFC 9180 — *Hybrid Public Key Encryption (HPKE)*. Barnes, Bhargavan, Lipp, Wood, 2022.
-- RFC 9106 — *Argon2 Memory-Hard Function for Password Hashing and Proof-of-Work Applications*. Biryukov, Dinu, Khovratovich, Josefsson, 2021.
-- RFC 8032 — *Edwards-Curve Digital Signature Algorithm (EdDSA)*. Josefsson, Liusvaara, 2017.
-- NIST FIPS 204 — *Module-Lattice-Based Digital Signature Standard (ML-DSA)*. NIST, 2024. The signature scheme behind account identity keys, device certs, DS request auth, transparency-log tree heads, and the hybrid suite's MLS leaves (§6.1).
-- NIST FIPS 203 — *Module-Lattice-Based Key-Encapsulation Mechanism Standard (ML-KEM)*. NIST, 2024. The post-quantum half of the hybrid suite's X-Wing KEM (§6.1).
-- RFC 7748 — *Elliptic Curves for Security* (Curve25519, X25519). Langley, Hamburg, Turner, 2016.
-- RFC 5869 — *HMAC-based Extract-and-Expand Key Derivation Function (HKDF)*. Krawczyk, Eronen, 2010.
-- RFC 8439 — *ChaCha20 and Poly1305 for IETF Protocols*. Nir, Langley, 2018.
-- IRTF CFRG draft `draft-irtf-cfrg-xchacha` — *XChaCha: eXtended-nonce ChaCha and AEAD_XChaCha20_Poly1305*. Arciszewski, current.
-- NIST SP 800-38D — *Recommendation for Block Cipher Modes of Operation: Galois/Counter Mode (GCM) and GMAC*. Dworkin, 2007.
-- RFC 5763 / RFC 5764 — DTLS-SRTP. Rescorla, McGrew, 2010.
-- AWS SigV4 — *Signing AWS API Requests*. Used by the Delivery Service's presigner (§9.3), not by the client. https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_aws-signing.html.
+- RFC 9420: *The Messaging Layer Security (MLS) Protocol*. Barnes et al., 2023.
+- RFC 9180: *Hybrid Public Key Encryption (HPKE)*. Barnes, Bhargavan, Lipp, Wood, 2022.
+- RFC 9106: *Argon2 Memory-Hard Function for Password Hashing and Proof-of-Work Applications*. Biryukov, Dinu, Khovratovich, Josefsson, 2021.
+- RFC 8032: *Edwards-Curve Digital Signature Algorithm (EdDSA)*. Josefsson, Liusvaara, 2017.
+- NIST FIPS 204: *Module-Lattice-Based Digital Signature Standard (ML-DSA)*, 2024. Account identity keys, device certs, DS request auth, transparency-log tree heads, MLS leaves (§6.1).
+- NIST FIPS 203: *Module-Lattice-Based Key-Encapsulation Mechanism Standard (ML-KEM)*, 2024. The post-quantum half of X-Wing (§6.1).
+- RFC 7748: *Elliptic Curves for Security* (X25519). Langley, Hamburg, Turner, 2016.
+- RFC 5869: *HMAC-based Extract-and-Expand Key Derivation Function (HKDF)*. Krawczyk, Eronen, 2010.
+- RFC 8439: *ChaCha20 and Poly1305 for IETF Protocols*. Nir, Langley, 2018.
+- `draft-irtf-cfrg-xchacha`: *XChaCha: eXtended-nonce ChaCha and AEAD_XChaCha20_Poly1305*. Arciszewski.
+- NIST SP 800-38D: *Galois/Counter Mode (GCM) and GMAC*. Dworkin, 2007.
+- RFC 6962 / RFC 9162: Certificate Transparency (Merkle tree, STH and proof formats used in §6.9).
+- RFC 5763 / RFC 5764: DTLS-SRTP. Rescorla, McGrew, 2010.
+- AWS SigV4, used by the DS presigner (§9.3), not the client. https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_aws-signing.html
 
 **Implementations relied upon**
-- OpenMLS — https://github.com/openmls/openmls. RustCrypto-backed reference implementation of RFC 9420.
-- SQLCipher — https://www.zetetic.net/sqlcipher/. AES-256-CBC + HMAC-SHA512, page-level.
-- LiveKit — https://livekit.io/. WebRTC-based SFU. The Rust `livekit` crate's `e2ee::FrameCryptor` (backed by libwebrtc's insertable streams) is enabled with AES-128-GCM and an MLS-exporter-derived shared key — see §10.2.
-- `keyring` (Rust) — https://crates.io/crates/keyring. Wraps macOS Keychain Services, freedesktop Secret Service, and Windows Credential Manager.
-- Cloudflare R2 — https://developers.cloudflare.com/r2/. S3-API-compatible object storage.
+- OpenMLS (https://github.com/openmls/openmls), with the RustCrypto provider.
+- SQLCipher (https://www.zetetic.net/sqlcipher/): AES-256-CBC + HMAC-SHA512, page-level.
+- LiveKit (https://livekit.io/): WebRTC SFU. The Rust `livekit` crate's `FrameCryptor`, keyed from the MLS exporter (§10.2).
+- `keyring` (https://crates.io/crates/keyring): macOS Keychain, Secret Service, Windows Credential Manager.
+- Cloudflare R2 (https://developers.cloudflare.com/r2/): S3-compatible object storage.
 
-**Comparable products and their cryptographic shapes**
-- **Signal / WhatsApp / Messenger Secret Conversations** — Signal Protocol (X3DH + Double Ratchet). Pairwise sessions, Sender Keys for groups. Pollis differs by using MLS, which provides better asymptotic group performance and continuous group authentication. Pollis matches Signal on E2EE messaging and also implements Signal-style 60-digit safety numbers for out-of-band human verification (§6.5), **layered on top of** per-device cross-signing certificates issued by the user's `account_id_pub`. The two mechanisms cover different threats: cross-signing protects the MLS tree from server-injected rogue devices (protocol level); safety numbers + TOFU pinning catch the case where a server (or anyone with Turso write access) swaps a peer's `account_id_pub` itself (account-key level), now additionally backed by a published append-only transparency log of every key version (§6.9), so the swap is not merely caught on the next message but is permanently auditable by anyone. Both run automatically. On every inbound DM message *and* on every group-reconcile commit, the batch TOFU helper (`batch_check_and_pin_account_keys` in `pollis-core/src/commands/safety.rs`) pins first-seen keys and emits a `KeyChanged` realtime event on mismatch — surfacing an inline banner in every conversation the affected peer is in and clearing the verified shield in member lists, DM lists, and channel author labels.
-- **Wire / Element X / Webex** — also MLS-based, all using OpenMLS or equivalent. Pollis is in the same cipher-suite tier (suite 1) as the public references for these deployments.
-- **Matrix / Element (legacy)** — Megolm + Olm. Adds key backup, which Pollis intentionally does not.
-- **Slack / Microsoft Teams** — TLS-in-transit, server-side at-rest encryption, no E2EE on messages or media. Pollis differs categorically: server operators can read Slack/Teams content; they cannot read Pollis messages.
-- **Discord** — TLS-in-transit, no E2EE on messages, **DAVE protocol** (MLS for key agreement, SFrame for media frame encryption) provides E2EE for audio and video in DMs, group DMs, voice channels, and Go Live streams as of September 2024. Pollis matches Discord on voice: §10.2 applies AES-128-GCM frame-level encryption via libwebrtc's `FrameCryptor` keyed by an MLS-exporter-derived shared secret, so the LiveKit SFU does not see audio plaintext, the same shape as DAVE. Pollis is *ahead* on messages (Discord chat is plaintext at rest on the server; Pollis chat is MLS-encrypted) and matched on voice.
-- **iMessage** — pairwise E2EE per device; per-user multi-device fan-out at send time; iCloud Messages backup historically held by Apple (and therefore subject to Apple's key custody) and only end-to-end encrypted when the user has opted into Advanced Data Protection (iOS 16.2+, December 2022). Pollis differs by using MLS group state instead of pairwise fan-out, and by not implementing any backup mechanism — Pollis has no equivalent to either default-iCloud or ADP-iCloud Messages backup.
-- **1Password** — Secret Key + master password, with PBKDF2-HMAC-SHA256 (650k iterations as of 2023) stretching the master password and the Secret Key folded in as additional KDF input. Pollis' Secret Key + PIN combination is shaped similarly in spirit (a user-held high-entropy secret combined with a low-entropy local factor), with two implementation differences: Pollis uses Argon2id rather than PBKDF2 for the local-factor KDF, and Pollis' Secret Key wraps the *account identity key* on the server (HKDF-SHA256 + AES-256-GCM) rather than being mixed into the password KDF. The two roles 1Password merges into one master-password unlock, Pollis splits across the PIN (device unlock) and the Secret Key (server-side recovery wrap).
+**Comparable products**
+- **Signal / WhatsApp / Messenger Secret Conversations:** Signal Protocol (X3DH + Double Ratchet), pairwise sessions, Sender Keys for groups. Pollis uses MLS for better asymptotic group cost and continuous group authentication. It has Signal-style 60-digit safety numbers with TOFU pinning (§5.4) on top of per-device cross-signing (§5.3), backed by the account-key transparency log (§6.9). Cross-signing covers server-injected devices; safety numbers, pinning and the log cover a swapped account key.
+- **Wire / Element X / Webex:** also MLS. Their public deployments use the RFC 9420 mandatory suite `0x0001`, which Pollis ran until #669; Pollis now runs the PQ suite `0x0052` (§6.1).
+- **Matrix / Element (legacy):** Megolm + Olm, with server-side key backup, which Pollis deliberately omits.
+- **Slack / Microsoft Teams:** TLS in transit, server-side at-rest encryption, no E2EE for messages or media. Their operators can read content; Pollis's cannot.
+- **Discord:** no E2EE for messages. The DAVE protocol (MLS key agreement, SFrame media encryption) provides E2EE for audio and video in DMs, group DMs, voice channels and Go Live since September 2024. Pollis's voice design (§10.2) has the same shape; its messages are also E2EE.
+- **iMessage:** pairwise E2EE per device with per-user fan-out at send time. iCloud Messages backup is held under Apple's keys unless the user enables Advanced Data Protection (iOS 16.2+, December 2022). Pollis uses MLS group state and has no backup of any kind.
+- **1Password:** Secret Key + master password, with PBKDF2-HMAC-SHA256 (650k iterations as of 2023) and the Secret Key mixed into the KDF. Pollis pairs a high-entropy Secret Key with a low-entropy local factor too, but uses Argon2id for the PIN, and its Secret Key wraps the account identity key on the server (HKDF-SHA256 + AES-256-GCM) rather than feeding the PIN KDF. Pollis splits device unlock (PIN) from server-side recovery (Secret Key).
