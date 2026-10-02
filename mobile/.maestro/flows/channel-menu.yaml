@@ -82,3 +82,12 @@ tags:
 - assertVisible:
     id: "screen-chat"
 - takeScreenshot: channel-menu-04-closed
+
+
+# iOS edge swipe-back is NOT asserted here, deliberately: Maestro's
+# XCUITest-synthesized drags never trigger UIKit's edge-pan recognizer — not
+# even with the native `default` push (verified 2026-10-02 with several
+# start/end/duration variants). Swipe-back after the faster `simple_push`
+# (lib/transitions.ts, with `customAnimationOnSwipe`) is a manual check on a
+# device: drill into a channel, swipe from the left edge, it must track the
+# finger and pop.

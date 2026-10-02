@@ -19,8 +19,11 @@ type StackOptions = Exclude<
 //   `slide_from_bottom`, `fade` and `fade_from_bottom`, never for the native
 //   `slide_from_right` push. So drill-in uses `simple_push`: the same
 //   horizontal push minus the header cross-fade we never show anyway
-//   (`headerShown: false`). The edge swipe-back stays the native interactive
-//   pop because `customAnimationOnSwipe` is left off.
+//   (`headerShown: false`). `customAnimationOnSwipe` is REQUIRED with it:
+//   without it UIKit's native edge-swipe begins, but react-native-screens
+//   hands the pop a non-interactive custom animator and the swipe never pops
+//   (caught by the channel-menu Maestro flow). With it, the library's own
+//   edge recognizer drives the custom animation interactively.
 // - Android ignores `animationDuration` entirely; each animation type has a
 //   fixed native duration. `slide_from_right` / `slide_from_bottom` run at the
 //   system medium time (400 ms); `ios_from_right` runs at the short time
@@ -30,7 +33,11 @@ const DURATION_MS = 200;
 
 /** Drill-in: tab → group → channel → thread, and back. */
 export const drillIn: StackOptions = Platform.select({
-  ios: { animation: "simple_push", animationDuration: DURATION_MS },
+  ios: {
+    animation: "simple_push",
+    animationDuration: DURATION_MS,
+    customAnimationOnSwipe: true,
+  },
   default: { animation: "ios_from_right" },
 });
 
