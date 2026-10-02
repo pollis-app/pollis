@@ -342,8 +342,11 @@ uniffi-bindgen-react-native build ios --config ubrn.config.yaml --and-generate \
 # the xcframework without simulator slices, so re-run without it before going
 # back to `pnpm expo run:ios` on a simulator.
 
-# 2. Native project + pods
+# 2. Native project + pods (`--ignore-workspace`: from mobile/ a bare
+#    `pnpm install` installs the ROOT workspace instead, and the archive then
+#    dies in Metro on a missing module such as react-i18next)
 cd ../..
+pnpm install --ignore-workspace --frozen-lockfile
 pnpm expo prebuild -p ios
 cd ios && pod install && cd ..
 
@@ -352,6 +355,9 @@ xcodebuild -workspace ios/Pollis.xcworkspace -scheme Pollis \
   -configuration Release -destination 'generic/platform=iOS' \
   archive -archivePath build/Pollis.xcarchive \
   DEVELOPMENT_TEAM=9JF7WWYMU2 CODE_SIGNING_ALLOWED=NO
+# 4. Give the unsigned app its entitlements, or push is silently lost (below).
+codesign -f -s - --entitlements ios/Pollis/Pollis.entitlements \
+  build/Pollis.xcarchive/Products/Applications/Pollis.app
 xcodebuild -exportArchive -archivePath build/Pollis.xcarchive \
   -exportOptionsPlist store/ExportOptions.plist -exportPath build/export \
   -allowProvisioningUpdates
@@ -363,24 +369,42 @@ so it fails. Signing at export instead needs only a distribution cert, which
 `-allowProvisioningUpdates` cloud-mints from the Xcode Apple ID session (no EAS
 account exists, deliberately — `eas.json` is vestigial).
 
+**Step 4 is load-bearing.** An unsigned archive carries no entitlements, and
+the export signs with only the entitlements the archived binary *requests* —
+it does not copy them from the profile. So `aps-environment` (which the store
+profile allows) silently vanished from the 2026-08 and first 2026-10 IPAs, and
+the app would have shipped unable to receive push. Ad-hoc signing (`-s -`) with
+`Pollis.entitlements` records the request; the export re-signs with the
+distribution cert and maps `development` → `production` from the profile. No
+local distribution identity is needed — it is cloud-managed.
+
 `store/ExportOptions.plist` (committed — `ios/` is generated, so it can't live
 there) sets `method: app-store-connect`, `teamID: 9JF7WWYMU2`,
 `uploadSymbols: true`. Upload the resulting `.ipa` with Xcode Organizer or
 `xcrun altool`/Transporter.
 
-Worth checking on the exported `.ipa` before an upload — all four held on the
-2026-08-21 build:
+Check the exported `.ipa` before an upload — all held on the 2026-10-02 build
+(1.0.0 / 1000000, the first ever uploaded):
 
 ```bash
 unzip -q build/export/Pollis.ipa -d /tmp/ipa
 codesign -dvvv /tmp/ipa/Payload/Pollis.app          # Authority=Apple Distribution
-codesign -d --entitlements :- /tmp/ipa/Payload/Pollis.app   # get-task-allow=false
+codesign -d --entitlements :- /tmp/ipa/Payload/Pollis.app   # get-task-allow=false, aps-environment=production
 /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' /tmp/ipa/Payload/Pollis.app/Info.plist
 strings /tmp/ipa/Payload/Pollis.app/main.jsbundle | grep -o 'https://api[a-z.-]*pollis.com'
 ```
 
-That last one is the one people forget: it is the only direct proof the shipped
+The bundle-URL check is the one people forget: it is the only direct proof the shipped
 JS bundle inlined the **prod** DS and not api-dev.
+
+Upload with the ASC API key (`~/.appstoreconnect/private_keys/AuthKey_<id>.p8`,
+id + issuer in Doppler `prd_prod`):
+
+```bash
+xcrun altool --upload-app -f build/export/Pollis.ipa -t ios \
+  --apiKey "$(doppler secrets get ASC_KEY_ID -p pollis -c prd_prod --plain)" \
+  --apiIssuer "$(doppler secrets get ASC_ISSUER_ID -p pollis -c prd_prod --plain)"
+```
 
 **Deployment target.** `modules/pollis-native/ubrn.config.yaml` pins
 `IPHONEOS_DEPLOYMENT_TARGET = "15.1"` via its ios `cargoExtras`
@@ -421,10 +445,35 @@ encryption declaration to ANSSI if distributing in France. Do not flip this to
 
 ```bash
 cd mobile
-pnpm expo prebuild -p android
+source android-env.sh
+pnpm install --ignore-workspace --frozen-lockfile
+# Rust core for every Android ABI, release profile
+(cd modules/pollis-native && uniffi-bindgen-react-native build android \
+  --config ubrn.config.yaml --and-generate --release)
+pnpm expo prebuild -p android --no-install
 cd android && ./gradlew :app:bundleRelease
-# → android/app/build/outputs/bundle/release/app-release.aab
+# → android/app/build/outputs/bundle/release/app-release.aab  (~180 MB, 4 ABIs)
 ```
+
+Verify, then upload with `scripts/play-publish.py` (Play Developer API through
+the `play-publisher@pollis.iam.gserviceaccount.com` service account; key in
+Doppler `PLAY_SERVICE_ACCOUNT_JSON`, copy in 1Password):
+
+```bash
+jarsigner -verify -certs android/app/build/outputs/bundle/release/app-release.aab  # CN=Daniel Kral, OU=Pollis
+unzip -p android/app/build/outputs/bundle/release/app-release.aab base/assets/index.android.bundle \
+  | strings | grep -o 'https://api[a-z.-]*pollis.com'                              # prod DS only
+scripts/play-publish.py upload --track alpha --status draft --name "1.0.0 (1000000)"
+scripts/play-publish.py listing --icon <512px.png> [--feature-graphic <1024x500.png>] [--phone <shots>]
+```
+
+`listing` pulls the title/short/full description from `docs/store-listing.md`
+(the same parser the ASC metadata script uses). Every run is one Play *edit*:
+committed on success, discarded on any error. The service account needs, per
+app, *Release to testing tracks*, *Manage testing tracks*, and *Manage store
+presence* for `listing`. Without that last one the edit commits are refused
+with a 403. The first `upload` (2026-10-02, versionCode 1000000, closed track
+`alpha`, draft) also enrolled the app in Play App Signing with the upload key.
 
 Release signing is wired by `plugins/withReleaseSigning.js` (registered in
 `app.json`), a local Expo config plugin that patches the generated

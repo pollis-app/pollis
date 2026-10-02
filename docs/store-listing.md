@@ -7,7 +7,10 @@ mobile app (`mobile/`, bundle/package id `com.pollis.mobile`). Compliance-questi
 fill-the-form order, and repeats a compliance answer only where a store form asks for it.
 
 **Publisher context:** published by **Daniel Kral, an individual developer** (no corporation, no
-D-U-N-S). The seller name shown on both stores will be the personal name — that is how individual
+D-U-N-S). Developer accounts: **Apple** — `dankral01@gmail.com` (team `9JF7WWYMU2`);
+**Google Play** — `dan@pollis.com`. They differ deliberately for now; consolidating means paying
+for a second Apple membership, deferred until the app earns revenue. The public support contact
+on both listings is `support@pollis.com`. The seller name shown on both stores will be the personal name — that is how individual
 accounts work on both stores, and there is no way around it short of forming an entity.
 
 ---
@@ -106,7 +109,7 @@ rejection under 2.3.7.
 | Field | Value |
 |---|---|
 | Marketing URL | `https://pollis.com` |
-| Support URL | `https://pollis.com/faq.html` (support contact: `dankral01@gmail.com`) |
+| Support URL | `https://pollis.com/faq.html` (support contact: `support@pollis.com`) |
 | Privacy Policy URL (both stores) | `https://pollis.com/privacy.html` |
 | Terms of Service / EULA | `https://pollis.com/terms.html` (App Store: leave "standard Apple EULA" selected unless you want the custom one; Play: enter the URL) |
 | Play account-deletion URL (required — Play asks for a web resource describing deletion) | `https://pollis.com/privacy.html#deletion` |
@@ -129,13 +132,12 @@ moderation the product cannot perform.
 - User-generated content / communication features: **Yes — users can communicate and share
   content, and it is not moderated** (E2EE). Declare the safety controls that exist: block user,
   and safety-number verification.
-- Expected result: with content answers all "None" the floor would be 4+, but the
-  unmoderated-communication answers push messengers into the mature tier. Comparable apps:
-  Telegram and Discord are 17+ on the App Store; Signal and WhatsApp have historically sat at
-  12+. Under Apple's revised tier set (4+/9+/13+/16+/18+, rolled out from 2025) expect the
-  questionnaire to compute **16+ or 18+**; accept the computed tier. Recommendation: answer
-  honestly and let it land at the mature tier rather than gaming the questionnaire down to 4+ —
-  an "anonymous-adjacent unmoderated chat rated 4+" is exactly the profile App Review bounces.
+- **Actual result (set 2026-10-02):** the honest answers above computed **4+** — Apple's revised
+  questionnaire records messaging/UGC as descriptors without raising the tier. The owner set
+  `ageRatingOverrideV2 = THIRTEEN_PLUS` (**13+**, the minimum the owner will accept), since an
+  unmoderated chat app at 4+ is the profile App Review bounces. Comparable apps: Telegram and
+  Discord 17+, Signal and WhatsApp 12+/13+. The questionnaire answers stay honest; the override
+  only raises the tier, never lowers it.
 
 **Google Play (IARC questionnaire):**
 - Users interact: **Yes.** Users can exchange content that is not moderated: **Yes.**
@@ -172,11 +174,9 @@ and note E2EE in the review notes.
 **Tracking section:** "Do you or your third-party partners use data for tracking?" → **No.**
 (`NSPrivacyTracking=false`, no tracking domains, no ATT prompt needed.)
 
-**Also required by App Review (separate from the label):** in-app **account deletion**. The
-delete-account flow exists in `pollis-core` (`delete_account`) and desktop's Security page, but
-**the mobile app has no delete-account UI yet — this is a submission blocker for both stores**
-(Apple guideline 5.1.1(v); Play's account-deletion policy). Wire a mobile Settings → Security →
-Delete account path before submitting, or expect rejection.
+**Also required by App Review (separate from the label):** in-app **account deletion** — shipped
+on mobile under Self → Security (see §8.1), which satisfies Apple 5.1.1(v) and Play's
+account-deletion policy.
 
 ---
 
@@ -190,7 +190,7 @@ Full reasoning in `docs/mobile-compliance-answers.md` §3. Form answers:
 - Is all user data encrypted in transit? → **Yes** (TLS everywhere; message content additionally
   E2EE).
 - Do you provide a way for users to request data deletion? → **Yes** — in-app account deletion
-  (see the blocker note in §3 above: must exist on mobile before answering this) plus
+  (Self → Security on mobile) plus
   `https://pollis.com/privacy.html#deletion`.
 
 Per-type declarations (each: **collected**, **not shared**, **not processed ephemerally**,
@@ -217,10 +217,11 @@ The owner is the exporter of record.
 - **Does the app use encryption? YES.** Standard, published algorithms only: MLS (RFC 9420 —
   ChaCha20-Poly1305, HKDF-SHA-384, X25519 + ML-KEM-768 hybrid key agreement, ML-DSA-44
   signatures), AES-256-GCM for attachments, Ed25519. Nothing proprietary or non-standard.
-- **Apple's `ITSAppUsesNonExemptEncryption`: `YES` (true).** E2EE messaging is well past the
-  HTTPS/authentication-only exemptions, so "No" would be false. Set it in `mobile/app.json` →
-  `expo.ios.infoPlist` once the owner is ready to stand behind the filing status (deliberately
-  not committed yet — see mobile-compliance-answers §2.1).
+- **Apple's `ITSAppUsesNonExemptEncryption`: `NO` (false)**, set in `mobile/app.json`. The key
+  asks about Apple's *documentation* exemption, not the EAR: standard algorithms, no
+  proprietary crypto and no French distribution need no uploaded documentation. It flips to
+  `true` plus an `ITSEncryptionExportComplianceCode` only when France is added — see
+  mobile-compliance-answers §2.1. The BIS report below is still owed regardless.
 - **Classification:** mass-market software using standard crypto → self-classified
   **ECCN 5D992.c** via the **Cryptography Note (Note 3 to Category 5, Part 2)** — generally
   available to the public, installed by the user without supplier support, standard crypto —
@@ -243,6 +244,10 @@ The owner is the exporter of record.
 ---
 
 ## 6. Google Play — new personal developer account requirements
+
+**Account status (2026-10-02):** the earlier Play account was closed by Google. A new personal
+developer account was opened under **`dan@pollis.com`** and is in identity verification. The upload keystore (`~/.pollis/pollis-upload.jks`) is unaffected
+— it is not tied to any account; Play App Signing enrolls it at the first upload.
 
 Personal (non-organization) Play developer accounts created after 13 Nov 2023 must, before
 production access is granted:
@@ -314,8 +319,9 @@ do not re-litigate them from this list's old wording.
 1. ~~**Mobile in-app account deletion UI**~~ — **DONE.** Self → Security carries the
    typed-DELETE full-screen confirm → `delete_account` + best-effort `wipe_local_data`
    → sign-out (App Store 5.1.1(v)).
-2. ~~**`ITSAppUsesNonExemptEncryption`**~~ — **DONE.** `app.json` sets it `true`, and the
-   signed IPA's `Info.plist` carries it. See §5 for why `true` is the honest answer.
+2. ~~**`ITSAppUsesNonExemptEncryption`**~~ — **DONE.** `app.json` sets it `false` (France
+   excluded); `true` was refused at upload (ITMS-90592) without an Encryption Documentation
+   code. See §5 and mobile-compliance-answers §2.1.
 3. **BIS annual report + ANSSI France declaration** — still outstanding. File (or restrict
    France) before release (§5). Operational, not code.
 4. ~~**SystemBootTime / required-reason APIs**~~ — **DONE, and verified in the binary**
@@ -343,3 +349,38 @@ do not re-litigate them from this list's old wording.
 
 So the iOS-side remainder is **§3 (export paperwork)** and **screenshots (§7)** — everything
 else on this list is satisfied.
+
+---
+
+## 9. App Review sign-in
+
+Both stores require a working login for review, and Pollis signs in with an emailed one-time
+code that a reviewer cannot receive. The DS therefore honours **`APP_REVIEW_LOGIN`**
+(`<email>:<6 digits>`, Doppler `prd_prod`, synced like every DS secret): for that one address
+the code is fixed and no email is sent. Throttle, expiry, single-use and the 6-guess lockout
+are unchanged, and the fixed code signs in no other address (`pollis-delivery/src/otp.rs`
+`ReviewLogin`, with tests). Read the live value with
+`doppler secrets get APP_REVIEW_LOGIN -p pollis -c prd_prod --plain` — never commit it.
+
+A new device on an account that already has an identity must enroll (sibling approval or
+recovery key). Apple and Google review on different devices, and a re-review may be on yet
+another, so the review notes carry the account's **recovery key** too. Generate it once by
+signing in on a device you own, keeping the emergency kit, and leave that account free of any
+real data.
+
+**Review notes (both stores) — fill in the bracketed values:**
+
+> Sign-in: tap "Continue", enter `[review email]`, then enter the code `[code]`. No email is
+> sent to that address; the code is fixed for review.
+> If the app asks to approve this new device, choose "Use recovery key" and enter
+> `[recovery key]`.
+> Pollis is end-to-end encrypted messaging. To try it: create a group, open its channel, and
+> send a message; or open Self → Security to see devices, safety numbers, and account deletion.
+> Voice/video calls are not part of the mobile app.
+
+App Store Connect: App Review Information → Sign-in required → username = the review email,
+password = the code, and the notes above. Play Console: App content → App access → "All or
+some functionality is restricted" → add the same instructions.
+
+Changing the code: update Doppler and run `delivery-deploy-prod` with `force_restart: true`
+(a secret-only change does not restart the container), then update both stores' review notes.

@@ -100,6 +100,9 @@ const SECRET_KEYS = [
   // here means the DS sends unauthenticated, which Expo rejects outright
   // once Enhanced Security for Push Notifications is enabled.
   "EXPO_TOKEN",
+  // `<email>:<6 digits>` — the one account App Store / Play review signs in
+  // with; that address gets this fixed code and no email (otp.rs ReviewLogin).
+  "APP_REVIEW_LOGIN",
 ] as const;
 
 interface SecretStoreBinding {

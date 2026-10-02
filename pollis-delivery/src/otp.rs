@@ -86,6 +86,50 @@ pub struct OtpConfig {
     /// code (#1088) — without it an attacker could mint unbounded concurrently
     /// valid codes for a victim's mailbox.
     pub max_sends_per_window: u32,
+    /// The one account App Store / Play review signs in with (env
+    /// `APP_REVIEW_LOGIN`). Reviewers cannot read a mailbox we own, so for this
+    /// single address the code is fixed instead of random and no email is sent.
+    /// See [`ReviewLogin`].
+    pub review_login: Option<ReviewLogin>,
+}
+
+/// A store-review sign-in: one exact address and the fixed code that signs it
+/// in. Parsed from `APP_REVIEW_LOGIN=<email>:<6 digits>` — one value rather
+/// than two env vars so "an address with no code" is not configurable.
+///
+/// The fixed code replaces only the *random generation* and the *email send*.
+/// Everything else is the ordinary path: the code is still stored salted and
+/// hashed, still expires after `ttl_secs`, is still single-use, and the mailbox
+/// still locks out after `max_attempts` wrong guesses — so a stranger guessing
+/// at the review address has exactly the budget they have against any other.
+/// Sign-in only: an email-change challenge to this address is a normal random
+/// code, because the fixed code exists to get a reviewer *in*, not to authorize
+/// anything once there.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReviewLogin {
+    email: String,
+    code: String,
+}
+
+impl ReviewLogin {
+    /// Fields are private so this is the only constructor: a `ReviewLogin` is
+    /// always a normalized address and a code the client's six-cell input can
+    /// actually type.
+    pub fn parse(raw: &str) -> Result<Self, &'static str> {
+        let (email, code) = raw.trim().rsplit_once(':').ok_or("expected <email>:<code>")?;
+        let email = normalize_email(email);
+        if !email.contains('@') {
+            return Err("review email has no @");
+        }
+        if code.len() != 6 || !code.bytes().all(|b| b.is_ascii_digit()) {
+            return Err("review code must be exactly 6 digits");
+        }
+        Ok(Self { email, code: code.to_string() })
+    }
+
+    fn matches(&self, email: &str) -> bool {
+        normalize_email(email) == self.email
+    }
 }
 
 impl Default for OtpConfig {
@@ -99,6 +143,7 @@ impl Default for OtpConfig {
             max_attempts: 5,
             lockout_secs: 900,
             max_sends_per_window: 3,
+            review_login: None,
         }
     }
 }
@@ -120,7 +165,25 @@ impl OtpConfig {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(defaults.ttl_secs),
+            review_login: review_login_from_env(),
             ..defaults
+        }
+    }
+}
+
+/// A malformed `APP_REVIEW_LOGIN` disables the review login and says so at
+/// ERROR, rather than refusing to start: a typo in a store-review convenience
+/// must not take sign-in down for everyone else.
+fn review_login_from_env() -> Option<ReviewLogin> {
+    let raw = std::env::var("APP_REVIEW_LOGIN").ok().filter(|s| !s.trim().is_empty())?;
+    match ReviewLogin::parse(&raw) {
+        Ok(login) => {
+            tracing::info!("store-review sign-in enabled for {}", mask_email(&login.email));
+            Some(login)
+        }
+        Err(e) => {
+            tracing::error!("APP_REVIEW_LOGIN ignored: {e}");
+            None
         }
     }
 }
@@ -448,9 +511,14 @@ pub async fn process_request_otp_for(
     email: &str,
     purpose: OtpPurpose,
 ) {
-    let code = match &cfg.dev_otp {
-        Some(dev) => dev.clone(),
-        None => format!("{:06}", OsRng.gen_range(0..1_000_000u32)),
+    let review = cfg
+        .review_login
+        .as_ref()
+        .filter(|r| purpose == OtpPurpose::SignIn && r.matches(email));
+    let code = match (&cfg.dev_otp, review) {
+        (Some(dev), _) => dev.clone(),
+        (None, Some(r)) => r.code.clone(),
+        (None, None) => format!("{:06}", OsRng.gen_range(0..1_000_000u32)),
     };
 
     let outcome = otp.prepare(email, &code, cfg, crate::util::now_unix());
@@ -467,6 +535,11 @@ pub async fn process_request_otp_for(
             // DEV_OTP: skip the real send entirely.
             if cfg.dev_otp.is_some() {
                 tracing::info!("DEV_OTP active — skipping email send for {}", mask_email(email));
+                return;
+            }
+            // Nobody reads the review mailbox; the reviewer already has the code.
+            if review.is_some() {
+                tracing::info!("store-review sign-in requested for {}", mask_email(email));
                 return;
             }
             if let Some(key) = &cfg.resend_api_key {
@@ -1049,6 +1122,86 @@ mod tests {
         let mut kept: Vec<&str> = guard.keys().map(|k| k.as_str()).collect();
         kept.sort();
         assert_eq!(kept, vec!["live@x.com", "locked@x.com"]);
+    }
+
+    fn review_cfg() -> OtpConfig {
+        OtpConfig {
+            review_login: Some(ReviewLogin::parse("Review@Pollis.com:424242").unwrap()),
+            ..cfg()
+        }
+    }
+
+    #[test]
+    fn a_review_login_must_be_an_address_and_six_digits() {
+        assert!(ReviewLogin::parse("review@pollis.com:424242").is_ok());
+        for bad in [
+            "review@pollis.com",
+            "review@pollis.com:",
+            "review@pollis.com:42424",
+            "review@pollis.com:4242424",
+            "review@pollis.com:42424a",
+            "pollis.com:424242",
+            ":424242",
+        ] {
+            assert!(ReviewLogin::parse(bad).is_err(), "{bad:?} must be refused");
+        }
+    }
+
+    /// The review address signs in with the fixed code, matched in any case.
+    #[tokio::test]
+    async fn the_review_address_gets_the_fixed_code() {
+        let store = OtpStore::default();
+        let cfg = review_cfg();
+        process_request_otp(&store, &cfg, " REVIEW@pollis.com ").await;
+        assert_eq!(store.check("review@pollis.com", "424242", &cfg, crate::util::now_unix()), VerifyOutcome::Ok);
+    }
+
+    /// Every other address still gets a random code — the fixed code is not a
+    /// master key.
+    #[tokio::test]
+    async fn the_fixed_code_does_not_sign_in_any_other_address() {
+        let store = OtpStore::default();
+        let cfg = review_cfg();
+        process_request_otp(&store, &cfg, "alice@x.com").await;
+        assert_ne!(store.check("alice@x.com", "424242", &cfg, crate::util::now_unix()), VerifyOutcome::Ok);
+    }
+
+    /// Only sign-in is fixed; an email-change challenge to the review address
+    /// is an ordinary random code.
+    #[tokio::test]
+    async fn an_email_change_challenge_to_the_review_address_is_not_fixed() {
+        let store = OtpStore::default();
+        let cfg = review_cfg();
+        process_request_otp_for(&store, &cfg, "review@pollis.com", OtpPurpose::EmailChangeChallenge).await;
+        assert_ne!(store.check("review@pollis.com", "424242", &cfg, crate::util::now_unix()), VerifyOutcome::Ok);
+    }
+
+    /// The fixed code buys no extra guesses: the review mailbox locks out like
+    /// any other, and while locked even the right code is refused.
+    #[tokio::test]
+    async fn the_review_mailbox_still_locks_out() {
+        let store = OtpStore::default();
+        let cfg = review_cfg();
+        process_request_otp(&store, &cfg, "review@pollis.com").await;
+        let now = crate::util::now_unix();
+        for _ in 0..=cfg.max_attempts {
+            store.check("review@pollis.com", "000000", &cfg, now);
+        }
+        assert_eq!(store.check("review@pollis.com", "424242", &cfg, now), VerifyOutcome::LockedOut);
+    }
+
+    /// Single-use and unrequested-code rules still hold: without a request
+    /// there is nothing to verify, and a consumed code does not replay.
+    #[tokio::test]
+    async fn the_review_code_is_single_use_and_needs_a_request() {
+        let store = OtpStore::default();
+        let cfg = review_cfg();
+        let now = crate::util::now_unix();
+        assert_eq!(store.check("review@pollis.com", "424242", &cfg, now), VerifyOutcome::NotFound);
+        process_request_otp(&store, &cfg, "review@pollis.com").await;
+        assert_eq!(store.check("review@pollis.com", "424242", &cfg, now), VerifyOutcome::Ok);
+        store.consume("review@pollis.com");
+        assert_eq!(store.check("review@pollis.com", "424242", &cfg, now), VerifyOutcome::NotFound);
     }
 
     #[test]

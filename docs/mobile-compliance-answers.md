@@ -124,25 +124,27 @@ HTTPS-only apps take.
 
 ### 2.1 `ITSAppUsesNonExemptEncryption`
 
-**Draft value: `YES` (true).**
+**Value: `NO` (false)** — decided by the owner 2026-10-02, replacing the earlier `YES` draft.
 
-Reasoning: Apple lets you answer *No* only if your app's encryption is limited to a short list of
-exemptions — calls to Apple's OS crypto, HTTPS/TLS, authentication-only use, or copyright
-protection. Pollis's encryption goes well past that: it is a core **E2EE messaging** feature.
-Therefore it uses *non-exempt* encryption and the honest answer is **Yes**.
+What the key means is Apple's, not the EAR's: it asks whether the app uses encryption that is
+**not exempt from Apple's export-compliance *documentation* requirement**. Apple's own
+questionnaire treats standard, published algorithms (no proprietary crypto) in a mass-market app
+as needing no uploaded documentation **unless the app is distributed in France**, where the ANSSI
+declaration must be uploaded. Pollis uses only standard algorithms and is excluded from France
+until ANSSI is filed, so the documentation-exempt answer is `NO` — the same value Signal ships.
 
-Because the answer is Yes, App Store Connect will require export-compliance information on every
-version *unless* the key is set in the build. **Recommended wiring (owner's call — not committed
-here because it asserts the owner's legal position):** once the BIS self-classification below is
-in hand, set it in `app.json` so the question is answered at build time:
+This does **not** make Pollis exempt from US export rules. It is still self-classified 5D992.c
+under License Exception ENC §740.17(b)(1), and the **annual self-classification report (§2.3)
+must still be filed** by February 1 each year.
 
-```jsonc
-// mobile/app.json → expo.ios.infoPlist
-"ITSAppUsesNonExemptEncryption": true
-```
+The earlier `YES` draft read the key as the EAR's "non-exempt" and was rejected at upload: with
+`true`, App Store Connect refuses the binary (ITMS-90592) unless an approved Encryption
+Documentation record exists and its code is baked in as `ITSEncryptionExportComplianceCode`.
 
-It is left **unset** in-repo deliberately: setting it is the owner's declaration to make, and it
-should track the actual BIS filing status.
+**When France is added** (after the ANSSI declaration): create the Encryption Documentation in
+App Store Connect with the ANSSI receipt, wait for approval, then set
+`ITSAppUsesNonExemptEncryption: true` **and** `ITSEncryptionExportComplianceCode: "<code>"` in
+`mobile/app.json` → `expo.ios.infoPlist` before the next upload.
 
 ### 2.2 Which EAR exemption / classification applies
 
@@ -263,7 +265,7 @@ upward (comparable apps: Signal 17+, Discord 17+, Telegram 17+ on the App Store)
 |---|---|---|
 | `PrivacyInfo.xcprivacy` + `app.json` wiring | — | **DONE** |
 | SystemBootTime decision (WebRTC linkage) | verify at EAS build (PL-18) | flagged UNVERIFIED above |
-| `ITSAppUsesNonExemptEncryption` value | **owner sets** once BIS filing started | drafted (§2.1) |
+| `ITSAppUsesNonExemptEncryption` value | **set `false`** 2026-10-02 (France excluded) | done (§2.1) |
 | BIS/NSA export self-classification + annual report | **owner files** | drafted (§2.3) |
 | App Store "App Privacy" nutrition label | **owner files** | drafted (§1, §0) |
 | Play "Data safety" form | **owner files** | drafted (§3) |

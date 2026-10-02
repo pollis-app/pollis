@@ -61,6 +61,7 @@
     { "binding": "LOG_DB_URL", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_LOG_DB_URL" },
     { "binding": "LOG_DB_ADMIN_TOKEN", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_LOG_DB_ADMIN_TOKEN" },
     { "binding": "RESEND_API_KEY", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_RESEND_API_KEY" },
+    { "binding": "APP_REVIEW_LOGIN", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_APP_REVIEW_LOGIN" },
     { "binding": "LIVEKIT_API_KEY", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_LIVEKIT_API_KEY" },
     { "binding": "LIVEKIT_API_SECRET", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_LIVEKIT_API_SECRET" },
     { "binding": "LIVEKIT_URL", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_LIVEKIT_URL" },

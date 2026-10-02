@@ -22,7 +22,7 @@
         "tinted": "./assets/ios-tinted.png"
       },
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": true,
+        "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "Pollis needs your camera to scan the pairing QR code from your desktop.",
         "UISupportedInterfaceOrientations": [
           "UIInterfaceOrientationPortrait"
