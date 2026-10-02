@@ -9,6 +9,7 @@ import { dayKey, dayLabel, timeLabel } from "../../components/chat/dates";
 import { DaySeparator } from "../../components/chat/DaySeparator";
 import { MessageRow } from "../../components/chat/MessageRow";
 import { Composer } from "../../components/chat/Composer";
+import { authorName } from "../../lib/authorName";
 import { EditBar } from "../../components/chat/EditBar";
 import { MessageActionsSheet } from "../../components/chat/MessageActionsSheet";
 import { ChannelMenuSheet } from "../../components/chat/ChannelMenuSheet";
@@ -98,7 +99,7 @@ function TextChat(props: ChatViewProps = {}) {
   // Newest-first (matches the inverted list's render order).
   const messages = useMemo(() => flattenPages(data), [data]);
   const messageIds = useMemo(
-    () => messages.filter((m) => !m.pending).map((m) => m.id),
+    () => messages.filter((m) => !m.pending && !m.failed).map((m) => m.id),
     [messages],
   );
   const { data: reactionsByMessage } = useConversationReactions(
@@ -363,8 +364,8 @@ function TextChat(props: ChatViewProps = {}) {
       const m = item.message;
       const mine = currentUser?.id === m.sender_id;
       const name =
-        m.sender_username ||
-        (mine ? t("chat.you") : t("chat:list.unknownAuthor"));
+        authorName(m.sender_id, m.sender_username, currentUser) ??
+        t("chat:list.unknownAuthor");
       return (
         <MessageRow
           testID={`row-message-${m.id}`}
@@ -376,6 +377,7 @@ function TextChat(props: ChatViewProps = {}) {
           text={m.content}
           attachments={m.attachments}
           pending={m.pending}
+          failed={m.failed}
           edited={!!m.edited_at}
           reactions={reactionsByMessage?.get(m.id)}
           currentUserId={currentUser?.id}
@@ -402,12 +404,12 @@ function TextChat(props: ChatViewProps = {}) {
                     params: { id: m.sender_id },
                   })
           }
-          onLongPress={m.pending ? undefined : () => setActionTarget(m)}
+          onLongPress={m.pending || m.failed ? undefined : () => setActionTarget(m)}
         />
       );
     },
     [
-      currentUser?.id,
+      currentUser,
       router,
       reactionsByMessage,
       toggleReaction,

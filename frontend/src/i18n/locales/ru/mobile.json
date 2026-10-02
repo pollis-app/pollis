@@ -95,8 +95,7 @@
     "reactionPillReacted_few": "{{emoji}} {{count}} реакции, вы отреагировали",
     "reactionPillReacted_many": "{{emoji}} {{count}} реакций, вы отреагировали",
     "reactionPillReacted_other": "{{emoji}} {{count}} реакции, вы отреагировали",
-    "sendFailed": "Не удалось отправить сообщение.",
-    "you": "вы"
+    "sendFailed": "Не удалось отправить сообщение."
   },
   "common": {
     "working": "Выполняется…"
@@ -318,11 +317,6 @@
         "showInlineTimestamps": "Показывать время рядом с сообщениями",
         "showMemberAvatars": "Показывать аватары участников"
       },
-      "density": {
-        "comfortable": "Просторная",
-        "compact": "Компактная"
-      },
-      "densityHeading": "Плотность",
       "notificationsOffSettings": "Выкл. — включите в настройках системы",
       "notificationsOffTap": "Выкл. — нажмите, чтобы включить",
       "notificationsOn": "Вкл. — будем уведомлять о новых сообщениях",
@@ -334,13 +328,7 @@
         "lilac": "Сиреневый",
         "mint": "Мятный",
         "rust": "Терракотовый"
-      },
-      "theme": {
-        "coal": "Уголь",
-        "paper": "Бумага",
-        "system": "Системная"
-      },
-      "themeHeading": "Тема"
+      }
     },
     "saved": {
       "empty": "Сохранённых сообщений нет. Чтобы сохранить сообщение, удерживайте его и выберите действие.",
@@ -388,7 +376,6 @@
     },
     "title": "Профиль",
     "userSettings": {
-      "avatarHint": "Составляется из первых двух символов имени пользователя.",
       "displayName": "Отображаемое имя",
       "handle": "Имя пользователя",
       "handleHint": "Другие участники смогут найти вас и написать вам по @handle.",

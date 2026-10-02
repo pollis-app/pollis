@@ -10,7 +10,6 @@ import {
   Body,
   SectionTitle,
   ListRow,
-  Chip,
   Toggle,
   Ctx,
 } from "../../components/ui";
@@ -48,9 +47,6 @@ const BEHAVIOR_KEYS = [
   { key: "reduce_motion", defaultOn: false },
 ] as const;
 
-const THEMES = ["Coal", "Paper", "System"] as const;
-const DENSITIES = ["Compact", "Comfortable"] as const;
-
 // The wire values above stay English; only the rendered label is keyed, one
 // literal call per value so `i18n-check` can see every key.
 function swatchLabel(t: TFunction, n: (typeof SWATCHES)[number]["n"]): string {
@@ -67,26 +63,6 @@ function swatchLabel(t: TFunction, n: (typeof SWATCHES)[number]["n"]): string {
       return t("mobile:self.preferences.swatch.lilac");
     case "Rust":
       return t("mobile:self.preferences.swatch.rust");
-  }
-}
-
-function themeLabel(t: TFunction, opt: (typeof THEMES)[number]): string {
-  switch (opt) {
-    case "Coal":
-      return t("mobile:self.preferences.theme.coal");
-    case "Paper":
-      return t("mobile:self.preferences.theme.paper");
-    case "System":
-      return t("mobile:self.preferences.theme.system");
-  }
-}
-
-function densityLabel(t: TFunction, opt: (typeof DENSITIES)[number]): string {
-  switch (opt) {
-    case "Compact":
-      return t("mobile:self.preferences.density.compact");
-    case "Comfortable":
-      return t("mobile:self.preferences.density.comfortable");
   }
 }
 
@@ -172,8 +148,6 @@ export default function Preferences() {
   const { accentHex, setAccent } = useTheme();
   const { data: prefs, update } = usePreferences();
 
-  const theme = prefs?.mobile_theme ?? "Coal";
-  const density = prefs?.mobile_density ?? "Compact";
   const behavior = prefs?.mobile_behavior ?? {};
   const sendReadReceipts =
     typeof prefs?.send_read_receipts === "boolean"
@@ -255,42 +229,6 @@ export default function Preferences() {
                 </Pressable>
               );
             })}
-          </View>
-        </View>
-
-        <View style={{ paddingHorizontal: 18, paddingTop: 18 }}>
-          <Text style={[ty.label, { marginBottom: 10 }]}>
-            {upper(t("mobile:self.preferences.themeHeading"))}
-          </Text>
-          <View style={{ flexDirection: "row", gap: 8 }}>
-            {THEMES.map((opt) => (
-              <Chip
-                key={opt}
-                testID={`chip-theme-${opt.toLowerCase()}`}
-                variant={theme === opt ? "on" : "default"}
-                onPress={() => update({ mobile_theme: opt })}
-              >
-                {themeLabel(t, opt)}
-              </Chip>
-            ))}
-          </View>
-        </View>
-
-        <View style={{ paddingHorizontal: 18, paddingTop: 18 }}>
-          <Text style={[ty.label, { marginBottom: 10 }]}>
-            {upper(t("mobile:self.preferences.densityHeading"))}
-          </Text>
-          <View style={{ flexDirection: "row", gap: 8 }}>
-            {DENSITIES.map((opt) => (
-              <Chip
-                key={opt}
-                testID={`chip-density-${opt.toLowerCase()}`}
-                variant={density === opt ? "on" : "default"}
-                onPress={() => update({ mobile_density: opt })}
-              >
-                {densityLabel(t, opt)}
-              </Chip>
-            ))}
           </View>
         </View>
 

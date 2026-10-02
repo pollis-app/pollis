@@ -99,8 +99,7 @@
     "reactionPillReacted_few": "{{emoji}} {{count}} تفاعلات، وقد تفاعلت",
     "reactionPillReacted_many": "{{emoji}} {{count}} تفاعلًا، وقد تفاعلت",
     "reactionPillReacted_other": "{{emoji}} {{count}} تفاعل، وقد تفاعلت",
-    "sendFailed": "تعذّر إرسال الرسالة.",
-    "you": "أنت"
+    "sendFailed": "تعذّر إرسال الرسالة."
   },
   "common": {
     "working": "جارٍ العمل…"
@@ -334,11 +333,6 @@
         "showInlineTimestamps": "إظهار الطوابع الزمنية داخل السطر",
         "showMemberAvatars": "إظهار الصور الرمزية للأعضاء"
       },
-      "density": {
-        "comfortable": "مريح",
-        "compact": "مضغوط"
-      },
-      "densityHeading": "الكثافة",
       "notificationsOffSettings": "مغلقة — فعّلها من إعدادات النظام",
       "notificationsOffTap": "مغلقة — انقر للتفعيل",
       "notificationsOn": "مفعّلة — ستصلك إشعارات بالرسائل الجديدة",
@@ -350,13 +344,7 @@
         "lilac": "ليلكي",
         "mint": "نعناعي",
         "rust": "صدئي"
-      },
-      "theme": {
-        "coal": "فحمي",
-        "paper": "ورقي",
-        "system": "النظام"
-      },
-      "themeHeading": "السمة"
+      }
     },
     "saved": {
       "empty": "لا توجد رسائل محفوظة. اضغط مطولًا على رسالة لحفظها.",
@@ -410,7 +398,6 @@
     },
     "title": "أنا",
     "userSettings": {
-      "avatarHint": "مشتقة من أول حرفين في اسم المستخدم.",
       "displayName": "اسم العرض",
       "handle": "اسم المستخدم",
       "handleHint": "يمكن للأعضاء الآخرين العثور عليك ومراسلتك عبر ‎@handle‎.",

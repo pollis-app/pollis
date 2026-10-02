@@ -91,8 +91,7 @@
     "reactWith": "React with {{emoji}}",
     "reactionPillReacted_one": "{{emoji}} {{count}} reaction, you reacted",
     "reactionPillReacted_other": "{{emoji}} {{count}} reactions, you reacted",
-    "sendFailed": "Couldn't send message.",
-    "you": "you"
+    "sendFailed": "Couldn't send message."
   },
   "common": {
     "working": "Working…"
@@ -308,11 +307,6 @@
         "showInlineTimestamps": "Show inline timestamps",
         "showMemberAvatars": "Show member avatars"
       },
-      "density": {
-        "comfortable": "Comfortable",
-        "compact": "Compact"
-      },
-      "densityHeading": "Density",
       "notificationsOffSettings": "Off — enable in system Settings",
       "notificationsOffTap": "Off — tap to enable",
       "notificationsOn": "On — new messages will notify you",
@@ -324,13 +318,7 @@
         "lilac": "Lilac",
         "mint": "Mint",
         "rust": "Rust"
-      },
-      "theme": {
-        "coal": "Coal",
-        "paper": "Paper",
-        "system": "System"
-      },
-      "themeHeading": "Theme"
+      }
     },
     "saved": {
       "empty": "No saved messages. Use the long-press action on a message to save it.",
@@ -372,7 +360,6 @@
     },
     "title": "Self",
     "userSettings": {
-      "avatarHint": "Derived from your handle's first two characters.",
       "displayName": "Display name",
       "handle": "Handle",
       "handleHint": "Other members can find and DM you with @handle.",

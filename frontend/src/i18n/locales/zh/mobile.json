@@ -89,8 +89,7 @@
     "openThread_other": "打开话题，{{count}} 条回复",
     "reactWith": "用 {{emoji}} 回应",
     "reactionPillReacted_other": "{{emoji}} {{count}} 个回应，包括你",
-    "sendFailed": "无法发送消息。",
-    "you": "你"
+    "sendFailed": "无法发送消息。"
   },
   "common": {
     "working": "处理中…"
@@ -294,11 +293,6 @@
         "showInlineTimestamps": "显示行内时间戳",
         "showMemberAvatars": "显示成员头像"
       },
-      "density": {
-        "comfortable": "宽松",
-        "compact": "紧凑"
-      },
-      "densityHeading": "密度",
       "notificationsOffSettings": "已关闭 — 请在系统「设置」中开启",
       "notificationsOffTap": "已关闭 — 点击开启",
       "notificationsOn": "已开启 — 有新消息时会通知你",
@@ -310,13 +304,7 @@
         "lilac": "丁香紫",
         "mint": "薄荷绿",
         "rust": "铁锈红"
-      },
-      "theme": {
-        "coal": "炭黑",
-        "paper": "纸白",
-        "system": "跟随系统"
-      },
-      "themeHeading": "主题"
+      }
     },
     "saved": {
       "empty": "暂无收藏的消息。长按消息即可收藏。",
@@ -355,7 +343,6 @@
     },
     "title": "我的",
     "userSettings": {
-      "avatarHint": "由你用户名的前两个字符生成。",
       "displayName": "显示名称",
       "handle": "用户名",
       "handleHint": "其他成员可以通过 @handle 找到你并发私信。",

@@ -91,8 +91,7 @@
     "reactWith": "Reaccionar con {{emoji}}",
     "reactionPillReacted_one": "{{emoji}} {{count}} reacción, has reaccionado",
     "reactionPillReacted_other": "{{emoji}} {{count}} reacciones, has reaccionado",
-    "sendFailed": "No se pudo enviar el mensaje.",
-    "you": "tú"
+    "sendFailed": "No se pudo enviar el mensaje."
   },
   "common": {
     "working": "Trabajando…"
@@ -302,11 +301,6 @@
         "showInlineTimestamps": "Mostrar la hora junto a cada mensaje",
         "showMemberAvatars": "Mostrar los avatares de los miembros"
       },
-      "density": {
-        "comfortable": "Cómoda",
-        "compact": "Compacta"
-      },
-      "densityHeading": "Densidad",
       "notificationsOffSettings": "Desactivadas: actívalas en los Ajustes del sistema",
       "notificationsOffTap": "Desactivadas: toca para activarlas",
       "notificationsOn": "Activadas: te avisaremos de los mensajes nuevos",
@@ -318,13 +312,7 @@
         "lilac": "Lila",
         "mint": "Menta",
         "rust": "Óxido"
-      },
-      "theme": {
-        "coal": "Carbón",
-        "paper": "Papel",
-        "system": "Sistema"
-      },
-      "themeHeading": "Tema"
+      }
     },
     "saved": {
       "empty": "No hay mensajes guardados. Mantén pulsado un mensaje para guardarlo.",
@@ -366,7 +354,6 @@
     },
     "title": "Tú",
     "userSettings": {
-      "avatarHint": "Se genera a partir de los dos primeros caracteres de tu nombre de usuario.",
       "displayName": "Nombre preferido",
       "handle": "Nombre de usuario",
       "handleHint": "Los demás miembros pueden encontrarte y escribirte con @handle.",
