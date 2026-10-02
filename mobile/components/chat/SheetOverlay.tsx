@@ -35,7 +35,9 @@ export function SheetOverlay({
         onPress={(e) => e.stopPropagation()}
         accessible={false}
         style={{
-          backgroundColor: semantic.cardBg,
+          // Opaque: the sheet floats over the header and composer, and a
+          // translucent card let them show through its buttons (#1193).
+          backgroundColor: semantic.sheetBg,
           borderTopWidth: 1,
           borderTopColor: semantic.hair,
           paddingHorizontal: 18,

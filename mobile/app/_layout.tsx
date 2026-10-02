@@ -14,6 +14,7 @@ import {
 import { QueryClientProvider } from "@tanstack/react-query";
 import { useObserver } from "mobx-react-lite";
 import { palette } from "../theme/tokens";
+import { drillIn, settingsPage } from "../lib/transitions";
 import { ThemeProvider } from "../components/theme";
 import { queryClient } from "../lib/queryClient";
 import { initializeNativeBridge } from "../lib/native";
@@ -108,8 +109,8 @@ export default function RootLayout() {
                 contentStyle: { backgroundColor: palette.bg },
                 // Drilling further into a route (tab → group → channel) pushes
                 // the new screen in from the right; back reverses it. Settings
-                // pages override this to slide up from the bottom (below).
-                animation: "slide_from_right",
+                // pages override this (below). Timing lives in lib/transitions.
+                ...drillIn,
               }}
             >
               {/* Boot router cuts in with nothing. Entering the tab container
@@ -133,37 +134,37 @@ export default function RootLayout() {
               <Stack.Screen name="chat/[id]" />
               <Stack.Screen name="chat/thread" />
               <Stack.Screen name="user/[id]" />
-              {/* Personal settings pages pop up from the bottom (pushing the
-                  current screen off), and reverse on back — a full-screen push,
-                  not a bottom-sheet overlay. */}
+              {/* Personal settings pages pop up from the bottom on iOS (fade on
+                  Android — see lib/transitions), pushing the current screen off
+                  and reversing on back — a full-screen push, not an overlay. */}
               <Stack.Screen
                 name="self/preferences"
-                options={{ animation: "slide_from_bottom" }}
+                options={settingsPage}
               />
               <Stack.Screen
                 name="self/user-settings"
-                options={{ animation: "slide_from_bottom" }}
+                options={settingsPage}
               />
               <Stack.Screen
                 name="self/security"
-                options={{ animation: "slide_from_bottom" }}
+                options={settingsPage}
               />
               <Stack.Screen
                 name="self/blocked"
-                options={{ animation: "slide_from_bottom" }}
+                options={settingsPage}
               />
               <Stack.Screen
                 name="self/change-email"
-                options={{ animation: "slide_from_bottom" }}
+                options={settingsPage}
               />
               <Stack.Screen
                 name="self/saved"
-                options={{ animation: "slide_from_bottom" }}
+                options={settingsPage}
               />
               <Stack.Screen name="m/[...permalink]" />
               <Stack.Screen
                 name="self/delete-account"
-                options={{ animation: "slide_from_bottom" }}
+                options={settingsPage}
               />
             </Stack>
             </AutoLockProvider>
