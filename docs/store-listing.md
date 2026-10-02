@@ -215,10 +215,11 @@ The owner is the exporter of record.
 - **Does the app use encryption? YES.** Standard, published algorithms only: MLS (RFC 9420 —
   ChaCha20-Poly1305, HKDF-SHA-384, X25519 + ML-KEM-768 hybrid key agreement, ML-DSA-44
   signatures), AES-256-GCM for attachments, Ed25519. Nothing proprietary or non-standard.
-- **Apple's `ITSAppUsesNonExemptEncryption`: `YES` (true).** E2EE messaging is well past the
-  HTTPS/authentication-only exemptions, so "No" would be false. Set it in `mobile/app.json` →
-  `expo.ios.infoPlist` once the owner is ready to stand behind the filing status (deliberately
-  not committed yet — see mobile-compliance-answers §2.1).
+- **Apple's `ITSAppUsesNonExemptEncryption`: `NO` (false)**, set in `mobile/app.json`. The key
+  asks about Apple's *documentation* exemption, not the EAR: standard algorithms, no
+  proprietary crypto and no French distribution need no uploaded documentation. It flips to
+  `true` plus an `ITSEncryptionExportComplianceCode` only when France is added — see
+  mobile-compliance-answers §2.1. The BIS report below is still owed regardless.
 - **Classification:** mass-market software using standard crypto → self-classified
   **ECCN 5D992.c** via the **Cryptography Note (Note 3 to Category 5, Part 2)** — generally
   available to the public, installed by the user without supplier support, standard crypto —
@@ -317,8 +318,9 @@ do not re-litigate them from this list's old wording.
 1. ~~**Mobile in-app account deletion UI**~~ — **DONE.** Self → Security carries the
    typed-DELETE full-screen confirm → `delete_account` + best-effort `wipe_local_data`
    → sign-out (App Store 5.1.1(v)).
-2. ~~**`ITSAppUsesNonExemptEncryption`**~~ — **DONE.** `app.json` sets it `true`, and the
-   signed IPA's `Info.plist` carries it. See §5 for why `true` is the honest answer.
+2. ~~**`ITSAppUsesNonExemptEncryption`**~~ — **DONE.** `app.json` sets it `false` (France
+   excluded); `true` was refused at upload (ITMS-90592) without an Encryption Documentation
+   code. See §5 and mobile-compliance-answers §2.1.
 3. **BIS annual report + ANSSI France declaration** — still outstanding. File (or restrict
    France) before release (§5). Operational, not code.
 4. ~~**SystemBootTime / required-reason APIs**~~ — **DONE, and verified in the binary**
