@@ -6,6 +6,7 @@ import {
   Pressable,
   ScrollView,
   KeyboardAvoidingView,
+  Platform,
   StyleProp,
   ViewStyle,
   TextStyle,
@@ -16,6 +17,7 @@ import { useTranslation } from "react-i18next";
 import { palette, semantic, type as ty, r, space, layout } from "../theme/tokens";
 import { useTheme } from "./theme";
 import { useLayoutClass } from "../hooks/useLayoutClass";
+import { useAndroidKeyboardInset } from "../hooks/useAndroidKeyboardInset";
 import { Icon } from "./icons";
 
 /* ── Text ─────────────────────────────────────────────────────────── */
@@ -59,6 +61,7 @@ export function Screen({
   useTheme();
   const cls = useLayoutClass();
   const centerBody = centered && cls === "regular";
+  const androidKeyboard = useAndroidKeyboardInset();
   return (
     <SafeAreaView
       testID={testID}
@@ -68,11 +71,15 @@ export function Screen({
       {/* Every screen pins its primary action to <BottomAction> at the
           bottom, with a <Field> above it and no per-screen keyboard
           handling — without this, the keyboard covers the action and
-          swallows its taps instead of reaching it. "padding" on BOTH
-          platforms: Android runs edge-to-edge (always, since SDK 54), so
-          the OS no longer shrinks the window for the keyboard and this
-          view is the only thing that lifts the content (#1194). */}
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
+          swallows its taps instead of reaching it. iOS: KeyboardAvoidingView.
+          Android: an explicit inset (see useAndroidKeyboardInset). The app
+          is edge-to-edge (#1194), and `behavior="padding"` alone is not
+          enough there: KAV only reacts to keyboard SHOW events, so a screen
+          that mounts with the keyboard already up (email → OTP) never pads. */}
+      <KeyboardAvoidingView
+        style={{ flex: 1, paddingBottom: androidKeyboard }}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
         {centerBody ? (
           <View
             style={{

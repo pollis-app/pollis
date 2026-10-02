@@ -82,6 +82,8 @@ case "$PLATFORM" in
     adb wait-for-device
     # give the launcher a moment
     adb shell 'while [ "$(getprop sys.boot_completed)" != "1" ]; do sleep 1; done'
+    SERIAL="$(adb devices | awk '/^emulator-/{print $1; exit}')"
+    [ -n "$SERIAL" ] && DEVICE_SEL=(--device "$SERIAL")
     ;;
   *) echo "unknown platform: $PLATFORM (want ios|ipad|android)" >&2; exit 1;;
 esac
@@ -116,8 +118,10 @@ FAILED=()
 for f in "${FLOW_FILES[@]}"; do
   fname="$(basename "$f" .yaml)"
   echo "--> $fname"
-  maestro "${DEVICE_SEL[@]}" test --debug-output "$DEBUG" \
-    "${ENV_ARGS[@]}" -e MAESTRO_EMAIL="$(fresh_email "$fname")" "$f" || {
+  # `${arr[@]+"${arr[@]}"}`: macOS's bash 3.2 treats an EMPTY array as unbound
+  # under `set -u`, which killed every Android run before Maestro started.
+  maestro ${DEVICE_SEL[@]+"${DEVICE_SEL[@]}"} test --debug-output "$DEBUG" \
+    ${ENV_ARGS[@]+"${ENV_ARGS[@]}"} -e MAESTRO_EMAIL="$(fresh_email "$fname")" "$f" || {
     FAILED+=("$fname")
     echo "!! $fname reported failures — screenshots (incl. the failing state) are in $OUT" >&2
   }
