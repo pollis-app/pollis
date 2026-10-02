@@ -149,7 +149,10 @@
     "downloadingProgress": "Downloading update… {{progress}}%",
     "installing": "Installing update…",
     "relaunching": "Relaunching…",
-    "failed": "Update failed: {{error}}"
+    "failed": "Update failed: {{error}}",
+    "readOnlyDiskImage": "Pollis is running from the disk image, which is read-only. Quit Pollis, drag it into Applications, eject the disk image, and open it from Applications.",
+    "readOnlyTranslocated": "macOS is running Pollis from a temporary read-only location. Quit Pollis, move it out of Applications and back in using Finder, then open it again.",
+    "readOnlyGeneric": "Pollis can't update itself because its location is read-only. Quit Pollis, make sure it is in your Applications folder (moved there with Finder), and open it again."
   },
   "home": {
     "groups": "Groups",

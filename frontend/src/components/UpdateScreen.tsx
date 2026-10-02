@@ -6,6 +6,15 @@ import { LoadingSpinner } from "./ui/LoaderSpinner";
 
 type UpdatePhase = "preparing" | "checking" | "downloading" | "installing" | "relaunching" | "error";
 
+// Mirrors `ReadOnlyLocation` in src-tauri/src/commands/install_kind.rs.
+type ReadOnlyLocation = "disk_image" | "translocated";
+
+// The updater replaces the app bundle in place, so it fails with EROFS when the
+// app runs from a read-only mount (the disk image, or macOS App Translocation).
+function isReadOnlyError(message: string): boolean {
+  return /read-only file system|os error 30/i.test(message);
+}
+
 /**
  * Fully automatic update screen. On mount it checks for an update, downloads
  * it, installs it, and relaunches — no user interaction required.
@@ -34,6 +43,23 @@ export const UpdateScreen: React.FC = () => {
         await new Promise((r) => setTimeout(r, 300));
 
         if (cancelled) {
+          return;
+        }
+
+        // An install from a read-only location is guaranteed to fail midway, so
+        // say how to fix it instead of attempting one.
+        const location = await invoke<ReadOnlyLocation | null>("detect_read_only_location").catch(() => null);
+        if (cancelled) {
+          return;
+        }
+        if (location === "disk_image") {
+          setError(t("update.readOnlyDiskImage"));
+          setPhase("error");
+          return;
+        }
+        if (location === "translocated") {
+          setError(t("update.readOnlyTranslocated"));
+          setPhase("error");
           return;
         }
 
@@ -81,7 +107,8 @@ export const UpdateScreen: React.FC = () => {
       } catch (err) {
         if (!cancelled) {
           console.error("[update] Auto-update failed:", err);
-          setError(errorMessage(err));
+          const message = errorMessage(err);
+          setError(isReadOnlyError(message) ? t("update.readOnlyGeneric") : message);
           setPhase("error");
         }
       }
@@ -89,7 +116,7 @@ export const UpdateScreen: React.FC = () => {
 
     runUpdate();
     return () => { cancelled = true; };
-  }, []);
+  }, [t]);
 
   const label = (() => {
     switch (phase) {

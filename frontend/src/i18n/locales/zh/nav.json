@@ -142,7 +142,10 @@
     "downloadingProgress": "正在下载更新… {{progress}}%",
     "installing": "正在安装更新…",
     "relaunching": "正在重启…",
-    "failed": "更新失败：{{error}}"
+    "failed": "更新失败：{{error}}",
+    "readOnlyDiskImage": "Pollis 正在从只读的磁盘映像运行。请退出 Pollis，将其拖到“应用程序”，推出磁盘映像，然后从“应用程序”打开。",
+    "readOnlyTranslocated": "macOS 正在从一个临时的只读位置运行 Pollis。请退出 Pollis，用访达把它移出“应用程序”再移回去，然后重新打开。",
+    "readOnlyGeneric": "Pollis 无法自行更新，因为它所在的位置是只读的。请退出 Pollis，确认它位于“应用程序”文件夹中（用访达移入），然后重新打开。"
   },
   "home": {
     "groups": "群组",
