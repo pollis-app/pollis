@@ -91,8 +91,7 @@
     "reactWith": "React with {{emoji}}",
     "reactionPillReacted_one": "{{emoji}} {{count}} reaction, you reacted",
     "reactionPillReacted_other": "{{emoji}} {{count}} reactions, you reacted",
-    "sendFailed": "Couldn't send message.",
-    "you": "you"
+    "sendFailed": "Couldn't send message."
   },
   "common": {
     "working": "Working…"

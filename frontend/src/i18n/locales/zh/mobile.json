@@ -89,8 +89,7 @@
     "openThread_other": "打开话题，{{count}} 条回复",
     "reactWith": "用 {{emoji}} 回应",
     "reactionPillReacted_other": "{{emoji}} {{count}} 个回应，包括你",
-    "sendFailed": "无法发送消息。",
-    "you": "你"
+    "sendFailed": "无法发送消息。"
   },
   "common": {
     "working": "处理中…"

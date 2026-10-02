@@ -31,6 +31,7 @@ export function MessageRow({
   time,
   text,
   pending,
+  failed,
   edited,
   reactions,
   currentUserId,
@@ -54,6 +55,7 @@ export function MessageRow({
   time: string;
   text?: string;
   pending?: boolean;
+  failed?: boolean;
   edited?: boolean;
   reactions?: Reaction[];
   currentUserId?: string;
@@ -83,7 +85,6 @@ export function MessageRow({
         gap: 12,
         paddingHorizontal: 18,
         paddingVertical: 8,
-        opacity: pending ? 0.55 : 1,
       }}
     >
       <Pressable onPress={onPressAvatar} disabled={!onPressAvatar}>
@@ -100,19 +101,22 @@ export function MessageRow({
           >
             {name}
           </Text>
+          {/* A pending row renders exactly like a sent one: a "sending" label
+              or dimmed row made a fast send feel slow. Only a failure is
+              labelled, matching desktop. */}
           <Text
             style={{
               fontFamily: ty.body.fontFamily,
               fontSize: 11,
-              color: semantic.mute,
+              color: failed ? semantic.danger : semantic.mute,
             }}
           >
-            {pending ? t("status.sending") : time}
+            {failed ? t("status.failed") : time}
           </Text>
           <ReceiptIndicator
             receipts={receipt}
             peerCount={peerCount}
-            visible={showReceipt && !pending}
+            visible={showReceipt && !pending && !failed}
           />
         </View>
         {text ? (

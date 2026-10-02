@@ -8,6 +8,7 @@ import { semantic, type as ty } from "../../theme/tokens";
 import { timeLabel } from "../../components/chat/dates";
 import { MessageRow } from "../../components/chat/MessageRow";
 import { Composer } from "../../components/chat/Composer";
+import { authorName } from "../../lib/authorName";
 import {
   useMessages,
   useSendMessage,
@@ -103,8 +104,8 @@ function ThreadScreen() {
     ({ item: m }: { item: Message }) => {
       const mine = currentUser?.id === m.sender_id;
       const name =
-        m.sender_username ||
-        (mine ? t("mobile:chat.you") : t("chat:list.unknownAuthor"));
+        authorName(m.sender_id, m.sender_username, currentUser) ??
+        t("chat:list.unknownAuthor");
       return (
         <MessageRow
           testID={`row-thread-${m.id}`}
@@ -116,6 +117,7 @@ function ThreadScreen() {
           text={m.content}
           attachments={m.attachments}
           pending={m.pending}
+          failed={m.failed}
           edited={!!m.edited_at}
           mentionNames={mentionNames}
           selfName={selfName}
@@ -131,23 +133,21 @@ function ThreadScreen() {
         />
       );
     },
-    [currentUser?.id, router, t],
+    [currentUser, router, t],
   );
 
+  const rootName = root
+    ? authorName(root.sender_id, root.sender_username, currentUser)
+    : null;
   const header = (
     <View>
       {root ? (
         <MessageRow
           testID={`row-thread-root-${root.id}`}
           messageId={root.id}
-          av={(root.sender_username || "??").slice(0, 2)}
+          av={(rootName ?? "??").slice(0, 2)}
           amber={currentUser?.id === root.sender_id}
-          name={
-            root.sender_username ||
-            (currentUser?.id === root.sender_id
-              ? t("mobile:chat.you")
-              : t("chat:list.unknownAuthor"))
-          }
+          name={rootName ?? t("chat:list.unknownAuthor")}
           time={timeLabel(root.created_at)}
           text={root.content}
           attachments={root.attachments}

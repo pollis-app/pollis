@@ -76,6 +76,8 @@ export interface Message {
   deleted_at?: number;
   /** Local-only optimistic stub flag. Replaced when `send_message` resolves. */
   pending?: boolean;
+  /** Local-only: the optimistic stub's send failed. Kept in the list, labelled. */
+  failed?: boolean;
 }
 
 /** One decoded page: newest-first messages plus the cursor to the next
@@ -263,7 +265,7 @@ function mapPages(
 /**
  * Send a text message. Optimistic: the new message is prepended to the
  * newest cached page with `pending: true`, then replaced with the
- * server-confirmed row on success (or rolled back on failure).
+ * server-confirmed row on success, or marked `failed` on failure.
  */
 export function useSendMessage(
   conversationId: string | null,
@@ -360,9 +362,15 @@ export function useSendMessage(
       if (!ctx) {
         return;
       }
+      // send_message's row carries no sender_username; keep the one the stub
+      // had so the author label doesn't change when the send reconciles.
+      const settled: Message = {
+        ...confirmed,
+        sender_username: confirmed.sender_username ?? currentUser?.username,
+      };
       queryClient.setQueryData<MessagesData>(ctx.key, (cache) =>
         mapPages(cache, (msgs) =>
-          msgs.map((m) => (m.id === ctx.optimisticId ? confirmed : m)),
+          msgs.map((m) => (m.id === ctx.optimisticId ? settled : m)),
         ),
       );
       if (ctx.threadId) {
@@ -370,7 +378,7 @@ export function useSendMessage(
           messageQueryKeys.thread(ctx.threadId),
           (cache) =>
             (cache ?? []).map((m) =>
-              m.id === ctx.optimisticId ? confirmed : m,
+              m.id === ctx.optimisticId ? settled : m,
             ),
         );
         // Reply-count chips on the parent rows.
@@ -383,14 +391,17 @@ export function useSendMessage(
       if (!ctx) {
         return;
       }
-      // Roll back the optimistic stubs on failure.
-      if (ctx.previous) {
-        queryClient.setQueryData(ctx.key, ctx.previous);
-      }
+      // Keep the stub and mark it failed rather than rolling it back: a send
+      // that silently vanishes is worse than one labelled "failed".
+      const markFailed = (m: Message): Message =>
+        m.id === ctx.optimisticId ? { ...m, pending: false, failed: true } : m;
+      queryClient.setQueryData<MessagesData>(ctx.key, (cache) =>
+        mapPages(cache, (msgs) => msgs.map(markFailed)),
+      );
       if (ctx.threadId) {
         queryClient.setQueryData<Message[]>(
           messageQueryKeys.thread(ctx.threadId),
-          (cache) => (cache ?? []).filter((m) => m.id !== ctx.optimisticId),
+          (cache) => (cache ?? []).map(markFailed),
         );
       }
     },

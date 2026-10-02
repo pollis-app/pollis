@@ -95,8 +95,7 @@
     "reactionPillReacted_few": "{{emoji}} {{count}} реакции, вы отреагировали",
     "reactionPillReacted_many": "{{emoji}} {{count}} реакций, вы отреагировали",
     "reactionPillReacted_other": "{{emoji}} {{count}} реакции, вы отреагировали",
-    "sendFailed": "Не удалось отправить сообщение.",
-    "you": "вы"
+    "sendFailed": "Не удалось отправить сообщение."
   },
   "common": {
     "working": "Выполняется…"

@@ -99,8 +99,7 @@
     "reactionPillReacted_few": "{{emoji}} {{count}} تفاعلات، وقد تفاعلت",
     "reactionPillReacted_many": "{{emoji}} {{count}} تفاعلًا، وقد تفاعلت",
     "reactionPillReacted_other": "{{emoji}} {{count}} تفاعل، وقد تفاعلت",
-    "sendFailed": "تعذّر إرسال الرسالة.",
-    "you": "أنت"
+    "sendFailed": "تعذّر إرسال الرسالة."
   },
   "common": {
     "working": "جارٍ العمل…"
