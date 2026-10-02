@@ -1,7 +1,7 @@
 // Cross-content search hook. Backs the (tabs)/search screen.
 //
-// Today we wire just `search_messages` — it goes through the local FTS
-// index and returns a page of SearchResult rows. User search
+// `search_messages` goes through the local FTS index and returns a page of
+// SearchResult rows; this hook pages through them (#1202). User search
 // (`search_user_by_username`) is exposed via `useUserSearch` and groups can be
 // filtered client-side from the cached `useUserGroupsWithChannels` list, so a
 // single Rust invoke covers the typeahead.
@@ -10,7 +10,7 @@
 // field; the desktop copy lives in `frontend/src/types/index.ts`. Keep all
 // three in sync.
 
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
 
 /** `sent_at DESC`, or bm25 with a recency decay. */
@@ -70,25 +70,38 @@ export interface SearchPage {
 }
 
 export const searchQueryKeys = {
-  messages: (q: string) => ["search", "messages", q] as const,
+  messages: (q: string, sort: SearchSort | null) =>
+    ["search", "messages", q, sort] as const,
 };
 
-export function useSearchMessages(query: string) {
+/** Results per request. The backend caps a page at 200. */
+const PAGE_SIZE = 25;
+
+/**
+ * On-device message search, paginated — the mirror of desktop's
+ * `useSearchMessages` (#1202). Mobile used to ask for one fixed page of 25
+ * and could never show the rest of a large result set.
+ *
+ * `sort` is optional: omitted, Rust picks (relevance for a global search) and
+ * the page reports which ordering it applied. Query filters (`from:@user`,
+ * `in:#channel`, `before:`/`after:`/`on:`, `has:attachment`, `has:link`) are
+ * parsed in the core, so they work here unchanged.
+ */
+export function useSearchMessages(query: string, sort: SearchSort | null = null) {
   const trimmed = query.trim();
-  return useQuery({
-    queryKey: searchQueryKeys.messages(trimmed),
-    queryFn: async (): Promise<SearchPage | null> => {
-      if (!trimmed) {
-        return null;
-      }
+  return useInfiniteQuery({
+    queryKey: searchQueryKeys.messages(trimmed, sort),
+    initialPageParam: null as SearchCursor | null,
+    queryFn: async ({ pageParam }): Promise<SearchPage> => {
       return await invoke<SearchPage>("search_messages", {
         query: trimmed,
         conversationId: null,
-        sort: null,
-        limit: 25,
-        cursor: null,
+        sort,
+        limit: PAGE_SIZE,
+        cursor: pageParam,
       });
     },
+    getNextPageParam: (lastPage) => lastPage.next_cursor,
     enabled: trimmed.length >= 2,
     staleTime: 1000 * 20,
   });

@@ -10,7 +10,12 @@ import {
   ListRow,
   Avatar,
   Field,
+  Chip,
+  Button,
 } from "../../components/ui";
+import { SearchResultRow } from "../../components/search/SearchResultRow";
+import { CorpusFooter } from "../../components/search/CorpusFooter";
+import type { SearchSort } from "../../hooks/queries/useSearch";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
 import {
@@ -20,14 +25,25 @@ import {
   useUserSearch,
 } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
-import { activeLocale, upper } from "../../i18n";
+import { upper } from "../../i18n";
 
 export default function Search() {
   const router = useRouter();
   const { t } = useTranslation("mobile");
   const [q, setQ] = useState("");
   const trimmed = q.trim();
-  const messages = useSearchMessages(trimmed);
+  const { t: ts } = useTranslation("search");
+  // null = let Rust choose (relevance for a global search); the page reports
+  // what it applied, which is what the toggle shows as selected.
+  const [sort, setSort] = useState<SearchSort | null>(null);
+  const messages = useSearchMessages(trimmed, sort);
+  const firstPage = messages.data?.pages[0];
+  const messageResults = useMemo(
+    () => messages.data?.pages.flatMap((p) => p.results) ?? [],
+    [messages.data],
+  );
+  const messageTotal = firstPage?.total ?? 0;
+  const activeSort: SearchSort = sort ?? firstPage?.sort ?? "relevant";
   const user = useUserSearch(trimmed);
   const { data: groups = [] } = useUserGroupsWithChannels();
   const { data: dms = [] } = useDMChannels();
@@ -92,11 +108,27 @@ export default function Search() {
     return { groups: matchingGroups, channels: matchingChannels };
   }, [groups, trimmed]);
 
+  // Quick-jump to settings pages — desktop's PAGE_RESULTS, for the pages the
+  // mobile Self hub offers. Matched on title and subtitle, like desktop.
+  const pages = useMemo(() => {
+    if (trimmed.length < 2) {
+      return [];
+    }
+    const lower = trimmed.toLowerCase();
+    return [
+      { id: "preferences", n: t("settings:preferences.title"), s: t("mobile:self.hub.preferencesSub"), to: "/self/preferences" as const },
+      { id: "user-settings", n: t("settings:user.title"), s: t("mobile:self.hub.userSettingsSub"), to: "/self/user-settings" as const },
+      { id: "security", n: t("settings:security.title"), s: t("mobile:self.hub.securitySub"), to: "/self/security" as const },
+      { id: "saved", n: t("saved:page.title"), s: t("mobile:self.hub.savedSub"), to: "/self/saved" as const },
+    ].filter((p) => p.n.toLowerCase().includes(lower) || p.s.toLowerCase().includes(lower));
+  }, [trimmed, t]);
+
   const totalResults =
     (user.data ? 1 : 0) +
     filtered.groups.length +
     filtered.channels.length +
-    (messages.data?.results.length ?? 0);
+    pages.length +
+    messageTotal;
 
   const showEmpty =
     trimmed.length >= 2 &&
@@ -128,6 +160,20 @@ export default function Search() {
             {t("search.hint")}
           </Text>
         ) : null}
+        {trimmed.length < 2 ? (
+          <Text
+            testID="search-filter-hint"
+            style={{
+              fontFamily: ty.mono.fontFamily,
+              fontSize: 11,
+              color: semantic.mute2,
+              paddingHorizontal: 18,
+              paddingTop: 8,
+            }}
+          >
+            {ts("view.filterHint")}
+          </Text>
+        ) : null}
         {showEmpty ? (
           <Text
             style={{
@@ -140,6 +186,41 @@ export default function Search() {
           >
             {t("search:panel.noMatches")}
           </Text>
+        ) : null}
+        {showEmpty ? (
+          <View testID="search-no-results-why" style={{ paddingHorizontal: 18, paddingTop: 10, gap: 4 }}>
+            <Text style={{ fontFamily: ty.body.fontFamily, fontSize: 12, color: semantic.mute }}>
+              {ts("view.noResultsWhy")}
+            </Text>
+            {[
+              "view.reasonNotIngested",
+              "view.reasonBeforeJoin",
+              "view.reasonNewDevice",
+              "view.reasonRetention",
+              "view.reasonDeleted",
+            ].map((k) => (
+              <Text key={k} style={{ fontFamily: ty.body.fontFamily, fontSize: 12, color: semantic.mute }}>
+                {`· ${ts(k)}`}
+              </Text>
+            ))}
+          </View>
+        ) : null}
+
+        {pages.length > 0 ? (
+          <View>
+            <SectionTitle>{upper(t("tabs.self"))}</SectionTitle>
+            {pages.map((p) => (
+              <ListRow
+                key={p.id}
+                testID={`row-page-${p.id}`}
+                minHeight={48}
+                glyph={<Icon.gear color={semantic.mute} />}
+                name={p.n}
+                sub={p.s}
+                onPress={() => router.push(p.to)}
+              />
+            ))}
+          </View>
         ) : null}
 
         {filtered.groups.length > 0 ? (
@@ -214,56 +295,103 @@ export default function Search() {
           </View>
         ) : null}
 
-        {(messages.data?.results.length ?? 0) > 0 ? (
+        {messageResults.length > 0 ? (
           <View>
             <SectionTitle>{upper(t("search.messages"))}</SectionTitle>
-            {messages.data!.results.map((m) => (
-              <ListRow
-                key={m.message_id}
-                testID={`row-message-${m.message_id}`}
-                minHeight={58}
-                glyph={<Avatar label={(m.sender_username ?? m.sender_id).slice(0, 2)} size="sm" />}
-                name={m.sender_username ?? m.sender_id}
-                nameStyle={{ fontSize: 13, fontFamily: ty.rowN.fontFamily }}
-                sub={m.snippet.text || m.content}
-                end={
-                  <Text style={ty.label}>
-                    {upper(
-                      new Date(m.sent_at).toLocaleDateString(activeLocale(), {
-                        month: "short",
-                        day: "numeric",
-                      }),
-                    )}
-                  </Text>
-                }
-                onPress={() => {
-                  const info = conversationKinds.get(m.conversation_id);
-                  // Unknown id (e.g. a conversation we've since left): fall
-                  // back to channel, the pre-fix behaviour.
-                  const kind = info?.kind ?? "channel";
-                  // Mirror the list rows: opening a conversation selects it
-                  // (suppresses its realtime unread) and clears its count.
-                  if (kind === "dm") {
-                    appStore.setSelectedConversationId(m.conversation_id);
-                  } else {
-                    if (info?.groupId) {
-                      appStore.setSelectedGroupId(info.groupId);
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                paddingHorizontal: 18,
+                paddingBottom: 8,
+                gap: 8,
+              }}
+            >
+              <Text testID="search-total" style={ty.label}>
+                {upper(ts("view.aboutResults", { count: messageTotal }))}
+              </Text>
+              <View style={{ flexDirection: "row", gap: 6 }}>
+                <Chip
+                  testID="search-sort-relevant"
+                  variant={activeSort === "relevant" ? "on" : "default"}
+                  onPress={() => setSort("relevant")}
+                >
+                  {ts("view.sortRelevant")}
+                </Chip>
+                <Chip
+                  testID="search-sort-recent"
+                  variant={activeSort === "recent" ? "on" : "default"}
+                  onPress={() => setSort("recent")}
+                >
+                  {ts("view.sortRecent")}
+                </Chip>
+              </View>
+            </View>
+            {messageResults.map((m) => {
+              const info = conversationKinds.get(m.conversation_id);
+              const label =
+                m.conversation_kind === "dm"
+                  ? (m.conversation_name ?? info?.name ?? null)
+                  : m.conversation_name
+                    ? `#${m.conversation_name}${m.group_name ? ` · ${m.group_name}` : ""}`
+                    : (info?.name ? `#${info.name}` : null);
+              return (
+                <SearchResultRow
+                  key={m.message_id}
+                  result={m}
+                  conversationLabel={label}
+                  onPress={() => {
+                    // The row carries its kind now; the cached lists are the
+                    // fallback for rows indexed before it did. Unknown (a
+                    // conversation since left): channel, the old behaviour.
+                    const kind = m.conversation_kind ?? info?.kind ?? "channel";
+                    // Mirror the list rows: opening a conversation selects it
+                    // (suppresses its realtime unread) and clears its count.
+                    if (kind === "dm") {
+                      appStore.setSelectedConversationId(m.conversation_id);
+                    } else {
+                      const groupId = m.group_id ?? info?.groupId;
+                      if (groupId) {
+                        appStore.setSelectedGroupId(groupId);
+                      }
+                      appStore.setSelectedChannelId(m.conversation_id);
                     }
-                    appStore.setSelectedChannelId(m.conversation_id);
-                  }
-                  appStore.markRead(m.conversation_id);
-                  router.push({
-                    pathname: "/chat/[id]",
-                    params: {
-                      id: m.conversation_id,
-                      kind,
-                      ...(info?.name ? { name: info.name } : {}),
-                    },
-                  });
-                }}
-              />
-            ))}
+                    appStore.markRead(m.conversation_id);
+                    const name = m.conversation_name ?? info?.name;
+                    router.push({
+                      pathname: "/chat/[id]",
+                      params: {
+                        id: m.conversation_id,
+                        kind,
+                        ...(name ? { name } : {}),
+                      },
+                    });
+                  }}
+                />
+              );
+            })}
+            {messages.hasNextPage ? (
+              <View style={{ padding: 14 }}>
+                <Button
+                  testID="search-load-more"
+                  variant="subtle"
+                  full
+                  disabled={messages.isFetchingNextPage}
+                  onPress={() => void messages.fetchNextPage()}
+                >
+                  {upper(
+                    messages.isFetchingNextPage
+                      ? ts("view.searching")
+                      : ts("view.loadMore"),
+                  )}
+                </Button>
+              </View>
+            ) : null}
           </View>
+        ) : null}
+        {trimmed.length >= 2 && firstPage?.corpus ? (
+          <CorpusFooter corpus={firstPage.corpus} />
         ) : null}
       </Body>
 
