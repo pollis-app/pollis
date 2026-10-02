@@ -136,15 +136,24 @@ class Edit:
 
     def __exit__(self, exc_type, exc, tb):
         if exc_type is None:
-            self.call("POST", f"/edits/{self.id}:commit")
-            print(f"committed edit {self.id}")
-        else:
             try:
-                self.call("DELETE", f"/edits/{self.id}")
+                self.call("POST", f"/edits/{self.id}:commit")
+                print(f"committed edit {self.id}")
+                return False
             except RuntimeError:
-                pass
-            print(f"discarded edit {self.id}", file=sys.stderr)
+                # A refused commit leaves the edit open; discard it like any
+                # other failure, then let the commit error surface.
+                self._discard()
+                raise
+        self._discard()
         return False
+
+    def _discard(self):
+        try:
+            self.call("DELETE", f"/edits/{self.id}")
+        except RuntimeError:
+            pass
+        print(f"discarded edit {self.id}", file=sys.stderr)
 
 
 def png_size(path):
@@ -233,6 +242,8 @@ def cmd_listing(args):
 
 
 def main():
+    # Progress and errors interleave in the order they happened, even piped.
+    sys.stdout.reconfigure(line_buffering=True)
     ap = argparse.ArgumentParser(description="Publish Pollis to Google Play via the Developer API.")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
