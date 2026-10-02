@@ -90,15 +90,25 @@ website/             # Static marketing site (Cloudflare Pages, not part of the 
                      #   separate property built from the `archon` repo
 ```
 
-**Mobile build (#706):** the mobile app has no released output yet, but CI now
-builds a real Android APK. The `android-build` job in
-`.github/workflows/mobile-core-check.yml` runs the full chain on `ubuntu-latest`
-— uniffi binding gen + a 3-ABI `cargo-ndk` cross-compile of `pollis-core`,
-`expo prebuild`, then `gradlew :app:assembleRelease` — and uploads the APK
-artifact. It uses `expo prebuild` + Gradle directly (never `eas build`, so the
-job needs no account, token or queue) and signs with the throwaway debug
-keystore; distribution signing is blocked (Play console / Apple account #723).
-See `docs/deployments.md` and `mobile/CLAUDE.md`.
+**Mobile build (#706):** CI builds a real Android APK on every mobile-touching
+PR. The `android-build` job in `.github/workflows/mobile-core-check.yml` runs the
+full chain on `ubuntu-latest` — uniffi binding gen + a 3-ABI `cargo-ndk`
+cross-compile of `pollis-core`, `expo prebuild`, then
+`gradlew :app:assembleRelease` — and uploads the APK artifact. It uses
+`expo prebuild` + Gradle directly (never `eas build`, so the job needs no
+account, token or queue) and signs with the throwaway debug keystore.
+
+**Android sideload APK (pollis.com/android):** the one mobile output a workflow
+*publishes*. `.github/workflows/mobile-apk-release.yml` fires on a `mobile-v*`
+tag (never on the desktop's `v*`), runs the same chain with `--release`, emits
+one APK per ABI (`POLLIS_ABI_SPLITS=true` → `mobile/plugins/withAbiSplits.js`;
+a universal APK is >2x the size), signs each with the dedicated **sideload** key (`POLLIS_RELEASE_KEY=sideload` selects it in
+`mobile/plugins/withReleaseSigning.js`; it has no debug fallback), and refuses to
+publish unless the signing cert matches `mobile/store/android-sideload-cert.sha256`
+and the Hermes bundle names `api.pollis.com` and not api-dev. Ships to
+`cdn.pollis.com/releases/android/` + a GitHub Release. Play store builds are a
+separate, local path with the Play upload key. See `docs/deployments.md` and
+`mobile/CLAUDE.md`.
 
 **Shared Rust primitives.** `pollis-core/src/util.rs` and
 `pollis-delivery/src/util.rs` hold the crate-wide odds and ends: `now_unix()`

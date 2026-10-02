@@ -52,6 +52,7 @@ Every row is held by one person. The last column is what a *user* loses, not wha
 | LiveKit + `VPS_SSH_KEY` | Own VPS | Voice/video/screenshare SFU | Calls stop. Text messaging is unaffected |
 | Resend | Resend | Sends the email OTP | **Nobody can sign in or add a device.** Existing sessions keep working |
 | `AUR_SSH_KEY` | GitHub secret / AUR | Publishes the Arch package | The AUR package goes stale. Already best-effort by design |
+| `POLLIS_SIDELOAD_*` (Android sideload keystore + passwords) | Doppler `prd_prod` → GitHub secrets; keystore also at `~/.pollis/pollis-sideload.jks` on the release workstation | Signs the APK pollis.com offers outside Google Play (`mobile-apk-release.yml`) | Same shape as the updater key, for sideloaded Android installs: Android accepts an update only from the certificate already installed, so no future APK can update an existing sideload install. Every such user would have to uninstall (losing on-device history) and reinstall. Play installs are unaffected — Google holds their app-signing key |
 | `POLLIS_OVERLAY_DIRECTORY_KEY` | GitHub secret | Signs the relay directory | Clients reject a directory nobody can re-sign; the overlay stops being usable |
 | Expo/EAS, APNs key, FCM service account | EAS (held by EAS, not by this repo) | Mobile push | Mobile is in development; no shipped user is affected today |
 

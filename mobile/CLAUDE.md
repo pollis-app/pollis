@@ -477,15 +477,103 @@ with a 403. The first `upload` (2026-10-02, versionCode 1000000, closed track
 
 Release signing is wired by `plugins/withReleaseSigning.js` (registered in
 `app.json`), a local Expo config plugin that patches the generated
-`android/app/build.gradle` at prebuild: `signingConfigs.release` reads
-`POLLIS_UPLOAD_STORE_FILE` / `POLLIS_UPLOAD_STORE_PASSWORD` /
-`POLLIS_UPLOAD_KEY_ALIAS` / `POLLIS_UPLOAD_KEY_PASSWORD` from gradle
-properties (`~/.gradle/gradle.properties`) or the environment, and **falls back
-to the debug keystore when unset** — so CI's `assembleRelease` keeps working
-with zero config. Generate the upload keystore once with
-`scripts/generate-upload-keystore.sh` (RSA-4096 at `~/.pollis/pollis-upload.jks`,
-refuses to overwrite); it prints the gradle.properties lines. Never commit a
+`android/app/build.gradle` at prebuild. `signingConfigs.release` picks one of
+two keys by `POLLIS_RELEASE_KEY` (gradle property or env; default `upload`) and
+reads only that key's own `POLLIS_<KEY>_STORE_FILE` / `_STORE_PASSWORD` /
+`_KEY_ALIAS` / `_KEY_PASSWORD`:
+
+- **`upload`** (default) — the Play upload key, `POLLIS_UPLOAD_*` from
+  `~/.gradle/gradle.properties` or the environment. **Falls back to the debug
+  keystore when unset**, so CI's `assembleRelease` keeps working with zero
+  config. Generate it once with `scripts/generate-upload-keystore.sh`
+  (RSA-4096 at `~/.pollis/pollis-upload.jks`, refuses to overwrite); it prints
+  the gradle.properties lines.
+- **`sideload`** — the pollis.com APK key, `POLLIS_SIDELOAD_*` (below). **No
+  fallback**: unset, the Gradle configuration fails.
+
+Separate prefixes are load-bearing, not tidiness: gradle properties beat
+environment variables, so with one shared set of names a workstation whose
+`gradle.properties` holds the upload key would sign a "sideload" build with
+it. `tests/release-signing.test.ts` pins the generated block. Never commit a
 keystore (`*.jks` is gitignored) or its passwords.
+
+### Android sideload APK (pollis.com/android)
+
+For people who will not use Google Play: **one signed APK per ABI**
+(`arm64-v8a`, `armeabi-v7a`, `x86_64` — pollis-core's ubrn targets) published by
+`.github/workflows/mobile-apk-release.yml` to
+`cdn.pollis.com/releases/android/v<version>/pollis-v<version>-android-<abi>.apk`
+(plus `releases/android/latest/pollis-latest-android-<abi>.apk` aliases and
+`releases/android/latest.json`) and a GitHub Release, linked from
+`website/android.html`.
+
+**Why per-ABI, not universal:** Android stores native libs uncompressed, and
+pollis-core is 24-34 MB per ABI. Measured 2026-10-02: a universal APK is
+~261 MB (~210 MB even without the 32-bit x86 libs RN builds by default), the
+arm64-v8a split ~90 MB. `plugins/withAbiSplits.js` adds a Gradle `splits.abi`
+block that is **off unless `POLLIS_ABI_SPLITS=true`**, so no other build
+changes; the release also passes
+`-PreactNativeArchitectures=arm64-v8a,armeabi-v7a,x86_64`, because RN's default
+list includes x86, for which pollis-core is never built — an x86 APK would
+install and crash loading the core.
+
+- **Own key.** `~/.pollis/pollis-sideload.jks`, alias `pollis-sideload`,
+  RSA-4096 / 10000 days, `CN=Pollis Android Sideload, OU=Pollis, O=Pollis`.
+  Keystore (base64) + passwords live in Doppler `pollis`/`prd_prod` as
+  `POLLIS_SIDELOAD_KEYSTORE_B64` / `_STORE_PASSWORD` / `_KEY_ALIAS` /
+  `_KEY_PASSWORD`, which Doppler syncs to the repo's Actions secrets. It is
+  never the Play upload key. Play re-signs what it serves with Google's
+  app-signing key, so a Play install and a sideloaded install have different
+  signatures and **cannot update each other**: switching channels means an
+  uninstall, and the new install starts empty (loss #2 in the root CLAUDE.md).
+  The download page says so.
+- **Pinned certificate.** `store/android-sideload-cert.sha256` holds the cert's
+  SHA-256 (lowercase hex, what `apksigner verify --print-certs` prints). The
+  workflow fails if the APK's signer differs, and if `website/android.html`
+  does not show the same value. Rotating the key = new keystore + Doppler
+  values + this file + the page, in one PR — and every existing sideload user
+  has to uninstall, so do not.
+- **Release:** bump `package.json` `version`, merge, then tag
+  `mobile-v<version>` on that commit and push the tag. The tag must equal
+  `mobile-v` + `package.json` `version` or the run fails. A
+  `workflow_dispatch` on a branch is a dry run (build + every check, APK as a
+  run artifact, publishes nothing); dispatched on the tag it re-publishes.
+  `POLLIS_BUILD` is the dispatch input `build` (default 0), same derivation as
+  the store builds. `mobile-v*` cannot match the desktop's `v*` glob, so
+  mobile and desktop never fire each other.
+- **CI checks every APK before anything is published:** `apksigner` v2
+  signature with exactly one signer = the pinned cert; `aapt2 dump badging`
+  shows `com.pollis.mobile`, `versionName` = `package.json`, `versionCode` = the
+  `app.config.js` derivation, not debuggable; native libs for exactly its own
+  ABI, `libpollis-native.so` included; and the raw bytes of `assets/index.android.bundle` contain `api.pollis.com`
+  and not `api-dev.pollis.com` (Hermes bytecode — `strings` can miss it). After
+  upload it re-downloads both CDN URLs and `latest.json` and compares hashes.
+- **No auto-update.** Nothing in the app checks for a newer APK; users come
+  back to the page. Push still goes through Expo → FCM, so it needs Play
+  services on the phone; the page says that too.
+
+Local build, same steps as the workflow (no `mobile/.env` needed — the
+`EXPO_PUBLIC_*` values come from the environment, which wins over `.env`):
+
+```bash
+cd mobile
+source android-env.sh
+pnpm install --ignore-workspace --frozen-lockfile
+(cd modules/pollis-native && uniffi-bindgen-react-native build android \
+  --config ubrn.config.yaml --and-generate --release)
+pnpm expo prebuild -p android --no-install --clean
+export POLLIS_RELEASE_KEY=sideload POLLIS_SIDELOAD_STORE_FILE=~/.pollis/pollis-sideload.jks
+export POLLIS_SIDELOAD_KEY_ALIAS=pollis-sideload
+export POLLIS_SIDELOAD_STORE_PASSWORD="$(doppler secrets get POLLIS_SIDELOAD_STORE_PASSWORD -p pollis -c prd_prod --plain)"
+export POLLIS_SIDELOAD_KEY_PASSWORD="$POLLIS_SIDELOAD_STORE_PASSWORD"
+export EXPO_PUBLIC_POLLIS_DELIVERY_URL=https://api.pollis.com POLLIS_ABI_SPLITS=true
+(cd android && ./gradlew :app:assembleRelease \
+  -PreactNativeArchitectures=arm64-v8a,armeabi-v7a,x86_64)
+"$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs \
+  android/app/build/outputs/apk/release/app-arm64-v8a-release.apk   # digest = store/android-sideload-cert.sha256
+```
+
+(The key is PKCS12, so its key password is the store password.)
 
 ---
 
