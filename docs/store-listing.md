@@ -54,7 +54,7 @@ Exactly 30 characters.
 > Pollis is a private messenger for groups and direct messages, built on MLS (Messaging Layer
 > Security, RFC 9420) — the IETF standard for end-to-end encrypted group messaging.
 >
-> Messages, attachments, reactions, and calls are encrypted on your device before anything is
+> Messages, attachments, and reactions are encrypted on your device before anything is
 > sent. The servers store and forward only ciphertext they can never read. That is a property of
 > the protocol, not a promise in a policy.
 >
