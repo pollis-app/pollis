@@ -360,8 +360,17 @@ codesign -f -s - --entitlements ios/Pollis/Pollis.entitlements \
   build/Pollis.xcarchive/Products/Applications/Pollis.app
 xcodebuild -exportArchive -archivePath build/Pollis.xcarchive \
   -exportOptionsPlist store/ExportOptions.plist -exportPath build/export \
-  -allowProvisioningUpdates
+  -allowProvisioningUpdates \
+  -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$ASC_KEY_ID.p8 \
+  -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+# ASC_KEY_ID / ASC_ISSUER_ID: doppler secrets get … -p pollis -c prd_prod --plain
 ```
+
+**Authenticate the export with the ASC API key, not Xcode's Apple ID
+session.** The session silently expires; on 2026-10-02 the export failed with
+`No Accounts` / `No signing certificate "iOS Distribution" found` until the
+`-authenticationKey*` flags were added. With them, cloud signing mints the
+distribution cert from the API key alone.
 
 `CODE_SIGNING_ALLOWED=NO` on the archive is deliberate: automatic *archive*
 signing wants a development profile, and the team has zero registered devices,
@@ -452,7 +461,13 @@ pnpm install --ignore-workspace --frozen-lockfile
   --config ubrn.config.yaml --and-generate --release)
 pnpm expo prebuild -p android --no-install
 cd android && ./gradlew :app:bundleRelease
-# → android/app/build/outputs/bundle/release/app-release.aab  (~180 MB, 4 ABIs)
+# → android/app/build/outputs/bundle/release/app-release.aab
+# Native libs for armeabi-v7a / arm64-v8a / x86_64 ONLY — pinned by
+# `expo-build-properties` android.buildArchs in app.json. React Native
+# defaults to also building 32-bit x86, which pollis-core is not compiled
+# for: the bundle shipped an x86 slice with no Rust core, which Play would
+# serve to x86-only devices to crash at launch. Check after every build:
+#   unzip -l <aab> | grep -o "base/lib/[a-z0-9_-]*" | sort -u   # 3 entries  (~180 MB, 4 ABIs)
 ```
 
 Verify, then upload with `scripts/play-publish.py` (Play Developer API through
