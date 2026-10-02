@@ -445,10 +445,35 @@ encryption declaration to ANSSI if distributing in France. Do not flip this to
 
 ```bash
 cd mobile
-pnpm expo prebuild -p android
+source android-env.sh
+pnpm install --ignore-workspace --frozen-lockfile
+# Rust core for every Android ABI, release profile
+(cd modules/pollis-native && uniffi-bindgen-react-native build android \
+  --config ubrn.config.yaml --and-generate --release)
+pnpm expo prebuild -p android --no-install
 cd android && ./gradlew :app:bundleRelease
-# → android/app/build/outputs/bundle/release/app-release.aab
+# → android/app/build/outputs/bundle/release/app-release.aab  (~180 MB, 4 ABIs)
 ```
+
+Verify, then upload with `scripts/play-publish.py` (Play Developer API through
+the `play-publisher@pollis.iam.gserviceaccount.com` service account; key in
+Doppler `PLAY_SERVICE_ACCOUNT_JSON`, copy in 1Password):
+
+```bash
+jarsigner -verify -certs android/app/build/outputs/bundle/release/app-release.aab  # CN=Daniel Kral, OU=Pollis
+unzip -p android/app/build/outputs/bundle/release/app-release.aab base/assets/index.android.bundle \
+  | strings | grep -o 'https://api[a-z.-]*pollis.com'                              # prod DS only
+scripts/play-publish.py upload --track alpha --status draft --name "1.0.0 (1000000)"
+scripts/play-publish.py listing --icon <512px.png> [--feature-graphic <1024x500.png>] [--phone <shots>]
+```
+
+`listing` pulls the title/short/full description from `docs/store-listing.md`
+(the same parser the ASC metadata script uses). Every run is one Play *edit*:
+committed on success, discarded on any error. The service account needs, per
+app, *Release to testing tracks*, *Manage testing tracks*, and *Manage store
+presence* for `listing`. Without that last one the edit commits are refused
+with a 403. The first `upload` (2026-10-02, versionCode 1000000, closed track
+`alpha`, draft) also enrolled the app in Play App Signing with the upload key.
 
 Release signing is wired by `plugins/withReleaseSigning.js` (registered in
 `app.json`), a local Expo config plugin that patches the generated
