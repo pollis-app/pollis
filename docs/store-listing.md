@@ -7,7 +7,10 @@ mobile app (`mobile/`, bundle/package id `com.pollis.mobile`). Compliance-questi
 fill-the-form order, and repeats a compliance answer only where a store form asks for it.
 
 **Publisher context:** published by **Daniel Kral, an individual developer** (no corporation, no
-D-U-N-S). The seller name shown on both stores will be the personal name — that is how individual
+D-U-N-S). Developer accounts: **Apple** — `dankral01@gmail.com` (team `9JF7WWYMU2`);
+**Google Play** — `dan@pollis.com`. They differ deliberately for now; consolidating means paying
+for a second Apple membership, deferred until the app earns revenue. The public support contact
+on both listings is `support@pollis.com`. The seller name shown on both stores will be the personal name — that is how individual
 accounts work on both stores, and there is no way around it short of forming an entity.
 
 ---
@@ -129,13 +132,12 @@ moderation the product cannot perform.
 - User-generated content / communication features: **Yes — users can communicate and share
   content, and it is not moderated** (E2EE). Declare the safety controls that exist: block user,
   and safety-number verification.
-- Expected result: with content answers all "None" the floor would be 4+, but the
-  unmoderated-communication answers push messengers into the mature tier. Comparable apps:
-  Telegram and Discord are 17+ on the App Store; Signal and WhatsApp have historically sat at
-  12+. Under Apple's revised tier set (4+/9+/13+/16+/18+, rolled out from 2025) expect the
-  questionnaire to compute **16+ or 18+**; accept the computed tier. Recommendation: answer
-  honestly and let it land at the mature tier rather than gaming the questionnaire down to 4+ —
-  an "anonymous-adjacent unmoderated chat rated 4+" is exactly the profile App Review bounces.
+- **Actual result (set 2026-10-02):** the honest answers above computed **4+** — Apple's revised
+  questionnaire records messaging/UGC as descriptors without raising the tier. The owner set
+  `ageRatingOverrideV2 = THIRTEEN_PLUS` (**13+**, the minimum the owner will accept), since an
+  unmoderated chat app at 4+ is the profile App Review bounces. Comparable apps: Telegram and
+  Discord 17+, Signal and WhatsApp 12+/13+. The questionnaire answers stay honest; the override
+  only raises the tier, never lowers it.
 
 **Google Play (IARC questionnaire):**
 - Users interact: **Yes.** Users can exchange content that is not moderated: **Yes.**
@@ -244,8 +246,7 @@ The owner is the exporter of record.
 ## 6. Google Play — new personal developer account requirements
 
 **Account status (2026-10-02):** the earlier Play account was closed by Google. A new personal
-developer account was opened under **`support@pollis.com`** (an alias of `dan@pollis.com`) and
-is in identity verification. The upload keystore (`~/.pollis/pollis-upload.jks`) is unaffected
+developer account was opened under **`dan@pollis.com`** and is in identity verification. The upload keystore (`~/.pollis/pollis-upload.jks`) is unaffected
 — it is not tied to any account; Play App Signing enrolls it at the first upload.
 
 Personal (non-organization) Play developer accounts created after 13 Nov 2023 must, before
