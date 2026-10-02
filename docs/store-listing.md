@@ -106,7 +106,7 @@ rejection under 2.3.7.
 | Field | Value |
 |---|---|
 | Marketing URL | `https://pollis.com` |
-| Support URL | `https://pollis.com/faq.html` (support contact: `dankral01@gmail.com`) |
+| Support URL | `https://pollis.com/faq.html` (support contact: `support@pollis.com`) |
 | Privacy Policy URL (both stores) | `https://pollis.com/privacy.html` |
 | Terms of Service / EULA | `https://pollis.com/terms.html` (App Store: leave "standard Apple EULA" selected unless you want the custom one; Play: enter the URL) |
 | Play account-deletion URL (required — Play asks for a web resource describing deletion) | `https://pollis.com/privacy.html#deletion` |
@@ -241,6 +241,11 @@ The owner is the exporter of record.
 ---
 
 ## 6. Google Play — new personal developer account requirements
+
+**Account status (2026-10-02):** the earlier Play account was closed by Google. A new personal
+developer account was opened under **`support@pollis.com`** (an alias of `dan@pollis.com`) and
+is in identity verification. The upload keystore (`~/.pollis/pollis-upload.jks`) is unaffected
+— it is not tied to any account; Play App Signing enrolls it at the first upload.
 
 Personal (non-organization) Play developer accounts created after 13 Nov 2023 must, before
 production access is granted:
