@@ -2,16 +2,104 @@ appId: com.pollis.mobile
 tags:
   - parity
 ---
-# SEARCH — the search tab: type a query, capture results (may be empty on a
-# fresh account, which is still a valid visual state). Self-contained.
+# SEARCH (#1202) — parity with desktop's on-device message search: a hit with
+# its highlighted snippet and "About N results", the sort toggle, the corpus
+# footer (what this device can search), quick-jump to a settings page, and
+# the "why no results" explanation. Self-contained: creates a group and posts
+# the message it then searches for.
 
 - runFlow: ../subflows/sign-in.yaml
 - tapOn:
     id: "tab-search"
 - assertVisible:
     id: "screen-search"
+- assertVisible:
+    id: "search-filter-hint"
 - takeScreenshot: search-01-empty
+
+# Seed a message to find.
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Search Group"
+- tapOn: "CREATE GROUP"
+- extendedWaitUntil:
+    visible:
+      id: "screen-group"
+    timeout: 15000
+- tapOn:
+    text: "General"
+- assertVisible:
+    id: "screen-chat"
+- tapOn:
+    id: "input-composer"
+- inputText: "pelican migration notes"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*pelican migration notes.*"
+    timeout: 15000
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "btn-back"
+    optional: true
+
+# Message hit, count, sort, corpus.
+- tapOn:
+    id: "tab-search"
 - tapOn:
     id: "input-search"
-- inputText: "test"
-- takeScreenshot: search-02-results
+- inputText: "pelican"
+- extendedWaitUntil:
+    visible:
+      id: "search-total"
+    timeout: 15000
+- assertVisible: ".*pelican migration notes.*"
+- assertVisible:
+    id: "search-corpus-footer"
+- takeScreenshot: search-02-message-hit
+- tapOn:
+    id: "search-sort-recent"
+- assertVisible: ".*pelican migration notes.*"
+- takeScreenshot: search-03-sorted-recent
+
+# A hit opens its conversation.
+- tapOn: ".*pelican migration notes.*"
+- assertVisible:
+    id: "screen-chat"
+- tapOn:
+    id: "btn-back"
+
+# Quick-jump to a settings page.
+- tapOn:
+    id: "tab-search"
+- tapOn:
+    id: "input-search"
+- eraseText: 20
+- inputText: "security"
+- assertVisible:
+    id: "row-page-security"
+- takeScreenshot: search-04-page-hit
+- tapOn:
+    id: "row-page-security"
+- assertVisible:
+    id: "screen-self-security"
+- tapOn:
+    id: "btn-back"
+
+# Nothing matches: say why, honestly.
+- tapOn:
+    id: "tab-search"
+- tapOn:
+    id: "input-search"
+- eraseText: 20
+- inputText: "zzqxnomatch"
+- extendedWaitUntil:
+    visible:
+      id: "search-no-results-why"
+    timeout: 15000
+- takeScreenshot: search-05-no-results
