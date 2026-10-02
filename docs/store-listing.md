@@ -172,11 +172,9 @@ and note E2EE in the review notes.
 **Tracking section:** "Do you or your third-party partners use data for tracking?" → **No.**
 (`NSPrivacyTracking=false`, no tracking domains, no ATT prompt needed.)
 
-**Also required by App Review (separate from the label):** in-app **account deletion**. The
-delete-account flow exists in `pollis-core` (`delete_account`) and desktop's Security page, but
-**the mobile app has no delete-account UI yet — this is a submission blocker for both stores**
-(Apple guideline 5.1.1(v); Play's account-deletion policy). Wire a mobile Settings → Security →
-Delete account path before submitting, or expect rejection.
+**Also required by App Review (separate from the label):** in-app **account deletion** — shipped
+on mobile under Self → Security (see §8.1), which satisfies Apple 5.1.1(v) and Play's
+account-deletion policy.
 
 ---
 
@@ -190,7 +188,7 @@ Full reasoning in `docs/mobile-compliance-answers.md` §3. Form answers:
 - Is all user data encrypted in transit? → **Yes** (TLS everywhere; message content additionally
   E2EE).
 - Do you provide a way for users to request data deletion? → **Yes** — in-app account deletion
-  (see the blocker note in §3 above: must exist on mobile before answering this) plus
+  (Self → Security on mobile) plus
   `https://pollis.com/privacy.html#deletion`.
 
 Per-type declarations (each: **collected**, **not shared**, **not processed ephemerally**,
@@ -343,3 +341,38 @@ do not re-litigate them from this list's old wording.
 
 So the iOS-side remainder is **§3 (export paperwork)** and **screenshots (§7)** — everything
 else on this list is satisfied.
+
+---
+
+## 9. App Review sign-in
+
+Both stores require a working login for review, and Pollis signs in with an emailed one-time
+code that a reviewer cannot receive. The DS therefore honours **`APP_REVIEW_LOGIN`**
+(`<email>:<6 digits>`, Doppler `prd_prod`, synced like every DS secret): for that one address
+the code is fixed and no email is sent. Throttle, expiry, single-use and the 6-guess lockout
+are unchanged, and the fixed code signs in no other address (`pollis-delivery/src/otp.rs`
+`ReviewLogin`, with tests). Read the live value with
+`doppler secrets get APP_REVIEW_LOGIN -p pollis -c prd_prod --plain` — never commit it.
+
+A new device on an account that already has an identity must enroll (sibling approval or
+recovery key). Apple and Google review on different devices, and a re-review may be on yet
+another, so the review notes carry the account's **recovery key** too. Generate it once by
+signing in on a device you own, keeping the emergency kit, and leave that account free of any
+real data.
+
+**Review notes (both stores) — fill in the bracketed values:**
+
+> Sign-in: tap "Continue", enter `[review email]`, then enter the code `[code]`. No email is
+> sent to that address; the code is fixed for review.
+> If the app asks to approve this new device, choose "Use recovery key" and enter
+> `[recovery key]`.
+> Pollis is end-to-end encrypted messaging. To try it: create a group, open its channel, and
+> send a message; or open Self → Security to see devices, safety numbers, and account deletion.
+> Voice/video calls are not part of the mobile app.
+
+App Store Connect: App Review Information → Sign-in required → username = the review email,
+password = the code, and the notes above. Play Console: App content → App access → "All or
+some functionality is restricted" → add the same instructions.
+
+Changing the code: update Doppler and run `delivery-deploy-prod` with `force_restart: true`
+(a secret-only change does not restart the container), then update both stores' review notes.
