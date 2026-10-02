@@ -6,7 +6,6 @@ import {
   Pressable,
   ScrollView,
   KeyboardAvoidingView,
-  Platform,
   StyleProp,
   ViewStyle,
   TextStyle,
@@ -69,11 +68,11 @@ export function Screen({
       {/* Every screen pins its primary action to <BottomAction> at the
           bottom, with a <Field> above it and no per-screen keyboard
           handling — without this, the keyboard covers the action and
-          swallows its taps instead of reaching it. */}
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
+          swallows its taps instead of reaching it. "padding" on BOTH
+          platforms: Android runs edge-to-edge (always, since SDK 54), so
+          the OS no longer shrinks the window for the keyboard and this
+          view is the only thing that lifts the content (#1194). */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
         {centerBody ? (
           <View
             style={{

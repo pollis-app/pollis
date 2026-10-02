@@ -44,6 +44,9 @@ tags:
 # like "hello from maestro" never matches the compound "name: text" label
 # (Maestro requires a full match, not substring — use a `.*...*` regex, or
 # better, the stable `row-message-<id>` testID).
+# The send tap below happens with the keyboard UP, on purpose: if the keyboard
+# covers the composer (Android edge-to-edge, #1194) the tap lands on the
+# keyboard and the message never sends. Do not add a hideKeyboard before it.
 - tapOn:
     id: "input-composer"
 - inputText: "hello from maestro"
