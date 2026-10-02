@@ -301,11 +301,6 @@
         "showInlineTimestamps": "Mostrar la hora junto a cada mensaje",
         "showMemberAvatars": "Mostrar los avatares de los miembros"
       },
-      "density": {
-        "comfortable": "Cómoda",
-        "compact": "Compacta"
-      },
-      "densityHeading": "Densidad",
       "notificationsOffSettings": "Desactivadas: actívalas en los Ajustes del sistema",
       "notificationsOffTap": "Desactivadas: toca para activarlas",
       "notificationsOn": "Activadas: te avisaremos de los mensajes nuevos",
@@ -317,13 +312,7 @@
         "lilac": "Lila",
         "mint": "Menta",
         "rust": "Óxido"
-      },
-      "theme": {
-        "coal": "Carbón",
-        "paper": "Papel",
-        "system": "Sistema"
-      },
-      "themeHeading": "Tema"
+      }
     },
     "saved": {
       "empty": "No hay mensajes guardados. Mantén pulsado un mensaje para guardarlo.",

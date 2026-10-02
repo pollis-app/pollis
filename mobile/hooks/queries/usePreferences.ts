@@ -7,8 +7,6 @@
 //
 // The mobile UI persists:
 //   - `accent_hex`             — color picker, also drives ThemeProvider
-//   - `mobile_theme`           — Coal | Paper | System (cosmetic, not wired yet)
-//   - `mobile_density`         — Compact | Comfortable
 //   - `mobile_behavior`        — toggle map for the BEHAVIOR list
 //
 // Mobile-only keys are namespaced with `mobile_` so future desktop reads
@@ -22,8 +20,6 @@ import { useObserver } from "mobx-react-lite";
 
 export interface MobilePreferencesPatch {
   accent_hex?: string;
-  mobile_theme?: "Coal" | "Paper" | "System";
-  mobile_density?: "Compact" | "Comfortable";
   mobile_behavior?: Record<string, boolean>;
   /**
    * Synced, desktop-shared key (NOT `mobile_`-namespaced on purpose): the

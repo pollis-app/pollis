@@ -307,11 +307,6 @@
         "showInlineTimestamps": "Show inline timestamps",
         "showMemberAvatars": "Show member avatars"
       },
-      "density": {
-        "comfortable": "Comfortable",
-        "compact": "Compact"
-      },
-      "densityHeading": "Density",
       "notificationsOffSettings": "Off — enable in system Settings",
       "notificationsOffTap": "Off — tap to enable",
       "notificationsOn": "On — new messages will notify you",
@@ -323,13 +318,7 @@
         "lilac": "Lilac",
         "mint": "Mint",
         "rust": "Rust"
-      },
-      "theme": {
-        "coal": "Coal",
-        "paper": "Paper",
-        "system": "System"
-      },
-      "themeHeading": "Theme"
+      }
     },
     "saved": {
       "empty": "No saved messages. Use the long-press action on a message to save it.",
