@@ -1,0 +1,93 @@
+appId: com.pollis.mobile
+tags:
+  - parity
+---
+# CHANNEL MENU (#1193) — the kebab sheet in a text channel: open it, tap
+# each item by testID, and capture it open for the visual gallery.
+#
+# The screenshot is the readability check a human reviews: the sheet must be
+# OPAQUE, with no `# General` header, back button or composer showing through
+# its buttons. Maestro cannot assert that itself (it reads the view
+# hierarchy, where a covered element is still "visible"), so the invariant is
+# also pinned by tests/sheet-opaque.test.ts.
+# Self-contained: creates its own group so there is a channel to open.
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-groups"
+- assertVisible:
+    id: "screen-groups"
+
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Menu Group"
+- tapOn: "CREATE GROUP"
+- extendedWaitUntil:
+    visible:
+      id: "screen-group"
+    timeout: 15000
+- tapOn:
+    text: "General"
+- assertVisible:
+    id: "screen-chat"
+
+# 1. Open the sheet; every item is present.
+- tapOn:
+    id: "btn-chat-menu"
+- assertVisible:
+    id: "btn-menu-info"
+- assertVisible:
+    id: "btn-menu-group-settings"
+- assertVisible:
+    id: "btn-menu-cancel"
+- takeScreenshot: channel-menu-01-open
+
+# 2. Conversation details.
+- tapOn:
+    id: "btn-menu-info"
+- extendedWaitUntil:
+    visible:
+      id: "screen-conversation-info"
+    timeout: 10000
+- takeScreenshot: channel-menu-02-info
+- tapOn:
+    id: "btn-back"
+- assertVisible:
+    id: "screen-chat"
+
+# 3. Group settings.
+- tapOn:
+    id: "btn-chat-menu"
+- tapOn:
+    id: "btn-menu-group-settings"
+- extendedWaitUntil:
+    visible:
+      id: "screen-group-settings"
+    timeout: 10000
+- takeScreenshot: channel-menu-03-group-settings
+- tapOn:
+    id: "btn-back"
+- assertVisible:
+    id: "screen-chat"
+
+# 4. Cancel closes the sheet and leaves the channel as it was.
+- tapOn:
+    id: "btn-chat-menu"
+- tapOn:
+    id: "btn-menu-cancel"
+- assertNotVisible:
+    id: "btn-menu-info"
+- assertVisible:
+    id: "screen-chat"
+- takeScreenshot: channel-menu-04-closed
+
+
+# iOS edge swipe-back is NOT asserted here, deliberately: Maestro's
+# XCUITest-synthesized drags never trigger UIKit's edge-pan recognizer — not
+# even with the native `default` push (verified 2026-10-02 with several
+# start/end/duration variants). Swipe-back after the faster `simple_push`
+# (lib/transitions.ts, with `customAnimationOnSwipe`) is a manual check on a
+# device: drill into a channel, swipe from the left edge, it must track the
+# finger and pop.

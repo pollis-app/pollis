@@ -76,6 +76,7 @@ gallery the visual evaluator reviews. Override device names with `IOS_DEVICE=…
 | `auth` | email→OTP→PIN→inbox (also the smoke test: bridge + dev DS + keystore live) | no |
 | `groups` | create group, open, channel visible | no |
 | `messaging` | send / edit / delete / react in a self-owned channel | no |
+| `channel-menu` | #1193 the channel kebab sheet: every item tapped by `testID`, plus `channel-menu-01-open` — the gallery shot that must show an OPAQUE sheet (no header/composer through its buttons; the invariant itself is pinned in `tests/sheet-opaque.test.ts`) | no |
 | `profile-prefs` | accent re-theme, behavior toggle, display-name save | no |
 | `search` | message/user/group search | no |
 | `security` | device list + blocked-list entry | no |

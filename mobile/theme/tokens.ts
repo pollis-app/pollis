@@ -1,4 +1,5 @@
 import { Platform } from "react-native";
+import { compositeOver } from "./composite";
 
 // Pollis Mobile — design tokens
 // Dark, monochrome-amber. One bg color + one accent; everything else is a
@@ -33,6 +34,13 @@ export const DEFAULT_ACCENT_HEX = rgbTripletToHex(DEFAULT_ACCENT);
 
 // Translucent accent tier. Reads the *current* accent each call.
 export const t = (alpha: number) => `rgba(${_accentRgb}, ${alpha})`;
+
+// The same tier pre-composited over `palette.bg`: identical colour where it
+// sits on the bare background, but OPAQUE, so whatever it is drawn on top of
+// cannot show through (#1193 — a translucent sheet let the channel header and
+// composer bleed through its buttons).
+export const tOpaque = (alpha: number) =>
+  compositeOver(_accentRgb, alpha, hexToRgbTriplet(palette.bg));
 
 export const palette = {
   bg: "#0a0907", // just-above-black
@@ -78,6 +86,11 @@ export const semantic = {
   },
   get cardBg() {
     return t(0.06);
+  },
+  // `cardBg`'s look, opaque — for surfaces that float over content (bottom
+  // sheets). Inline cards keep the translucent `cardBg`.
+  get sheetBg() {
+    return tOpaque(0.06);
   },
   danger: palette.danger,
 };

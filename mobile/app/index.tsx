@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { View, ActivityIndicator } from "react-native";
+import { View, ActivityIndicator, Image } from "react-native";
 import { useRouter } from "expo-router";
 import { restoreSession } from "../hooks/queries/useAuth";
 import { invoke } from "../lib/native";
@@ -71,8 +71,20 @@ export default function Index() {
         justifyContent: "center",
       }}
     >
+      {/* The native splash's glyph, same size and dead centre, so the
+          splash → app handoff is seamless instead of the logo blinking
+          into a bare spinner. 120 matches `imageWidth` in app.json. */}
+      <Image
+        source={require("../assets/splash-glyph.png")}
+        style={{ width: 120, height: 120 }}
+        accessibilityIgnoresInvertColors
+      />
       {!routed ? (
-        <ActivityIndicator color={semantic.accent} />
+        <ActivityIndicator
+          color={semantic.accent}
+          // Below the glyph, out of flow, so the glyph never shifts.
+          style={{ position: "absolute", top: "50%", marginTop: 96 }}
+        />
       ) : null}
     </View>
   );
