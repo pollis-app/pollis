@@ -97,17 +97,17 @@ function UserSettings() {
             >
               {displayName || handle || "—"}
             </Text>
-            <Text
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 12,
-                color: semantic.mute,
-              }}
-            >
-              {isLoading
-                ? t("common:states.loading")
-                : t("mobile:self.userSettings.avatarHint")}
-            </Text>
+            {isLoading ? (
+              <Text
+                style={{
+                  fontFamily: ty.body.fontFamily,
+                  fontSize: 12,
+                  color: semantic.mute,
+                }}
+              >
+                {t("common:states.loading")}
+              </Text>
+            ) : null}
           </View>
         </View>
 

@@ -354,7 +354,6 @@
     },
     "title": "我的",
     "userSettings": {
-      "avatarHint": "由你用户名的前两个字符生成。",
       "displayName": "显示名称",
       "handle": "用户名",
       "handleHint": "其他成员可以通过 @handle 找到你并发私信。",
