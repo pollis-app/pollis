@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pollis — Android Download</title>
+  <meta name="description"
+    content="Download the signed Pollis Android app directly, without Google Play, and check the signature before you install it." />
+  <meta name="theme-color" content="#0f1117" />
+
+  <meta property="og:title" content="Pollis — Android Download" />
+  <meta property="og:description"
+    content="The signed Pollis APK for people who do not use Google Play, with the certificate fingerprint to check it against." />
+  <meta property="og:type" content="website" />
+
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;700&display=swap"
+    rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="doc-page.css" />
+</head>
+
+<body>
+  <!-- Dot matrix background -->
+  <div id="dot-matrix-bg"></div>
+
+  <main>
+    <div class="doc-main reading-surface">
+      <a href="index.html" class="doc-back">&larr; Back to Pollis</a>
+
+      <div class="doc-header">
+        <h1 class="doc-title">Pollis for Android</h1>
+        <p class="doc-subtitle">
+          A direct download for people who do not use Google Play. Same app, signed with our own key.
+        </p>
+      </div>
+
+      <!-- One APK per CPU type (a universal one would be more than twice the size).
+           The no-JS hrefs are the stable latest aliases on the CDN; the script below
+           swaps in the version-pinned URLs and fills version, size and hashes from
+           releases/android/latest.json. -->
+      <div class="doc-card">
+        <p>
+          <a class="btn btn-primary" data-apk-abi="arm64-v8a"
+            href="https://cdn.pollis.com/releases/android/latest/pollis-latest-android-arm64-v8a.apk">Download APK</a>
+        </p>
+        <p class="doc-cmd-note doc-loading" id="apk-meta">Android 7.0 or later. Loading the current version&hellip;</p>
+        <p class="doc-cmd-note">
+          This is the right file for almost every phone (<code>arm64-v8a</code>). Older 32-bit phones:
+          <a class="aur-link" data-apk-abi="armeabi-v7a"
+            href="https://cdn.pollis.com/releases/android/latest/pollis-latest-android-armeabi-v7a.apk">armeabi-v7a</a>.
+          Chromebooks and emulators:
+          <a class="aur-link" data-apk-abi="x86_64"
+            href="https://cdn.pollis.com/releases/android/latest/pollis-latest-android-x86_64.apk">x86_64</a>.
+          If Android says the app is not compatible with your device, you have the wrong one.
+        </p>
+      </div>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">Check it before you install it</h2>
+        <p>
+          Two values identify what we published. The <strong>signing certificate</strong> matters most: it is
+          the key Android checks every future update against, and it is the same for every release.
+        </p>
+
+        <h3 class="doc-sub-title">Signing certificate SHA-256</h3>
+        <code class="doc-cmd doc-cmd--wrap" id="cert-sha256">a991cf8d0d3c4fd9280b8537f7089f621ec6cc09742a45ff568d06141cf524eb</code>
+        <span class="doc-cmd-note">
+          Certificate <code>CN=Pollis Android Sideload, OU=Pollis, O=Pollis</code>, RSA-4096. Also committed in the
+          source repository as
+          <a href="https://github.com/actuallydan/pollis/blob/main/mobile/store/android-sideload-cert.sha256"
+            target="_blank" rel="noopener noreferrer"><code>mobile/store/android-sideload-cert.sha256</code></a>,
+          and the release pipeline refuses to publish an APK signed by anything else.
+        </span>
+
+        <p>
+          Check it with <code>apksigner</code>, which ships in the Android SDK build-tools
+          (<code>$ANDROID_HOME/build-tools/&lt;version&gt;/apksigner</code>):
+        </p>
+        <code class="doc-cmd">apksigner verify --print-certs pollis-v<span data-apk-version>X.Y.Z</span>-android-arm64-v8a.apk</code>
+        <span class="doc-cmd-note">
+          The line <code>Signer #1 certificate SHA-256 digest:</code> must show exactly the value above. If it
+          shows anything else, or the command reports the signature does not verify, do not install the file.
+        </span>
+
+        <h3 class="doc-sub-title">File SHA-256</h3>
+        <code class="doc-cmd doc-cmd--wrap" id="apk-sha256">Loading&hellip;</code>
+        <code class="doc-cmd">sha256sum pollis-v<span data-apk-version>X.Y.Z</span>-android-arm64-v8a.apk     # macOS: shasum -a 256</code>
+        <span class="doc-cmd-note">
+          This hash is served by the same CDN as the file, so it catches a corrupted download, not a tampered
+          one. The certificate check above is the one that tells you who made it. Every release, its hash and
+          its certificate fingerprint are also attached to its
+          <a href="https://github.com/actuallydan/pollis/releases" target="_blank"
+            rel="noopener noreferrer">GitHub release</a>.
+        </span>
+
+        <div class="doc-limit">
+          <span class="doc-limit-title">Why the first install is the one to check</span>
+          <p>
+            Android will only install an update over Pollis if it is signed by the same certificate as the copy
+            you already have. Once a correctly signed Pollis is on your phone, a substitute signed by anyone
+            else is refused as an update. So checking the certificate once, before the first install, covers
+            every update after it.
+          </p>
+        </div>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">Installing</h2>
+        <ol>
+          <li>Download the APK on your phone, or copy it over from your computer.</li>
+          <li>
+            Open it. Android asks you to allow the app you opened it with (your browser or file manager) to
+            install apps. Allow it for this install; you can turn the permission off again afterwards.
+          </li>
+          <li>Sign in, or enroll this phone as a new device from one you already use.</li>
+        </ol>
+        <div class="doc-limit">
+          <span class="doc-limit-title">Notifications still go through Google</span>
+          <p>
+            Skipping the Play Store does not skip Google's push service. Notifications while Pollis is closed
+            are relayed through Expo's push service to Firebase Cloud Messaging, so they need Google Play services
+            on the phone. The notification is a fixed "New message" with no sender and no content. Without Play
+            services, messages still arrive, but only when you open the app.
+          </p>
+        </div>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">Google Play and this APK do not mix</h2>
+        <p>
+          Google Play re-signs every app it delivers with a key Google holds. This APK is signed with ours. Android
+          treats the two as different publishers of the same app, so <strong>neither can update the
+          other</strong>: installing this APK over a Play install (or the reverse) fails with a signature
+          conflict.
+        </p>
+        <p>To switch from one to the other:</p>
+        <ul>
+          <li>Uninstall the copy you have, then install the other one.</li>
+          <li>
+            <strong>Your message history on that phone does not carry over.</strong> The new install is a new
+            device, and a new device starts empty: there is no key backup and no server-side copy of your
+            history, by design. Messages are still on your other devices, and everything sent from now on
+            arrives normally.
+          </li>
+          <li>
+            The uninstalled copy stays listed among your devices. Remove it from another device under
+            <strong>Security &rarr; Devices</strong> (see <a href="device-security.html">lost or stolen
+            device</a> for what that does).
+          </li>
+        </ul>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">Updates are manual</h2>
+        <p>
+          This build does not update itself and does not check for updates. To update, come back to this page,
+          download the new APK, check it the same way, and open it. It installs over the existing copy and keeps
+          your data, because it is signed with the same certificate.
+        </p>
+        <p>
+          New versions are listed on our
+          <a href="https://github.com/actuallydan/pollis/releases" target="_blank"
+            rel="noopener noreferrer">GitHub releases</a> page as <code>mobile-v&hellip;</code>, and the current one
+          is always at
+          <a href="https://cdn.pollis.com/releases/android/latest.json"><code>releases/android/latest.json</code></a>.
+        </p>
+      </section>
+
+      <div class="footer-links">
+        <a href="index.html" class="footer-link">Home</a>
+        <a href="security.html" class="footer-link">Security</a>
+        <a href="faq.html" class="footer-link">FAQ</a>
+        <a href="transparency.html" class="footer-link">Transparency</a>
+        <a href="artifacts.html" class="footer-link">Artifacts</a>
+        <a href="device-security.html" class="footer-link">Lost device</a>
+        <a href="assurance.html" class="footer-link">Assurance</a>
+        <a href="privacy.html" class="footer-link">Privacy</a>
+        <a href="terms.html" class="footer-link">Terms</a>
+        <a href="https://status.pollis.com/" class="footer-link" target="_blank" rel="noopener noreferrer">Status</a>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <p id="year-copyright"></p>
+  </footer>
+
+  <script src="script.js"></script>
+  <script>
+    document.getElementById("year-copyright").textContent =
+      "© " + new Date().getFullYear() + " Pollis. All rights reserved.";
+
+    // The certificate fingerprint above is deliberately NOT read from the manifest:
+    // it is pinned in this page (served by pollis.com, not the CDN) so that the CDN
+    // alone cannot change what a reader is told to expect.
+    fetch("https://cdn.pollis.com/releases/android/latest.json", { cache: "no-cache" })
+      .then(function (r) {
+        if (!r.ok) {
+          throw new Error("HTTP " + r.status);
+        }
+        return r.json();
+      })
+      .then(function (data) {
+        var apks = data.apks || {};
+        var links = document.querySelectorAll("[data-apk-abi]");
+        for (var i = 0; i < links.length; i++) {
+          var entry = apks[links[i].getAttribute("data-apk-abi")];
+          if (entry && entry.url) {
+            links[i].href = entry.url;
+          }
+        }
+        if (data.version) {
+          var spans = document.querySelectorAll("[data-apk-version]");
+          for (var j = 0; j < spans.length; j++) {
+            spans[j].textContent = data.version;
+          }
+        }
+        var main = apks["arm64-v8a"] || {};
+        var meta = document.getElementById("apk-meta");
+        var parts = ["Android 7.0 or later"];
+        if (data.version) {
+          parts.unshift("Version " + data.version);
+        }
+        if (main.size) {
+          parts.push(Math.round(main.size / 1048576) + " MB");
+        }
+        if (data.pub_date) {
+          parts.push("published " + data.pub_date.slice(0, 10));
+        }
+        meta.textContent = parts.join(" · ");
+        meta.classList.remove("doc-loading");
+        var lines = [];
+        var order = ["arm64-v8a", "armeabi-v7a", "x86_64"];
+        for (var k = 0; k < order.length; k++) {
+          if (apks[order[k]] && apks[order[k]].sha256) {
+            lines.push(apks[order[k]].sha256 + "  " + order[k]);
+          }
+        }
+        if (lines.length) {
+          document.getElementById("apk-sha256").textContent = lines.join("\n");
+        }
+      })
+      .catch(function () {
+        var meta = document.getElementById("apk-meta");
+        meta.textContent = "Android 7.0 or later. Could not load the current version details.";
+        meta.classList.remove("doc-loading");
+        document.getElementById("apk-sha256").textContent =
+          "Unavailable: see the .sha256 file on the GitHub release.";
+      });
+  </script>
+</body>
+
+</html>
