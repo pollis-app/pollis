@@ -1,0 +1,455 @@
+name: Mobile APK Release (Android sideload)
+
+# The signed Android APK that pollis.com offers to people who will not use
+# Google Play. A separate distribution channel from Play, with its own key:
+#
+#   * Signed with the dedicated SIDELOAD key (`pollis-sideload`, RSA-4096),
+#     never the Play upload key. Play re-signs everything it serves with
+#     Google's app-signing key, so a Play install and a sideloaded install of
+#     com.pollis.mobile carry different signatures and cannot update one
+#     another — the download page says so.
+#   * Fails the release unless the APK's signing certificate matches the
+#     fingerprint committed in mobile/store/android-sideload-cert.sha256, so a
+#     wrong key (the debug keystore, the upload key, a rotated secret) can never
+#     reach pollis.com quietly.
+#   * Fails unless the JS bundle inlined the PROD Delivery Service
+#     (api.pollis.com) and not api-dev.
+#
+# Trigger:
+#   * Tag push `mobile-v<package.json version>` (e.g. `git tag mobile-v1.0.0 &&
+#     git push origin mobile-v1.0.0`) — builds, verifies and publishes to
+#     cdn.pollis.com/releases/android/ and a GitHub Release.
+#   * workflow_dispatch — on a branch: builds and verifies, uploads the APK as a
+#     run artifact only (a dry run of the whole pipeline). Dispatched on a
+#     `mobile-v*` tag ref it publishes, which is how a failed publish is re-run.
+#
+# Mobile and desktop do NOT version together. The prefix is `mobile-v`, which
+# desktop-release.yml / cli-release.yml's `v*` glob cannot match (a glob
+# anchors at the start of the tag name), and this workflow matches nothing
+# else — so neither release can ever fire the other.
+on:
+  push:
+    tags:
+      - "mobile-v*"
+  workflow_dispatch:
+    inputs:
+      build:
+        description: "POLLIS_BUILD counter (low two digits of versionCode; see mobile/app.config.js). Leave 0 unless re-releasing an unchanged version."
+        required: false
+        default: "0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-apk-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      version_code: ${{ steps.version.outputs.version_code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      # The version is mobile/package.json's and nothing else's; a tag that
+      # disagrees with it fails here rather than publishing an APK whose
+      # versionName contradicts its download URL. versionCode is computed by the
+      # SAME function the store builds use (app.config.js), and asserted
+      # against the built APK further down.
+      - name: Resolve version and versionCode
+        id: version
+        env:
+          BUILD_INPUT: ${{ github.event.inputs.build }}
+        run: |
+          set -euo pipefail
+          build="${BUILD_INPUT:-0}"
+          if ! [[ "$build" =~ ^[0-9]{1,2}$ ]]; then
+            echo "::error::build input must be an integer 0-99, got '${build}'"
+            exit 1
+          fi
+          version="$(node -p 'require("./mobile/package.json").version')"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            if [ "${GITHUB_REF_NAME}" != "mobile-v${version}" ]; then
+              echo "::error::tag ${GITHUB_REF_NAME} does not match mobile/package.json version ${version} — tag mobile-v${version}, or bump the version first"
+              exit 1
+            fi
+          fi
+          code="$(cd mobile && POLLIS_BUILD="$build" node -p 'require("./app.config.js")({ config: { android: {}, ios: {} } }).android.versionCode')"
+          {
+            echo "version=${version}"
+            echo "build=${build}"
+            echo "version_code=${code}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Releasing ${version} (versionCode ${code}, build ${build})"
+
+      # The fingerprint is pinned in two places a reader can check: the repo
+      # file this job verifies against, and the download page that tells people
+      # what to expect. If they disagree, one of them is lying to someone.
+      - name: Assert the pinned signing-cert fingerprint matches the download page
+        run: |
+          set -euo pipefail
+          pinned="$(tr -d '[:space:]' < mobile/store/android-sideload-cert.sha256)"
+          if ! [[ "$pinned" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::mobile/store/android-sideload-cert.sha256 must hold one lowercase hex SHA-256, got '${pinned}'"
+            exit 1
+          fi
+          if ! grep -qF "$pinned" website/android.html; then
+            echo "::error::website/android.html does not show the pinned signing-cert fingerprint ${pinned}"
+            exit 1
+          fi
+          echo "pinned cert sha256: ${pinned}"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10.25.0
+
+      # The three ABIs in modules/pollis-native/ubrn.config.yaml.
+      - name: Add android rust targets
+        run: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: android-apk-release
+
+      # Same toolchain install as mobile-core-check.yml's android-build job (see
+      # the comments there): RN 0.83.6 pins NDK 27.1.12297006 + CMake 3.22.1, and
+      # build-tools 36.0.0 also provides the apksigner/aapt2 the verify step uses.
+      - name: Install the RN-pinned Android NDK + CMake + build-tools
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$SDK" ]; then
+            echo "ANDROID_HOME / ANDROID_SDK_ROOT not set on this runner" >&2
+            exit 1
+          fi
+          SDKMGR="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMGR" ]; then
+            SDKMGR="$(command -v sdkmanager)"
+          fi
+          { yes || true; } | "$SDKMGR" --licenses >/dev/null
+          "$SDKMGR" "ndk;27.1.12297006" "cmake;3.22.1" "platforms;android-36" "build-tools;36.0.0"
+          {
+            echo "ANDROID_NDK_HOME=$SDK/ndk/27.1.12297006"
+            echo "ANDROID_NDK_ROOT=$SDK/ndk/27.1.12297006"
+            echo "BUILD_TOOLS=$SDK/build-tools/36.0.0"
+          } >> "$GITHUB_ENV"
+
+      # ubrn must be the exact tag mobile/CLAUDE.md pins (its C++ template has to
+      # match the npm uniffi-bindgen-react-native 0.31.0-2).
+      - name: Install cargo-ndk + uniffi-bindgen-react-native (pinned)
+        run: |
+          set -euo pipefail
+          cargo install cargo-ndk --locked
+          cargo install --git https://github.com/jhugman/uniffi-bindgen-react-native \
+            --tag 0.31.0-2 uniffi-bindgen-react-native --locked
+
+      # mobile/ is a standalone Expo project, not a workspace member.
+      - name: Install JS dependencies
+        working-directory: mobile
+        run: pnpm install --ignore-workspace --frozen-lockfile
+
+      # `--release`: the store recipe's profile (the debug staticlibs are ~5x
+      # larger and unoptimised).
+      - name: Generate uniffi bindings + cross-compile pollis-core (3 ABIs, release)
+        working-directory: mobile/modules/pollis-native
+        run: uniffi-bindgen-react-native build android --config ubrn.config.yaml --and-generate --release
+
+      # POLLIS_BUILD is read by app.config.js here (versionCode lands in the
+      # generated build.gradle) and again when Gradle's bundle step evaluates
+      # the config, so it is set on both steps.
+      - name: Expo prebuild (android)
+        working-directory: mobile
+        env:
+          POLLIS_BUILD: ${{ steps.version.outputs.build }}
+        run: pnpm expo prebuild --platform android --no-install --clean
+
+      # The keystore and its passwords exist only for this step and the next:
+      # decoded to the runner's temp dir, read by the Gradle release
+      # signingConfig (plugins/withReleaseSigning.js, POLLIS_RELEASE_KEY=sideload,
+      # which has NO debug fallback), and deleted unconditionally afterwards.
+      #
+      # One APK per ABI (plugins/withAbiSplits.js, POLLIS_ABI_SPLITS=true), not a
+      # universal one: Android stores native libs uncompressed and pollis-core is
+      # 24-34 MB per ABI, so a universal APK is ~210 MB against ~90 MB for the
+      # arm64-v8a split nearly every phone takes. reactNativeArchitectures drops
+      # 32-bit x86, which pollis-core is not built for.
+      #
+      # EXPO_PUBLIC_* are the public endpoints Metro inlines into the bundle.
+      # The DS URL is a literal, not a secret, because it is the one value this
+      # workflow exists to get right; the bundle check below proves it landed.
+      - name: Assemble the signed release APKs
+        working-directory: mobile/android
+        env:
+          GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx4096m
+          POLLIS_BUILD: ${{ steps.version.outputs.build }}
+          POLLIS_ABI_SPLITS: "true"
+          POLLIS_RELEASE_KEY: sideload
+          POLLIS_SIDELOAD_KEYSTORE_B64: ${{ secrets.POLLIS_SIDELOAD_KEYSTORE_B64 }}
+          POLLIS_SIDELOAD_STORE_PASSWORD: ${{ secrets.POLLIS_SIDELOAD_STORE_PASSWORD }}
+          POLLIS_SIDELOAD_KEY_ALIAS: ${{ secrets.POLLIS_SIDELOAD_KEY_ALIAS }}
+          POLLIS_SIDELOAD_KEY_PASSWORD: ${{ secrets.POLLIS_SIDELOAD_KEY_PASSWORD }}
+          EXPO_PUBLIC_POLLIS_DELIVERY_URL: https://api.pollis.com
+          EXPO_PUBLIC_LIVEKIT_URL: ${{ secrets.LIVEKIT_URL }}
+          EXPO_PUBLIC_R2_ENDPOINT: ${{ secrets.R2_S3_ENDPOINT }}
+          EXPO_PUBLIC_R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
+        run: |
+          set -euo pipefail
+          for v in POLLIS_SIDELOAD_KEYSTORE_B64 POLLIS_SIDELOAD_STORE_PASSWORD POLLIS_SIDELOAD_KEY_ALIAS POLLIS_SIDELOAD_KEY_PASSWORD; do
+            if [ -z "${!v}" ]; then
+              echo "::error::secret ${v} is not set (Doppler pollis/prd_prod syncs it to this repo)"
+              exit 1
+            fi
+          done
+          umask 077
+          printf '%s' "$POLLIS_SIDELOAD_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/pollis-sideload.jks"
+          unset POLLIS_SIDELOAD_KEYSTORE_B64
+          export POLLIS_SIDELOAD_STORE_FILE="$RUNNER_TEMP/pollis-sideload.jks"
+          ./gradlew :app:assembleRelease --no-daemon \
+            -PreactNativeArchitectures=arm64-v8a,armeabi-v7a,x86_64
+
+      - name: Delete the decoded keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/pollis-sideload.jks"
+
+      # Everything a downloader is told on pollis.com, checked against the bytes
+      # of every APK: who signed it, what it is, which server it talks to.
+      - name: Verify the APKs
+        env:
+          EXPECTED_VERSION: ${{ steps.version.outputs.version }}
+          EXPECTED_CODE: ${{ steps.version.outputs.version_code }}
+        run: |
+          set -euo pipefail
+          out="mobile/android/app/build/outputs/apk/release"
+          pinned="$(tr -d '[:space:]' < mobile/store/android-sideload-cert.sha256)"
+          ls -la "$out"
+          if ls "$out"/*universal* >/dev/null 2>&1 || [ -e "$out/app-release.apk" ]; then
+            echo "::error::expected per-ABI APKs only (is POLLIS_ABI_SPLITS reaching the build?)"
+            exit 1
+          fi
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            apk="$out/app-${abi}-release.apk"
+            echo "::group::${abi}"
+            test -f "$apk"
+
+            # 1. Signature: valid under the v2+ scheme, exactly one signer, and
+            #    that signer is the pinned sideload certificate.
+            "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$apk" | tee apksigner.txt
+            grep -q '^Verified using v2 scheme (APK Signature Scheme v2): true' apksigner.txt
+            grep -q '^Number of signers: 1' apksigner.txt
+            got="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' apksigner.txt | tr -d '[:space:]')"
+            if [ "$got" != "$pinned" ]; then
+              echo "::error::${abi} APK is signed by certificate ${got:-<none>}, expected the pinned sideload certificate ${pinned}"
+              exit 1
+            fi
+
+            # 2. Identity: package, versionName from package.json, versionCode
+            #    from the app.config.js derivation, and not debuggable.
+            "$BUILD_TOOLS/aapt2" dump badging "$apk" > badging.txt
+            head -1 badging.txt
+            grep -q "^package: name='com.pollis.mobile' versionCode='${EXPECTED_CODE}' versionName='${EXPECTED_VERSION}'" badging.txt
+            if grep -q 'application-debuggable' badging.txt; then
+              echo "::error::${abi} APK is debuggable"
+              exit 1
+            fi
+
+            # 3. Exactly this ABI's native libs, including pollis-core. (The
+            #    listing goes through a file: `unzip | grep -q` dies of SIGPIPE
+            #    under pipefail once grep stops reading.)
+            unzip -Z1 "$apk" > entries.txt
+            abis="$(sed -n 's#^lib/\([^/]*\)/.*#\1#p' entries.txt | sort -u | tr '\n' ' ')"
+            if [ "$abis" != "${abi} " ]; then
+              echo "::error::${abi} APK carries native libs for: ${abis}"
+              exit 1
+            fi
+            if ! grep -qx "lib/${abi}/libpollis-native.so" entries.txt; then
+              echo "::error::${abi} APK has no pollis-core (lib/${abi}/libpollis-native.so)"
+              exit 1
+            fi
+
+            # 4. Prod DS. The bundle is Hermes bytecode, where `strings` can miss
+            #    a literal, so grep the raw bytes.
+            unzip -p "$apk" assets/index.android.bundle > bundle.bin
+            prod="$(grep -a -c -F 'api.pollis.com' bundle.bin || true)"
+            dev="$(grep -a -c -F 'api-dev.pollis.com' bundle.bin || true)"
+            echo "bundle: api.pollis.com x${prod}, api-dev.pollis.com x${dev}"
+            if [ "$prod" -eq 0 ] || [ "$dev" -ne 0 ]; then
+              echo "::error::${abi} bundle does not point at the prod Delivery Service only"
+              exit 1
+            fi
+            echo "::endgroup::"
+          done
+
+      - name: Package APKs, checksums and certificate fingerprint
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            name="pollis-v${VERSION}-android-${abi}.apk"
+            cp "mobile/android/app/build/outputs/apk/release/app-${abi}-release.apk" "dist/${name}"
+            (cd dist && sha256sum "${name}" > "${name}.sha256")
+          done
+          tr -d '[:space:]' < mobile/store/android-sideload-cert.sha256 > dist/pollis-android-signing-cert.sha256
+          echo >> dist/pollis-android-signing-cert.sha256
+          ls -la dist
+          cat dist/*.sha256
+
+      - name: Upload run artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pollis-android-sideload-apk
+          path: dist/*
+          if-no-files-found: error
+
+  # Only this job writes anywhere, and only on a `mobile-v*` tag. Split from
+  # `build` for the same reason as verifier-release.yml: the build compiles a
+  # large third-party tree and has no business holding a write token or the R2
+  # key.
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/mobile-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download the verified APKs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pollis-android-sideload-apk
+          path: dist
+
+      # Same bucket and mechanics as desktop-release.yml, under a dedicated
+      # `releases/android/` prefix. The desktop prune only considers prefixes
+      # matching `releases/v[0-9]*/`, so it can never touch these. Versioned
+      # objects are immutable; the `latest` aliases and manifest are no-cache,
+      # like the desktop's. Cloudflare Pages could not serve these (25 MiB
+      # per-file cap).
+      - name: Upload to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
+          AWS_DEFAULT_REGION: auto
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VERSION: ${{ needs.build.outputs.version }}
+          VERSION_CODE: ${{ needs.build.outputs.version_code }}
+        run: |
+          set -euo pipefail
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          tag="v${VERSION}"
+          base="https://cdn.pollis.com/releases/android"
+          cert_sha="$(tr -d '[:space:]' < dist/pollis-android-signing-cert.sha256)"
+          apks='{}'
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            name="pollis-${tag}-android-${abi}.apk"
+            aws s3 cp "dist/${name}" "s3://pollis/releases/android/${tag}/${name}" \
+              --endpoint-url "${ENDPOINT}" --content-type "application/vnd.android.package-archive"
+            aws s3 cp "dist/${name}.sha256" "s3://pollis/releases/android/${tag}/${name}.sha256" \
+              --endpoint-url "${ENDPOINT}" --content-type "text/plain"
+            aws s3 cp "dist/${name}" "s3://pollis/releases/android/latest/pollis-latest-android-${abi}.apk" \
+              --endpoint-url "${ENDPOINT}" --content-type "application/vnd.android.package-archive" --cache-control "no-cache"
+            apks="$(jq -c \
+              --arg abi "$abi" \
+              --arg url "${base}/${tag}/${name}" \
+              --arg sha256 "$(cut -d' ' -f1 "dist/${name}.sha256")" \
+              --argjson size "$(stat -c %s "dist/${name}")" \
+              '. + {($abi): {url: $url, sha256: $sha256, size: $size}}' <<< "$apks")"
+          done
+          aws s3 cp "dist/pollis-android-signing-cert.sha256" "s3://pollis/releases/android/${tag}/pollis-android-signing-cert.sha256" \
+            --endpoint-url "${ENDPOINT}" --content-type "text/plain"
+
+          jq -n \
+            --arg version "$VERSION" \
+            --argjson version_code "$VERSION_CODE" \
+            --arg cert_sha256 "$cert_sha" \
+            --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --argjson apks "$apks" \
+            '{version: $version, version_code: $version_code, signing_cert_sha256: $cert_sha256, pub_date: $pub_date, apks: $apks}' \
+            > latest.json
+          cat latest.json
+          aws s3 cp latest.json "s3://pollis/releases/android/latest.json" \
+            --endpoint-url "${ENDPOINT}" --content-type "application/json" --cache-control "no-cache"
+
+      # "Workflow green" is not "live" (docs/deployments.md, post-merge step 3):
+      # fetch what the CDN now serves and compare it with what was verified.
+      - name: Confirm the CDN serves the verified APKs
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          curl -fsSL -H 'Cache-Control: no-cache' https://cdn.pollis.com/releases/android/latest.json > served.json
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            name="pollis-v${VERSION}-android-${abi}.apk"
+            want="$(cut -d' ' -f1 "dist/${name}.sha256")"
+            for url in \
+              "https://cdn.pollis.com/releases/android/v${VERSION}/${name}" \
+              "https://cdn.pollis.com/releases/android/latest/pollis-latest-android-${abi}.apk"; do
+              got="$(curl -fsSL -H 'Cache-Control: no-cache' "$url" | sha256sum | cut -d' ' -f1)"
+              if [ "$got" != "$want" ]; then
+                echo "::error::${url} serves ${got}, expected ${want}"
+                exit 1
+              fi
+              echo "ok ${url}"
+            done
+            served="$(jq -r --arg abi "$abi" '.apks[$abi].sha256' served.json)"
+            if [ "$served" != "$want" ]; then
+              echo "::error::releases/android/latest.json names ${served} for ${abi}, expected ${want}"
+              exit 1
+            fi
+          done
+
+      - name: Read the signing-cert fingerprint
+        id: cert
+        run: echo "sha256=$(tr -d '[:space:]' < dist/pollis-android-signing-cert.sha256)" >> "$GITHUB_OUTPUT"
+
+      # The GitHub Release is the permanent archive (R2 serves downloads).
+      # `make_latest: false` keeps the repo's "Latest release" badge on the
+      # desktop release, which is what most visitors to the repo want.
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          files: dist/*
+          make_latest: false
+          prerelease: ${{ contains(needs.build.outputs.version, '-') }}
+          body: |
+            ## Pollis for Android (direct download)
+
+            The signed APKs that <https://pollis.com/android> links to, for
+            people who do not use Google Play. Same app as the Play listing,
+            different signing key. One APK per CPU type: almost every phone
+            wants `arm64-v8a`; `armeabi-v7a` is for older 32-bit phones,
+            `x86_64` for Chromebooks and emulators.
+
+            **Signing certificate SHA-256:** `${{ steps.cert.outputs.sha256 }}`
+
+            Verify before installing:
+
+            ```
+            sha256sum pollis-v${{ needs.build.outputs.version }}-android-arm64-v8a.apk
+            apksigner verify --print-certs pollis-v${{ needs.build.outputs.version }}-android-arm64-v8a.apk
+            ```
+
+            The `Signer #1 certificate SHA-256 digest` must equal the value
+            above, which is also on <https://pollis.com/android> and committed
+            in `mobile/store/android-sideload-cert.sha256`.
+
+            - A Play install and this APK cannot update each other (different
+              signatures). Switching means uninstalling, and a new install
+              starts with empty history.
+            - There is no auto-update. Check <https://pollis.com/android> for
+              new versions.

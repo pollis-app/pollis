@@ -114,6 +114,17 @@
           </div>
           <span class="download-detail">Arch Linux: <code>yay -S pollis</code> (<a href="https://aur.archlinux.org/packages/pollis" class="aur-link" target="_blank" rel="noopener noreferrer">AUR</a>)</span>
         </div>
+        <!-- Links to the Android page rather than the APK itself: a sideloaded install
+             needs its certificate check and the Play/sideload caveat in front of it.
+             No data-platform attribute, so the desktop latest.json rewrite skips it. -->
+        <a class="download-card" href="android.html">
+          <svg class="download-icon" viewBox="0 0 24 24" fill="currentColor" width="32" height="32" aria-hidden="true">
+            <path
+              d="M17.6 9.48l1.84-3.18c.16-.31.04-.69-.26-.85a.637.637 0 0 0-.83.22l-1.88 3.24a11.463 11.463 0 0 0-8.94 0L5.65 5.67a.643.643 0 0 0-.87-.2c-.28.18-.37.54-.22.83L6.4 9.48A10.78 10.78 0 0 0 1 18h22a10.78 10.78 0 0 0-5.4-8.52zM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5z" />
+          </svg>
+          <span class="download-platform">Android</span>
+          <span class="download-detail">Signed APK, no Play Store</span>
+        </a>
       </div>
 
       <!-- Every release's hash is already public in the transparency log; this puts
@@ -189,6 +200,7 @@
     <!-- Footer links -->
     <div class="footer-links">
       <a href="#terminal" class="footer-link">Terminal</a>
+      <a href="android.html" class="footer-link">Android</a>
       <a href="faq.html" class="footer-link">FAQ</a>
       <a href="security.html" class="footer-link">Security</a>
       <a href="transparency.html" class="footer-link">Transparency</a>

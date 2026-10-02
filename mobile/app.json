@@ -87,6 +87,7 @@
     },
     "plugins": [
       "./plugins/withReleaseSigning",
+      "./plugins/withAbiSplits",
       "expo-secure-store",
       "expo-router",
       [

@@ -56,10 +56,11 @@ intended cost — see `docs/deployments.md`.
 ### 2. Tag protection for `v*` — the tag *is* the release trigger
 
 *Settings → Rules → Rulesets → new ruleset, target **Tags**, pattern `v*` (and
-`pollis-verify-v*`).*
+`pollis-verify-v*`, `mobile-v*`).*
 
-`desktop-release.yml` and `cli-release.yml` fire on a `v*` tag push, and
-`verifier-release.yml` on `pollis-verify-v*`. Anyone who can create or **move** such a
+`desktop-release.yml` and `cli-release.yml` fire on a `v*` tag push,
+`verifier-release.yml` on `pollis-verify-v*`, and `mobile-apk-release.yml` (the
+pollis.com Android APK) on `mobile-v*`. Anyone who can create or **move** such a
 tag can publish a signed release from arbitrary tree contents, and a moved tag also
 rewrites what the transparency log's leaf claims to describe.
 
@@ -77,7 +78,8 @@ Today the deploy workflows use environments (`delivery-dev`, `delivery-prod`,
 `TAURI_SIGNING_PRIVATE_KEY*` (the updater key), `R2_*` (writes `cdn.pollis.com`:
 `install.sh`, `latest.json`, every installer), `STH_SIGNING_KEY` and
 `LOG_DB_ADMIN_TOKEN` (the transparency log's append credential), `AUR_SSH_KEY`,
-`TURSO_*`. A repository-level secret is readable by **every** workflow the repo runs,
+`POLLIS_SIDELOAD_*` (the key the pollis.com Android APK is signed with — whoever
+holds it can ship an update every sideloaded install accepts), `TURSO_*`. A repository-level secret is readable by **every** workflow the repo runs,
 including one added in a PR that merges without review.
 
 - Create a `release` environment (and a `transparency` one for `STH_SIGNING_KEY` /
@@ -96,7 +98,8 @@ Dispatch permission follows repository **write** access — there is no per-work
 setting — so the control is: keep the write-access list small, and put the credentials
 behind an Environment with reviewers (item 3), which is what actually gates a dispatched
 run. Workflows where a hand-fired run publishes or mutates something real:
-`cli-release.yml`, `verifier-release.yml`, `attest-release.yml`,
+`cli-release.yml`, `verifier-release.yml`, `mobile-apk-release.yml` (publishes
+only when dispatched on a `mobile-v*` tag ref), `attest-release.yml`,
 `transparency-publish.yml`, `aur-republish.yml`, `website-deploy.yml`,
 `delivery-deploy-{dev,prod}.yml`, `db-migrate-dev.yml`, `livekit-deploy.yml`,
 `relay-image.yml`. (`desktop-release.yml` already self-refuses a dispatch.)
