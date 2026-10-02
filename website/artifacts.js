@@ -1,5 +1,5 @@
 // Artifacts dashboard — a live view of every public Pollis output and the
-// server-computed transparency proof for each. Like transparency.js, there is
+// server-computed transparency proof for each. Unlike transparency.js, there is
 // NO in-browser verification here: the browser fetches server-computed verdicts
 // and version pointers and DISPLAYS them. The ONLY thing verified locally is a
 // string compare of the served signing key against the pinned key set below.
@@ -9,7 +9,7 @@
 // is escaped through esc() before it is inserted into HTML.
 
 // ── Configuration ──────────────────────────────────────────────────────────
-// Server-computed verification API (same trust model / base as transparency.js).
+// Transparency host (the same base transparency.js verifies against).
 const BACKEND_BASE = "https://verify.pollis.com";
 // Static release pointers — the same source of truth index.html uses.
 const CDN_BASE = "https://cdn.pollis.com";

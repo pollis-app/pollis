@@ -28,7 +28,7 @@ The file path under the output directory is the URL path without the leading `/`
 | `/v1/index.json` | manifest (below) | short |
 | `/v1/sth/latest.json` | newest STH | short |
 | `/v1/sth/<tree_size>.json` | STH at that size | immutable |
-| `/v1/entries.json` | full ordered `[Entry]` | immutable |
+| `/v1/entries.json` | full ordered `[Entry]` | short (grows with every append) |
 | `/v1/entries/<index>.json` | one entry | immutable |
 | `/v1/proof/inclusion/<tree_size>/<leaf_index>.json` | inclusion proof | immutable |
 | `/v1/proof/consistency/<first>-<second>.json` | consistency proof | immutable |
@@ -52,7 +52,11 @@ conversation you need its real id, which only members have:
 - `pollis-verify group <base-url> <conversation_id>` fetches `entries.json` and does
   the work locally, so it works against a plain static host;
 - `GET /verify/group/<conversation_id>` does the same work on a server (`serve serve`
-  or `serve live`). A static host alone does not answer it.
+  or `serve live`). A static host alone does not answer it;
+- the website explorer (`website/transparency.js`) is a JavaScript port of
+  `verify_group` that does the work in the browser against the static files, so
+  production needs no server for it. A change to the group verdict here must be
+  mirrored there.
 
 Both re-derive the conversation's pseudonym for every window and check the
 invariant across windows with the shared `verify_group_in_bundle`.

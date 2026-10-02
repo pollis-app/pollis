@@ -2127,13 +2127,15 @@ A valid signature on a tampered app, the three levels a release is recorded at, 
             verification code as the app.
           </p>
           <p>
-            <strong>Why your browser cannot do this check.</strong> This page used to
-            verify the signature in the browser. The log now signs with
+            <strong>Checking in the browser.</strong> The log signs with
             <strong>ML-DSA-44</strong>, so that its statements about history stay
             valid even after a quantum computer could forge an Ed25519 signature.
-            Browsers ship Ed25519 but not ML-DSA, so the check moved into a program
-            that carries its own cryptography. The guarantee is stronger; for now,
-            fewer places can check it.
+            Browsers do not ship ML-DSA, so a page that checks it has to bring its
+            own cryptography. The <a href="transparency.html">Key Transparency</a>
+            page does: it runs the same checks as <code>pollis-verify group</code>
+            in your browser, against the static log files and the pinned key, using
+            a pinned copy of an audited ML-DSA library. The command-line verifier
+            remains the check that does not depend on code a web page hands you.
           </p>
           <p>
             The signature covers the root, so changing one character of the history

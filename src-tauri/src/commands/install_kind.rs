@@ -109,3 +109,79 @@ fn strip_quotes(s: &str) -> &str {
 pub fn detect_managed_install() -> Option<ManagedInstallInfo> {
     detect().map(Into::into)
 }
+
+/// Where the running app lives when the in-app updater cannot replace it.
+///
+/// Tauri's macOS updater swaps the `.app` bundle in place, so it needs the
+/// bundle's directory to be writable. Two launch locations are read-only and
+/// fail with "Read-only file system (os error 30)" partway through an update:
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadOnlyLocation {
+    /// Launched straight from the mounted disk image (`/Volumes/...`) instead
+    /// of from a copy in Applications.
+    DiskImage,
+    /// macOS App Translocation: a quarantined app run from a randomized,
+    /// read-only mount (`.../AppTranslocation/...`) until it is moved in Finder.
+    Translocated,
+}
+
+/// Classify an executable path. Pure, so the rule is testable on every OS.
+fn classify_exe_path(path: &str) -> Option<ReadOnlyLocation> {
+    if path.contains("/AppTranslocation/") {
+        return Some(ReadOnlyLocation::Translocated);
+    }
+    if path.starts_with("/Volumes/") {
+        return Some(ReadOnlyLocation::DiskImage);
+    }
+    None
+}
+
+/// `Some` when the running app is in a location the updater cannot write to,
+/// so the update screen can say how to fix it before attempting an install
+/// that is guaranteed to fail. `None` everywhere but macOS.
+#[tauri::command]
+pub fn detect_read_only_location() -> Option<ReadOnlyLocation> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    let exe = std::env::current_exe().ok()?;
+    classify_exe_path(&exe.to_string_lossy())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_applications_install_is_writable() {
+        assert_eq!(classify_exe_path("/Applications/Pollis.app/Contents/MacOS/pollis"), None);
+        assert_eq!(classify_exe_path("/Users/me/Applications/Pollis.app/Contents/MacOS/pollis"), None);
+    }
+
+    #[test]
+    fn running_from_the_mounted_dmg_is_read_only() {
+        assert_eq!(
+            classify_exe_path("/Volumes/Pollis 1.14.0/Pollis.app/Contents/MacOS/pollis"),
+            Some(ReadOnlyLocation::DiskImage)
+        );
+    }
+
+    #[test]
+    fn a_translocated_app_is_read_only() {
+        assert_eq!(
+            classify_exe_path(
+                "/private/var/folders/xy/abc/T/AppTranslocation/1F2E-33/d/Pollis.app/Contents/MacOS/pollis"
+            ),
+            Some(ReadOnlyLocation::Translocated)
+        );
+    }
+
+    #[test]
+    fn translocation_wins_even_if_the_original_was_on_a_volume() {
+        assert_eq!(
+            classify_exe_path("/Volumes/x/AppTranslocation/1/d/Pollis.app/Contents/MacOS/pollis"),
+            Some(ReadOnlyLocation::Translocated)
+        );
+    }
+}

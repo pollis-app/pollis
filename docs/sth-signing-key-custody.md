@@ -140,7 +140,7 @@ real one.
 | Candidate-key derivation | `verifiable-log-serve/src/bundle.rs` | `PublicKeyDoc::verifying_candidates(now_ms)` / `Bundle::key_candidates(now_ms)` — the one place a document becomes verifying keys |
 | Overlap publishing | `builder --retired-key <hex>:<not_after_ms>` | repeatable; emits `retired_keys` into the bundle |
 | Rebuilder | `.github/workflows/rebuild-verify.yml` | `PINNED_LOG_KEY` accepts a comma/space-separated list |
-| Website | `website/artifacts.js` | `PINNED_KEYS` + `livePinnedKeys()` |
+| Website | `website/artifacts.js`, `website/transparency.js` | `PINNED_KEYS` + `livePinnedKeys()` (the explorer verifies STHs in the browser against it) |
 | Copy agreement | `scripts/check-pinned-log-key.py` | The nine hard-coded copies must match `transparency.rs`; enforced on every PR by `scripts-check.yml`, and it also refuses an unregistered tenth (#945) |
 
 **`key_id` is a hint, not a trust input.** It is derived (`key_id_for` = first 8 bytes of

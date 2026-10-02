@@ -21,6 +21,36 @@
   <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;700&display=swap"
     rel="stylesheet" />
 
+  <!-- The explorer verifies in your browser with @noble/post-quantum (ML-DSA-44) and
+       @noble/hashes (SHA-256): exact versions, raw npm files from jsDelivr, each module
+       pinned by an SRI hash (the integrity map below; a browser without import-map
+       integrity support loads them unchecked). Bumping a version means recomputing
+       every hash: sha384 of the file in the npm tarball, base64. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "@noble/post-quantum/": "https://cdn.jsdelivr.net/npm/@noble/post-quantum@0.7.1/",
+      "@noble/hashes/": "https://cdn.jsdelivr.net/npm/@noble/hashes@2.4.0/",
+      "@noble/curves/": "https://cdn.jsdelivr.net/npm/@noble/curves@2.4.0/"
+    },
+    "integrity": {
+      "https://cdn.jsdelivr.net/npm/@noble/curves@2.4.0/abstract/fft.js": "sha384-BhhrVK9q8Q/ZSggdCXKcsDdWI95d1YMTRlhDT/+x3xiTKgWWWw2ird6lgr+1oJ1u",
+      "https://cdn.jsdelivr.net/npm/@noble/curves@2.4.0/abstract/modular.js": "sha384-xR7s2u9uY85mOtRdE4RBg4QC7mI1CUwjMWOLGFwxx+LGd9Xzg6T8c5/u/3K/x6fk",
+      "https://cdn.jsdelivr.net/npm/@noble/curves@2.4.0/utils.js": "sha384-yxyxAjWSOk1k91XdLdph2I73SDcpeqSnrkUr5ru3cOL6csP8uAhQ0qgD2y7s85BT",
+      "https://cdn.jsdelivr.net/npm/@noble/hashes@2.4.0/_md.js": "sha384-+inj+kU2SrziXaCzySRcSf7kOiLEfScN7pI3vq97++FGKDRSw3MJ0t0l37dQWmKc",
+      "https://cdn.jsdelivr.net/npm/@noble/hashes@2.4.0/_u64.js": "sha384-SPLtaj6mblQ3NtLCy4eidRByUQWvhD8+J1MpyW8ejRRfwyGrzdElsKxcrcBmGjZY",
+      "https://cdn.jsdelivr.net/npm/@noble/hashes@2.4.0/hmac.js": "sha384-T+vGWnGryWubEFH8lQdk8LN00eOX+mpsmHwdXuC6L6KIIn46POY/2hauzVrdjZNH",
+      "https://cdn.jsdelivr.net/npm/@noble/hashes@2.4.0/legacy.js": "sha384-0jB24bW9lAVeQ6N+1J5hDmWtio1Pn5vx3+RMWQ8C6TUHpnILHsRDC0RdvP99O52Q",
+      "https://cdn.jsdelivr.net/npm/@noble/hashes@2.4.0/sha2.js": "sha384-YXgpTrphhgj/WMtfF9PcPZQOE57vqATkv4wTjdFflOBTMR5ro2T6S/MkCc9vVH5q",
+      "https://cdn.jsdelivr.net/npm/@noble/hashes@2.4.0/sha3.js": "sha384-IT/CA0UQxCI3fLDdZcqKlKmr/XVBDPGkB4SxGvCqwmzqdmr35J4qqRxH5WsqYYtB",
+      "https://cdn.jsdelivr.net/npm/@noble/hashes@2.4.0/utils.js": "sha384-YFMR8BWPimRHARZs0bAtgjKOWPQL0ND/lZk6QwHVzhzx71FWSqzQb1ToPgVtqapB",
+      "https://cdn.jsdelivr.net/npm/@noble/post-quantum@0.7.1/_crystals.js": "sha384-Bfh7z4BRC7JaTs8oJ+RLORtqNz6zaxvoeKd50h3PqLlO29xDyGfsqKB5BLLvNhf3",
+      "https://cdn.jsdelivr.net/npm/@noble/post-quantum@0.7.1/ml-dsa.js": "sha384-UrSJV+yZJDzkTcFGm/b4MTupcQ6vKYxOO53hOx41rTcuJRJLylX3Wy87bBH8ZTbf",
+      "https://cdn.jsdelivr.net/npm/@noble/post-quantum@0.7.1/utils.js": "sha384-cFZnN6r3eHUtLySj3b6/nvGwOkseylmRhBU8ARPSwnHxqn5qe+uEdTYQ4kFpRTNF"
+    }
+  }
+  </script>
+
   <link rel="stylesheet" href="styles.css" />
 
   <style>
@@ -295,14 +325,15 @@
       </div>
 
       <div class="kt-explainer">
-        This page is a live demonstration. To check the same proof without relying on this page,
+        The check runs entirely in your browser: this page downloads the signed log's static files from
+        <code>verify.pollis.com/v1/</code> and verifies the signature, the inclusion proofs and the commit
+        chain itself, exactly as the <code>pollis-verify group</code> command does. No server computes the
+        verdict. To check the same proof without relying on this page,
         <a href="https://github.com/actuallydan/pollis/releases" target="_blank"
           rel="noopener noreferrer">download the <code>pollis-verify</code> tool</a>
         (tags <code>pollis-verify-v*</code>, <a
           href="https://github.com/actuallydan/pollis/blob/main/docs/verify-transparency-log.md"
-          target="_blank" rel="noopener noreferrer">guide here</a>), or query our
-        <a href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md" target="_blank"
-          rel="noopener noreferrer">public verification API</a> directly (rate limits apply).
+          target="_blank" rel="noopener noreferrer">guide here</a>).
         The only thing you have to trust is the log's pinned public key. It is an ML-DSA-44 (post-quantum) key,
         so its signatures over past history stay trustworthy even against a future quantum computer. It is published on the
         <a href="artifacts.html">artifacts page</a>, in the <code>pollis-verify</code> release body, and compiled into
@@ -341,7 +372,7 @@
   </footer>
 
   <script src="script.js"></script>
-  <script src="transparency.js"></script>
+  <script type="module" src="transparency.js"></script>
   <script>
     document.getElementById("year-copyright").textContent =
       "© " + new Date().getFullYear() + " Pollis. All rights reserved.";

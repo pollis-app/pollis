@@ -23,6 +23,8 @@ on:
       # honest log look tampered to whoever reads the stale copy.
       - "pollis-core/src/commands/transparency.rs"
       - "website/artifacts.js"
+      - "website/transparency.js"
+      - "website/install.sh"
       - "website/learn.html"
       - "website/assurance.html"
       - "key-set.json"
@@ -58,6 +60,8 @@ on:
       # honest log look tampered to whoever reads the stale copy.
       - "pollis-core/src/commands/transparency.rs"
       - "website/artifacts.js"
+      - "website/transparency.js"
+      - "website/install.sh"
       - "website/learn.html"
       - "website/assurance.html"
       - "key-set.json"
@@ -158,6 +162,12 @@ jobs:
       # consistency check nobody has watched fail is a check nobody should cite.
       - name: Pinned-key check catches divergence (#945)
         run: ./scripts/test-pinned-log-key.sh
+
+      # install.sh deletes a download the transparency log does not record. Its
+      # record match once split each record at the nested toolchain object and
+      # deleted a genuine v1.14.1 .dmg as tampered; this runs the real function.
+      - name: install.sh log match accepts genuine and refuses forged records
+        run: ./scripts/test-install-verify.sh
 
       # The e2e commit-log migration applier. Two silent failures shipped in it:
       # a stale migrations path that made it apply ZERO statements and exit 0,

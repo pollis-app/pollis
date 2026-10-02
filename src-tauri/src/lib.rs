@@ -659,6 +659,7 @@ pub fn run() {
             commands::update::is_update_required,
             commands::update::get_update_check_plan,
             commands::install_kind::detect_managed_install,
+            commands::install_kind::detect_read_only_location,
             commands::voice::subscribe_voice_events,
             commands::voice::list_audio_devices,
             commands::voice::prepare_voice_connection,

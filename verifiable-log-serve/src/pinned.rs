@@ -116,16 +116,40 @@ pub fn retain_pinned<F: FnMut(bool, String)>(
 /// already holds (the publisher precomputing its own per-release report). A
 /// bundle you built yourself is correctly verified against its own key; there is
 /// no third party in that path to distrust.
-pub fn require_pinned(doc: &crate::bundle::PublicKeyDoc, now_ms: u64) -> Result<(), String> {
-    let mut passed = false;
-    let _ = retain_pinned(doc.verifying_candidates(now_ms), &mut |ok, _| passed = ok);
-    if passed {
-        Ok(())
-    } else {
-        Err("served public_key.json does not match the pinned log key — refusing to trust \
+pub fn require_pinned(
+    doc: &crate::bundle::PublicKeyDoc,
+    now_ms: u64,
+) -> Result<crate::bundle::PublicKeyDoc, String> {
+    let pinned_ids: std::collections::HashSet<String> = pinned_candidates()
+        .iter()
+        .map(|(_, vk)| key_id_for(vk))
+        .collect();
+    // Keep only the served keys that are genuinely pinned. Passing on the
+    // unfiltered document would let a server list an attacker key beside the
+    // pinned one: the pin check would pass on the pinned entry, and heads signed
+    // by the attacker key would then verify under the unfiltered candidate set.
+    let kept: Vec<crate::bundle::PublicKeyEntry> = doc
+        .active_keys(now_ms)
+        .into_iter()
+        .filter_map(|e| {
+            let vk = verifying_key_from_hex(&e.public_key).ok()?;
+            let id = key_id_for(&vk);
+            if pinned_ids.contains(&id) {
+                Some(crate::bundle::PublicKeyEntry { key_id: id, ..e })
+            } else {
+                None
+            }
+        })
+        .collect();
+    let Some(first) = kept.first() else {
+        return Err("served public_key.json does not match the pinned log key — refusing to trust \
              the served log"
-            .to_string())
-    }
+            .to_string());
+    };
+    Ok(crate::bundle::PublicKeyDoc {
+        public_key: first.public_key.clone(),
+        keys: kept,
+    })
 }
 
 #[cfg(test)]
@@ -170,6 +194,50 @@ mod tests {
         let (kept, ok) = run(vec![(pinned_id, foreign_vk())]);
         assert!(kept.is_empty(), "a foreign key must be refused even with the pinned key's id");
         assert!(!ok, "the pin check must fail when no served key is genuinely pinned");
+    }
+
+    fn entry(vk: &VerifyingKey, not_after: Option<u64>) -> crate::bundle::PublicKeyEntry {
+        crate::bundle::PublicKeyEntry {
+            key_id: key_id_for(vk),
+            algorithm: "ML-DSA-44".to_string(),
+            public_key: hex::encode(vk.encode()),
+            not_after,
+        }
+    }
+
+    #[test]
+    fn require_pinned_strips_an_unpinned_key_served_beside_the_pinned_one() {
+        let foreign = foreign_vk();
+        let pinned = pinned_vk();
+        let doc = crate::bundle::PublicKeyDoc {
+            public_key: hex::encode(foreign.encode()),
+            keys: vec![entry(&foreign, None), entry(&pinned, Some(u64::MAX))],
+        };
+        let trusted = require_pinned(&doc, 0).expect("a pinned key is served");
+        let ids: Vec<String> = trusted.verifying_candidates(0).into_iter().map(|(_, vk)| key_id_for(&vk)).collect();
+        assert_eq!(ids, vec![key_id_for(&pinned)], "only the pinned key may survive");
+        assert_eq!(trusted.public_key, hex::encode(pinned.encode()));
+    }
+
+    #[test]
+    fn require_pinned_refuses_a_doc_with_no_pinned_key() {
+        let foreign = foreign_vk();
+        let doc = crate::bundle::PublicKeyDoc {
+            public_key: hex::encode(foreign.encode()),
+            keys: vec![entry(&foreign, None)],
+        };
+        assert!(require_pinned(&doc, 0).is_err());
+    }
+
+    #[test]
+    fn require_pinned_drops_an_expired_pinned_overlap_key() {
+        let foreign = foreign_vk();
+        let pinned = pinned_vk();
+        let doc = crate::bundle::PublicKeyDoc {
+            public_key: hex::encode(foreign.encode()),
+            keys: vec![entry(&foreign, None), entry(&pinned, Some(10))],
+        };
+        assert!(require_pinned(&doc, 11).is_err(), "an expired pinned key must not vouch for the doc");
     }
 
     #[test]

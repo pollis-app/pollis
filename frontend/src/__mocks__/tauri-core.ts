@@ -877,6 +877,9 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'detect_managed_install':
       return null;
 
+    case 'detect_read_only_location':
+      return null;
+
     // Shaped, not empty: App.tsx reads `.accounts` off the result.
     case 'list_known_accounts':
       return { accounts: [], active_user_id: store.session?.id ?? null };

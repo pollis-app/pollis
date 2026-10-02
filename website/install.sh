@@ -116,6 +116,28 @@ cosign_verify() {
     return 1
 }
 
+# BEGIN report_has_artifact (loaded by scripts/test-install-verify.sh)
+# Succeeds when the compact /verify/release/<tag> JSON in $1 holds ONE artifact
+# record naming $2 with artifact_sha256 $3 that is included in the signed log.
+#
+# All three greps must match within the SAME record: a name and a hash matching
+# in DIFFERENT records would prove nothing. Each record's first field is
+# `"platform"`, so a newline goes in front of every `"platform":` to put one
+# record per line. Splitting on `{` instead (as this once did) also cuts each
+# record at its nested `"toolchain":{...}` object, which separates `included`
+# from the hash and raised a false tamper alarm on every genuine download.
+#
+# No `grep -q` on the last stage, deliberately: `-q` exits on the first match
+# and SIGPIPEs the greps upstream, which under `pipefail` makes the pipeline
+# report FAILURE precisely when the text was found.
+report_has_artifact() {
+    echo "$1" | awk '{ gsub(/"platform":/, "\n\"platform\":"); print }' \
+        | grep -F "\"artifact_name\":\"$2\"" \
+        | grep -F "\"artifact_sha256\":\"$3\"" \
+        | grep -F '"included":true' >/dev/null
+}
+# END report_has_artifact
+
 # verify_download <file> <artifact_name>
 verify_download() {
     local file="$1" name="$2" sha report
@@ -149,19 +171,7 @@ verify_download() {
             ;;
     esac
 
-    # One artifact record per line: the report is compact JSON, so splitting on
-    # `{` puts each record on its own line and all three greps below must
-    # therefore match within the SAME record. A name and a hash matching in
-    # DIFFERENT records would prove nothing.
-    #
-    # No `grep -q` on the last stage, deliberately: `-q` exits on the first match
-    # and SIGPIPEs the greps upstream, which under `pipefail` makes the pipeline
-    # report FAILURE precisely when the text was found — here that would raise a
-    # tamper alarm on a perfectly good download.
-    if ! echo "$report" | tr '{' '\n' \
-        | grep -F "\"artifact_name\":\"${name}\"" \
-        | grep -F "\"artifact_sha256\":\"${sha}\"" \
-        | grep -F '"included":true' >/dev/null
+    if ! report_has_artifact "$report" "$name" "$sha"
     then
         rm -f "$file"
         error "TAMPER CHECK FAILED for ${name}.
