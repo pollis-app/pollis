@@ -240,8 +240,7 @@ def main():
     else:
         print("no app info localization found — subtitle not written")
 
-    print("\nStill the owner's to do in ASC (declarations, not copy): age rating, "
-          "App Privacy answers, export compliance, pricing and availability.")
+    print("\nStill the owner's to do in ASC: the App Privacy answers — the one form with no API.")
 
 
 if __name__ == "__main__":
