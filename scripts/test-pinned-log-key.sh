@@ -32,6 +32,7 @@ FILES=(
   "scripts/check-pinned-log-key.py"
   "pollis-core/src/commands/transparency.rs"
   "website/artifacts.js"
+  "website/transparency.js"
   "website/learn.html"
   "website/assurance.html"
   "key-set.json"
@@ -115,6 +116,7 @@ expect_pass "$(fresh_tree baseline)" "an untouched tree passes"
 # This is the case the ticket is about: seven of eight updated, one missed.
 for target in \
   "website/artifacts.js" \
+  "website/transparency.js" \
   "key-set.json" \
   "SECURITY.md" \
   "README.md" \

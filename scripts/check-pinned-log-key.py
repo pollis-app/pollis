@@ -75,6 +75,10 @@ COPIES: list[tuple[str, str, str]] = [
     # 2. The website's client-side verifier — the copy #732 made stale.
     ("website/artifacts.js", SIGNER, FULL),
     ("website/artifacts.js", SIGNER, KEY_ID),
+    # 2b. The Key Transparency explorer, which verifies STH signatures in the
+    #     browser and refuses a served key that is not this one.
+    ("website/transparency.js", SIGNER, FULL),
+    ("website/transparency.js", SIGNER, KEY_ID),
     # 3. The Learn page shows a truncation, not the whole key.
     ("website/learn.html", SIGNER, PREFIX),
     # 4. The root-signed key set published at /v1/key-set.json.

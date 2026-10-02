@@ -23,6 +23,7 @@ on:
       # honest log look tampered to whoever reads the stale copy.
       - "pollis-core/src/commands/transparency.rs"
       - "website/artifacts.js"
+      - "website/transparency.js"
       - "website/learn.html"
       - "website/assurance.html"
       - "key-set.json"
@@ -58,6 +59,7 @@ on:
       # honest log look tampered to whoever reads the stale copy.
       - "pollis-core/src/commands/transparency.rs"
       - "website/artifacts.js"
+      - "website/transparency.js"
       - "website/learn.html"
       - "website/assurance.html"
       - "key-set.json"

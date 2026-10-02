@@ -124,7 +124,9 @@ pub fn verify_account_via(
     // gated: it also verifies a bundle the caller already holds (the publisher
     // precomputing its own report), where the bundle's own key is the right
     // anchor and there is no third party to distrust.
-    crate::pinned::require_pinned(&pk_doc, now_ms()).map_err(crate::error::ServeError::BadBundle)?;
+    // Rebind to the pinned-only subset: every key the verdict core may accept from
+    // here on is a pinned one, never a key the server merely listed beside it.
+    let pk_doc = crate::pinned::require_pinned(&pk_doc, now_ms()).map_err(crate::error::ServeError::BadBundle)?;
     let sth: Sth = fetch_json(&agent, &format!("{base}/v1/account-keys/sth/latest.json"))?;
     let entries: Vec<Entry> = fetch_json(&agent, &format!("{base}/v1/account-keys/entries.json"))?;
 

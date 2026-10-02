@@ -346,12 +346,15 @@ jobs:
             --cache-control "public, max-age=31536000, immutable" \
             --exclude "v1/sth/latest.json" \
             --exclude "v1/index.json" \
+            --exclude "v1/entries.json" \
             --exclude "verify/group/*" \
             --exclude "v1/account-keys/sth/latest.json" \
             --exclude "v1/account-keys/index.json" \
+            --exclude "v1/account-keys/entries.json" \
             --exclude "verify/account/*" \
             --exclude "v1/binaries/sth/latest.json" \
             --exclude "v1/binaries/index.json" \
+            --exclude "v1/binaries/entries.json" \
             --exclude "verify/release/*"
 
       - name: Publish mutable head + reports (pass 2)
@@ -361,7 +364,9 @@ jobs:
           R2_BUCKET: ${{ secrets.R2_TRANSPARENCY_BUCKET }}
         run: |
           set -euo pipefail
-          # The moving documents last; --content-type so the extensionless
+          # The moving documents last. entries.json is one of them: it grows with
+          # every append, so caching it as immutable would let a client keep a
+          # stale entry list next to a fresh head. --content-type so the extensionless
           # verify/group/<id> files are still served as JSON.
           aws s3 sync ./site "s3://${R2_BUCKET}/" \
             --endpoint-url "${R2_ENDPOINT}" \
@@ -371,12 +376,15 @@ jobs:
             --exclude "*" \
             --include "v1/sth/latest.json" \
             --include "v1/index.json" \
+            --include "v1/entries.json" \
             --include "verify/group/*" \
             --include "v1/account-keys/sth/latest.json" \
             --include "v1/account-keys/index.json" \
+            --include "v1/account-keys/entries.json" \
             --include "verify/account/*" \
             --include "v1/binaries/sth/latest.json" \
             --include "v1/binaries/index.json" \
+            --include "v1/binaries/entries.json" \
             --include "verify/release/*"
 
       # (e) Post-publish self-audit: verify what is ACTUALLY served at the live

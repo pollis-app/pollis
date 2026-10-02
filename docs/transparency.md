@@ -83,13 +83,15 @@ Each crate has a README with the details.
 | **builder** | [`verifiable-log-builder`](../verifiable-log-builder/README.md) | Reads `mls_commit_log` (and the account-key and binaries sources) and writes signed bundles. Hashes each commit blob and discards the bytes. |
 | **serve** | [`verifiable-log-serve`](../verifiable-log-serve/README.md) | Turns signed bundles into the static `/v1/...` read API. Also a dev server and a `live` server, both with the dynamic `/verify/group/<id>` endpoint. |
 | **pollis-verify** | [`verifiable-log-serve`](../verifiable-log-serve/README.md) | The auditor CLI: `remote` (all three trees), `group`, `account`, `release`. |
-| **website explorer** | [`website/transparency.html`](../website/transparency.html) | Calls `/verify/group/<id>` and draws the result. A convenience, not a trust anchor. |
+| **website explorer** | [`website/transparency.html`](../website/transparency.html) | Runs `pollis-verify group`'s checks in the browser (`website/transparency.js`, a JS port of `group.rs`) against the static `/v1/` files, trusting only the pinned key. A convenience, not a trust anchor. |
 
 Data flows one way: the builder signs bundles, `serve generate` turns them into the
 static tree, and `monitor`, `pollis-verify` and the explorer check it. Merkle, proof,
 signature and invariant logic lives only in `verifiable-log` (and the tenant
-invariants in `verifiable-log-builder`), so the CLI, the HTTP endpoint and the
-website run the same code and reach the same verdict on the same input.
+invariants in `verifiable-log-builder`), so the CLI and the HTTP endpoint run the
+same code and reach the same verdict on the same input. The website explorer is the
+one reimplementation: `website/transparency.js` ports `verify_group` to JavaScript
+(ML-DSA-44 via `@noble/post-quantum`) and must produce the identical `GroupReport`.
 
 ### The commit-log invariant
 
@@ -150,7 +152,8 @@ sender_pseudonym       = SHA256(dom_s || conversation_id || sender_id || window)
 
 A member re-derives `conversation_pseudonym` for each window and recovers the whole
 history. `pollis-verify group <base-url> <conversation_id>` and
-`GET /verify/group/<conversation_id>` do this. A leaf's window is computed from its
+`GET /verify/group/<conversation_id>` do this, and so does the website explorer, in
+the browser. A leaf's window is computed from its
 published `seq`, so no extra field is needed.
 
 ### Choosing the window
@@ -228,8 +231,9 @@ currently `2`), and `pollis-verify` reads it before anything else:
 
 After the republish, upgrade any `pollis-verify` older than `v0.6.0`.
 
-The website explorer is unaffected: it calls the server's `GET /verify/group/<id>`
-(`BACKEND_BASE` in `website/transparency.js`), which always runs current code.
+The website explorer applies the same two gates in the browser
+(`FORMAT_VERSION` / `MIN_LEAF_FORMAT_VERSION` in `website/transparency.js`), so a
+format change must update that file in the same change.
 
 ### What an outside observer can learn
 
@@ -279,7 +283,7 @@ precomputed JSON files served as static assets, with URL paths matching file pat
 | `/v1/index.json` | manifest, including `format_version` | short |
 | `/v1/sth/latest.json` | newest STH | short |
 | `/v1/sth/<tree_size>.json` | STH at that size | immutable |
-| `/v1/entries.json` | full ordered `[Entry]` | immutable |
+| `/v1/entries.json` | full ordered `[Entry]` | short (grows with every append) |
 | `/v1/entries/<index>.json` | one entry | immutable |
 | `/v1/proof/inclusion/<tree_size>/<leaf_index>.json` | inclusion proof | immutable |
 | `/v1/proof/consistency/<first>-<second>.json` | consistency proof | immutable |
@@ -288,10 +292,14 @@ The account-key and binaries trees use the same layout under `/v1/account-keys/.
 and `/v1/binaries/...`. The publisher also writes precomputed reports at
 `/verify/account/<user_id>` and `/verify/release/<tag>`. In production, "short"
 means `Cache-Control: public, max-age=300`, and it applies to `latest.json`,
-`index.json` and those reports; everything else is cached as immutable.
+`index.json`, `entries.json` and those reports; everything else is cached as immutable.
 
 There is no static `/verify/group/<id>`. The dynamic endpoint is served by
-`serve serve` and `serve live` and runs the same `verify_group` code as the CLI. The
+`serve serve` and `serve live` (dev and self-hosting) and runs the same
+`verify_group` code as the CLI. Production serves only the static files, and the
+website explorer does not use the endpoint: it fetches `index.json`,
+`public_key.json`, `sth/latest.json`, `entries.json` and the selected inclusion
+proofs and verifies them in the browser. The
 wire shapes (`Entry`, `Sth`, `InclusionProof`, `ConsistencyProof`) are defined in
 [`verifiable-log/README.md`](../verifiable-log/README.md).
 

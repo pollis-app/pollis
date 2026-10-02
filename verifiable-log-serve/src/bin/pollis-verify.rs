@@ -175,8 +175,9 @@ fn main() -> ExitCode {
                  re-run.\n\
                  \n\
                  (Note: a log's format only ever moves forward at a full republish, \
-                 e.g. the #672 ML-DSA-44 key rotation. The website explorer, which \
-                 calls the live server's dynamic endpoints, is unaffected.)"
+                 e.g. the #672 ML-DSA-44 key rotation. The website explorer runs the \
+                 same check in the browser and ships with the site, so it moves with \
+                 the log.)"
             );
             ExitCode::from(EXIT_VERSION_SKEW)
         }

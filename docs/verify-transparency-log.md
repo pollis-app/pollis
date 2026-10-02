@@ -142,8 +142,8 @@ id that is not in the log reports `Found: no` with an empty chain, which passes.
 `group` refuses a log published before the pseudonym change (`format_version` below
 2) with an error, rather than report an empty result.
 
-`--json` prints the `GroupReport`, the same shape the `/verify/group/<id>` endpoint
-returns:
+`--json` prints the `GroupReport`, the same shape the `/verify/group/<id>` dev
+endpoint returns and the website explorer computes:
 
 ```bash
 pollis-verify group <base-url> <conversation-id> --json
@@ -357,11 +357,16 @@ rebuilder (`.github/workflows/rebuild-verify.yml`, Linux payload only; see
 ## The website explorer
 
 [`website/transparency.html`](../website/transparency.html) takes a conversation id
-and shows its commit chain. The browser does no verification: it calls a server's
-`GET /verify/group/<id>` endpoint, which runs the same code as
-`pollis-verify group`, and draws the returned `GroupReport`. It is only as
-trustworthy as that server. For a verdict that rests on checks you ran, use
-`pollis-verify` or `monitor` on your own machine.
+and shows its commit chain. The browser runs the `pollis-verify group` checks itself
+(`website/transparency.js`, a JavaScript port of `group.rs`): it fetches the static
+`index.json`, `public_key.json`, `sth/latest.json`, `entries.json` and the inclusion
+proofs for that conversation's entries from `https://verify.pollis.com/v1/`, refuses a
+served key that is not the pinned one, verifies the ML-DSA-44 head signature, every
+inclusion proof and the commit-log invariant, and produces the same `GroupReport` the
+CLI does. No server computes the verdict. You still trust the page's code as served
+by pollis.com and the pinned crypto libraries it loads (`@noble/post-quantum`,
+`@noble/hashes`, each pinned by an SRI hash). For a verdict that rests only on code
+you chose to run, use `pollis-verify` or `monitor` on your own machine.
 
 ## Run the pipeline locally
 
