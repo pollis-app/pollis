@@ -148,11 +148,24 @@ pub async fn derive_voice_key(
     // wiped them — see issue #371). External-join rebuilds local state at
     // the current epoch from the published GroupInfo, which is how `process_
     // pending_commits` already recovers when there's no local group at all.
+    //
+    // External join refuses to replace a CONFIRMED local group (#1220: a join
+    // that clobbered one lost every envelope sealed at its epoch), so this
+    // path deletes the stranded group first. It is a deliberate rebuild: the
+    // catch-up above already ran and could not reach the published epoch, so
+    // the commits that would advance this group are gone from the log.
     if let Some(remote_epoch) = remote_epoch {
         if epoch < remote_epoch {
             eprintln!(
                 "[voice-e2ee] catch-up: local epoch {epoch} < published {remote_epoch} for {mls_group_id} — external-join recovery"
             );
+            if let Err(e) =
+                crate::commands::mls::forget_local_mls_group(state, &mls_group_id).await
+            {
+                eprintln!(
+                    "[voice-e2ee] external-join recovery: could not drop stranded group {mls_group_id}: {e}"
+                );
+            }
             match crate::commands::mls::external_join_group(
                 state,
                 &mls_group_id,
