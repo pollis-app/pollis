@@ -10,6 +10,7 @@ import {
   useUnlock,
   useUnlockState,
 } from "../../hooks/queries/useAuth";
+import { useFinalizeEnrollment } from "../../hooks/queries/useEnrollment";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { upper } from "../../i18n";
@@ -30,6 +31,7 @@ function AuthPIN() {
   const setPinMutation = useSetPin();
   const unlockMutation = useUnlock();
   const unlockState = useUnlockState();
+  const finalize = useFinalizeEnrollment();
 
   useEffect(() => {
     unlockState.mutate(undefined, {
@@ -115,8 +117,20 @@ function AuthPIN() {
       setPinMutation.mutate(
         { newPin: entered },
         {
-          onSuccess: () => {
+          onSuccess: async () => {
             appStore.setLocked(false);
+            // Now that `set_pin` has opened the local DB, finalize this
+            // device: publish its cert and external-join the account's
+            // groups/DMs. Required after device-linking and Secret-Key
+            // recovery, a no-op for a fresh signup — run unconditionally,
+            // mirroring desktop's handlePinCreated. Best-effort: a failure
+            // here must not strand the user on the PIN screen; the next
+            // unlock re-publishes the cert and welcomes still deliver.
+            try {
+              await finalize.mutateAsync();
+            } catch (e) {
+              console.error("[pin] finalize_device_enrollment failed:", e);
+            }
             // First-device signup has a one-time recovery key stashed in
             // the store by `verify_otp`. Show it before initializing so
             // the user can save it before we drop it from memory.

@@ -1,0 +1,18 @@
+appId: com.pollis.mobile
+---
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-pin"
+    timeout: 60000
+- runFlow: ../../subflows/enter-pin.yaml
+- runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 60000
+- tapOn:
+    id: "tab-groups"
+- extendedWaitUntil:
+    visible: ".*Link Test Group.*"
+    timeout: 60000
+- takeScreenshot: link-03-android-in-with-group

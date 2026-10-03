@@ -14,6 +14,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const { addAbiSplits } = require("../plugins/withAbiSplits.js");
@@ -36,7 +38,7 @@ test("splits are opt-in and default off", () => {
 });
 
 test("the split ABIs are exactly pollis-core's ubrn android targets", () => {
-  const ubrn = readFileSync(new URL("../modules/pollis-native/ubrn.config.yaml", import.meta.url), "utf8");
+  const ubrn = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../modules/pollis-native/ubrn.config.yaml"), "utf8");
   const androidBlock = ubrn.split(/^ios:/m)[0];
   const targets = [...androidBlock.matchAll(/^\s+- ([a-z0-9_-]+)\s*$/gm)].map((m) => m[1]).sort();
   const out = addAbiSplits(TEMPLATE);
