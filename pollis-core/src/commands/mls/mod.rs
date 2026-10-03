@@ -10,6 +10,7 @@ pub(crate) mod ds_reads;
 pub(crate) mod generation;
 mod group_state;
 pub mod invariants;
+mod join_branch;
 mod key_packages;
 mod migrate;
 // `pub(crate)` because the media-only voice key export builds its own provider

@@ -54,12 +54,16 @@ pub mod rendezvous {
         /// between the sender's catch-up and its post, in which a commit that
         /// lands makes the envelope epoch-behind (#1041).
         EnvelopeBeforePost,
+        /// An external join lost its compare-and-swap and dropped its branch;
+        /// the retry has not started — the window in which the device's own
+        /// Welcome lands (#1220).
+        ExternalJoinAfterLostRace,
     }
 
-    const POINTS: usize = 4;
+    const POINTS: usize = 5;
 
     static ARMED: Mutex<[Option<mpsc::UnboundedSender<Release>>; POINTS]> =
-        Mutex::new([None, None, None, None]);
+        Mutex::new([None, None, None, None, None]);
 
     /// Arm `point`. Every client reaching it in this process then parks there
     /// and sends a [`Release`] on the returned receiver. Disarm with
@@ -427,6 +431,11 @@ enum ExternalJoinResult {
     /// we don't race our own inbound Welcome (both do "delete stale group →
     /// rejoin"). See the DM-accept convergence note in [`external_join_attempt`].
     DeferredToWelcome,
+    /// This device already holds a CONFIRMED group for the lineage — typically
+    /// its Welcome landed while an earlier attempt was losing its race (#1220).
+    /// It is a member; building another branch would discard that group and
+    /// every envelope sealed at its epoch, so the join stands down.
+    AlreadyMember,
 }
 
 /// Body of [`external_join_group`]. Assumes the caller already holds the
@@ -450,6 +459,15 @@ pub(crate) async fn external_join_group_inner(
             // happen via `apply_welcome`). Success, not an error: the group WILL be
             // joined, just via the canonical Welcome path.
             ExternalJoinResult::DeferredToWelcome => return Ok(()),
+            // Already in, by another path (#1220). Success: nothing to join.
+            ExternalJoinResult::AlreadyMember => {
+                eprintln!(
+                    "[mls] external_join_group: {conversation_id} already has a confirmed local \
+                     group (attempt {}/{MAX_JOIN_ATTEMPTS}) — standing down instead of replacing it",
+                    attempt + 1
+                );
+                return Ok(());
+            }
             ExternalJoinResult::LostRace {
                 generation: join_generation,
             } => {
@@ -459,8 +477,15 @@ pub(crate) async fn external_join_group_inner(
                     attempt + 1
                 );
                 // Drop the doomed branch we just built so the next attempt
-                // re-joins cleanly from the advanced GroupInfo.
-                let _ = forget_local_mls_group_at(state, conversation_id, join_generation).await;
+                // re-joins cleanly from the advanced GroupInfo — the BRANCH
+                // only: if a Welcome replaced it while the compare-and-swap
+                // was in flight, the group stored now is confirmed and stays
+                // (#1220).
+                forget_unconfirmed_branch(state, conversation_id, join_generation).await;
+                // Test-harness only: park between the lost race and the retry,
+                // the window in which the device's own Welcome can land.
+                #[cfg(feature = "test-harness")]
+                rendezvous::park(rendezvous::Point::ExternalJoinAfterLostRace).await;
                 // Brief backoff so the winner can publish GroupInfo at the new
                 // epoch before we re-read it.
                 tokio::time::sleep(std::time::Duration::from_millis(
@@ -614,6 +639,17 @@ async fn external_join_attempt(
         let db = guard.as_ref().ok_or_else(|| {
             crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
         })?;
+        // Already a member of this lineage by another path (#1220) — most often
+        // the device's own Welcome, applied (unlocked) while a previous attempt
+        // was losing its race. Checked under the same guard as the build, so a
+        // Welcome cannot slip in between: `build_external_commit` would refuse
+        // anyway, and this turns that refusal into the success it is.
+        let stored = load_stored_group_at(db.conn(), conversation_id, stored_generation).is_some();
+        let unconfirmed =
+            super::join_branch::is_unconfirmed(db.conn(), conversation_id, stored_generation);
+        if !super::join_branch::external_join_may_replace(stored, unconfirmed) {
+            return Ok(ExternalJoinResult::AlreadyMember);
+        }
         let provider = PollisProvider::new(db.conn());
         build_external_commit(
             &provider,
@@ -698,9 +734,10 @@ async fn external_join_attempt(
                 );
             } else {
                 // Genuine failure — discard the locally-finalized (orphaned)
-                // join group for symmetry with the LostRace path (the caller
-                // only forgets on LostRace), then surface the error.
-                let _ = forget_local_mls_group_at(state, conversation_id, stored_generation).await;
+                // join branch for symmetry with the LostRace path (the caller
+                // only forgets on LostRace), then surface the error. Branch
+                // only, as there (#1220).
+                forget_unconfirmed_branch(state, conversation_id, stored_generation).await;
                 return Err(e);
             }
         }
@@ -713,6 +750,9 @@ async fn external_join_attempt(
     {
         let guard = state.local_db.lock().await;
         if let Some(db) = guard.as_ref() {
+            // The log accepted the commit: the branch is now the canonical
+            // group (#1220).
+            super::join_branch::clear(db.conn(), conversation_id, stored_generation);
             set_local_generation(db.conn(), conversation_id, stored_generation);
             // Our leaf in this lineage is brand new and, being an external
             // commit, already merged — but the rotation clock belongs to the
@@ -1002,18 +1042,35 @@ where
         provenance,
     )?;
 
-    // Drop any stale local group with the same ID so the external commit builder
-    // doesn't collide. Scoped to THIS lineage: a predecessor group under a
-    // different id is still needed to drain messages sealed before the migration.
+    // Drop this device's own leftover branch for the lineage so the external
+    // commit builder doesn't collide — but NEVER a confirmed group (#1220). A
+    // confirmed group is on the canonical log and holds the only keys this
+    // device will ever have for its epoch; replacing it with a fresh branch at
+    // the next epoch made every envelope sealed at the old one undecryptable
+    // (the epoch-0 race: a retry clobbered the Welcome group the device had
+    // just joined). A caller that really means to rebuild a broken group
+    // deletes it first. Scoped to THIS lineage: a predecessor group under a
+    // different id is still needed to drain messages sealed before the
+    // migration.
     if let Ok(Some(mut old)) = MlsGroup::load(provider.storage(), &group_id) {
+        let unconfirmed =
+            super::join_branch::is_unconfirmed(provider.raw_conn(), conversation_id, generation);
+        if !super::join_branch::external_join_may_replace(true, unconfirmed) {
+            return Err(crate::error::Error::Other(anyhow::anyhow!(
+                "external join for {conversation_id} generation {generation}: this device already \
+                 holds a confirmed group at epoch {} — refusing to replace it with a new branch",
+                old.epoch().as_u64()
+            )));
+        }
         let _ = old.delete(provider.storage());
+        super::join_branch::clear(provider.raw_conn(), conversation_id, generation);
     }
 
     let join_config = MlsGroupJoinConfig::builder()
         .use_ratchet_tree_extension(true)
         .build();
 
-    let (_joined_group, commit_bundle) = MlsGroup::external_commit_builder()
+    let (joined_group, commit_bundle) = MlsGroup::external_commit_builder()
         .with_config(join_config)
         .build_group(provider, verifiable_group_info, cred_with_key)
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!(
@@ -1032,6 +1089,17 @@ where
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!(
             "external commit finalize: {e}"
         )))?;
+
+    // The stored group is now a branch the log has not accepted (#1220). Marked
+    // in the same local-DB critical section that stored it, so nothing can see
+    // the branch without the marker. Cleared when the compare-and-swap wins, or
+    // with the branch when it loses.
+    super::join_branch::mark_unconfirmed(
+        provider.raw_conn(),
+        conversation_id,
+        generation,
+        joined_group.epoch().as_u64(),
+    )?;
 
     let (commit_msg, _welcome_msg, new_group_info) = commit_bundle.into_contents();
     let commit_bytes = commit_msg
@@ -1265,8 +1333,45 @@ pub(super) async fn forget_local_mls_group_at(
         group.delete(&store_only(db.conn()))
             .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("mls delete group: {e}")))?;
     }
+    // Whatever was stored is gone, branch or not (#1220).
+    super::join_branch::clear(db.conn(), group_id, generation);
     // If the group wasn't found locally, nothing to clean up.
     Ok(())
+}
+
+/// Delete this device's unconfirmed external-join branch for the lineage, and
+/// nothing else (#1220).
+///
+/// A lost compare-and-swap means the branch is doomed — but by the time the
+/// loss is known the device's own Welcome may already have REPLACED the branch
+/// (`welcome_may_replace`), and that group is confirmed. Deleting it there was
+/// half of the epoch-0 message loss; the check and the delete share one
+/// local-DB critical section so the Welcome cannot land between them.
+pub(super) async fn forget_unconfirmed_branch(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    generation: i64,
+) {
+    let guard = state.local_db.lock().await;
+    let Some(db) = guard.as_ref() else {
+        return;
+    };
+    if !super::join_branch::is_unconfirmed(db.conn(), conversation_id, generation) {
+        eprintln!(
+            "[mls] {conversation_id} generation {generation}: the stored group is no longer this \
+             device's unconfirmed branch (a Welcome replaced it) — keeping it"
+        );
+        return;
+    }
+    if let Some(mut group) = load_stored_group_at(db.conn(), conversation_id, generation) {
+        if let Err(e) = group.delete(&store_only(db.conn())) {
+            eprintln!(
+                "[mls] could not delete the doomed external-join branch for {conversation_id}: {e}"
+            );
+            return;
+        }
+    }
+    super::join_branch::clear(db.conn(), conversation_id, generation);
 }
 
 /// Apply any commits from `mls_commit_log` that this member has not yet seen.
@@ -1913,6 +2018,12 @@ async fn process_one_generation<'h>(
                 apply_one_commit(&provider, mls_group_id, generation, commit.epoch, &commit_data);
             match outcome {
                 CommitApply::Applied { adds, epoch_after } => {
+                    // A canonical commit applied on top of the stored group
+                    // proves it is on the log; if it was an external-join
+                    // branch whose acceptance was never recorded (a crash
+                    // between the compare-and-swap and the record), it is
+                    // confirmed now (#1220).
+                    super::join_branch::clear(db.conn(), mls_group_id, generation);
                     // Verify AFTER the merge and OFF THE TREE: a StagedCommit
                     // cannot be dropped and re-processed later (its ratchet
                     // generation is consumed), so there is no "defer" — only
@@ -2128,6 +2239,14 @@ async fn process_one_generation<'h>(
         .ok();
         let gates = gates.as_ref().filter(|s| s.authorized);
         if may_rejoin_via_external_join(gates, mls_group_id, user_id) {
+            // An explicit rebuild: the group that could not advance is dropped
+            // HERE, by name, because an external join never replaces a stored
+            // confirmed group on its own (#1220). `apply_one_commit` already
+            // deleted it for every `Recover` reason; the epoch-desync guard
+            // above is the one that leaves it in place.
+            if group_exists {
+                let _ = forget_local_mls_group_at(state, mls_group_id, generation).await;
+            }
             eprintln!("[mls] process_pending_commits: group {mls_group_id} was deleted during processing — external-joining to recover");
             // Lock already held by the wrapper, so call the unlocked inner variant.
             if let Err(e) = external_join_group_inner(state, mls_group_id, user_id).await {
