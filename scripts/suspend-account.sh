@@ -23,7 +23,7 @@ set -euo pipefail
 CONFIG="${DOPPLER_CONFIG:-prd_prod}"
 TURSO_URL="$(doppler secrets get TURSO_URL -p pollis -c "$CONFIG" --plain)"
 TURSO_TOKEN="$(doppler secrets get TURSO_TOKEN -p pollis -c "$CONFIG" --plain)"
-HTTP_URL="${TURSO_URL/libsql:\/\//https:\/\/}"
+HTTP_URL="https://${TURSO_URL#libsql://}"
 
 usage() {
   sed -n '3,8p' "$0" | sed 's/^# \{0,1\}//'
