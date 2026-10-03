@@ -27,6 +27,7 @@
  */
 
 import { test, expect, type Page, type Locator } from "@playwright/test";
+import { skinAgnosticTest } from "./lib/skins";
 
 const ME = { id: "u_me", email: "me@pollis.test", username: "mia" };
 const GROUP_ID = "g_voice";
@@ -166,8 +167,10 @@ async function appearanceOf(locator: Locator): Promise<string> {
 }
 
 for (const skin of SKINS) {
+  // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
+  const agnosticTest = skinAgnosticTest(skin);
   test.describe(`push-to-talk + deafen — ${skin} skin`, () => {
-    test("the four mic states are labelled distinctly", async ({ page }) => {
+    agnosticTest("the four mic states are labelled distinctly", async ({ page }) => {
       await joinVoiceChannel(page, skin);
       const mute = page.getByTestId("voice-tray-mute");
 
@@ -254,7 +257,7 @@ for (const skin of SKINS) {
       await expect(deafen).toHaveAttribute("title", /undeafen|deafen/i);
     });
 
-    test("both controls are present and reachable, mic or no mic", async ({ page }) => {
+    agnosticTest("both controls are present and reachable, mic or no mic", async ({ page }) => {
       await joinVoiceChannel(page, skin);
 
       await expect(page.getByTestId("voice-tray-mute")).toBeEnabled();
@@ -327,52 +330,10 @@ for (const skin of SKINS) {
 }
 
 /*
- * The terminal skin carries a second, always-on copy of these controls in the
- * bottom `VoiceBar`; AppShell mounts it only for that skin. The refined skin's
- * equivalent strip lives in `SidebarProfilePanel` and is NOT covered here —
- * see the note at the end of this file.
- */
-test.describe("push-to-talk + deafen — terminal VoiceBar", () => {
-  test("the persistent bar carries the same four states and a deafen toggle", async ({
-    page,
-  }) => {
-    await joinVoiceChannel(page, "terminal");
-
-    const mute = page.getByTestId("voice-bar-mute-button");
-    const deafen = page.getByTestId("voice-bar-deafen-button");
-    await expect(mute).toBeVisible();
-    await expect(deafen).toBeVisible();
-
-    // Wait for the button to actually reflect each gate BEFORE sampling how it
-    // looks. `setGate` resolves when the command returns, not when React has
-    // re-rendered, so reading the appearance straight after it sampled the
-    // previous frame perhaps a third of the time — and a stale sample makes
-    // two genuinely different states compare equal.
-    const appearanceInState = async (gate: Parameters<typeof setGate>[1], state: string) => {
-      await setGate(page, gate);
-      await expect(mute).toHaveAttribute("data-mic-state", state);
-      return appearanceOf(mute);
-    };
-
-    const live = await appearanceInState(LIVE, "live");
-    const muted = await appearanceInState(MUTED, "muted");
-    const pttIdle = await appearanceInState(PTT_IDLE, "ptt-idle");
-
-    expect(pttIdle).not.toBe(muted);
-    expect(pttIdle).not.toBe(live);
-
-    await setGate(page, DEAFENED);
-    await expect(mute).toHaveAttribute("data-mic-state", "deafened");
-    await expect(deafen).toHaveAttribute("data-deafened", "true");
-
-    await page.screenshot({ path: "artifacts/voice-bar-terminal.png" });
-  });
-});
-
-/*
- * The gap this file used to record — refined's sidebar strip having no deafen
- * control and a two-state mic — was #891, and is closed. The strip now carries
- * the same four-state mic and a deafen toggle in both skins; the tests live in
+ * The persistent strips — the terminal skin's bottom `VoiceBar` (AppShell
+ * mounts it only for that skin) and the refined skin's `SidebarProfilePanel`
+ * strip — carry a second, always-on copy of these controls. Their four-state
+ * mic and deafen toggle are covered in BOTH skins by
  * `voice-sidebar-parity.spec.ts`, which asserts the four states are distinct in
- * rendered appearance rather than by state name.
+ * rendered appearance rather than by state name (#891).
  */

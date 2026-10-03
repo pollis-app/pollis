@@ -512,7 +512,7 @@ mod tests {
         let c = conn().await;
         let users = vec!["alice".to_string()];
         let mut seen = std::collections::HashSet::new();
-        for _ in 0..8 {
+        for _ in 0..16 {
             let h = mint_push_handles(&c, &users, "conv-1", "dm")
                 .await
                 .remove("alice")
@@ -522,6 +522,7 @@ mod tests {
                 "the same conversation must not produce a repeated handle"
             );
         }
+        assert_eq!(seen.len(), 16);
     }
 
     /// One handle per recipient user, and users do not share.
@@ -538,6 +539,9 @@ mod tests {
         let a = handles.get("alice").unwrap();
         let b = handles.get("bob").unwrap();
         assert_ne!(a, b, "two recipients must not share a handle");
+        // Each resolves for its owner and for nobody else.
+        assert!(lookup_push_handle(&c, "alice", a).await.unwrap().is_some());
+        assert!(lookup_push_handle(&c, "bob", b).await.unwrap().is_some());
         assert_eq!(lookup_push_handle(&c, "alice", b).await.unwrap(), None);
         assert_eq!(lookup_push_handle(&c, "bob", a).await.unwrap(), None);
     }

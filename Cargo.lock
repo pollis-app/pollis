@@ -6575,7 +6575,6 @@ dependencies = [
  "libsql",
  "objc",
  "openmls",
- "openmls_basic_credential",
  "openmls_traits",
  "pollis-api",
  "pollis-capture-proto",

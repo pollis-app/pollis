@@ -19,6 +19,7 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { skinAgnosticTest } from "./lib/skins";
 
 const USER = { id: "u-alice", email: "alice@example.com", username: "alice" };
 
@@ -256,6 +257,8 @@ async function flashedTestIds(page: Page): Promise<string[]> {
 }
 
 for (const skin of SKINS) {
+  // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
+  const agnosticTest = skinAgnosticTest(skin);
   test.describe(`windowed message log — ${skin} skin`, () => {
     test("a 400-message log keeps a bounded number of rows in the DOM", async ({
       page,
@@ -468,7 +471,7 @@ for (const skin of SKINS) {
       expect(await renderedRows(page).count()).toBeLessThan(80);
     });
 
-    test("a conversation reopened from cache can still reach its oldest message", async ({
+    agnosticTest("a conversation reopened from cache can still reach its oldest message", async ({
       page,
     }) => {
       await boot(page, skin, { paginate: true, secondChannel: true });
@@ -589,7 +592,9 @@ test.describe("load-more leaves a frame with the new rows and the flag still set
   const FIRST_OLDER_ROW = idAt(TOTAL - 51);
 
   for (const skin of SKINS) {
-    test(`${skin}: a prepend batch still carries the loading line`, async ({
+    // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
+    const agnosticTest = skinAgnosticTest(skin);
+    agnosticTest(`${skin}: a prepend batch still carries the loading line`, async ({
       page,
     }) => {
       await boot(page, skin, { paginate: true });

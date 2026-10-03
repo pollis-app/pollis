@@ -20,6 +20,7 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { skinAgnosticTest } from "./lib/skins";
 
 const USER = { id: "u-alice", email: "alice@example.com", username: "alice" };
 
@@ -203,8 +204,10 @@ async function search(page: Page, query: string) {
 }
 
 for (const skin of SKINS) {
+  // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
+  const agnosticTest = skinAgnosticTest(skin);
   test.describe(`message search — ${skin} skin`, () => {
-    test("a query returns ranked results carrying real names, not ids", async ({ page }) => {
+    agnosticTest("a query returns ranked results carrying real names, not ids", async ({ page }) => {
       await boot(page, skin);
       await search(page, "budget");
 
@@ -232,7 +235,7 @@ for (const skin of SKINS) {
       await expect(page.getByTestId("search-total")).toHaveText("About 3 results");
     });
 
-    test("the sort toggle reorders the results", async ({ page }) => {
+    agnosticTest("the sort toggle reorders the results", async ({ page }) => {
       await boot(page, skin);
       await search(page, "budget");
       await expect(page.getByTestId("search-result-item")).toHaveCount(3);
@@ -277,7 +280,7 @@ for (const skin of SKINS) {
         .toContain(`message-${CHANNEL_HIT_ID}`);
     });
 
-    test("a DM hit lands on the DM route", async ({ page }) => {
+    agnosticTest("a DM hit lands on the DM route", async ({ page }) => {
       await boot(page, skin);
       await watchForFlash(page);
       await search(page, "budget");
@@ -294,7 +297,7 @@ for (const skin of SKINS) {
         .toContain(`message-${DM_HIT_ID}`);
     });
 
-    test("Cmd+K hands the query off to the search page instead of listing messages", async ({
+    agnosticTest("Cmd+K hands the query off to the search page instead of listing messages", async ({
       page,
     }) => {
       await boot(page, skin);
@@ -319,7 +322,7 @@ for (const skin of SKINS) {
       await expect(page.getByTestId("search-result-item")).toHaveCount(3);
     });
 
-    test("the results footer states the corpus, and the empty state explains why", async ({
+    agnosticTest("the results footer states the corpus, and the empty state explains why", async ({
       page,
     }) => {
       await boot(page, skin);
@@ -341,7 +344,7 @@ for (const skin of SKINS) {
       await expect(empty).toContainText("before this device was added");
     });
 
-    test("a from: filter narrows the results", async ({ page }) => {
+    agnosticTest("a from: filter narrows the results", async ({ page }) => {
       await boot(page, skin);
       await search(page, "budget from:@carol");
       await expect(page.getByTestId("search-result-item")).toHaveCount(1);

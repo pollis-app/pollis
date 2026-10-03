@@ -309,6 +309,7 @@ mod tests {
     fn self_hear_predicate_matches_sibling_device_only() {
         let me = "u1";
         assert_eq!(user_id_from_voice_identity(&voice_identity("u1", Some("dev-b"))), me);
+        assert_ne!(user_id_from_voice_identity(&voice_identity("u2", Some("dev-x"))), me);
         assert_eq!(
             user_id_from_voice_identity(&internal_identity("u1", WIRE_VOICE_B, ParticipantKind::Voice)),
             me

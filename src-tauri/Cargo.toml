@@ -148,11 +148,10 @@ proptest = "1"
 # tests/flows/dms.rs mints a DM id by hand so it can drive the `/v1/dm/create`
 # membership write and the MLS bootstrap as separate steps (#1041).
 ulid = "1"
-# Used directly by tests/multi_device_messaging.rs for in-process MLS
+# Used directly by the flows harness (tests/flows/harness.rs) for in-process MLS
 # state simulation. Production lib code reaches MLS through pollis-core.
 openmls = "0.8"
 openmls_traits = "0.5"
-openmls_basic_credential = "0.5"
 tls_codec = "0.5"
 # rusqlite is target-split into the two dev-dependency tables at the bottom of
 # this file, mirroring pollis-core's [dependencies]. It has to be: cargo unions

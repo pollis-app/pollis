@@ -350,7 +350,7 @@ All scenarios to add to `src-tauri/tests/flows.rs` under the `test-harness` feat
 
 - `pin_set_lock_unlock_roundtrip` — signup → set_pin → lock → unlock with correct PIN → assert `UserProfile` matches and local DB is queryable.
 - `pin_wrong_counter_and_lockout` — 9 wrong attempts return `PinIncorrect` with correct `attempts_remaining`; 10th wipes wrapped blobs and local DB; next `unlock` returns `PinNotSet`.
-- `pin_change_roundtrip` — set → change (old, new) → old PIN fails → new PIN unlocks.
+- PIN change — set → change (old, new) → old PIN fails → new PIN unlocks. Shipped as the tail of `pin_set_lock_unlock_roundtrip` (it was `pin_change_roundtrip`, a second sign-up for the same slots).
 - `pin_migration_from_pre_upgrade_state` — harness helper that seeds `session_*` + unwrapped `db_key` + unwrapped `account_id_key` in the `InMemoryKeystore`, then asserts `get_unlock_state` reports "needs migration," `migrate_set_initial_pin` succeeds, old slots are gone, new wrapped slots are present.
 - `accounts_json_crash_mid_write_recovers` — simulate by writing a malformed file under the tempdir path before calling `upsert_account`; assert the error is surfaced and the `.bad-{ts}.json` backup exists.
 - `accounts_json_atomic_write` — use `POLLIS_DATA_DIR` override, write a big index, kill the process mid-write by intercepting the fsync/rename... or more realistically, assert the `.json.tmp` file never coexists with a valid `.json` at the observable API level (the atomic-rename property).

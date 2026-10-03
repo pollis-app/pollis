@@ -5,7 +5,7 @@
 //! any message. And the operator's one lever: a suspended account's devices
 //! stop authenticating, so it cannot write anything.
 
-use crate::harness::{wipe, writable_remote, TestClient};
+use crate::harness::{expire_ds_device_keys, wipe, writable_remote, TestClient};
 use serial_test::serial;
 
 async fn count(sql: &str, a: &str, b: &str) -> i64 {
@@ -96,22 +96,24 @@ async fn a_suspended_account_cannot_write() {
         .await
         .expect("suspend");
 
-    // Any signed write will do; a report is the one this ticket added. The
-    // device key cache may hold bob's key for up to its TTL, so allow for it
-    // by retrying past it rather than asserting on the first call.
-    let mut refused = false;
-    for _ in 0..40 {
-        let r = bob
-            .invoke_try(
-                "report_user",
-                serde_json::json!({ "reportedId": alice_p.id, "reason": "other" }),
-            )
-            .await;
-        if r.is_err() {
-            refused = true;
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-    }
-    assert!(refused, "a suspended account was still able to write");
+    // The DS's device-key cache may hold bob's key for up to its TTL
+    // (`DEVICE_KEY_CACHE_TTL_SECS`) — an operator suspension has no eviction
+    // hook and relies on that TTL. Expire it for bob rather than sleeping it
+    // out in real time (this test used to retry for up to 40 s); after that,
+    // the very next signed request must be refused.
+    expire_ds_device_keys(&bob_p.id);
+
+    // Any signed write will do; a report is the one this ticket added.
+    let r = bob
+        .invoke_try(
+            "report_user",
+            serde_json::json!({ "reportedId": alice_p.id, "reason": "other" }),
+        )
+        .await;
+    assert!(r.is_err(), "a suspended account was still able to write: {r:?}");
+    assert_eq!(
+        count("SELECT COUNT(*) FROM user_report WHERE reporter_id = ?1 AND reported_id = ?2", &bob_p.id, &alice_p.id).await,
+        0,
+        "the suspended account's refused report must not have landed"
+    );
 }

@@ -170,25 +170,6 @@ async fn count(db: &Db, sql: &str, user_id: &str) -> i64 {
     rows.next().await.unwrap().expect("count row").get(0).unwrap()
 }
 
-// ── 1. Session authorizes the rotation, user bound from the session ──────────
-
-#[tokio::test(flavor = "multi_thread")]
-async fn rotate_identity_accepts_verified_otp_session() {
-    let db = fresh_db().await;
-    let state = authed_state(Arc::clone(&db));
-    let (user_id, token) = login_established(&state, "alice@example.com", "dev-1").await;
-
-    let (s, body) = send(&state, "/v1/account/rotate-identity", rotate_body(1), Some(&token), false).await;
-    assert_eq!(s, StatusCode::OK, "session-authorized rotation should 200: {body}");
-    assert_eq!(body["identity_version"], serde_json::json!(2));
-    assert_eq!(identity_version(&db, &user_id).await, 2);
-    assert_eq!(
-        count(&db, "SELECT COUNT(*) FROM account_key_log WHERE user_id = ?1", &user_id).await,
-        2,
-        "rotation must append the transparency log (v1 from establish, v2 from rotate)"
-    );
-}
-
 // ── 2. The session binds the actor — a body naming another user is 403 ───────
 
 #[tokio::test(flavor = "multi_thread")]
@@ -347,11 +328,18 @@ async fn session_rotation_is_the_reset_and_is_audited_by_the_ds() {
     seed_account_state(&db, &user_id, "dev-new").await;
 
     // The attack shape: rotate-identity ALONE, with nothing but the OTP session,
-    // and never call reset-recover.
+    // and never call reset-recover. It is also the plain "a verified OTP session
+    // authorizes the rotation, user bound from the session" case (formerly
+    // `rotate_identity_accepts_verified_otp_session`, the identical call).
     let (s, body) = send(&state, "/v1/account/rotate-identity", rotate_body(1), Some(&token), false).await;
     assert_eq!(s, StatusCode::OK, "session-authorized rotation should 200: {body}");
     assert_eq!(body["identity_version"], serde_json::json!(2));
     assert_eq!(identity_version(&db, &user_id).await, 2);
+    assert_eq!(
+        count(&db, "SELECT COUNT(*) FROM account_key_log WHERE user_id = ?1", &user_id).await,
+        2,
+        "rotation must append the transparency log (v1 from establish, v2 from rotate)"
+    );
 
     // The session-minted key owns NOTHING: every membership and key package is
     // gone in the same transaction as the rotation …

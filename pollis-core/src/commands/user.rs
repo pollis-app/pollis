@@ -184,10 +184,12 @@ pub async fn search_user_by_username(
     )
 }
 
+// The remaining tests pin schema constraints (CHECK, UNIQUE, PRIMARY KEY,
+// ON DELETE CASCADE) against the shipped remote schema. Query-simulation tests
+// for the client SQL #987 removed were deleted.
 #[cfg(test)]
 mod tests {
     use rusqlite::Connection;
-
 
     fn db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
@@ -212,138 +214,6 @@ mod tests {
         ).unwrap();
     }
 
-    // ── get_user_profile ───────────────────────────────────────────────────
-
-    #[test]
-    fn get_user_profile_returns_existing_user() {
-        let conn = db();
-        setup(&conn);
-
-        let (id, username, phone, avatar): (String, Option<String>, Option<String>, Option<String>) =
-            conn.query_row(
-                "SELECT id, username, phone, avatar_url FROM users WHERE id = ?1",
-                rusqlite::params!["alice"],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            ).unwrap();
-
-        assert_eq!(id, "alice");
-        assert_eq!(username.as_deref(), Some("alice"));
-        assert_eq!(phone.as_deref(), Some("555-0001"));
-        assert_eq!(avatar.as_deref(), Some("https://img.example.com/alice.png"));
-    }
-
-    #[test]
-    fn get_user_profile_returns_none_for_missing_user() {
-        let conn = db();
-        setup(&conn);
-
-        let result = conn.query_row(
-            "SELECT id FROM users WHERE id = ?1",
-            rusqlite::params!["nonexistent"],
-            |row| row.get::<_, String>(0),
-        );
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn get_user_profile_nullable_fields() {
-        let conn = db();
-        setup(&conn);
-
-        let (phone, avatar): (Option<String>, Option<String>) = conn.query_row(
-            "SELECT phone, avatar_url FROM users WHERE id = 'bob'",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        ).unwrap();
-
-        assert!(phone.is_none());
-        assert!(avatar.is_none());
-    }
-
-    // ── update_user_profile (COALESCE) ─────────────────────────────────────
-
-    #[test]
-    fn update_profile_only_username() {
-        let conn = db();
-        setup(&conn);
-
-        conn.execute(
-            "UPDATE users SET username = COALESCE(?2, username), phone = COALESCE(?3, phone), avatar_url = COALESCE(?4, avatar_url) WHERE id = ?1",
-            rusqlite::params!["alice", Some("alice_new"), None::<String>, None::<String>],
-        ).unwrap();
-
-        let (username, phone, avatar): (Option<String>, Option<String>, Option<String>) =
-            conn.query_row(
-                "SELECT username, phone, avatar_url FROM users WHERE id = 'alice'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            ).unwrap();
-
-        assert_eq!(username.as_deref(), Some("alice_new"), "username should be updated");
-        assert_eq!(phone.as_deref(), Some("555-0001"), "phone should be preserved");
-        assert_eq!(avatar.as_deref(), Some("https://img.example.com/alice.png"), "avatar should be preserved");
-    }
-
-    #[test]
-    fn update_profile_only_phone() {
-        let conn = db();
-        setup(&conn);
-
-        conn.execute(
-            "UPDATE users SET username = COALESCE(?2, username), phone = COALESCE(?3, phone), avatar_url = COALESCE(?4, avatar_url) WHERE id = ?1",
-            rusqlite::params!["alice", None::<String>, Some("555-9999"), None::<String>],
-        ).unwrap();
-
-        let (username, phone): (Option<String>, Option<String>) = conn.query_row(
-            "SELECT username, phone FROM users WHERE id = 'alice'",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        ).unwrap();
-
-        assert_eq!(username.as_deref(), Some("alice"), "username preserved");
-        assert_eq!(phone.as_deref(), Some("555-9999"), "phone updated");
-    }
-
-    #[test]
-    fn update_profile_all_fields() {
-        let conn = db();
-        setup(&conn);
-
-        conn.execute(
-            "UPDATE users SET username = COALESCE(?2, username), phone = COALESCE(?3, phone), avatar_url = COALESCE(?4, avatar_url) WHERE id = ?1",
-            rusqlite::params!["alice", Some("new_alice"), Some("555-0000"), Some("https://new-avatar.png")],
-        ).unwrap();
-
-        let (username, phone, avatar): (Option<String>, Option<String>, Option<String>) =
-            conn.query_row(
-                "SELECT username, phone, avatar_url FROM users WHERE id = 'alice'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            ).unwrap();
-
-        assert_eq!(username.as_deref(), Some("new_alice"));
-        assert_eq!(phone.as_deref(), Some("555-0000"));
-        assert_eq!(avatar.as_deref(), Some("https://new-avatar.png"));
-    }
-
-    #[test]
-    fn update_profile_no_fields_is_noop() {
-        let conn = db();
-        setup(&conn);
-
-        conn.execute(
-            "UPDATE users SET username = COALESCE(?2, username), phone = COALESCE(?3, phone), avatar_url = COALESCE(?4, avatar_url) WHERE id = ?1",
-            rusqlite::params!["alice", None::<String>, None::<String>, None::<String>],
-        ).unwrap();
-
-        let username: Option<String> = conn.query_row(
-            "SELECT username FROM users WHERE id = 'alice'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
-        assert_eq!(username.as_deref(), Some("alice"), "should be unchanged");
-    }
-
     // ── search_user_by_username ────────────────────────────────────────────
     //
     // The lookup itself lives on the DS (`directory::user_by_identifier`); what
@@ -359,28 +229,6 @@ mod tests {
             |row| row.get(0),
         )
         .ok()
-    }
-
-    #[test]
-    fn search_by_username() {
-        let conn = db();
-        setup(&conn);
-        assert_eq!(lookup(&conn, "bob").as_deref(), Some("bob"));
-    }
-
-    #[test]
-    fn search_by_email() {
-        let conn = db();
-        setup(&conn);
-        assert_eq!(lookup(&conn, "alice@x.com").as_deref(), Some("alice"));
-    }
-
-    #[test]
-    fn search_no_match() {
-        let conn = db();
-        setup(&conn);
-        assert_eq!(lookup(&conn, "nobody"), None);
-        assert_eq!(lookup(&conn, "nobody@x.com"), None);
     }
 
     /// The shipped schema (`000021`) makes an email-shaped username

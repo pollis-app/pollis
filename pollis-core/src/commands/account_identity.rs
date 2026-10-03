@@ -1133,11 +1133,10 @@ mod tests {
         assert!(aes_gcm_decrypt(&wrap2, &nonce, &ct).is_err());
     }
 
-    /// Schema-level tests for the account_key_log history table (migration
-    /// 000005) and the dual-write contract. Like the rest of pollis-core's
-    /// unit tests, these drive an in-memory rusqlite DB and exercise the exact
-    /// SQL the async commands run — the command functions themselves need an
-    /// `AppState` + libsql + keystore and are covered by the flows harness.
+    // The remaining tests pin schema behaviour of the account_key_log history
+    // table (migration 000005): its backfill and its UNIQUE constraint. The
+    // tests that only replayed the client dual-write SQL #987 removed were
+    // deleted.
     mod account_key_log {
         use rusqlite::Connection;
 
@@ -1183,9 +1182,7 @@ mod tests {
             .collect()
         }
 
-        // The dual-write the commands perform, replicated as SQL so the schema
-        // contract is tested directly.
-
+        // Seeds a version-1 identity: the users row plus its first log row.
         fn signup_dual_write(conn: &Connection, user_id: &str, pubkey: &[u8]) {
             conn.execute(
                 "UPDATE users SET account_id_pub = ?1, identity_version = 1 WHERE id = ?2",
@@ -1198,32 +1195,6 @@ mod tests {
                 rusqlite::params![user_id, pubkey],
             )
             .unwrap();
-        }
-
-        fn reset_dual_write(
-            conn: &Connection,
-            user_id: &str,
-            pubkey: &[u8],
-        ) -> rusqlite::Result<usize> {
-            conn.execute(
-                "UPDATE users \
-                 SET account_id_pub = ?1, identity_version = identity_version + 1 \
-                 WHERE id = ?2",
-                rusqlite::params![pubkey, user_id],
-            )
-            .unwrap();
-            let new_version: i64 = conn
-                .query_row(
-                    "SELECT identity_version FROM users WHERE id = ?1",
-                    rusqlite::params![user_id],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            conn.execute(
-                "INSERT INTO account_key_log (user_id, account_id_pub, identity_version) \
-                 VALUES (?1, ?2, ?3)",
-                rusqlite::params![user_id, pubkey, new_version],
-            )
         }
 
         #[test]
@@ -1249,42 +1220,6 @@ mod tests {
             assert_eq!(alice[0].1, 3);
             assert_eq!(alice[0].2, alice_key);
             assert!(log_rows(&conn, "bob").is_empty());
-        }
-
-        #[test]
-        fn signup_writes_version_1_row() {
-            let conn = baseline_db();
-            conn.execute_batch(migration_sql()).unwrap();
-
-            insert_user(&conn, "carol");
-            let key_v1 = vec![0x11u8; 32];
-            signup_dual_write(&conn, "carol", &key_v1);
-
-            let rows = log_rows(&conn, "carol");
-            assert_eq!(rows.len(), 1);
-            assert_eq!(rows[0].1, 1);
-            assert_eq!(rows[0].2, key_v1);
-        }
-
-        #[test]
-        fn reset_appends_version_2_row() {
-            let conn = baseline_db();
-            conn.execute_batch(migration_sql()).unwrap();
-
-            insert_user(&conn, "dave");
-            let key_v1 = vec![0x11u8; 32];
-            let key_v2 = vec![0x22u8; 32];
-            signup_dual_write(&conn, "dave", &key_v1);
-            reset_dual_write(&conn, "dave", &key_v2).unwrap();
-
-            let rows = log_rows(&conn, "dave");
-            assert_eq!(rows.len(), 2);
-            // Append-only: both versions retained, in order.
-            assert_eq!(rows[0].1, 1);
-            assert_eq!(rows[0].2, key_v1);
-            assert_eq!(rows[1].1, 2);
-            assert_eq!(rows[1].2, key_v2);
-            assert!(rows[0].0 < rows[1].0, "seq must be monotonic");
         }
 
         #[test]

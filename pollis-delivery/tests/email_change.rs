@@ -130,15 +130,26 @@ async fn send_signed(
     status
 }
 
-// ── 1. Happy path ─────────────────────────────────────────────────────────────
+// ── 1. Happy path, and the change is not silent (L3) ─────────────────────────
 
+/// **L3.** The OTP proves control of the NEW mailbox and the device signature
+/// proves the current account — but a stolen unlocked device satisfies both, and
+/// the change used to leave no trace: the old address was never told and nothing
+/// in the app recorded it, so the account's recovery address could be moved
+/// silently.
+///
+/// The DS now writes the audit row itself, so a client cannot suppress it by
+/// omitting a call, and it names the address that was left.
+///
+/// Also the happy path (formerly `email_change_happy_path`, the identical
+/// request + verify): request-email-change-otp answers 200, the correct codes
+/// swap `users.email`.
 #[tokio::test(flavor = "multi_thread")]
-async fn email_change_happy_path() {
+async fn a_completed_email_change_is_recorded_against_the_account() {
     let db = fresh_db().await;
     let state = dev_state(Arc::clone(&db));
     let sk = gen_signing_key();
     seed_user(&db, "alice", "alice@x.com", "dev-a", &sk.verifying_key()).await;
-
     let new_email = "alice-new@x.com";
 
     let s = send_signed(
@@ -151,7 +162,6 @@ async fn email_change_happy_path() {
     )
     .await;
     assert_eq!(s, StatusCode::OK, "request-email-change-otp should always 200");
-
     let s = send_signed(
         &state,
         "/v1/auth/verify-email-change",
@@ -163,45 +173,6 @@ async fn email_change_happy_path() {
     .await;
     assert_eq!(s, StatusCode::OK, "correct code should swap the email");
     assert_eq!(email_of(&db, "alice").await, new_email, "users.email must be updated");
-}
-
-// ── 1b. The change is not silent (L3) ────────────────────────────────────────
-
-/// **L3.** The OTP proves control of the NEW mailbox and the device signature
-/// proves the current account — but a stolen unlocked device satisfies both, and
-/// the change used to leave no trace: the old address was never told and nothing
-/// in the app recorded it, so the account's recovery address could be moved
-/// silently.
-///
-/// The DS now writes the audit row itself, so a client cannot suppress it by
-/// omitting a call, and it names the address that was left.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_completed_email_change_is_recorded_against_the_account() {
-    let db = fresh_db().await;
-    let state = dev_state(Arc::clone(&db));
-    let sk = gen_signing_key();
-    seed_user(&db, "alice", "alice@x.com", "dev-a", &sk.verifying_key()).await;
-    let new_email = "alice-new@x.com";
-
-    send_signed(
-        &state,
-        "/v1/auth/request-email-change-otp",
-        "alice",
-        "dev-a",
-        &sk,
-        serde_json::json!({ "new_email": new_email }),
-    )
-    .await;
-    let s = send_signed(
-        &state,
-        "/v1/auth/verify-email-change",
-        "alice",
-        "dev-a",
-        &sk,
-        serde_json::json!({ "new_email": new_email, "code": DEV_CODE, "current_code": DEV_CODE }),
-    )
-    .await;
-    assert_eq!(s, StatusCode::OK);
 
     let conn = db.conn().await.unwrap();
     let mut rows = conn

@@ -14,6 +14,7 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { skinAgnosticTest } from "./lib/skins";
 
 const USER = { id: "u-alice", email: "alice@example.com", username: "alice" };
 
@@ -227,6 +228,8 @@ async function resolveToken(
 }
 
 for (const skin of SKINS) {
+  // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
+  const agnosticTest = skinAgnosticTest(skin);
   test.describe(`bookmarks + permalinks — ${skin} skin`, () => {
     test("saved list shows a saved message and can unsave it", async ({ page }) => {
       await boot(page, skin, [
@@ -374,7 +377,7 @@ for (const skin of SKINS) {
       });
     });
 
-    test("copy link puts a bare pollis://m/ pointer on the clipboard", async ({
+    agnosticTest("copy link puts a bare pollis://m/ pointer on the clipboard", async ({
       page,
     }) => {
       await boot(page, skin);
@@ -455,7 +458,7 @@ for (const skin of SKINS) {
       expect(copiedFill).not.toBe(accentFill);
     });
 
-    test("a successful copy confirms itself on the button", async ({ page }) => {
+    agnosticTest("a successful copy confirms itself on the button", async ({ page }) => {
       await boot(page, skin);
       await gotoChannel(page);
 
@@ -517,7 +520,7 @@ for (const skin of SKINS) {
       expect(clipboard).toBe("");
     });
 
-    test("saving from the message row lands in the saved list", async ({ page }) => {
+    agnosticTest("saving from the message row lands in the saved list", async ({ page }) => {
       await boot(page, skin);
       await gotoChannel(page);
 

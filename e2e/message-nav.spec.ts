@@ -12,6 +12,7 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { skinAgnosticTest } from "./lib/skins";
 
 const USER = { id: "u-alice", email: "alice@example.com", username: "alice" };
 
@@ -107,6 +108,8 @@ async function gotoChannel(page: Page) {
 }
 
 for (const skin of SKINS) {
+  // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
+  const agnosticTest = skinAgnosticTest(skin);
   test.describe(`arrow-key log navigation — ${skin} skin`, () => {
     test("ArrowUp from an empty composer focuses the newest message; ArrowDown returns", async ({
       page,
@@ -178,7 +181,7 @@ for (const skin of SKINS) {
       await expect(page.getByTestId("message-input")).toBeFocused();
     });
 
-    test("Tab exits navigation back to the composer", async ({ page }) => {
+    agnosticTest("Tab exits navigation back to the composer", async ({ page }) => {
       await boot(page, skin);
       await gotoChannel(page);
 
@@ -188,7 +191,7 @@ for (const skin of SKINS) {
       await expect(page.getByTestId("message-input")).toBeFocused();
     });
 
-    test("the composer only hands off with the caret on the first line", async ({
+    agnosticTest("the composer only hands off with the caret on the first line", async ({
       page,
     }) => {
       await boot(page, skin);

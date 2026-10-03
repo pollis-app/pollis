@@ -17,6 +17,7 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { skinAgnosticTest } from "./lib/skins";
 
 const USER = { id: "u-alice", email: "alice@example.com", username: "alice" };
 
@@ -146,6 +147,8 @@ async function lastArgs<T>(page: Page, cmd: string): Promise<T> {
 }
 
 for (const skin of SKINS) {
+  // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
+  const agnosticTest = skinAgnosticTest(skin);
   test.describe(`export archive — ${skin} skin`, () => {
     test("one click on Security writes the account archive to the picked path", async ({ page }) => {
       await boot(page, preloadState(skin));
@@ -175,7 +178,7 @@ for (const skin of SKINS) {
       });
     });
 
-    test("cancelling the picker writes nothing and invokes nothing", async ({ page }) => {
+    agnosticTest("cancelling the picker writes nothing and invokes nothing", async ({ page }) => {
       await boot(page, preloadState(skin, null));
       await gotoSecurity(page);
       await page.getByTestId("export-archive-button").click();
@@ -188,7 +191,7 @@ for (const skin of SKINS) {
       await expect(page.getByTestId("export-archive-button-error")).toHaveCount(0);
     });
 
-    test("the network step is offered after the export and taken only on its own button", async ({ page }) => {
+    agnosticTest("the network step is offered after the export and taken only on its own button", async ({ page }) => {
       await boot(page, preloadState(skin));
       await gotoSecurity(page);
       await page.getByTestId("export-archive-button").click();
@@ -215,7 +218,7 @@ for (const skin of SKINS) {
       await expect(fetch).toHaveCount(0);
     });
 
-    test("DM settings exports exactly that conversation", async ({ page }) => {
+    agnosticTest("DM settings exports exactly that conversation", async ({ page }) => {
       await boot(page, preloadState(skin));
       await page.getByTestId("menu-item-dms").click();
       await page.getByTestId(`dm-option-${DM_ID}-secondary`).click();
@@ -231,7 +234,7 @@ for (const skin of SKINS) {
       await expect(page.getByTestId("dm-settings-export-button-fetch")).toHaveCount(0);
     });
 
-    test("the channel header exports exactly that channel", async ({ page }) => {
+    agnosticTest("the channel header exports exactly that channel", async ({ page }) => {
       await boot(page, preloadState(skin));
       await gotoChannel(page);
       await page.getByTestId("channel-export-trigger").click();

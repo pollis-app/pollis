@@ -33,6 +33,7 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { skinAgnosticTest } from "./lib/skins";
 
 const USER = { id: "u-alice", email: "alice@example.com", username: "alice" };
 
@@ -191,8 +192,10 @@ async function openThread(page: Page, rootId: string) {
 }
 
 for (const skin of SKINS) {
+  // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
+  const agnosticTest = skinAgnosticTest(skin);
   test.describe(`thread panel timestamps — ${skin} skin`, () => {
-    test("a seconds-precision timestamp renders the real date, not 1970", async ({
+    agnosticTest("a seconds-precision timestamp renders the real date, not 1970", async ({
       page,
     }) => {
       await boot(page, skin);
@@ -217,7 +220,7 @@ for (const skin of SKINS) {
       );
     });
 
-    test("guard: an ordinary millisecond timestamp is untouched", async ({
+    agnosticTest("guard: an ordinary millisecond timestamp is untouched", async ({
       page,
     }) => {
       // The other half of the normalisation. A "fix" that multiplied every

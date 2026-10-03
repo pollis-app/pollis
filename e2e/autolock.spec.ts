@@ -20,6 +20,7 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { skinAgnosticTest } from "./lib/skins";
 
 const USER = { id: "u-alice", email: "alice@example.com", username: "alice" };
 
@@ -154,6 +155,8 @@ async function pushedTimeout(page: Page): Promise<number | null> {
 }
 
 for (const skin of SKINS) {
+  // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
+  const agnosticTest = skinAgnosticTest(skin);
   test.describe(`auto-lock — ${skin} skin`, () => {
     test("the window can be chosen, reaches the backend, and survives a restart", async ({
       page,
@@ -206,7 +209,7 @@ for (const skin of SKINS) {
       );
     });
 
-    test("the shell reports activity so the deadline can be reset", async ({
+    agnosticTest("the shell reports activity so the deadline can be reset", async ({
       page,
     }) => {
       await boot(page, skin);

@@ -440,6 +440,23 @@ async fn delivery_submit(
 /// test would hit a dead port (connection refused). Owning the server on a
 /// separate thread + runtime decouples its lifetime from the per-test runtimes,
 /// so the single shared DS stays up for the whole `cargo test` process.
+/// The in-process DS's device-key cache, captured when the DS boots.
+static DS_DEVICE_KEYS: std::sync::OnceLock<pollis_delivery::auth::DeviceKeyCache> =
+    std::sync::OnceLock::new();
+
+/// Stand in for `DEVICE_KEY_CACHE_TTL_SECS` elapsing for one user: evict every
+/// cached device key of `user_id` from the in-process DS, so the next signed
+/// request re-reads `user_device` (and the suspension check that rides on the
+/// same query). For server-side state a test mutates directly — e.g. an operator
+/// suspension written with `scripts/suspend-account.sh`, which has no eviction
+/// hook and relies on the TTL — instead of sleeping the TTL out in real time.
+pub(crate) fn expire_ds_device_keys(user_id: &str) {
+    DS_DEVICE_KEYS
+        .get()
+        .expect("the in-process DS has not booted yet")
+        .invalidate_user(user_id);
+}
+
 async fn spawn_in_process_delivery(main: Arc<Db>, log: Arc<Db>) -> String {
     use std::sync::mpsc;
 
@@ -494,6 +511,10 @@ async fn spawn_in_process_delivery(main: Arc<Db>, log: Arc<Db>) -> String {
             get_max: 1_000_000,
             get_window_secs: 1,
         });
+
+    // Keep a handle on the DS's device-key cache (a shallow `Arc` clone, so it
+    // is the very map the auth gate consults) for `expire_ds_device_keys`.
+    let _ = DS_DEVICE_KEYS.set(real_state.device_keys.clone());
 
     // Only `/v1/commits` is served by the harness, for fault injection.
     let fault_state = DsState { main, log };
