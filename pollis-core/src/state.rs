@@ -87,6 +87,13 @@ pub struct AppState {
     /// Stored in memory only — if the app restarts mid-enrollment the user
     /// starts over. The 10-minute request TTL bounds the exposure.
     pub enrollment_ephemeral_keys: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+    /// QR device links this device created (#1207): link_id → link token.
+    /// Memory only — the token is the QR's secret and never leaves this device
+    /// except as the QR itself.
+    pub device_link_tokens: Arc<Mutex<HashMap<String, zeroize::Zeroizing<Vec<u8>>>>>,
+    /// The QR device link this (new) device claimed (#1207), read by
+    /// `start_device_enrollment` to tag its request.
+    pub device_link_pending: Arc<Mutex<Option<crate::commands::device_link::PendingDeviceLink>>>,
     /// In-memory PIN unlock state. `Some` once the user has entered a
     /// valid PIN (or just set one via `set_pin`); dropped by `lock`.
     /// Not yet load-bearing — stage 6 flips the app over to reading the
@@ -221,6 +228,8 @@ impl AppState {
             update_required: Arc::new(AtomicBool::new(false)),
             device_id: Arc::new(Mutex::new(None)),
             enrollment_ephemeral_keys: Arc::new(Mutex::new(HashMap::new())),
+            device_link_tokens: Arc::new(Mutex::new(HashMap::new())),
+            device_link_pending: Arc::new(Mutex::new(None)),
             unlock: Arc::new(Mutex::new(None)),
             bootstrap_session: Arc::new(Mutex::new(None)),
             enrollment_session: Arc::new(Mutex::new(None)),

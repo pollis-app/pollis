@@ -430,12 +430,25 @@ pub async fn start_device_enrollment(
         Some(token) => {
             use base64::Engine as _;
             let b64 = base64::engine::general_purpose::STANDARD;
+            // QR device link (#1207): a device signed in by a claimed link tags
+            // its request with the QR-secret-keyed MAC the approver verifies in
+            // place of a typed code. Absent for an email-OTP sign-in.
+            let link_tag = state.device_link_pending.lock().await.as_ref().map(|link| {
+                b64.encode(crate::commands::device_link::link_tag(
+                    &link.mac_key,
+                    &link.link_id,
+                    &request_id,
+                    &device_id,
+                    ephemeral_public.as_bytes(),
+                ))
+            });
             let body = pollis_api::bootstrap::EnrollmentRequestBody {
                 request_id: request_id.clone(),
                 new_device_ephemeral_pub: b64.encode(ephemeral_public.as_bytes()),
                 verification_code: verification_code.clone(),
                 created_at: created_at_str.clone(),
                 expires_at: expires_at_str.clone(),
+                link_tag,
             };
             crate::commands::mls::ds_post_session_ok(
                 state,
@@ -790,6 +803,37 @@ pub async fn approve_device_enrollment(
 
     // 2. Load the approver's account_id_key and wrap it to the requester's
     //    ephemeral pub via ECDH + HKDF + AES-256-GCM.
+    wrap_and_approve(
+        state,
+        &approver_device_id,
+        &request_id,
+        &user_id,
+        &new_device_id,
+        &ephemeral_pub,
+        "approval",
+    )
+    .await
+
+}
+
+/// Wrap `account_id_key` to a new device's ephemeral key and post the approval
+/// — the half of approving that is the same however the new device's key was
+/// authenticated. [`approve_device_enrollment`] authenticates it with the SAS
+/// the human typed; `device_link::approve_device_link` (#1207) with the link
+/// tag the QR's secret keyed. Callers MUST have authenticated `ephemeral_pub`
+/// before calling; this function trusts it. `via` lands in the security event.
+pub(crate) async fn wrap_and_approve(
+    state: &Arc<AppState>,
+    approver_device_id: &str,
+    request_id: &str,
+    user_id: &str,
+    new_device_id: &str,
+    ephemeral_pub: &[u8],
+    via: &str,
+) -> Result<()> {
+    let request_id = request_id.to_string();
+    let user_id = user_id.to_string();
+    let new_device_id = new_device_id.to_string();
     let signing_key =
         crate::commands::account_identity::load_account_id_key(state, &user_id).await?;
     // The ML-DSA-44 private key IS its 32-byte seed, so the enrollment transfer
@@ -839,14 +883,14 @@ pub async fn approve_device_enrollment(
     //    sibling device, so it can sign. The DS binds the request to the signer
     //    (`WHERE id = ? AND user_id = actor`), so a device can only approve
     //    enrollments for its OWN account.
-    let metadata = format!("via=approval,approver={approver_device_id}");
+    let metadata = format!("via={via},approver={approver_device_id}");
     {
         use base64::Engine as _;
         let b64 = base64::engine::general_purpose::STANDARD;
         let body = pollis_api::account::ApproveEnrollmentBody {
             request_id: request_id.clone(),
             wrapped_account_key: b64.encode(&wrapped),
-            approved_by_device_id: approver_device_id,
+            approved_by_device_id: approver_device_id.to_string(),
             // The DS's no-auth fallback for the acting user
             // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
             // user and this must EQUAL it; auth off → this IS the actor, and a
@@ -885,6 +929,7 @@ pub async fn approve_device_enrollment(
 
     Ok(())
 }
+
 
 /// New-device side. Recover `account_id_key` from the server-stored
 /// recovery blob using the user's Secret Key, install it locally, then
@@ -1186,6 +1231,8 @@ pub async fn finalize_device_enrollment(
 }
 
 async fn finalize_enrollment(state: &Arc<AppState>, user_id: &str) -> Result<()> {
+    // The device is enrolled; a claimed QR link (#1207) has done its job.
+    *state.device_link_pending.lock().await = None;
     let device_id = state
         .device_id
         .lock()

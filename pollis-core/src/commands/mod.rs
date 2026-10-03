@@ -9,6 +9,7 @@ pub mod blocks;
 // device-local DB — no DS, no Turso, compiles on every target.
 pub mod bookmarks;
 pub mod device_enrollment;
+pub mod device_link;
 // On-device plaintext export (#856). Pure rusqlite against the local DB — no
 // DS, no Turso, no R2 — and deliberately no import path.
 pub mod export;
