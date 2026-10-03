@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { View, Text } from "react-native";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import {
   Screen,
@@ -25,6 +25,12 @@ type Mode = "chooser" | "polling" | "recovery";
 export default function Enrollment() {
   const { t } = useTranslation("mobile");
   const router = useRouter();
+  // Signed in by a QR device link (#1207): no chooser and no code to read
+  // out — the request starts at once and the device that showed the QR
+  // approves it on the link tag.
+  const { linked } = useLocalSearchParams<{ linked?: string }>();
+  const isLinked = linked === "1";
+  const autoStarted = useRef(false);
   const [mode, setMode] = useState<Mode>("chooser");
   const [handle, setHandle] = useState<EnrollmentHandle | null>(null);
   const [secretKey, setSecretKey] = useState("");
@@ -55,6 +61,14 @@ export default function Enrollment() {
     // router is stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status.data?.status]);
+
+  useEffect(() => {
+    if (isLinked && !autoStarted.current) {
+      autoStarted.current = true;
+      onStart();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLinked]);
 
   const onStart = () => {
     setError(null);
@@ -92,7 +106,9 @@ export default function Enrollment() {
         <View style={{ paddingHorizontal: 24, paddingTop: 24, gap: 18 }}>
           <View style={{ gap: 8 }}>
             <Text style={[ty.h1, { color: semantic.ink }]}>
-              {mode === "polling"
+              {mode === "polling" && isLinked
+                ? t("auth:link.awaitingTitle")
+                : mode === "polling"
                 ? t("auth.enrollment.pollingTitle")
                 : mode === "recovery"
                   ? t("auth.enrollment.recoveryTitle")
@@ -106,7 +122,9 @@ export default function Enrollment() {
                 color: semantic.mute,
               }}
             >
-              {mode === "polling"
+              {mode === "polling" && isLinked
+                ? t("auth:link.awaitingIntro")
+                : mode === "polling"
                 ? t("auth.enrollment.pollingIntro")
                 : mode === "recovery"
                   ? t("auth.enrollment.recoveryIntro")
@@ -143,7 +161,16 @@ export default function Enrollment() {
             </View>
           ) : null}
 
-          {mode === "polling" && handle ? (
+          {mode === "polling" && handle && isLinked ? (
+            <Text
+              testID="linked-awaiting-approval"
+              style={{ fontFamily: ty.body.fontFamily, fontSize: 12, color: semantic.mute, textAlign: "center" }}
+            >
+              {t("auth.enrollment.waiting")}
+            </Text>
+          ) : null}
+
+          {mode === "polling" && handle && !isLinked ? (
             <View style={{ gap: 14, paddingTop: 6 }}>
               <View
                 style={{

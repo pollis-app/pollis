@@ -34,6 +34,7 @@ import {
   useLockNow,
 } from "../../lib/autolock";
 import { ExportArchive } from "../../components/ExportArchive";
+import { LinkDeviceSection } from "../../components/auth/LinkDeviceSection";
 import { SAS_LENGTH, normalizeSasInput } from "../../lib/enrollmentSas";
 
 function formatRelative(iso: string): string {
@@ -375,6 +376,10 @@ export default function Security() {
             </Text>
           )}
         </View>
+
+        {/* Link a new device by QR (#1207) */}
+        <SectionTitle>{upper(t("linkDevice.heading"))}</SectionTitle>
+        <LinkDeviceSection />
 
         <SectionTitle>{upper(t("security.devicesHeading"))}</SectionTitle>
         {isLoading ? (

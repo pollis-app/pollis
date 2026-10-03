@@ -480,6 +480,10 @@ pub async fn pending_enrollments(
         Err(resp) => return Ok(resp),
     };
 
+    // Requests bound to a live QR device link (#1207) are approved on the device
+    // showing that QR, on the link tag — the new device shows no code, so a
+    // typed-code approval list could never complete them. Leave them out.
+    let link_bound = state.links.bound_request_ids(&who, crate::util::now_unix());
     let conn = state.db.conn().await?;
     let mut rows = conn
         .query(
@@ -493,8 +497,12 @@ pub async fn pending_enrollments(
         .await?;
     let mut requests = Vec::new();
     while let Some(row) = rows.next().await? {
+        let id: String = row.get(0)?;
+        if link_bound.contains(&id) {
+            continue;
+        }
         requests.push(EnrollmentRequestRow {
-            id: row.get(0)?,
+            id,
             user_id: row.get(1)?,
             new_device_id: row.get(2)?,
             status: row.get(3)?,

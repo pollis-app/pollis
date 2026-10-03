@@ -89,6 +89,16 @@ export default function AuthEmail() {
         >
           {upper(requestOtp.isPending ? t("otp.sending") : t("otp.continue"))}
         </Button>
+        {/* QR device link (#1207): scan the code a signed-in device shows,
+            instead of the email code. */}
+        <Button
+          testID="btn-sign-in-with-device"
+          variant="subtle"
+          full
+          onPress={() => router.push("/(auth)/link")}
+        >
+          {upper(t("link.useDevice"))}
+        </Button>
         {/* Recovery is reachable through the standard sign-in flow: enter
             your email, verify the OTP, and Pollis routes you to the
             recovery-key entry on a fresh device. No dedicated button

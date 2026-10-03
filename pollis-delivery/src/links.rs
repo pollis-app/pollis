@@ -188,6 +188,21 @@ impl LinkStore {
         true
     }
 
+    /// Enrollment requests of `user_id` currently bound to a live link — the
+    /// typed-code approval list leaves these out (they are approved on the
+    /// link tag by the device showing the QR).
+    pub fn bound_request_ids(&self, user_id: &str, now: u64) -> std::collections::HashSet<String> {
+        let guard = self.inner.lock().expect("link store mutex poisoned");
+        guard
+            .values()
+            .filter(|r| r.user_id == user_id && now <= r.expires_at)
+            .filter_map(|r| match &r.phase {
+                Phase::Requested { request_id, .. } => Some(request_id.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// The creator's view. `None` when the link is not `user_id`'s (or does not
     /// exist) — the handler answers that with the same `Expired` an absent
     /// link gets, so status is not an existence oracle across accounts.
@@ -406,6 +421,8 @@ mod tests {
         assert!(store.record_request("l1", "phone", "req1", "tag", 1003));
         // Once.
         assert!(!store.record_request("l1", "phone", "req2", "tag2", 1004));
+        assert!(store.bound_request_ids("alice", 1005).contains("req1"));
+        assert!(store.bound_request_ids("mallory", 1005).is_empty());
         let st = store.status("l1", "alice", 1005);
         assert_eq!(st.state, LinkState::Requested);
         assert_eq!(st.request_id.as_deref(), Some("req1"));
