@@ -2,7 +2,7 @@
   "language": {
     "heading": "Language",
     "ariaLabel": "Language",
-    "description": "Language is per-device — it won't sync to your other devices. Pollis starts in your system language when we ship it, and English otherwise."
+    "description": "Only changes this device."
   },
   "hub": {
     "title": "Account",
@@ -277,8 +277,8 @@
     "terminalEnabledLabel": "Enable the in-app terminal",
     "terminalEnabledDescription": "Off by default. When enabled, the terminal pane can start your login shell with your full environment — the same power as opening Terminal yourself. Leave it off unless you use it.",
     "exportHeading": "Your data",
-    "exportDescription": "Save a copy of everything this device holds — every message it has decrypted, your saved items and your vault — as a plain JSON file you choose the location of. Nothing is sent anywhere.",
-    "exportNote": "Per device: a new device starts empty, so export from the one with the history. Attachments already on this device are copied alongside the archive; the rest are listed by name and hash.",
+    "exportDescription": "Save everything this device holds (messages, saved items, vault) to a file. Nothing is uploaded.",
+    "exportNote": "Each device keeps its own history, so export from the one that has it.",
     "exportButton": "Export my data…",
     "exportConversationButton": "Export this conversation…",
     "exportConversationLabel": "Export conversation",

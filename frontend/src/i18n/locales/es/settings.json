@@ -2,7 +2,7 @@
   "language": {
     "heading": "Idioma",
     "ariaLabel": "Idioma",
-    "description": "El idioma es propio de cada dispositivo: no se sincroniza con tus otros dispositivos. Pollis arranca en el idioma de tu sistema si lo tenemos disponible, y en inglés en caso contrario."
+    "description": "Solo cambia en este dispositivo."
   },
   "hub": {
     "title": "Cuenta",
@@ -264,8 +264,8 @@
     "mediaNoteWindows": "El estado de la cámara y el micrófono viene de los ajustes de privacidad de Windows. «Revocar ahora» abre esos ajustes para que puedas desactivar Pollis; compartir pantalla no se controla ahí.",
     "mediaNoteOther": "Los controles de permisos multimedia no están disponibles en esta plataforma.",
     "exportHeading": "Tus datos",
-    "exportDescription": "Guarda una copia de todo lo que tiene este dispositivo — cada mensaje descifrado, tus elementos guardados y tu bóveda — como un archivo JSON en la ubicación que elijas. No se envía nada a ningún sitio.",
-    "exportNote": "Por dispositivo: un dispositivo nuevo empieza vacío, así que exporta desde el que tiene el historial. Los adjuntos que ya están en este dispositivo se copian junto al archivo; el resto se listan por nombre y hash.",
+    "exportDescription": "Guarda todo lo que hay en este dispositivo (mensajes, guardados, bóveda) en un archivo. No se sube nada.",
+    "exportNote": "Cada dispositivo guarda su propio historial, así que exporta desde el que lo tenga.",
     "exportButton": "Exportar mis datos…",
     "exportConversationButton": "Exportar esta conversación…",
     "exportConversationLabel": "Exportar conversación",

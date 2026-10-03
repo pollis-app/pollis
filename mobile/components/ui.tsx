@@ -185,8 +185,10 @@ export function SectionTitle({
         alignItems: "center",
         gap: space.md,
         paddingHorizontal: space.xxl,
-        paddingTop: space.xxl,
-        paddingBottom: space.sm,
+        // Room above every section so a page reads as separate blocks, not
+        // one run of text (#1211).
+        paddingTop: 40,
+        paddingBottom: space.md,
       }}
     >
       <Text style={[ty.label, { color: semantic.ink2 }]}>{children}</Text>

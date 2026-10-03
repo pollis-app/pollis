@@ -2,7 +2,7 @@
   "language": {
     "heading": "语言",
     "ariaLabel": "语言",
-    "description": "语言按设备保存 — 不会同步到你的其他设备。如果我们提供了你系统语言的翻译，Pollis 会以该语言启动，否则使用英语。"
+    "description": "只更改这台设备。"
   },
   "hub": {
     "title": "账户",
@@ -258,8 +258,8 @@
     "mediaNoteWindows": "摄像头和麦克风状态来自 Windows 隐私设置。“立即撤销”会打开这些设置，你可以在其中关闭 Pollis 的权限；屏幕共享不在其中记录。",
     "mediaNoteOther": "此平台不提供媒体权限控制。",
     "exportHeading": "你的数据",
-    "exportDescription": "将此设备持有的全部内容——每条已解密的消息、你的收藏和保险库——保存为一个普通 JSON 文件，位置由你选择。不会向任何地方发送。",
-    "exportNote": "按设备保存：新设备的历史记录为空，请从保存有历史记录的设备导出。此设备上已有的附件会复制到归档旁边；其余附件只记录名称和哈希。",
+    "exportDescription": "把这台设备上的所有内容（消息、收藏、保险库）保存为文件。不会上传任何内容。",
+    "exportNote": "每台设备各自保存历史记录，请从有记录的那台导出。",
     "exportButton": "导出我的数据…",
     "exportConversationButton": "导出此会话…",
     "exportConversationLabel": "导出会话",

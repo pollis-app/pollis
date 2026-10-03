@@ -90,6 +90,13 @@ Two-client / special flows (`enrollment-approval`, `realtime`, `blocking`,
 `push-tap`, and the DM accept/reply side) are scaffolded in `_two-client.md` —
 they need the two-device setup below and a Mac shakedown.
 
+## Screen tour (visual audit)
+
+`flows/tour.yaml` (tag `audit`) signs up, makes a group with a message, and
+takes one numbered screenshot of every reachable screen (`tour-01-…` to
+`tour-34-…`), so a layout or copy change can be compared before and after. It
+asserts nothing; collect the shots with `--debug-output <dir>`.
+
 ## Two-client flows
 
 **QR device link (automated, #1207):** `mobile/scripts/maestro-qr-link.sh <existing-device> <new-device>`

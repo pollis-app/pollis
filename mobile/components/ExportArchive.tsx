@@ -47,9 +47,8 @@ export function ExportArchive({ conversationId = null }: { conversationId?: stri
       <SectionTitle>
         {upper(t(conversationId ? "mobile:self.export.conversationHeading" : "security.exportHeading"))}
       </SectionTitle>
-      <View style={{ paddingHorizontal: 18, paddingTop: 6, gap: 6 }}>
+      <View style={{ paddingHorizontal: 18, paddingTop: 6 }}>
         <Text style={noteStyle}>{t("security.exportDescription")}</Text>
-        <Text style={{ ...noteStyle, color: semantic.mute2 }}>{t("security.exportNote")}</Text>
       </View>
       <ListRow
         testID="row-export-archive"
