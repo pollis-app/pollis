@@ -28,6 +28,7 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { skinAgnosticTest } from "./lib/skins";
 
 const USER = { id: "u-alice", email: "alice@example.com", username: "alice" };
 const GROUP_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0GRP";
@@ -115,8 +116,10 @@ async function boot(page: Page, skin: Skin) {
 }
 
 for (const skin of SKINS) {
+  // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
+  const agnosticTest = skinAgnosticTest(skin);
   test.describe(`link detection — ${skin} skin`, () => {
-    test("every message keeps the link it starts with", async ({ page }) => {
+    agnosticTest("every message keeps the link it starts with", async ({ page }) => {
       await boot(page, skin);
 
       // Two anchors per body, in every body — the count is what a stale
@@ -137,7 +140,7 @@ for (const skin of SKINS) {
       }
     });
 
-    test("the media unfurl sees the same URLs the linkifier did", async ({
+    agnosticTest("the media unfurl sees the same URLs the linkifier did", async ({
       page,
     }) => {
       // The other consumer of the shared scanner. Both run over every body in
@@ -154,7 +157,7 @@ for (const skin of SKINS) {
       );
     });
 
-    test("a bare www link is given a protocol", async ({ page }) => {
+    agnosticTest("a bare www link is given a protocol", async ({ page }) => {
       // `ensureProtocol` moved into the shared module with the pattern. The
       // `www.` body is the only one that exercises it.
       await boot(page, skin);

@@ -25,6 +25,7 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { skinAgnosticTest } from "./lib/skins";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -288,8 +289,10 @@ async function rawKeyLeaks(page: Page): Promise<string[]> {
 }
 
 for (const skin of SKINS) {
+  // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
+  const agnosticTest = skinAgnosticTest(skin);
   test.describe(`i18n — ${skin} skin`, () => {
-    test("the language selector renders every available language", async ({ page }) => {
+    agnosticTest("the language selector renders every available language", async ({ page }) => {
       await boot(page, skin);
       await gotoPreferences(page);
 
@@ -317,7 +320,7 @@ for (const skin of SKINS) {
       );
     });
 
-    test("switching language changes the rendered copy", async ({ page }) => {
+    agnosticTest("switching language changes the rendered copy", async ({ page }) => {
       await boot(page, skin);
       await gotoPreferences(page);
 
@@ -371,7 +374,7 @@ for (const skin of SKINS) {
       expect(await rawKeyLeaks(page)).toEqual([]);
     });
 
-    test("the language choice persists across a reload", async ({ page }) => {
+    agnosticTest("the language choice persists across a reload", async ({ page }) => {
       await boot(page, skin);
       await gotoPreferences(page);
       await page.getByTestId(`pref-language-${TEST_LANG}`).click();
@@ -391,7 +394,7 @@ for (const skin of SKINS) {
       );
     });
 
-    test("first run defaults to the OS locale when we ship it", async ({ page }) => {
+    agnosticTest("first run defaults to the OS locale when we ship it", async ({ page }) => {
       // The synthetic locale stands in for "a locale we ship". A fresh profile
       // with no stored choice should start there. `-XX` also exercises the
       // region-subtag degrade: `qtt-XX` has no catalogue of its own but must

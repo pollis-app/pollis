@@ -14,6 +14,7 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { skinAgnosticTest } from "./lib/skins";
 
 const ME = { id: "u_me", email: "me@pollis.test", username: "mia" };
 const GROUP_ID = "g_media";
@@ -90,8 +91,10 @@ const boxOf = (locator: ReturnType<Page["getByTestId"]>) =>
   });
 
 for (const skin of SKINS) {
+  // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
+  const agnosticTest = skinAgnosticTest(skin);
   test.describe(`right panel media — ${skin} skin`, () => {
-    test("the grid shows pictures and videos, not audio", async ({ page }) => {
+    agnosticTest("the grid shows pictures and videos, not audio", async ({ page }) => {
       await openChannelWithPanel(page, skin);
       const tiles = page.getByTestId("right-panel-media-tile");
       await expect(tiles).toHaveCount(2);
@@ -120,7 +123,7 @@ for (const skin of SKINS) {
       expect(tileBox.width).toBe(tileBox.height);
     });
 
-    test("clicking a video tile opens the lightbox", async ({ page }) => {
+    agnosticTest("clicking a video tile opens the lightbox", async ({ page }) => {
       await openChannelWithPanel(page, skin);
       // The image tile stays disabled until its bytes resolve, and the mock
       // has none; the video card resolves on click, which is the path that

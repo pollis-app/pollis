@@ -24,6 +24,7 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { skinAgnosticTest } from "./lib/skins";
 
 const ME = { id: "u_me", email: "me@pollis.test", username: "mia" };
 const GROUP_ID = "g_emoji";
@@ -182,6 +183,8 @@ async function openPicker(page: Page) {
 }
 
 for (const skin of SKINS) {
+  // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
+  const agnosticTest = skinAgnosticTest(skin);
   test.describe(`custom emoji — ${skin} skin`, () => {
     test("the picker opens from the composer with the whole standard set", async ({
       page,
@@ -274,7 +277,7 @@ for (const skin of SKINS) {
       await expect(cells).toHaveCount(0);
     });
 
-    test("a custom pick lands at the caret, not at the end", async ({ page }) => {
+    agnosticTest("a custom pick lands at the caret, not at the end", async ({ page }) => {
       await openChannel(page, skin);
 
       await composer(page).click();
@@ -339,7 +342,7 @@ for (const skin of SKINS) {
       await page.screenshot({ path: `artifacts/emoji-composer-inline-${skin}.png` });
     });
 
-    test("a standard pick also lands at the caret", async ({ page }) => {
+    agnosticTest("a standard pick also lands at the caret", async ({ page }) => {
       await openChannel(page, skin);
 
       await composer(page).click();
@@ -510,7 +513,7 @@ for (const skin of SKINS) {
   });
 
   test.describe(`reactions — ${skin} skin`, () => {
-    test("a message without reactions reserves no reactions row", async ({ page }) => {
+    agnosticTest("a message without reactions reserves no reactions row", async ({ page }) => {
       await openChannel(page, skin);
       // The old design rendered a row under EVERY message holding a
       // hover-revealed "+" — a blank line that read as a layout bug. The row
@@ -556,7 +559,7 @@ for (const skin of SKINS) {
       await expect(row.getByTestId("message-reactions")).toHaveCount(0);
     });
 
-    test("a reaction shows before the write comes back, and is taken back the same way", async ({
+    agnosticTest("a reaction shows before the write comes back, and is taken back the same way", async ({
       page,
     }) => {
       await openChannel(page, skin);

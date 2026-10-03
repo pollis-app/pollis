@@ -21,6 +21,7 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { skinAgnosticTest } from "./lib/skins";
 
 const USER = { id: "u-alice", email: "alice@example.com", username: "alice" };
 
@@ -225,6 +226,8 @@ async function arrive(page: Page, index: number) {
 }
 
 for (const skin of SKINS) {
+  // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
+  const agnosticTest = skinAgnosticTest(skin);
   test.describe(`jump-to-message gap (#1039) — ${skin} skin`, () => {
     test("scrolling forward from a jump renders every message up to the live tail", async ({
       page,
@@ -256,7 +259,7 @@ for (const skin of SKINS) {
       expect((await renderedIndices(page)).length).toBeLessThan(80);
     });
 
-    test("the same walk from a search hit renders every message up to the live tail", async ({
+    agnosticTest("the same walk from a search hit renders every message up to the live tail", async ({
       page,
     }) => {
       await boot(page, skin);
@@ -318,7 +321,7 @@ for (const skin of SKINS) {
       await expect(page.getByTestId(`message-${idAt(TOTAL)}`)).toHaveCount(0);
     });
 
-    test("sending from inside the window returns the log to the present", async ({
+    agnosticTest("sending from inside the window returns the log to the present", async ({
       page,
     }) => {
       await boot(page, skin);

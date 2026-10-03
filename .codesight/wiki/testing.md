@@ -519,10 +519,14 @@ pipeline — a fork, wedge, or squatted duplicate leaf fails the decrypt checks.
   A pre-write 500 must persist nothing, so the commit-log head is **unchanged**
   and alice rolls back cleanly (no phantom epoch): she still round-trips with bob
   at her real epoch. This is the "pre-write ≠ lost-response" distinction.
-- **`epoch_gap_recovers_via_external_join`** (#430-P2 / F1) — bob is offline while
+- **`epoch_gap_recovers_via_external_join`** (#430-P2 / F1, and the #4
+  strand-through-rebuild repro) — bob is offline while
   the group churns through several epochs, then one interior commit row is dropped
-  (`drop_commit_row`). On return bob retains the message at his join epoch
-  (decrypted by the interleave hook *before* the gap), trips the gap detector,
+  (`drop_commit_row`). On return bob retains the message at his join epoch AND the
+  one sealed at a mid-replay epoch he only reaches by applying a commit (both
+  decrypted by the interleave hook *before* the gap — #440/#441 on the recovery
+  seam; this absorbed the former `continuous_member_keeps_mid_replay_message_through_rebuild`,
+  which ran the identical sequence), trips the gap detector,
   forgets his stale group, and external-joins onto the head; he then decrypts
   post-recovery traffic and the group agrees on the head epoch. **Accepted loss
   (documented, not fought):** messages sealed at the epochs the gap forces bob to
@@ -812,13 +816,13 @@ Honest scope + roadmap: `docs/machine-checked-correctness-design.md`.
 - **`admin_delete_redacts_the_authors_own_copy`** (#790, flows harness — `src-tauri/tests/flows/messages.rs`, not the `pollis-delivery` `messages` module its neighbours refer to) closes the last hole in the delete matrix: every other delete test re-reads a THIRD PARTY, so nothing pinned what the message's own author sees after somebody else removes it — the case a real user notices first, since their post is gone for everyone else and they are the only one still looking at it. It is a distinct path from a self-delete: the author neither initiates the delete nor authors the tombstone, so they must apply a redaction authored by someone else to a row they wrote themselves. That is the same *application* half that #693/#661 identified as the defect-prone one (delivery was ruled out), which is why it gets its own test rather than another assertion bolted onto the flaky `sealed_admin_delete_of_other_member_works`. Proven non-vacuous by mutation: making the ingest redaction `UPDATE` skip rows the applying device authored fails it with the author still holding plaintext.
 - **`watermark::delete_consumption_tests`** + **`ingest::delete_resolution_tests`** (`pollis-core`, #693) pin candidate 2 AND its fix. The asymmetry: an undecryptable `message` is held back and re-fetched to success, whereas a `delete` tombstone used to be `is_handled == true` UNCONDITIONALLY — `ingest.rs` classified EVERY tombstone as handled regardless of whether its fire-and-forget redaction `UPDATE` landed, so a redaction matching zero rows or hitting a transient local-DB error was consumed-and-lost, never retried (the deleted message stayed readable forever). The fix: ingest now resolves each tombstone's fate from the redaction's OUTCOME (`resolve_delete`) and re-classifies a not-yet-applied-but-still-applicable one to `EnvKind::DeletePending` (`is_handled == false`), so the watermark stops strictly below it and the next fetch re-applies it — mirroring the undecryptable-message retry path. `delete_resolution_tests` pins the edge matrix: applied / already-redacted / transient-error(retry) / target-absent-but-awaiting-ingest(retry) / target-absent-pre-join(terminal, does not spin). `delete_consumption_tests` pins the watermark half (an applied `Delete` is consumed; a `DeletePending` is retried). The DS cursor/delivery is not the culprit (proven by `admin_delete_visibility_tests`); the drop was an *application* failure, now closed.
 - **`dm_multi_device_round_trip`** drives the device-enrollment command chain via the `enroll_second_device` helper and proves the MLS tree in a DM expands to every enrolled device of every member. Alice and Bob each run two devices; the DM's `dm_channel_member` row is still keyed per user, but reconcile populates one MLS leaf per device, so a message sent from any of the four devices decrypts on the other three. A non-member (carol) cannot decrypt any of the messages.
-- **`dm_invite_reject_removes_from_tree`** covers the reject path: bob runs two devices, both are in the MLS tree at create time, bob_d1 calls `leave_dm_channel` on the pending request, and reconcile removes BOTH bob devices' leaves. The `dm_channel_member` row (keyed per user) goes to zero, and neither bob device may decrypt a subsequent alice-authored message; the DM also disappears from both bob devices' `list_dm_channels` / `list_dm_requests`.
-- **`dm_re_invite_after_reject`** proves that after a reject, alice can open a fresh DM with bob (new `dm_channel.id`), bob accepts on one device, and both bob devices re-enter the MLS tree — alice→bob and bob→alice round-trips both decrypt. Alice's side may still hold a ghost row for the rejected DM (leave_dm_channel only tears the channel down when zero members remain), but bob's side shows no trace, and the rejected id never carries fresh-DM plaintext.
+- **`dm_invite_reject_removes_from_tree_then_re_invite_converges`** — phase 1 covers the reject path: bob runs two devices, both are in the MLS tree at create time, bob_d1 calls `leave_dm_channel` on the pending request, and reconcile removes BOTH bob devices' leaves. The `dm_channel_member` row (keyed per user) goes to zero, and neither bob device may decrypt a subsequent alice-authored message; the DM also disappears from both bob devices' `list_dm_channels` / `list_dm_requests`.
+- Phases 2-5 of the same test prove that after a reject, alice can open a fresh DM with bob (new `dm_channel.id`), bob accepts on one device, and both bob devices re-enter the MLS tree — alice→bob and bob→alice round-trips both decrypt. Alice's side may still hold a ghost row for the rejected DM (leave_dm_channel only tears the channel down when zero members remain), but bob's side shows no trace, and the rejected id never carries fresh-DM plaintext.
 - **`user_block_lifecycle`** walks block → unblock across a DM: pre-block `search_user_by_username` resolves; `block_user` inserts a `user_block` row and hides the DM from the blocker's `list_dm_channels`/`list_dm_requests` but NOT from the blocked side (dm.rs:169-173 privacy property); `create_dm_channel` fails with BLOCK_ERR while the block is active; `unblock_user` drops the row and the DM resurfaces on alice's side; a subsequent `create_dm_channel` to a fresh peer succeeds.
 
 ## Known flakes
 
-- **`channel_message_round_trip`** can fail with "stream not found" during `send_group_invite`'s MLS reconcile — a libsql hrana stream timeout. It passes reliably in isolation and in the current suite, but is sensitive to connection state accumulation. If it flakes again, the first suspect is stream lifetime, not test logic.
+- The basic invite → accept → send → decrypt round trip is `commit_welcome_groupinfo_land_atomically_via_delivery_service` (it absorbed the former `channel_message_round_trip`, a strict subset). That round trip once flaked with "stream not found" during `send_group_invite`'s MLS reconcile — a libsql hrana stream timeout, sensitive to connection state accumulation. If it flakes again, the first suspect is stream lifetime, not test logic.
 
 ### Rules the fixed flakes left behind
 
@@ -914,13 +918,13 @@ no reason for it not to gate. Failure screenshots + traces upload as the
 | `bookmarks.spec.ts` | Saved messages + permalinks, and what an unresolvable permalink refuses to say, in BOTH skins (#854). Also pins the copy-link row's three states on **resolved paint**, not class strings — the row keeps focus after the click, so a copied row must show the accent text over the selected-row tint and a failed one the danger inversion (#1059) |
 | `emoji.spec.ts` | The custom-emoji picker (full standard set, search, caret-accurate insertion) and `<:name:hash>` rendering, in BOTH skins (#848) |
 | `invite-links.spec.ts` | Invite-link create / one-time copy / revoke, in BOTH skins (#847) |
-| `voice-controls.spec.ts` | Push-to-talk, deafen and the input-mode toggle — the four mic states drawn distinctly — in BOTH skins (#849) |
+| `voice-controls.spec.ts` | Push-to-talk, deafen and the input-mode toggle — the four mic states drawn distinctly — in BOTH skins (#849). The persistent strips' copy of these controls is `voice-sidebar-parity.spec.ts` |
 | `autolock.spec.ts` | Idle auto-lock: the window is chosen, reaches the backend and survives a restart; the shell reports activity; a backend lock drops to the PIN gate **and empties the query cache**, in BOTH skins (#851) |
 | `i18n.spec.ts` | The language selector, switching, per-device persistence, OS-locale default and the English fallback — driven through a synthetic locale so it survives the real language list changing, in BOTH skins (#855). Also pins that the sidebar's settings rows are reached by `sidebar-row-*` testid and not by their translated label, under a locale that renames every one of them (#932) |
 | `ipc-efficiency.spec.ts` | IPC/query-layer COUNTS (#874): one batched preview call per list instead of one per row, zero refetches on window focus, a closed Cmd+K panel costing zero member queries, `membership_changed` touching only the named group's roster, join requests keyed per group id, own-profile vs public-profile not colliding. Skin-agnostic except the two tests that also assert something renders |
 | `rtl.spec.ts` | Right-to-left layout, asserted as **measured geometry** (`getBoundingClientRect`, a `Range` over the text, the painted physical border edge) rather than a `dir` attribute — which passes on unmirrored code. Drives the real `ar` locale and pins the LTR case in the same body, in BOTH skins (#855) |
 | `receipts.spec.ts` | DM delivery/read indicators in BOTH skins — delivered vs read visually distinct, none in group channels, per-reader fractions in group DMs (#857) |
-| `render-cost.spec.ts` | Regression guards on message-log render cost in BOTH skins — typing in the edit bar, opening the reply bar and arrow-key navigation must re-render **zero** rows; a shell re-render must not re-render the sidebar; paired with the other half (skin flip restructures rows, an edit updates its row, day dividers survive) so a memo cannot pass by freezing the UI (#874) |
+| `render-cost.spec.ts` | Regression guards on message-log render cost in BOTH skins — typing in the edit bar, opening the reply bar and arrow-key navigation must re-render **zero** rows; a shell re-render must not re-render the sidebar; paired with the other half (skin flip restructures rows, an edit updates its row) so a memo cannot pass by freezing the UI (#874). Day dividers through the memoised row path are `message-window.spec.ts`'s "day dividers come from the whole timeline" |
 | `message-window.spec.ts` | The virtualised log: only the visible slice is in the DOM, and every DOM-locating path still reaches a row outside the window, in BOTH skins (#874). Plus the load-more seam (#934) — a `MutationObserver` proves some DOM batch carries the prepended rows while the log still reports fetching, which a poll could never catch |
 | `linkify.spec.ts` | URL detection in message bodies in BOTH skins — every body keeps the link it *starts* with, the media unfurl agrees with the linkifier about which URLs exist, and a bare `www.` link gets a protocol. Guards the pattern shared by `LinkifiedText` and `MediaLinkUnfurl` (#874) |
 | `thread-panel.spec.ts` | The thread panel's timestamps in BOTH skins — a seconds-precision `created_at` must render the real date rather than 1970, a millisecond one must be left alone, and the thread must agree with the channel about when a message was sent (#874) |
@@ -931,6 +935,16 @@ no reason for it not to gate. Failure screenshots + traces upload as the
 | `voice-sidebar-parity.spec.ts` | The persistent voice strip (terminal `VoiceBar`, refined `SidebarProfilePanel` row 2) draws the same four mic states and offers a way out of deafen in BOTH skins (#849, #891) |
 
 `.spec.ts` is as welcome as `.spec.js`; one config matches both.
+
+**"In BOTH skins" means the per-skin loop, not every test in it.** A test whose
+code path has no skin branch and whose assertions are behavioural (invoke
+arguments and counts, mock state, routes, text) registers through
+`skinAgnosticTest(skin)` from `e2e/lib/skins.ts` and runs in the terminal skin
+only — the refined run repeated identical work. Anything that measures paint or
+geometry, saves a per-skin screenshot, reaches its target through markup that
+differs per skin (BreadcrumbNav, Sidebar rows, `MessageItem`'s two row variants,
+`ChatInput`'s ghost-vs-list suggestions, the invite components) or counts renders
+or invokes of a skin-dependent tree stays a plain `test` and runs in both.
 
 Five things to know before writing one:
 

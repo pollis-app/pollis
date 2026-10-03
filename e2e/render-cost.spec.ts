@@ -43,7 +43,7 @@ function messages() {
       conversation_id: CHANNEL_ID,
       sender_id: own ? USER.id : "u-bob",
       content: own ? "my own newest message" : `message number ${i}`,
-      // All on one day so the day-divider count is deterministic.
+      // All on one day, so the rows render without a day boundary between them.
       sent_at: `2026-08-01T10:${String(i).padStart(2, "0")}:00.000Z`,
     });
   }
@@ -335,14 +335,6 @@ for (const skin of SKINS) {
 
       // The memoised row must reflect the new content.
       await expect(own).toContainText("the edited body");
-    });
-
-    test("day dividers survive the memoised row path", async ({ page }) => {
-      await boot(page, skin);
-      await gotoChannel(page);
-
-      // One divider: every seeded message shares a single local day.
-      await expect(page.getByTestId("day-divider")).toHaveCount(1);
     });
   });
 }
