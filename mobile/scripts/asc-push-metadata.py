@@ -55,6 +55,27 @@ LIMITS = {
 }
 
 
+def unwrap(text):
+    """Rejoin the doc's soft-wrapped lines into the paragraphs they are.
+
+    The doc wraps at ~95 columns for readability; the stores render every
+    newline literally, so shipping the wraps puts line breaks mid-sentence on
+    the listing (which is exactly what the first push did). A line continues
+    the previous one unless it is blank, starts a bullet, or follows a blank
+    line or an ALL-CAPS section heading.
+    """
+    out = []
+    for line in text.split("\n"):
+        prev = out[-1] if out else ""
+        starts_block = not line.strip() or line.lstrip().startswith(("•", "- "))
+        prev_ends_block = not prev.strip() or (prev.strip().isupper() and len(prev.strip()) < 40)
+        if out and not starts_block and not prev_ends_block:
+            out[-1] = f"{prev.rstrip()} {line.strip()}"
+        else:
+            out.append(line.rstrip())
+    return "\n".join(out)
+
+
 def blockquote_after(md, heading_re, collapse=False):
     """Pull the `> ...` block that follows a heading, unwrapped.
 
@@ -80,6 +101,8 @@ def blockquote_after(md, heading_re, collapse=False):
     text = "\n".join(lines).strip()
     if text.startswith("`") and text.endswith("`"):
         text = text[1:-1].strip()
+    if not collapse:
+        text = unwrap(text)
     if collapse:
         # A single-line field: the newlines are the doc's wrapping, not content.
         # Collapsing matters beyond looks — a literal newline in `keywords` or
@@ -217,8 +240,7 @@ def main():
     else:
         print("no app info localization found — subtitle not written")
 
-    print("\nStill the owner's to do in ASC (declarations, not copy): age rating, "
-          "App Privacy answers, export compliance, pricing and availability.")
+    print("\nStill the owner's to do in ASC: the App Privacy answers — the one form with no API.")
 
 
 if __name__ == "__main__":
