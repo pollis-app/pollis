@@ -10,7 +10,7 @@
 # to be exempted with a job-level `paths-ignore`, but a path-filtered workflow
 # does not run AT ALL on an exempt PR — so a *required* status check would sit
 # pending forever and wedge every frontend-only PR. This workflow therefore
-# ALWAYS triggers and ALWAYS reports, in four jobs:
+# ALWAYS triggers and ALWAYS reports, in five jobs:
 #   1. `changes` — a seconds-cheap decision job (no checkout, no toolchain, no
 #      apt) that asks the PR's changed-file list whether any NON-exempt file was
 #      touched. Ignore-list, not allow-list: the exemptions are exactly the old
@@ -19,13 +19,18 @@
 #   2. `tests`   — the heavy native build+test job, gated on that decision. Its
 #      runner, caching, system deps, env, and steps are byte-for-byte unchanged;
 #      on an exempt PR it is simply skipped.
+#   2b. `flows`  — the multi-client integration flows harness, sharded four
+#      ways across runners (it was ~29 of the old single job's ~40 minutes,
+#      all of it test execution). Same decision gate as `tests`, in parallel
+#      with it.
 #   3. `macos-at-rest` — the local-database at-rest tests on `macos-latest`,
 #      gated on the same decision. macOS is the third desktop platform and the
 #      only one whose SQLCipher crypto provider is CommonCrypto, and nothing
 #      ran these tests there until #998.
-#   4. `gate`    — `needs: [tests, macos-at-rest]`, `if: always()`. Green when
-#      both heavy jobs passed OR were legitimately skipped as exempt; red when
-#      either failed, was cancelled, or the decision job itself failed
+#   4. `gate`    — `needs: [tests, flows, macos-at-rest]`, `if: always()`.
+#      Green when every heavy job (all flows shards included) passed OR was
+#      legitimately skipped as exempt; red when any failed, was cancelled, or
+#      the decision job itself failed
 #      (fail-closed). Because it always runs it always reports, so it — NOT the
 #      heavy jobs — is the check to mark required in branch protection.
 name: MLS & delivery tests
@@ -285,12 +290,17 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo test -p pollis-tui
 
-      # Multi-client integration harness against the real in-process Delivery
-      # Service — the base for the adversarial recovery suite.
-      - name: MLS integration flows harness
-        if: ${{ !cancelled() }}
+      # The multi-client flows harness RUNS in the sharded `flows` job below,
+      # in parallel with this one. It is still BUILT here on `main`, because
+      # this job is the only writer of the `tests` cache the shards restore
+      # (`shared-key: tests`), and rust-cache saves only the dependencies a job
+      # actually compiled — without this step the cache would stop carrying the
+      # Tauri/test-harness half of the graph and every shard would rebuild it
+      # cold. PR runs never save the cache, so they skip it.
+      - name: Build the flows harness (cache warm-up for the shards)
+        if: ${{ github.ref == 'refs/heads/main' && !cancelled() }}
         working-directory: src-tauri
-        run: cargo test --features test-harness --test flows
+        run: cargo test --features test-harness --test flows --no-run
 
       # The Rust lint gate (#912). Until now `cargo clippy` was not even
       # installed for the pinned toolchain, so thousands of lines merged without
@@ -370,6 +380,126 @@ jobs:
             src-tauri/marathon-soak.log
           retention-days: 90
           if-no-files-found: warn
+
+  # The multi-client integration flows harness (`src-tauri/tests/flows`),
+  # sharded across runners. Serially it was ~29 of the `tests` job's ~40
+  # minutes, and it is the one suite here whose wall time is test EXECUTION,
+  # not compilation (the binary builds in ~1 min on a warm cache).
+  #
+  # Why sharding is sound: every test in the binary shares ONE process-wide
+  # world — one in-process DS, one pair of libsql files, one armed-fault slot —
+  # which is why the tests are `#[serial]`. That world is per PROCESS
+  # (`OnceCell` in harness.rs, a fresh tempdir, the DS on an ephemeral port), so
+  # separate runners are as isolated from each other as two `cargo test`
+  # invocations on a laptop. Within a shard nothing changes: same binary, same
+  # features, same libtest scheduling.
+  #
+  # Completeness is by construction: each shard asks the BUILT binary for its
+  # full test list and takes a disjoint slice of it — shard 0 the `model::`
+  # module (its property test alone is ~9 of the 29 minutes), shards 1-3 the
+  # rest round-robin — then runs those names with `--exact`. A new test lands
+  # in some shard automatically; a renamed `model` module fails shard 0 loudly
+  # (empty slice) rather than silently dropping anything.
+  flows:
+    needs: changes
+    if: ${{ needs.changes.outputs.run_tests == 'true' }}
+    name: flows (shard ${{ matrix.shard }})
+    # Same runner as `tests`, for the same PipeWire >= 1.0 reason.
+    runs-on: ubuntu-24.04
+    strategy:
+      # Every shard reports, so one red test doesn't hide another.
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    env:
+      # Same link-size reason as the `tests` job.
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Same reason as the `tests` job: the flows binary links the whole native
+      # stack, and that link can exhaust a stock runner's disk.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+            /usr/local/share/boost /opt/hostedtoolcache/CodeQL /usr/local/.ghcup || true
+          sudo docker image prune --all --force || true
+          df -h /
+
+      # The pinned toolchain, exactly as the `tests` job (see its comment).
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
+
+      # Restores the `tests` job's cache: `shared-key: tests` produces the very
+      # key that job writes (rust-cache builds `v0-rust-<shared-key|job>-…`),
+      # given the same `workspaces`, toolchain and CARGO_* env. Never saves —
+      # `tests` is the single writer, so the shards cannot race it with a
+      # partial copy (#759 budget).
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: tests
+          workspaces: |
+            .
+            src-tauri
+          save-if: false
+
+      # Same system packages as the `tests` job.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            libasound2-dev \
+            libpulse-dev \
+            libpipewire-0.3-dev \
+            libva-dev \
+            libdbus-1-dev \
+            cmake \
+            clang \
+            ninja-build
+
+      - name: Install meson (newer than apt)
+        run: |
+          python3 -m pip install --user 'meson>=1.3'
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build the flows harness
+        working-directory: src-tauri
+        run: cargo test --features test-harness --test flows --no-run
+
+      - name: MLS integration flows harness (shard ${{ matrix.shard }})
+        working-directory: src-tauri
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          # The binary's own inventory, not a hand-kept list.
+          cargo test --features test-harness --test flows -- --list --format terse 2>/dev/null \
+            | sed -n 's/: test$//p' | sort > "$RUNNER_TEMP/all-tests.txt"
+          total=$(wc -l < "$RUNNER_TEMP/all-tests.txt")
+          if [ "$total" -eq 0 ]; then
+            echo "::error::The flows binary listed no tests."
+            exit 1
+          fi
+          if [ "$SHARD" -eq 0 ]; then
+            grep '^model::' "$RUNNER_TEMP/all-tests.txt" > "$RUNNER_TEMP/mine.txt" || true
+          else
+            grep -v '^model::' "$RUNNER_TEMP/all-tests.txt" \
+              | awk -v n=3 -v s=$((SHARD - 1)) '(NR - 1) % n == s' > "$RUNNER_TEMP/mine.txt" || true
+          fi
+          mine=$(wc -l < "$RUNNER_TEMP/mine.txt")
+          echo "shard $SHARD: $mine of $total tests"
+          if [ "$mine" -eq 0 ]; then
+            echo "::error::Shard $SHARD selected no tests (was the model:: module renamed? update the partition in mls-tests.yml)."
+            exit 1
+          fi
+          mapfile -t names < "$RUNNER_TEMP/mine.txt"
+          cargo test --features test-harness --test flows -- --exact "${names[@]}"
 
   # The local database's at-rest guarantee, on the third desktop platform (#998).
   #
@@ -456,7 +586,7 @@ jobs:
   # the heavy jobs did, and collapses the outcome into a single pass/fail.
   # Fail-closed: the only way to green is a genuine pass or a genuine exemption.
   gate:
-    needs: [changes, tests, macos-at-rest]
+    needs: [changes, tests, flows, macos-at-rest]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
@@ -465,9 +595,10 @@ jobs:
           CHANGES_RESULT: ${{ needs.changes.result }}
           RUN_TESTS: ${{ needs.changes.outputs.run_tests }}
           TESTS_RESULT: ${{ needs.tests.result }}
+          FLOWS_RESULT: ${{ needs.flows.result }}
           MACOS_RESULT: ${{ needs.macos-at-rest.result }}
         run: |
-          echo "changes=$CHANGES_RESULT run_tests=$RUN_TESTS tests=$TESTS_RESULT macos=$MACOS_RESULT"
+          echo "changes=$CHANGES_RESULT run_tests=$RUN_TESTS tests=$TESTS_RESULT flows=$FLOWS_RESULT macos=$MACOS_RESULT"
           # The decision must have completed cleanly; if it failed or was
           # cancelled we cannot trust the exemption verdict, so fail closed.
           if [ "$CHANGES_RESULT" != "success" ]; then
@@ -482,24 +613,30 @@ jobs:
               echo "::error::Heavy MLS tests were required but their result was '$TESTS_RESULT' — failing."
               exit 1
             fi
+            # A matrix job's result is the aggregate: `success` only when
+            # every shard passed.
+            if [ "$FLOWS_RESULT" != "success" ]; then
+              echo "::error::Flows harness shards were required but their result was '$FLOWS_RESULT' — failing."
+              exit 1
+            fi
             if [ "$MACOS_RESULT" != "success" ]; then
               echo "::error::macOS at-rest tests were required but their result was '$MACOS_RESULT' — failing."
               exit 1
             fi
-            echo "Heavy MLS tests and macOS at-rest tests passed."
+            echo "Heavy MLS tests, flows shards and macOS at-rest tests passed."
             exit 0
           fi
           # Exempt PR (frontend/website/docs/markdown only): the heavy jobs were
           # legitimately not run.
-          if [ "$TESTS_RESULT" = "skipped" ] && [ "$MACOS_RESULT" = "skipped" ]; then
+          if [ "$TESTS_RESULT" = "skipped" ] && [ "$FLOWS_RESULT" = "skipped" ] && [ "$MACOS_RESULT" = "skipped" ]; then
             echo "Exempt PR — no Rust/workspace change, heavy jobs correctly skipped."
             exit 0
           fi
           # Defensive: exemption said skip but the jobs somehow ran — honour
           # their actual results rather than assuming.
-          if [ "$TESTS_RESULT" = "success" ] && [ "$MACOS_RESULT" = "success" ]; then
+          if [ "$TESTS_RESULT" = "success" ] && [ "$FLOWS_RESULT" = "success" ] && [ "$MACOS_RESULT" = "success" ]; then
             echo "Heavy jobs ran and passed."
             exit 0
           fi
-          echo "::error::Unexpected state (run_tests=$RUN_TESTS tests=$TESTS_RESULT macos=$MACOS_RESULT) — failing closed."
+          echo "::error::Unexpected state (run_tests=$RUN_TESTS tests=$TESTS_RESULT flows=$FLOWS_RESULT macos=$MACOS_RESULT) — failing closed."
           exit 1
