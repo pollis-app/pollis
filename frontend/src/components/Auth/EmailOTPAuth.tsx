@@ -182,13 +182,16 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
 
   if (linkMode) {
     return (
-      <div data-testid="link-form-container" className="flex flex-col gap-4">
+      <div data-testid="link-form-container" className="flex flex-col gap-6">
+        <div className="flex flex-col gap-2">
+          <h2 className="text-base text-fg">{t('link.scanTitle')}</h2>
+          <p className="text-sm text-muted leading-relaxed">{t('link.codeIntro')}</p>
+        </div>
         {error && (
           <p data-testid="auth-error" className="text-xs font-mono text-danger">
             {error}
           </p>
         )}
-        <p className="text-xs font-mono text-muted">{t('link.intro')}</p>
         <form data-testid="link-form" onSubmit={handleClaimLink} className="flex flex-col gap-4">
           <TextInput
             id="link-code-input"
@@ -196,7 +199,7 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
             label={t('link.codeLabel')}
             value={linkCode}
             onChange={setLinkCode}
-            placeholder="pollis-link:v1:…"
+            placeholder={t('link.codePlaceholder')}
             autoFocus
             disabled={isLoading}
             required

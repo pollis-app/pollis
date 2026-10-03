@@ -235,6 +235,12 @@ const changePinRoute = createRoute({
   component: lazyRouteComponent(() => import("./pages/ChangePinPage"), "ChangePinPage"),
 });
 
+const linkDeviceRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/security/link-device",
+  component: lazyRouteComponent(() => import("./pages/LinkDevicePage"), "LinkDevicePage"),
+});
+
 const invitesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/invites",
@@ -343,6 +349,7 @@ const routeTree = rootRoute.addChildren([
   userProfileRoute,
   securityRoute,
   changePinRoute,
+  linkDeviceRoute,
   invitesRoute,
   joinByInviteRoute,
   inviteLinkLandingRoute,

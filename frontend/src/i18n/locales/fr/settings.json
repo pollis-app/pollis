@@ -354,5 +354,36 @@
   "notify": {
     "enrollmentTitle": "Connexion d'un nouvel appareil",
     "enrollmentBody": "Un nouvel appareil demande l'accès à votre compte"
+  },
+  "linkDevice": {
+    "heading": "Associer un nouvel appareil",
+    "rowSub": "Se connecter sur un autre téléphone, une tablette ou un ordinateur",
+    "pinTitle": "Confirmez votre identité",
+    "pinSubtitle": "Saisissez le code PIN de cet appareil.",
+    "pinFailed": "Ce code PIN est incorrect.",
+    "showTitle": "Scannez pour vous connecter",
+    "showSubtitle": "Sur le nouvel appareil, touchez Se connecter avec un autre appareil.",
+    "codeSubtitle": "Copiez ce code et collez-le sur le nouvel appareil.",
+    "tabQr": "Code QR",
+    "tabCode": "Code",
+    "copyHint": "Touchez pour copier",
+    "clickToCopy": "Cliquez pour copier",
+    "copied": "Copié",
+    "expiresIn": "Expire dans {{time}}",
+    "claimedTitle": "Presque fini",
+    "claimed": "{{name}} se connecte.",
+    "wantsToSignIn": "{{name}} veut se connecter",
+    "approveHint": "N'approuvez qu'un appareil que vous venez de configurer. Il pourra lire vos messages.",
+    "approve": "Approuver",
+    "reject": "Refuser",
+    "linked": "{{name}} est connecté",
+    "unnamedDevice": "Un nouvel appareil",
+    "tamperedTitle": "Quelque chose ne va pas",
+    "tampered": "Cette demande a été modifiée en route et ne peut pas être approuvée. Réessayez avec un nouveau code.",
+    "expiredTitle": "Ce code a expiré",
+    "expired": "Les codes durent une minute. Demandez-en un nouveau pour réessayer.",
+    "newCode": "Obtenir un nouveau code",
+    "failed": "Impossible d'associer l'appareil. Réessayez.",
+    "done": "Terminé"
   }
 }

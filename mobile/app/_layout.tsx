@@ -150,6 +150,10 @@ export default function RootLayout() {
                 options={settingsPage}
               />
               <Stack.Screen
+                name="self/link-device"
+                options={settingsPage}
+              />
+              <Stack.Screen
                 name="self/blocked"
                 options={settingsPage}
               />

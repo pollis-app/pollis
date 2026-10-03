@@ -1,7 +1,7 @@
 appId: com.pollis.mobile
 ---
-# Existing device: Self → Security → Link a new device → PIN → the QR (and its
-# code as text, which the script reads off the UI tree).
+# Existing device: Self → Security → Link a new device → PIN → the QR, then
+# the Code tab (whose full text the script reads off the UI tree).
 - tapOn:
     id: "btn-back"
     optional: true
@@ -11,17 +11,24 @@ appId: com.pollis.mobile
     id: "row-self-security"
 - scrollUntilVisible:
     element:
-      id: "btn-link-device"
+      id: "row-link-device"
     direction: DOWN
 - tapOn:
-    id: "btn-link-device"
-- tapOn:
-    id: "input-link-device-pin"
-- inputText: "1234"
-- tapOn:
-    id: "btn-link-device-show"
+    id: "row-link-device"
+- extendedWaitUntil:
+    visible:
+      id: "screen-link-device"
+    timeout: 10000
+- runFlow: ../../subflows/enter-pin.yaml
 - extendedWaitUntil:
     visible:
       id: "link-device-qr"
     timeout: 15000
-- takeScreenshot: qr-link-01-existing-shows-code
+- takeScreenshot: qr-link-01-existing-shows-qr
+- tapOn:
+    id: "chip-link-code"
+- extendedWaitUntil:
+    visible:
+      id: "link-device-payload"
+    timeout: 5000
+- takeScreenshot: qr-link-01b-existing-shows-code

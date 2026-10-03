@@ -50,10 +50,15 @@ async function approvals(page: Page): Promise<string[]> {
   );
 }
 
+async function enterPin(page: Page, pin: string) {
+  await page.getByTestId("link-device-pin-input").locator("input").first().click();
+  await page.keyboard.type(pin);
+}
+
 async function showCode(page: Page, pin: string) {
   await page.getByTestId("link-device-button").click();
-  await page.getByTestId("link-device-pin-input").fill(pin);
-  await page.getByTestId("link-device-pin-submit").click();
+  await expect(page.getByTestId("link-device-page")).toBeVisible();
+  await enterPin(page, pin);
 }
 
 test("the QR appears only after the right PIN", async ({ page }) => {
@@ -64,10 +69,15 @@ test("the QR appears only after the right PIN", async ({ page }) => {
   await expect(page.getByText("That PIN isn't right.")).toBeVisible();
   await expect(page.getByTestId("link-device-showing")).toHaveCount(0);
 
-  await page.getByTestId("link-device-pin-input").fill("1234");
-  await page.getByTestId("link-device-pin-submit").click();
+  await enterPin(page, "1234");
   await expect(page.getByTestId("link-device-showing")).toBeVisible();
   await expect(page.getByTestId("link-device-qr")).toBeVisible();
+
+  // The Code tab shows the whole code, one click to copy.
+  await page.getByTestId("link-device-tab-code").click();
+  await expect(page.getByTestId("link-device-payload")).toContainText("pollis-link:v1:");
+  await page.getByTestId("link-device-copy").click();
+  await expect(page.getByTestId("link-device-copy")).toContainText("Copied");
 });
 
 test("a scanned, verified request is approved only on an explicit tap", async ({ page }) => {
@@ -89,7 +99,7 @@ test("a scanned, verified request is approved only on an explicit tap", async ({
   expect(await approvals(page), "nothing is approved before the tap").toEqual([]);
 
   await page.getByTestId("link-device-approve").click();
-  await expect(page.getByTestId("link-device-done")).toContainText("Pixel 9 is now signed in");
+  await expect(page.getByTestId("link-device-done")).toContainText("Pixel 9 is signed in");
   expect(await approvals(page)).toEqual(["link_mock_1"]);
 });
 

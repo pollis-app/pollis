@@ -33,7 +33,7 @@ maestro --device "$EXISTING" test "${ENV_ARGS[@]}" -e MAESTRO_EMAIL="$EMAIL" "$L
 echo "==> 2/5 existing device shows a link code"
 maestro --device "$EXISTING" test "$QR/2-existing-show-code.yaml"
 
-# Read the payload off the existing device's screen (the "can't scan?" text).
+# Read the payload off the existing device's screen (the Code tab text).
 if [[ "$EXISTING" == emulator-* || "$EXISTING" == *:* ]]; then
   adb -s "$EXISTING" shell uiautomator dump /sdcard/qr-ui.xml >/dev/null
   TREE="$(adb -s "$EXISTING" exec-out cat /sdcard/qr-ui.xml)"
