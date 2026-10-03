@@ -566,6 +566,18 @@ anonymous-membership (not shipped — tracked in #489).
 - `created_at` TEXT NOT NULL DEFAULT now
 - Directional — A blocking B does not imply B blocks A. Enforcement checks both directions, so once either side blocks, neither can DM or group-invite the other.
 
+### user_report _(migration 33, #1213)_
+- `id` TEXT PK (ULID)
+- `reporter_id` TEXT NOT NULL FK users, `reported_id` TEXT NOT NULL FK users — `CHECK (reporter_id <> reported_id)`
+- `reason` TEXT NOT NULL `CHECK IN ('spam','harassment','illegal','other')`
+- `conversation_id` TEXT NULL, `message_id` TEXT NULL — `CHECK (message_id IS NULL OR conversation_id IS NOT NULL)`
+- `created_at` TEXT NOT NULL DEFAULT now; index `(reported_id, created_at)`
+- **No content column, by design.** Written only by `POST /v1/reports`; purged in both directions on account deletion (`teardown::purge_user_rows`); survives conversation teardown (`EXEMPT_FROM_CONVERSATION_PURGE`).
+
+### account_suspension _(migration 33, #1213)_
+- `user_id` TEXT PK FK users, `reason` TEXT NOT NULL (non-blank), `suspended_at` TEXT NOT NULL DEFAULT now
+- While a row exists the DS's device-key lookup (`auth.rs` `lookup_device_pubkey`) treats every device of the account as revoked → 401 on every device-signed request (a cached key keeps working up to `DEVICE_KEY_CACHE_TTL_SECS`, 30s). Written only by the operator script `scripts/suspend-account.sh`; no endpoint touches it. Purged on account deletion.
+
 ### group_invite
 - `id` TEXT PK
 - `group_id` TEXT NOT NULL FK groups

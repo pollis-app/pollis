@@ -257,6 +257,7 @@ Idle auto-lock (#851) — the timer that was missing from `pin::lock`. Rust owns
 ## blocks (`commands/blocks.rs`)
 - `block_user(blocker_id, blocked_id)` — idempotent. Inserts `user_block` row and resets `accepted_at = NULL` on the blocker's `dm_channel_member` rows for every DM shared with the blocked user (so after unblock those conversations reappear as requests).
 - `unblock_user(blocker_id, blocked_id)` — deletes the `user_block` row. DM history becomes visible again and un-accepted channels surface in `list_dm_requests`.
+- `report_user(reported_id, reason, conversation_id?, message_id?, also_block)` (#1213) — `POST /v1/reports` with the reporter (this device's user), the reported account, a reason (`spam` | `harassment` | `illegal` | `other`) and optionally the conversation + message ids. **Never message text**: the wire type and `user_report` have no field for it. `also_block` then runs `block_user`. The DS refuses a self-report, a forged reporter, a message id without its conversation, a conversation the reporter is not in, an unknown account, and more than 20 reports per reporter per day; it emails support@pollis.com (ids only) and stores the row. Desktop: message menu → Report, profile → Report, page `/report/$userId[/$conversationId/$messageId]`. Mobile: long-press → Report, user screen → Report, screen `app/report.tsx`.
 - `list_blocked_users(user_id)` → `BlockedUser[]`
 - Enforced in: `create_dm_channel`, `send_message` (DM only — group-channel sends are not gated), `send_group_invite`. All three return the identical string `"message request pending"` so the sender cannot infer which gate rejected them.
 
@@ -605,7 +606,7 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 - **`(lib.rs, no module)`** — `hide_window`, `read_clipboard_files`, `read_clipboard_image`
 - **`autolock`** — `report_user_activity`, `set_auto_lock_timeout`
 - **`auth`** — `delete_account`, `dev_login`, `get_identity`, `get_session`, `initialize_identity`, `is_current_device_registered`, `list_known_accounts`, `list_user_devices`, `logout`, `request_email_change_otp`, `request_otp`, `revoke_device`, `verify_email_change`, `verify_otp`, `wipe_local_data`
-- **`blocks`** — `block_user`, `list_blocked_users`, `unblock_user`
+- **`blocks`** — `block_user`, `list_blocked_users`, `unblock_user`, `report_user`
 - **`bookmarks`** — `list_saved_messages`, `resolve_message_permalink`, `save_message`, `toggle_saved_message`, `unsave_message`
 - **`camera`** — `list_video_devices`, `start_camera`, `start_camera_preview`, `stop_camera`, `stop_camera_preview`, `subscribe_camera_events`
 - **`device_enrollment`** — `approve_device_enrollment`, `await_enrollment_approval`, `finalize_device_enrollment`, `list_pending_enrollment_requests`, `list_security_events`, `poll_enrollment_status`, `recover_with_secret_key`, `reject_device_enrollment`, `reset_identity_and_recover`, `start_device_enrollment`

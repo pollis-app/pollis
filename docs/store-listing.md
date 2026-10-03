@@ -376,6 +376,9 @@ real data.
 > `[recovery key]`.
 > Pollis is end-to-end encrypted messaging. To try it: create a group, open its channel, and
 > send a message; or open Self → Security to see devices, safety numbers, and account deletion.
+> To report or block: long-press any message from another person → Report, or open a person's
+> profile → Report / Block User. Reports go to support@pollis.com and are reviewed within 24
+> hours; abusive accounts are suspended.
 > Voice/video calls are not part of the mobile app.
 
 App Store Connect: App Review Information → Sign-in required → username = the review email,
@@ -384,3 +387,49 @@ some functionality is restricted" → add the same instructions.
 
 Changing the code: update Doppler and run `delivery-deploy-prod` with `force_restart: true`
 (a secret-only change does not restart the container), then update both stores' review notes.
+
+## 10. App Review — Guideline 2.1 "Information Needed" (answered 2026-10)
+
+Apple asked a new developer account for a screen recording plus five answers, to go in the
+Resolution Center reply AND in App Review Information → Notes. Keep these current; they are
+reused on every submission.
+
+**1. Screen recording** (physical iPhone, latest iOS, starting from launch). Record from a
+TestFlight build, in this order: launch → Sign in (email + code; the terms line is visible) →
+PIN → recovery key screen → create a group (optionally with #General) → send a message → a
+second account's message: long-press → Report → pick a reason → Report and block → their
+profile shows Unblock → Self → Security → Delete account (show the confirm screen; cancel or
+complete on a throwaway account). There is no paid content.
+
+**2. Purpose and audience.** Pollis is an end-to-end encrypted group messenger, organised like
+Slack (groups with channels, plus direct messages), for people and small teams who want group
+chat where the service operator cannot read their messages. It uses the MLS standard (RFC
+9420) with post-quantum signatures, so messages, attachments and reactions are encrypted on
+the device and our servers store only ciphertext. The value: team-style chat with the privacy
+of Signal, open source, with no ads, tracking or data sale.
+
+**3. Setup and main features.** Sign in with the review account below (email + fixed code; no
+email is sent). If asked to approve a new device, choose "Use recovery key" and enter the key
+in the notes. Then: Groups → Create Group → open a channel → send a message; Direct → New
+message; Search; Self → Preferences / Security (devices, safety numbers, export, account
+deletion). Report: long-press another person's message → Report, or their profile → Report;
+Block from the same places. Nothing else (sample files, hardware) is needed.
+
+**4. External services** (none sees message content):
+- Turso (libSQL) — database for account metadata and encrypted message envelopes.
+- Our own Delivery Service (pollis-delivery, on Cloudflare Containers) — the only server the
+  app talks to for data; routes encrypted messages and checks device signatures.
+- Cloudflare R2 — storage for encrypted attachments.
+- Resend — sends the one-time sign-in codes by email.
+- LiveKit — realtime "new message" signalling (data only; no audio or video on mobile).
+- Expo Push Service with Apple Push Notification service and Firebase Cloud Messaging —
+  content-free "New message" notifications.
+No AI services, no payment processors, no analytics or advertising SDKs.
+
+**5. Regional differences.** None. The app works the same in every region where it is
+offered. (Encryption export compliance is declared in App Store Connect.)
+
+**6. Regulated industry / third-party material.** Not applicable: Pollis is not in a regulated
+industry and includes no protected third-party content. It uses standard encryption, declared
+via ITSAppUsesNonExemptEncryption = YES and the export compliance answers in §5.
+
