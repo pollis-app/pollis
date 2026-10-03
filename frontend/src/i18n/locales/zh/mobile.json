@@ -240,7 +240,7 @@
   },
   "search": {
     "channels": "频道",
-    "hint": "至少输入 2 个字符进行搜索。",
+    "hint": "至少输入 2 个字符进行搜索。要查找某人，请输入其准确的用户名并按回车。",
     "filtersLabel": "筛选",
     "messages": "消息",
     "placeholder": "搜索所有内容…",

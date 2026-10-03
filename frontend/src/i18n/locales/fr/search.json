@@ -73,6 +73,7 @@
     "requestRejected": "Votre demande a été refusée.",
     "tryAgain": "Réessayer",
     "requestAccess": "Demander l'accès",
-    "sendingRequest": "Envoi de la demande…"
+    "sendingRequest": "Envoi de la demande…",
+    "requestFailed": "Impossible d'envoyer la demande. Réessayez."
   }
 }

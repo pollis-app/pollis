@@ -10,6 +10,9 @@ import type { Channel, Group } from "../../types";
 
 export interface GroupWithChannels extends Group {
   channels: Channel[];
+  /** The viewer's role in this group ("admin" | "member"), from the core's
+   *  `GroupWithChannels.current_user_role`. */
+  current_user_role?: string;
 }
 
 export const groupQueryKeys = {

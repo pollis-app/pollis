@@ -56,7 +56,12 @@ export default function Search() {
   );
   const messageTotal = firstPage?.total ?? 0;
   const activeSort: SearchSort = sort ?? firstPage?.sort ?? "relevant";
-  const user = useUserSearch(trimmed);
+  // Message/group search below is local and runs as you type; the account
+  // lookup is an exact-match DS query, so it runs only on return (#1216):
+  // a lookup per keystroke would let anyone walk the directory by prefix.
+  const [userQuery, setUserQuery] = useState("");
+  const user = useUserSearch(userQuery);
+  const userShown = !!user.data && userQuery === trimmed;
   const { data: groups = [] } = useUserGroupsWithChannels();
   const { data: dms = [] } = useDMChannels();
 
@@ -136,7 +141,7 @@ export default function Search() {
   }, [trimmed, t]);
 
   const totalResults =
-    (user.data ? 1 : 0) +
+    (userShown ? 1 : 0) +
     filtered.groups.length +
     filtered.channels.length +
     pages.length +
@@ -284,7 +289,7 @@ export default function Search() {
           </View>
         ) : null}
 
-        {user.data ? (
+        {userShown && user.data ? (
           <View>
             <SectionTitle>{upper(t("tabs.direct"))}</SectionTitle>
             <ListRow
@@ -419,6 +424,12 @@ export default function Search() {
           amber
           value={q}
           onChangeText={setQ}
+          onSubmitEditing={() => {
+            if (trimmed.length >= 2) {
+              setUserQuery(trimmed);
+            }
+          }}
+          returnKeyType="search"
           placeholder={t("search.placeholder")}
           icon={<Icon.search color={semantic.mute} />}
         />

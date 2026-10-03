@@ -1,0 +1,25 @@
+appId: com.pollis.mobile
+---
+# Peer: find the group by its slug and ask to join.
+- runFlow: ../../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    id: "btn-join-group"
+- tapOn:
+    id: "input-group-search"
+- inputText: "${GROUP_SLUG}"
+# Dismiss the keyboard, then look the slug up (one request, not per key).
+- tapOn:
+    point: "50%,70%"
+- tapOn:
+    id: "btn-group-search"
+- extendedWaitUntil:
+    visible:
+      id: "btn-request-access"
+    timeout: 20000
+- tapOn:
+    id: "btn-request-access"
+- extendedWaitUntil:
+    visible: "(?i).*request pending.*"
+    timeout: 15000

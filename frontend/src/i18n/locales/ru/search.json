@@ -73,6 +73,7 @@
     "requestRejected": "Ваш запрос отклонён.",
     "tryAgain": "Попробовать снова",
     "requestAccess": "Запросить доступ",
-    "sendingRequest": "Отправка запроса…"
+    "sendingRequest": "Отправка запроса…",
+    "requestFailed": "Не удалось отправить запрос. Попробуйте ещё раз."
   }
 }

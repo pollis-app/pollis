@@ -97,6 +97,7 @@
     "requestRejected": "Your request was declined.",
     "tryAgain": "Try Again",
     "requestAccess": "Request Access",
-    "sendingRequest": "Sending request…"
+    "sendingRequest": "Sending request…",
+    "requestFailed": "Couldn't send the request. Try again."
   }
 }

@@ -73,6 +73,7 @@
     "requestRejected": "Ваш запит відхилено.",
     "tryAgain": "Спробувати ще раз",
     "requestAccess": "Запросити доступ",
-    "sendingRequest": "Надсилання запиту…"
+    "sendingRequest": "Надсилання запиту…",
+    "requestFailed": "Не вдалося надіслати запит. Спробуйте ще раз."
   }
 }

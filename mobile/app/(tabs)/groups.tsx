@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from "react";
-import { View, Text } from "react-native";
+import { Pressable, View, Text } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import {
@@ -21,6 +21,7 @@ import {
   useDeclineGroupInvite,
   useLastMessages,
   previewText,
+  useAdminPendingJoinRequestCounts,
 } from "../../hooks/queries";
 import { timeAgoShort } from "../../lib/timeAgo";
 import { upper } from "../../i18n";
@@ -35,6 +36,11 @@ function Groups() {
   const router = useRouter();
   const { data: groups = [], isLoading, isError } = useUserGroupsWithChannels();
   const { data: invites = [] } = usePendingGroupInvites();
+  const adminGroupIds = useMemo(
+    () => groups.filter((g) => g.current_user_role === "admin").map((g) => g.id),
+    [groups],
+  );
+  const pendingByGroup = useAdminPendingJoinRequestCounts(adminGroupIds);
   const acceptInvite = useAcceptGroupInvite();
   const declineInvite = useDeclineGroupInvite();
   const setSelectedGroupId = appStore.setSelectedGroupId;
@@ -79,6 +85,25 @@ function Groups() {
         end={String(totalChannels)}
       />
       <Body>
+        {/* Join requests waiting on you, one row per group (#1216). */}
+        {pendingByGroup.size > 0 ? (
+          <View>
+            <SectionTitle>{upper(t("group.joinRequests"))}</SectionTitle>
+            {groups
+              .filter((g) => pendingByGroup.has(g.id))
+              .map((g) => (
+                <ListRow
+                  key={g.id}
+                  testID={`row-join-requests-${g.id}`}
+                  glyph={<Icon.inbox color={semantic.accent} />}
+                  name={g.name}
+                  sub={t("groups.joinRequestsPending", { count: pendingByGroup.get(g.id) })}
+                  onPress={() => router.push({ pathname: "/group/requests", params: { groupId: g.id } })}
+                  end={<Icon.fwd color={semantic.mute} />}
+                />
+              ))}
+          </View>
+        ) : null}
         {invites.length > 0 ? (
           <View>
             <SectionTitle>{upper(t("mobile:groups.pendingInvites"))}</SectionTitle>
@@ -157,9 +182,42 @@ function Groups() {
         ) : null}
         {groups.map((g) => (
           <View key={g.id}>
-            <SectionTitle right={<Icon.fwd color={semantic.mute} />}>
-              {upper(g.name)}
-            </SectionTitle>
+            {/* The group header opens the group (members, invite, settings,
+                join requests) without going through a channel (#1216). */}
+            <Pressable
+              testID={`row-group-${g.id}`}
+              accessibilityRole="button"
+              accessibilityLabel={g.name}
+              onPress={() => router.push({ pathname: "/group/[id]", params: { id: g.id } })}
+            >
+              <SectionTitle
+                right={
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    {pendingByGroup.has(g.id) ? (
+                      <View
+                        testID={`badge-join-requests-${g.id}`}
+                        style={{
+                          minWidth: 18,
+                          paddingHorizontal: 5,
+                          height: 18,
+                          borderRadius: 9,
+                          backgroundColor: semantic.accent,
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <Text style={{ fontFamily: ty.body.fontFamily, fontSize: 11, color: "#0a0907" }}>
+                          {pendingByGroup.get(g.id)}
+                        </Text>
+                      </View>
+                    ) : null}
+                    <Icon.fwd color={semantic.mute} />
+                  </View>
+                }
+              >
+                {upper(g.name)}
+              </SectionTitle>
+            </Pressable>
             {g.channels.length === 0 ? (
               <Text
                 style={{

@@ -3,7 +3,7 @@
 // member-list + leave-group hooks live here too because they all sit on
 // the group detail screen and share invalidation patterns.
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
@@ -339,6 +339,36 @@ export function useGroupJoinRequests(groupId: string | null) {
     enabled: !!(currentUser && groupId),
     staleTime: 1000 * 30,
   });
+}
+
+/**
+ * Pending join requests for every group the viewer administers, as
+ * groupId → count. Desktop's `useAllPendingJoinRequests` twin: only admin
+ * groups are asked (the core refuses a non-admin), and each query shares the
+ * per-group cache key, so approving on the requests screen updates this too.
+ */
+export function useAdminPendingJoinRequestCounts(adminGroupIds: string[]): Map<string, number> {
+  const currentUser = useObserver(() => appStore.currentUser);
+  const results = useQueries({
+    queries: adminGroupIds.map((groupId) => ({
+      queryKey: joinRequestQueryKeys.byGroup(groupId),
+      queryFn: async (): Promise<JoinRequest[]> =>
+        await invoke<JoinRequest[]>("get_group_join_requests", {
+          groupId,
+          requesterId: currentUser!.id,
+        }),
+      enabled: !!currentUser,
+      staleTime: 1000 * 30,
+    })),
+  });
+  const counts = new Map<string, number>();
+  adminGroupIds.forEach((id, i) => {
+    const n = results[i]?.data?.length ?? 0;
+    if (n > 0) {
+      counts.set(id, n);
+    }
+  });
+  return counts;
 }
 
 export function useMyJoinRequest(groupId: string | null) {
