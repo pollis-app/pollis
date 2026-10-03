@@ -438,17 +438,16 @@ asserts the min-version reached the built artifact. Keep the value in lockstep
 with the Podfile.
 
 **Encryption export compliance:** `app.json` sets
-`ITSAppUsesNonExemptEncryption: true` deliberately. `false` means "no
-encryption, or only Apple-exempt encryption (auth, DRM, HTTPS-only)" — Pollis
-uses standard-algorithm E2EE (MLS RFC 9420: AES-GCM, ML-DSA-44) for content
-confidentiality in its own protocol, which is **not** on the exempt list, so
-`false` would be a false export declaration. `true` is the honest answer; it
-skips the per-build compliance interruption in App Store Connect and instead
-requires (one-time/annual, operational not code): answering ASC's export
-compliance questions (standard algorithms → mass-market self-classification,
-annual self-classification report to the U.S. BIS by Feb 1), and the French
-encryption declaration to ANSSI if distributing in France. Do not flip this to
-`false` to silence ASC.
+`ITSAppUsesNonExemptEncryption: false`, and that is the current, deliberate
+answer — `docs/store-listing.md` §5 is the source of truth. The key asks about
+Apple's *documentation* exemption, not whether the app encrypts: Pollis uses
+only standard published algorithms (MLS RFC 9420, AES-GCM, ML-DSA-44), has no
+proprietary crypto and is not distributed in France, so no export
+documentation is uploaded. It flips to `true` plus an
+`ITSEncryptionExportComplianceCode` only when France is added (after the ANSSI
+declaration). The BIS annual self-classification report (due Feb 1) is owed
+regardless. An earlier version of this paragraph said the opposite; it was
+written before the §5 decision and is superseded.
 
 ### Android
 
