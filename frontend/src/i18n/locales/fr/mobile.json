@@ -11,7 +11,7 @@
       "verifyEmail": "Vérifier l'e-mail"
     },
     "email": {
-      "intro": "Saisissez votre e-mail. Nous vous enverrons un code à usage unique — pas de mot de passe.",
+      "intro": "Saisissez votre e-mail et nous vous enverrons un code.",
       "sendFailed": "Impossible d'envoyer le code. Vérifiez votre connexion et réessayez.",
       "title": "Se connecter"
     },
@@ -19,9 +19,9 @@
       "ackLabel": "J'ai enregistré ma clé secrète",
       "ackText": "J'ai enregistré ma clé secrète en lieu sûr.",
       "copyFailed": "Échec de la copie",
-      "intro": "Cette clé est le seul moyen d'ajouter Pollis sur un nouvel appareil ou de récupérer votre compte si vous perdez celui-ci. Nous ne la stockons nulle part où vous pourriez la relire plus tard — notez-la ou enregistrez-la dès maintenant dans un gestionnaire de mots de passe.",
+      "intro": "Si vous perdez ce téléphone, cette clé vous permet de vous connecter sur un nouveau. Nous ne pouvons pas la récupérer pour vous : notez-la ou gardez-la dans un gestionnaire de mots de passe.",
       "title": "Enregistrez votre clé secrète",
-      "warning": "Toute personne disposant de cette clé peut se connecter à votre place sur un nouvel appareil. Traitez-la comme un mot de passe maître."
+      "warning": "Toute personne qui a cette clé peut se connecter à votre place."
     },
     "enrollment": {
       "chooserIntro": "Cet appareil ne possède pas encore vos clés. Choisissez comment les y transférer.",
@@ -41,7 +41,7 @@
       "waiting": "En attente d'approbation…"
     },
     "initializing": {
-      "intro": "Un instant — association de votre appareil et synchronisation des clés.",
+      "intro": "Un instant. Configuration de cet appareil.",
       "ready": "Prêt",
       "setupFailed": "Échec de la configuration.",
       "skip": "Passer",
@@ -57,13 +57,13 @@
     "otp": {
       "codeLabel": "Code à usage unique",
       "invalidCode": "Code invalide. Veuillez réessayer.",
-      "sentTo": "Nous avons envoyé un code à 6 chiffres à <address>{{email}}</address>. Saisissez-le pour continuer.",
+      "sentTo": "Nous avons envoyé un code à <address>{{email}}</address>.",
       "title": "Consultez votre e-mail",
       "useDifferentEmail": "Utiliser un autre e-mail",
       "yourEmail": "votre e-mail"
     },
     "pin": {
-      "createIntro": "Sert à déverrouiller Pollis sur cet appareil. Il reste sur votre téléphone — nous ne le voyons jamais.",
+      "createIntro": "Ce code PIN déverrouille Pollis sur ce téléphone. Il ne quitte jamais le téléphone.",
       "createTitle": "Nouveau code PIN",
       "invalidPin": "Code PIN invalide.",
       "noActiveUser": "Aucun utilisateur actif. Reconnectez-vous.",
@@ -116,7 +116,7 @@
   "dm": {
     "backToInbox": "Retour à la boîte de réception",
     "danger": "Danger",
-    "exactMatchHint": "Saisissez au moins deux caractères. Correspondance exacte uniquement — Pollis ne diffuse pas les correspondances partielles.",
+    "exactMatchHint": "Saisissez le nom d'utilisateur ou l'adresse e-mail exacts.",
     "new": "Nouveau",
     "participants": "Participants",
     "participantsCount_one": "Participants · {{count}}",
@@ -152,11 +152,11 @@
       "textChannels": "Canaux textuels"
     },
     "discover": {
-      "approved": "Approuvée — ouvrez l'onglet Groupes",
-      "blurb": "Les slugs sont de courts identifiants uniques choisis par les propriétaires de groupes. Demandez-en un pour rejoindre un groupe — il n'existe pas d'annuaire public.",
+      "approved": "Approuvé. Ouvrez l'onglet Groupes.",
+      "blurb": "Demandez l'identifiant au propriétaire du groupe. Il n'existe pas de liste publique des groupes.",
       "requestDeclined": "Demande refusée",
       "requestPending": "Demande en attente",
-      "title": "Découvrir"
+      "title": "Trouver un groupe"
     },
     "emoji": {
       "adminsOnly": "Seuls les administrateurs du groupe peuvent ajouter ou retirer des émojis.",
@@ -168,12 +168,12 @@
       "uploading": "Envoi…"
     },
     "invite": {
-      "blurb": "L'invitation apparaîtra dans leur section En attente à leur prochaine ouverture de Pollis. Seuls les administrateurs de {{name}} peuvent inviter — si vous n'en êtes pas, le serveur refusera.",
+      "blurb": "L'invitation apparaîtra à sa prochaine ouverture de Pollis.",
       "createLinkFailed": "Impossible de créer le lien d'invitation.",
       "crumb": "Inviter",
-      "linkBlurb": "Toute personne disposant du lien peut rejoindre directement — sans étape d'approbation. Le lien n'est affiché qu'une seule fois, juste après sa création.",
-      "linkCreated": "Lien créé — copiez-le maintenant",
-      "linkOnce": "C'est la seule fois où ce lien peut être affiché. Personne — vous compris — ne pourra le revoir. Pour le partager plus tard, créez-en un nouveau.",
+      "linkBlurb": "Toute personne qui a le lien peut rejoindre. Vous ne le verrez qu'une fois.",
+      "linkCreated": "Lien créé. Copiez-le maintenant.",
+      "linkOnce": "Vous ne reverrez plus ce lien. Pour le partager plus tard, créez-en un nouveau.",
       "manageLinks": "Gérer les liens d'invitation",
       "manageLinksSub": "Consulter et révoquer les liens existants",
       "share": "Partager",
@@ -181,7 +181,7 @@
       "thisGroup": "ce groupe"
     },
     "inviteLinks": {
-      "blurb": "Les liens ne peuvent plus être affichés après leur création — le serveur n'en conserve qu'une empreinte. Révoquer un lien le désactive immédiatement pour tous ceux qui le détiennent.",
+      "blurb": "Les liens ne peuvent pas être réaffichés. Révoquer un lien le désactive aussitôt.",
       "empty": "Aucun lien d'invitation pour l'instant. Créez-en un depuis l'écran Inviter.",
       "revokeFailed": "Impossible de révoquer le lien.",
       "revokeLabel": "Révoquer le lien d'invitation",
@@ -194,7 +194,7 @@
       "roleOwner": "Propriétaire"
     },
     "new": {
-      "blurb": "Un canal textuel #General est créé automatiquement. Vous pourrez en ajouter d'autres plus tard. Les métadonnées du groupe ne sont visibles que par les membres invités.",
+      "blurb": "Seuls les membres voient les détails du groupe.",
       "crumb": "Nouveau",
       "descriptionLabel": "Description (facultative)",
       "descriptionPlaceholder": "À quoi sert ce groupe ?"
@@ -227,7 +227,7 @@
   "invite": {
     "backToPollis": "Retour à Pollis",
     "checking": "Vérification de votre invitation…",
-    "failed": "Ce lien d'invitation ne peut pas être utilisé. Il est peut-être invalide, expiré, révoqué ou déjà épuisé — demandez un nouveau lien.",
+    "failed": "Ce lien d'invitation ne fonctionne plus. Demandez-en un nouveau.",
     "groupInvite": "Invitation de groupe",
     "locked": "Déverrouillez d'abord Pollis, puis rouvrez le lien d'invitation.",
     "openPollis": "Ouvrir Pollis",
@@ -247,7 +247,8 @@
   },
   "search": {
     "channels": "Canaux",
-    "hint": "Saisissez au moins deux caractères pour rechercher des groupes, des canaux, des personnes et des messages.",
+    "hint": "Saisissez au moins 2 caractères pour rechercher.",
+    "filtersLabel": "Filtres",
     "messages": "Messages",
     "placeholder": "Rechercher partout…",
     "resultCount_one": "{{count}} résultat",
@@ -271,14 +272,14 @@
     "deleteAccount": {
       "consequences": "Cette action supprime définitivement votre compte Pollis. Vous êtes retiré de tous vos groupes et conversations, vos appareils sont désenregistrés et vos données chiffrées sur ce téléphone sont effacées. Les autres membres conservent leurs propres copies des messages passés, mais rien de ce qui sera envoyé après la suppression ne pourra jamais être lu avec vos clés.",
       "contextPath": "{{parent}} · {{child}}",
-      "failed": "Impossible de supprimer le compte. Rien n'a été modifié — réessayez.",
+      "failed": "Impossible de supprimer le compte. Rien n'a changé. Réessayez.",
       "irreversible": "Cette action est irréversible. Il n'y a ni délai de grâce ni récupération possible.",
       "submit": "Supprimer définitivement le compte",
       "title": "Supprimer le compte"
     },
     "export": {
       "conversationHeading": "Exporter",
-      "rowSub": "Écrit sur ce téléphone, puis partagé en zip",
+      "rowSub": "Enregistré en zip à partager",
       "share": "Partager l'archive",
       "bundling": "Compression…",
       "sharingUnavailable": "Le partage n'est pas disponible sur cet appareil.",
@@ -301,10 +302,10 @@
         "showInlineTimestamps": "Afficher l'heure dans les messages",
         "showMemberAvatars": "Afficher les avatars des membres"
       },
-      "notificationsOffSettings": "Désactivées — à activer dans les Réglages du système",
-      "notificationsOffTap": "Désactivées — touchez pour activer",
-      "notificationsOn": "Activées — vous serez averti des nouveaux messages",
-      "readReceiptsSub": "Réciproque — désactiver cette option vous masque aussi les accusés des autres",
+      "notificationsOffSettings": "Désactivées. Activez-les dans les Réglages du système",
+      "notificationsOffTap": "Désactivées. Touchez pour activer",
+      "notificationsOn": "Activées",
+      "readReceiptsSub": "Désactivé, vous ne verrez pas non plus ceux des autres",
       "swatch": {
         "amber": "Ambre",
         "citron": "Citron",
@@ -315,7 +316,7 @@
       }
     },
     "saved": {
-      "empty": "Aucun message enregistré. Maintenez un message appuyé pour l'enregistrer.",
+      "empty": "Aucun message enregistré. Appuyez longuement sur un message pour l'enregistrer.",
       "openA11y": "Ouvrir le message enregistré",
       "savedAgo": "enregistré il y a {{time}}",
       "unsave": "Retirer"
@@ -324,18 +325,18 @@
       "approve": "Approuver",
       "approveA11y": "Approuver l'enrôlement",
       "autoLockA11y": "Verrouillage automatique {{label}}",
-      "autoLockDescription": "Verrouille Pollis derrière le code PIN de l'appareil après une période d'inactivité. Ce réglage reste sur ce téléphone.",
+      "autoLockDescription": "Verrouille Pollis après un moment d'inactivité. Ne concerne que ce téléphone.",
       "current": "Actuel",
       "daysAgo_one": "il y a {{count}} j",
       "daysAgo_other": "il y a {{count}} j",
       "deleteAccountSub": "Supprimer définitivement votre compte et effacer cet appareil",
       "deviceSub": "associé {{paired}} · vu {{lastSeen}}",
       "enrollmentFailed": "Impossible de traiter la demande d'enrôlement.",
-      "eventsEmpty": "Aucun événement de sécurité pour l'instant. Les associations d'appareils, les révocations et les réinitialisations d'identité apparaîtront ici.",
+      "eventsEmpty": "Aucun événement de sécurité pour l'instant.",
       "hoursAgo_one": "il y a {{count}} h",
       "hoursAgo_other": "il y a {{count}} h",
-      "identityDescription": "Votre clé d'identité publique. Vos contacts peuvent la comparer à ce que voit leur appareil pour vérifier qu'il s'agit bien de vous.",
-      "identityMissing": "Aucune clé d'identité publiée depuis cet appareil pour l'instant.",
+      "identityDescription": "Votre clé publique. Les autres peuvent la comparer avec la leur pour vérifier que c'est bien vous.",
+      "identityMissing": "Cet appareil n'a pas encore publié de clé.",
       "justNow": "à l'instant",
       "lockNow": "Verrouiller maintenant",
       "lockNowSub": "Exiger votre code PIN pour rouvrir Pollis",
@@ -344,7 +345,7 @@
       "pairHeading": "Associer un nouvel appareil",
       "pairHint": "Vérifiez que ce code correspond à celui affiché sur l'autre appareil, puis approuvez.",
       "pairIntro": "Un nouvel appareil souhaite s'associer à votre compte.",
-      "recoveryDescription": "La gestion de la clé secrète et du code PIN n'est pas encore disponible sur mobile. Pour configurer un nouvel appareil, connectez-vous avec votre e-mail — Pollis vous guide dans l'enrôlement.",
+      "recoveryDescription": "Pour ajouter un appareil, connectez-vous dessus avec votre e-mail, ou associez-le depuis Appareils, plus haut.",
       "recoveryHeading": "Récupération",
       "reject": "Refuser",
       "rejectA11y": "Refuser l'enrôlement",
@@ -381,7 +382,7 @@
     "compareHint": "Comparez ces chiffres en personne ou par un autre canal de confiance. Des numéros identiques prouvent que vous parlez bien à la clé que le serveur a publiée pour cet utilisateur.",
     "computing": "Calcul…",
     "fallbackHandle": "utilisateur",
-    "keyChanged": "La clé a changé depuis votre dernière vérification — revérifiez en personne.",
+    "keyChanged": "Sa clé a changé. Vérifiez-la de nouveau en personne.",
     "message": "Message",
     "opening": "Ouverture…",
     "safetyActionsHeading": "Actions de sécurité",

@@ -258,7 +258,7 @@ function Groups() {
   );
 
   return (
-    <Screen testID="screen-groups">
+    <Screen testID="screen-groups" aboveTabBar>
       {isRegular ? (
         <TwoPane
           list={listColumn}

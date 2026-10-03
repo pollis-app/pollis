@@ -11,7 +11,7 @@
       "verifyEmail": "Verify email"
     },
     "email": {
-      "intro": "Enter your email. We'll send you a one-time code — no password.",
+      "intro": "Enter your email and we'll send you a code.",
       "sendFailed": "Couldn't send code. Check your connection and try again.",
       "title": "Sign in"
     },
@@ -19,9 +19,9 @@
       "ackLabel": "I've saved my recovery key",
       "ackText": "I've saved my recovery key in a safe place.",
       "copyFailed": "Copy failed",
-      "intro": "This key is the only way to add Pollis to a new device or recover after losing this one. We don't store it anywhere you can read it later — write it down or save it to a password manager now.",
+      "intro": "If you lose this phone, this key is how you sign in on a new one. We can't recover it for you, so write it down or save it in a password manager.",
       "title": "Save your recovery key",
-      "warning": "Anyone with this key can sign in as you on a new device. Treat it like a master password."
+      "warning": "Anyone with this key can sign in as you."
     },
     "enrollment": {
       "chooserIntro": "This device doesn't have your keys yet. Choose how to get them onto it.",
@@ -41,7 +41,7 @@
       "waiting": "Waiting for approval…"
     },
     "initializing": {
-      "intro": "One moment — pairing your device and syncing keys.",
+      "intro": "One moment. Setting up this device.",
       "ready": "Ready",
       "setupFailed": "Setup failed.",
       "skip": "Skip",
@@ -57,13 +57,13 @@
     "otp": {
       "codeLabel": "One-time code",
       "invalidCode": "Invalid code. Please try again.",
-      "sentTo": "We sent a 6-digit code to <address>{{email}}</address>. Enter it to continue.",
+      "sentTo": "We sent a code to <address>{{email}}</address>.",
       "title": "Check your email",
       "useDifferentEmail": "Use a different email",
       "yourEmail": "your email"
     },
     "pin": {
-      "createIntro": "Used to unlock Pollis on this device. This stays on your phone — we never see it.",
+      "createIntro": "You'll use this PIN to unlock Pollis on this phone. It never leaves the phone.",
       "createTitle": "New device PIN",
       "invalidPin": "Invalid PIN.",
       "noActiveUser": "No active user. Sign in again.",
@@ -116,7 +116,7 @@
   "dm": {
     "backToInbox": "Back to inbox",
     "danger": "Danger",
-    "exactMatchHint": "Type at least two characters. Exact match only — Pollis doesn't broadcast partial matches.",
+    "exactMatchHint": "Enter a user's exact username or email address.",
     "new": "New",
     "participants": "Participants",
     "participantsCount_one": "Participants · {{count}}",
@@ -152,11 +152,11 @@
       "textChannels": "Text channels"
     },
     "discover": {
-      "approved": "Approved — open Groups tab",
-      "blurb": "Slugs are short, unique identifiers chosen by group owners. Ask for one to join — there's no public directory.",
+      "approved": "Approved. Open the Groups tab.",
+      "blurb": "Ask the group's owner for its slug. There's no public list of groups.",
       "requestDeclined": "Request declined",
       "requestPending": "Request pending",
-      "title": "Discover"
+      "title": "Find Group"
     },
     "emoji": {
       "adminsOnly": "Only group admins can add or remove emoji.",
@@ -168,12 +168,12 @@
       "uploading": "Uploading…"
     },
     "invite": {
-      "blurb": "They'll see this invite in their Pending section the next time they open Pollis. Only admins of {{name}} can invite — if you're not one, the server will reject this.",
+      "blurb": "They'll see the invite the next time they open Pollis.",
       "createLinkFailed": "Couldn't create invite link.",
       "crumb": "Invite",
-      "linkBlurb": "Anyone with the link can join directly — no approval step. The link is shown exactly once, right after you create it.",
-      "linkCreated": "Link created — copy it now",
-      "linkOnce": "This is the only time this link can be shown. Nobody — including you — can view it again. To share it later, create a new one.",
+      "linkBlurb": "Anyone with the link can join. You can only see it once.",
+      "linkCreated": "Link created. Copy it now.",
+      "linkOnce": "You won't see this link again. To share it later, make a new one.",
       "manageLinks": "Manage invite links",
       "manageLinksSub": "Review and revoke existing links",
       "share": "Share",
@@ -181,7 +181,7 @@
       "thisGroup": "this group"
     },
     "inviteLinks": {
-      "blurb": "Links can't be shown again after creation — the server keeps only a hash. Revoking stops a link immediately for everyone holding it.",
+      "blurb": "Links can't be shown again. Revoking a link stops it right away.",
       "empty": "No invite links yet. Create one from the Invite screen.",
       "revokeFailed": "Couldn't revoke link.",
       "revokeLabel": "Revoke invite link",
@@ -194,7 +194,7 @@
       "roleOwner": "Owner"
     },
     "new": {
-      "blurb": "A #General text channel is created automatically. You can add more later. Group metadata is visible to invited members only.",
+      "blurb": "Only members can see the group's details.",
       "crumb": "New",
       "descriptionLabel": "Description (optional)",
       "descriptionPlaceholder": "What's this group for?"
@@ -231,7 +231,7 @@
     "confirmTitle": "Join this group?",
     "join": "Join group",
     "joining": "Joining…",
-    "failed": "This invite link can't be used. It may be invalid, expired, revoked, or already used up — ask for a new link.",
+    "failed": "This invite link doesn't work anymore. Ask for a new one.",
     "groupInvite": "Group invite",
     "locked": "Unlock Pollis first, then open the invite link again.",
     "openPollis": "Open Pollis",
@@ -251,7 +251,8 @@
   },
   "search": {
     "channels": "Channels",
-    "hint": "Type at least two characters to search groups, channels, people, and messages.",
+    "hint": "Type at least 2 characters to search.",
+    "filtersLabel": "Filters",
     "messages": "Messages",
     "placeholder": "Search everything…",
     "resultCount_one": "{{count}} result",
@@ -277,14 +278,14 @@
     "deleteAccount": {
       "consequences": "This permanently deletes your Pollis account. You are removed from every group and conversation, your devices are unregistered, and your encrypted data on this phone is wiped. Other members keep their own copies of past messages, but nothing sent after deletion can ever be read with your keys.",
       "contextPath": "{{parent}} · {{child}}",
-      "failed": "Couldn't delete the account. Nothing was changed — try again.",
+      "failed": "Couldn't delete the account. Nothing changed. Try again.",
       "irreversible": "This cannot be undone. There is no grace period and no recovery.",
       "submit": "Delete account permanently",
       "title": "Delete account"
     },
     "export": {
       "conversationHeading": "Export",
-      "rowSub": "Written on this phone, then shared as a zip",
+      "rowSub": "Saved as a zip you can share",
       "share": "Share archive",
       "bundling": "Bundling…",
       "sharingUnavailable": "Sharing isn't available on this device.",
@@ -307,10 +308,10 @@
         "showInlineTimestamps": "Show inline timestamps",
         "showMemberAvatars": "Show member avatars"
       },
-      "notificationsOffSettings": "Off — enable in system Settings",
-      "notificationsOffTap": "Off — tap to enable",
-      "notificationsOn": "On — new messages will notify you",
-      "readReceiptsSub": "Reciprocal — turning this off also hides others' receipts from you",
+      "notificationsOffSettings": "Off. Turn on in system Settings",
+      "notificationsOffTap": "Off. Tap to turn on",
+      "notificationsOn": "On",
+      "readReceiptsSub": "If off, you won't see other people's either",
       "swatch": {
         "amber": "Amber",
         "citron": "Citron",
@@ -321,7 +322,7 @@
       }
     },
     "saved": {
-      "empty": "No saved messages. Use the long-press action on a message to save it.",
+      "empty": "No saved messages yet. Long-press a message to save it.",
       "openA11y": "Open saved message",
       "savedAgo": "saved {{time}} ago",
       "unsave": "Unsave"
@@ -330,18 +331,18 @@
       "approve": "Approve",
       "approveA11y": "Approve enrollment",
       "autoLockA11y": "Auto-lock {{label}}",
-      "autoLockDescription": "Lock Pollis behind your device PIN after a period of inactivity. This setting stays on this phone.",
+      "autoLockDescription": "Lock Pollis when you've been away a while. Only affects this phone.",
       "current": "Current",
       "daysAgo_one": "{{count}}d ago",
       "daysAgo_other": "{{count}}d ago",
       "deleteAccountSub": "Permanently delete your account and wipe this device",
       "deviceSub": "paired {{paired}} · last seen {{lastSeen}}",
       "enrollmentFailed": "Couldn't process the enrollment request.",
-      "eventsEmpty": "No security events yet. Device pairings, revocations, and identity resets will show up here.",
+      "eventsEmpty": "No security events yet.",
       "hoursAgo_one": "{{count}}h ago",
       "hoursAgo_other": "{{count}}h ago",
-      "identityDescription": "Your public identity key. Peers you talk to can compare this against what their device sees to verify it's really you.",
-      "identityMissing": "No identity key published from this device yet.",
+      "identityDescription": "Your public key. People can compare it with what they see to check it's really you.",
+      "identityMissing": "This device hasn't published a key yet.",
       "justNow": "just now",
       "lockNow": "Lock now",
       "lockNowSub": "Require your PIN to reopen Pollis",
@@ -350,7 +351,7 @@
       "pairHeading": "Pair new device",
       "pairHint": "Confirm this code matches what's shown on the other device, then approve.",
       "pairIntro": "A new device wants to pair with your account.",
-      "recoveryDescription": "Recovery key and device PIN management aren't wired on mobile yet. To set up a new device, sign in with your email — Pollis walks you through enrollment.",
+      "recoveryDescription": "To add a new device, sign in on it with your email, or link it from Devices above.",
       "recoveryHeading": "Recovery",
       "reject": "Reject",
       "rejectA11y": "Reject enrollment",
@@ -387,7 +388,7 @@
     "compareHint": "Compare these digits in person or over an out-of-band channel. Matching numbers prove you're talking to the same key the server published for this user.",
     "computing": "Computing…",
     "fallbackHandle": "user",
-    "keyChanged": "Key changed since you last verified — re-verify in person.",
+    "keyChanged": "Their key changed. Verify them again in person.",
     "message": "Message",
     "opening": "Opening…",
     "safetyActionsHeading": "Safety actions",

@@ -47,7 +47,7 @@ const TEST_HEADING = "IDIOMA-TEST";
  * and so proves the English fallback.
  */
 const EN_HEADING = "Language";
-const EN_DESCRIPTION_FRAGMENT = "per-device";
+const EN_DESCRIPTION_FRAGMENT = "Only changes this device";
 
 const SKINS = ["terminal", "refined"] as const;
 type Skin = (typeof SKINS)[number];

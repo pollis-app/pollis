@@ -2,7 +2,7 @@ import { useState } from "react";
 import { View, Text } from "react-native";
 import { useTranslation } from "react-i18next";
 import { useObserver } from "mobx-react-lite";
-import { Chip } from "./ui";
+import { Chip, SectionTitle } from "./ui";
 import { type as ty, semantic } from "../theme/tokens";
 import { SUPPORTED_LANGUAGES } from "../i18n/languages";
 import { layoutRestartPending, setLanguage, upper } from "../i18n";
@@ -28,12 +28,10 @@ export function LanguageSection() {
   const active = i18n.language;
 
   return (
-    <View style={{ paddingHorizontal: 18, paddingTop: 18 }} testID="pref-language">
-      <Text style={[ty.label, { marginBottom: 10 }]} testID="pref-language-heading">
-        {upper(t("language.heading"))}
-      </Text>
+    <View testID="pref-language">
+      <SectionTitle testID="pref-language-heading">{upper(t("language.heading"))}</SectionTitle>
       <View
-        style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}
+        style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: 18 }}
         accessibilityRole="radiogroup"
         accessibilityLabel={t("language.ariaLabel")}
       >
@@ -59,13 +57,13 @@ export function LanguageSection() {
           );
         })}
       </View>
-      <Text style={[ty.body, { color: semantic.mute, fontSize: 12, marginTop: 10 }]}>
+      <Text style={[ty.body, { color: semantic.mute, fontSize: 12, marginTop: 10, paddingHorizontal: 18 }]}>
         {t("language.description")}
       </Text>
       {restartPending ? (
         <Text
           testID="pref-language-restart"
-          style={[ty.body, { color: semantic.accent, fontSize: 12, marginTop: 6 }]}
+          style={[ty.body, { color: semantic.accent, fontSize: 12, marginTop: 6, paddingHorizontal: 18 }]}
         >
           {t("mobile:language.restartRequired")}
         </Text>

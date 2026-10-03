@@ -11,7 +11,7 @@
       "verifyEmail": "Verificar correo"
     },
     "email": {
-      "intro": "Escribe tu correo. Te enviaremos un código de un solo uso; sin contraseña.",
+      "intro": "Escribe tu correo y te enviaremos un código.",
       "sendFailed": "No se pudo enviar el código. Comprueba tu conexión e inténtalo de nuevo.",
       "title": "Iniciar sesión"
     },
@@ -19,9 +19,9 @@
       "ackLabel": "He guardado mi clave secreta",
       "ackText": "He guardado mi clave secreta en un sitio seguro.",
       "copyFailed": "No se pudo copiar",
-      "intro": "Esta clave es la única forma de añadir Pollis a un dispositivo nuevo o de recuperar el acceso si pierdes este. No la guardamos en ningún sitio donde puedas consultarla más tarde: anótala o guárdala ahora en un gestor de contraseñas.",
+      "intro": "Si pierdes este teléfono, esta clave es la forma de entrar en uno nuevo. No podemos recuperarla por ti, así que anótala o guárdala en un gestor de contraseñas.",
       "title": "Guarda tu clave secreta",
-      "warning": "Cualquiera con esta clave puede iniciar sesión como tú en un dispositivo nuevo. Trátala como una contraseña maestra."
+      "warning": "Cualquiera con esta clave puede entrar como tú."
     },
     "enrollment": {
       "chooserIntro": "Este dispositivo todavía no tiene tus claves. Elige cómo traerlas aquí.",
@@ -41,7 +41,7 @@
       "waiting": "Esperando aprobación…"
     },
     "initializing": {
-      "intro": "Un momento: vinculando tu dispositivo y sincronizando las claves.",
+      "intro": "Un momento. Preparando este dispositivo.",
       "ready": "Listo",
       "setupFailed": "La configuración falló.",
       "skip": "Omitir",
@@ -57,13 +57,13 @@
     "otp": {
       "codeLabel": "Código de un solo uso",
       "invalidCode": "Código no válido. Inténtalo de nuevo.",
-      "sentTo": "Hemos enviado un código de 6 dígitos a <address>{{email}}</address>. Introdúcelo para continuar.",
+      "sentTo": "Enviamos un código a <address>{{email}}</address>.",
       "title": "Revisa tu correo",
       "useDifferentEmail": "Usar otro correo",
       "yourEmail": "tu correo"
     },
     "pin": {
-      "createIntro": "Sirve para desbloquear Pollis en este dispositivo. Se queda en tu teléfono: nosotros nunca lo vemos.",
+      "createIntro": "Usarás este PIN para desbloquear Pollis en este teléfono. Nunca sale del teléfono.",
       "createTitle": "PIN del dispositivo",
       "invalidPin": "PIN no válido.",
       "noActiveUser": "No hay ningún usuario activo. Inicia sesión de nuevo.",
@@ -116,7 +116,7 @@
   "dm": {
     "backToInbox": "Volver a la bandeja",
     "danger": "Peligro",
-    "exactMatchHint": "Escribe al menos dos caracteres. Solo coincidencias exactas: Pollis no difunde coincidencias parciales.",
+    "exactMatchHint": "Escribe el nombre de usuario o la dirección de correo exactos.",
     "new": "Nuevo",
     "participants": "Participantes",
     "participantsCount_one": "Participantes · {{count}}",
@@ -152,11 +152,11 @@
       "textChannels": "Canales de texto"
     },
     "discover": {
-      "approved": "Aprobada: abre la pestaña Grupos",
-      "blurb": "Los identificadores son nombres cortos y únicos que eligen los propietarios de cada grupo. Pide uno para unirte: no hay directorio público.",
+      "approved": "Aprobado. Abre la pestaña Grupos.",
+      "blurb": "Pide el identificador al dueño del grupo. No hay una lista pública de grupos.",
       "requestDeclined": "Solicitud rechazada",
       "requestPending": "Solicitud pendiente",
-      "title": "Descubrir"
+      "title": "Buscar grupo"
     },
     "emoji": {
       "adminsOnly": "Solo los admins del grupo pueden añadir o quitar emoji.",
@@ -168,12 +168,12 @@
       "uploading": "Subiendo…"
     },
     "invite": {
-      "blurb": "Verán esta invitación en su sección Pendientes la próxima vez que abran Pollis. Solo los admins de {{name}} pueden invitar: si no eres uno, el servidor la rechazará.",
+      "blurb": "Verán la invitación la próxima vez que abran Pollis.",
       "createLinkFailed": "No se pudo crear el enlace de invitación.",
       "crumb": "Invitar",
-      "linkBlurb": "Cualquiera con el enlace puede entrar directamente, sin aprobación. El enlace se muestra una sola vez, justo después de crearlo.",
-      "linkCreated": "Enlace creado: cópialo ahora",
-      "linkOnce": "Esta es la única vez que se puede mostrar este enlace. Nadie, ni siquiera tú, podrá volver a verlo. Para compartirlo más adelante, crea uno nuevo.",
+      "linkBlurb": "Cualquiera con el enlace puede unirse. Solo podrás verlo una vez.",
+      "linkCreated": "Enlace creado. Cópialo ahora.",
+      "linkOnce": "No volverás a ver este enlace. Para compartirlo más tarde, crea uno nuevo.",
       "manageLinks": "Gestionar enlaces de invitación",
       "manageLinksSub": "Revisa y revoca los enlaces existentes",
       "share": "Compartir",
@@ -181,7 +181,7 @@
       "thisGroup": "este grupo"
     },
     "inviteLinks": {
-      "blurb": "Los enlaces no se pueden volver a mostrar después de crearlos: el servidor solo guarda un hash. Revocar un enlace lo anula al instante para todo el que lo tenga.",
+      "blurb": "Los enlaces no se pueden volver a mostrar. Revocar un enlace lo desactiva al instante.",
       "empty": "Todavía no hay enlaces de invitación. Crea uno desde la pantalla Invitar.",
       "revokeFailed": "No se pudo revocar el enlace.",
       "revokeLabel": "Revocar enlace de invitación",
@@ -194,7 +194,7 @@
       "roleOwner": "Propietario"
     },
     "new": {
-      "blurb": "Se crea automáticamente un canal de texto #General. Puedes añadir más después. Los metadatos del grupo solo son visibles para los miembros invitados.",
+      "blurb": "Solo los miembros pueden ver los detalles del grupo.",
       "crumb": "Nuevo",
       "descriptionLabel": "Descripción (opcional)",
       "descriptionPlaceholder": "¿Para qué es este grupo?"
@@ -227,7 +227,7 @@
   "invite": {
     "backToPollis": "Volver a Pollis",
     "checking": "Comprobando tu invitación…",
-    "failed": "Este enlace de invitación no se puede usar. Puede que no sea válido, haya caducado, se haya revocado o ya se haya agotado: pide un enlace nuevo.",
+    "failed": "Este enlace de invitación ya no funciona. Pide uno nuevo.",
     "groupInvite": "Invitación a un grupo",
     "locked": "Desbloquea Pollis primero y luego vuelve a abrir el enlace de invitación.",
     "openPollis": "Abrir Pollis",
@@ -247,7 +247,8 @@
   },
   "search": {
     "channels": "Canales",
-    "hint": "Escribe al menos dos caracteres para buscar grupos, canales, personas y mensajes.",
+    "hint": "Escribe al menos 2 caracteres para buscar.",
+    "filtersLabel": "Filtros",
     "messages": "Mensajes",
     "placeholder": "Buscar en todo…",
     "resultCount_one": "{{count}} resultado",
@@ -271,14 +272,14 @@
     "deleteAccount": {
       "consequences": "Esto elimina tu cuenta de Pollis de forma permanente. Se te quita de todos los grupos y conversaciones, se anula el registro de tus dispositivos y se borran los datos cifrados de este teléfono. Los demás miembros conservan sus propias copias de los mensajes anteriores, pero nada de lo enviado después de la eliminación podrá leerse jamás con tus claves.",
       "contextPath": "{{parent}} · {{child}}",
-      "failed": "No se pudo eliminar la cuenta. No se ha cambiado nada: inténtalo de nuevo.",
+      "failed": "No se pudo eliminar la cuenta. No cambió nada. Inténtalo de nuevo.",
       "irreversible": "No se puede deshacer. No hay periodo de gracia ni recuperación.",
       "submit": "Eliminar la cuenta permanentemente",
       "title": "Eliminar cuenta"
     },
     "export": {
       "conversationHeading": "Exportar",
-      "rowSub": "Escrito en este teléfono y compartido como zip",
+      "rowSub": "Se guarda como un zip que puedes compartir",
       "share": "Compartir archivo",
       "bundling": "Empaquetando…",
       "sharingUnavailable": "Compartir no está disponible en este dispositivo.",
@@ -301,10 +302,10 @@
         "showInlineTimestamps": "Mostrar la hora junto a cada mensaje",
         "showMemberAvatars": "Mostrar los avatares de los miembros"
       },
-      "notificationsOffSettings": "Desactivadas: actívalas en los Ajustes del sistema",
-      "notificationsOffTap": "Desactivadas: toca para activarlas",
-      "notificationsOn": "Activadas: te avisaremos de los mensajes nuevos",
-      "readReceiptsSub": "Recíproco: desactivarlo también te oculta las confirmaciones de los demás",
+      "notificationsOffSettings": "Desactivadas. Actívalas en Ajustes del sistema",
+      "notificationsOffTap": "Desactivadas. Toca para activar",
+      "notificationsOn": "Activadas",
+      "readReceiptsSub": "Si lo desactivas, tampoco verás las de los demás",
       "swatch": {
         "amber": "Ámbar",
         "citron": "Cidra",
@@ -315,7 +316,7 @@
       }
     },
     "saved": {
-      "empty": "No hay mensajes guardados. Mantén pulsado un mensaje para guardarlo.",
+      "empty": "Aún no hay mensajes guardados. Mantén pulsado un mensaje para guardarlo.",
       "openA11y": "Abrir mensaje guardado",
       "savedAgo": "guardado hace {{time}}",
       "unsave": "Quitar de guardados"
@@ -324,18 +325,18 @@
       "approve": "Aprobar",
       "approveA11y": "Aprobar el registro",
       "autoLockA11y": "Bloqueo automático {{label}}",
-      "autoLockDescription": "Bloquea Pollis tras el PIN del dispositivo después de un tiempo sin actividad. Este ajuste se queda en este teléfono.",
+      "autoLockDescription": "Bloquea Pollis cuando lleves un rato sin usarlo. Solo afecta a este teléfono.",
       "current": "Actual",
       "daysAgo_one": "hace {{count}} d",
       "daysAgo_other": "hace {{count}} d",
       "deleteAccountSub": "Elimina tu cuenta de forma permanente y borra este dispositivo",
       "deviceSub": "vinculado {{paired}} · visto por última vez {{lastSeen}}",
       "enrollmentFailed": "No se pudo procesar la solicitud de registro.",
-      "eventsEmpty": "Todavía no hay eventos de seguridad. Aquí aparecerán las vinculaciones de dispositivos, las revocaciones y los restablecimientos de identidad.",
+      "eventsEmpty": "Aún no hay eventos de seguridad.",
       "hoursAgo_one": "hace {{count}} h",
       "hoursAgo_other": "hace {{count}} h",
-      "identityDescription": "Tu clave de identidad pública. Las personas con las que hablas pueden compararla con lo que ve su dispositivo para verificar que eres tú de verdad.",
-      "identityMissing": "Este dispositivo todavía no ha publicado ninguna clave de identidad.",
+      "identityDescription": "Tu clave pública. Otros pueden compararla con la que ven para comprobar que eres tú.",
+      "identityMissing": "Este dispositivo aún no ha publicado una clave.",
       "justNow": "ahora mismo",
       "lockNow": "Bloquear ahora",
       "lockNowSub": "Pedir el PIN para volver a abrir Pollis",
@@ -344,7 +345,7 @@
       "pairHeading": "Vincular un dispositivo nuevo",
       "pairHint": "Confirma que este código coincide con el que se muestra en el otro dispositivo y luego apruébalo.",
       "pairIntro": "Un dispositivo nuevo quiere vincularse a tu cuenta.",
-      "recoveryDescription": "La gestión de la clave secreta y del PIN del dispositivo todavía no está disponible en el móvil. Para configurar un dispositivo nuevo, inicia sesión con tu correo: Pollis te guiará por el registro.",
+      "recoveryDescription": "Para añadir un dispositivo nuevo, entra en él con tu correo o vincúlalo desde Dispositivos, arriba.",
       "recoveryHeading": "Recuperación",
       "reject": "Rechazar",
       "rejectA11y": "Rechazar el registro",
@@ -381,7 +382,7 @@
     "compareHint": "Compara estos dígitos en persona o por otro canal de confianza. Si coinciden, estás hablando con la misma clave que el servidor publicó para este usuario.",
     "computing": "Calculando…",
     "fallbackHandle": "usuario",
-    "keyChanged": "La clave ha cambiado desde la última vez que verificaste: vuelve a verificar en persona.",
+    "keyChanged": "Su clave cambió. Vuelve a verificarla en persona.",
     "message": "Mensaje",
     "opening": "Abriendo…",
     "safetyActionsHeading": "Acciones de seguridad",

@@ -82,7 +82,7 @@ export function useCreateGroup() {
         name: vars.name,
         description: vars.description ?? null,
         ownerId: currentUser.id,
-        createDefaultTextChannel: vars.createDefaultTextChannel ?? true,
+        createDefaultTextChannel: vars.createDefaultTextChannel ?? false,
         // Mobile drops voice — never create the default voice channel.
         createDefaultVoiceChannel: false,
       });

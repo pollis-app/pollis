@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { View, Text } from "react-native";
+import { Pressable, View, Text } from "react-native";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import {
@@ -9,7 +9,9 @@ import {
   Field,
   Button,
   BottomAction,
+  Toggle,
 } from "../../components/ui";
+import { FormField, FormStack } from "../../components/FormField";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
 import { useCreateGroup } from "../../hooks/queries";
@@ -22,6 +24,7 @@ function NewGroup() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [createTextChannel, setCreateTextChannel] = useState(false);
   const createGroup = useCreateGroup();
   const setSelectedGroupId = appStore.setSelectedGroupId;
 
@@ -34,7 +37,7 @@ function NewGroup() {
       {
         name: trimmedName,
         description: description.trim() || undefined,
-        createDefaultTextChannel: true,
+        createDefaultTextChannel: createTextChannel,
       },
       {
         onSuccess: (group) => {
@@ -61,9 +64,8 @@ function NewGroup() {
         ]}
       />
       <Body>
-        <View style={{ paddingHorizontal: 18, paddingTop: 12, gap: 16 }}>
-          <View style={{ gap: 8 }}>
-            <Text style={ty.label}>{upper(t("createGroup.nameLabel"))}</Text>
+        <FormStack paddingTop={12}>
+          <FormField label={t("createGroup.nameLabel")}>
             <Field
               testID="input-group-name"
               accessibilityLabel={t("createGroup.nameLabel")}
@@ -73,11 +75,8 @@ function NewGroup() {
               placeholder={t("createGroup.namePlaceholder")}
               icon={<Icon.people color={semantic.mute} />}
             />
-          </View>
-          <View style={{ gap: 8 }}>
-            <Text style={ty.label}>
-              {upper(t("mobile:group.new.descriptionLabel"))}
-            </Text>
+          </FormField>
+          <FormField label={t("mobile:group.new.descriptionLabel")}>
             <Field
               testID="input-group-description"
               accessibilityLabel={t("mobile:group.common.descriptionLabel")}
@@ -85,7 +84,30 @@ function NewGroup() {
               onChangeText={setDescription}
               placeholder={t("mobile:group.new.descriptionPlaceholder")}
             />
-          </View>
+          </FormField>
+          {/* Opt-in, off by default, like desktop. No voice option: voice is
+              not supported on mobile. */}
+          <Pressable
+            accessibilityRole="switch"
+            accessibilityState={{ checked: createTextChannel }}
+            onPress={() => setCreateTextChannel((v) => !v)}
+            style={{ flexDirection: "row", alignItems: "center", gap: 14 }}
+          >
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text style={{ fontFamily: ty.body.fontFamily, fontSize: 14, color: semantic.ink }}>
+                {t("createGroup.textChannelLabel")}
+              </Text>
+              <Text style={{ fontFamily: ty.body.fontFamily, fontSize: 11, lineHeight: 16, color: semantic.mute }}>
+                {t("createGroup.textChannelDescription")}
+              </Text>
+            </View>
+            <Toggle
+              testID="toggle-general-channel"
+              on={createTextChannel}
+              onPress={() => setCreateTextChannel((v) => !v)}
+              accessibilityLabel={t("createGroup.textChannelLabel")}
+            />
+          </Pressable>
           <Text
             style={{
               fontFamily: ty.body.fontFamily,
@@ -108,7 +130,7 @@ function NewGroup() {
                 t("createGroup.createFailed")}
             </Text>
           ) : null}
-        </View>
+        </FormStack>
       </Body>
       <BottomAction>
         <Button

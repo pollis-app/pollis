@@ -11,7 +11,7 @@
       "verifyEmail": "验证邮箱"
     },
     "email": {
-      "intro": "输入你的邮箱。我们会发送一个一次性验证码 — 无需密码。",
+      "intro": "输入你的邮箱，我们会发送一个验证码。",
       "sendFailed": "无法发送验证码。请检查网络连接后重试。",
       "title": "登录"
     },
@@ -19,9 +19,9 @@
       "ackLabel": "我已保存安全密钥",
       "ackText": "我已把安全密钥保存在安全的地方。",
       "copyFailed": "复制失败",
-      "intro": "这个密钥是把 Pollis 添加到新设备、或在丢失此设备后恢复账户的唯一方式。我们不会把它存放在任何你之后能读取的地方 — 请现在就抄下来或存入密码管理器。",
+      "intro": "如果丢失这部手机，你需要用这个密钥在新设备上登录。我们无法替你找回，请把它写下来或存进密码管理器。",
       "title": "保存你的安全密钥",
-      "warning": "任何拿到此密钥的人都能在新设备上以你的身份登录。请像对待主密码一样对待它。"
+      "warning": "任何拿到这个密钥的人都能以你的身份登录。"
     },
     "enrollment": {
       "chooserIntro": "此设备上还没有你的密钥。请选择获取方式。",
@@ -41,7 +41,7 @@
       "waiting": "等待批准…"
     },
     "initializing": {
-      "intro": "请稍候 — 正在配对设备并同步密钥。",
+      "intro": "请稍候，正在设置这台设备。",
       "ready": "就绪",
       "setupFailed": "设置失败。",
       "skip": "跳过",
@@ -57,13 +57,13 @@
     "otp": {
       "codeLabel": "一次性验证码",
       "invalidCode": "验证码无效，请重试。",
-      "sentTo": "我们已向 <address>{{email}}</address> 发送了 6 位验证码。输入后即可继续。",
+      "sentTo": "我们已将验证码发送到 <address>{{email}}</address>。",
       "title": "查收邮件",
       "useDifferentEmail": "使用其他邮箱",
       "yourEmail": "你的邮箱"
     },
     "pin": {
-      "createIntro": "用于在此设备上解锁 Pollis。它只保存在你的手机上 — 我们永远看不到。",
+      "createIntro": "你将用这个 PIN 码在这部手机上解锁 Pollis。它不会离开这部手机。",
       "createTitle": "新设备 PIN 码",
       "invalidPin": "PIN 码无效。",
       "noActiveUser": "没有当前用户。请重新登录。",
@@ -114,7 +114,7 @@
   "dm": {
     "backToInbox": "返回收件箱",
     "danger": "危险",
-    "exactMatchHint": "请至少输入两个字符。仅支持精确匹配 — Pollis 不会公开部分匹配的结果。",
+    "exactMatchHint": "输入用户准确的用户名或邮箱地址。",
     "new": "新建",
     "participants": "参与者",
     "participantsCount_other": "参与者 · {{count}}",
@@ -146,11 +146,11 @@
       "textChannels": "文字频道"
     },
     "discover": {
-      "approved": "已批准 — 请打开「群组」标签页",
-      "blurb": "标识是群组所有者选定的简短唯一 ID。向对方索取标识即可加入 — 没有公开目录。",
+      "approved": "已通过。请打开“群组”标签页。",
+      "blurb": "请向群主索要群组标识。没有公开的群组列表。",
       "requestDeclined": "申请已被拒绝",
       "requestPending": "申请待处理",
-      "title": "发现"
+      "title": "查找群组"
     },
     "emoji": {
       "adminsOnly": "只有群组管理员才能添加或移除表情。",
@@ -161,12 +161,12 @@
       "uploading": "正在上传…"
     },
     "invite": {
-      "blurb": "对方下次打开 Pollis 时会在「待处理」中看到此邀请。只有 {{name}} 的管理员才能邀请 — 如果你不是管理员，服务器会拒绝此请求。",
+      "blurb": "对方下次打开 Pollis 时会看到邀请。",
       "createLinkFailed": "无法创建邀请链接。",
       "crumb": "邀请",
-      "linkBlurb": "任何拿到链接的人都能直接加入 — 无需审批。链接只在创建后显示一次。",
-      "linkCreated": "链接已创建 — 请立即复制",
-      "linkOnce": "此链接仅显示这一次。没有人 — 包括你 — 能再次查看它。之后要分享，请重新创建一个。",
+      "linkBlurb": "任何拿到链接的人都能加入。链接只显示一次。",
+      "linkCreated": "链接已创建，请立即复制。",
+      "linkOnce": "之后无法再查看此链接。如需稍后分享，请新建一个。",
       "manageLinks": "管理邀请链接",
       "manageLinksSub": "查看并撤销现有链接",
       "share": "分享",
@@ -174,7 +174,7 @@
       "thisGroup": "此群组"
     },
     "inviteLinks": {
-      "blurb": "链接创建后无法再次显示 — 服务器只保存哈希值。撤销后，所有持有该链接的人都会立即无法使用。",
+      "blurb": "链接无法再次显示。撤销后立即失效。",
       "empty": "还没有邀请链接。请在「邀请」页面创建。",
       "revokeFailed": "无法撤销链接。",
       "revokeLabel": "撤销邀请链接",
@@ -187,7 +187,7 @@
       "roleOwner": "所有者"
     },
     "new": {
-      "blurb": "会自动创建一个 #General 文字频道，之后可以添加更多。群组信息仅对受邀成员可见。",
+      "blurb": "只有成员能看到群组详情。",
       "crumb": "新建",
       "descriptionLabel": "描述（可选）",
       "descriptionPlaceholder": "这个群组是做什么的？"
@@ -220,7 +220,7 @@
   "invite": {
     "backToPollis": "返回 Pollis",
     "checking": "正在检查你的邀请…",
-    "failed": "此邀请链接无法使用。它可能无效、已过期、已撤销或已用完 — 请索取新链接。",
+    "failed": "这个邀请链接已失效，请索要新的链接。",
     "groupInvite": "群组邀请",
     "locked": "请先解锁 Pollis，然后重新打开邀请链接。",
     "openPollis": "打开 Pollis",
@@ -240,7 +240,8 @@
   },
   "search": {
     "channels": "频道",
-    "hint": "请至少输入两个字符，搜索群组、频道、用户和消息。",
+    "hint": "至少输入 2 个字符进行搜索。",
+    "filtersLabel": "筛选",
     "messages": "消息",
     "placeholder": "搜索所有内容…",
     "resultCount_other": "{{count}} 条结果",
@@ -263,14 +264,14 @@
     "deleteAccount": {
       "consequences": "这会永久删除你的 Pollis 账户。你将被移出所有群组和对话，你的设备会被注销，此手机上的加密数据也会被清除。其他成员会保留他们自己的历史消息副本，但删除后发送的任何内容都无法再用你的密钥读取。",
       "contextPath": "{{parent}} · {{child}}",
-      "failed": "无法删除账户。未做任何更改 — 请重试。",
+      "failed": "无法删除账户。没有任何更改，请重试。",
       "irreversible": "此操作无法撤销。没有宽限期，也无法恢复。",
       "submit": "永久删除账户",
       "title": "删除账户"
     },
     "export": {
       "conversationHeading": "导出",
-      "rowSub": "在此手机上写入，然后以 zip 形式分享",
+      "rowSub": "保存为可分享的 zip 文件",
       "share": "分享归档",
       "bundling": "正在打包…",
       "sharingUnavailable": "此设备不支持分享。",
@@ -293,10 +294,10 @@
         "showInlineTimestamps": "显示行内时间戳",
         "showMemberAvatars": "显示成员头像"
       },
-      "notificationsOffSettings": "已关闭 — 请在系统「设置」中开启",
-      "notificationsOffTap": "已关闭 — 点击开启",
-      "notificationsOn": "已开启 — 有新消息时会通知你",
-      "readReceiptsSub": "双向生效 — 关闭后你也看不到对方的回执",
+      "notificationsOffSettings": "已关闭。请在系统设置中开启",
+      "notificationsOffTap": "已关闭。点按开启",
+      "notificationsOn": "已开启",
+      "readReceiptsSub": "关闭后，你也看不到别人的已读回执",
       "swatch": {
         "amber": "琥珀",
         "citron": "柠檬黄",
@@ -307,7 +308,7 @@
       }
     },
     "saved": {
-      "empty": "暂无收藏的消息。长按消息即可收藏。",
+      "empty": "还没有收藏的消息。长按消息即可收藏。",
       "openA11y": "打开收藏的消息",
       "savedAgo": "{{time}}前收藏",
       "unsave": "取消收藏"
@@ -316,16 +317,16 @@
       "approve": "批准",
       "approveA11y": "批准设备注册",
       "autoLockA11y": "自动锁定 {{label}}",
-      "autoLockDescription": "在一段时间无操作后，把 Pollis 锁回设备 PIN 码界面。此设置只保存在此手机上。",
+      "autoLockDescription": "一段时间不用时锁定 Pollis。只影响这部手机。",
       "current": "当前",
       "daysAgo_other": "{{count}} 天前",
       "deleteAccountSub": "永久删除你的账户并清除此设备",
       "deviceSub": "配对于 {{paired}} · 最近活跃 {{lastSeen}}",
       "enrollmentFailed": "无法处理该设备注册请求。",
-      "eventsEmpty": "还没有安全事件。设备配对、撤销和身份重置都会显示在这里。",
+      "eventsEmpty": "暂无安全事件。",
       "hoursAgo_other": "{{count}} 小时前",
-      "identityDescription": "你的公开身份密钥。与你聊天的人可以把它与自己设备上看到的进行比对，以确认确实是你。",
-      "identityMissing": "此设备尚未发布身份密钥。",
+      "identityDescription": "你的公钥。别人可以核对它，确认真的是你。",
+      "identityMissing": "这台设备还没有发布密钥。",
       "justNow": "刚刚",
       "lockNow": "立即锁定",
       "lockNowSub": "重新打开 Pollis 时需要输入 PIN 码",
@@ -333,7 +334,7 @@
       "pairHeading": "配对新设备",
       "pairHint": "确认此验证码与另一台设备上显示的一致，然后批准。",
       "pairIntro": "有一台新设备想要与你的账户配对。",
-      "recoveryDescription": "移动端暂不支持管理安全密钥和设备 PIN 码。要设置新设备，请用邮箱登录 — Pollis 会引导你完成注册。",
+      "recoveryDescription": "要添加新设备，可以在新设备上用邮箱登录，或在上方“设备”中关联。",
       "recoveryHeading": "恢复",
       "reject": "拒绝",
       "rejectA11y": "拒绝设备注册",
@@ -370,7 +371,7 @@
     "compareHint": "请当面或通过其他独立渠道比对这些数字。数字一致即证明你正在与服务器为此用户发布的同一密钥通信。",
     "computing": "正在计算…",
     "fallbackHandle": "用户",
-    "keyChanged": "自上次验证后密钥已更改 — 请当面重新验证。",
+    "keyChanged": "对方的密钥已更改。请当面重新验证。",
     "message": "发消息",
     "opening": "正在打开…",
     "safetyActionsHeading": "安全操作",

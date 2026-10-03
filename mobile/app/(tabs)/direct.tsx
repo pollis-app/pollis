@@ -245,7 +245,7 @@ function Direct() {
   );
 
   return (
-    <Screen testID="screen-direct">
+    <Screen testID="screen-direct" aboveTabBar>
       {isRegular ? (
         <TwoPane
           list={listColumn}

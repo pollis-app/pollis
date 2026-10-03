@@ -13,6 +13,7 @@ import {
   Button,
   BottomAction,
 } from "../../components/ui";
+import { FormField, FormStack } from "../../components/FormField";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
 import { upper } from "../../i18n";
@@ -112,78 +113,57 @@ function UserSettings() {
         </View>
 
         <SectionTitle>{upper(t("mobile:self.identityHeading"))}</SectionTitle>
-        <View style={{ paddingHorizontal: 18, paddingTop: 6, gap: 6 }}>
-          <Text style={ty.label}>
-            {upper(t("mobile:self.userSettings.displayName"))}
-          </Text>
-          <Field
-            value={displayName}
-            onChangeText={setDisplayName}
-            testID="input-display-name"
-            accessibilityLabel={t("mobile:self.userSettings.displayName")}
-          />
-        </View>
-        <View style={{ paddingHorizontal: 18, paddingTop: 14, gap: 6 }}>
-          <Text style={ty.label}>
-            {upper(t("mobile:self.userSettings.handle"))}
-          </Text>
-          <Field
-            value={handle}
-            onChangeText={setHandle}
-            testID="input-handle"
-            accessibilityLabel={t("mobile:self.userSettings.handle")}
-            icon={
-              <Text
-                style={{
-                  fontFamily: ty.body.fontFamily,
-                  color: semantic.mute,
-                }}
-              >
-                @
-              </Text>
-            }
-          />
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 11,
-              color: semantic.mute,
-            }}
+        <FormStack>
+          <FormField label={t("mobile:self.userSettings.displayName")}>
+            <Field
+              value={displayName}
+              onChangeText={setDisplayName}
+              testID="input-display-name"
+              accessibilityLabel={t("mobile:self.userSettings.displayName")}
+            />
+          </FormField>
+          <FormField
+            label={t("mobile:self.userSettings.handle")}
+            hint={t("mobile:self.userSettings.handleHint")}
+            error={handleInvalid && nextHandle ? t("mobile:self.userSettings.handleInvalid") : null}
+            errorTestID="text-handle-invalid"
           >
-            {t("mobile:self.userSettings.handleHint")}
-          </Text>
-          {handleInvalid && nextHandle ? (
-            <Text
-              testID="text-handle-invalid"
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 11,
-                color: semantic.danger,
-              }}
+            <Field
+              value={handle}
+              onChangeText={setHandle}
+              testID="input-handle"
+              accessibilityLabel={t("mobile:self.userSettings.handle")}
+              icon={
+                <Text
+                  style={{
+                    fontFamily: ty.body.fontFamily,
+                    color: semantic.mute,
+                  }}
+                >
+                  @
+                </Text>
+              }
+            />
+          </FormField>
+          <FormField label={t("user.emailLabel")}>
+            <Field
+              value={profile?.email ?? currentUser?.email ?? ""}
+              editable={false}
+              testID="input-email"
+              accessibilityLabel={t("user.emailLabel")}
+              icon={<Icon.mail color={semantic.mute} />}
+            />
+            <Button
+              variant="subtle"
+              full
+              testID="btn-change-email"
+              onPress={() => router.push("/self/change-email")}
+              icon={<Icon.edit color={semantic.ink} />}
             >
-              {t("mobile:self.userSettings.handleInvalid")}
-            </Text>
-          ) : null}
-        </View>
-        <View style={{ paddingHorizontal: 18, paddingTop: 14, gap: 6 }}>
-          <Text style={ty.label}>{upper(t("user.emailLabel"))}</Text>
-          <Field
-            value={profile?.email ?? currentUser?.email ?? ""}
-            editable={false}
-            testID="input-email"
-            accessibilityLabel={t("user.emailLabel")}
-            icon={<Icon.mail color={semantic.mute} />}
-          />
-          <Button
-            variant="subtle"
-            full
-            testID="btn-change-email"
-            onPress={() => router.push("/self/change-email")}
-            icon={<Icon.edit color={semantic.ink} />}
-          >
-            {t("user.changeEmailButton")}
-          </Button>
-        </View>
+              {t("user.changeEmailButton")}
+            </Button>
+          </FormField>
+        </FormStack>
 
         {updateProfile.isError ? (
           <Text

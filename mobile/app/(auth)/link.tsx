@@ -3,7 +3,6 @@ import { Platform, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import * as Clipboard from "expo-clipboard";
 import { Screen, Crumb, Button, BottomAction, Field } from "../../components/ui";
 import { Heading } from "../../components/auth/Heading";
 import { BackLink } from "../../components/auth/BackLink";
@@ -15,9 +14,9 @@ const PAYLOAD_PREFIX = "pollis-link:v1:";
 
 /**
  * Sign in with another device (#1207): scan the code a signed-in device shows
- * under Security → Link a new device, or paste it. Laid out like Sign in: a
- * title, one line, the camera (or one big Paste button), and a quiet way back
- * to email.
+ * under Security → Link a new device, or paste it into the field. Laid out
+ * like Sign in: a title, one line, the camera (or the code field), and a quiet
+ * way back to email.
  */
 export default function LinkSignIn() {
   const { t } = useTranslation("auth");
@@ -49,16 +48,6 @@ export default function LinkSignIn() {
     );
   };
 
-  const pasteAndSubmit = async () => {
-    const text = (await Clipboard.getStringAsync()).trim();
-    setCode(text);
-    if (text.startsWith(PAYLOAD_PREFIX)) {
-      submit(text);
-    } else {
-      setError(t("link.notACode"));
-    }
-  };
-
   return (
     <Screen testID="screen-auth-link" centered>
       <Crumb segs={[{ label: upper(t("mobile:auth.crumb.auth")) }, { label: t("link.useDevice"), leaf: true }]} />
@@ -88,10 +77,7 @@ export default function LinkSignIn() {
         ) : null}
 
         {manual ? (
-          <View style={{ gap: 14 }}>
-            <Button testID="btn-link-paste" variant="primary" full disabled={claim.isPending} onPress={() => void pasteAndSubmit()}>
-              {upper(t("link.paste"))}
-            </Button>
+          <View>
             <Field
               testID="input-link-code"
               accessibilityLabel={t("link.codeLabel")}

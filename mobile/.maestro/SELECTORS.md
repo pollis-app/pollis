@@ -105,9 +105,8 @@ delete/remove/revoke), the record id is appended to keep the selector unique
   group lives on `group/[id]` as `btn-leave-group`). No `toggle-*` exists on
   this screen either (group settings are name/description text fields + channel
   management only).
-- `self/security` has **no** change-password / PIN-entry buttons — recovery/PIN
-  management is explicitly "not wired on mobile yet" (copy in the RECOVERY
-  section). Safety numbers live on `user/[id]`, not here. Enrollment
+- `self/security` has **no** change-password / PIN-entry buttons — the RECOVERY
+  section only points at email sign-in and `row-link-device`. Safety numbers live on `user/[id]`, not here. Enrollment
   approve/reject and device revoke are the load-bearing actions.
 - `user/[id]` self-view shows no safety-number card or block/message buttons
   (it's you) — those testIDs only render for a peer.

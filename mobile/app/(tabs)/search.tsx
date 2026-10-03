@@ -27,6 +27,18 @@ import {
 import { appStore } from "../../stores/appStore";
 import { upper } from "../../i18n";
 
+// Search filter syntax, one per line. The operators are typed literally, so
+// they are not translated; only the label above them is.
+const SEARCH_FILTER_EXAMPLES = [
+  "from:@user",
+  "in:#channel",
+  "before:YYYY-MM-DD",
+  "after:YYYY-MM-DD",
+  "on:YYYY-MM-DD",
+  "has:attachment",
+  "has:link",
+];
+
 export default function Search() {
   const router = useRouter();
   const { t } = useTranslation("mobile");
@@ -137,7 +149,7 @@ export default function Search() {
     totalResults === 0;
 
   return (
-    <Screen testID="screen-search">
+    <Screen testID="screen-search" aboveTabBar>
       <Crumb
         segs={[{ label: upper(t("tabs.search")), leaf: true }]}
         end={upper(
@@ -166,12 +178,13 @@ export default function Search() {
             style={{
               fontFamily: ty.mono.fontFamily,
               fontSize: 11,
+              lineHeight: 18,
               color: semantic.mute2,
               paddingHorizontal: 18,
-              paddingTop: 8,
+              paddingTop: 12,
             }}
           >
-            {ts("view.filterHint")}
+            {[t("search.filtersLabel"), ...SEARCH_FILTER_EXAMPLES].join("\n")}
           </Text>
         ) : null}
         {showEmpty ? (
@@ -302,15 +315,12 @@ export default function Search() {
               style={{
                 flexDirection: "row",
                 alignItems: "center",
-                justifyContent: "space-between",
+                justifyContent: "flex-end",
                 paddingHorizontal: 18,
                 paddingBottom: 8,
                 gap: 8,
               }}
             >
-              <Text testID="search-total" style={ty.label}>
-                {upper(ts("view.aboutResults", { count: messageTotal }))}
-              </Text>
               <View style={{ flexDirection: "row", gap: 6 }}>
                 <Chip
                   testID="search-sort-relevant"

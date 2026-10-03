@@ -1,0 +1,332 @@
+appId: com.pollis.mobile
+tags:
+  - audit
+---
+# TOUR — one screenshot of every reachable screen, in a fixed order with
+# numbered names, for a visual-density audit (before/after comparisons).
+# Self-contained: signs up, makes a group with a message, and walks every tab,
+# group page, settings page, sheet and the device-link screens. Not an
+# assertion suite; each step is optional where a screen may legitimately be
+# absent, so one missing screen never hides the rest.
+
+- clearState
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-email"
+    timeout: 20000
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-01-auth-email
+
+# The device-link sign-in screen, before signing in.
+- tapOn:
+    id: "btn-sign-in-with-device"
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-02-auth-link-scan
+- tapOn:
+    id: "btn-link-toggle-manual"
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-03-auth-link-code
+- tapOn:
+    id: "btn-link-use-email"
+    optional: true
+
+- tapOn:
+    id: "input-email"
+- inputText: "${MAESTRO_EMAIL}"
+- tapOn:
+    id: "btn-submit-email"
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-otp"
+    timeout: 15000
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-04-auth-otp
+- inputText: "${MAESTRO_OTP}"
+- tapOn:
+    id: "btn-submit-otp"
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-pin"
+    timeout: 15000
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-05-auth-pin
+- runFlow: ../subflows/enter-pin.yaml
+- runFlow: ../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-emergency-kit"
+    timeout: 15000
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-06-auth-emergency-kit
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-emergency-kit"
+    commands:
+      - tapOn:
+          id: "toggle-recovery-ack"
+      - tapOn:
+          id: "btn-continue"
+- runFlow:
+    when:
+      visible:
+        id: "btn-continue"
+    commands:
+      - tapOn:
+          id: "btn-continue"
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 30000
+
+# Tabs, empty.
+- tapOn:
+    id: "tab-groups"
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-07-groups-empty
+- tapOn:
+    id: "tab-direct"
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-08-direct-empty
+- tapOn:
+    id: "tab-search"
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-09-search-empty
+- tapOn:
+    id: "tab-self"
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-10-self
+
+# A group with a message.
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    id: "btn-create-group"
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-11-group-new
+# #General is opt-in (off by default, like desktop); these steps open it.
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "Design Team"
+- tapOn: "CREATE GROUP"
+- extendedWaitUntil:
+    visible:
+      id: "screen-group"
+    timeout: 15000
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-12-group
+- tapOn:
+    text: "General"
+- assertVisible:
+    id: "screen-chat"
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-13-chat-empty
+- tapOn:
+    id: "input-composer"
+- inputText: "Shipping the handoff build tonight"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*handoff build.*"
+    timeout: 15000
+- tapOn:
+    point: "50%,30%"
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-14-chat
+- tapOn:
+    id: "btn-chat-menu"
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-15-channel-menu
+- tapOn:
+    id: "btn-menu-info"
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-16-conversation-info
+- tapOn:
+    id: "btn-back"
+- longPressOn:
+    id: "row-message-.*"
+- extendedWaitUntil:
+    visible:
+      id: "btn-action-cancel"
+    timeout: 20000
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-17-message-actions
+- tapOn:
+    id: "btn-action-cancel"
+    optional: true
+- tapOn:
+    id: "btn-back"
+
+# Group pages.
+- tapOn:
+    id: "row-group-members"
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-18-group-members
+- tapOn:
+    id: "btn-back"
+    optional: true
+- tapOn:
+    id: "row-group-invite"
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-19-group-invite
+- tapOn:
+    id: "btn-back"
+    optional: true
+- tapOn:
+    id: "row-group-settings"
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-20-group-settings
+- tapOn:
+    id: "row-group-emoji"
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-21-group-emoji
+- tapOn:
+    id: "btn-back"
+    optional: true
+- tapOn:
+    id: "btn-back"
+    optional: true
+- tapOn:
+    id: "btn-back"
+    optional: true
+
+# Groups / DMs / search with content.
+- tapOn:
+    id: "tab-groups"
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-22-groups
+- tapOn:
+    id: "btn-join-group"
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-23-group-discover
+- tapOn:
+    id: "btn-back"
+    optional: true
+- tapOn:
+    id: "tab-direct"
+- tapOn:
+    id: "btn-new-dm"
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-24-dm-new
+- tapOn:
+    id: "btn-back"
+    optional: true
+- tapOn:
+    id: "tab-search"
+- tapOn:
+    id: "input-search"
+- inputText: "handoff"
+- extendedWaitUntil:
+    visible:
+      id: "search-sort-relevant"
+    timeout: 15000
+    optional: true
+# Dismiss the keyboard by tapping the empty space under the results.
+- tapOn:
+    point: "50%,45%"
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-25-search-results
+
+# Self pages.
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-preferences"
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-26-preferences
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "row-self-user-settings"
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-27-user-settings
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "row-self-saved"
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-28-saved
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "row-self-security"
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-29-security-top
+- scroll
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-30-security-middle
+- scroll
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-31-security-bottom
+
+# Link a new device: PIN, the QR, the copyable code.
+- scrollUntilVisible:
+    element:
+      id: "row-link-device"
+    direction: UP
+    optional: true
+- tapOn:
+    id: "row-link-device"
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-32-link-device-pin
+- runFlow: ../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "link-device-qr"
+    timeout: 15000
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-33-link-device-qr
+- tapOn:
+    id: "chip-link-code"
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-34-link-device-code

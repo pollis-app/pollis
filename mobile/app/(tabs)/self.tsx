@@ -7,7 +7,6 @@ import {
   Body,
   ListRow,
   Avatar,
-  Diamond,
   Button,
 } from "../../components/ui";
 import { Icon } from "../../components/icons";
@@ -68,7 +67,7 @@ function Self() {
   ];
 
   return (
-    <Screen testID="screen-self">
+    <Screen testID="screen-self" aboveTabBar>
       <Crumb
         segs={[{ label: upper(t("mobile:self.title")), leaf: true }]}
         end={upper(t("common:presence.online"))}
@@ -77,7 +76,7 @@ function Self() {
         <View
           style={{
             flexDirection: "row",
-            alignItems: "center",
+            alignItems: "flex-start",
             gap: 14,
             paddingHorizontal: 18,
             paddingTop: 12,
@@ -100,24 +99,10 @@ function Self() {
                 fontFamily: ty.body.fontFamily,
                 fontSize: 12,
                 color: semantic.mute,
+                marginTop: 10,
               }}
             >
               @{handle}
-            </Text>
-          </View>
-          <View
-            style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
-          >
-            <Diamond size={6} />
-            <Text
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 11,
-                letterSpacing: 1.1,
-                color: semantic.accent,
-              }}
-            >
-              {upper(t("common:presence.online"))}
             </Text>
           </View>
         </View>
