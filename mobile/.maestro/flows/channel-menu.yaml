@@ -20,6 +20,9 @@ tags:
 
 - tapOn:
     id: "btn-create-group"
+# #General is opt-in (off by default, like desktop); these steps open it.
+- tapOn:
+    id: "toggle-general-channel"
 - tapOn:
     id: "input-group-name"
 - inputText: "E2E Menu Group"

@@ -194,7 +194,7 @@
       "roleOwner": "Owner"
     },
     "new": {
-      "blurb": "Your group starts with a #General channel. Only members can see the group's details.",
+      "blurb": "Only members can see the group's details.",
       "crumb": "New",
       "descriptionLabel": "Description (optional)",
       "descriptionPlaceholder": "What's this group for?"

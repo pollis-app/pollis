@@ -194,7 +194,7 @@
       "roleOwner": "Propietario"
     },
     "new": {
-      "blurb": "Tu grupo empieza con un canal #General. Solo los miembros pueden ver los detalles del grupo.",
+      "blurb": "Solo los miembros pueden ver los detalles del grupo.",
       "crumb": "Nuevo",
       "descriptionLabel": "Descripción (opcional)",
       "descriptionPlaceholder": "¿Para qué es este grupo?"

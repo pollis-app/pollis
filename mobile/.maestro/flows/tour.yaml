@@ -119,6 +119,9 @@ tags:
 - waitForAnimationToEnd:
     timeout: 3000
 - takeScreenshot: tour-11-group-new
+# #General is opt-in (off by default, like desktop); these steps open it.
+- tapOn:
+    id: "toggle-general-channel"
 - tapOn:
     id: "input-group-name"
 - inputText: "Design Team"

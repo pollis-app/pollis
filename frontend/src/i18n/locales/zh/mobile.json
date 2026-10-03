@@ -187,7 +187,7 @@
       "roleOwner": "所有者"
     },
     "new": {
-      "blurb": "群组会自带一个 #General 频道。只有成员能看到群组详情。",
+      "blurb": "只有成员能看到群组详情。",
       "crumb": "新建",
       "descriptionLabel": "描述（可选）",
       "descriptionPlaceholder": "这个群组是做什么的？"

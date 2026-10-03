@@ -20,6 +20,9 @@ tags:
     id: "btn-create-group"
 - assertVisible:
     id: "screen-group-new"
+# #General is opt-in (off by default, like desktop); these steps open it.
+- tapOn:
+    id: "toggle-general-channel"
 - tapOn:
     id: "input-group-name"
 - inputText: "E2E Test Group"
@@ -35,3 +38,23 @@ tags:
     timeout: 15000
 - assertVisible: "General"
 - takeScreenshot: groups-03-created
+
+# Without the toggle, a new group has no channel at all (desktop parity).
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    id: "btn-create-group"
+- assertVisible:
+    id: "screen-group-new"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E No Channel Group"
+- tapOn: "CREATE GROUP"
+- extendedWaitUntil:
+    visible:
+      id: "screen-group"
+    timeout: 15000
+- assertNotVisible: "General"
+- takeScreenshot: groups-04-created-without-channel

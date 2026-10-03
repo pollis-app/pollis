@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { View, Text } from "react-native";
+import { Pressable, View, Text } from "react-native";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import {
@@ -9,6 +9,7 @@ import {
   Field,
   Button,
   BottomAction,
+  Toggle,
 } from "../../components/ui";
 import { FormField, FormStack } from "../../components/FormField";
 import { Icon } from "../../components/icons";
@@ -23,6 +24,7 @@ function NewGroup() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [createTextChannel, setCreateTextChannel] = useState(false);
   const createGroup = useCreateGroup();
   const setSelectedGroupId = appStore.setSelectedGroupId;
 
@@ -35,7 +37,7 @@ function NewGroup() {
       {
         name: trimmedName,
         description: description.trim() || undefined,
-        createDefaultTextChannel: true,
+        createDefaultTextChannel: createTextChannel,
       },
       {
         onSuccess: (group) => {
@@ -83,6 +85,29 @@ function NewGroup() {
               placeholder={t("mobile:group.new.descriptionPlaceholder")}
             />
           </FormField>
+          {/* Opt-in, off by default, like desktop. No voice option: voice is
+              not supported on mobile. */}
+          <Pressable
+            accessibilityRole="switch"
+            accessibilityState={{ checked: createTextChannel }}
+            onPress={() => setCreateTextChannel((v) => !v)}
+            style={{ flexDirection: "row", alignItems: "center", gap: 14 }}
+          >
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text style={{ fontFamily: ty.body.fontFamily, fontSize: 14, color: semantic.ink }}>
+                {t("createGroup.textChannelLabel")}
+              </Text>
+              <Text style={{ fontFamily: ty.body.fontFamily, fontSize: 11, lineHeight: 16, color: semantic.mute }}>
+                {t("createGroup.textChannelDescription")}
+              </Text>
+            </View>
+            <Toggle
+              testID="toggle-general-channel"
+              on={createTextChannel}
+              onPress={() => setCreateTextChannel((v) => !v)}
+              accessibilityLabel={t("createGroup.textChannelLabel")}
+            />
+          </Pressable>
           <Text
             style={{
               fontFamily: ty.body.fontFamily,
