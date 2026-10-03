@@ -8,10 +8,14 @@ import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
 import { dmQueryKeys } from "./useDMChannels";
 
+// Mirrors `pollis_core::commands::blocks::BlockedUser` field for field. It
+// used to name these `blocked_id` / `blocked_username` / `created_at`, which
+// the core never sends, so a blocked profile never offered Unblock and the
+// Blocked Users list read `undefined`.
 export interface BlockedUser {
-  blocked_id: string;
-  blocked_username?: string;
-  created_at: string;
+  user_id: string;
+  username?: string | null;
+  blocked_at: string;
 }
 
 export const blockQueryKeys = {

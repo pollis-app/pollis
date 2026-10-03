@@ -1,10 +1,12 @@
 appId: com.pollis.mobile
 tags:
   - parity
+  - two-client
 ---
 # REPORT (#1213) — report the seeded peer from their profile: a reason is
 # required, Report and block both files the report and blocks, and the
-# confirmation says so. Requires ${MAESTRO_PEER_HANDLE} on the dev DS. The
+# confirmation says so. Run via scripts/maestro-report.sh, which signs up a
+# fresh peer on a second device and passes its handle as ${MAESTRO_PEER_HANDLE}. The
 # message-level entry (long-press → Report) opens the same screen with the
 # conversation and message ids; Playwright covers that the request carries no
 # message text.

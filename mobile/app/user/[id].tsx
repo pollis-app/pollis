@@ -64,7 +64,7 @@ function UserProfile() {
 
   const blockedUsers = useBlockedUsers();
   const isBlocked =
-    !!peerId && (blockedUsers.data ?? []).some((b) => b.blocked_id === peerId);
+    !!peerId && (blockedUsers.data ?? []).some((b) => b.user_id === peerId);
   const block = useBlockUser();
   const unblock = useUnblockUser();
 

@@ -57,23 +57,23 @@ export default function Blocked() {
           </Text>
         ) : null}
         {blocked.map((b) => {
-          const handle = b.blocked_username ?? b.blocked_id.slice(0, 8);
+          const handle = b.username ?? b.user_id.slice(0, 8);
           return (
             <ListRow
-              key={b.blocked_id}
-              testID={`row-blocked-${b.blocked_id}`}
+              key={b.user_id}
+              testID={`row-blocked-${b.user_id}`}
               minHeight={54}
               glyph={<Avatar label={handle.slice(0, 2)} />}
               name={`@${handle}`}
               nameStyle={{ fontSize: 14 }}
               sub={t("mobile:self.blocked.blockedOn", {
-                date: new Date(b.created_at).toLocaleDateString(activeLocale()),
+                date: new Date(b.blocked_at).toLocaleDateString(activeLocale()),
               })}
               end={
                 <Chip
-                  testID={`btn-unblock-${b.blocked_id}`}
+                  testID={`btn-unblock-${b.user_id}`}
                   accessibilityLabel={t("mobile:self.blocked.unblock")}
-                  onPress={() => unblock.mutate(b.blocked_id)}
+                  onPress={() => unblock.mutate(b.user_id)}
                 >
                   {unblock.isPending ? "…" : t("mobile:self.blocked.unblock")}
                 </Chip>
