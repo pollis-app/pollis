@@ -15,7 +15,6 @@ import { semantic, type as ty, fonts } from "../../theme/tokens";
 import {
   useStartEnrollment,
   useEnrollmentStatus,
-  useFinalizeEnrollment,
   useRecoverWithSecretKey,
   type EnrollmentHandle,
 } from "../../hooks/queries";
@@ -32,21 +31,20 @@ export default function Enrollment() {
   const [error, setError] = useState<string | null>(null);
 
   const start = useStartEnrollment();
-  const finalize = useFinalizeEnrollment();
   const recover = useRecoverWithSecretKey();
   const status = useEnrollmentStatus(
     mode === "polling" ? handle?.request_id ?? null : null,
   );
 
-  // When the existing device approves, finalize on this side then route
-  // to PIN-create so the user can set a local PIN for this device.
+  // When the existing device approves, go straight to PIN-create. Finalize
+  // (publish this device's cert, external-join the account's groups) needs
+  // the local DB, which only `set_pin` opens — so it runs on the PIN screen
+  // after `set_pin`, exactly as desktop's handlePinCreated does. Calling it
+  // here, before the PIN, failed every device-linking sign-in with "not
+  // signed in for DS request signing".
   useEffect(() => {
     if (status.data?.status === "approved") {
-      finalize.mutate(undefined, {
-        onSuccess: () => router.replace("/(auth)/pin"),
-        onError: (e) =>
-          setError((e as Error).message || t("auth.enrollment.finalizeFailed")),
-      });
+      router.replace("/(auth)/pin");
     }
     if (status.data?.status === "rejected") {
       setError(t("auth.enrollment.rejected"));
@@ -54,7 +52,7 @@ export default function Enrollment() {
     if (status.data?.status === "expired") {
       setError(t("auth.enrollment.expired"));
     }
-    // finalize is a stable mutation ref.
+    // router is stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status.data?.status]);
 

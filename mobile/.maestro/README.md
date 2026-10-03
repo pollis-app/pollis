@@ -92,6 +92,16 @@ they need the two-device setup below and a Mac shakedown.
 
 ## Two-client flows
 
+**Device link (automated):** `mobile/scripts/maestro-device-link.sh <existing-device> <new-device>`
+runs both halves of device-linking sign-in across two devices
+(`.maestro/two-client/device-link/`): the existing device signs up and makes
+a group, the new device signs in and shows its code, the script reads it off
+the new device's UI tree, the existing device approves, and the new device
+must create its PIN, finalize, and list the group. Any pair works
+(iOS sim + Android emulator is the usual one). It exists because device
+linking shipped broken on mobile — finalize ran before `set_pin` opened the
+local DB — and no flow drove both halves.
+
 Run a second simulator/emulator with the peer account and drive it with a
 parallel Maestro invocation, reusing `subflows/sign-in.yaml` with the peer env:
 ```bash

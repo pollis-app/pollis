@@ -1,0 +1,30 @@
+appId: com.pollis.mobile
+---
+- clearState
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-email"
+    timeout: 20000
+- tapOn:
+    id: "input-email"
+- inputText: ${MAESTRO_EMAIL}
+- tapOn:
+    id: "btn-submit-email"
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-otp"
+    timeout: 15000
+- inputText: ${MAESTRO_OTP}
+- tapOn:
+    id: "btn-submit-otp"
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-enrollment"
+    timeout: 20000
+- tapOn:
+    id: "btn-enroll-approve-device"
+- extendedWaitUntil:
+    visible: "Waiting for approval.*"
+    timeout: 20000
+- takeScreenshot: link-01-android-code

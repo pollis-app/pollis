@@ -1,0 +1,23 @@
+appId: com.pollis.mobile
+---
+- tapOn:
+    id: "btn-back"
+    optional: true
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-security"
+- extendedWaitUntil:
+    visible:
+      id: "input-approval-code-.*"
+    timeout: 30000
+- tapOn:
+    id: "input-approval-code-.*"
+- inputText: ${CODE}
+- tapOn:
+    id: "btn-approve-.*"
+- extendedWaitUntil:
+    notVisible:
+      id: "input-approval-code-.*"
+    timeout: 30000
+- takeScreenshot: link-02-ios-approved

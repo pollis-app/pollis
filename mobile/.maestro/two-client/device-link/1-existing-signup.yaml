@@ -1,0 +1,15 @@
+appId: com.pollis.mobile
+---
+- runFlow: ../../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "input-group-name"
+- inputText: "Link Test Group"
+- tapOn: "CREATE GROUP"
+- extendedWaitUntil:
+    visible:
+      id: "screen-group"
+    timeout: 15000
