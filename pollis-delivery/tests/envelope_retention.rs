@@ -822,38 +822,6 @@ async fn sweep_collects_quiet_conversations_and_spares_uncollected() {
 // each asserts a COLLECTION the pre-#720 watermark-only predicate never performs,
 // so each fails against the pre-change code.
 
-/// A device that reported a watermark long ago and then went silent stops pinning
-/// once every LIVE device has read past the envelope. Real handler path.
-/// Pre-#720 bob's ancient cursor pins `MIN(cw)` below the envelope forever.
-#[tokio::test]
-async fn dormant_device_stops_pinning_via_endpoint() {
-    let db = fresh().await;
-    db.conn().await
-        .unwrap()
-        .execute_batch(
-            "INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');\
-             INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'bob');\
-             INSERT INTO conversation (id, kind) VALUES ('c1', 'channel');INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');",
-        )
-        .await
-        .unwrap();
-    add_device(&db, "alice", "a1", false).await;
-    add_device(&db, "bob", "b1", false).await;
-    seed_watermark_reported(&db, "c1", "alice", "a1", 10, "-1 day").await;
-    seed_watermark_reported(&db, "c1", "bob", "b1", 1, "-400 days").await;
-    add_envelope(&db, "e1", "c1", 3).await;
-
-    let body = EnvelopeGcBody { conversation_id: "c1".into(), is_dm: false, actor_id: Some("alice".into()) };
-    apply_envelope_gc(&db.conn().await.unwrap(), None, &body, STALE).await.unwrap();
-
-    assert_eq!(
-        envelope_count(&db, "c1").await,
-        0,
-        "a device silent past the window stops pinning; the envelope every LIVE \
-         device read past is collected (#720)"
-    );
-}
-
 /// **Reversibility.** A dormant device that comes back and reports a watermark —
 /// even one whose cursor is still behind the envelope — is live again IMMEDIATELY
 /// and re-pins. This drives the real `apply_advance_watermark`, proving it stamps
@@ -921,7 +889,11 @@ async fn a_returning_device_reports_and_pins_again() {
 
 /// The sweep and the per-conversation endpoint apply the SAME liveness predicate
 /// (both flow through `cleanup_conversation_envelopes`), so they agree on the
-/// same dormant-device fixture: BOTH collect the envelope. Two GC paths with two
+/// same dormant-device fixture: BOTH collect the envelope. Its endpoint half is
+/// the "a device that reported long ago and then went silent stops pinning once
+/// every LIVE device has read past the envelope" proof through the real handler
+/// (formerly also `dormant_device_stops_pinning_via_endpoint`, the identical
+/// fixture and call). Two GC paths with two
 /// different predicates is exactly the invalid state this repo forbids (#720
 /// checkbox 3). Pre-#720 both KEEP the envelope, so the collection assertion also
 /// fails against the pre-change code.

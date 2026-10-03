@@ -111,6 +111,11 @@ async fn welcome_row(db: &Db, conv: &str, recipient: &str, device: &str) -> (i64
 
 /// A resubmit re-drives a Welcome for a recipient/device that had none — the row
 /// is (re)inserted with the supplied blob, armed for delivery.
+///
+/// The request carries no `generation` field, so it is also the pre-hybrid
+/// compatibility contract (#454 P4, formerly `an_omitted_generation_is_the_classic_lineage`,
+/// the identical request): a shipped desktop app sends no `generation`, and
+/// generation 0 is exactly the lineage that app is in.
 #[tokio::test(flavor = "multi_thread")]
 async fn resubmit_re_drives_a_missing_welcome() {
     let db = fresh_db().await;
@@ -125,9 +130,10 @@ async fn resubmit_re_drives_a_missing_welcome() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
-    let (count, data, _) = welcome_row(&db, "conv1", "alice", "dev1").await;
+    let (count, data, generation) = welcome_row(&db, "conv1", "alice", "dev1").await;
     assert_eq!(count, 1, "resubmit must insert exactly one Welcome");
     assert_eq!(data, b"welcome-blob");
+    assert_eq!(generation, 0, "a pre-P4 client's Welcome is generation 0");
 }
 
 /// Two resubmits for the same (conversation, recipient, device) are idempotent:
@@ -155,24 +161,6 @@ async fn resubmit_is_idempotent_and_refreshes_blob() {
     let (count, data, _) = welcome_row(&db, "conv1", "alice", "dev1").await;
     assert_eq!(count, 1, "resubmit must not duplicate the Welcome");
     assert_eq!(data, b"welcome-v2", "resubmit must refresh to the latest blob");
-}
-
-/// The pre-hybrid compatibility contract (#454 P4): a shipped desktop app sends
-/// no `generation` field, and generation 0 is exactly the lineage that app is in.
-#[tokio::test(flavor = "multi_thread")]
-async fn an_omitted_generation_is_the_classic_lineage() {
-    let db = fresh_db().await;
-    seed_conversation(&db, "conv1", "alice", 0).await;
-    let router = build_router_with_state(AppState::new(Arc::clone(&db), false));
-
-    let resp = router
-        .oneshot(resubmit_req("conv1", "alice", "dev1", b"welcome-blob"))
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-
-    let (_, _, generation) = welcome_row(&db, "conv1", "alice", "dev1").await;
-    assert_eq!(generation, 0, "a pre-P4 client's Welcome is generation 0");
 }
 
 /// Re-driving a Welcome for a conversation that has since migrated must land the

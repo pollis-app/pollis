@@ -111,6 +111,11 @@ async fn fresh_db() -> common::TempDb {
     db
 }
 
+/// The CAS against the REAL schema — `fresh_db` applies the single-DB scripts,
+/// so the log DB's 000005 I1 triggers are installed — which also proves the CAS
+/// and the `BEFORE INSERT` trigger coexist: legitimate head-appends are Accepted
+/// (the trigger never spuriously aborts one) and stale / forward-gap submits are
+/// Rejected by the CAS's WHERE, producing no row for the trigger to see.
 #[tokio::test(flavor = "multi_thread")]
 async fn accepts_head_rejects_stale_and_gap() {
     let db = fresh_db().await;

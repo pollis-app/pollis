@@ -13,30 +13,18 @@
 //! The counterpart obligation — "a trigger that fires on legitimate traffic is
 //! worse than no trigger" — is discharged by `legitimate_traffic_*`: the real
 //! head-append and retention-prune paths run against the triggered schema and are
-//! asserted to succeed. The full integration suite (flows / tui) piles on more,
-//! since it applies migration 000005 via POST_BASELINE_LOG_MIGRATIONS and then
-//! runs every real submit + prune through it.
+//! asserted to succeed. The real CAS path (`submit_commit`) coexisting with the
+//! `BEFORE INSERT` trigger — a head-append Accepted, a stale submit Rejected by
+//! the CAS's WHERE before the trigger ever fires — is `serialize.rs`'s
+//! `accepts_head_rejects_stale_and_gap`, whose fixture applies the full
+//! single-DB schema (triggers included). The full integration suite (flows /
+//! tui) piles on more, since it applies migration 000005 via
+//! POST_BASELINE_LOG_MIGRATIONS and then runs every real submit + prune through it.
 
-use pollis_delivery::commit::{
-    delete_commits_below, delete_generations_below, submit_commit, SubmitBody, SubmitResponse,
-    SubmitVerdict,
-};
+use pollis_delivery::commit::{delete_commits_below, delete_generations_below};
 use pollis_delivery::db::Db;
 
 mod common;
-
-/// `submit_commit` on a log-only fixture. The bodies here carry no Welcomes, so
-/// the main-DB gates added for C1 never look at a membership table — passing the
-/// log connection for both is exactly the DS's single-database configuration.
-async fn submit(
-    conn: &libsql::Connection,
-    body: &SubmitBody,
-) -> anyhow::Result<SubmitResponse> {
-    match submit_commit(conn, conn, body).await? {
-        SubmitVerdict::Response(r) => Ok(r),
-        other => panic!("expected a CAS response, got {other:?}"),
-    }
-}
 
 // The real log-DB schema, in version order (mirrors POST_BASELINE_LOG_MIGRATIONS
 // + LOG_DB_SCHEMA). 000005 is the trigger migration under test.
@@ -416,51 +404,4 @@ async fn legitimate_traffic_survives_triggers() {
     assert_eq!(gens, 4);
     assert_eq!(epochs(&db, "c2", 0).await, Vec::<i64>::new());
     assert_eq!(epochs(&db, "c2", 1).await, (0..=4).collect::<Vec<_>>());
-}
-
-/// Drive the REAL CAS path (`submit_commit`, `INSERT ... SELECT ... WHERE ... ON
-/// CONFLICT DO NOTHING`) against the triggered schema. `serialize.rs` proves the
-/// CAS in isolation but against an untriggered schema; this proves the CAS and
-/// the `BEFORE INSERT` trigger coexist — a legitimate head-append is Accepted
-/// (the trigger does not spuriously abort it) and a stale submit is Rejected by
-/// the CAS's WHERE (no row is produced, so the trigger never even fires).
-#[tokio::test]
-async fn real_submit_path_coexists_with_triggers() {
-    let db = fresh_log().await;
-    let conn = db.conn().await.unwrap();
-
-    // base64 of a 3-byte commit blob — avoids pulling in the base64 crate.
-    let body = |based_on_epoch: i64| SubmitBody {
-        conversation_id: "c1".into(),
-        generation: 0,
-        based_on_epoch,
-        closes_epoch: None,
-        sender_id: "sender".into(),
-        commit: "AQID".into(),
-        added_user_id: None,
-        added_device_ids: None,
-        group_info: None,
-        welcomes: vec![],
-    };
-
-    // Opening commit (head is 0 on an empty lineage) → Accepted.
-    match submit(&conn, &body(0)).await.expect("submit 0") {
-        SubmitResponse::Accepted { epoch, .. } => assert_eq!(epoch, 0),
-        other => panic!("expected Accepted, got {other:?}"),
-    }
-    // Next head (head is now 1) → Accepted.
-    match submit(&conn, &body(1)).await.expect("submit 1") {
-        SubmitResponse::Accepted { epoch, .. } => assert_eq!(epoch, 1),
-        other => panic!("expected Accepted, got {other:?}"),
-    }
-    // Stale resubmit at epoch 1 (head is now 2): the CAS WHERE is false, so no
-    // row is produced and nothing is inserted — Rejected, and the trigger is a
-    // no-op because it only fires on a row that is actually being inserted.
-    match submit(&conn, &body(1)).await.expect("stale submit") {
-        SubmitResponse::Rejected { head, .. } => assert_eq!(head, 2),
-        other => panic!("expected Rejected, got {other:?}"),
-    }
-
-    // The chain is contiguous and intact — the CAS built it, the triggers let it.
-    assert_eq!(epochs(&db, "c1", 0).await, vec![0, 1]);
 }

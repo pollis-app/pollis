@@ -298,25 +298,10 @@ fn minted_grant_never_carries_the_raw_conversation_id() {
     assert!(granted.starts_with("r-"), "grant should be an opaque pseudonym, got {granted}");
 }
 
-/// Two members of one conversation must resolve to the SAME room, or they join
-/// different rooms and never see each other's traffic — the failure mode that
-/// would make this change silently break messaging rather than loudly break it.
-#[test]
-fn all_members_of_a_conversation_resolve_to_one_room() {
-    let conv = "01KZVDFR5Z9DKJ27YN91S3KS6N";
-    let a = pollis_delivery::room_id::room_pseudonym(LK_SECRET, conv);
-    let b = pollis_delivery::room_id::room_pseudonym(LK_SECRET, conv);
-    assert_eq!(a, b);
-}
-
-/// An inbox room must not expose the owner's user id either — otherwise the SFU
-/// still learns exactly who is online, which is half of what #828 removes.
-#[test]
-fn inbox_rooms_do_not_expose_the_user_id() {
-    let uid = "01KZT7RW4RXQGT943Q05C7NW8A";
-    let wire = pollis_delivery::room_id::room_pseudonym(LK_SECRET, &format!("inbox-{uid}"));
-    assert!(!wire.contains(uid), "inbox pseudonym must not embed the user id");
-}
+// Determinism (all members of a conversation resolve to ONE room) and inbox
+// rooms not exposing the user id are pinned on the pure function itself:
+// `room_id::tests::stable_for_a_given_secret` and
+// `room_id::tests::never_leaks_the_logical_name` (which covers `inbox-<id>`).
 
 // ─── #836: pseudonymous participant identities ───────────────────────────────
 
@@ -351,38 +336,10 @@ fn minted_sub_never_carries_the_raw_user_or_device_id() {
     }
 }
 
-/// The residual #836 was filed for: the SFU could cluster the social graph by
-/// co-membership because one user carried one identity into every room. Two
-/// rooms must now give unrelated identities, and one room's key must not open
-/// the other's.
-#[test]
-fn one_user_is_unlinkable_across_two_rooms() {
-    let user = "01KZT7RW4RXQGT943Q05C7NW8A";
-    let device = "01KZT7RW4RXQGT943Q05C7NW8B";
-    let a = participant_pseudonym(LK_SECRET, "conv-a", user, device, ParticipantKind::Voice);
-    let b = participant_pseudonym(LK_SECRET, "conv-b", user, device, ParticipantKind::Voice);
-
-    assert_ne!(a, b, "the same user must not reuse an identity across rooms");
-    assert_eq!(resolve_participant(LK_SECRET, "conv-a", &b), None);
-    assert_eq!(
-        resolve_participant(LK_SECRET, "conv-a", &a).map(|(u, _)| u),
-        Some(user.to_string()),
-    );
-}
-
-/// #140 must survive: a user's two devices stay distinct participants (or the
-/// second evicts the first on the SFU) while still resolving to one person.
-#[test]
-fn two_devices_of_one_user_coexist_and_resolve_to_the_same_user() {
-    let user = "01KZT7RW4RXQGT943Q05C7NW8A";
-    let room = "01KZVDFR5Z9DKJ27YN91S3KS6N";
-    let a = participant_pseudonym(LK_SECRET, room, user, "dev-a", ParticipantKind::Voice);
-    let b = participant_pseudonym(LK_SECRET, room, user, "dev-b", ParticipantKind::Voice);
-
-    assert_ne!(a, b);
-    assert_eq!(resolve_participant(LK_SECRET, room, &a).unwrap().0, user);
-    assert_eq!(resolve_participant(LK_SECRET, room, &b).unwrap().0, user);
-}
+// Cross-room unlinkability (#836's residual) and a user's two devices staying
+// distinct participants that resolve to one person (#140) are pinned on the pure
+// function itself: `participant_id::tests::unlinkable_across_rooms`,
+// `resolves_back_to_the_user_and_kind` and `devices_of_one_user_stay_distinct`.
 
 /// A client cannot obtain a token identifying as another user. The identity is
 /// a pure function of the room, the VERIFIED signer and the signer's device —

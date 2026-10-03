@@ -63,7 +63,11 @@ async fn registered(db: &common::TempDb, roster: &[&str]) -> HashSet<(String, St
         .collect()
 }
 
-/// The #679 regression itself.
+/// The #679 regression itself. The same fixture is the revoke-then-re-enrol
+/// shape (formerly `reenrolled_device_replaces_the_revoked_one`): the
+/// replacement device is a NEW `device_id`, so the old leaf must be droppable
+/// while the new one is admitted — getting this backwards would lock a user out
+/// of their own re-enrolled device.
 #[tokio::test]
 async fn revoked_device_is_not_registered() {
     let db = db_with_devices(&[
@@ -124,25 +128,6 @@ async fn fully_revoked_user_contributes_no_devices() {
     assert!(
         got.is_empty(),
         "every device revoked ⇒ no registered devices; got {got:?}"
-    );
-}
-
-/// Revoke-then-re-enrol: the replacement device is a NEW `device_id`, so the
-/// old leaf must be droppable while the new one is admitted. Getting this
-/// backwards would lock a user out of their own re-enrolled device.
-#[tokio::test]
-async fn reenrolled_device_replaces_the_revoked_one() {
-    let db = db_with_devices(&[
-        ("alice", "old-device", Some("2026-07-30 12:00:00")),
-        ("alice", "new-device", None),
-    ])
-    .await;
-
-    let got = registered(&db, &["alice"]).await;
-    assert_eq!(
-        got,
-        HashSet::from([("alice".to_string(), "new-device".to_string())]),
-        "only the re-enrolled device; got {got:?}"
     );
 }
 
