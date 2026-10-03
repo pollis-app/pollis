@@ -848,7 +848,7 @@ pub(crate) async fn wrap_and_approve(
         let approver_priv = StaticSecret::from(approver_priv_bytes);
         let approver_pub = PublicKey::from(&approver_priv);
 
-        let requester_pub = x25519_public_from_bytes(&ephemeral_pub)?;
+        let requester_pub = x25519_public_from_bytes(ephemeral_pub)?;
         let shared = approver_priv.diffie_hellman(&requester_pub);
         require_contributory(&shared, "the request's published ephemeral key")?;
         let wrap_key = derive_wrap_key(

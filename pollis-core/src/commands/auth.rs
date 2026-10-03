@@ -343,7 +343,7 @@ pub(crate) async fn bootstrap_existing_identity_device(
 ) -> Result<()> {
     let user_id = user_id.to_string();
     let session_token = session_token.to_string();
-    let stored_device_id = ensure_device_id(state, &user_id, &candidate_device_id).await?;
+    let stored_device_id = ensure_device_id(state, &user_id, candidate_device_id).await?;
 
     // Whether this device already holds the account key. That — not the id
     // comparison below on its own — is what decides which branch is right
