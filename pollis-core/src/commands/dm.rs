@@ -363,6 +363,10 @@ pub async fn leave_dm_channel(
     Ok(())
 }
 
+// The remaining tests pin schema constraints (PRIMARY KEY dedupe, ON DELETE
+// CASCADE) against the shipped remote schema, plus the 2-person DM dedupe
+// lookup whose SQL now lives in pollis-delivery/src/profile.rs and has no DS
+// test yet. Query-simulation tests for the client SQL #987 removed were deleted.
 #[cfg(test)]
 mod tests {
     use rusqlite::Connection;
@@ -420,34 +424,6 @@ mod tests {
     // ── DM channel creation ────────────────────────────────────────────────
 
     #[test]
-    fn create_dm_channel_with_two_members() {
-        let conn = db();
-        setup(&conn);
-        create_dm(&conn, "dm1", "alice", &["alice", "bob"]);
-
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM dm_channel_member WHERE dm_channel_id = 'dm1'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
-        assert_eq!(count, 2);
-    }
-
-    #[test]
-    fn create_dm_channel_creator_is_member() {
-        let conn = db();
-        setup(&conn);
-        create_dm(&conn, "dm1", "alice", &["alice", "bob"]);
-
-        let exists: bool = conn.query_row(
-            "SELECT COUNT(*) FROM dm_channel_member WHERE dm_channel_id = 'dm1' AND user_id = 'alice'",
-            [],
-            |row| row.get::<_, i64>(0).map(|c| c > 0),
-        ).unwrap();
-        assert!(exists, "creator should be a member");
-    }
-
-    #[test]
     fn create_dm_channel_duplicate_member_ignored() {
         let conn = db();
         setup(&conn);
@@ -465,179 +441,6 @@ mod tests {
             |row| row.get(0),
         ).unwrap();
         assert_eq!(count, 1, "should still be one membership row");
-    }
-
-    // ── list_dm_channels ───────────────────────────────────────────────────
-
-    #[test]
-    fn list_dm_channels_only_returns_user_dms() {
-        let conn = db();
-        setup(&conn);
-        create_dm(&conn, "dm1", "alice", &["alice", "bob"]);
-        create_dm(&conn, "dm2", "alice", &["alice", "carol"]);
-        create_dm(&conn, "dm3", "bob", &["bob", "carol"]); // carol-bob only
-
-        let alice_dms: Vec<String> = conn.prepare(
-            "SELECT dc.id FROM dm_channel dc JOIN dm_channel_member dcm ON dcm.dm_channel_id = dc.id WHERE dcm.user_id = ?1",
-        ).unwrap().query_map(
-            rusqlite::params!["alice"],
-            |row| row.get(0),
-        ).unwrap().map(|r| r.unwrap()).collect();
-
-        assert_eq!(alice_dms.len(), 2);
-        assert!(alice_dms.contains(&"dm1".to_string()));
-        assert!(alice_dms.contains(&"dm2".to_string()));
-        assert!(!alice_dms.contains(&"dm3".to_string()));
-    }
-
-    // ── fetch_dm_members ───────────────────────────────────────────────────
-
-    #[test]
-    fn fetch_dm_members_includes_username() {
-        let conn = db();
-        setup(&conn);
-        create_dm(&conn, "dm1", "alice", &["alice", "bob"]);
-
-        let members: Vec<(String, Option<String>)> = conn.prepare(
-            "SELECT dcm.user_id, u.username
-             FROM dm_channel_member dcm
-             LEFT JOIN users u ON u.id = dcm.user_id
-             WHERE dcm.dm_channel_id = ?1",
-        ).unwrap().query_map(
-            rusqlite::params!["dm1"],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        ).unwrap().map(|r| r.unwrap()).collect();
-
-        assert_eq!(members.len(), 2);
-        assert!(members.contains(&("alice".into(), Some("alice".into()))));
-        assert!(members.contains(&("bob".into(), Some("bob".into()))));
-    }
-
-    // ── get_dm_channel ─────────────────────────────────────────────────────
-
-    #[test]
-    fn get_dm_channel_returns_channel() {
-        let conn = db();
-        setup(&conn);
-        create_dm(&conn, "dm1", "alice", &["alice", "bob"]);
-
-        let (id, created_by): (String, String) = conn.query_row(
-            "SELECT id, created_by FROM dm_channel WHERE id = ?1",
-            rusqlite::params!["dm1"],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        ).unwrap();
-
-        assert_eq!(id, "dm1");
-        assert_eq!(created_by, "alice");
-    }
-
-    #[test]
-    fn get_dm_channel_not_found() {
-        let conn = db();
-        setup(&conn);
-
-        let result = conn.query_row(
-            "SELECT id FROM dm_channel WHERE id = 'nonexistent'",
-            [],
-            |row| row.get::<_, String>(0),
-        );
-        assert!(result.is_err());
-    }
-
-    // ── remove_user_from_dm_channel (authorization) ────────────────────────
-
-    #[test]
-    fn remove_member_by_creator_succeeds() {
-        let conn = db();
-        setup(&conn);
-        create_dm(&conn, "dm1", "alice", &["alice", "bob"]);
-
-        // alice (creator) removes bob
-        let creator: String = conn.query_row(
-            "SELECT created_by FROM dm_channel WHERE id = 'dm1'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
-        assert_eq!(creator, "alice");
-
-        conn.execute(
-            "DELETE FROM dm_channel_member WHERE dm_channel_id = 'dm1' AND user_id = 'bob'",
-            [],
-        ).unwrap();
-
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM dm_channel_member WHERE dm_channel_id = 'dm1' AND user_id = 'bob'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
-        assert_eq!(count, 0);
-    }
-
-    // ── leave_dm_channel: auto-cleanup ─────────────────────────────────────
-
-    #[test]
-    fn leave_dm_last_member_cleans_up_channel() {
-        let conn = db();
-        setup(&conn);
-        create_dm(&conn, "dm1", "alice", &["alice", "bob"]);
-
-        // Add a message to verify cleanup
-        conn.execute(
-            "INSERT INTO message_envelope (id, conversation_id, sender_id, ciphertext, sent_at) VALUES ('m1', 'dm1', 'alice', 'hello', '2024-01-01T10:00:00Z')",
-            [],
-        ).unwrap();
-
-        // Both leave
-        conn.execute("DELETE FROM dm_channel_member WHERE dm_channel_id = 'dm1' AND user_id = 'alice'", []).unwrap();
-        conn.execute("DELETE FROM dm_channel_member WHERE dm_channel_id = 'dm1' AND user_id = 'bob'", []).unwrap();
-
-        let remaining: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM dm_channel_member WHERE dm_channel_id = 'dm1'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
-        assert_eq!(remaining, 0);
-
-        // Simulate cleanup logic from leave_dm_channel
-        conn.execute("DELETE FROM message_envelope WHERE conversation_id = 'dm1'", []).unwrap();
-        conn.execute("DELETE FROM dm_channel WHERE id = 'dm1'", []).unwrap();
-
-        let channel_exists: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM dm_channel WHERE id = 'dm1'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
-        assert_eq!(channel_exists, 0, "channel should be deleted");
-
-        let msg_count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM message_envelope WHERE conversation_id = 'dm1'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
-        assert_eq!(msg_count, 0, "messages should be cleaned up");
-    }
-
-    #[test]
-    fn leave_dm_not_last_member_keeps_channel() {
-        let conn = db();
-        setup(&conn);
-        create_dm(&conn, "dm1", "alice", &["alice", "bob"]);
-
-        conn.execute("DELETE FROM dm_channel_member WHERE dm_channel_id = 'dm1' AND user_id = 'alice'", []).unwrap();
-
-        let remaining: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM dm_channel_member WHERE dm_channel_id = 'dm1'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
-        assert_eq!(remaining, 1, "bob is still a member");
-
-        let channel_exists: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM dm_channel WHERE id = 'dm1'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
-        assert_eq!(channel_exists, 1, "channel should still exist");
     }
 
     // ── DM cascade deletes ─────────────────────────────────────────────────
@@ -674,36 +477,7 @@ mod tests {
         assert_eq!(count, 0, "bob's membership should be cascade-deleted");
     }
 
-    // ── watermark initialization ───────────────────────────────────────────
-
-    #[test]
-    fn watermark_initialized_for_dm_members() {
-        let conn = db();
-        setup(&conn);
-        create_dm(&conn, "dm1", "alice", &["alice", "bob"]);
-
-        conn.execute(
-            "INSERT INTO user_device (device_id, user_id) VALUES
-               ('alice-d1', 'alice'), ('alice-d2', 'alice'), ('bob-d1', 'bob')",
-            [],
-        ).unwrap();
-
-        for uid in ["alice", "bob"] {
-            conn.execute(
-                "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
-                 SELECT ?1, ?2, ud.device_id, datetime('now')
-                 FROM user_device ud WHERE ud.user_id = ?2",
-                rusqlite::params!["dm1", uid],
-            ).unwrap();
-        }
-
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM conversation_watermark WHERE conversation_id = 'dm1'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
-        assert_eq!(count, 3, "2 alice devices + 1 bob device");
-    }
+    // ── watermark dedupe ───────────────────────────────────────────────────
 
     #[test]
     fn watermark_idempotent() {
@@ -732,22 +506,6 @@ mod tests {
             |row| row.get(0),
         ).unwrap();
         assert_eq!(count, 1);
-    }
-
-    // ── group DM (3+ members) ──────────────────────────────────────────────
-
-    #[test]
-    fn group_dm_three_members() {
-        let conn = db();
-        setup(&conn);
-        create_dm(&conn, "dm1", "alice", &["alice", "bob", "carol"]);
-
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM dm_channel_member WHERE dm_channel_id = 'dm1'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
-        assert_eq!(count, 3);
     }
 
     // ── 2-person DM dedupe lookup ─────────────────────────────────────────
@@ -797,25 +555,5 @@ mod tests {
         create_dm(&conn, "dm1", "bob", &["bob", "alice"]);
 
         assert_eq!(find_two_person_dm(&conn, "alice", "bob").as_deref(), Some("dm1"));
-    }
-
-    #[test]
-    fn add_user_to_existing_dm() {
-        let conn = db();
-        setup(&conn);
-        create_dm(&conn, "dm1", "alice", &["alice", "bob"]);
-
-        // Add carol to existing DM
-        conn.execute(
-            "INSERT OR IGNORE INTO dm_channel_member (dm_channel_id, user_id, added_by, added_at) VALUES ('dm1', 'carol', 'alice', '2024-01-02T00:00:00Z')",
-            [],
-        ).unwrap();
-
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM dm_channel_member WHERE dm_channel_id = 'dm1'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
-        assert_eq!(count, 3);
     }
 }
