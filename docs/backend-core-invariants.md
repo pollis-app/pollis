@@ -65,6 +65,7 @@ the invariant that makes it unrepresentable.
 | F6 | ~~**Retention ignores absent members**~~ — **FIXED for envelopes** | the envelope floor is the MIN `last_fetched_at` over every current member device (revoked devices excluded #685, devices silent past N months excluded #720), no longer gated by a TTL | F3's TTL was the leak; it is gone. The #720 liveness bound adds a *third* accepted loss (a device dormant past the window) — see I3. Commit/Welcome floors (I4) tracked separately |
 | F8 | **One id naming two conversations** — **unrepresentable (#880 + #948)** | `dm_channel`, `groups` and `channels` are three tables with three separate primary keys, so the same id fits in all three, and `is_member` ORs across all three on one id. #879 added the `conversation_id_taken` chokepoint; #880 added the `conversation` registry, claimed in the same transaction as the row it names, so a second claim cannot commit *through the DS*; #948 (migration 000017) added guard triggers so the database itself refuses a row the registry did not grant — a writer that skips the registry is now refused too | a DM named after a victim's group made `is_member(victim_group, attacker)` true — commit injection, GroupInfo/Welcome overwrite, a LiveKit token for their room. Pinned in `pollis-delivery/tests/conversation_namespace.rs`, including raw-SQL refusal with the DS bypassed |
 | F9 | ~~**Envelope stored at an epoch the log has closed**~~ — **unrepresentable (#1041)** | the pre-op catch-up and the op are two steps; an envelope sealed at epoch *e* after a committer's catch-up but before its commit merged was undecryptable once it merged (`max_past_epochs = 0`) and marked handled — silent loss; one sealed after the commit landed was readable by nobody. The DS now keeps an envelope only if its asserted `(generation, epoch)` is the log head (409 `epoch_behind`), the committer sweeps the closing epoch before it merges, and refused senders re-seal — see I8 | the `ui_e2e.rs` flake on CI. Pinned in `pollis-delivery` `epoch_gate_tests` and `flows::dms::message_sealed_*` (both fail with the gate and sweep disabled) |
+| F10 | ~~**A device discards a group the log carries, for a branch it does not**~~ — **unrepresentable on the join paths (#1220)** | an external join merges its commit locally before the log's CAS decides it, and both join paths replaced whatever group was stored. A recipient that lost the epoch-0 race and had its Welcome land before the retry had the confirmed Welcome group (epoch 1) deleted by the retry's `build_external_commit`; a Welcome polled while the doomed branch was still stored was refused as a replay and acknowledged (gone). Either way the creator's message sealed at epoch 1 became undecryptable and the cursor — correctly, for an epoch the device no longer held — moved past it | `flows::dms::recipient_that_loses_the_epoch_zero_race_*` failed on every real-speed run (`[profile.test.package."*"] opt-level = 2`); `retry_after_a_lost_epoch_zero_race_*` and `welcome_polled_while_a_doomed_join_branch_*` force both orderings at any build speed and fail with the guard off |
 | F7 | **Schema divergence: test vs prod** | two apply paths — test harness uses `POST_BASELINE_MIGRATIONS` on a *fresh* DB; prod uses `db-apply.sh` (version-tracked) on the *long-lived* DB. Version numbers collide with the old lineage | prod missing `000005_account_key_log`, `000006_push_token` while all tests pass |
 
 ## Target invariants & where they're enforced
@@ -256,6 +257,38 @@ the invariant that makes it unrepresentable.
 - *Result:* "a control-plane row nobody can ever advance" is unrepresentable, and
   the join and pin paths of a conversation cannot be wedged by one write.
 
+### I10 — The watermark's epoch rule is only as sound as the group it reads (#1220)
+- The ingest cursor treats an envelope sealed BELOW the epoch the replay started
+  at as permanently undecryptable and moves past it (`watermark::is_handled`).
+  That is true only if this device never held that epoch while the envelope was
+  still un-ingested — i.e. if the local group is never replaced by one that
+  skipped an epoch the device was entitled to read. A retry is pointless once
+  the keys are gone (`max_past_epochs = 0`), so holding the cursor there would
+  wedge it, not deliver; the invariant has to hold on the GROUP, below the
+  cursor.
+- Enforced at the one chokepoint that can break it — replacing a stored group.
+  An external join's branch is marked *unconfirmed* in the same local-DB
+  critical section that stores it (`mls::join_branch`, an `mls_kv` row beside
+  the group state) and confirmed when the log accepts its commit (or a
+  canonical commit applies on top of it). `external_join_may_replace` lets an
+  external join replace nothing but its own unconfirmed branch:
+  `build_external_commit` refuses a confirmed group and the attempt stands down
+  as `AlreadyMember`. `welcome_may_replace` lets a Welcome replace a strictly
+  older group (the #1161 C1 rule) or an unconfirmed branch at its own epoch —
+  a Welcome there was produced by a commit holding the epoch the branch is
+  claiming, so the branch cannot win. A lost CAS deletes only a still-unconfirmed
+  branch (`forget_unconfirmed_branch`), never the Welcome group that replaced it.
+  Callers that genuinely rebuild a broken group (epoch desync, gap recovery)
+  delete it by name first.
+- *Result:* "a device holds an epoch, an envelope at it is un-ingested, and the
+  device moves to a branch that skipped it" is unrepresentable on the join paths;
+  the cursor's epoch rule only ever classifies the three acceptable losses.
+  Pinned by `join_branch::tests` (the predicates) and the flows tests named in
+  F10, each of which loses the message with the guard off, plus
+  `assert_cursor_never_passes_an_unprocessed_envelope`, which checks the
+  invariant against the real tables: no sender message at or below the
+  recipient's cursor is missing from its local history.
+
 ## Enforcement layers, summarized
 
 | Invariant | DB constraint/trigger | Rust type | Protocol | Test |
@@ -269,6 +302,7 @@ the invariant that makes it unrepresentable.
 | I7 one id, one conversation | `conversation` PK + `kind` CHECK, claimed in the creating txn (#880); guard triggers on all three tables (#948, migration 000017) | `ConversationKind` | `conversation_id_taken` → 403 | guard vs registry vs DB-trigger layers (`conversation_namespace.rs`) |
 | I8 no envelope behind the head | — (two DB handles; insert-then-verify) | `Sealed { generation, epoch }` asserted from the ciphertext | `epoch_behind` → 409 + committer pre-merge sweep | `epoch_gate_tests` (DS) + `dms::message_sealed_*` (flows, fail with the gate/sweep off) |
 | I9 no control-plane row above the head | — (the ceiling read shares the GroupInfo write's transaction) | `HeadBoundedOutcome` / `KeystateOutcome::AheadOfHead` | `refuse_above_head` → 409 with the head; `submitted_by` gates a Welcome overwrite | `control_plane_head_bounds.rs` (each test fails with the ceiling off) |
+| I10 no group replaced by a branch that skipped its epoch | — (local; `mls_kv` marker written with the branch) | `join_branch` predicates | `AlreadyMember` stand-down; Welcome replaces a doomed branch; lost CAS deletes only a branch | `join_branch::tests` + `dms::retry_after_a_lost_epoch_zero_race_*` / `dms::welcome_polled_while_a_doomed_join_branch_*` (fail with the guard off) |
 
 ## Roadmap (phased)
 

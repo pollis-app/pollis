@@ -119,7 +119,7 @@ where
     let raw_group_id = String::from_utf8(new_group_id.as_slice().to_vec()).map_err(|_| {
         crate::error::Error::Other(anyhow::anyhow!("welcome carries a non-UTF-8 group id"))
     })?;
-    let (conversation_id, _generation) = super::generation::split_mls_group_id(&raw_group_id);
+    let (conversation_id, generation) = super::generation::split_mls_group_id(&raw_group_id);
     if let Some(expected) = expected {
         if conversation_id != expected {
             return Err(crate::error::Error::Other(anyhow::anyhow!(
@@ -130,7 +130,17 @@ where
 
     if let Ok(Some(mut old_group)) = MlsGroup::load(provider.storage(), &new_group_id) {
         let local_epoch = old_group.epoch().as_u64();
-        if local_epoch >= welcome_epoch {
+        // An unconfirmed external-join branch at the Welcome's own epoch is
+        // doomed — the commit behind this Welcome holds the epoch the branch is
+        // trying to claim — so the Welcome replaces it (#1220). Refusing here
+        // (and acknowledging the Welcome, which `poll_mls_welcomes_inner` does
+        // for every outcome) left the device with neither.
+        let unconfirmed = super::join_branch::is_unconfirmed(
+            provider.raw_conn(),
+            &conversation_id,
+            generation,
+        );
+        if !super::join_branch::welcome_may_replace(local_epoch, welcome_epoch, unconfirmed) {
             return Err(crate::error::Error::Other(anyhow::anyhow!(
                 "welcome for {raw_group_id} is at epoch {welcome_epoch} but this device already \
                  holds that group at epoch {local_epoch} — refusing to replace a group the commit \
@@ -142,6 +152,7 @@ where
              Welcome's epoch {welcome_epoch}"
         );
         let _ = old_group.delete(provider.storage());
+        super::join_branch::clear(provider.raw_conn(), &conversation_id, generation);
     }
 
     let staged = processed.into_staged_welcome(provider, None)

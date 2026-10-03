@@ -57,6 +57,13 @@ async function enterPin(page: Page, pin: string) {
   const cells = page.getByTestId("link-device-pin-input").locator("input");
   for (let i = 0; i < pin.length; i++) {
     await cells.nth(i).fill(pin[i]);
+    // InputOtp rebuilds the PIN from its last-rendered value on each change,
+    // so the next digit must wait for this one to render — otherwise a fill
+    // that outruns the re-render drops the previous digit (seen in CI). The
+    // last digit submits, after which the cells may unmount.
+    if (i < pin.length - 1) {
+      await expect(cells.nth(i)).not.toHaveValue("");
+    }
   }
 }
 

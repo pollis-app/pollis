@@ -60,6 +60,15 @@ The `test-harness` feature:
 
 It is **not** enabled in release builds.
 
+Third-party crates (OpenMLS, the PQ crypto, libsql) build optimized under
+`cargo test` — `[profile.test.package."*"] opt-level = 2` in the workspace
+`Cargo.toml` — while our own crates stay at opt-level 0 with debug assertions.
+At opt-level 0 the crypto is slow enough that real interleavings never happen in
+tests: the DM epoch-0 race (#1220) lost a message on every real-speed run and
+passed on every unoptimized one. Races a test depends on are still forced with
+`mls::rendezvous` points, so they are exercised at any build speed; the profile
+makes sure the rest of the suite runs at the speed devices do.
+
 ### Running headless (no desktop environment)
 
 ```bash

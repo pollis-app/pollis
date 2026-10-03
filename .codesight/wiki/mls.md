@@ -199,6 +199,35 @@ The replay still reaches head even with zero envelopes, so the cold-launch
 "advance every group to head" guarantee is preserved. Steady state is cheap:
 watermarks make repeat catch-ups return zero envelopes.
 
+### Join paths never replace a confirmed group (#1220)
+
+The watermark advances past any envelope sealed below the epoch the replay
+started at — it treats those as permanently undecryptable, which is only true if
+the device never threw away an epoch it was entitled to read. Both join paths
+used to replace whatever group was stored, and the DM epoch-0 race broke that:
+the recipient external-joins in the pre-reconcile window (no Welcome yet), loses
+epoch 0 to the creator's Add, and either (A) its Welcome lands before the retry
+and the retry's `build_external_commit` deletes the confirmed Welcome group at
+epoch 1 to join at epoch 2, or (B) its Welcome is polled while the doomed branch
+is still stored at epoch 1, refused as a replay and acknowledged. Either way the
+creator's message sealed at epoch 1 was lost, and the cursor moved past it.
+
+`mls::join_branch` closes it at the replacement chokepoint. An external join's
+branch is merged locally BEFORE the log's CAS decides it, so it is marked
+*unconfirmed* (an `mls_kv` row in the same critical section that stores it) and
+cleared when the log accepts the commit or a canonical commit applies on top.
+`external_join_may_replace`: an external join replaces only its own unconfirmed
+branch — a confirmed group makes the attempt stand down as `AlreadyMember`.
+`welcome_may_replace`: a Welcome replaces a strictly older group (#1161 C1) or an
+unconfirmed branch at its own epoch (the commit behind it holds the epoch the
+branch is claiming). A lost CAS deletes only a still-unconfirmed branch
+(`forget_unconfirmed_branch`). Rebuild paths that mean to discard a broken group
+(epoch desync, gap recovery) delete it by name first. Invariant I10 in
+`docs/backend-core-invariants.md`; flows tests
+`dms::retry_after_a_lost_epoch_zero_race_*` and
+`dms::welcome_polled_while_a_doomed_join_branch_*` force each ordering through
+rendezvous points (`ExternalJoinBeforeSubmit`, `ExternalJoinAfterLostRace`).
+
 ### Pre-op ingest-before-advance (committer strand, #440)
 
 The group-level catch-up above closes the *fetch / sweep / realtime* variants,
