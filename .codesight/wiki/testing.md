@@ -110,7 +110,7 @@ data-dir section](#the-process-wide-data-dir--never-set_var)).
    PRNG assertions get the same treatment: `fortuna_writes_every_byte_it_reports` pre-fills a sentinel and proves every reported byte was written (a partial fill leaves a non-zero prefix that carries the older, weaker assertions), and `fortuna_does_not_merely_count` scores each byte *position* across 64 reads, because a counter varies only in its low-order bytes.
 6. `cargo test -p pollis-tui` — see below.
    - `cd mobile && pnpm test` — Node's own runner over the pure modules in the Expo app (`mobile/tests/`). Mobile is a standalone project, not a workspace member, so it is its own command; it runs in CI inside `mobile-core-check.yml`'s cheap `expo-doctor` job rather than behind the 3-ABI `android-build`. Today it covers `applyReactionToggle`, the optimistic reaction reducer — whose whole job is to predict what `useConversationReactions` will report, so the cases that matter are the ones where the two could disagree (pill ordering, a message dropping out of the map, `count` tracking `user_ids`, an already-true toggle).
-7. `cargo test --features test-harness --test flows` — the integration harness.
+7. `cargo test --features test-harness --test flows` — the integration harness. **Not in this job any more:** it runs in the parallel `flows` job, sharded four ways across runners (shard 0 = the `model::` module, shards 1-3 = every other test round-robin, each taken from the built binary's own `--list` and run with `--exact`, so the union is the whole suite by construction). Sharding is sound because the harness's shared world is per process. `tests` still builds the flows binary on `main`, as the single writer of the cache the shards restore.
 8. `cargo clippy --workspace --all-targets -- -D warnings` — the Rust lint gate (#912). Runs last so the test signal lands first, and inside this job because the toolchain, apt deps and cargo cache are already there. `rust-toolchain.toml` lists `components = ["clippy"]`, so `cargo clippy` works on a dev box with no extra step; the job pins `dtolnay/rust-toolchain@1.96.0` (the action exports `RUSTUP_TOOLCHAIN` and would otherwise override the pin) so a new stable's new lints cannot turn an untouched PR red.
 
 Every step after the first carries `if: ${{ !cancelled() }}`, so one failure still lets the rest report.
@@ -905,8 +905,10 @@ every push to `main` (#1059). It ran nowhere from #843 until then, which is how
 the bookmarks copy-link paint assertion sat red on `main` from #990 onward
 without anyone noticing — the WebDriver tier's `e2e-*.yml` are dispatch-only
 by design, but this tier is seconds-per-spec and needs no backend, so there is
-no reason for it not to gate. Failure screenshots + traces upload as the
-`playwright-artifacts` workflow artifact.
+no reason for it not to gate. It is sharded four ways across runners
+(`--shard=N/4`, by spec file), each runner keeping the config's `workers: 1`;
+a `playwright` job aggregates the shards into one check. Failure screenshots +
+traces upload per shard as the `playwright-artifacts-N` workflow artifacts.
 
 | spec | what it proves |
 |---|---|

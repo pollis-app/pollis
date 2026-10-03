@@ -5,7 +5,8 @@ name: Browser UI specs
 # needs no backend, no secrets and no native shell — and for a year nothing
 # ran it in CI. #990 turned the bookmarks copy-link paint assertion red on
 # main and it stayed red, unnoticed, until #1059. This job is the always-on
-# gate that closes that hole: the whole suite, one Chromium, every PR.
+# gate that closes that hole: the whole suite, every PR — split across four
+# runners, one Chromium and one worker each (see `playwright-shard`).
 #
 # It is NOT the WebDriver tier: `e2e-*.yml` drive the real Tauri binary and
 # stay dispatch-only by design (docs/deployments.md → "On-demand E2E").
@@ -24,13 +25,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  playwright:
+  # Sharded across runners, NOT across workers. The config stays `workers: 1`
+  # (the composer specs are keystroke-driven and must not share a CPU with a
+  # second browser), so the only way to cut the ~11 min serial run is more
+  # machines: each shard is its own runner with its own vite server and its own
+  # Chromium, running a disjoint slice of the spec files (`--shard`), exactly
+  # as the unsharded job did. Playwright's shard split is by file and is
+  # complete by construction — every spec lands in exactly one shard.
+  playwright-shard:
+    name: playwright (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
-    # The suite takes ~6 min locally with one worker (the config is
-    # deliberately `workers: 1` — the composer specs are keystroke-driven).
-    # Twice that plus a cold browser download is the ceiling; a hung dev
-    # server must not hold a runner for the default six hours.
-    timeout-minutes: 20
+    strategy:
+      # Every shard reports, so one red spec doesn't hide another.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    # The whole suite took ~11 min serially on a runner; a shard is a quarter
+    # of that. A hung dev server must not hold a runner for the default six
+    # hours.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -56,8 +69,8 @@ jobs:
       # `CI=1` flips the config's `reuseExistingServer` off, so the run can
       # only ever talk to the vite server it started itself (the config
       # derives the port from the checkout path for the same reason).
-      - name: Run the browser suite
-        run: pnpm --filter @pollis/e2e e2e:ui
+      - name: Run the browser suite (shard ${{ matrix.shard }}/4)
+        run: pnpm --filter @pollis/e2e e2e:ui --shard=${{ matrix.shard }}/4
         env:
           CI: "1"
 
@@ -67,7 +80,25 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-artifacts
+          name: playwright-artifacts-${{ matrix.shard }}
           path: e2e/artifacts/playwright
           if-no-files-found: ignore
           retention-days: 7
+
+  # One stable check name for the whole suite, whatever the shard count: green
+  # only when every shard passed, red on any failure, cancel or skip. Keeps the
+  # check called `playwright`, as it was before sharding.
+  playwright:
+    needs: playwright-shard
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate shards
+        env:
+          RESULT: ${{ needs.playwright-shard.result }}
+        run: |
+          echo "playwright shards: $RESULT"
+          if [ "$RESULT" != "success" ]; then
+            echo "::error::Playwright shards did not all pass ($RESULT)."
+            exit 1
+          fi
