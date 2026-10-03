@@ -59,4 +59,9 @@ pub struct EnrollmentRequestBody {
     pub verification_code: String,
     pub created_at: String,
     pub expires_at: String,
+    /// QR device link (#1207): base64 `HMAC-SHA256(mac_key, link_id ‖ request_id
+    /// ‖ new_device_id ‖ ephemeral_pub)`. Required when the session is a
+    /// device-link session, refused otherwise.
+    #[serde(default)]
+    pub link_tag: Option<String>,
 }

@@ -538,7 +538,8 @@ pub async fn recovery_blob(
 
     let user_id = if state.require_auth {
         let now = crate::util::now_unix();
-        match crate::session::verify_session(&headers, &state.sessions, now) {
+        // OTP or device-link session (#1207): the new device's enrollment read.
+        match crate::session::verify_session_for_enrollment(&headers, &state.sessions, now) {
             Ok(claims) => {
                 if claims.user_id != parsed.user_id {
                     return Ok(AuthRejection::Forbidden.into_response());

@@ -39,6 +39,7 @@ pub mod email_change;
 pub mod emoji;
 pub mod error;
 pub mod groups;
+pub mod links;
 pub mod headers;
 pub mod invite_token;
 pub mod messages;
@@ -90,6 +91,8 @@ pub struct AppState {
     pub otp: otp::OtpStore,
     /// In-memory OTP-session store gating the bootstrap writes.
     pub sessions: session::SessionStore,
+    /// QR device links (#1207). In-memory, like `sessions`.
+    pub links: links::LinkStore,
     /// OTP/session tunables + the Resend key (DS env).
     pub otp_config: otp::OtpConfig,
     /// Email-change OTP store + requester binding (device-signed, separate from
@@ -144,6 +147,7 @@ impl AppState {
             require_auth,
             otp: otp::OtpStore::default(),
             sessions: session::SessionStore::default(),
+            links: links::LinkStore::default(),
             otp_config: otp::OtpConfig::default(),
             email_change: email_change::EmailChangeStore::default(),
             broker: broker::BrokerConfig::default(),
@@ -417,6 +421,11 @@ pub fn build_router_with_state(state: AppState) -> Router {
         // subsequent-device cert publish reuses publish-device-cert above, gated
         // by cert-validity ALONE (no session). See docs §5.
         .route(<bootstrap::EnrollmentRequestBody as DsRequest>::PATH, post(bootstrap::enrollment_request))
+        // QR device links (#1207): create/status are device-signed; claim is
+        // pre-credential and mints an enrollment-only session.
+        .route(<links::CreateLinkBody as DsRequest>::PATH, post(links::create_link))
+        .route(<links::ClaimLinkBody as DsRequest>::PATH, post(links::claim_link))
+        .route(<links::LinkStatusBody as DsRequest>::PATH, post(links::link_status))
         // Email change (Goal B #419 final piece) — DEVICE-SIGNED (the user is
         // already authenticated; the OTP only proves control of the NEW mailbox).
         // request records (authed → new_email); verify requires the signed caller
