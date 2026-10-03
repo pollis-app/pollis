@@ -39,6 +39,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # Only `main` writes (it has a `push:` trigger); PRs restore from it.
+          # A PR-saved cache is visible to that PR alone and only spends the
+          # repo's 10 GiB cache budget (#759).
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: cargo test (verifiable-log crates)
         run: cargo test -p verifiable-log -p verifiable-log-builder -p verifiable-log-serve
