@@ -51,8 +51,13 @@ async function approvals(page: Page): Promise<string[]> {
 }
 
 async function enterPin(page: Page, pin: string) {
-  await page.getByTestId("link-device-pin-input").locator("input").first().click();
-  await page.keyboard.type(pin);
+  // One fill per cell: each is its own change event on its own input, so no
+  // digit depends on InputOtp having moved focus in time. Per-key typing into
+  // the first cell raced that focus move and dropped a digit on a slow runner.
+  const cells = page.getByTestId("link-device-pin-input").locator("input");
+  for (let i = 0; i < pin.length; i++) {
+    await cells.nth(i).fill(pin[i]);
+  }
 }
 
 async function showCode(page: Page, pin: string) {
