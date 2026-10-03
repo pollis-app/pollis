@@ -217,6 +217,8 @@ interface MockStore {
   deviceLinkPin: string;
   deviceLinkScript: unknown[];
   deviceLinkApprovals: string[];
+  /** Abuse reports filed through `report_user` (#1213), args verbatim. */
+  reports: Record<string, unknown>[];
   enrollmentWait: 'none' | 'pending';
   // Local voice gate (#849). Rust owns this in production.
   voiceGate: MockVoiceGate;
@@ -308,6 +310,7 @@ const store: MockStore = {
   deviceLinkPin: (preload.deviceLinkPin as string | undefined) ?? '1234',
   deviceLinkScript: (preload.deviceLinkScript as unknown[] | undefined) ?? [],
   deviceLinkApprovals: [],
+  reports: [],
   enrollmentWait: (preload.enrollmentWait as 'none' | 'pending' | undefined) ?? 'none',
   voiceGate: {
     mode: 'voice_activity',
@@ -950,6 +953,9 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       store.deviceLinkApprovals.push(args.linkId as string);
       return null;
     case 'cancel_device_link':
+      return null;
+    case 'report_user':
+      store.reports.push({ ...args });
       return null;
     case 'claim_device_link': {
       const payload = args.payload as string;

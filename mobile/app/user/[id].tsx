@@ -275,7 +275,20 @@ function UserProfile() {
             </View>
 
             <SectionTitle>{upper(t("mobile:user.safetyActionsHeading"))}</SectionTitle>
-            <View style={{ paddingHorizontal: 18 }}>
+            <View style={{ paddingHorizontal: 18, gap: 10 }}>
+              <Button
+                full
+                testID="btn-report-user"
+                variant="danger"
+                icon={<Icon.flag color={semantic.danger} />}
+                onPress={() => {
+                  if (peerId) {
+                    router.push({ pathname: "/report", params: { userId: peerId } });
+                  }
+                }}
+              >
+                {upper(t("dms:profile.report"))}
+              </Button>
               <Button
                 full
                 testID={isBlocked ? "btn-unblock" : "btn-block"}

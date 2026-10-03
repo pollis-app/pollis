@@ -12,6 +12,7 @@ import {
   Check,
   AlertCircle,
   Trash2,
+  Flag,
 } from "lucide-react";
 import { ReactionAddButton } from "./ReactionAddButton";
 
@@ -36,6 +37,8 @@ interface MessageActionsProps {
   onCopyLink?: (messageId: string) => void;
   onEdit?: (messageId: string) => void;
   onDelete?: (messageId: string) => void;
+  /** Report this message's sender (#1213). Shown on other people's messages. */
+  onReport?: (messageId: string) => void;
 }
 
 // Approximate rendered menu height plus margin — used to decide whether the
@@ -67,6 +70,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
   onCopyLink,
   onEdit,
   onDelete,
+  onReport,
 }) => {
   const { t } = useTranslation("chat");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -107,8 +111,9 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
   }, [menuOpen]);
 
   const canDelete = (isOwn || canModerate) && !!onDelete;
+  const canReport = !isOwn && !!onReport;
   const hasMenu =
-    !!onOpenThread || !!onToggleSave || !!onTogglePin || !!onCopyLink || canDelete;
+    !!onOpenThread || !!onToggleSave || !!onTogglePin || !!onCopyLink || canDelete || canReport;
 
   const copyLinkIcon =
     copyLinkState === "copied" ? Check : copyLinkState === "failed" ? AlertCircle : Link;
@@ -310,6 +315,17 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
                 >
                   {React.createElement(copyLinkIcon, { size: 16, className: "shrink-0" })}
                   {copyLinkLabel}
+                </button>
+              )}
+              {canReport && onReport && (
+                <button
+                  role="menuitem"
+                  data-testid="report-button"
+                  onClick={closeAnd(() => onReport(messageId))}
+                  className={`${menuRowClass} ${menuRowFocusDangerClass} text-danger`}
+                >
+                  <Flag size={16} className="shrink-0" />
+                  {t("actions.report")}
                 </button>
               )}
               {canDelete && onDelete && (

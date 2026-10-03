@@ -64,6 +64,42 @@ export function useBlockUser() {
   });
 }
 
+export type ReportReason = "spam" | "harassment" | "illegal" | "other";
+
+/**
+ * Report a user (#1213), optionally pointing at one of their messages,
+ * optionally blocking them in the same step. Sends ids and a reason only; no
+ * message text ever leaves the device.
+ */
+export function useReportUser() {
+  const queryClient = useQueryClient();
+  const currentUser = useObserver(() => appStore.currentUser);
+  return useMutation({
+    mutationFn: async (vars: {
+      reportedId: string;
+      reason: ReportReason;
+      conversationId?: string | null;
+      messageId?: string | null;
+      alsoBlock: boolean;
+    }) => {
+      await invoke("report_user", {
+        reportedId: vars.reportedId,
+        reason: vars.reason,
+        conversationId: vars.conversationId ?? null,
+        messageId: vars.messageId ?? null,
+        alsoBlock: vars.alsoBlock,
+      });
+    },
+    onSuccess: (_data, vars) => {
+      if (vars.alsoBlock) {
+        queryClient.invalidateQueries({ queryKey: blockQueryKeys.list(currentUser?.id ?? null) });
+        queryClient.invalidateQueries({ queryKey: dmQueryKeys.channels(currentUser?.id ?? null) });
+        queryClient.invalidateQueries({ queryKey: dmQueryKeys.requests(currentUser?.id ?? null) });
+      }
+    },
+  });
+}
+
 export function useUnblockUser() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);

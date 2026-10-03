@@ -235,6 +235,20 @@ const changePinRoute = createRoute({
   component: lazyRouteComponent(() => import("./pages/ChangePinPage"), "ChangePinPage"),
 });
 
+// Report a user (#1213), or one of their messages. Parameterized, so not a
+// static page (no search entry, no sidebar row).
+const reportUserRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/report/$userId",
+  component: lazyRouteComponent(() => import("./pages/ReportPage"), "ReportPage"),
+});
+
+const reportMessageRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/report/$userId/$conversationId/$messageId",
+  component: lazyRouteComponent(() => import("./pages/ReportPage"), "ReportPage"),
+});
+
 const linkDeviceRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/security/link-device",
@@ -350,6 +364,8 @@ const routeTree = rootRoute.addChildren([
   securityRoute,
   changePinRoute,
   linkDeviceRoute,
+  reportUserRoute,
+  reportMessageRoute,
   invitesRoute,
   joinByInviteRoute,
   inviteLinkLandingRoute,

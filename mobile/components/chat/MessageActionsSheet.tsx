@@ -86,6 +86,7 @@ export function MessageActionsSheet({
   onCopyLink,
   onEdit,
   onDelete,
+  onReport,
   onClose,
 }: {
   target: Message;
@@ -99,6 +100,8 @@ export function MessageActionsSheet({
   onCopyLink: () => Promise<boolean>;
   onEdit: () => void;
   onDelete: () => void;
+  /** Report the sender (#1213). Shown only on other people's messages. */
+  onReport?: () => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation("chat");
@@ -313,6 +316,30 @@ export function MessageActionsSheet({
             </Text>
           </Pressable>
         </>
+      ) : null}
+
+      {!isOwn && onReport ? (
+        <Pressable
+          onPress={onReport}
+          testID="btn-report"
+          accessibilityRole="button"
+          accessibilityLabel={t("actions.report")}
+          style={{
+            paddingVertical: 14,
+            paddingHorizontal: 12,
+            borderWidth: 1,
+            borderColor: "rgba(196,106,46,0.4)",
+            borderRadius: r.sm,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 10,
+          }}
+        >
+          <Icon.flag color={semantic.danger} />
+          <Text style={{ fontFamily: ty.body.fontFamily, fontSize: 14, color: semantic.danger }}>
+            {t("actions.report")}
+          </Text>
+        </Pressable>
       ) : null}
 
       <Pressable

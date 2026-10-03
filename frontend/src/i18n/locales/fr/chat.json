@@ -27,7 +27,8 @@
     "deleteAsAdmin": "Supprimer le message (admin)",
     "more": "Plus d'actions",
     "pin": "Épingler le message",
-    "unpin": "Désépingler le message"
+    "unpin": "Désépingler le message",
+    "report": "Signaler"
   },
   "thread": {
     "replyCount_one": "{{count}} réponse",
@@ -109,5 +110,25 @@
     "kilobytes": "{{size}} Ko",
     "megabytes": "{{size}} Mo",
     "gigabytes": "{{size}} Go"
+  },
+  "report": {
+    "someone": "cette personne",
+    "titleMessage": "Signaler le message",
+    "titleUser": "Signaler {{name}}",
+    "intro": "Pollis reçoit le compte et le motif. Les messages restent chiffrés : nous ne voyons jamais ce qui a été dit.",
+    "reasonLabel": "Motif",
+    "reason": {
+      "spam": "Spam",
+      "harassment": "Harcèlement ou menaces",
+      "illegal": "Contenu illégal",
+      "other": "Autre chose"
+    },
+    "submit": "Signaler",
+    "submitAndBlock": "Signaler et bloquer",
+    "failed": "Impossible d'envoyer le signalement. Réessayez.",
+    "doneTitle": "Signalement envoyé",
+    "done": "Merci. Nous examinons chaque signalement.",
+    "doneBlocked": "Merci. Nous examinons chaque signalement. Vous avez aussi bloqué {{name}}.",
+    "close": "Terminé"
   }
 }

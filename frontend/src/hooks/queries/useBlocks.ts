@@ -75,6 +75,41 @@ export function useBlockUser() {
   });
 }
 
+export type ReportReason = "spam" | "harassment" | "illegal" | "other";
+
+// Mutation: report a user (#1213), optionally pointing at one of their
+// messages, optionally blocking them too. Sends ids and a reason only; no
+// message text ever leaves this device.
+export function useReportUser() {
+  const queryClient = useQueryClient();
+  const currentUser = useObserver(() => appStore.currentUser);
+
+  return useMutation({
+    mutationFn: async (vars: {
+      reportedId: string;
+      reason: ReportReason;
+      conversationId?: string | null;
+      messageId?: string | null;
+      alsoBlock: boolean;
+    }): Promise<void> => {
+      await invoke("report_user", {
+        reportedId: vars.reportedId,
+        reason: vars.reason,
+        conversationId: vars.conversationId ?? null,
+        messageId: vars.messageId ?? null,
+        alsoBlock: vars.alsoBlock,
+      });
+    },
+    onSuccess: (_data, vars) => {
+      if (vars.alsoBlock) {
+        queryClient.invalidateQueries({ queryKey: ["dmRequests"] });
+        queryClient.invalidateQueries({ queryKey: messageQueryKeys.dmConversations(currentUser?.id ?? null) });
+        queryClient.invalidateQueries({ queryKey: ["blockedUsers"] });
+      }
+    },
+  });
+}
+
 // Mutation: unblock a user.
 export function useUnblockUser() {
   const queryClient = useQueryClient();

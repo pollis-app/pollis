@@ -1,0 +1,64 @@
+appId: com.pollis.mobile
+tags:
+  - parity
+---
+# REPORT (#1213) — report the seeded peer from their profile: a reason is
+# required, Report and block both files the report and blocks, and the
+# confirmation says so. Requires ${MAESTRO_PEER_HANDLE} on the dev DS. The
+# message-level entry (long-press → Report) opens the same screen with the
+# conversation and message ids; Playwright covers that the request carries no
+# message text.
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-search"
+- tapOn:
+    id: "input-search"
+- inputText: "${MAESTRO_PEER_HANDLE}"
+- extendedWaitUntil:
+    visible:
+      id: "row-user-.*"
+    timeout: 20000
+- tapOn:
+    id: "row-user-.*"
+- scrollUntilVisible:
+    element:
+      id: "btn-report-user"
+    direction: DOWN
+- tapOn:
+    id: "btn-report-user"
+- extendedWaitUntil:
+    visible:
+      id: "screen-report"
+    timeout: 10000
+- takeScreenshot: report-01-reasons
+# No reason yet: Report does nothing.
+- tapOn:
+    id: "btn-report-submit"
+- assertVisible:
+    id: "screen-report"
+- assertNotVisible:
+    id: "report-done"
+- tapOn:
+    id: "report-reason-spam"
+- tapOn:
+    id: "btn-report-and-block"
+- extendedWaitUntil:
+    visible:
+      id: "report-done"
+    timeout: 15000
+- takeScreenshot: report-02-done
+- tapOn:
+    id: "btn-report-done"
+# The block landed: the profile now offers Unblock.
+- scrollUntilVisible:
+    element:
+      id: "btn-unblock"
+    direction: DOWN
+# Leave the peer unblocked for the other flows that DM them.
+- tapOn:
+    id: "btn-unblock"
+- extendedWaitUntil:
+    visible:
+      id: "btn-block"
+    timeout: 15000

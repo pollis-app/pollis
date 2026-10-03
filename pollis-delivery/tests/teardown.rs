@@ -57,6 +57,9 @@ const USER_COLUMNS: &[(&str, &str)] = &[
     ("security_event", "user_id"),
     ("user_block", "blocker_id"),
     ("user_block", "blocked_id"),
+    ("user_report", "reporter_id"),
+    ("user_report", "reported_id"),
+    ("account_suspension", "user_id"),
     ("user_device", "user_id"),
     ("user_preferences", "user_id"),
     ("users", "id"),
@@ -152,6 +155,18 @@ async fn seed_user(c: &Connection, u: &str, peer: &str, solo: bool) {
     )).await;
     exec(c, &format!(
         "INSERT INTO user_block (blocker_id, blocked_id) VALUES ('{u}_stranger2', '{u}')"
+    )).await;
+    // Reports in both directions and a suspension (#1213).
+    exec(c, &format!(
+        "INSERT INTO user_report (id, reporter_id, reported_id, reason) \
+         VALUES ('{u}_r1', '{u}', '{u}_stranger', 'spam')"
+    )).await;
+    exec(c, &format!(
+        "INSERT INTO user_report (id, reporter_id, reported_id, reason) \
+         VALUES ('{u}_r2', '{u}_stranger2', '{u}', 'harassment')"
+    )).await;
+    exec(c, &format!(
+        "INSERT INTO account_suspension (user_id, reason) VALUES ('{u}', 'test')"
     )).await;
 
     // A group the user belongs to, with one channel carrying a message.

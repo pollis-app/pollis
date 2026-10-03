@@ -50,6 +50,7 @@ pub mod profile;
 pub mod push;
 pub mod ratelimit;
 pub mod reads;
+pub mod reports;
 pub mod redact;
 pub mod room_id;
 pub mod session;
@@ -359,6 +360,8 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route(<profile::SavePreferencesBody as DsRequest>::PATH, post(profile::save_preferences))
         .route(<profile::AddBlock as DsRequest>::PATH, post(profile::block_user))
         .route(<profile::RemoveBlock as DsRequest>::PATH, post(profile::unblock_user))
+        // Abuse reports (#1213): ids and a reason, never content.
+        .route(<pollis_api::reports::ReportUserBody as DsRequest>::PATH, post(reports::report_user))
         .route(<profile::CreateDmBody as DsRequest>::PATH, post(profile::create_dm))
         .route(<profile::AcceptDmBody as DsRequest>::PATH, post(profile::accept_dm))
         .route(<profile::AddDmMemberBody as DsRequest>::PATH, post(profile::add_dm_member))

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { useNavigate } from "@tanstack/react-router";
 import { MessageItem } from "./MessageItem";
 import "./messageHighlight.css";
 import {
@@ -636,6 +637,27 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     [],
   );
 
+  // Report the message's sender (#1213). Like Copy link, it names the
+  // message's OWN conversation, never the list's MLS group id.
+  const navigate = useNavigate();
+  const handleReport = useCallback(
+    (messageId: string) => {
+      const message = sortedMessagesRef.current.find((m) => m.id === messageId);
+      if (!message) {
+        return;
+      }
+      if (message.conversation_id) {
+        navigate({
+          to: "/report/$userId/$conversationId/$messageId",
+          params: { userId: message.sender_id, conversationId: message.conversation_id, messageId },
+        });
+      } else {
+        navigate({ to: "/report/$userId", params: { userId: message.sender_id } });
+      }
+    },
+    [navigate],
+  );
+
   // Read the pending jump during RENDER, not only inside the effect below.
   // `MessageList` is an `observer`, and observers only subscribe to what they
   // touch while rendering — claiming solely inside an effect would mean a jump
@@ -920,6 +942,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
         isPinned={pinnedMessageIds.has(message.id)}
         onTogglePin={pinsConversationId ? handleTogglePin : undefined}
         onCopyLink={handleCopyLink}
+        onReport={handleReport}
         copyLinkState={
           copyLinkState?.messageId === message.id ? copyLinkState.state : "idle"
         }

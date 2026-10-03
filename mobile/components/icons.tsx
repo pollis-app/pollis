@@ -40,6 +40,7 @@ import {
   Volume2,
   Info,
   MessagesSquare,
+  Flag,
   type LucideIcon,
 } from "lucide-react-native";
 import { I18nManager, View } from "react-native";
@@ -112,6 +113,7 @@ export const Icon = {
   info: wrap(Info, 16),
   thread: wrap(MessagesSquare, 14),
   bookmark: wrap(Bookmark, 14),
+  flag: wrap(Flag, 14),
 };
 
 export type IconName = keyof typeof Icon;

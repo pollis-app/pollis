@@ -61,7 +61,8 @@
     "keyChangedWarning": "This contact's identity key changed since you last verified it. Compare the number again out-of-band before trusting it.",
     "compareHint": "Compare these digits with {{name}} over a trusted channel (in person, a call you recognise). If they match, mark this contact verified.",
     "removeVerification": "Remove verification",
-    "markVerified": "Mark verified"
+    "markVerified": "Mark verified",
+    "report": "Report"
   },
   "notify": {
     "requestTitle": "New conversation",

@@ -22,3 +22,8 @@ pub async fn unblock_user(blocker_id: String, blocked_id: String, state: State<'
 pub async fn list_blocked_users(user_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<BlockedUser>> {
     pollis_core::commands::blocks::list_blocked_users(user_id, &state).await
 }
+
+#[tauri::command]
+pub async fn report_user(reported_id: String, reason: String, conversation_id: Option<String>, message_id: Option<String>, also_block: bool, state: State<'_, Arc<AppState>>) -> Result<()> {
+    pollis_core::commands::blocks::report_user(reported_id, reason, conversation_id, message_id, also_block, &state).await
+}

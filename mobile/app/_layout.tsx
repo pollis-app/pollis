@@ -134,6 +134,7 @@ export default function RootLayout() {
               <Stack.Screen name="chat/[id]" />
               <Stack.Screen name="chat/thread" />
               <Stack.Screen name="user/[id]" />
+              <Stack.Screen name="report" options={settingsPage} />
               {/* Personal settings pages pop up from the bottom on iOS (fade on
                   Android — see lib/transitions), pushing the current screen off
                   and reversing on back — a full-screen push, not an overlay. */}

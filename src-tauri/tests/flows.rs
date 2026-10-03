@@ -43,6 +43,8 @@ mod pq_key_packages;
 mod pq_migration;
 #[path = "flows/rejoin.rs"]
 mod rejoin;
+#[path = "flows/reports.rs"]
+mod reports;
 #[path = "flows/sealed_sender.rs"]
 mod sealed_sender;
 #[path = "flows/security.rs"]

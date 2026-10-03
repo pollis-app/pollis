@@ -953,6 +953,15 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             blocks::block_user(blocker_id, blocked_id, &state()?).await?;
             ok(())
         }
+        "report_user" => {
+            let reported_id: String = arg(&args, "reportedId")?;
+            let reason: String = arg(&args, "reason")?;
+            let conversation_id: Option<String> = arg_opt(&args, "conversationId")?;
+            let message_id: Option<String> = arg_opt(&args, "messageId")?;
+            let also_block: bool = arg_opt(&args, "alsoBlock")?.unwrap_or(false);
+            blocks::report_user(reported_id, reason, conversation_id, message_id, also_block, &state()?).await?;
+            ok(())
+        }
         "unblock_user" => {
             let blocker_id: String = arg(&args, "blockerId")?;
             let blocked_id: String = arg(&args, "blockedId")?;
