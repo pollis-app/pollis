@@ -20,6 +20,8 @@ tags:
 - tapOn:
     id: "input-user-search"
 - inputText: "${MAESTRO_PEER_HANDLE}"
+# Exact-match lookup on return / Find only, never per keystroke.
+- pressKey: Enter
 - takeScreenshot: dms-02-search
 # The result row starts the DM when tapped. Match the id as a REGEX PREFIX:
 # the app emits `row-user-<userId>`, not `row-user-<handle>`, and the user id

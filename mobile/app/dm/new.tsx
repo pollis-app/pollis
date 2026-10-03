@@ -11,6 +11,7 @@ import {
   Avatar,
   Ctx,
   CtxAct,
+  Button,
 } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
@@ -21,7 +22,17 @@ export default function NewDM() {
   const router = useRouter();
   const { t } = useTranslation("mobile");
   const [query, setQuery] = useState("");
-  const search = useUserSearch(query);
+  // Exact-match lookup on Find / return only, never while typing: per-key
+  // lookups let anyone walk the directory one prefix at a time (#1216).
+  // Desktop's Start DM looks up on submit the same way.
+  const [submitted, setSubmitted] = useState("");
+  const search = useUserSearch(submitted);
+  const submit = () => {
+    const q = query.trim();
+    if (q.length >= 2) {
+      setSubmitted(q);
+    }
+  };
   const createDM = useCreateDM();
 
   const onStartDM = (userId: string) => {
@@ -40,7 +51,7 @@ export default function NewDM() {
 
   const found = search.data;
   const showEmpty =
-    !search.isLoading && !search.isError && query.trim().length >= 2 && !found;
+    !search.isFetching && !search.isError && submitted.length >= 2 && !found;
   const directLabel = upper(t("tabs.direct"));
 
   return (
@@ -57,6 +68,8 @@ export default function NewDM() {
             amber
             value={query}
             onChangeText={setQuery}
+            onSubmitEditing={submit}
+            returnKeyType="search"
             testID="input-user-search"
             accessibilityLabel={t("dms:start.identifierLabel")}
             icon={<Icon.search color={semantic.mute} />}
@@ -70,10 +83,19 @@ export default function NewDM() {
           >
             {t("dm.exactMatchHint")}
           </Text>
+          <Button
+            testID="btn-user-search"
+            variant="subtle"
+            full
+            disabled={query.trim().length < 2 || search.isFetching}
+            onPress={submit}
+          >
+            {upper(search.isFetching ? t("search:view.searching") : t("search:group.submit"))}
+          </Button>
         </View>
 
         <View style={{ paddingTop: 8 }}>
-          {search.isLoading && query.trim().length >= 2 ? (
+          {search.isLoading && submitted.length >= 2 ? (
             <Text
               style={{
                 fontFamily: ty.body.fontFamily,

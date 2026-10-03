@@ -17,6 +17,8 @@ tags:
 - tapOn:
     id: "input-search"
 - inputText: "${MAESTRO_PEER_HANDLE}"
+# Account lookup is exact-match and runs only on return, never per keystroke.
+- pressKey: Enter
 - extendedWaitUntil:
     visible:
       id: "row-user-.*"

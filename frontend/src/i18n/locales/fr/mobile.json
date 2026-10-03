@@ -247,7 +247,7 @@
   },
   "search": {
     "channels": "Canaux",
-    "hint": "Saisissez au moins 2 caractères pour rechercher.",
+    "hint": "Saisissez au moins 2 caractères pour rechercher. Pour trouver une personne, saisissez son nom d'utilisateur exact et appuyez sur Entrée.",
     "filtersLabel": "Filtres",
     "messages": "Messages",
     "placeholder": "Rechercher partout…",
