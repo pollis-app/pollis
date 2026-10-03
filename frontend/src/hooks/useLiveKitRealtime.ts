@@ -121,6 +121,8 @@ type RealtimeEvent =
     request_id: string;
     new_device_id: string;
     verification_code: string;
+    /// Set when the request belongs to a QR device link (#1207).
+    link_id?: string | null;
   }
   | {
     type: 'realtime_reconnected';
@@ -585,6 +587,12 @@ export function useLiveKitRealtime() {
       }
 
       if (event.type === 'enrollment_requested') {
+        // A QR-linked request (#1207) is approved on the device showing that
+        // QR, on the link tag — the new phone shows no code, so the typed-code
+        // takeover below could never be completed. The link screen handles it.
+        if (event.link_id) {
+          return;
+        }
         // Immediate UI takeover — the user must explicitly approve or
         // reject the request. Silently ignoring an enrollment is a quiet
         // account-takeover vector. Sound + OS notification + overlay are

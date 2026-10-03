@@ -15,6 +15,7 @@ import * as api from "../services/api";
 import { AccountKeyAuditLine } from "../components/Security/AccountKeyAuditLine";
 import { BuildVerifyLine } from "../components/Security/BuildVerifyLine";
 import { ExportArchiveButton } from "../components/Security/ExportArchiveButton";
+import { LinkDeviceSection } from "../components/Security/LinkDeviceSection";
 import { useSelfAuditAccountKey, useVerifyOwnBuild } from "../hooks/queries";
 import { getVersion, shellOpen } from "../bridge";
 import { usePreferences } from "../hooks/queries/usePreferences";
@@ -584,6 +585,14 @@ export const SecurityPage: React.FC = observer(() => {
               {t("security.autoLockNote")}
             </p>
           </section>
+
+          {/* Link a new device by QR (#1207) */}
+          {currentUser && (
+            <section className="flex flex-col gap-4 mb-12">
+              <h2 className={sectionHeaderClass}>{t("linkDevice.heading")}</h2>
+              <LinkDeviceSection userId={currentUser.id} />
+            </section>
+          )}
 
           {/* Devices */}
           <section className="flex flex-col gap-4 mb-12">

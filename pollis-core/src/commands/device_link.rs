@@ -59,7 +59,7 @@ pub enum DeviceLinkStatus {
     Claimed { device_name: Option<String> },
     /// That phone is waiting for approval, and its key is authenticated by the
     /// link tag. Safe to show Approve.
-    ReadyToApprove { device_name: Option<String>, new_device_id: String },
+    ReadyToApprove { device_name: Option<String>, new_device_id: String, request_id: String },
     /// The request's tag does NOT verify — the server (or someone between)
     /// altered it. Never approvable; the UI says so and offers a fresh QR.
     Tampered,
@@ -163,6 +163,45 @@ pub async fn poll_device_link(state: &Arc<AppState>, user_id: String, link_id: S
     Ok(verified_status(state, &user_id, &link_id).await?.0)
 }
 
+/// Wait until the link leaves the state the caller last saw (`since`, the
+/// `state` tag of a [`DeviceLinkStatus`]), then return the new status.
+///
+/// ONE awaited call, not a renderer poll — the same shape as
+/// `await_enrollment_approval`: exponential backoff between reads in Rust and
+/// a hard stop at the claimed-link lifetime, so it cannot outlive the link.
+/// The creator's UI calls it again after each transition.
+pub async fn await_device_link(
+    state: &Arc<AppState>,
+    user_id: String,
+    link_id: String,
+    since: String,
+) -> Result<DeviceLinkStatus> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(16 * 60);
+    let mut delay = std::time::Duration::from_millis(500);
+    loop {
+        let status = verified_status(state, &user_id, &link_id).await?.0;
+        if status_tag(&status) != since || matches!(status, DeviceLinkStatus::Expired) {
+            return Ok(status);
+        }
+        if std::time::Instant::now() + delay >= deadline {
+            return Ok(DeviceLinkStatus::Expired);
+        }
+        tokio::time::sleep(delay).await;
+        delay = std::cmp::min(delay * 2, std::time::Duration::from_secs(4));
+    }
+}
+
+/// The serde `state` tag of a status, for [`await_device_link`]'s comparison.
+fn status_tag(s: &DeviceLinkStatus) -> &'static str {
+    match s {
+        DeviceLinkStatus::Open => "open",
+        DeviceLinkStatus::Claimed { .. } => "claimed",
+        DeviceLinkStatus::ReadyToApprove { .. } => "ready_to_approve",
+        DeviceLinkStatus::Tampered => "tampered",
+        DeviceLinkStatus::Expired => "expired",
+    }
+}
+
 /// [`poll_device_link`] plus, when approvable, the request facts the wrap
 /// needs — read and verified in one pass so approval wraps to exactly the key
 /// whose tag was checked.
@@ -213,6 +252,7 @@ async fn verified_status(
                 DeviceLinkStatus::ReadyToApprove {
                     device_name: st.device_name,
                     new_device_id: row.new_device_id.clone(),
+                    request_id: request_id.clone(),
                 },
                 Some((request_id, row.new_device_id, ephemeral_pub)),
             ))

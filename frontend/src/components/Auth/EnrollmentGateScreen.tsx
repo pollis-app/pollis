@@ -11,6 +11,10 @@ import { LoadingSpinner } from "../ui/LoaderSpinner";
 import * as api from "../../services/api";
 
 interface EnrollmentGateScreenProps {
+  /// Signed in by a QR device link (#1207): start the enrollment request at
+  /// once and wait for Approve on the device that showed the QR — there is no
+  /// code for the user to read out.
+  linked?: boolean;
   userId: string;
   /// Email address the user just signed in with, used as the required
   /// confirmation in the soft-recovery flow.
@@ -40,6 +44,7 @@ type GatePhase =
   | { phase: "error"; message: string };
 
 export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
+  linked = false,
   userId,
   userEmail,
   onEnrolled,
@@ -116,6 +121,15 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
     }
   };
 
+  // A linked sign-in skips the chooser: the only next step is the request
+  // the QR's device will approve.
+  useEffect(() => {
+    if (linked) {
+      void handleStartApproval();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linked]);
+
   const restart = () => {
     // Abandon any outstanding wait — see `waitGenerationRef`.
     waitGenerationRef.current += 1;
@@ -180,7 +194,11 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
               />
             )}
 
-            {state.phase === "awaiting-approval" && (
+            {state.phase === "awaiting-approval" && linked && (
+              <LinkedAwaitingPane onCancel={onCancel} />
+            )}
+
+            {state.phase === "awaiting-approval" && !linked && (
               <AwaitingApprovalPane
                 code={state.verificationCode}
                 expiresAt={state.expiresAt}
@@ -304,6 +322,24 @@ const ChoosePane: React.FC<{
         className="w-full mt-12"
       >
         {t("enroll.cancelAndSwitch")}
+      </Button>
+    </div>
+  );
+};
+
+/// Waiting on a QR-linked approval (#1207): no code to read out — the device
+/// that showed the QR approves on the link tag.
+const LinkedAwaitingPane: React.FC<{ onCancel: () => void }> = ({ onCancel }) => {
+  const { t } = useTranslation("auth");
+  return (
+    <div className="flex flex-col gap-4" data-testid="linked-awaiting-approval">
+      <p className="text-sm font-mono text-fg">{t("link.awaitingTitle")}</p>
+      <p className="text-xs font-mono text-muted">{t("link.awaitingIntro")}</p>
+      <div className="flex items-center gap-2 justify-center">
+        <LoadingSpinner size="sm" />
+      </div>
+      <Button data-testid="cancel-linked-approval-button" onClick={onCancel} variant="ghost" className="w-full">
+        {t("common:actions.cancel")}
       </Button>
     </div>
   );

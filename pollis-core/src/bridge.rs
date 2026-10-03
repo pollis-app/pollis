@@ -309,6 +309,12 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let link_id: String = arg(&args, "linkId")?;
             ok(crate::commands::device_link::poll_device_link(&state()?, user_id, link_id).await?)
         }
+        "await_device_link" => {
+            let user_id: String = arg(&args, "userId")?;
+            let link_id: String = arg(&args, "linkId")?;
+            let since: String = arg(&args, "since")?;
+            ok(crate::commands::device_link::await_device_link(&state()?, user_id, link_id, since).await?)
+        }
         "approve_device_link" => {
             let user_id: String = arg(&args, "userId")?;
             let link_id: String = arg(&args, "linkId")?;

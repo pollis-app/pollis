@@ -374,5 +374,28 @@
     "rebuilding": "Rebuilding…",
     "rebuilt": "Search index rebuilt.",
     "description": "Search runs entirely on this device, over an index stored inside the encrypted local database. It repairs itself at startup if it ever goes wrong; rebuild it by hand only if search is missing messages you know are here."
+  },
+  "linkDevice": {
+    "heading": "Link a new device",
+    "description": "Sign a phone or tablet in by scanning a code, without an email code. You'll need this device's PIN, and nothing is shared until you approve the device that scans it.",
+    "start": "Link a device",
+    "pinLabel": "This device's PIN",
+    "showCode": "Show code",
+    "pinFailed": "That PIN isn't right.",
+    "scanPrompt": "On the new device, choose \"Sign in with another device\" and scan this code. It expires in {{seconds}}s.",
+    "claimed": "{{name}} is signing in…",
+    "wantsToSignIn": "{{name}} wants to sign in to your account.",
+    "approveHint": "Approve only if this is the device you just scanned the code with. It will be able to read your conversations from now on.",
+    "approve": "Approve",
+    "reject": "Reject",
+    "linked": "{{name}} is now signed in.",
+    "unnamedDevice": "A new device",
+    "tampered": "This sign-in request was altered in transit, so it can't be approved. Show a new code and try again.",
+    "expired": "This code has expired.",
+    "newCode": "Show a new code",
+    "cantScan": "Can't scan it?",
+    "cantScanHint": "On the new device, choose \"Enter a code instead\" and paste this:",
+    "failed": "Couldn't link the device. Try again.",
+    "done": "Done"
   }
 }

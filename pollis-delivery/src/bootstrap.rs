@@ -595,11 +595,17 @@ pub async fn enrollment_request(
             // Best-effort: a miss is covered by the sibling's login-time
             // `list_pending_enrollment_requests` poll.
             let inbox = format!("inbox-{}", claims.user_id);
+            // `link_id` (#1207) tells clients this request belongs to a QR
+            // link: the device showing that QR approves it on the link tag,
+            // and no device should pop the typed-code approval for it — the
+            // phone shows no code to type.
+            let link_id = link.as_ref().map(|(id, _)| id.clone());
             let event = serde_json::json!({
                 "type": "enrollment_requested",
                 "request_id": parsed.request_id,
                 "new_device_id": claims.device_id,
                 "verification_code": parsed.verification_code,
+                "link_id": link_id,
             });
             if let Err(e) = crate::broker::room_send_data(&state, &inbox, &event).await {
                 tracing::warn!("enrollment-request inbox notify failed (non-fatal): {e}");

@@ -60,6 +60,7 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::device_enrollment::finalize_device_enrollment,
             crate::commands::device_link::create_device_link,
             crate::commands::device_link::poll_device_link,
+            crate::commands::device_link::await_device_link,
             crate::commands::device_link::approve_device_link,
             crate::commands::device_link::cancel_device_link,
             crate::commands::device_link::claim_device_link,

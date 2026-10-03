@@ -77,6 +77,9 @@ function MainApp() {
   // The user we're enrolling. Set when an enrollment-required login happens
   // so the EnrollmentGateScreen knows whose account it's joining.
   const [pendingEnrollmentUser, setPendingEnrollmentUser] = useState<User | null>(null);
+  // Signed in by a QR device link (#1207): the gate auto-starts and shows no
+  // code, since approval happens on the device that showed the QR.
+  const [pendingEnrollmentLinked, setPendingEnrollmentLinked] = useState(false);
   // User queued for PIN setup (post-signup, post-enrollment, or
   // post-upgrade when `pin_set` is false but the user already has a
   // session) or PIN entry (returning user whose PIN is set but has not
@@ -310,6 +313,7 @@ function MainApp() {
     // Must run the enrollment gate before the main app.
     if (result.enrollmentRequired) {
       setPendingEnrollmentUser(result.user);
+      setPendingEnrollmentLinked(result.linked ?? false);
       setAppState("enrollment-required");
       return;
     }
@@ -662,6 +666,7 @@ function MainApp() {
   if (appState === "enrollment-required" && pendingEnrollmentUser) {
     return (
       <EnrollmentGateScreen
+        linked={pendingEnrollmentLinked}
         userId={pendingEnrollmentUser.id}
         userEmail={pendingEnrollmentUser.email ?? ""}
         onEnrolled={handleEnrolled}

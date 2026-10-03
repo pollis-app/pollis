@@ -29,6 +29,9 @@ export interface AuthResult {
   user: User;
   newSecretKey: string | null;
   enrollmentRequired: boolean;
+  /// Signed in by a QR device link (#1207): enrollment is approved on the
+  /// device that showed the code, so the gate shows no code to type.
+  linked?: boolean;
 }
 
 function rawProfileToAuthResult(profile: RawUserProfile, isResume: boolean): AuthResult {
@@ -108,6 +111,51 @@ export async function getSession(): Promise<AuthResult | null> {
     return null;
   }
   return rawProfileToAuthResult(profile, true);
+}
+
+// ── QR device link (#1207) ──────────────────────────────────────────────────
+// Mirrors pollis-core `commands::device_link`. Protocol and guardrails:
+// docs/qr-device-link-design.md.
+
+export interface DeviceLinkHandle {
+  link_id: string;
+  /// `pollis-link:v1:<link_id>:<token>` — render as a QR, or copy for manual entry.
+  qr_payload: string;
+  /// Unix seconds, server-set.
+  expires_at: number;
+}
+
+export type DeviceLinkStatus =
+  | { state: 'open' }
+  | { state: 'claimed'; device_name: string | null }
+  | { state: 'ready_to_approve'; device_name: string | null; new_device_id: string; request_id: string }
+  | { state: 'tampered' }
+  | { state: 'expired' };
+
+/// Create a link to show as a QR. The PIN is verified in Rust (same attempt
+/// counter as unlock), so this fails without it.
+export async function createDeviceLink(userId: string, pin: string): Promise<DeviceLinkHandle> {
+  return invoke<DeviceLinkHandle>('create_device_link', { userId, pin });
+}
+
+/// Resolve when the link leaves `since` (its last `state`). One awaited call;
+/// the backoff and the deadline live in Rust, like `awaitEnrollmentApproval`.
+export async function awaitDeviceLink(userId: string, linkId: string, since: DeviceLinkStatus['state']): Promise<DeviceLinkStatus> {
+  return invoke<DeviceLinkStatus>('await_device_link', { userId, linkId, since });
+}
+
+export async function approveDeviceLink(userId: string, linkId: string): Promise<void> {
+  await invoke('approve_device_link', { userId, linkId });
+}
+
+export async function cancelDeviceLink(linkId: string): Promise<void> {
+  await invoke('cancel_device_link', { linkId });
+}
+
+/// Sign in by a code from another device's QR — pasted, on desktop.
+export async function claimDeviceLink(payload: string, deviceName: string): Promise<AuthResult> {
+  const profile = await invoke<RawUserProfile>('claim_device_link', { payload, deviceName });
+  return { ...rawProfileToAuthResult(profile, false), linked: true };
 }
 
 // ── Device enrollment ───────────────────────────────────────────────────────
