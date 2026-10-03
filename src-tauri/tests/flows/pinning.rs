@@ -36,7 +36,9 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 }
 
 /// The issue's headline scenario: pin first, join second, read anyway — plus
-/// the at-rest check that the server holds only ciphertext.
+/// the at-rest checks that the server holds only ciphertext and that the stored
+/// pin key state is a wrap, not a key (formerly
+/// `the_stored_keystate_is_a_wrap_not_a_key`, a one-client copy of this pin).
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_member_joining_after_the_pin_still_reads_it() {
@@ -72,6 +74,36 @@ async fn a_member_joining_after_the_pin_still_reads_it() {
         !contains(&blobs[0], b"the load-bearing decision"),
         "pin plaintext appears in the server-side row"
     );
+
+    // The pin key state at rest: the server row is a ~48-byte wrap, not the
+    // key. A breach dump of `pin_keystate` must not contain any 32-byte value
+    // that decrypts the pins (we can't test decryption directly here, but we
+    // can pin the row's shape: wrapped blob = key + AEAD tag, never the bare
+    // key size).
+    {
+        let remote = writable_remote().await;
+        let conn = remote.conn().await.expect("conn");
+        let mut rows = conn
+            .query(
+                "SELECT wrapped_kpin, nonce, epoch FROM pin_keystate WHERE conversation_id = ?1",
+                libsql::params![group_id.clone()],
+            )
+            .await
+            .expect("query");
+        let row = rows
+            .next()
+            .await
+            .expect("row")
+            .expect("keystate row must exist after the first pin");
+        let wrapped = row.get::<Vec<u8>>(0).expect("wrap");
+        let nonce = row.get::<Vec<u8>>(1).expect("nonce");
+        assert_eq!(
+            wrapped.len(),
+            48,
+            "the stored blob must be key+tag (a wrap), not a bare 32-byte key"
+        );
+        assert_eq!(nonce.len(), 12);
+    }
 
     // Bob joins via the normal Welcome path. Alice's invite commit advanced
     // the epoch, and her committer hook re-wrapped Kpin under the new
@@ -172,72 +204,14 @@ async fn an_external_joiner_reads_existing_pins_after_a_member_rewraps() {
     drop(bob);
 }
 
-/// Any member may unpin, and the unpin is for everyone.
+/// Any member may unpin, and the unpin is for everyone. Then: a removed
+/// member's pin reads are refused outright — the DS's membership gate is what
+/// stands between an ex-member's retained key and future pin ciphertext. (The
+/// two scenarios built the identical two-member pinned channel, so they share
+/// it; the refusal does not depend on a pin still being present.)
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-async fn any_member_can_unpin_for_everyone() {
-    wipe().await;
-
-    let mut alice = TestClient::new().await;
-    let mut bob = TestClient::new().await;
-    let alice_p = alice.sign_up("alice@test.local").await;
-    let bob_p = bob.sign_up("bob@test.local").await;
-
-    let group_id = alice.create_group("Unpin").await;
-    alice.invite(&group_id, &bob_p.username).await;
-    let invite_id = bob.first_pending_invite().await.expect("invite")["id"]
-        .as_str()
-        .expect("id")
-        .to_string();
-    bob.accept_invite(&invite_id).await;
-    bob.poll().await;
-
-    let channel_id = alice.general_channel_id(&group_id).await;
-    let msg_id = alice.send_channel_message_id(&channel_id, "ephemeral").await;
-    alice
-        .invoke_json(
-            "pin_message",
-            serde_json::json!({
-                "conversationId": channel_id,
-                "messageId": msg_id,
-                "userId": alice_p.id,
-            }),
-        )
-        .await;
-    bob.process_commits_for(&channel_id).await;
-
-    // Bob — who did not pin it — unpins it.
-    bob.invoke_json(
-        "unpin_message",
-        serde_json::json!({
-            "conversationId": channel_id,
-            "messageId": msg_id,
-            "userId": bob_p.id,
-        }),
-    )
-    .await;
-
-    let pins = alice
-        .invoke_json(
-            "list_pinned_messages",
-            serde_json::json!({ "conversationId": channel_id, "userId": alice_p.id }),
-        )
-        .await;
-    assert!(
-        pins.as_array().unwrap().is_empty(),
-        "bob's unpin must remove the pin for alice too"
-    );
-
-    drop(alice);
-    drop(bob);
-}
-
-/// A removed member's pin reads are refused outright — the DS's membership
-/// gate is what stands between an ex-member's retained key and future pin
-/// ciphertext.
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn a_removed_member_can_no_longer_list_pins() {
+async fn any_member_can_unpin_and_a_removed_member_can_no_longer_list_pins() {
     wipe().await;
 
     let mut alice = TestClient::new().await;
@@ -277,6 +251,28 @@ async fn a_removed_member_can_no_longer_list_pins() {
         .await;
     assert_eq!(pins.as_array().unwrap().len(), 1);
 
+    // Bob — who did not pin it — unpins it.
+    bob.invoke_json(
+        "unpin_message",
+        serde_json::json!({
+            "conversationId": channel_id,
+            "messageId": msg_id,
+            "userId": bob_p.id,
+        }),
+    )
+    .await;
+
+    let pins = alice
+        .invoke_json(
+            "list_pinned_messages",
+            serde_json::json!({ "conversationId": channel_id, "userId": alice_p.id }),
+        )
+        .await;
+    assert!(
+        pins.as_array().unwrap().is_empty(),
+        "bob's unpin must remove the pin for alice too"
+    );
+
     alice.remove_member(&group_id, &bob_p.id).await;
 
     let result = bob
@@ -292,55 +288,4 @@ async fn a_removed_member_can_no_longer_list_pins() {
 
     drop(alice);
     drop(bob);
-}
-
-/// The pin key state at rest: the server row is a ~48-byte wrap, not the key.
-/// A breach dump of `pin_keystate` must not contain any 32-byte value that
-/// decrypts the pins (we can't test decryption directly here, but we can pin
-/// the row's shape: wrapped blob = key + AEAD tag, never the bare key size).
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn the_stored_keystate_is_a_wrap_not_a_key() {
-    wipe().await;
-
-    let mut alice = TestClient::new().await;
-    let alice_p = alice.sign_up("alice@test.local").await;
-    let group_id = alice.create_group("Keystate").await;
-    let channel_id = alice.general_channel_id(&group_id).await;
-    let msg_id = alice.send_channel_message_id(&channel_id, "x").await;
-    alice
-        .invoke_json(
-            "pin_message",
-            serde_json::json!({
-                "conversationId": channel_id,
-                "messageId": msg_id,
-                "userId": alice_p.id,
-            }),
-        )
-        .await;
-
-    let remote = writable_remote().await;
-    let conn = remote.conn().await.expect("conn");
-    let mut rows = conn
-        .query(
-            "SELECT wrapped_kpin, nonce, epoch FROM pin_keystate WHERE conversation_id = ?1",
-            libsql::params![group_id],
-        )
-        .await
-        .expect("query");
-    let row = rows
-        .next()
-        .await
-        .expect("row")
-        .expect("keystate row must exist after the first pin");
-    let wrapped = row.get::<Vec<u8>>(0).expect("wrap");
-    let nonce = row.get::<Vec<u8>>(1).expect("nonce");
-    assert_eq!(
-        wrapped.len(),
-        48,
-        "the stored blob must be key+tag (a wrap), not a bare 32-byte key"
-    );
-    assert_eq!(nonce.len(), 12);
-
-    drop(alice);
 }

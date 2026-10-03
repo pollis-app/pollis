@@ -4,52 +4,6 @@ use crate::harness::{wipe, writable_remote, TestClient};
 use pollis_lib::commands::auth::UserProfile;
 use serial_test::serial;
 
-/// End-to-end crypto round-trip: after Bob accepts Alice's invite, Alice
-/// sends a channel message. Bob fetches the channel via `get_channel_messages`
-/// and sees the decrypted plaintext — proving the MLS handshake + encrypt +
-/// decrypt path works through the real command pipeline.
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn channel_message_round_trip() {
-    wipe().await;
-
-    let mut alice = TestClient::new().await;
-    let mut bob = TestClient::new().await;
-
-    let _alice_profile = alice.sign_up("alice@test.local").await;
-    let bob_profile = bob.sign_up("bob@test.local").await;
-
-    let group_id = alice.create_group("Crypto").await;
-    alice.invite(&group_id, &bob_profile.username).await;
-
-    let invite_id = bob
-        .first_pending_invite()
-        .await
-        .expect("pending invite")["id"]
-        .as_str()
-        .expect("invite id")
-        .to_string();
-    bob.accept_invite(&invite_id).await;
-    bob.poll().await;
-
-    let channel_id = alice.general_channel_id(&group_id).await;
-
-    alice.send_channel_message(&channel_id, "hello bob").await;
-
-    let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
-    let contents: Vec<&str> = bob_msgs
-        .iter()
-        .filter_map(|m| m["content"].as_str())
-        .collect();
-    assert!(
-        contents.contains(&"hello bob"),
-        "bob should decrypt alice's message, got: {bob_msgs:#?}"
-    );
-
-    drop(alice);
-    drop(bob);
-}
-
 /// Scales the group up from 1 → 9 members and back down to 1, sending a
 /// labeled message after every membership change. Verifies:
 ///   - After each add, every current member (including the newcomer) can
@@ -677,6 +631,28 @@ async fn edit_message_across_membership_changes() {
 
     alice.edit_message(&channel_id, &msg_id_v, "v2").await;
 
+    // Sealed EDIT, self, at an unchanged epoch (#607, formerly
+    // `sealed_self_edit_is_visible_to_recipient`): the author edits her OWN
+    // message and the recipient ingests the new content. This is the case that
+    // 403'd before Solution A — with sealing on, the DS's old author-equality
+    // check compared the sentinel to the real editor and refused the edit. It
+    // also puts "v2" in bob's local cache, which is what the v3 convergence
+    // below is about.
+    let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
+    let bob_row = bob_msgs
+        .iter()
+        .find(|m| m["id"] == msg_id_v)
+        .expect("bob row exists");
+    assert_eq!(
+        bob_row["content"].as_str(),
+        Some("v2"),
+        "recipient must apply the author's sealed edit"
+    );
+    assert!(
+        bob_row["edited_at"].as_str().is_some(),
+        "the edited row must carry an edited_at timestamp"
+    );
+
     // Add a brand-new user dave; advance everyone's epoch.
     let mut dave = TestClient::new().await;
     let dave_profile = dave.sign_up("dave@test.local").await;
@@ -1156,123 +1132,6 @@ async fn lost_submit_response_is_adopted_not_wedged() {
     drop(carol);
 }
 
-/// #356 — a device whose `user_device` row has been deleted (the revoked-device
-/// state) must not be able to climb back into a group it was removed from.
-///
-/// Modeled cross-user: each `TestClient` user gets its own local DB, whereas
-/// the harness shares one local DB per `user_id` and so cannot represent two
-/// independent devices of the *same* user (that intra-user path is validated by
-/// manual multi-device testing). The MLS mechanics are identical either way —
-/// a leaf whose device cert is gone must fail cross-signing verification, so the
-/// device cannot rejoin. Before this fix the verification was advisory, so a
-/// removed device with live Turso write creds external-joined straight back in.
-///
-/// Asserts: after removal + cert deletion the device does NOT auto-rejoin,
-/// cannot read post-removal messages, and does not wedge the group (the
-/// rejected self-add must not be allowed to squat the epoch under the
-/// UNIQUE(conversation_id, epoch) constraint).
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn revoked_device_cannot_rejoin_group() {
-    wipe().await;
-
-    let mut alice = TestClient::new().await;
-    let mut bob = TestClient::new().await;
-    let mut carol = TestClient::new().await;
-    let _alice_p = alice.sign_up("alice@test.local").await;
-    let bob_p = bob.sign_up("bob@test.local").await;
-    let carol_p = carol.sign_up("carol@test.local").await;
-
-    let group_id = alice.create_group("Revoke").await;
-    let channel_id = alice.general_channel_id(&group_id).await;
-
-    // bob + carol join.
-    for (c, p) in [(&bob, &bob_p), (&carol, &carol_p)] {
-        alice.invite(&group_id, &p.username).await;
-        let invite_id = c
-            .first_pending_invite()
-            .await
-            .expect("invite")["id"]
-            .as_str()
-            .expect("invite id")
-            .to_string();
-        c.accept_invite(&invite_id).await;
-        c.poll().await;
-        alice.process_commits_for(&channel_id).await;
-    }
-    bob.process_commits_for(&channel_id).await;
-    carol.process_commits_for(&channel_id).await;
-
-    // Baseline: everyone decrypts.
-    alice.send_channel_message(&channel_id, "before").await;
-    for (c, label) in [(&alice, "alice"), (&bob, "bob"), (&carol, "carol")] {
-        let msgs = c.fetch_channel_messages(&channel_id).await;
-        let contents: Vec<&str> = msgs.iter().filter_map(|m| m["content"].as_str()).collect();
-        assert!(
-            contents.contains(&"before"),
-            "{label} should decrypt 'before', got: {contents:?}"
-        );
-    }
-
-    // Revoke bob's device: tombstone its `user_device` row (issue #372) so
-    // IdentityDirectory::leaf_verdict distinguishes "revoked" (delete the squatting
-    // commit OK) from "absent because not replicated yet" (don't delete).
-    // Pre-#372 this was a hard DELETE; the migration to tombstones changed
-    // revoke_device to set revoked_at, and this test mirrors that path.
-    {
-        // Server-side revocation effect — poke the writable "server" handle
-        // directly (a client has no database handle at all since #987).
-        let remote = crate::harness::writable_remote().await;
-        let conn = remote.conn().await.expect("remote conn");
-        conn.execute(
-            "UPDATE user_device SET revoked_at = datetime('now') WHERE user_id = ?1",
-            libsql::params![bob_p.id.clone()],
-        )
-        .await
-        .expect("tombstone bob user_device");
-    }
-
-    // Remove bob from the group — reconcile prunes his leaf.
-    alice.remove_member(&group_id, &bob_p.id).await;
-    alice.process_commits_for(&channel_id).await;
-    carol.process_commits_for(&channel_id).await;
-
-    // bob syncs: evicted → must NOT external-join back in (device row gone).
-    bob.fetch_channel_messages(&channel_id).await;
-
-    // alice sends after the revoke.
-    alice.send_channel_message(&channel_id, "after-revoke").await;
-
-    // alice + carol read it; bob (revoked, out of the tree) does not.
-    for (c, label) in [(&alice, "alice"), (&carol, "carol")] {
-        let msgs = c.fetch_channel_messages(&channel_id).await;
-        let contents: Vec<&str> = msgs.iter().filter_map(|m| m["content"].as_str()).collect();
-        assert!(
-            contents.contains(&"after-revoke"),
-            "{label} should decrypt 'after-revoke', got: {contents:?}"
-        );
-    }
-    let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
-    let bob_contents: Vec<&str> = bob_msgs.iter().filter_map(|m| m["content"].as_str()).collect();
-    assert!(
-        !bob_contents.contains(&"after-revoke"),
-        "REVOCATION BYPASS: revoked bob decrypted a post-revoke message — it rejoined the group. got: {bob_contents:?}"
-    );
-
-    // No wedge: the group keeps advancing after the rejected rejoin attempt.
-    alice.send_channel_message(&channel_id, "after-2").await;
-    let carol_msgs = carol.fetch_channel_messages(&channel_id).await;
-    let carol_contents: Vec<&str> = carol_msgs.iter().filter_map(|m| m["content"].as_str()).collect();
-    assert!(
-        carol_contents.contains(&"after-2"),
-        "group wedged after revoke — carol could not receive a new message. got: {carol_contents:?}"
-    );
-
-    drop(alice);
-    drop(bob);
-    drop(carol);
-}
-
 /// Read the `mls_group_info` row (epoch, byte length) for a conversation, if any.
 async fn group_info_row(
     remote: &Arc<pollis_delivery::db::Db>,
@@ -1572,143 +1431,23 @@ async fn self_delete_redacts_already_delivered_recipients() {
     drop((alice, bob, carol));
 }
 
-/// Security invariant (invalid states unrepresentable): a redaction is honored
-/// ONLY when its MLS-authenticated author is the target message's author. carol
-/// — a member, but neither the author nor an admin — forges a redaction for
-/// alice's message via the test-only `send_redaction_as`. bob must STILL see
-/// alice's message: the recipient rejects the mismatched-author redaction.
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn redaction_from_non_author_is_ignored() {
-    wipe().await;
-
-    let mut alice = TestClient::new().await;
-    let mut bob = TestClient::new().await;
-    let mut carol = TestClient::new().await;
-
-    let _alice_profile = alice.sign_up("alice@test.local").await;
-    let bob_profile = bob.sign_up("bob@test.local").await;
-    let carol_profile = carol.sign_up("carol@test.local").await;
-
-    let group_id = alice.create_group("No Forgery").await;
-    let channel_id = alice.general_channel_id(&group_id).await;
-
-    add_member_and_sync(&alice, &group_id, &channel_id, &bob, &bob_profile, &[]).await;
-    add_member_and_sync(&alice, &group_id, &channel_id, &carol, &carol_profile, &[&bob]).await;
-
-    let msg_id = alice
-        .send_channel_message_id(&channel_id, "carol cannot delete this")
-        .await;
-
-    // bob receives the original.
-    let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
-    assert_eq!(
-        bob_msgs
-            .iter()
-            .find(|m| m["id"] == msg_id)
-            .expect("bob received it")["content"]
-            .as_str(),
-        Some("carol cannot delete this")
-    );
-
-    // carol forges a redaction targeting alice's message. It is a real,
-    // decryptable MLS message — but authored by carol, not alice.
-    pollis_core::commands::messages::send_redaction_as(
-        &carol.state,
-        &channel_id,
-        &msg_id,
-        carol.user_id(),
-    )
-    .await
-    .expect("forged redaction send");
-
-    // bob re-fetches: the message is UNCHANGED — the redaction was rejected
-    // because carol is not the author.
-    let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
-    let m = bob_msgs
-        .iter()
-        .find(|m| m["id"] == msg_id)
-        .expect("message still present");
-    assert_eq!(
-        m["content"].as_str(),
-        Some("carol cannot delete this"),
-        "a non-author redaction must be ignored"
-    );
-    assert!(
-        m["deleted_at"].is_null(),
-        "a forged redaction must NOT mark the message deleted"
-    );
-
-    drop((alice, bob, carol));
-}
-
 // ─── Solution A (#607): client-side edit/delete authz under unconditional
 // sealed sender ──────────────────────────────────────────────────────────────
 //
 // The DS no longer checks authorship on edit/delete (the stored sender_id is
 // always the sealed sentinel). Authorship is enforced CLIENT-side on ingest.
-// These four prove both halves: the legitimate cases still work now that the DS
-// stopped blocking them, and the forged cases are rejected by the client.
+// These prove both halves: the legitimate cases still work now that the DS
+// stopped blocking them, and the forged cases are rejected by the client. The
+// self-EDIT case lives in `edit_message_across_membership_changes` (phase 3).
 
-/// Sealed EDIT, self: an author edits their OWN message and a recipient ingests
-/// the new content. This is the case that 403'd before Solution A — with sealing
-/// on, the DS's old author-equality check (`original_sender == sender`) compared
-/// the sentinel to the real editor and refused the edit. The DS now
-/// membership-gates only, and ingest applies the edit because the credential
-/// author matches the target's author.
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn sealed_self_edit_is_visible_to_recipient() {
-    wipe().await;
-
-    let mut alice = TestClient::new().await;
-    let mut bob = TestClient::new().await;
-
-    let _alice_profile = alice.sign_up("alice@test.local").await;
-    let bob_profile = bob.sign_up("bob@test.local").await;
-
-    let group_id = alice.create_group("Self Edit").await;
-    let channel_id = alice.general_channel_id(&group_id).await;
-    add_member_and_sync(&alice, &group_id, &channel_id, &bob, &bob_profile, &[]).await;
-
-    let msg_id = alice
-        .send_channel_message_id(&channel_id, "original")
-        .await;
-
-    // Bob receives the original.
-    let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
-    assert_eq!(
-        bob_msgs
-            .iter()
-            .find(|m| m["id"] == msg_id)
-            .expect("bob received it")["content"]
-            .as_str(),
-        Some("original")
-    );
-
-    // Alice edits her own message — no DS rejection under Solution A.
-    alice.edit_message(&channel_id, &msg_id, "edited by author").await;
-
-    // Bob re-fetches and sees the edited content.
-    let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
-    let m = bob_msgs
-        .iter()
-        .find(|m| m["id"] == msg_id)
-        .expect("message still present");
-    assert_eq!(
-        m["content"].as_str(),
-        Some("edited by author"),
-        "recipient must apply the author's sealed edit"
-    );
-    assert!(
-        m["edited_at"].as_str().is_some(),
-        "the edited row must carry an edited_at timestamp"
-    );
-
-    drop((alice, bob));
-}
-
-/// Sealed EDIT, non-author rejected — now at BOTH layers.
+/// Sealed EDIT and REDACTION, non-author rejected — the edit now at BOTH layers.
+///
+/// Security invariant (invalid states unrepresentable): a redaction is honored
+/// ONLY when its MLS-authenticated author is the target message's author, and
+/// so is an edit. carol — a member, but neither the author nor an admin —
+/// forges both for alice's message; bob must STILL see it unchanged. (The
+/// redaction half was `redaction_from_non_author_is_ignored`, which built the
+/// identical three-member world.)
 ///
 /// Carol (a member, but NOT the author) forges an edit envelope for alice's
 /// message via the test-only `edit_message_as`, bypassing the client-send
@@ -1776,8 +1515,20 @@ async fn sealed_non_author_edit_is_ignored() {
          deletion capability (#1086), got {refused:?}"
     );
 
-    // bob re-fetches: the message is UNCHANGED — the edit was rejected because
-    // carol is not the author.
+    // carol also forges a REDACTION targeting alice's message. It is a real,
+    // decryptable MLS message — but authored by carol, not alice — so the
+    // recipient must reject the mismatched-author redaction on ingest.
+    pollis_core::commands::messages::send_redaction_as(
+        &carol.state,
+        &channel_id,
+        &msg_id,
+        carol.user_id(),
+    )
+    .await
+    .expect("forged redaction send");
+
+    // bob re-fetches: the message is UNCHANGED — the edit and the redaction were
+    // both rejected because carol is not the author.
     let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
     let m = bob_msgs
         .iter()
@@ -1786,11 +1537,15 @@ async fn sealed_non_author_edit_is_ignored() {
     assert_eq!(
         m["content"].as_str(),
         Some("carol cannot edit this"),
-        "a non-author edit must be ignored on ingest"
+        "a non-author edit or redaction must be ignored on ingest"
     );
     assert!(
         m["edited_at"].is_null(),
         "a forged edit must NOT mark the message edited"
+    );
+    assert!(
+        m["deleted_at"].is_null(),
+        "a forged redaction must NOT mark the message deleted"
     );
 
     drop((alice, bob, carol));

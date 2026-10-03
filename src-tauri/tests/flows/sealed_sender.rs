@@ -19,6 +19,9 @@
 //!   - **no opt-out invariant** — there is NO way to emit an unsealed envelope:
 //!     every posted `type='message'` envelope (ordinary sends AND redactions)
 //!     carries `sealed = 1` and the sentinel, never a real id.
+//!
+//! All three run in ONE scenario: they need the same two-member channel, and
+//! building it (two sign-ups and an MLS join) is the expensive part.
 
 use std::sync::Arc;
 
@@ -68,25 +71,44 @@ async fn two_member_channel(sender: &TestClient, receiver: &TestClient, receiver
     (group_id, channel_id)
 }
 
-/// HEADLINE PROOF: sealing blinds the server-stored sender while attribution
-/// still works.
+/// The three sealed-sender properties, in one two-member channel.
 ///
-/// The stored `message_envelope` row carries `sealed = 1` and the sentinel
-/// `sender_id` (`"sealed"`), NOT Alice's real id — so a Turso breach reveals
-/// nothing about who sent it. Yet Bob ingests the message and attributes it to
-/// Alice's REAL id, because the reader takes the sender from the MLS credential
-/// inside the ciphertext, not the (now-blinded) envelope column.
+/// **HEADLINE PROOF: sealing blinds the server-stored sender while attribution
+/// still works.** The stored `message_envelope` row carries `sealed = 1` and the
+/// sentinel `sender_id` (`"sealed"`), NOT Alice's real id — so a Turso breach
+/// reveals nothing about who sent it. Yet Bob ingests the message and attributes
+/// it to Alice's REAL id, because the reader takes the sender from the MLS
+/// credential inside the ciphertext, not the (now-blinded) envelope column.
+///
+/// **A sealed send from a NON-member is still rejected by the DS membership
+/// gate.** Sealing relaxes only the `sender_id == auth-user` binding (the stored
+/// sender is a sentinel, not the auth user); it does NOT relax "the authenticated
+/// writer must be a member of the conversation". Mallory is authenticated
+/// (validly signed) but not a member, so her sealed send gets a 403 (proved
+/// identity, lacking permission), not a 401.
+///
+/// **NO-OPT-OUT INVARIANT (#606/#607): there is NO way to emit an UNSEALED
+/// envelope.** Sealing is unconditional, so every posted `type='message'`
+/// envelope — ordinary sends AND self-delete redactions (which ride the same send
+/// path) — must carry `sealed = 1` and the sentinel `sender_id`, never a real id.
+/// This is the property edit/delete client-side authz (Solution A) leans on: the
+/// DS can never learn who authored a message from the stored envelope. The check
+/// is over the WHOLE `message_envelope` table's `type='message'` rows, so it
+/// catches any code path that might slip an unsealed row through — not just the
+/// one message we can name by id.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-async fn sealed_send_blinds_server_but_recipient_attributes_correctly() {
+async fn every_send_is_sealed_attributed_and_membership_gated() {
     wipe().await;
 
-    // Sealing is unconditional — both clients seal every send.
+    // Sealing is unconditional — every client seals every send.
     let mut alice = TestClient::new().await;
     let mut bob = TestClient::new().await;
+    let mut mallory = TestClient::new().await;
 
     let alice_profile = alice.sign_up("alice@test.local").await;
     let bob_profile = bob.sign_up("bob@test.local").await;
+    let _mallory_profile = mallory.sign_up("mallory@test.local").await;
 
     let (_group_id, channel_id) = two_member_channel(&alice, &bob, &bob_profile.username).await;
 
@@ -123,31 +145,7 @@ async fn sealed_send_blinds_server_but_recipient_attributes_correctly() {
          credential), even though the envelope column was blinded to the sentinel"
     );
 
-    drop(alice);
-    drop(bob);
-}
-
-/// A sealed send from a NON-member is still rejected by the DS membership gate.
-/// Sealing relaxes only the `sender_id == auth-user` binding (the stored sender
-/// is a sentinel, not the auth user); it does NOT relax "the authenticated writer
-/// must be a member of the conversation". Mallory is authenticated (validly
-/// signed) but not a member, so her sealed send gets a 403 (proved identity,
-/// lacking permission), not a 401.
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn sealed_send_from_non_member_is_rejected() {
-    wipe().await;
-
-    let mut alice = TestClient::new().await;
-    let mut bob = TestClient::new().await;
-    let mut mallory = TestClient::new().await;
-
-    let _alice_profile = alice.sign_up("alice@test.local").await;
-    let bob_profile = bob.sign_up("bob@test.local").await;
-    let _mallory_profile = mallory.sign_up("mallory@test.local").await;
-
-    let (_group_id, channel_id) = two_member_channel(&alice, &bob, &bob_profile.username).await;
-
+    // ── A non-member's sealed send is refused by the membership gate ──
     // Mallory signs a sealed send to alice+bob's channel. She is a real,
     // authenticated device but not a member — the membership gate must reject.
     let body = serde_json::json!({
@@ -166,7 +164,6 @@ async fn sealed_send_from_non_member_is_rejected() {
     );
 
     // And nothing landed: no envelope row was written for mallory's attempt.
-    let remote = writable_remote().await;
     let conn = remote.conn().await.expect("remote conn");
     let mut rows = conn
         .query(
@@ -184,55 +181,15 @@ async fn sealed_send_from_non_member_is_rejected() {
         .expect("count");
     assert_eq!(count, 0, "the rejected sealed send must not have been persisted");
 
-    drop(alice);
-    drop(bob);
-    drop(mallory);
-}
-
-/// NO-OPT-OUT INVARIANT (#606/#607): there is NO way to emit an UNSEALED
-/// envelope. Sealing is unconditional, so every posted `type='message'` envelope
-/// — ordinary sends AND self-delete redactions (which ride the same send path) —
-/// must carry `sealed = 1` and the sentinel `sender_id`, never a real id. This is
-/// the property edit/delete client-side authz (Solution A) leans on: the DS can
-/// never learn who authored a message from the stored envelope.
-///
-/// The check is over the WHOLE `message_envelope` table's `type='message'` rows,
-/// so it catches any code path that might slip an unsealed row through — not just
-/// the one message we can name by id.
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn no_unsealed_envelope_can_be_sent() {
-    wipe().await;
-
-    let mut alice = TestClient::new().await;
-    let mut bob = TestClient::new().await;
-
-    let alice_profile = alice.sign_up("alice@test.local").await;
-    let bob_profile = bob.sign_up("bob@test.local").await;
-
-    let (_group_id, channel_id) = two_member_channel(&alice, &bob, &bob_profile.username).await;
-
-    // An ordinary send…
-    let keep_id = alice.send_channel_message_id(&channel_id, "kept message").await;
-    // …and a message alice then self-deletes, which posts a REDACTION envelope
-    // (also a `type='message'` row) on the same sealed send path.
+    // ── No opt-out: redactions are sealed too ──
+    // A message alice then self-deletes posts a REDACTION envelope (also a
+    // `type='message'` row) on the same sealed send path.
     let doomed_id = alice.send_channel_message_id(&channel_id, "doomed message").await;
     alice.delete_message(&doomed_id).await;
-
-    // The kept message's envelope is blinded.
-    let remote = writable_remote().await;
-    let (sealed, envelope_sender) = envelope_sealed_and_sender(&remote, &keep_id).await;
-    assert_eq!(sealed, 1, "every send must store sealed = 1");
-    assert_eq!(envelope_sender, "sealed", "every send must store the sentinel");
-    assert_ne!(
-        envelope_sender, alice_profile.id,
-        "the server-stored sender must never be a real id"
-    );
 
     // WHOLE-TABLE invariant: NO `type='message'` envelope is unsealed or carries
     // a non-sentinel sender. This is the load-bearing "no opt-out" assertion —
     // if any path (send or redaction) emitted an unsealed row, this trips.
-    let conn = remote.conn().await.expect("remote conn");
     let mut rows = conn
         .query(
             "SELECT COUNT(*) FROM message_envelope \
@@ -256,4 +213,5 @@ async fn no_unsealed_envelope_can_be_sent() {
 
     drop(alice);
     drop(bob);
+    drop(mallory);
 }

@@ -228,15 +228,23 @@ async fn dm_multi_device_round_trip() {
 }
 
 /// Rejecting a DM invite must remove EVERY device of the rejecter from the
-/// MLS tree, not just the device that invoked reject. `leave_dm_channel`
-/// deletes the rejecter's single `dm_channel_member` row (there is one row
-/// per user, not per device) and then reconcile removes every leaf in the
-/// MLS tree that belongs to that user. Bob runs two devices, rejects from
-/// `bob_d1`, and neither `bob_d1` nor `bob_d2` may decrypt subsequent
-/// messages sent by alice.
+/// MLS tree, not just the device that invoked reject — and after the reject,
+/// alice can open a FRESH DM with bob and both sides converge again.
+///
+/// Phase 1 (reject): `leave_dm_channel` deletes the rejecter's single
+/// `dm_channel_member` row (there is one row per user, not per device) and then
+/// reconcile removes every leaf in the MLS tree that belongs to that user. Bob
+/// runs two devices, rejects from `bob_d1`, and neither `bob_d1` nor `bob_d2`
+/// may decrypt subsequent messages sent by alice.
+///
+/// Phases 2-5 (re-invite): every bob device must re-enter the MLS tree with a
+/// brand-new `dm_channel.id`, and no stale state from the rejected DM may
+/// surface. (These were two tests, `dm_invite_reject_removes_from_tree` and
+/// `dm_re_invite_after_reject`, that built the same two-device world and
+/// rejected the same way; the second never checked the reject's effects.)
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-async fn dm_invite_reject_removes_from_tree() {
+async fn dm_invite_reject_removes_from_tree_then_re_invite_converges() {
     wipe().await;
 
     let mut alice = TestClient::new().await;
@@ -246,9 +254,10 @@ async fn dm_invite_reject_removes_from_tree() {
     let bob_profile = bob_d1.sign_up("bob@test.local").await;
     let bob_d2 = enroll_second_device(&bob_d1, "bob@test.local").await;
 
+    // ── Phase 1: create → reject removes EVERY bob device ──
     // Alice invites bob. Both bob devices land in the MLS tree at creation
     // time — dm.rs:127 "Reconcile then adds all members' devices".
-    let dm_id = alice
+    let rejected_dm_id = alice
         .create_dm(&[alice_profile.id.as_str(), bob_profile.id.as_str()])
         .await;
 
@@ -268,7 +277,7 @@ async fn dm_invite_reject_removes_from_tree() {
     // row (per-user, so both bob devices lose membership), forgets this
     // device's local MLS state, and signals remaining members to
     // reconcile away the bob leaves.
-    bob_d1.leave_dm(&dm_id).await;
+    bob_d1.leave_dm(&rejected_dm_id).await;
 
     // `dm_channel_member` has NO rows for bob in this dm.
     let remote = crate::harness::writable_remote().await;
@@ -278,7 +287,7 @@ async fn dm_invite_reject_removes_from_tree() {
             .query(
                 "SELECT COUNT(*) FROM dm_channel_member \
                  WHERE dm_channel_id = ?1 AND user_id = ?2",
-                libsql::params![dm_id.clone(), bob_profile.id.clone()],
+                libsql::params![rejected_dm_id.clone(), bob_profile.id.clone()],
             )
             .await
             .expect("count bob members");
@@ -292,16 +301,16 @@ async fn dm_invite_reject_removes_from_tree() {
 
     // Alice reconciles her own tree (pulling the membership change into
     // her local MLS state) and then sends a post-reject message.
-    alice.process_commits_for(&dm_id).await;
+    alice.process_commits_for(&rejected_dm_id).await;
     alice
-        .send_channel_message(&dm_id, "alice post-reject")
+        .send_channel_message(&rejected_dm_id, "alice post-reject")
         .await;
 
     // Neither bob device may decrypt alice's new message — their leaves
     // are gone from the tree. They may still see an envelope row on the
     // remote, but the content decrypts to None.
     for (client, label) in [(&bob_d1, "bob_d1"), (&bob_d2, "bob_d2")] {
-        let msgs = client.fetch_dm_messages(&dm_id).await;
+        let msgs = client.fetch_dm_messages(&rejected_dm_id).await;
         let contents: Vec<&str> =
             msgs.iter().filter_map(|m| m["content"].as_str()).collect();
         assert!(
@@ -317,7 +326,7 @@ async fn dm_invite_reject_removes_from_tree() {
             .list_dm_requests()
             .await
             .iter()
-            .all(|c| c["id"].as_str() != Some(dm_id.as_str())),
+            .all(|c| c["id"].as_str() != Some(rejected_dm_id.as_str())),
         "bob_d1 must not list the rejected DM as a request"
     );
     assert!(
@@ -325,7 +334,7 @@ async fn dm_invite_reject_removes_from_tree() {
             .list_dms()
             .await
             .iter()
-            .all(|c| c["id"].as_str() != Some(dm_id.as_str())),
+            .all(|c| c["id"].as_str() != Some(rejected_dm_id.as_str())),
         "bob_d1 must not list the rejected DM as an accepted channel"
     );
     assert!(
@@ -333,7 +342,7 @@ async fn dm_invite_reject_removes_from_tree() {
             .list_dm_requests()
             .await
             .iter()
-            .all(|c| c["id"].as_str() != Some(dm_id.as_str())),
+            .all(|c| c["id"].as_str() != Some(rejected_dm_id.as_str())),
         "bob_d2 must not list the rejected DM as a request"
     );
     assert!(
@@ -341,36 +350,9 @@ async fn dm_invite_reject_removes_from_tree() {
             .list_dms()
             .await
             .iter()
-            .all(|c| c["id"].as_str() != Some(dm_id.as_str())),
+            .all(|c| c["id"].as_str() != Some(rejected_dm_id.as_str())),
         "bob_d2 must not list the rejected DM as an accepted channel"
     );
-
-    drop(alice);
-    drop(bob_d1);
-    drop(bob_d2);
-}
-
-/// After a reject, alice can open a FRESH DM with bob and both sides
-/// converge again. Every bob device must re-enter the MLS tree with a
-/// brand-new `dm_channel.id`, and no stale state from the rejected DM
-/// may surface.
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn dm_re_invite_after_reject() {
-    wipe().await;
-
-    let mut alice = TestClient::new().await;
-    let alice_profile = alice.sign_up("alice@test.local").await;
-
-    let mut bob_d1 = TestClient::new().await;
-    let bob_profile = bob_d1.sign_up("bob@test.local").await;
-    let bob_d2 = enroll_second_device(&bob_d1, "bob@test.local").await;
-
-    // ── Phase 1: create → reject ──
-    let rejected_dm_id = alice
-        .create_dm(&[alice_profile.id.as_str(), bob_profile.id.as_str()])
-        .await;
-    bob_d1.leave_dm(&rejected_dm_id).await;
 
     // ── Phase 2: fresh DM; a brand-new dm_channel.id ──
     let dm_id = alice

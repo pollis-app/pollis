@@ -688,6 +688,21 @@ async fn fail500_pre_write_persists_nothing_and_does_not_wedge() {
 /// that member — that is the direct consequence of the injected F1 gap, and is
 /// exactly what the I1 DB triggers exist to prevent upstream. This test proves
 /// the CLIENT recovers and converges; it does not claim the gap itself is lossless.
+///
+/// **Also the deterministic repro for the fuzzer/marathon
+/// message-strand-through-rebuild finding (#4)** — it absorbed the former
+/// `continuous_member_keeps_mid_replay_message_through_rebuild`, which ran this
+/// exact sequence and dropped the same row. Every epoch-ADVANCING path,
+/// including a recovery rebuild, must INGEST the current epoch's messages
+/// *before* advancing past it, because `max_past_epochs = 0` discards the
+/// ratchet keys the instant the group advances (#440 / #441 for the fetch /
+/// send / commit-initiation paths; this closes it on the RECOVERY seam). So bob
+/// holds TWO un-ingested messages: M1 at his *join* epoch (initial-epoch hook)
+/// and M2 at a *mid-replay* epoch he only reaches after applying a commit — the
+/// load-bearing one, caught by the post-commit hook the instant his replay
+/// reaches that epoch, *before* the gap forces the jump to head. The lost-race
+/// converge path (`reconcile.rs`) runs the same interleaved catch-up; that path
+/// is timing-sensitive and is gated by the model fuzzer + marathon.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn epoch_gap_recovers_via_external_join() {
@@ -710,6 +725,7 @@ async fn epoch_gap_recovers_via_external_join() {
     // MLS epoch is the head that leaves behind; he then goes "offline" (no further
     // poll/process/fetch until the very end).
     join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
+    let bob_join_epoch = ds_head_epoch(&group_id).await;
 
     // A message at bob's join epoch — the interleave hook decrypts this on his
     // return, BEFORE the replay reaches the gap, so it must survive.
@@ -724,6 +740,21 @@ async fn epoch_gap_recovers_via_external_join() {
     // be built from.
     join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
     let remove_epoch = ds_head_epoch(&group_id).await;
+
+    // (M2) at a MID-replay epoch — the epoch the carol-remove row is built
+    // from. Bob only reaches it AFTER applying the carol-add commits, so it
+    // exercises the post-commit interleave hook, not the initial one. Asserted
+    // rather than assumed: if a future change made the carol join a no-op, M2
+    // would silently collapse onto bob's join epoch and the load-bearing M2
+    // assertion below would go vacuous.
+    assert!(
+        remove_epoch > bob_join_epoch,
+        "M2 must sit at an epoch bob reaches only by APPLYING a commit \
+         (join epoch {bob_join_epoch}, M2 epoch {remove_epoch}) — otherwise this scenario \
+         only re-tests the initial-epoch hook"
+    );
+    alice.send_channel_message(&channel_id, "M2-mid-replay").await;
+
     alice.remove_member(&group_id, carol_p.id.as_str()).await;
     alice.process_commits_for(&channel_id).await;
     join_member(&alice, &dave, &group_id, &channel_id, &dave_p.username).await;
@@ -756,6 +787,15 @@ async fn epoch_gap_recovers_via_external_join() {
         bob_after_return.contains(&"M1-at-join-epoch".to_string()),
         "bob must retain the message at his join epoch (decrypted before the gap \
          is hit), got: {bob_after_return:?}"
+    );
+    // The gap sits directly ABOVE M2, so bob ingests it before the rebuild —
+    // a mid-replay epoch's message must be ingested before the external-join
+    // rebuild discards its keys (#440 / #441 on the recovery seam).
+    assert!(
+        bob_after_return.contains(&"M2-mid-replay".to_string()),
+        "STRAND THROUGH REBUILD: bob lost M2, sent at a mid-replay epoch he held keys for. The \
+         interleave hook must ingest each epoch's messages BEFORE the external-join rebuild jumps \
+         the local group to head. got: {bob_after_return:?}"
     );
 
     // Alice applies bob's recovery external-join, then sends fresh traffic.
@@ -1020,137 +1060,6 @@ async fn forged_retention_high_water_cannot_wipe_the_live_log() {
 
     drop(alice);
     drop(bob);
-    drop(dave);
-}
-
-// ─── Scenario 2b — un-ingested message survives a forced rebuild (repro) ─────
-
-/// **Deterministic repro for the fuzzer/marathon message-strand-through-rebuild
-/// finding (#4).** The marathon (500 ops, heavy `DsFault`) flagged a CONTINUOUS
-/// member — alice, the owner — losing an early prefix of messages after a
-/// fault-recovery external-join **rebuild** jumped her local group to head. The
-/// governing invariant: every epoch-ADVANCING path (including a recovery rebuild)
-/// must INGEST the current epoch's messages *before* advancing past it, because
-/// `max_past_epochs = 0` discards the ratchet keys the instant the group advances
-/// (issues #440 / #441 established this for the fetch / send / commit-initiation
-/// paths; this closes it on the RECOVERY seam).
-///
-/// This scenario proves the per-epoch interleave hook decrypts un-ingested
-/// messages at **every** epoch the replay passes through — not just the member's
-/// initial epoch — before an external-join rebuild discards those keys. A
-/// continuous member (bob) is offline while the group churns, holds TWO
-/// un-ingested messages (one at his *join* epoch, one at a *mid-replay* epoch he
-/// only reaches after applying a commit), and is then forced to rebuild by an
-/// injected commit-log gap. Both messages must survive: the join-epoch one is
-/// caught by the initial-epoch hook, and — the load-bearing new assertion — the
-/// mid-replay one is caught by the post-commit hook the instant bob's replay
-/// reaches epoch 2, *before* the gap forces the jump to head.
-///
-/// The lost-race converge path (`reconcile.rs`) now runs this SAME interleaved
-/// catch-up rather than a bare commit-only replay, so a converge that advances or
-/// rebuilds can't strand a current-epoch message either. That path is
-/// timing-sensitive and is exercised by the model fuzzer + marathon
-/// (`model_marathon_convergence`), the authoritative gate for #4.
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn continuous_member_keeps_mid_replay_message_through_rebuild() {
-    wipe().await;
-
-    let mut alice = TestClient::new().await;
-    let mut bob = TestClient::new().await;
-    let mut carol = TestClient::new().await;
-    let mut dave = TestClient::new().await;
-
-    let _alice_p = alice.sign_up("alice@test.local").await;
-    let bob_p = bob.sign_up("bob@test.local").await;
-    let carol_p = carol.sign_up("carol@test.local").await;
-    let dave_p = dave.sign_up("dave@test.local").await;
-
-    let group_id = alice.create_group("MidReplay").await;
-    let channel_id = alice.general_channel_id(&group_id).await;
-
-    // Bob joins; his MLS epoch is the head that leaves behind. He then goes
-    // "offline" (no poll/process/fetch until the very end).
-    join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
-    let bob_join_epoch = ds_head_epoch(&group_id).await;
-
-    // (M1) at bob's JOIN epoch — caught by the initial-epoch hook on his return.
-    alice.send_channel_message(&channel_id, "M1-join-epoch").await;
-
-    // Carol's add advances the shared group past bob's join epoch.
-    join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
-
-    // (M2) at a MID-replay epoch — bob only reaches this epoch AFTER applying the
-    // carol-add commits, so it exercises the post-commit hook, not the initial
-    // one. Asserted rather than assumed: if a future change made the carol join
-    // a no-op, M2 would silently collapse onto bob's join epoch and the
-    // load-bearing assertion below would go vacuous.
-    let m2_epoch = ds_head_epoch(&group_id).await;
-    assert!(
-        m2_epoch > bob_join_epoch,
-        "M2 must sit at an epoch bob reaches only by APPLYING a commit \
-         (join epoch {bob_join_epoch}, M2 epoch {m2_epoch}) — otherwise this scenario \
-         only re-tests the initial-epoch hook"
-    );
-    alice.send_channel_message(&channel_id, "M2-mid-replay").await;
-
-    // More churn while bob is offline. The carol-remove commit — the row this
-    // scenario drops — lands at M2's epoch, so the gap sits directly ABOVE both
-    // messages: bob can ingest them both and only then hit it.
-    alice.remove_member(&group_id, carol_p.id.as_str()).await;
-    alice.process_commits_for(&channel_id).await;
-    join_member(&alice, &dave, &group_id, &channel_id, &dave_p.username).await;
-
-    let head_before_gap = ds_head_epoch(&group_id).await;
-    assert!(
-        head_before_gap > m2_epoch + 1,
-        "dave's add must sit above the dropped row at epoch {m2_epoch} for the gap to be \
-         interior, head is {head_before_gap}"
-    );
-
-    // Punch the gap ABOVE both messages. A member replaying from bob's join epoch
-    // ingests M1 there, applies the carol-add commits to reach M2's epoch and
-    // ingests M2, THEN hits the gap and rebuilds via external-join.
-    drop_commit_row(&group_id, m2_epoch).await;
-    assert_eq!(
-        ds_head_epoch(&group_id).await,
-        head_before_gap,
-        "dropping an interior row must not change the head (MAX(epoch)+1)"
-    );
-
-    // Bob comes back. This single fetch drains his backlog and forces the rebuild.
-    let bob_view = contents(&bob, &channel_id).await;
-
-    // Both un-ingested messages survived the rebuild. M1 proves the initial-epoch
-    // hook; M2 is the load-bearing assertion — a mid-replay epoch's message must
-    // be ingested before the rebuild discards its keys.
-    assert!(
-        bob_view.contains(&"M1-join-epoch".to_string()),
-        "bob must retain the message at his join epoch (initial-epoch hook), got: {bob_view:?}"
-    );
-    assert!(
-        bob_view.contains(&"M2-mid-replay".to_string()),
-        "STRAND THROUGH REBUILD: bob lost M2, sent at a mid-replay epoch he held keys for. The \
-         interleave hook must ingest each epoch's messages BEFORE the external-join rebuild jumps \
-         the local group to head. got: {bob_view:?}"
-    );
-
-    // Bob recovered — current member, decrypts fresh post-recovery traffic.
-    alice.process_commits_for(&channel_id).await;
-    alice.send_channel_message(&channel_id, "after-recovery").await;
-    let members = alice.group_member_ids(&group_id).await;
-    assert!(
-        members.contains(&bob_p.id),
-        "bob must be a current member after rebuild, got: {members:?}"
-    );
-    assert!(
-        contents(&bob, &channel_id).await.contains(&"after-recovery".to_string()),
-        "bob must decrypt post-recovery traffic — he wedged on the rebuild otherwise"
-    );
-
-    drop(alice);
-    drop(bob);
-    drop(carol);
     drop(dave);
 }
 
@@ -1519,13 +1428,17 @@ async fn revoked_device_locked_out_of_every_recovery_path() {
     join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
     join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
     bob.process_commits_for(&channel_id).await;
+    carol.process_commits_for(&channel_id).await;
 
-    // Baseline: bob is a real, decrypting member.
+    // Baseline: everyone decrypts, bob included — he is a real, decrypting
+    // member before the revoke.
     alice.send_channel_message(&channel_id, "before-revoke").await;
-    assert!(
-        contents(&bob, &channel_id).await.contains(&"before-revoke".to_string()),
-        "bob should decrypt while still a registered member"
-    );
+    for (c, label) in [(&alice, "alice"), (&bob, "bob"), (&carol, "carol")] {
+        assert!(
+            contents(c, &channel_id).await.contains(&"before-revoke".to_string()),
+            "{label} should decrypt 'before-revoke' while bob is still a registered member"
+        );
+    }
 
     // Revoke bob's device server-side: tombstone its `user_device` row (the
     // #372 revoked-device state). Poke the writable MAIN handle directly — the
@@ -1547,6 +1460,14 @@ async fn revoked_device_locked_out_of_every_recovery_path() {
     carol.process_commits_for(&channel_id).await;
 
     alice.send_channel_message(&channel_id, "after-revoke-1").await;
+
+    // The legitimate members read the first post-revoke message.
+    for (c, label) in [(&alice, "alice"), (&carol, "carol")] {
+        assert!(
+            contents(c, &channel_id).await.contains(&"after-revoke-1".to_string()),
+            "{label} should decrypt 'after-revoke-1'"
+        );
+    }
 
     // Bob drives EVERY recovery entry point. Both must return cleanly (these
     // helpers panic on an `Err`, so reaching the assertions proves no panic/error)

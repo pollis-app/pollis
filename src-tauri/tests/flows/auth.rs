@@ -11,7 +11,8 @@ use serial_test::serial;
 /// DB opens. This test focuses on the lock/unlock half of the cycle:
 /// asserts the wrapped blobs and pin_meta are present, the legacy
 /// session blob is gone, lock drops unlock state, wrong PIN fails,
-/// correct PIN restores access.
+/// correct PIN restores access. Then changes the PIN: the old one fails
+/// after the change and the new one unlocks.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn pin_set_lock_unlock_roundtrip() {
@@ -71,20 +72,8 @@ async fn pin_set_lock_unlock_roundtrip() {
     let snap: serde_json::Value = alice.invoke_json("get_unlock_state", json!({})).await;
     assert_eq!(snap["is_unlocked"], true);
 
-    drop(alice);
-}
-
-/// Changing the PIN: old fails after change, new succeeds.
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn pin_change_roundtrip() {
-    wipe().await;
-
-    let mut alice = TestClient::new().await;
-    let profile = alice.sign_up("alice@test.local").await;
-    let uid = profile.id.clone();
-
-    // sign_up set TEST_PIN. Change to 2222.
+    // Changing the PIN: old fails after change, new succeeds (formerly
+    // `pin_change_roundtrip`, a separate sign-up for the same PIN slots).
     invoke::<()>(
         &alice.webview,
         "set_pin",
@@ -120,9 +109,14 @@ async fn pin_change_roundtrip() {
 /// Lock closes the local DB. With the DB closed, DB-touching commands
 /// fail until unlock re-opens it. This is the load-bearing property:
 /// the PIN isn't merely a UI gate, it gates SQLCipher decryption.
+///
+/// And a wrong PIN must NOT open it. The wrapped blobs stay untouched,
+/// AppState.unlock stays empty, and DB-touching commands continue to fail.
+/// (Formerly two tests, `pin_locks_db_access` and `wrong_pin_keeps_db_locked`,
+/// that each signed up just to lock.)
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-async fn pin_locks_db_access() {
+async fn pin_locks_db_access_and_wrong_pin_keeps_it_locked() {
     wipe().await;
 
     let mut alice = TestClient::new().await;
@@ -156,40 +150,6 @@ async fn pin_locks_db_access() {
             || err_lower.contains("database"),
         "expected DB-closed error, got: {err}"
     );
-
-    // Correct PIN reopens.
-    invoke::<serde_json::Value>(
-        &alice.webview,
-        "unlock",
-        json!({ "userId": uid, "pin": TEST_PIN }),
-    )
-    .await
-    .expect("unlock with correct PIN");
-
-    invoke::<serde_json::Value>(
-        &alice.webview,
-        "list_messages",
-        json!({ "conversationId": "nonexistent" }),
-    )
-    .await
-    .expect("list_messages after unlock");
-
-    drop(alice);
-}
-
-/// Wrong PIN must NOT open the local DB. The wrapped blobs stay
-/// untouched, AppState.unlock stays empty, and DB-touching commands
-/// continue to fail.
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn wrong_pin_keeps_db_locked() {
-    wipe().await;
-
-    let mut alice = TestClient::new().await;
-    let profile = alice.sign_up("alice@test.local").await;
-    let uid = profile.id.clone();
-
-    invoke::<()>(&alice.webview, "lock", json!({})).await.expect("lock");
 
     // Capture the wrapped blobs before any failed unlock attempts.
     let ks = alice.state.keystore.clone();
@@ -428,142 +388,6 @@ async fn reset_identity_resigns_device_cert() {
     drop(alice);
 }
 
-/// Boot-time self-heal: a sibling device's `user_device` row whose
-/// `cert_identity_version` is behind `users.identity_version` (e.g.
-/// because another device rotated the account identity while this one
-/// was offline) gets re-signed during `unlock`, without that sibling
-/// device having to come online itself.
-///
-/// Drives the path by inserting a synthetic stale row that does NOT
-/// belong to the test client's current device (so `ensure_device_cert`
-/// — which only touches the calling device — leaves it alone) and
-/// asserts `unlock` re-signs it via `resign_stale_device_certs`.
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn unlock_resigns_stale_sibling_device_cert() {
-    wipe().await;
-
-    let mut alice = TestClient::new().await;
-    let profile = alice.sign_up("alice@test.local").await;
-    let user_id = profile.id.clone();
-
-    let w = world().await;
-    let conn = w.remote.conn().await.expect("remote conn");
-
-    // Synthetic sibling device row at cert_identity_version = 0 (stale
-    // relative to the just-signed-up user's identity_version = 1). The
-    // mls_signature_pub bytes are arbitrary — the cross-signing cert
-    // attests to whatever bytes are stored there, so verification
-    // works on whatever we wrote.
-    let phantom_device_id = "phantom-sibling-device";
-    let phantom_sig_pub = vec![0xABu8; 32];
-    let phantom_sig_pub_pq = vec![0xCDu8; pollis_lib::commands::account_identity::MLDSA44_PUB_LEN];
-    let phantom_cert_placeholder = vec![0u8; pollis_lib::commands::account_identity::MLDSA44_SIG_LEN];
-    conn.execute(
-        "INSERT INTO user_device \
-           (device_id, user_id, device_cert, cert_issued_at, cert_identity_version, \
-            mls_signature_pub, mls_signature_pub_pq) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        libsql::params![
-            phantom_device_id,
-            user_id.clone(),
-            phantom_cert_placeholder.clone(),
-            "0".to_string(),
-            0i64,
-            phantom_sig_pub.clone(),
-            phantom_sig_pub_pq.clone(),
-        ],
-    )
-    .await
-    .expect("insert phantom user_device row");
-
-    // Sanity: the phantom row's placeholder cert is bogus and would
-    // never verify against the user's real account_id_pub.
-    let (account_id_pub, identity_version): (Vec<u8>, i64) = {
-        let mut rows = conn
-            .query(
-                "SELECT account_id_pub, identity_version FROM users WHERE id = ?1",
-                libsql::params![user_id.clone()],
-            )
-            .await
-            .expect("users select");
-        let row = rows.next().await.expect("rows").expect("user row");
-        (
-            row.get::<Option<Vec<u8>>>(0).unwrap().expect("account_id_pub"),
-            row.get(1).expect("identity_version"),
-        )
-    };
-    assert!(
-        pollis_lib::commands::account_identity::verify_device_cert(
-            &account_id_pub,
-            phantom_device_id,
-            &phantom_sig_pub,
-            &phantom_sig_pub_pq,
-            0,
-            0,
-            &phantom_cert_placeholder,
-        )
-        .is_err(),
-        "placeholder cert must not verify (sanity check)"
-    );
-
-    // Lock + unlock to trigger the boot-time sweep.
-    invoke::<()>(&alice.webview, "lock", json!({}))
-        .await
-        .expect("lock");
-    invoke::<serde_json::Value>(
-        &alice.webview,
-        "unlock",
-        json!({ "userId": user_id, "pin": TEST_PIN }),
-    )
-    .await
-    .expect("unlock");
-
-    // The phantom row should now be re-signed at the current
-    // identity_version with bytes that verify against
-    // account_id_pub.
-    let (new_cert, new_cert_version, new_issued_at_str): (Vec<u8>, i64, String) = {
-        let mut rows = conn
-            .query(
-                "SELECT device_cert, cert_identity_version, cert_issued_at \
-                 FROM user_device WHERE device_id = ?1 AND user_id = ?2",
-                libsql::params![phantom_device_id, user_id.clone()],
-            )
-            .await
-            .expect("phantom re-select");
-        let row = rows.next().await.expect("rows").expect("phantom row");
-        (
-            row.get::<Option<Vec<u8>>>(0).unwrap().expect("device_cert"),
-            row.get::<i64>(1).expect("cert_identity_version"),
-            row.get::<Option<String>>(2)
-                .unwrap()
-                .expect("cert_issued_at"),
-        )
-    };
-    let new_issued_at: u64 = new_issued_at_str.parse().expect("parse issued_at");
-
-    assert_eq!(
-        new_cert_version, identity_version,
-        "phantom cert_identity_version must be bumped to current identity_version"
-    );
-    assert_ne!(
-        new_cert, phantom_cert_placeholder,
-        "phantom cert bytes must change (was placeholder, now real signature)"
-    );
-    pollis_lib::commands::account_identity::verify_device_cert(
-        &account_id_pub,
-        phantom_device_id,
-        &phantom_sig_pub,
-        &phantom_sig_pub_pq,
-        new_cert_version as u32,
-        new_issued_at,
-        &new_cert,
-    )
-    .expect("re-signed phantom cert must verify against account_id_pub");
-
-    drop(alice);
-}
-
 /// The graceful sign-out path, end to end (#685, part E).
 ///
 /// `revoke_device` publishes a `device_revoked` inbox nudge; the nudge is
@@ -710,8 +534,19 @@ async fn revoking_a_device_records_a_security_event() {
     );
 }
 
-/// The negative twin of the test above (#685, part C): the boot-time sweep must
-/// re-sign a stale LIVE sibling and must NOT re-sign a stale REVOKED one.
+/// Boot-time self-heal and its negative twin (#685, part C): the boot-time sweep
+/// must re-sign a stale LIVE sibling and must NOT re-sign a stale REVOKED one.
+///
+/// The live half: a sibling device's `user_device` row whose
+/// `cert_identity_version` is behind `users.identity_version` (e.g. because
+/// another device rotated the account identity while this one was offline) gets
+/// re-signed during `unlock`, without that sibling device having to come online
+/// itself — at the current identity_version, with bytes that verify against
+/// `account_id_pub`. The rows do NOT belong to the test client's current device,
+/// so `ensure_device_cert` — which only touches the calling device — leaves them
+/// alone and only `resign_stale_device_certs` can re-sign them. (This was the
+/// separate `unlock_resigns_stale_sibling_device_cert`, which built the same
+/// phantom-sibling world for its one row.)
 ///
 /// This is a security property, not hygiene. `pollis-device-cert` verification is
 /// offline by design (#455 relay cert auth) — it binds `identity_version` and
@@ -765,6 +600,36 @@ async fn unlock_never_resigns_a_revoked_sibling_device_cert() {
         .expect("insert phantom user_device row");
     }
 
+    // Sanity: the placeholder cert is bogus and would never verify against the
+    // user's real account_id_pub.
+    let (account_id_pub, identity_version): (Vec<u8>, i64) = {
+        let mut rows = conn
+            .query(
+                "SELECT account_id_pub, identity_version FROM users WHERE id = ?1",
+                libsql::params![user_id.clone()],
+            )
+            .await
+            .expect("users select");
+        let row = rows.next().await.expect("rows").expect("user row");
+        (
+            row.get::<Option<Vec<u8>>>(0).unwrap().expect("account_id_pub"),
+            row.get(1).expect("identity_version"),
+        )
+    };
+    assert!(
+        pollis_lib::commands::account_identity::verify_device_cert(
+            &account_id_pub,
+            "live-sibling",
+            &sig_pub,
+            &sig_pub_pq,
+            0,
+            0,
+            &placeholder,
+        )
+        .is_err(),
+        "placeholder cert must not verify (sanity check)"
+    );
+
     // Lock + unlock to trigger the boot-time sweep.
     invoke::<()>(&alice.webview, "lock", json!({}))
         .await
@@ -783,7 +648,7 @@ async fn unlock_never_resigns_a_revoked_sibling_device_cert() {
         async move {
             let mut rows = conn
                 .query(
-                    "SELECT device_cert, cert_identity_version \
+                    "SELECT device_cert, cert_identity_version, cert_issued_at \
                      FROM user_device WHERE device_id = ?1 AND user_id = ?2",
                     libsql::params![device_id, user_id],
                 )
@@ -793,20 +658,37 @@ async fn unlock_never_resigns_a_revoked_sibling_device_cert() {
             (
                 row.get::<Option<Vec<u8>>>(0).unwrap().expect("device_cert"),
                 row.get::<i64>(1).expect("cert_identity_version"),
+                row.get::<Option<String>>(2).unwrap().expect("cert_issued_at"),
             )
         }
     };
 
-    // Control: the live stale sibling WAS re-signed, so the sweep really ran.
-    let (live_cert, live_version) = cert_state("live-sibling").await;
+    // The live stale sibling WAS re-signed — at the current identity_version,
+    // with bytes that verify against account_id_pub. This is both the boot-time
+    // self-heal property and the control that the sweep really ran.
+    let (live_cert, live_version, live_issued_at) = cert_state("live-sibling").await;
     assert!(
         live_version > 0 && live_cert != placeholder,
         "control failed: the LIVE stale sibling must be re-signed, otherwise this \
          test proves nothing about the revoked one (#685)"
     );
+    assert_eq!(
+        live_version, identity_version,
+        "the live sibling's cert_identity_version must be bumped to the current identity_version"
+    );
+    pollis_lib::commands::account_identity::verify_device_cert(
+        &account_id_pub,
+        "live-sibling",
+        &sig_pub,
+        &sig_pub_pq,
+        live_version as u32,
+        live_issued_at.parse().expect("parse issued_at"),
+        &live_cert,
+    )
+    .expect("re-signed live sibling cert must verify against account_id_pub");
 
     // The property: the revoked sibling is untouched at the stale version.
-    let (revoked_cert, revoked_version) = cert_state("revoked-sibling").await;
+    let (revoked_cert, revoked_version, _) = cert_state("revoked-sibling").await;
     assert_eq!(
         revoked_version, 0,
         "a REVOKED device must never be re-signed to the current identity_version — \

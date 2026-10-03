@@ -761,7 +761,7 @@ recipients. `delete_message` (`messages/edit_delete.rs`) has two paths:
   MLS-authenticated author (`cred_sender`) equals the target message's stored
   author** — so neither the server nor another member can redact a message they
   did not write (the invariant test is
-  `flows/messages.rs::redaction_from_non_author_is_ignored`). Self-delete also
+  `flows/messages.rs::sealed_non_author_edit_is_ignored`, which forges both an edit and a redaction). Self-delete also
   removes the original envelope + any pending edit via `/v1/messages/delete` (so
   a not-yet-fetched member never receives it and the ciphertext does not linger
   at rest) and soft-deletes the sender's own row (`content=NULL, deleted_at`).
@@ -812,7 +812,7 @@ re-derived **admin role**. Authorship is enforced **cryptographically on ingest*
 instead — an edit or redaction is applied only when its MLS-authenticated author
 (the credential inside the ciphertext) equals the target message's author
 (`decrypt_and_persist_one` in `messages/ingest.rs`; invariant tests
-`sealed_non_author_edit_is_ignored` / `redaction_from_non_author_is_ignored`). The
+`sealed_non_author_edit_is_ignored`, which forges both). The
 one accepted trade: a non-author member can remove a *not-yet-fetched* envelope
 from Turso (an availability cost), but cannot forge a *delete appearance* on any
 member who already holds the message — that still requires a valid redaction or an

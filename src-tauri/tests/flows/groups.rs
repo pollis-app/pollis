@@ -87,10 +87,13 @@ async fn two_clients_see_each_other_via_turso() {
 // ─── Scenarios ──────────────────────────────────────────────────────────────
 
 /// Alice invites Bob by username. Bob sees the pending invite, accepts it,
-/// and appears in the group member list.
+/// and appears in the group member list. Alice then removes Bob: he no longer
+/// appears in the member list and the group drops off his own list. (The
+/// removal half was `removed_member_loses_access`, which repeated this whole
+/// invite → accept setup.)
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-async fn group_invite_accept_flow() {
+async fn group_invite_accept_then_remove_flow() {
     wipe().await;
 
     let mut alice = TestClient::new().await;
@@ -124,6 +127,13 @@ async fn group_invite_accept_flow() {
 
     // Bob's own group list now includes the group.
     assert!(bob.list_group_ids().await.contains(&group_id));
+
+    // Removal: bob leaves the roster and the group drops off his own list.
+    alice.remove_member(&group_id, &bob_profile.id).await;
+
+    let ids = alice.group_member_ids(&group_id).await;
+    assert_eq!(ids, vec![alice_profile.id.clone()]);
+    assert!(!bob.list_group_ids().await.contains(&group_id));
 
     drop(alice);
     drop(bob);
@@ -162,59 +172,6 @@ async fn group_invite_decline_flow() {
     drop(bob);
 }
 
-/// Carol finds Alice's group by slug, requests access, and Alice (admin)
-/// approves. Carol's request becomes non-pending and Carol gains membership.
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn group_join_request_approve_flow() {
-    wipe().await;
-
-    let mut alice = TestClient::new().await;
-    let mut carol = TestClient::new().await;
-
-    let alice_profile = alice.sign_up("alice@test.local").await;
-    let carol_profile = carol.sign_up("carol@test.local").await;
-
-    let group_id = alice.create_group("Joinable").await;
-
-    carol.request_group_access(&group_id).await;
-
-    // Admin sees one pending request for this group.
-    let requests = alice.list_join_requests(&group_id).await;
-    assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0]["requester_id"], carol_profile.id);
-    let request_id = requests[0]["id"].as_str().expect("request id").to_string();
-
-    // #875: a non-member used to receive `[]` here — the same answer as "nobody
-    // has asked to join". It now reports the real condition.
-    let err = carol
-        .invoke_try(
-            "get_group_join_requests",
-            json!({ "groupId": group_id, "requesterId": carol.user_id() }),
-        )
-        .await
-        .expect_err("a non-member must not receive a join-request list");
-    assert!(
-        err.contains("not a member of this group"),
-        "non-member should be told why, got: {err}"
-    );
-
-    alice.approve_join_request(&request_id).await;
-    carol.poll().await;
-
-    // Request no longer pending for the admin.
-    assert!(alice.list_join_requests(&group_id).await.is_empty());
-
-    // Carol is a member; Alice still is.
-    let ids = alice.group_member_ids(&group_id).await;
-    assert!(ids.contains(&alice_profile.id));
-    assert!(ids.contains(&carol_profile.id));
-    assert_eq!(ids.len(), 2);
-
-    drop(alice);
-    drop(carol);
-}
-
 /// Carol's request is rejected. She does not become a member and the pending
 /// list clears.
 #[tokio::test(flavor = "multi_thread")]
@@ -246,136 +203,6 @@ async fn group_join_request_reject_flow() {
     drop(carol);
 }
 
-/// After Alice removes Bob from the group, Bob no longer appears in the
-/// member list and the group drops off his own list.
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn removed_member_loses_access() {
-    wipe().await;
-
-    let mut alice = TestClient::new().await;
-    let mut bob = TestClient::new().await;
-
-    let alice_profile = alice.sign_up("alice@test.local").await;
-    let bob_profile = bob.sign_up("bob@test.local").await;
-
-    let group_id = alice.create_group("Kick Test").await;
-    alice.invite(&group_id, &bob_profile.username).await;
-
-    let invite = bob.first_pending_invite().await.expect("pending invite");
-    let invite_id = invite["id"].as_str().expect("invite id").to_string();
-    bob.accept_invite(&invite_id).await;
-    bob.poll().await;
-
-    assert!(bob.list_group_ids().await.contains(&group_id));
-
-    alice.remove_member(&group_id, &bob_profile.id).await;
-
-    let ids = alice.group_member_ids(&group_id).await;
-    assert_eq!(ids, vec![alice_profile.id.clone()]);
-    assert!(!bob.list_group_ids().await.contains(&group_id));
-
-    drop(alice);
-    drop(bob);
-}
-
-/// #875 — the two admin-gated group READS used to answer `Ok(vec![])` for a
-/// non-member and for a plain member alike, which is byte-identical to "there
-/// is nothing here". A caller could not tell a permission boundary from an
-/// empty page, and neither could the UI.
-///
-/// Both cases are exercised separately on purpose: "not a member at all" and
-/// "a member without the role" are different conditions and must say so.
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn join_requests_and_invite_links_are_admin_only() {
-    wipe().await;
-
-    let mut alice = TestClient::new().await;
-    let mut bob = TestClient::new().await;
-    let mut carol = TestClient::new().await;
-
-    alice.sign_up("alice@test.local").await;
-    let bob_profile = bob.sign_up("bob@test.local").await;
-    carol.sign_up("carol@test.local").await;
-
-    let group_id = alice.create_group("Admin Only").await;
-
-    // Bob joins as a plain member; Carol stays outside the group entirely.
-    alice.invite(&group_id, &bob_profile.username).await;
-    bob.poll().await;
-    let invite = bob.first_pending_invite().await.expect("bob was invited");
-    bob.accept_invite(invite["id"].as_str().expect("invite id")).await;
-    bob.poll().await;
-    assert!(
-        bob.list_group_ids().await.contains(&group_id),
-        "bob should be a member before the role gate is tested"
-    );
-
-    // The admin can create and see an invite link.
-    let created: serde_json::Value = alice
-        .invoke_json(
-            "create_group_invite_link",
-            json!({ "groupId": group_id, "creatorId": alice.user_id(),
-                    "expiresInHours": null, "maxUses": null }),
-        )
-        .await;
-    assert!(created["token"].as_str().is_some(), "admin should get a link token");
-    let links = alice
-        .invoke_json(
-            "list_group_invite_links",
-            json!({ "groupId": group_id, "userId": alice.user_id() }),
-        )
-        .await;
-    assert_eq!(
-        links.as_array().expect("links array").len(),
-        1,
-        "the admin must still see the link — the fix must not deny the allowed case"
-    );
-
-    // A member without the role is told which role is missing …
-    let bob_links = bob
-        .invoke_try(
-            "list_group_invite_links",
-            json!({ "groupId": group_id, "userId": bob.user_id() }),
-        )
-        .await
-        .expect_err("a non-admin member must not receive an invite-link list");
-    assert!(
-        bob_links.contains("only group admins can view invite links"),
-        "a member should be told which role is missing, got: {bob_links}"
-    );
-    let bob_reqs = bob
-        .invoke_try(
-            "get_group_join_requests",
-            json!({ "groupId": group_id, "requesterId": bob.user_id() }),
-        )
-        .await
-        .expect_err("a non-admin member must not receive a join-request list");
-    assert!(
-        bob_reqs.contains("only group admins can view join requests"),
-        "a member should be told which role is missing, got: {bob_reqs}"
-    );
-
-    // … and a non-member is told they are not in the group at all, which is a
-    // different condition and used to be the same empty vec.
-    let carol_links = carol
-        .invoke_try(
-            "list_group_invite_links",
-            json!({ "groupId": group_id, "userId": carol.user_id() }),
-        )
-        .await
-        .expect_err("a non-member must not receive an invite-link list");
-    assert!(
-        carol_links.contains("not a member of this group"),
-        "a non-member should be told they are outside the group, got: {carol_links}"
-    );
-
-    drop(alice);
-    drop(bob);
-    drop(carol);
-}
-
 // ─── #917 — group reads take a caller ────────────────────────────────────────
 
 /// The roster, the channel list and the emoji list used to take a group id and
@@ -391,6 +218,17 @@ async fn join_requests_and_invite_links_are_admin_only() {
 ///
 /// Mallory is signed up and authenticated; she is simply outside the group. So
 /// a denial here is "not a member", never "unknown user".
+///
+/// The same scenario also carries the #875 admin gate (formerly
+/// `join_requests_and_invite_links_are_admin_only`, which built this exact
+/// admin / plain member / outsider world):
+/// the two admin-gated group READS used to answer `Ok(vec![])` for a
+/// non-member and for a plain member alike, which is byte-identical to "there
+/// is nothing here". A caller could not tell a permission boundary from an
+/// empty page, and neither could the UI.
+///
+/// Both cases are exercised separately on purpose: "not a member at all" and
+/// "a member without the role" are different conditions and must say so.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn group_reads_are_members_only() {
@@ -491,6 +329,66 @@ async fn group_reads_are_members_only() {
         "a non-member should be told they are outside the group, got: {err}"
     );
 
+    // ── #875: the admin-gated reads ─────────────────────────────────────────
+    // The admin can create and see an invite link.
+    let created: serde_json::Value = alice
+        .invoke_json(
+            "create_group_invite_link",
+            json!({ "groupId": group_id, "creatorId": alice.user_id(),
+                    "expiresInHours": null, "maxUses": null }),
+        )
+        .await;
+    assert!(created["token"].as_str().is_some(), "admin should get a link token");
+    let links = alice
+        .invoke_json(
+            "list_group_invite_links",
+            json!({ "groupId": group_id, "userId": alice.user_id() }),
+        )
+        .await;
+    assert_eq!(
+        links.as_array().expect("links array").len(),
+        1,
+        "the admin must still see the link — the fix must not deny the allowed case"
+    );
+
+    // A member without the role is told which role is missing …
+    let bob_links = bob
+        .invoke_try(
+            "list_group_invite_links",
+            json!({ "groupId": group_id, "userId": bob.user_id() }),
+        )
+        .await
+        .expect_err("a non-admin member must not receive an invite-link list");
+    assert!(
+        bob_links.contains("only group admins can view invite links"),
+        "a member should be told which role is missing, got: {bob_links}"
+    );
+    let bob_reqs = bob
+        .invoke_try(
+            "get_group_join_requests",
+            json!({ "groupId": group_id, "requesterId": bob.user_id() }),
+        )
+        .await
+        .expect_err("a non-admin member must not receive a join-request list");
+    assert!(
+        bob_reqs.contains("only group admins can view join requests"),
+        "a member should be told which role is missing, got: {bob_reqs}"
+    );
+
+    // … and a non-member is told they are not in the group at all, which is a
+    // different condition and used to be the same empty vec.
+    let mallory_links = mallory
+        .invoke_try(
+            "list_group_invite_links",
+            json!({ "groupId": group_id, "userId": mallory.user_id() }),
+        )
+        .await
+        .expect_err("a non-member must not receive an invite-link list");
+    assert!(
+        mallory_links.contains("not a member of this group"),
+        "a non-member should be told they are outside the group, got: {mallory_links}"
+    );
+
     drop(alice);
     drop(bob);
     drop(mallory);
@@ -560,7 +458,11 @@ async fn emoji_rendering_ignores_group_membership() {
 ///
 /// Asserts the full join path end to end from OUTSIDE the group (search →
 /// request → approve → member), and that the projection carries what the join
-/// prompt renders and nothing more.
+/// prompt renders and nothing more. It is also the join-request APPROVE flow
+/// (formerly `group_join_request_approve_flow`, which ran the same request →
+/// approve on the same two users): the admin sees exactly carol's request, a
+/// non-member asking for the request list is told why (#875), and an approved
+/// request stops being pending.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_non_member_can_still_find_and_join_a_group() {
@@ -626,14 +528,33 @@ async fn a_non_member_can_still_find_and_join_a_group() {
     carol.request_group_access(&group_id).await;
     let requests = alice.list_join_requests(&group_id).await;
     assert_eq!(requests.len(), 1, "the admin must see the pending request");
+    assert_eq!(requests[0]["requester_id"], carol_profile.id);
     let request_id = requests[0]["id"].as_str().expect("request id").to_string();
+
+    // #875: a non-member used to receive `[]` here — the same answer as "nobody
+    // has asked to join". It now reports the real condition.
+    let err = carol
+        .invoke_try(
+            "get_group_join_requests",
+            json!({ "groupId": group_id, "requesterId": carol.user_id() }),
+        )
+        .await
+        .expect_err("a non-member must not receive a join-request list");
+    assert!(
+        err.contains("not a member of this group"),
+        "non-member should be told why, got: {err}"
+    );
 
     alice.approve_join_request(&request_id).await;
     carol.poll().await;
 
+    // Request no longer pending for the admin.
+    assert!(alice.list_join_requests(&group_id).await.is_empty());
+
     let ids = alice.group_member_ids(&group_id).await;
     assert!(ids.contains(&carol_profile.id), "carol should have joined");
     assert!(ids.contains(&alice_profile.id));
+    assert_eq!(ids.len(), 2);
 
     // And now that she is inside, the guarded reads open up for her.
     assert!(
