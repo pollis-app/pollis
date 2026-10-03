@@ -661,6 +661,14 @@ function TextChat(props: ChatViewProps = {}) {
             deleteMessage.mutate(actionTarget.id);
             setActionTarget(null);
           }}
+          onReport={() => {
+            const m = actionTarget;
+            setActionTarget(null);
+            router.push({
+              pathname: "/report",
+              params: { userId: m.sender_id, conversationId: m.conversation_id, messageId: m.id },
+            });
+          }}
           onClose={() => setActionTarget(null)}
         />
       ) : null}

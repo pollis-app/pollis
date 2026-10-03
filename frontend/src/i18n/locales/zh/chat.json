@@ -27,7 +27,8 @@
     "deleteAsAdmin": "删除消息（管理员）",
     "more": "更多操作",
     "pin": "置顶消息",
-    "unpin": "取消置顶"
+    "unpin": "取消置顶",
+    "report": "举报"
   },
   "thread": {
     "replyCount_other": "{{count}} 条回复"
@@ -103,5 +104,25 @@
     "kilobytes": "{{size}}KB",
     "megabytes": "{{size}}MB",
     "gigabytes": "{{size}}GB"
+  },
+  "report": {
+    "someone": "此人",
+    "titleMessage": "举报消息",
+    "titleUser": "举报 {{name}}",
+    "intro": "Pollis 只会收到账户和举报原因。消息始终保持加密，我们无法看到聊天内容。",
+    "reasonLabel": "原因",
+    "reason": {
+      "spam": "垃圾信息",
+      "harassment": "骚扰或威胁",
+      "illegal": "违法内容",
+      "other": "其他"
+    },
+    "submit": "举报",
+    "submitAndBlock": "举报并屏蔽",
+    "failed": "举报发送失败，请重试。",
+    "doneTitle": "举报已发送",
+    "done": "谢谢。我们会审核每一条举报。",
+    "doneBlocked": "谢谢。我们会审核每一条举报。你也已屏蔽 {{name}}。",
+    "close": "完成"
   }
 }

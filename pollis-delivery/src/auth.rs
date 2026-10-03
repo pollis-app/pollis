@@ -503,7 +503,8 @@ fn parse_credentials(headers: &HeaderMap, now: i64) -> Result<Credentials, AuthR
 /// Look up the registered `mls_signature_pub_pq` for `(user_id, device_id)`.
 ///
 /// Returns `Ok(Some(pub))` for a live, enrolled device; `Ok(None)` if the row
-/// is absent, revoked, or has a NULL/wrong-length pubkey — all of which the
+/// is absent, revoked, belongs to a suspended account (#1213), or has a
+/// NULL/wrong-length pubkey — all of which the
 /// caller treats as "unknown device" → 401. A NULL column specifically means a
 /// device that has not published a cert since #668; it must re-run
 /// `publish-device-cert` (which is session/cert gated, never device-signature
@@ -516,7 +517,8 @@ async fn lookup_device_pubkey(
 ) -> anyhow::Result<Option<VerifyingKey>> {
     let mut rows = conn
         .query(
-            "SELECT mls_signature_pub_pq, revoked_at \
+            "SELECT mls_signature_pub_pq, revoked_at, \
+                    EXISTS (SELECT 1 FROM account_suspension s WHERE s.user_id = ?2) \
              FROM user_device WHERE device_id = ?1 AND user_id = ?2",
             libsql::params![device_id, user_id],
         )
@@ -531,6 +533,16 @@ async fn lookup_device_pubkey(
     // its pubkey column is still populated.
     let revoked_at: Option<String> = row.get::<Option<String>>(1).ok().flatten();
     if revoked_at.is_some() {
+        return Ok(None);
+    }
+
+    // A suspended account (#1213) authenticates nothing from any of its
+    // devices — the same refusal as a revoked device, enforced here because
+    // this lookup is the one every device-signed endpoint funnels through. The
+    // column is read as a required integer so a schema mistake fails closed
+    // (Err → reject), never open.
+    let suspended: i64 = row.get(2)?;
+    if suspended != 0 {
         return Ok(None);
     }
 

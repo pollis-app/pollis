@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { View, Text } from "react-native";
+import { Linking, View, Text } from "react-native";
 import { useRouter } from "expo-router";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { Screen, Crumb, Field, Button, BottomAction } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
@@ -89,6 +89,21 @@ export default function AuthEmail() {
         >
           {upper(requestOtp.isPending ? t("otp.sending") : t("otp.continue"))}
         </Button>
+        {/* Agreeing to the terms is part of creating the account (#1213; App
+            Store 1.2): the terms say abusive content is not tolerated. */}
+        <Text
+          testID="text-legal"
+          style={{ fontFamily: ty.body.fontFamily, fontSize: 11, lineHeight: 16, color: semantic.mute, textAlign: "center" }}
+        >
+          <Trans
+            t={t}
+            i18nKey="auth:legal.agree"
+            components={{
+              terms: <Text style={{ color: semantic.accent }} onPress={() => void Linking.openURL("https://pollis.com/terms")} />,
+              privacy: <Text style={{ color: semantic.accent }} onPress={() => void Linking.openURL("https://pollis.com/privacy")} />,
+            }}
+          />
+        </Text>
         {/* QR device link (#1207): scan the code a signed-in device shows,
             instead of the email code. */}
         <Button

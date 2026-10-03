@@ -61,7 +61,8 @@
     "keyChangedWarning": "La clé d'identité de ce contact a changé depuis votre dernière vérification. Comparez à nouveau le numéro par un autre moyen avant de lui faire confiance.",
     "compareHint": "Comparez ces chiffres avec {{name}} via un canal de confiance (en personne, ou un appel dont vous reconnaissez la voix). S'ils correspondent, marquez ce contact comme vérifié.",
     "removeVerification": "Retirer la vérification",
-    "markVerified": "Marquer comme vérifié"
+    "markVerified": "Marquer comme vérifié",
+    "report": "Signaler"
   },
   "notify": {
     "requestTitle": "Nouvelle conversation",

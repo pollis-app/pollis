@@ -1,0 +1,9 @@
+appId: com.pollis.mobile
+---
+# Peer device: sign up a fresh account and show its handle on Self, where the
+# script reads it off the UI tree.
+- runFlow: ../../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-self"
+- assertVisible:
+    id: "screen-self"

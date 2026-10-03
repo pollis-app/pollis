@@ -7,6 +7,7 @@ import * as api from '../../services/api';
 import { Button } from '../ui/Button';
 import { InputOtp } from '../ui/InputOtp';
 import { TextInput } from '../ui/TextInput';
+import { shellOpen } from '../../bridge';
 
 interface EmailOTPAuthProps {
   onSuccess: (result: api.AuthResult) => void | Promise<void>;
@@ -258,6 +259,22 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
       >
         {t('link.useDevice')}
       </Button>
+      {/* Agreeing to the terms is part of creating the account (#1213): they
+          say abusive content is not tolerated. */}
+      <p data-testid="legal-agree" className="text-xs text-muted text-center leading-relaxed">
+        <Trans
+          t={t}
+          i18nKey="legal.agree"
+          components={{
+            terms: (
+              <button type="button" className="underline bg-transparent text-accent" onClick={() => void shellOpen('https://pollis.com/terms')} />
+            ),
+            privacy: (
+              <button type="button" className="underline bg-transparent text-accent" onClick={() => void shellOpen('https://pollis.com/privacy')} />
+            ),
+          }}
+        />
+      </p>
     </div>
   );
 };

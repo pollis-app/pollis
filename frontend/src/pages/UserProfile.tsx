@@ -1,7 +1,7 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { ArrowLeft, MessageCircle, Ban } from "lucide-react";
+import { ArrowLeft, MessageCircle, Ban, Flag } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { PageShell } from "../components/Layout/PageShell";
 import { PresenceAvatar } from "../components/ui/PresenceAvatar";
@@ -89,6 +89,14 @@ export const UserProfilePage: React.FC = observer(() => {
           disabled: blockMutation.isPending,
           type: "system",
           testId: "user-profile-block",
+        },
+        {
+          id: "report",
+          label: t("profile.report"),
+          icon: <Flag size={14} />,
+          action: () => navigate({ to: "/report/$userId", params: { userId } }),
+          type: "system",
+          testId: "user-profile-report",
         },
         { id: "__sep__", label: "", type: "separator" },
         {

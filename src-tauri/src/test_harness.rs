@@ -117,6 +117,7 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::dm::leave_dm_channel,
             crate::commands::blocks::block_user,
             crate::commands::blocks::unblock_user,
+            crate::commands::blocks::report_user,
             crate::commands::blocks::list_blocked_users,
             crate::commands::bookmarks::save_message,
             crate::commands::bookmarks::unsave_message,

@@ -277,6 +277,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "attachment_ownership_retired",
         include_str!("../migrations/000032_attachment_ownership_retired.sql"),
     ),
+    (
+        33,
+        "user_report",
+        include_str!("../migrations/000033_user_report.sql"),
+    ),
 ];
 
 /// Every script for the MAIN DB, in apply order (baseline first). One element

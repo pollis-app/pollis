@@ -127,7 +127,10 @@ fn the_endpoint_table_covers_the_whole_write_surface() {
         // 109 since #1207 added QR device links: `/v1/link/create` and
         // `/v1/link/status` (device-signed, from the device showing the QR) and
         // `/v1/link/claim` (pre-credential; mints an enrollment-only session).
-        109,
+        //
+        // 110 since #1213 added abuse reports: `/v1/reports` (device-signed;
+        // ids and a reason, never content).
+        110,
         "the DS write surface changed — update this count deliberately, and make \
          sure the new endpoint is routed in BOTH pollis-delivery and the flows harness"
     );

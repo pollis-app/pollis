@@ -27,7 +27,8 @@
     "deleteAsAdmin": "Eliminar mensaje (admin)",
     "more": "Más acciones",
     "pin": "Fijar mensaje",
-    "unpin": "Dejar de fijar mensaje"
+    "unpin": "Dejar de fijar mensaje",
+    "report": "Denunciar"
   },
   "thread": {
     "replyCount_one": "{{count}} respuesta",
@@ -109,5 +110,25 @@
     "kilobytes": "{{size}} KB",
     "megabytes": "{{size}} MB",
     "gigabytes": "{{size}} GB"
+  },
+  "report": {
+    "someone": "esta persona",
+    "titleMessage": "Denunciar mensaje",
+    "titleUser": "Denunciar a {{name}}",
+    "intro": "Pollis recibe la cuenta y el motivo. Los mensajes siguen cifrados, así que nunca vemos lo que se dijo.",
+    "reasonLabel": "Motivo",
+    "reason": {
+      "spam": "Spam",
+      "harassment": "Acoso o amenazas",
+      "illegal": "Contenido ilegal",
+      "other": "Otro motivo"
+    },
+    "submit": "Denunciar",
+    "submitAndBlock": "Denunciar y bloquear",
+    "failed": "No se pudo enviar la denuncia. Inténtalo de nuevo.",
+    "doneTitle": "Denuncia enviada",
+    "done": "Gracias. Revisamos todas las denuncias.",
+    "doneBlocked": "Gracias. Revisamos todas las denuncias. También bloqueaste a {{name}}.",
+    "close": "Listo"
   }
 }

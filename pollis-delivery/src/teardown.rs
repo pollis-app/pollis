@@ -87,6 +87,8 @@ pub const USER_PURGED_TABLES: &[&str] = &[
     "users",
     "vault_attachment_ref",
     "vault_message",
+    "user_report",
+    "account_suspension",
 ];
 
 /// Every table a conversation teardown clears — [`purge_conversation_rows`],
@@ -199,6 +201,13 @@ pub const EXEMPT_FROM_CONVERSATION_PURGE: &[(&str, &str)] = &[
         "User-owned via its vault entry (#107); purged with the account, and \
          reaped by the envelope-GC sweep if ever orphaned.",
     ),
+    (
+        "user_report",
+        "An abuse report names an account, not a conversation (#1213). Its \
+         conversation_id is context for the operator and points at no stored \
+         content; the report lives until the reporter or reported account is \
+         deleted, which purges it.",
+    ),
 ];
 
 /// Delete every main-DB row keyed to `user_id`, **except** the `users` row
@@ -259,6 +268,16 @@ pub async fn purge_user_rows(conn: &Connection, user_id: &str) -> anyhow::Result
         uid2(),
     )
     .await?;
+    // Abuse reports filed BY or ABOUT this user, and any suspension (#1213).
+    // They hold ids only, but an id that outlives its account is residue the
+    // retention policy promises not to keep, and a deleted account's id is
+    // never reused, so a suspension row would bind nobody.
+    conn.execute(
+        "DELETE FROM user_report WHERE reporter_id = ?1 OR reported_id = ?2",
+        uid2(),
+    )
+    .await?;
+    conn.execute("DELETE FROM account_suspension WHERE user_id = ?1", uid()).await?;
 
     // Invites, in both directions, plus the links this user minted. Honour the
     // declared `ON DELETE SET NULL` on the redemption audit trail BEFORE the

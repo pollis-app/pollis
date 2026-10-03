@@ -105,6 +105,7 @@ pub mod otp;
 pub mod pins;
 pub mod profile;
 pub mod reads;
+pub mod reports;
 pub mod vault;
 pub mod writes;
 
@@ -307,6 +308,10 @@ endpoints! {
     Client   profile::AddDmMemberBody           => "/v1/dm/add",                         StatusOk;
     Client   profile::RemoveDmMemberBody        => "/v1/dm/remove",                      StatusOk;
     Client   profile::LeaveDmBody               => "/v1/dm/leave",                       StatusOk;
+
+    // ── Abuse reports (#1213) ────────────────────────────────────────────────
+    // Ids and a reason only; there is no field for message content.
+    Client   reports::ReportUserBody            => "/v1/reports",                        StatusOk;
 
     // ── Read-cursor cross-device sync (#844) ─────────────────────────────────
     // The body is an OPAQUE BLOB, unlike its plaintext neighbour

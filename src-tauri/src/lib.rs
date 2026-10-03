@@ -578,6 +578,7 @@ pub fn run() {
             commands::dm::leave_dm_channel,
             commands::blocks::block_user,
             commands::blocks::unblock_user,
+            commands::blocks::report_user,
             commands::blocks::list_blocked_users,
             // Saved messages + permalinks (#854). Device-local; no DS endpoint
             // backs any of these, and resolve_message_permalink deliberately

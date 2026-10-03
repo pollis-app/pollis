@@ -47,6 +47,8 @@ interface MessageItemProps {
    * pass them the affordances simply don't render. Wired from `MessageList`. */
   onToggleSave?: (messageId: string) => void;
   onCopyLink?: (messageId: string) => void;
+  /** Report this message's sender (#1213). */
+  onReport?: (messageId: string) => void;
   /** Pin/unpin this message for every member (#99). Optional like the
    * bookmark affordance — absent in surfaces without a conversation. */
   onTogglePin?: (messageId: string) => void;
@@ -83,6 +85,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
   onToggleSave,
   onTogglePin,
   onCopyLink,
+  onReport,
   copyLinkState = "idle",
   isSaved = false,
   isPinned = false,
@@ -310,6 +313,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             onToggleSave={onToggleSave}
             onTogglePin={onTogglePin}
             onCopyLink={onCopyLink}
+            onReport={onReport}
             onEdit={onEdit}
             onDelete={onDelete}
           />
@@ -437,6 +441,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             onToggleSave={onToggleSave}
             onTogglePin={onTogglePin}
             onCopyLink={onCopyLink}
+            onReport={onReport}
             onEdit={onEdit}
             onDelete={onDelete}
           />

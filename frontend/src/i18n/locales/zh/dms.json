@@ -60,7 +60,8 @@
     "keyChangedWarning": "自你上次验证以来，此联系人的身份密钥已更改。请通过其他渠道再次核对安全号码，确认无误后再信任它。",
     "compareHint": "请通过可信渠道（当面，或一通你能确认对方身份的电话）与 {{name}} 核对这些数字。如果一致，就把此联系人标记为已验证。",
     "removeVerification": "取消验证标记",
-    "markVerified": "标记为已验证"
+    "markVerified": "标记为已验证",
+    "report": "举报"
   },
   "notify": {
     "requestTitle": "新的对话",

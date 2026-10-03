@@ -27,7 +27,8 @@
     "deleteAsAdmin": "Delete message (admin)",
     "more": "More actions",
     "pin": "Pin message",
-    "unpin": "Unpin message"
+    "unpin": "Unpin message",
+    "report": "Report"
   },
   "thread": {
     "replyCount_one": "{{count}} reply",
@@ -109,5 +110,25 @@
     "kilobytes": "{{size}}KB",
     "megabytes": "{{size}}MB",
     "gigabytes": "{{size}}GB"
+  },
+  "report": {
+    "someone": "this person",
+    "titleMessage": "Report message",
+    "titleUser": "Report {{name}}",
+    "intro": "Pollis gets the account and the reason. Messages stay encrypted, so we never see what was said.",
+    "reasonLabel": "Reason",
+    "reason": {
+      "spam": "Spam",
+      "harassment": "Harassment or threats",
+      "illegal": "Illegal content",
+      "other": "Something else"
+    },
+    "submit": "Report",
+    "submitAndBlock": "Report and block",
+    "failed": "Couldn't send the report. Try again.",
+    "doneTitle": "Report sent",
+    "done": "Thanks. We review every report.",
+    "doneBlocked": "Thanks. We review every report. You also blocked {{name}}.",
+    "close": "Done"
   }
 }

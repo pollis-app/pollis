@@ -70,6 +70,45 @@ pub async fn block_user(
     Ok(())
 }
 
+/// Report an account (#1213), optionally pointing at one of their messages,
+/// and optionally block them in the same step.
+///
+/// Signal-style: the report carries the reported account, a reason and the
+/// conversation/message ids, never message text. The reporter is this device's
+/// own user (the DS binds it to the signature anyway). `reason` is one of
+/// `spam`, `harassment`, `illegal`, `other`; anything else is refused here
+/// before it is sent, and by the DS and the table after.
+pub async fn report_user(
+    reported_id: String,
+    reason: String,
+    conversation_id: Option<String>,
+    message_id: Option<String>,
+    also_block: bool,
+    state: &Arc<AppState>,
+) -> Result<()> {
+    let reporter_id = crate::commands::mls::current_user_id(state).await?;
+    if reporter_id == reported_id {
+        return Err(crate::error::Error::Other(anyhow::anyhow!(
+            "cannot report yourself"
+        )));
+    }
+    let reason: pollis_api::reports::ReportReason =
+        serde_json::from_value(serde_json::Value::String(reason))
+            .map_err(|_| crate::error::Error::Other(anyhow::anyhow!("unknown report reason")))?;
+    let body = pollis_api::reports::ReportUserBody {
+        reporter_id: reporter_id.clone(),
+        reported_id: reported_id.clone(),
+        reason,
+        conversation_id,
+        message_id,
+    };
+    crate::commands::mls::ds_post_ok(state, &body).await?;
+    if also_block {
+        block_user(reporter_id, reported_id, state).await?;
+    }
+    Ok(())
+}
+
 pub async fn unblock_user(
     blocker_id: String,
     blocked_id: String,
