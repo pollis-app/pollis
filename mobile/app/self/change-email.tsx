@@ -11,6 +11,7 @@ import {
   BottomAction,
   Ctx,
 } from "../../components/ui";
+import { FormField, FORM_FIELD_GAP } from "../../components/FormField";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
 import { upper } from "../../i18n";
@@ -114,8 +115,7 @@ function ChangeEmail() {
           </Text>
 
           {stage === "enter-email" ? (
-            <View style={{ gap: 6 }}>
-              <Text style={ty.label}>{upper(t("user.newEmailLabel"))}</Text>
+            <FormField label={t("user.newEmailLabel")}>
               <Field
                 amber
                 value={newEmail}
@@ -125,17 +125,10 @@ function ChangeEmail() {
                 icon={<Icon.mail color={semantic.mute} />}
                 keyboardType="email-address"
               />
-            </View>
+            </FormField>
           ) : (
-            <View style={{ gap: 14 }}>
-              <View style={{ gap: 6 }}>
-                <Text style={ty.label}>
-                  {upper(
-                    t("mobile:self.changeEmail.newCodeLabel", {
-                      email: newEmail.trim(),
-                    }),
-                  )}
-                </Text>
+            <View style={{ gap: FORM_FIELD_GAP }}>
+              <FormField label={t("mobile:self.changeEmail.newCodeLabel", { email: newEmail.trim() })}>
                 <Field
                   amber
                   value={code}
@@ -147,15 +140,8 @@ function ChangeEmail() {
                   keyboardType="number-pad"
                   icon={<Icon.key color={semantic.mute} />}
                 />
-              </View>
-              <View style={{ gap: 6 }}>
-                <Text style={ty.label}>
-                  {upper(
-                    t("mobile:self.changeEmail.currentCodeLabel", {
-                      email: currentUser?.email ?? "",
-                    }),
-                  )}
-                </Text>
+              </FormField>
+              <FormField label={t("mobile:self.changeEmail.currentCodeLabel", { email: currentUser?.email ?? "" })}>
                 <Field
                   amber
                   value={currentCode}
@@ -167,7 +153,7 @@ function ChangeEmail() {
                   keyboardType="number-pad"
                   icon={<Icon.key color={semantic.mute} />}
                 />
-              </View>
+              </FormField>
             </View>
           )}
 

@@ -120,7 +120,7 @@
   "dm": {
     "backToInbox": "Назад к входящим",
     "danger": "Опасная зона",
-    "exactMatchHint": "Введите полное имя пользователя или почту.",
+    "exactMatchHint": "Введите точное имя пользователя или адрес почты.",
     "new": "Новое",
     "participants": "Участники",
     "participantsCount_one": "Участники · {{count}}",
@@ -262,6 +262,7 @@
   "search": {
     "channels": "Каналы",
     "hint": "Введите не менее 2 символов для поиска.",
+    "filtersLabel": "Фильтры",
     "messages": "Сообщения",
     "placeholder": "Искать везде…",
     "resultCount_one": "{{count}} результат",

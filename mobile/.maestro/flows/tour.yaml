@@ -252,7 +252,7 @@ tags:
 - inputText: "handoff"
 - extendedWaitUntil:
     visible:
-      id: "search-total"
+      id: "search-sort-relevant"
     timeout: 15000
     optional: true
 # Dismiss the keyboard by tapping the empty space under the results.

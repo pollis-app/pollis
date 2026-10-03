@@ -116,7 +116,7 @@
   "dm": {
     "backToInbox": "Volver a la bandeja",
     "danger": "Peligro",
-    "exactMatchHint": "Escribe su nombre de usuario o correo completo.",
+    "exactMatchHint": "Escribe el nombre de usuario o la dirección de correo exactos.",
     "new": "Nuevo",
     "participants": "Participantes",
     "participantsCount_one": "Participantes · {{count}}",
@@ -156,7 +156,7 @@
       "blurb": "Pide el identificador al dueño del grupo. No hay una lista pública de grupos.",
       "requestDeclined": "Solicitud rechazada",
       "requestPending": "Solicitud pendiente",
-      "title": "Descubrir"
+      "title": "Buscar grupo"
     },
     "emoji": {
       "adminsOnly": "Solo los admins del grupo pueden añadir o quitar emoji.",
@@ -248,6 +248,7 @@
   "search": {
     "channels": "Canales",
     "hint": "Escribe al menos 2 caracteres para buscar.",
+    "filtersLabel": "Filtros",
     "messages": "Mensajes",
     "placeholder": "Buscar en todo…",
     "resultCount_one": "{{count}} resultado",

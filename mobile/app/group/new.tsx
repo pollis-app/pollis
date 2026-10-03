@@ -10,6 +10,7 @@ import {
   Button,
   BottomAction,
 } from "../../components/ui";
+import { FormField, FormStack } from "../../components/FormField";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
 import { useCreateGroup } from "../../hooks/queries";
@@ -61,9 +62,8 @@ function NewGroup() {
         ]}
       />
       <Body>
-        <View style={{ paddingHorizontal: 18, paddingTop: 12, gap: 16 }}>
-          <View style={{ gap: 8 }}>
-            <Text style={ty.label}>{upper(t("createGroup.nameLabel"))}</Text>
+        <FormStack paddingTop={12}>
+          <FormField label={t("createGroup.nameLabel")}>
             <Field
               testID="input-group-name"
               accessibilityLabel={t("createGroup.nameLabel")}
@@ -73,11 +73,8 @@ function NewGroup() {
               placeholder={t("createGroup.namePlaceholder")}
               icon={<Icon.people color={semantic.mute} />}
             />
-          </View>
-          <View style={{ gap: 8 }}>
-            <Text style={ty.label}>
-              {upper(t("mobile:group.new.descriptionLabel"))}
-            </Text>
+          </FormField>
+          <FormField label={t("mobile:group.new.descriptionLabel")}>
             <Field
               testID="input-group-description"
               accessibilityLabel={t("mobile:group.common.descriptionLabel")}
@@ -85,7 +82,7 @@ function NewGroup() {
               onChangeText={setDescription}
               placeholder={t("mobile:group.new.descriptionPlaceholder")}
             />
-          </View>
+          </FormField>
           <Text
             style={{
               fontFamily: ty.body.fontFamily,
@@ -108,7 +105,7 @@ function NewGroup() {
                 t("createGroup.createFailed")}
             </Text>
           ) : null}
-        </View>
+        </FormStack>
       </Body>
       <BottomAction>
         <Button

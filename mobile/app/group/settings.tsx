@@ -14,6 +14,7 @@ import {
   Chip,
   Ctx,
 } from "../../components/ui";
+import { FormField, FormStack } from "../../components/FormField";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
 import {
@@ -123,26 +124,26 @@ function GroupSettings() {
         ) : null}
 
         <SectionTitle>{upper(t("mobile:group.settings.identitySection"))}</SectionTitle>
-        <View style={{ paddingHorizontal: 18, paddingTop: 6, gap: 6 }}>
-          <Text style={ty.label}>{upper(t("renameGroup.nameLabel"))}</Text>
-          <Field
-            value={name}
-            onChangeText={setName}
-            editable={iAmAdmin}
-            testID="input-group-name"
-            accessibilityLabel={t("renameGroup.nameLabel")}
-          />
-        </View>
-        <View style={{ paddingHorizontal: 18, paddingTop: 14, gap: 6 }}>
-          <Text style={ty.label}>{upper(t("renameGroup.descriptionLabel"))}</Text>
-          <Field
-            value={description}
-            onChangeText={setDescription}
-            editable={iAmAdmin}
-            testID="input-group-description"
-            accessibilityLabel={t("mobile:group.common.descriptionLabel")}
-          />
-        </View>
+        <FormStack>
+          <FormField label={t("renameGroup.nameLabel")}>
+            <Field
+              value={name}
+              onChangeText={setName}
+              editable={iAmAdmin}
+              testID="input-group-name"
+              accessibilityLabel={t("renameGroup.nameLabel")}
+            />
+          </FormField>
+          <FormField label={t("renameGroup.descriptionLabel")}>
+            <Field
+              value={description}
+              onChangeText={setDescription}
+              editable={iAmAdmin}
+              testID="input-group-description"
+              accessibilityLabel={t("mobile:group.common.descriptionLabel")}
+            />
+          </FormField>
+        </FormStack>
 
         <SectionTitle>{upper(t("mobile:group.settings.channelsSection"))}</SectionTitle>
         {channels.map((c) => {

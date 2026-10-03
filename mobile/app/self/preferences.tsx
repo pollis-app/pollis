@@ -173,10 +173,8 @@ export default function Preferences() {
         ]}
       />
       <Body>
-        <View style={{ paddingHorizontal: 18, paddingTop: 12 }}>
-          <Text style={[ty.label, { marginBottom: 10 }]}>
-            {upper(t("mobile:self.preferences.accentHeading"))}
-          </Text>
+        <SectionTitle>{upper(t("mobile:self.preferences.accentHeading"))}</SectionTitle>
+        <View style={{ paddingHorizontal: 18 }}>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
             {SWATCHES.map((s) => {
               const sel = accentHex.toLowerCase() === s.c.toLowerCase();

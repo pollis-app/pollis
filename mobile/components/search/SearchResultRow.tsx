@@ -64,7 +64,7 @@ export function SearchResultRow({
           <Text style={[ty.label, { letterSpacing: 0.6 }]}>{when}</Text>
         </View>
         {where ? (
-          <Text numberOfLines={1} style={ty.rowSub}>
+          <Text numberOfLines={1} style={[ty.rowSub, { marginBottom: 6 }]}>
             {where}
           </Text>
         ) : null}

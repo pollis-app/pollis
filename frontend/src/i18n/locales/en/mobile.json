@@ -116,7 +116,7 @@
   "dm": {
     "backToInbox": "Back to inbox",
     "danger": "Danger",
-    "exactMatchHint": "Enter their full username or email.",
+    "exactMatchHint": "Enter a user's exact username or email address.",
     "new": "New",
     "participants": "Participants",
     "participantsCount_one": "Participants · {{count}}",
@@ -156,7 +156,7 @@
       "blurb": "Ask the group's owner for its slug. There's no public list of groups.",
       "requestDeclined": "Request declined",
       "requestPending": "Request pending",
-      "title": "Discover"
+      "title": "Find Group"
     },
     "emoji": {
       "adminsOnly": "Only group admins can add or remove emoji.",
@@ -252,6 +252,7 @@
   "search": {
     "channels": "Channels",
     "hint": "Type at least 2 characters to search.",
+    "filtersLabel": "Filters",
     "messages": "Messages",
     "placeholder": "Search everything…",
     "resultCount_one": "{{count}} result",

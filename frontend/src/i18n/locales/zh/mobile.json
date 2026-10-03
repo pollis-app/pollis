@@ -114,7 +114,7 @@
   "dm": {
     "backToInbox": "返回收件箱",
     "danger": "危险",
-    "exactMatchHint": "输入对方完整的用户名或邮箱。",
+    "exactMatchHint": "输入用户准确的用户名或邮箱地址。",
     "new": "新建",
     "participants": "参与者",
     "participantsCount_other": "参与者 · {{count}}",
@@ -150,7 +150,7 @@
       "blurb": "请向群主索要群组标识。没有公开的群组列表。",
       "requestDeclined": "申请已被拒绝",
       "requestPending": "申请待处理",
-      "title": "发现"
+      "title": "查找群组"
     },
     "emoji": {
       "adminsOnly": "只有群组管理员才能添加或移除表情。",
@@ -241,6 +241,7 @@
   "search": {
     "channels": "频道",
     "hint": "至少输入 2 个字符进行搜索。",
+    "filtersLabel": "筛选",
     "messages": "消息",
     "placeholder": "搜索所有内容…",
     "resultCount_other": "{{count}} 条结果",

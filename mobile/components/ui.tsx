@@ -45,6 +45,7 @@ export function Screen({
   children,
   testID,
   centered,
+  aboveTabBar,
 }: {
   children: React.ReactNode;
   // Each route sets `screen-<route>` here so e2e flows have one stable root
@@ -55,6 +56,10 @@ export function Screen({
   // `compact` (phones, narrow panes) it is a no-op — children render exactly as
   // today, with no wrapper, so the phone tree is byte-for-byte unchanged.
   centered?: boolean;
+  // Tab screens set this. The tab bar already pads itself by the bottom safe
+  // area, so the screen must not pad by it again, or a dead band opens above
+  // the tab bar.
+  aboveTabBar?: boolean;
 }) {
   // Subscribe to the accent so the whole subtree re-renders (and the token
   // getters resolve to the new color) when it changes.
@@ -66,7 +71,7 @@ export function Screen({
     <SafeAreaView
       testID={testID}
       style={{ flex: 1, backgroundColor: palette.bg }}
-      edges={["top", "bottom"]}
+      edges={aboveTabBar ? ["top"] : ["top", "bottom"]}
     >
       {/* Every screen pins its primary action to <BottomAction> at the
           bottom, with a <Field> above it and no per-screen keyboard
@@ -174,9 +179,11 @@ export function Crumb({
 export function SectionTitle({
   children,
   right,
+  testID,
 }: {
   children: string;
   right?: React.ReactNode;
+  testID?: string;
 }) {
   return (
     <View
@@ -191,7 +198,7 @@ export function SectionTitle({
         paddingBottom: space.md,
       }}
     >
-      <Text style={[ty.label, { color: semantic.ink2 }]}>{children}</Text>
+      <Text testID={testID} style={[ty.label, { color: semantic.ink2 }]}>{children}</Text>
       <View style={{ flex: 1, height: 1, backgroundColor: semantic.hairSoft }} />
       {right}
     </View>
