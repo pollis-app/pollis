@@ -99,6 +99,16 @@ asserts nothing; collect the shots with `--debug-output <dir>`.
 
 ## Two-client flows
 
+**Join requests (automated):** `mobile/scripts/maestro-join-request.sh <admin-device> <peer-device>`
+— the admin creates a group and opens it from its Groups-tab header; the peer
+finds it by slug (one lookup, on Search) and requests access; the admin sees
+the request on the Groups tab (row + header badge) and approves it; the peer
+then lists the group.
+
+**Report (automated, #1213):** `mobile/scripts/maestro-report.sh <reporter-device> <peer-device>`
+— a fresh peer signs up, its handle is read off the screen, and the reporter
+reports it with "Report and block", then unblocks.
+
 **QR device link (automated, #1207):** `mobile/scripts/maestro-qr-link.sh <existing-device> <new-device>`
 — the existing device shows a code from Security (PIN first), the script reads
 the code's text off its UI tree, the new device signs in with it from "Sign in

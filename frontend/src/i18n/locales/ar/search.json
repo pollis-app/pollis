@@ -73,6 +73,7 @@
     "requestRejected": "رُفض طلبك.",
     "tryAgain": "حاول مرة أخرى",
     "requestAccess": "طلب الوصول",
-    "sendingRequest": "جارٍ إرسال الطلب…"
+    "sendingRequest": "جارٍ إرسال الطلب…",
+    "requestFailed": "تعذّر إرسال الطلب. حاول مرة أخرى."
   }
 }

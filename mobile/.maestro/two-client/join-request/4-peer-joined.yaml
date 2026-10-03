@@ -1,0 +1,21 @@
+appId: com.pollis.mobile
+---
+# Peer: after approval the group is in their list.
+- stopApp
+- launchApp
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 30000
+- tapOn:
+    id: "tab-groups"
+- extendedWaitUntil:
+    visible: "(?i).*${GROUP_NAME}.*"
+    timeout: 60000
+- takeScreenshot: join-04-peer-in-group

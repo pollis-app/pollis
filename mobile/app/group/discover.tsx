@@ -21,7 +21,18 @@ export default function Discover() {
   const { t } = useTranslation("search");
   const router = useRouter();
   const [slug, setSlug] = useState("");
-  const search = useGroupBySlug(slug.trim().replace(/^#/, ""));
+  // Looked up on Search / return, never per keystroke: slug lookups share a
+  // tight per-IP budget on the DS (60 per 10 min), and a slug typed one
+  // character at a time spent ~one lookup per character (#1216). Desktop's
+  // Find Group works the same way.
+  const [submitted, setSubmitted] = useState("");
+  const search = useGroupBySlug(submitted || null);
+  const submit = () => {
+    const s = slug.trim().replace(/^#/, "");
+    if (s.length >= 2) {
+      setSubmitted(s);
+    }
+  };
   const requestAccess = useRequestGroupAccess();
   const myRequest = useMyJoinRequest(search.data?.id ?? null);
 
@@ -32,7 +43,12 @@ export default function Discover() {
     requestAccess.mutate(search.data.id);
   };
 
-  const status = myRequest.data?.status;
+  // The DS never tells a non-member about their own pending request (that
+  // would answer "has X asked to join Y" for anyone), so a sent request is
+  // shown from the request's own outcome, as desktop does; the lookup only
+  // ever answers for admins (#1216).
+  const sentForThisGroup = requestAccess.isSuccess && requestAccess.data === search.data?.id;
+  const status = sentForThisGroup ? "pending" : myRequest.data?.status;
 
   return (
     <Screen testID="screen-group-discover">
@@ -49,6 +65,8 @@ export default function Discover() {
             amber
             value={slug}
             onChangeText={setSlug}
+            onSubmitEditing={submit}
+            returnKeyType="search"
             placeholder={t("group.slugPlaceholder")}
             testID="input-group-search"
             accessibilityLabel={t("group.slugLabel")}
@@ -66,8 +84,19 @@ export default function Discover() {
           </Text>
         </View>
 
+        <View style={{ paddingHorizontal: 18, paddingTop: 14 }}>
+          <Button
+            testID="btn-group-search"
+            variant="subtle"
+            full
+            disabled={slug.trim().replace(/^#/, "").length < 2 || search.isFetching}
+            onPress={submit}
+          >
+            {upper(search.isFetching ? t("group.searching") : t("group.submit"))}
+          </Button>
+        </View>
         <View style={{ paddingHorizontal: 18, paddingTop: 18 }}>
-          {search.isLoading && slug.trim().length >= 2 ? (
+          {search.isLoading && !!submitted ? (
             <Text
               style={{
                 fontFamily: ty.body.fontFamily,
@@ -141,6 +170,14 @@ export default function Discover() {
                       : upper(t("group.requestAccess"))}
                   </Button>
                 )}
+                {requestAccess.isError ? (
+                  <Text
+                    testID="discover-request-error"
+                    style={{ fontFamily: ty.body.fontFamily, fontSize: 12, color: semantic.danger, marginTop: 8 }}
+                  >
+                    {(requestAccess.error as Error).message || t("group.requestFailed")}
+                  </Text>
+                ) : null}
               </View>
             </Card>
           ) : null}

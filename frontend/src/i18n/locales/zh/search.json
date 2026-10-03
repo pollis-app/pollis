@@ -73,6 +73,7 @@
     "requestRejected": "你的申请已被拒绝。",
     "tryAgain": "重试",
     "requestAccess": "申请加入",
-    "sendingRequest": "正在发送申请…"
+    "sendingRequest": "正在发送申请…",
+    "requestFailed": "请求发送失败，请重试。"
   }
 }

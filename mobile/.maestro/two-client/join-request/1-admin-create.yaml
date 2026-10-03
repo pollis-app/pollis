@@ -1,0 +1,25 @@
+appId: com.pollis.mobile
+---
+# Admin: create a group, then reach it from the Groups tab header (no channel).
+- runFlow: ../../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "input-group-name"
+- inputText: "${GROUP_NAME}"
+- tapOn: "CREATE GROUP"
+- extendedWaitUntil:
+    visible:
+      id: "screen-group"
+    timeout: 15000
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    id: "row-group-.*"
+- assertVisible:
+    id: "screen-group"
+- takeScreenshot: join-01-group-from-header

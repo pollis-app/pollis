@@ -549,6 +549,8 @@ export function Field({
   keyboardType,
   testID,
   accessibilityLabel,
+  onSubmitEditing,
+  returnKeyType,
 }: {
   value?: string;
   onChangeText?: (v: string) => void;
@@ -563,6 +565,8 @@ export function Field({
   // the caller's field label (Field renders no label of its own).
   testID?: string;
   accessibilityLabel?: string;
+  onSubmitEditing?: () => void;
+  returnKeyType?: "done" | "go" | "search" | "send" | "next";
 }) {
   return (
     <View
@@ -589,6 +593,8 @@ export function Field({
         editable={editable}
         secureTextEntry={secureTextEntry}
         keyboardType={keyboardType}
+        onSubmitEditing={onSubmitEditing}
+        returnKeyType={returnKeyType}
         autoCapitalize="none"
         style={{
           flex: 1,
