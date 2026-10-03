@@ -66,6 +66,13 @@ opt-level = 3
 [profile.dev.package.zune-core]
 opt-level = 3
 
+# Third-party crates (OpenMLS, the PQ crypto, libsql…) run optimized under
+# `cargo test`; our own crates stay at opt-level 0 with debug assertions. At
+# opt-level 0 the crypto is so slow that real interleavings (#1220: the
+# epoch-0 join race) never happen in tests, while shipped builds hit them.
+[profile.test.package."*"]
+opt-level = 2
+
 [profile.release]
 panic = "abort"
 codegen-units = 1

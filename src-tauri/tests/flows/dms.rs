@@ -654,8 +654,7 @@ async fn user_block_lifecycle() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn recipient_that_loses_the_epoch_zero_race_still_reads_the_creators_message() {
-    use pollis_api::DsRequest;
-    use pollis_lib::commands::mls::{init_mls_group, reconcile_group_mls_impl, rendezvous};
+    use pollis_lib::commands::mls::{reconcile_group_mls_impl, rendezvous};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
 
@@ -666,27 +665,9 @@ async fn recipient_that_loses_the_epoch_zero_race_still_reads_the_creators_messa
     let alice_profile = alice.sign_up("alice@test.local").await;
     let bob_profile = bob.sign_up("bob@test.local").await;
 
-    // The DM rows only — the two halves of the MLS bootstrap are driven by hand
-    // below so the recipient can be interleaved between them.
-    let dm_id = ulid::Ulid::new().to_string();
-    let body = pollis_api::profile::CreateDmBody {
-        id: dm_id.clone(),
-        creator_id: alice_profile.id.clone(),
-        member_ids: vec![alice_profile.id.clone(), bob_profile.id.clone()],
-        created_at: chrono::Utc::now().to_rfc3339(),
-    };
-    let status = crate::harness::signed_post_status(
-        &alice,
-        <pollis_api::profile::CreateDmBody as DsRequest>::PATH,
-        &serde_json::to_vec(&body).expect("serialize CreateDmBody"),
-    )
-    .await;
-    assert_eq!(status, 200, "create_dm rows");
-
-    // Half one: the creator's single-member group + GroupInfo at epoch 0.
-    init_mls_group(&alice.state, &dm_id, &alice_profile.id)
-        .await
-        .expect("init_mls_group");
+    // The DM rows and the creator's half of the MLS bootstrap; the reconcile
+    // half is driven by hand below so the recipient can be interleaved.
+    let dm_id = dm_with_only_the_creators_group(&alice, &alice_profile.id, &bob_profile.id).await;
 
     // Bob, shaped like the TUI: a sync loop and a UI refresh loop, both free
     // running until the test is done with them.
@@ -794,6 +775,7 @@ async fn recipient_that_loses_the_epoch_zero_race_still_reads_the_creators_messa
              {bob_view:?}\n{diag}"
         );
     }
+    assert_cursor_never_passes_an_unprocessed_envelope(&bob, &bob_profile.id, &alice, &dm_id).await;
 
     // And back: the DM is usable in both directions.
     bob.send_channel_message(&dm_id, "PONG_BACK_ACROSS_UI").await;
@@ -807,6 +789,333 @@ async fn recipient_that_loses_the_epoch_zero_race_still_reads_the_creators_messa
         alice_view.contains(&"PONG_BACK_ACROSS_UI".to_string()),
         "alice did not get bob's reply: {alice_view:?}"
     );
+
+    drop(alice);
+    drop(bob);
+}
+
+/// The DM rows plus the creator's half of the MLS bootstrap (a single-member
+/// group and its GroupInfo at epoch 0) — the window before reconcile adds the
+/// recipient, in which a recipient with no Welcome external-joins. The
+/// reconcile half is left to the test so it can be interleaved.
+async fn dm_with_only_the_creators_group(
+    alice: &TestClient,
+    alice_id: &str,
+    bob_id: &str,
+) -> String {
+    use pollis_api::DsRequest;
+    let dm_id = ulid::Ulid::new().to_string();
+    let body = pollis_api::profile::CreateDmBody {
+        id: dm_id.clone(),
+        creator_id: alice_id.to_string(),
+        member_ids: vec![alice_id.to_string(), bob_id.to_string()],
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+    let status = crate::harness::signed_post_status(
+        alice,
+        <pollis_api::profile::CreateDmBody as DsRequest>::PATH,
+        &serde_json::to_vec(&body).expect("serialize CreateDmBody"),
+    )
+    .await;
+    assert_eq!(status, 200, "create_dm rows");
+    pollis_lib::commands::mls::init_mls_group(&alice.state, &dm_id, alice_id)
+        .await
+        .expect("init_mls_group");
+    dm_id
+}
+
+/// Poll `cond` until it holds, failing the test after 30s. For waiting on a
+/// state another task produces — never for papering over an ordering.
+async fn wait_until<F, Fut>(what: &str, mut cond: F)
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !cond().await {
+        assert!(tokio::time::Instant::now() < deadline, "timed out waiting for {what}");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
+async fn holds_local_group(client: &TestClient, conversation_id: &str) -> bool {
+    let guard = client.state.local_db.lock().await;
+    guard
+        .as_ref()
+        .is_some_and(|db| pollis_lib::commands::mls::has_local_group(db.conn(), conversation_id))
+}
+
+async fn welcomes_acknowledged(recipient_id: &str, conversation_id: &str) -> bool {
+    let remote = crate::harness::writable_log().await;
+    let conn = remote.conn().await.expect("remote conn");
+    let mut rows = conn
+        .query(
+            "SELECT COUNT(*) FROM mls_welcome \
+             WHERE recipient_id = ?1 AND conversation_id = ?2 AND delivered = 1",
+            libsql::params![recipient_id.to_string(), conversation_id.to_string()],
+        )
+        .await
+        .expect("welcome query");
+    rows.next()
+        .await
+        .ok()
+        .flatten()
+        .and_then(|r| r.get::<i64>(0).ok())
+        .unwrap_or(0)
+        > 0
+}
+
+/// The delivery invariant (#1220), checked against the real tables: a
+/// recipient's cursor never sits at or above a message it did not ingest.
+///
+/// The messages are the sender's own sends (her local `message` rows carry the
+/// envelope ids), which excludes the control frames — receipts — that ride in
+/// `message` envelopes but never become rows on either side. The recipient was
+/// a member before every one of them was sealed, so no acceptable loss
+/// excuses any: each envelope at or below the recipient's cursor that carries
+/// one of them must be in the recipient's local `message` table. A cursor past
+/// one that is not there means no fetch will select it again — it is gone.
+async fn assert_cursor_never_passes_an_unprocessed_envelope(
+    recipient: &TestClient,
+    recipient_id: &str,
+    sender: &TestClient,
+    conversation_id: &str,
+) {
+    let remote = crate::harness::writable_remote().await;
+    let conn = remote.conn().await.expect("remote conn");
+    let mut cursor: Option<i64> = None;
+    let mut rows = conn
+        .query(
+            "SELECT MAX(last_seq) FROM conversation_watermark \
+             WHERE conversation_id = ?1 AND user_id = ?2",
+            libsql::params![conversation_id.to_string(), recipient_id.to_string()],
+        )
+        .await
+        .expect("watermark query");
+    if let Ok(Some(r)) = rows.next().await {
+        cursor = r.get::<Option<i64>>(0).unwrap_or(None);
+    }
+    let cursor = cursor.expect("the recipient reported a cursor");
+    let mut passed: Vec<String> = Vec::new();
+    let mut rows = conn
+        .query(
+            "SELECT id FROM message_envelope \
+             WHERE conversation_id = ?1 AND type = 'message' AND seq <= ?2 ORDER BY seq",
+            libsql::params![conversation_id.to_string(), cursor],
+        )
+        .await
+        .expect("envelope query");
+    while let Ok(Some(r)) = rows.next().await {
+        passed.push(r.get::<String>(0).expect("envelope id"));
+    }
+    let has_row = |client: &TestClient, id: &str| {
+        let id = id.to_string();
+        let state = client.state.clone();
+        async move {
+            let guard = state.local_db.lock().await;
+            let db = guard.as_ref().expect("signed in");
+            db.conn()
+                .query_row("SELECT 1 FROM message WHERE id = ?1", [id.as_str()], |_| Ok(()))
+                .is_ok()
+        }
+    };
+    let mut sent = 0;
+    let mut missing: Vec<String> = Vec::new();
+    for id in &passed {
+        if !has_row(sender, id).await {
+            continue;
+        }
+        sent += 1;
+        if !has_row(recipient, id).await {
+            missing.push(id.clone());
+        }
+    }
+    assert!(sent > 0, "precondition: the cursor covers at least one of the sender's messages");
+    assert!(
+        missing.is_empty(),
+        "the cursor (seq {cursor}) passed message envelope(s) this device never ingested: {missing:?}"
+    );
+}
+
+/// #1220, ordering A — the one the real-speed suite hit on every run. The
+/// recipient external-joins in the pre-reconcile window, loses epoch 0 to the
+/// creator's Add, drops its branch, and — before the retry — its Welcome lands
+/// (the welcome poll does not take the conversation lock). The retry used to
+/// external-join anyway: `build_external_commit` deleted the confirmed Welcome
+/// group at epoch 1 and claimed epoch 1 for a fresh branch. The creator's
+/// message, sealed at epoch 1 in between, was then undecryptable, and the
+/// cursor moved past it.
+///
+/// Both windows are rendezvous points, so the ordering is forced at any build
+/// speed.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn retry_after_a_lost_epoch_zero_race_keeps_the_welcome_that_landed_meanwhile() {
+    use pollis_lib::commands::mls::reconcile_group_mls_impl;
+    use pollis_lib::commands::mls::rendezvous::{self, Point};
+    use std::time::Duration;
+
+    wipe().await;
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+    let dm_id = dm_with_only_the_creators_group(&alice, &alice_profile.id, &bob_profile.id).await;
+
+    let mut before_submit = rendezvous::arm(Point::ExternalJoinBeforeSubmit);
+    let mut after_lost = rendezvous::arm(Point::ExternalJoinAfterLostRace);
+
+    // Bob, with no group and no Welcome, external-joins.
+    let join = {
+        let state = bob.state.clone();
+        let user = bob_profile.id.clone();
+        let dm = dm_id.clone();
+        tokio::spawn(async move {
+            pollis_core::commands::mls::process_pending_commits(&state, dm, user).await
+        })
+    };
+    let release = tokio::time::timeout(Duration::from_secs(30), before_submit.recv())
+        .await
+        .expect("bob never built his external-join branch")
+        .expect("rendezvous closed");
+
+    // Alice's Add wins epoch 0 and writes Bob's Welcome; Bob's CAS then loses.
+    reconcile_group_mls_impl(&alice.state, &dm_id, &alice_profile.id)
+        .await
+        .expect("reconcile");
+    rendezvous::disarm(Point::ExternalJoinBeforeSubmit);
+    let _ = release.send(());
+    let release = tokio::time::timeout(Duration::from_secs(30), after_lost.recv())
+        .await
+        .expect("bob's external join never lost its race")
+        .expect("rendezvous closed");
+    rendezvous::disarm(Point::ExternalJoinAfterLostRace);
+
+    // Between the lost race and the retry, Bob's Welcome lands. The poll then
+    // waits for the conversation lock (its post-join self-update) until the
+    // join is released below.
+    let poll = {
+        let state = bob.state.clone();
+        let user = bob_profile.id.clone();
+        tokio::spawn(async move { pollis_core::commands::mls::poll_mls_welcomes(&state, user).await })
+    };
+    wait_until("bob's welcome to be applied", || holds_local_group(&bob, &dm_id)).await;
+
+    // Alice seals at epoch 1 — the epoch only Bob's Welcome group can open.
+    alice.send_channel_message(&dm_id, "SEALED_AT_THE_WELCOME_EPOCH").await;
+
+    // The retry runs now, with the Welcome group stored.
+    let _ = release.send(());
+    let _ = join.await.expect("join task");
+    let _ = poll.await.expect("poll task");
+
+    bob.accept_dm_request(&dm_id).await;
+    let bob_view: Vec<String> = bob
+        .fetch_dm_messages(&dm_id)
+        .await
+        .iter()
+        .filter_map(|m| m["content"].as_str().map(str::to_string))
+        .collect();
+    if !bob_view.contains(&"SEALED_AT_THE_WELCOME_EPOCH".to_string()) {
+        let diag = diagnose_missing_delivery(&bob_profile.id, &dm_id).await;
+        panic!("bob lost the message sealed at his Welcome's epoch: {bob_view:?}\n{diag}");
+    }
+    assert_cursor_never_passes_an_unprocessed_envelope(&bob, &bob_profile.id, &alice, &dm_id).await;
+
+    // And the DM works both ways afterwards.
+    bob.send_channel_message(&dm_id, "PONG").await;
+    assert!(alice
+        .fetch_dm_messages(&dm_id)
+        .await
+        .iter()
+        .any(|m| m["content"] == "PONG"));
+
+    drop(alice);
+    drop(bob);
+}
+
+/// #1220, ordering B. The same race, but Bob's Welcome is polled while his
+/// doomed branch is still STORED (built at epoch 1 on GroupInfo 0, CAS not yet
+/// sent). `join_from_welcome` used to see "a local group at epoch 1, a Welcome
+/// at epoch 1", refuse it as a replay — and the poll acknowledges every
+/// outcome, so the Welcome was gone. The lost CAS then dropped the branch and
+/// the retry external-joined at epoch 1 → 2, past the creator's message sealed
+/// at epoch 1. An unconfirmed branch now yields to a Welcome at its own epoch,
+/// and the lost CAS drops only a branch, never the group that replaced it.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn welcome_polled_while_a_doomed_join_branch_is_stored_replaces_the_branch() {
+    use pollis_lib::commands::mls::reconcile_group_mls_impl;
+    use pollis_lib::commands::mls::rendezvous::{self, Point};
+    use std::time::Duration;
+
+    wipe().await;
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+    let dm_id = dm_with_only_the_creators_group(&alice, &alice_profile.id, &bob_profile.id).await;
+
+    let mut before_submit = rendezvous::arm(Point::ExternalJoinBeforeSubmit);
+    let join = {
+        let state = bob.state.clone();
+        let user = bob_profile.id.clone();
+        let dm = dm_id.clone();
+        tokio::spawn(async move {
+            pollis_core::commands::mls::process_pending_commits(&state, dm, user).await
+        })
+    };
+    let release = tokio::time::timeout(Duration::from_secs(30), before_submit.recv())
+        .await
+        .expect("bob never built his external-join branch")
+        .expect("rendezvous closed");
+    assert!(holds_local_group(&bob, &dm_id).await, "precondition: the branch is stored");
+
+    reconcile_group_mls_impl(&alice.state, &dm_id, &alice_profile.id)
+        .await
+        .expect("reconcile");
+
+    // Bob's welcome poll runs against the stored branch and acknowledges the
+    // Welcome whatever it decides.
+    let poll = {
+        let state = bob.state.clone();
+        let user = bob_profile.id.clone();
+        tokio::spawn(async move { pollis_core::commands::mls::poll_mls_welcomes(&state, user).await })
+    };
+    wait_until("bob's welcome to be acknowledged", || {
+        welcomes_acknowledged(&bob_profile.id, &dm_id)
+    })
+    .await;
+
+    // Alice seals at epoch 1 while Bob's CAS is still unsent.
+    alice.send_channel_message(&dm_id, "SEALED_WHILE_THE_BRANCH_WAS_STORED").await;
+
+    rendezvous::disarm(Point::ExternalJoinBeforeSubmit);
+    let _ = release.send(());
+    let _ = join.await.expect("join task");
+    let _ = poll.await.expect("poll task");
+
+    bob.accept_dm_request(&dm_id).await;
+    let bob_view: Vec<String> = bob
+        .fetch_dm_messages(&dm_id)
+        .await
+        .iter()
+        .filter_map(|m| m["content"].as_str().map(str::to_string))
+        .collect();
+    if !bob_view.contains(&"SEALED_WHILE_THE_BRANCH_WAS_STORED".to_string()) {
+        let diag = diagnose_missing_delivery(&bob_profile.id, &dm_id).await;
+        panic!(
+            "bob lost the message sealed while his doomed branch was stored: {bob_view:?}\n{diag}"
+        );
+    }
+    assert_cursor_never_passes_an_unprocessed_envelope(&bob, &bob_profile.id, &alice, &dm_id).await;
+
+    bob.send_channel_message(&dm_id, "PONG").await;
+    assert!(alice
+        .fetch_dm_messages(&dm_id)
+        .await
+        .iter()
+        .any(|m| m["content"] == "PONG"));
 
     drop(alice);
     drop(bob);
