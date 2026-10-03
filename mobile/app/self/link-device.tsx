@@ -320,7 +320,7 @@ function ShowCode({ handle, crumb, onCancel }: { handle: DeviceLinkHandle; crumb
 
         <Text testID="link-device-status" style={{ fontFamily: ty.body.fontFamily, fontSize: 13, color: semantic.mute, textAlign: "center" }}>
           {secondsLeft > 0
-            ? t("linkDevice.expiresIn", { time: `0:${String(secondsLeft).padStart(2, "0")}` })
+            ? t("linkDevice.expiresIn", { time: `${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, "0")}` })
             : t("linkDevice.expiredTitle")}
         </Text>
       </View>

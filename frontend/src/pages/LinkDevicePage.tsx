@@ -293,7 +293,7 @@ const ShowCode: React.FC<{ handle: api.DeviceLinkHandle; onCancel: () => void }>
         </button>
       )}
       <p className="text-sm text-muted" data-testid="link-device-status">
-        {secondsLeft > 0 ? t("linkDevice.expiresIn", { time: `0:${String(secondsLeft).padStart(2, "0")}` }) : t("linkDevice.expiredTitle")}
+        {secondsLeft > 0 ? t("linkDevice.expiresIn", { time: `${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, "0")}` }) : t("linkDevice.expiredTitle")}
       </p>
       <div>
         <Button variant="ghost" onClick={onCancel}>{t("common:actions.cancel")}</Button>
