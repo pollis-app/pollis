@@ -221,7 +221,7 @@ Returning users on an enrolled device skip OTP and enter their PIN against `pin_
 
 ## 5. Multi-Device Enrollment
 
-A user with an existing `account_id_pub` adds a device in one of two ways. Both end with the new device holding the account identity private key, having published a `device_cert` and `KeyPackage`s, and having joined every existing MLS group by external commit. Both tiers (desktop and mobile) can be either side.
+A user with an existing `account_id_pub` adds a device in one of two ways (the approval path also has a QR variant, §5.1a). Both end with the new device holding the account identity private key, having published a `device_cert` and `KeyPackage`s, and having joined every existing MLS group by external commit. Both tiers (desktop and mobile) can be either side.
 
 ### 5.1 Approval path (in-band, sibling-device-mediated)
 
@@ -242,6 +242,12 @@ This is one-shot ECDH-then-AEAD, not an authenticated key exchange: nothing sign
 - Finding a substitute keypair that yields the same code costs ~2^40 keygens. The per-request salt makes that work per request, inside the 10-minute TTL; unsalted (before the 2026-09-18 review), one precomputed table worked against every user forever. The 8-character width matters: 6 digits would have been ~2^20.
 
 Residual: no long-term-key signature over the approver's ephemeral key, so authentication is only as good as the human comparison.
+
+### 5.1a QR device link (approval path without the email OTP)
+
+Source: `pollis-core/src/commands/device_link.rs`, `pollis-delivery/src/links.rs`; full design in `docs/qr-device-link-design.md` (#1207).
+
+An enrolled device shows a QR carrying a fresh 32-byte link token `t`. Creating it requires that device's **PIN** (verified with the unlock attempt counter). The DS stores only `SHA-256(HKDF(t, "pollis-link-claim-v1"))` and sets a 60-second, single-use lifetime; it never sees `t`. The scanning device presents `HKDF(t, "pollis-link-claim-v1")` to claim the link, which mints a **`DeviceLink`-scoped session** that the OTP-only gates refuse (the soft reset, reset-and-recover, establish-identity): it can register this device and file its enrollment request, nothing else. That request carries `HMAC-SHA256(HKDF(t, "pollis-link-mac-v1"), link_id ‖ request_id ‖ new_device_id ‖ ephemeral_pub)` (length-prefixed). The creating device verifies this tag in place of the typed SAS — the DS cannot forge it, so it cannot substitute the ephemeral key — and wraps the account key only after an explicit Approve naming the device (security event `via=qr_link`). The trade-off: an unlocked enrolled device plus its PIN suffices to add a device, without the mailbox. Email sign-in remains.
 
 ### 5.2 Secret Key recovery path (out-of-band)
 

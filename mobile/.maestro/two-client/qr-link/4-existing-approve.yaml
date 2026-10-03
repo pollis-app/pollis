@@ -1,0 +1,14 @@
+appId: com.pollis.mobile
+---
+# Existing device: the request arrives tag-verified; approve it explicitly.
+- extendedWaitUntil:
+    visible:
+      id: "btn-link-device-approve"
+    timeout: 60000
+- takeScreenshot: qr-link-03-existing-approve-card
+- tapOn:
+    id: "btn-link-device-approve"
+- extendedWaitUntil:
+    visible:
+      id: "link-device-done"
+    timeout: 30000

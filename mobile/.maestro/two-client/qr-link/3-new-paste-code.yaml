@@ -1,0 +1,23 @@
+appId: com.pollis.mobile
+---
+# New device: no email code — "Sign in with another device", enter the code.
+- clearState
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-email"
+    timeout: 20000
+- tapOn:
+    id: "btn-sign-in-with-device"
+- tapOn:
+    id: "btn-link-toggle-manual"
+- tapOn:
+    id: "input-link-code"
+- inputText: ${PAYLOAD}
+- tapOn:
+    id: "btn-link-submit"
+- extendedWaitUntil:
+    visible:
+      id: "linked-awaiting-approval"
+    timeout: 30000
+- takeScreenshot: qr-link-02-new-awaiting

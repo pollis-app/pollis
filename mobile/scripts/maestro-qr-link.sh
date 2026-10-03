@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Two-device QR device link e2e (#1207): an EXISTING device shows a QR from
+# Security, a NEW device signs in with that code (no email OTP) — entered as
+# text, because a simulator camera cannot be pointed at another screen — the
+# existing device approves the tag-verified request, and the new device must
+# set its PIN and see the existing device's group.
+#
+#   mobile/scripts/maestro-qr-link.sh <existing-device-id> <new-device-id>
+#
+# Both devices need a Release build against a dev DS that has the link
+# endpoints, and .maestro/.env filled in.
+set -euo pipefail
+
+EXISTING="${1:?usage: maestro-qr-link.sh <existing-device-id> <new-device-id>}"
+NEW="${2:?usage: maestro-qr-link.sh <existing-device-id> <new-device-id>}"
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+LINK="$HERE/.maestro/two-client/device-link"
+QR="$HERE/.maestro/two-client/qr-link"
+ENV_FILE="$HERE/.maestro/.env"
+
+ENV_ARGS=()
+while IFS= read -r line; do
+  case "$line" in ''|\#*|MAESTRO_EMAIL=*) continue;; esac
+  ENV_ARGS+=(-e "$line")
+done < "$ENV_FILE"
+BASE="$(sed -n 's/^MAESTRO_EMAIL=//p' "$ENV_FILE" | head -1)"
+BASE="${BASE:-pollis-e2e+primary@example.com}"
+EMAIL="${BASE%@*}-qr-$(date +%Y%m%d%H%M%S)@${BASE#*@}"
+
+echo "==> 1/5 existing device signs up ($EMAIL) and creates a group"
+maestro --device "$EXISTING" test "${ENV_ARGS[@]}" -e MAESTRO_EMAIL="$EMAIL" "$LINK/1-existing-signup.yaml"
+
+echo "==> 2/5 existing device shows a link code"
+maestro --device "$EXISTING" test "$QR/2-existing-show-code.yaml"
+
+# Read the payload off the existing device's screen (the "can't scan?" text).
+if [[ "$EXISTING" == emulator-* || "$EXISTING" == *:* ]]; then
+  adb -s "$EXISTING" shell uiautomator dump /sdcard/qr-ui.xml >/dev/null
+  TREE="$(adb -s "$EXISTING" exec-out cat /sdcard/qr-ui.xml)"
+else
+  TREE="$(maestro --device "$EXISTING" hierarchy 2>/dev/null)"
+fi
+PAYLOAD="$(printf '%s' "$TREE" | grep -oE 'pollis-link:v1:[0-9A-Za-z]+:[A-Za-z0-9_-]{43}' | head -1)"
+[ -n "$PAYLOAD" ] || { echo "could not read the link code from the existing device" >&2; exit 1; }
+echo "    code: ${PAYLOAD:0:28}…"
+
+echo "==> 3/5 new device signs in with the code"
+maestro --device "$NEW" test -e PAYLOAD="$PAYLOAD" "$QR/3-new-paste-code.yaml"
+
+echo "==> 4/5 existing device approves the tag-verified request"
+maestro --device "$EXISTING" test "$QR/4-existing-approve.yaml"
+
+echo "==> 5/5 new device sets its PIN, finalizes, and sees the group"
+maestro --device "$NEW" test "$QR/5-new-finish.yaml"
+echo "==> QR link passed"

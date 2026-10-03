@@ -19,6 +19,15 @@ must hand it over. Step 1 is not — it only has to prove "the account holder
 wants this device". A QR shown by an unlocked, PIN-verified desktop proves the
 same thing, and the camera is a better out-of-band channel than a typed code.
 
+## Who plays which role
+
+Both apps play both roles, as device linking already did: an enrolled
+**desktop or phone** shows the QR (Settings → Security → Link a new device),
+and a new **phone** scans it (or enters the code) while a new **desktop** pastes
+the code shown under the QR — desktops have no camera scanner. The creator waits
+with `await_device_link` (one awaited call, Rust-side backoff), never a renderer
+poll.
+
 ## Threat model
 
 Untrusted, as everywhere: the network, the DS, its operator. In particular the
@@ -103,6 +112,15 @@ a `SessionScope`:
 The refusal is structural: `verify_session` returns the scope, and the gates
 that predate links accept `Otp` only. A new session-gated endpoint has to opt
 in to `DeviceLink` explicitly.
+
+## Keeping a linked request out of typed-code approval
+
+A link-tagged enrollment request is approved on the link tag by the device
+showing that QR; the new device shows no code, so a typed-code approval of it
+could never complete. Two places enforce that: the DS leaves link-bound
+requests out of `pending_enrollments` (`LinkStore::bound_request_ids`), and the
+`enrollment_requested` inbox nudge carries `link_id`, on which clients skip the
+typed-code takeover.
 
 ## Guardrails
 

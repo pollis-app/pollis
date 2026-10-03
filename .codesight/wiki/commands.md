@@ -472,6 +472,16 @@ Every path that produces a fresh `account_id_key` (signup, approval, Secret-Key 
 - `reset_identity(user_id)` → new secret key. **Not a registered Tauri command** as of 2026-08-03 (#714): it is `pollis_core::commands::account_identity::reset_identity`, reached from the registered `reset_identity_and_recover`.
 - Also registered in this module but undocumented here: `list_security_events`. See Appendix A.
 
+## device_link (`commands/device_link.rs`) — QR device link (#1207)
+
+Sign a new device in by scanning a QR an enrolled device shows, instead of the email OTP plus a typed SAS. Protocol, threat model and guardrails: `docs/qr-device-link-design.md`. Both apps play both roles (desktop claims by pasting the code — no camera scanner).
+
+- `create_device_link(user_id, pin)` → `DeviceLinkHandle { link_id, qr_payload, expires_at }`. **Requires the PIN** (`pin::verify_pin`, same attempt counter and lockout as unlock). Holds the link token in memory only; the DS gets `SHA-256(HKDF(t, "pollis-link-claim-v1"))` and a server-set 60 s expiry.
+- `await_device_link(user_id, link_id, since)` → `DeviceLinkStatus` (`open | claimed | ready_to_approve | tampered | expired`). One awaited call with Rust-side backoff — the renderer never polls. `ready_to_approve` means the request's **link tag verified** against the QR-derived MAC key the DS never sees; `tampered` means it did not, and is never approvable. `poll_device_link` is the one-shot read.
+- `approve_device_link(user_id, link_id)` — re-verifies the tag, then runs the same wrap as typed-code approval (`device_enrollment::wrap_and_approve`); security event `device_enrolled` with `via=qr_link`.
+- `cancel_device_link(link_id)` — forget the token locally.
+- `claim_device_link(payload, device_name)` → `UserProfile` (`enrollment_required = true`). Signs in with a **`DeviceLink`-scoped session**: the DS's OTP-only gates (soft reset, reset-and-recover, establish-identity) refuse it; it can only register the device and file its enrollment request, which `start_device_enrollment` then tags. Clears on finalize and on any email sign-in.
+
 ## livekit (`commands/livekit/`)
 - Tokens are minted by the DS now (#393) — no on-device signer. `get_livekit_token` and friends call `ds_livekit_token` (`POST /v1/livekit/token`); server-side fan-out/roster go through `ds_livekit_send_data` / `ds_livekit_participants`. The client holds no LiveKit API secret.
 - `get_livekit_token(room_id, user_id, username)` → token string (identity/name derived server-side; the args are ignored)
@@ -635,14 +645,12 @@ _Back to [index.md](./index.md)_
 
 ## Complete registered-command index
 
-Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **212 commands** in 31 shim modules.
+Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **227 commands** in 34 shim modules.
 Prose above covers roughly half of these; this index covers all of them, so a name that
 appears here but not above is registered and real, just undocumented. Regenerate rather
 than hand-edit.
 
 **`(root)`** (4) — `hide_window`, `read_clipboard_files`, `read_clipboard_image`, `write_clipboard_text`
-
-**`tray`** (4) — `tray_set_close_to_tray`, `tray_set_enabled`, `tray_set_unread`, `tray_set_voice_state`
 
 **`media_permissions`** (4) — `get_media_permission_status`, `open_privacy_settings`, `revoke_media_permissions`, `set_revoke_media_on_exit`
 
@@ -650,11 +658,11 @@ than hand-edit.
 
 **`pin`** (4) — `get_unlock_state`, `lock`, `set_pin`, `unlock`
 
-**`pinned_messages`** (3) — `list_pinned_messages`, `pin_message`, `unpin_message`
-
 **`autolock`** (2) — `report_user_activity`, `set_auto_lock_timeout`
 
 **`device_enrollment`** (10) — `approve_device_enrollment`, `await_enrollment_approval`, `finalize_device_enrollment`, `list_pending_enrollment_requests`, `list_security_events`, `poll_enrollment_status`, `recover_with_secret_key`, `reject_device_enrollment`, `reset_identity_and_recover`, `start_device_enrollment`
+
+**`device_link`** (6) — `approve_device_link`, `await_device_link`, `cancel_device_link`, `claim_device_link`, `create_device_link`, `poll_device_link`
 
 **`safety`** (3) — `get_safety_number`, `list_peer_verifications`, `set_contact_verified`
 
@@ -666,8 +674,6 @@ than hand-edit.
 
 **`user`** (5) — `get_preferences`, `get_user_profile`, `save_preferences`, `search_user_by_username`, `update_user_profile`
 
-**`vault`** (6) — `delete_vault_message`, `edit_vault_message`, `get_vault_messages`, `search_vault_messages`, `send_vault_message`, `set_vault_message_pinned`
-
 **`groups`** (27) — `accept_group_invite`, `approve_join_request`, `create_channel`, `create_group`, `create_group_invite_link`, `decline_group_invite`, `delete_channel`, `delete_group`, `get_group_join_requests`, `get_group_members`, `get_my_join_request`, `get_pending_invites`, `leave_group`, `list_group_channels`, `list_group_invite_links`, `list_user_groups`, `list_user_groups_with_channels`, `redeem_group_invite_link`, `reject_join_request`, `remove_member_from_group`, `request_group_access`, `revoke_group_invite_link`, `search_group_by_slug`, `send_group_invite`, `set_member_role`, `update_channel`, `update_group`
 
 **`dm`** (8) — `accept_dm_request`, `add_user_to_dm_channel`, `create_dm_channel`, `get_dm_channel`, `leave_dm_channel`, `list_dm_channels`, `list_dm_requests`, `remove_user_from_dm_channel`
@@ -676,15 +682,21 @@ than hand-edit.
 
 **`bookmarks`** (5) — `list_saved_messages`, `resolve_message_permalink`, `save_message`, `toggle_saved_message`, `unsave_message`
 
-**`messages`** (26) — `add_reaction`, `delete_message`, `edit_message`, `get_channel_messages`, `get_dm_messages`, `get_message_retention`, `get_reactions`, `get_unread_counts`, `ingest_channel_envelopes`, `ingest_dm_envelopes`, `list_messages`, `list_thread_summaries`, `mark_conversation_read`, `read_channel_messages`, `read_dm_messages`, `read_last_messages`, `read_messages_after`, `read_messages_around`, `read_thread_messages`, `rebuild_search_index`, `remove_reaction`, `run_message_eviction`, `search_messages`, `send_message`, `set_message_retention`, `sync_read_cursors`
+**`export`** (2) — `export_archive`, `fetch_export_attachments`
+
+**`pinned_messages`** (3) — `list_pinned_messages`, `pin_message`, `unpin_message`
+
+**`vault`** (6) — `delete_vault_message`, `edit_vault_message`, `get_vault_messages`, `search_vault_messages`, `send_vault_message`, `set_vault_message_pinned`
+
+**`messages`** (28) — `add_reaction`, `delete_message`, `edit_message`, `get_channel_messages`, `get_conversation_receipts`, `get_dm_messages`, `get_message_retention`, `get_reactions`, `get_unread_counts`, `ingest_channel_envelopes`, `ingest_dm_envelopes`, `list_messages`, `list_thread_summaries`, `mark_conversation_read`, `mark_messages_read`, `read_channel_messages`, `read_dm_messages`, `read_last_messages`, `read_messages_after`, `read_messages_around`, `read_thread_messages`, `rebuild_search_index`, `remove_reaction`, `run_message_eviction`, `search_messages`, `send_message`, `set_message_retention`, `sync_read_cursors`
 
 **`mls`** (3) — `catch_up_all_mls_groups`, `poll_mls_welcomes`, `process_pending_commits`
 
 **`livekit`** (12) — `cancel_call`, `connect_rooms`, `get_livekit_token`, `get_livekit_url`, `get_livekit_view_token`, `list_voice_participants`, `list_voice_room_counts`, `publish_ping`, `publish_typing`, `publish_voice_presence`, `start_call`, `subscribe_realtime`
 
-**`r2`** (9) — `download_file`, `download_media`, `get_media_url`, `get_public_file_url`, `save_media_to_path`, `upload_file`, `upload_media`, `upload_media_staged`, `upload_public_file`
+**`emoji`** (6) — `get_emoji_url`, `list_group_emoji`, `list_usable_emoji`, `prepare_emoji_text`, `remove_group_emoji`, `upload_group_emoji`
 
-**`pathscope`** (2) — `pick_open_paths`, `pick_save_path`
+**`r2`** (9) — `download_file`, `download_media`, `get_media_url`, `get_public_file_url`, `save_media_to_path`, `upload_file`, `upload_media`, `upload_media_staged`, `upload_public_file`
 
 **`staging`** (2) — `discard_staged_attachment`, `stage_attachment`
 
@@ -701,6 +713,8 @@ than hand-edit.
 **`camera`** (6) — `list_video_devices`, `start_camera`, `start_camera_preview`, `stop_camera`, `stop_camera_preview`, `subscribe_camera_events`
 
 **`sfx`** (3) — `play_sfx`, `start_ring`, `stop_ring`
+
+**`pathscope`** (2) — `pick_open_paths`, `pick_save_path`
 
 **`terminal`** (7) — `get_terminal_enabled`, `set_terminal_enabled`, `terminal_ack`, `terminal_close`, `terminal_open`, `terminal_resize`, `terminal_write`
 

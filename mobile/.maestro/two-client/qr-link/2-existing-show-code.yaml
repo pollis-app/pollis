@@ -1,0 +1,27 @@
+appId: com.pollis.mobile
+---
+# Existing device: Self → Security → Link a new device → PIN → the QR (and its
+# code as text, which the script reads off the UI tree).
+- tapOn:
+    id: "btn-back"
+    optional: true
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-security"
+- scrollUntilVisible:
+    element:
+      id: "btn-link-device"
+    direction: DOWN
+- tapOn:
+    id: "btn-link-device"
+- tapOn:
+    id: "input-link-device-pin"
+- inputText: "1234"
+- tapOn:
+    id: "btn-link-device-show"
+- extendedWaitUntil:
+    visible:
+      id: "link-device-qr"
+    timeout: 15000
+- takeScreenshot: qr-link-01-existing-shows-code
