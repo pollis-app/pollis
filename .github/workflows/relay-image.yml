@@ -300,7 +300,7 @@ jobs:
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       - name: Configure AWS credentials (GitHub OIDC — no standing creds)
-        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ vars.RELAY_IMAGE_OIDC_ROLE_ARN }}
           aws-region: ${{ vars.RELAY_HYDRA_REGION || 'us-west-2' }}
