@@ -7,6 +7,10 @@
 #
 #   mobile/scripts/maestro-qr-link.sh <existing-device-id> <new-device-id>
 #
+# Prefer an iOS simulator as the NEW device: Maestro types the ~70-character
+# code one key at a time, which on an Android emulator can take longer than
+# the code's 60-second lifetime (the claim then fails as expired).
+#
 # Both devices need a Release build against a dev DS that has the link
 # endpoints, and .maestro/.env filled in.
 set -euo pipefail
@@ -34,10 +38,16 @@ echo "==> 2/5 existing device shows a link code"
 maestro --device "$EXISTING" test "$QR/2-existing-show-code.yaml"
 
 # Read the payload off the existing device's screen (the Code tab text).
+# `uiautomator dump` waits for an idle screen, which the code screen never is
+# (its expiry countdown re-renders every second), so on Android it can fail
+# with "could not get idle state"; Maestro's hierarchy reader does not wait.
+TREE=""
 if [[ "$EXISTING" == emulator-* || "$EXISTING" == *:* ]]; then
-  adb -s "$EXISTING" shell uiautomator dump /sdcard/qr-ui.xml >/dev/null
-  TREE="$(adb -s "$EXISTING" exec-out cat /sdcard/qr-ui.xml)"
-else
+  if adb -s "$EXISTING" shell uiautomator dump /sdcard/qr-ui.xml >/dev/null 2>&1; then
+    TREE="$(adb -s "$EXISTING" exec-out cat /sdcard/qr-ui.xml)"
+  fi
+fi
+if ! printf '%s' "$TREE" | grep -q 'pollis-link:v1:'; then
   TREE="$(maestro --device "$EXISTING" hierarchy 2>/dev/null)"
 fi
 PAYLOAD="$(printf '%s' "$TREE" | grep -oE 'pollis-link:v1:[0-9A-Za-z]+:[A-Za-z0-9_-]{43}' | head -1)"
