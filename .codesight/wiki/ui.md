@@ -611,7 +611,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**157 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**158 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -633,7 +633,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 
 - **EmailOTPAuth** — props: onSuccess, prefillEmail, prefillNonce, onStepChange — `frontend/src/components/Auth/EmailOTPAuth.tsx`
 - **EnrollmentApprovalPrompt** — props: requestId, newDeviceId, onResolved — `frontend/src/components/Auth/EnrollmentApprovalPrompt.tsx`
-- **EnrollmentGateScreen** — props: userId, userEmail, onEnrolled, onCancel, onResetComplete — `frontend/src/components/Auth/EnrollmentGateScreen.tsx`
+- **EnrollmentGateScreen** — props: linked, userId, userEmail, onEnrolled, onCancel, onResetComplete — `frontend/src/components/Auth/EnrollmentGateScreen.tsx`
 - **LoginScreen** — props: knownAccounts, onAuthSuccess, onWipeComplete — `frontend/src/components/Auth/LoginScreen.tsx`
 - **PinCreateScreen** — props: oldPin, onCreated, onCancel, headline, subline — `frontend/src/components/Auth/PinCreateScreen.tsx`
 - **PinEntryScreen** — props: userId, username, onUnlocked, onForgotPin, onSwitchAccount — `frontend/src/components/Auth/PinEntryScreen.tsx`
@@ -770,7 +770,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **StageTile** — `frontend/src/components/Voice/stage/StageTile.tsx`
 - **VoiceStage** — props: channelName, isInCall, onJoin, onLeave, onBack, onOpenSettings, observerParticipants, headerActions, footer, callMode — `frontend/src/components/Voice/stage/VoiceStage.tsx`
 
-### `pages` (49)
+### `pages` (50)
 
 - **AllJoinRequestsPage** — `frontend/src/pages/AllJoinRequestsPage.tsx`
 - **ArcadePage** — `frontend/src/pages/ArcadePage.tsx`
@@ -800,6 +800,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **KeyboardShortcutsPage** — `frontend/src/pages/KeyboardShortcutsPage.tsx`
 - **KickMemberPage** — `frontend/src/pages/KickMemberPage.tsx`
 - **LeaveGroupPage** — `frontend/src/pages/LeaveGroup.tsx`
+- **LinkDevicePage** — `frontend/src/pages/LinkDevicePage.tsx`
 - **Members** — props: groupId, isAdmin — `frontend/src/pages/Members.tsx`
 - **MembersPage** — `frontend/src/pages/MembersPage.tsx`
 - **PreferencesPage** — `frontend/src/pages/PreferencesPage.tsx`

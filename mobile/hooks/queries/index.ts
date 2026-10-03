@@ -14,6 +14,7 @@ export * from "./useAccount";
 export * from "./useSecurityEvents";
 export * from "./useGroupInvites";
 export * from "./useEnrollment";
+export * from "./useDeviceLink";
 export * from "./useSearch";
 export * from "./useSafety";
 export * from "./useBlocks";

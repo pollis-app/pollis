@@ -354,5 +354,36 @@
   "notify": {
     "enrollmentTitle": "Inicio de sesión en un dispositivo nuevo",
     "enrollmentBody": "Un dispositivo nuevo solicita acceso a tu cuenta"
+  },
+  "linkDevice": {
+    "heading": "Vincular un dispositivo nuevo",
+    "rowSub": "Inicia sesión en otro teléfono, tableta u ordenador",
+    "pinTitle": "Confirma que eres tú",
+    "pinSubtitle": "Introduce el PIN de este dispositivo.",
+    "pinFailed": "Ese PIN no es correcto.",
+    "showTitle": "Escanea para iniciar sesión",
+    "showSubtitle": "En el dispositivo nuevo, toca Iniciar sesión con otro dispositivo.",
+    "codeSubtitle": "Copia este código y pégalo en el dispositivo nuevo.",
+    "tabQr": "Código QR",
+    "tabCode": "Código",
+    "copyHint": "Toca para copiar",
+    "clickToCopy": "Haz clic para copiar",
+    "copied": "Copiado",
+    "expiresIn": "Caduca en {{time}}",
+    "claimedTitle": "Casi listo",
+    "claimed": "{{name}} está iniciando sesión.",
+    "wantsToSignIn": "{{name}} quiere iniciar sesión",
+    "approveHint": "Aprueba solo un dispositivo que acabas de configurar. Podrá leer tus mensajes.",
+    "approve": "Aprobar",
+    "reject": "Rechazar",
+    "linked": "{{name}} ha iniciado sesión",
+    "unnamedDevice": "Un dispositivo nuevo",
+    "tamperedTitle": "Algo no va bien",
+    "tampered": "Esta solicitud cambió por el camino y no se puede aprobar. Inténtalo con un código nuevo.",
+    "expiredTitle": "Este código ha caducado",
+    "expired": "Los códigos duran un minuto. Pide uno nuevo para volver a intentarlo.",
+    "newCode": "Obtener un código nuevo",
+    "failed": "No se pudo vincular el dispositivo. Inténtalo de nuevo.",
+    "done": "Listo"
   }
 }

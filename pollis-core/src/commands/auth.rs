@@ -159,6 +159,10 @@ async fn verify_otp_ds(
     // the wrong device). Binding to the stable id fixes that; `register-device`
     // is an idempotent upsert, so re-registering the existing row is safe.
     // Already-enrolled and brand-new devices keep the fresh candidate (unchanged).
+    // An email sign-in is never a link sign-in: drop any claimed-link state
+    // left from an abandoned QR attempt, or its tag would ride on this OTP
+    // session's enrollment request and the DS would rightly refuse it (#1207).
+    *state.device_link_pending.lock().await = None;
     let candidate_device_id = stable_device_id_for_reenrollment(state, &email)
         .await
         .unwrap_or_else(|| Ulid::new().to_string());
@@ -302,82 +306,129 @@ async fn verify_otp_ds(
         // cert publish is then gated by cert-validity ALONE (not this session),
         // since approval can outlast the session TTL. See
         // `docs/otp-server-bootstrap-design.md` §5.
-        let stored_device_id = ensure_device_id(state, &user_id, &candidate_device_id).await?;
-
-        // Whether this device already holds the account key. That — not the id
-        // comparison below on its own — is what decides which branch is right
-        // (#1099).
-        let enrolled = crate::commands::account_identity::has_local_account_identity(
-            state, &user_id,
-        )
-        .await
-        .unwrap_or(false);
-
-        // A NOT-yet-enrolled device carrying a stale local id adopts the session's
-        // instead. The keystore has a `device_id` for this account, but
-        // `stable_device_id_for_reenrollment` could not find it from the typed
-        // address, so verify-otp bound the session to a fresh candidate — which
-        // happens when the local accounts index does not know the address, after an
-        // email change made on another device, say.
-        //
-        // Every session-gated write that follows is bound to the CANDIDATE, and the
-        // pre-enrollment soft reset is the one that matters: the DS keeps exactly
-        // the session's device (`account::reset_recover_in_tx`, taken from the
-        // session record and never from the request body — trusting the body would
-        // reopen the account-takeover finding). Keep the stale id and the reset
-        // deletes this device's own row, after which its cert publish fails and the
-        // only way out is a manual re-enroll.
-        //
-        // Nothing is lost by adopting: an unenrolled device's row carries no cert
-        // and no MLS state, and a soft reset orphans every other device regardless.
-        // The id comparison alone would be wrong — an already-enrolled device also
-        // sees a mismatch (`stable_device_id_for_reenrollment` returns `None` for it
-        // by design) and there keeping the stored id is correct, which is what
-        // `enrolled` distinguishes.
-        let device_id = if !enrolled && stored_device_id != candidate_device_id {
-            state
-                .keystore
-                .store_for_user(DEVICE_ID_KEY, &user_id, candidate_device_id.as_bytes())
-                .await?;
-            *state.device_id.lock().await = Some(candidate_device_id.clone());
-            candidate_device_id.clone()
-        } else {
-            stored_device_id
-        };
-
-        if device_id == candidate_device_id {
-            // Brand-new device for this account (nothing in the keystore yet), or
-            // one that just adopted the session's id above: the session minted
-            // above is bound to exactly this device_id, so it can authorize the row.
-            let hostname = gethostname::gethostname().to_string_lossy().to_string();
-            let device_name = format!("{hostname} ({})", std::env::consts::OS);
-            crate::commands::mls::ds_post_session_ok(
-                state,
-                &session_token,
-                &pollis_api::bootstrap::RegisterDeviceBody {
-                    device_id: device_id.clone(),
-                    device_name: Some(device_name),
-                },
-            )
-            .await?;
-            // Hold the session for the session-gated enrollment REQUEST write that
-            // a sibling-approval enrollment performs next (also pre-credential).
-            // NOT stashed in `bootstrap_session`: the cert publish must stay on the
-            // cert-validity-alone path.
-            *state.enrollment_session.lock().await = Some(session_token.clone());
-        } else {
-            // A device already known to this account (its registered device_id
-            // predates this session, which is bound to a fresh candidate). The
-            // session can't authorize it and the local DB is still closed (no
-            // signing key), so `register_device` no-ops its remote write under a DS
-            // (bucket-C C2) — the row already exists with a cert from a prior
-            // login; the `last_seen` touch it skips is non-critical. It still
-            // resolves + sets `state.device_id`.
-            register_device(state, &user_id).await?;
-        }
+        bootstrap_existing_identity_device(state, &user_id, &candidate_device_id, &session_token).await?;
         None
     };
 
+    finish_login_profile(state, user_id, email, username, new_secret_key, has_identity).await
+}
+
+/// Sign in with the enrollment-only session a claimed QR device link minted
+/// (#1207). The account necessarily has an identity (an enrolled device showed
+/// the QR), so this is exactly verify-otp's existing-account path: reconcile
+/// the identity, register this device under the session, and hand back a
+/// profile that requires enrollment.
+pub(crate) async fn sign_in_with_link_session(
+    state: &Arc<AppState>,
+    v: pollis_api::links::ClaimLinkResponse,
+    candidate_device_id: String,
+) -> Result<UserProfile> {
+    let user_id = accept_server_user_id(v.user_id)?;
+    reconcile_account_identity(state, &user_id, v.account_id_pub.as_deref()).await;
+    bootstrap_existing_identity_device(state, &user_id, &candidate_device_id, &v.session_token).await?;
+    finish_login_profile(state, user_id, v.email, v.username, None, true).await
+}
+
+/// The existing-account half of signing a new device in, shared by email OTP
+/// (`verify_otp_ds`) and the QR device link (`device_link::claim_device_link`,
+/// #1207): resolve this device's id, register it through the session-gated DS
+/// endpoint (it has no signing credential yet), and hold the session for the
+/// enrollment request that follows. The account key itself arrives later, by
+/// sibling approval or Secret-Key recovery.
+pub(crate) async fn bootstrap_existing_identity_device(
+    state: &Arc<AppState>,
+    user_id: &str,
+    candidate_device_id: &str,
+    session_token: &str,
+) -> Result<()> {
+    let user_id = user_id.to_string();
+    let session_token = session_token.to_string();
+    let stored_device_id = ensure_device_id(state, &user_id, candidate_device_id).await?;
+
+    // Whether this device already holds the account key. That — not the id
+    // comparison below on its own — is what decides which branch is right
+    // (#1099).
+    let enrolled = crate::commands::account_identity::has_local_account_identity(
+        state, &user_id,
+    )
+    .await
+    .unwrap_or(false);
+
+    // A NOT-yet-enrolled device carrying a stale local id adopts the session's
+    // instead. The keystore has a `device_id` for this account, but
+    // `stable_device_id_for_reenrollment` could not find it from the typed
+    // address, so verify-otp bound the session to a fresh candidate — which
+    // happens when the local accounts index does not know the address, after an
+    // email change made on another device, say.
+    //
+    // Every session-gated write that follows is bound to the CANDIDATE, and the
+    // pre-enrollment soft reset is the one that matters: the DS keeps exactly
+    // the session's device (`account::reset_recover_in_tx`, taken from the
+    // session record and never from the request body — trusting the body would
+    // reopen the account-takeover finding). Keep the stale id and the reset
+    // deletes this device's own row, after which its cert publish fails and the
+    // only way out is a manual re-enroll.
+    //
+    // Nothing is lost by adopting: an unenrolled device's row carries no cert
+    // and no MLS state, and a soft reset orphans every other device regardless.
+    // The id comparison alone would be wrong — an already-enrolled device also
+    // sees a mismatch (`stable_device_id_for_reenrollment` returns `None` for it
+    // by design) and there keeping the stored id is correct, which is what
+    // `enrolled` distinguishes.
+    let device_id = if !enrolled && stored_device_id != candidate_device_id {
+        state
+            .keystore
+            .store_for_user(DEVICE_ID_KEY, &user_id, candidate_device_id.as_bytes())
+            .await?;
+        *state.device_id.lock().await = Some(candidate_device_id.to_string());
+        candidate_device_id.to_string()
+    } else {
+        stored_device_id
+    };
+
+    if device_id == candidate_device_id {
+        // Brand-new device for this account (nothing in the keystore yet), or
+        // one that just adopted the session's id above: the session minted
+        // above is bound to exactly this device_id, so it can authorize the row.
+        let hostname = gethostname::gethostname().to_string_lossy().to_string();
+        let device_name = format!("{hostname} ({})", std::env::consts::OS);
+        crate::commands::mls::ds_post_session_ok(
+            state,
+            &session_token,
+            &pollis_api::bootstrap::RegisterDeviceBody {
+                device_id: device_id.clone(),
+                device_name: Some(device_name),
+            },
+        )
+        .await?;
+        // Hold the session for the session-gated enrollment REQUEST write that
+        // a sibling-approval enrollment performs next (also pre-credential).
+        // NOT stashed in `bootstrap_session`: the cert publish must stay on the
+        // cert-validity-alone path.
+        *state.enrollment_session.lock().await = Some(session_token.to_string());
+    } else {
+        // A device already known to this account (its registered device_id
+        // predates this session, which is bound to a fresh candidate). The
+        // session can't authorize it and the local DB is still closed (no
+        // signing key), so `register_device` no-ops its remote write under a DS
+        // (bucket-C C2) — the row already exists with a cert from a prior
+        // login; the `last_seen` touch it skips is non-critical. It still
+        // resolves + sets `state.device_id`.
+        register_device(state, &user_id).await?;
+    }
+    Ok(())
+}
+
+/// Build the signed-in profile and record the account locally — the tail every
+/// sign-in path shares (#1207).
+pub(crate) async fn finish_login_profile(
+    state: &Arc<AppState>,
+    user_id: String,
+    email: String,
+    username: String,
+    new_secret_key: Option<String>,
+    has_identity: bool,
+) -> Result<UserProfile> {
     let enrollment_required = enrollment_required_for(state, &user_id, has_identity).await;
 
     let profile = UserProfile {

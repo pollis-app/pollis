@@ -298,6 +298,39 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let request_id: String = arg(&args, "requestId")?;
             ok(device_enrollment::poll_enrollment_status(&state()?, request_id).await?)
         }
+        // QR device link (#1207).
+        "create_device_link" => {
+            let user_id: String = arg(&args, "userId")?;
+            let pin: String = arg(&args, "pin")?;
+            ok(crate::commands::device_link::create_device_link(&state()?, user_id, pin).await?)
+        }
+        "poll_device_link" => {
+            let user_id: String = arg(&args, "userId")?;
+            let link_id: String = arg(&args, "linkId")?;
+            ok(crate::commands::device_link::poll_device_link(&state()?, user_id, link_id).await?)
+        }
+        "await_device_link" => {
+            let user_id: String = arg(&args, "userId")?;
+            let link_id: String = arg(&args, "linkId")?;
+            let since: String = arg(&args, "since")?;
+            ok(crate::commands::device_link::await_device_link(&state()?, user_id, link_id, since).await?)
+        }
+        "approve_device_link" => {
+            let user_id: String = arg(&args, "userId")?;
+            let link_id: String = arg(&args, "linkId")?;
+            crate::commands::device_link::approve_device_link(&state()?, user_id, link_id).await?;
+            ok(())
+        }
+        "cancel_device_link" => {
+            let link_id: String = arg(&args, "linkId")?;
+            crate::commands::device_link::cancel_device_link(&state()?, link_id).await?;
+            ok(())
+        }
+        "claim_device_link" => {
+            let payload: String = arg(&args, "payload")?;
+            let device_name: Option<String> = arg_opt(&args, "deviceName")?;
+            ok(crate::commands::device_link::claim_device_link(&state()?, payload, device_name).await?)
+        }
         "finalize_device_enrollment" => {
             let user_id: String = arg(&args, "userId")?;
             device_enrollment::finalize_device_enrollment(&state()?, user_id).await?;

@@ -4,7 +4,8 @@ import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { Screen, Crumb } from "../../components/ui";
 import { Icon } from "../../components/icons";
-import { palette, semantic, type as ty, fonts, r } from "../../theme/tokens";
+import { PinCells, PinKeypad } from "../../components/auth/PinPad";
+import { semantic, type as ty } from "../../theme/tokens";
 import {
   useSetPin,
   useUnlock,
@@ -14,8 +15,6 @@ import { useFinalizeEnrollment } from "../../hooks/queries/useEnrollment";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { upper } from "../../i18n";
-
-const SUBS = ["", "ABC", "DEF", "GHI", "JKL", "MNO", "PQRS", "TUV", "WXYZ"];
 
 type Stage = "checking" | "create-first" | "create-confirm" | "unlock";
 
@@ -164,7 +163,6 @@ function AuthPIN() {
     }
   };
 
-  const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "bk"];
   const busy =
     stage === "checking" ||
     setPinMutation.isPending ||
@@ -200,52 +198,7 @@ function AuthPIN() {
         </View>
 
         <View style={{ paddingVertical: 14 }}>
-          <View
-            style={{ flexDirection: "row", gap: 14, justifyContent: "center" }}
-          >
-            {[0, 1, 2, 3].map((i) => {
-              const filled = i < pin.length;
-              const cursor = i === pin.length;
-              return (
-                <View
-                  key={i}
-                  style={{
-                    width: 52,
-                    height: 60,
-                    borderWidth: 1,
-                    borderRadius: r.sm,
-                    borderColor:
-                      filled || cursor
-                        ? semantic.accent
-                        : semantic.hairStrong,
-                    backgroundColor: semantic.fieldBg,
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  {filled ? (
-                    <Text
-                      style={{
-                        fontFamily: fonts.sora500,
-                        fontSize: 24,
-                        color: semantic.ink,
-                      }}
-                    >
-                      •
-                    </Text>
-                  ) : cursor ? (
-                    <View
-                      style={{
-                        width: 2,
-                        height: 18,
-                        backgroundColor: semantic.accent,
-                      }}
-                    />
-                  ) : null}
-                </View>
-              );
-            })}
-          </View>
+          <PinCells length={pin.length} />
           <Text
             style={[ty.label, { textAlign: "center", marginTop: 14 }]}
           >
@@ -295,68 +248,11 @@ function AuthPIN() {
         </View>
       </View>
 
-      <View
-        style={{
-          flexDirection: "row",
-          flexWrap: "wrap",
-          borderTopWidth: 1,
-          borderTopColor: semantic.hairSoft,
-          backgroundColor: semantic.hairSoft,
-          opacity: busy ? 0.5 : 1,
-        }}
-        pointerEvents={busy ? "none" : "auto"}
-      >
-        {keys.map((k, i) => (
-          <Pressable
-            key={i}
-            disabled={k === ""}
-            testID={
-              k === "" ? undefined : k === "bk" ? "btn-pin-back" : `btn-pin-${k}`
-            }
-            accessibilityRole={k === "" ? undefined : "button"}
-            accessibilityLabel={
-              k === "" ? undefined : k === "bk" ? t("common:keys.delete") : k
-            }
-            onPress={() => (k === "bk" ? setPin(pin.slice(0, -1)) : push(k))}
-            // Subtle press feedback: the key briefly fills with the soft amber
-            // tier so a tap is acknowledged without anything flashy.
-            style={({ pressed }) => ({
-              width: "33.333%",
-              backgroundColor:
-                pressed && k !== "" ? semantic.accentSoft : palette.bg,
-              paddingVertical: 18,
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 2,
-              marginBottom: 1,
-            })}
-          >
-            <Text
-              style={{
-                fontFamily: fonts.sora400,
-                fontSize: k === "bk" ? 26 : 22,
-                color: k === "bk" ? semantic.ink2 : semantic.ink,
-              }}
-            >
-              {k === "bk" ? "⌫" : k}
-            </Text>
-            {k && k !== "bk" ? (
-              <Text
-                style={{
-                  fontFamily: fonts.sora400,
-                  fontSize: 9,
-                  letterSpacing: 1.8,
-                  color: semantic.mute,
-                }}
-              >
-                {SUBS[Number(k) - 1] || " "}
-              </Text>
-            ) : (
-              <Text style={{ fontSize: 9 }}> </Text>
-            )}
-          </Pressable>
-        ))}
-      </View>
+      <PinKeypad
+        onDigit={push}
+        onBackspace={() => setPin(pin.slice(0, -1))}
+        disabled={busy}
+      />
     </Screen>
   );
 }

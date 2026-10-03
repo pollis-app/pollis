@@ -376,7 +376,18 @@ export default function Security() {
           )}
         </View>
 
+
         <SectionTitle>{upper(t("security.devicesHeading"))}</SectionTitle>
+        {/* Link a new device by QR (#1207): its own screen, one step at a time. */}
+        <ListRow
+          testID="row-link-device"
+          minHeight={58}
+          glyph={<Icon.plus color={semantic.mute} />}
+          name={t("linkDevice.heading")}
+          sub={t("linkDevice.rowSub")}
+          onPress={() => router.push("/self/link-device")}
+          end={<Icon.fwd color={semantic.mute} />}
+        />
         {isLoading ? (
           <Text
             style={{

@@ -35,6 +35,10 @@ const ALLOWED = new Map<string, string>([
     "components/Auth/EnrollmentGateScreen.tsx",
     "1s countdown clock — re-renders the rendered M:SS, makes no request",
   ],
+  [
+    "pages/LinkDevicePage.tsx",
+    "1s countdown clock for the device-link code's expiry — re-renders M:SS, makes no request (#1207)",
+  ],
 ]);
 
 function walk(dir: string): string[] {

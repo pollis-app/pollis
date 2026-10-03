@@ -726,6 +726,15 @@ pub async fn unlock(
     })
 }
 
+/// Re-verify the PIN of an already-unlocked device, for an action that must be
+/// confirmed by the person at the keyboard rather than by whoever left the app
+/// open — today, showing a QR device link (#1207). Same attempt counter and
+/// lockout as [`unlock`]; touches nothing in `AppState`.
+pub(crate) async fn verify_pin(state: &Arc<AppState>, user_id: &str, pin: &str) -> Result<()> {
+    validate_pin(pin)?;
+    unlock_inner(state.keystore.as_ref(), user_id, pin).await.map(|_| ())
+}
+
 /// Shared core for verify-and-unwrap, used by both `unlock` and the
 /// `set_pin(Some(old), ...)` change flow.
 async fn unlock_inner(

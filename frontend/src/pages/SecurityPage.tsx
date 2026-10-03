@@ -585,6 +585,19 @@ export const SecurityPage: React.FC = observer(() => {
             </p>
           </section>
 
+          {/* Link a new device by QR (#1207) */}
+          {currentUser && (
+            <section className="flex flex-col gap-4 mb-12">
+              <h2 className={sectionHeaderClass}>{t("linkDevice.heading")}</h2>
+              <p className="text-sm text-muted">{t("linkDevice.rowSub")}</p>
+              <div>
+                <Button data-testid="link-device-button" variant="secondary" onClick={() => navigate({ to: "/security/link-device" })}>
+                  {t("linkDevice.heading")}
+                </Button>
+              </div>
+            </section>
+          )}
+
           {/* Devices */}
           <section className="flex flex-col gap-4 mb-12">
             <h2 className={sectionHeaderClass}>

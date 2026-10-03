@@ -341,5 +341,36 @@
   "notify": {
     "enrollmentTitle": "新设备登录",
     "enrollmentBody": "有一台新设备正在请求访问你的账户"
+  },
+  "linkDevice": {
+    "heading": "关联新设备",
+    "rowSub": "在另一部手机、平板或电脑上登录",
+    "pinTitle": "确认是你本人",
+    "pinSubtitle": "输入此设备的 PIN 码。",
+    "pinFailed": "PIN 码不正确。",
+    "showTitle": "扫码登录",
+    "showSubtitle": "在新设备上，点按“使用其他设备登录”。",
+    "codeSubtitle": "复制此代码，然后粘贴到新设备上。",
+    "tabQr": "二维码",
+    "tabCode": "代码",
+    "copyHint": "点按复制",
+    "clickToCopy": "点击复制",
+    "copied": "已复制",
+    "expiresIn": "{{time}} 后过期",
+    "claimedTitle": "马上就好",
+    "claimed": "{{name}} 正在登录。",
+    "wantsToSignIn": "{{name}} 想要登录",
+    "approveHint": "只批准你刚刚设置的设备。它将能读取你的消息。",
+    "approve": "批准",
+    "reject": "拒绝",
+    "linked": "{{name}} 已登录",
+    "unnamedDevice": "一台新设备",
+    "tamperedTitle": "出了点问题",
+    "tampered": "此请求在传输中被更改，无法批准。请用新代码重试。",
+    "expiredTitle": "此代码已过期",
+    "expired": "代码有效期为一分钟。获取新代码后重试。",
+    "newCode": "获取新代码",
+    "failed": "无法关联设备，请重试。",
+    "done": "完成"
   }
 }

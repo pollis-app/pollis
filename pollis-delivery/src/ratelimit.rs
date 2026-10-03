@@ -329,9 +329,12 @@ fn classify(method: &Method, path: &str, cfg: &RateLimitConfig) -> Option<(&'sta
             cfg.request_otp_max,
             cfg.request_otp_window_secs,
         )),
+        // `/v1/link/claim` (#1207) consumes a guessable-in-principle secret
+        // pre-credential, exactly like verify-otp, so it shares that tier.
         "/v1/auth/verify-otp"
         | "/v1/auth/request-email-change-otp"
-        | "/v1/auth/verify-email-change" => {
+        | "/v1/auth/verify-email-change"
+        | "/v1/link/claim" => {
             Some(("otp_verify", cfg.verify_otp_max, cfg.verify_otp_window_secs))
         }
         // #847 — its own tier, keyed per IP. The durable per-USER bound lives in
@@ -360,6 +363,9 @@ fn classify(method: &Method, path: &str, cfg: &RateLimitConfig) -> Option<(&'sta
         // Every other read (#987). They are POSTs, so without this they would
         // spend the write budget — and a cold launch issues far more reads than
         // a user ever issues writes.
+        // `/v1/link/status` is polled by the device showing a QR (#1207): a
+        // read, not a write, whatever its path family.
+        "/v1/link/status" => Some(("read", cfg.read_max, cfg.read_window_secs)),
         p if is_read_path(p) => Some(("read", cfg.read_max, cfg.read_window_secs)),
         _ => Some(("write", cfg.write_max, cfg.write_window_secs)),
     }

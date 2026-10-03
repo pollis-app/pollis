@@ -208,6 +208,16 @@ interface MockStore {
   pendingEnrollments: MockPendingEnrollment[];
   /** What the UI actually submitted to `approve_device_enrollment`. */
   enrollmentApprovals: { requestId: string; verificationCode: string }[];
+  /**
+   * QR device link (#1207). `deviceLinkPin` is the PIN `create_device_link`
+   * accepts (Rust verifies it in production); `deviceLinkScript` is the
+   * sequence of statuses successive `await_device_link` calls resolve to;
+   * `deviceLinkApprovals` records each `approve_device_link`.
+   */
+  deviceLinkPin: string;
+  deviceLinkScript: unknown[];
+  deviceLinkApprovals: string[];
+  enrollmentWait: 'none' | 'pending';
   // Local voice gate (#849). Rust owns this in production.
   voiceGate: MockVoiceGate;
   // Delivery / read receipts (#857), keyed by conversation id. DM-only in
@@ -295,6 +305,10 @@ const store: MockStore = {
   inviteLinks: preload.inviteLinks ?? [],
   pendingEnrollments: preload.pendingEnrollments ?? [],
   enrollmentApprovals: [],
+  deviceLinkPin: (preload.deviceLinkPin as string | undefined) ?? '1234',
+  deviceLinkScript: (preload.deviceLinkScript as unknown[] | undefined) ?? [],
+  deviceLinkApprovals: [],
+  enrollmentWait: (preload.enrollmentWait as 'none' | 'pending' | undefined) ?? 'none',
   voiceGate: {
     mode: 'voice_activity',
     self_muted: false,
@@ -915,6 +929,43 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
         expires_at: e.expires_at,
       }));
 
+    // QR device link (#1207). The PIN check and the link-tag verification are
+    // Rust's in production; here the PIN is a preload value and the statuses a
+    // scripted sequence, so a spec can drive every screen of the flow.
+    case 'create_device_link': {
+      if ((args.pin as string) !== store.deviceLinkPin) {
+        throw new Error("That PIN isn't right.");
+      }
+      return {
+        link_id: 'link_mock_1',
+        qr_payload: 'pollis-link:v1:link_mock_1:BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU',
+        expires_at: Math.floor(Date.now() / 1000) + 60,
+      };
+    }
+    // A wait with nothing scripted models "nothing has happened yet": it never
+    // resolves, exactly like the Rust wait while the link sits unchanged.
+    case 'await_device_link':
+      return store.deviceLinkScript.length > 0 ? store.deviceLinkScript.shift() : new Promise(() => {});
+    case 'approve_device_link':
+      store.deviceLinkApprovals.push(args.linkId as string);
+      return null;
+    case 'cancel_device_link':
+      return null;
+    case 'claim_device_link': {
+      const payload = args.payload as string;
+      if (!payload.startsWith('pollis-link:v1:')) {
+        throw new Error("That isn't a Pollis sign-in code.");
+      }
+      return { id: 'u_linked', email: 'me@pollis.test', username: 'mia', enrollment_required: true };
+    }
+    // `null` (the historical default) reads as "the wait ended without an
+    // answer"; a preload of `enrollmentWait: 'pending'` holds it open, which
+    // is what the linked-wait screen (#1207) needs to be looked at.
+    case 'await_enrollment_approval':
+      return store.enrollmentWait === 'pending' ? new Promise(() => {}) : null;
+    case 'start_device_enrollment':
+      return { request_id: 'req_linked_1', verification_code: 'H7K2PQ3M', expires_at: '2099-01-01T00:00:00Z' };
+
     // Records what the UI submitted, and accepts it only if it equals the
     // request's real code — standing in for `approve_device_enrollment`, which
     // compares against the value it derives from the ephemeral key it fetched
@@ -991,7 +1042,6 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'subscribe_realtime':
     case 'subscribe_camera_events':
     case 'subscribe_screen_share_events':
-    case 'await_enrollment_approval':
     case 'poll_mls_welcomes':
     case 'catch_up_all_mls_groups':
     case 'process_pending_commits':

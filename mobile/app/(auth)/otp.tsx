@@ -4,6 +4,7 @@ import { useRouter, useLocalSearchParams } from "expo-router";
 import { Trans, useTranslation } from "react-i18next";
 import { Screen, Crumb, Button, BottomAction } from "../../components/ui";
 import { Icon } from "../../components/icons";
+import { BackLink } from "../../components/auth/BackLink";
 import { semantic, type as ty, r } from "../../theme/tokens";
 import { useVerifyOtp } from "../../hooks/queries/useAuth";
 import { upper } from "../../i18n";
@@ -146,26 +147,7 @@ export default function AuthOTP() {
           </Text>
         ) : null}
 
-        <Pressable
-          onPress={() => router.back()}
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            alignSelf: "flex-start",
-            gap: 8,
-          }}
-        >
-          <Icon.back color={semantic.ink} />
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 16,
-              color: semantic.ink,
-            }}
-          >
-            {t("mobile:auth.otp.useDifferentEmail")}
-          </Text>
-        </Pressable>
+        <BackLink label={t("mobile:auth.otp.useDifferentEmail")} onPress={() => router.back()} />
       </View>
 
       <BottomAction>

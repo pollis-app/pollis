@@ -99,6 +99,7 @@ pub mod directory;
 pub mod email_change;
 pub mod emoji;
 pub mod groups;
+pub mod links;
 pub mod messages;
 pub mod otp;
 pub mod pins;
@@ -337,6 +338,10 @@ endpoints! {
     Client   bootstrap::RegisterDeviceBody      => "/v1/auth/register-device",           StatusOk;
     Client   bootstrap::PublishCertBody         => "/v1/auth/publish-device-cert",       StatusOk;
     Client   bootstrap::EnrollmentRequestBody   => "/v1/auth/enrollment-request",        StatusOk;
+    // ── QR device links (#1207) ──────────────────────────────────────────────
+    Client   links::CreateLinkBody              => "/v1/link/create",                    links::CreateLinkResponse;
+    Client   links::ClaimLinkBody               => "/v1/link/claim",                     links::ClaimLinkResponse;
+    Client   links::LinkStatusBody              => "/v1/link/status",                    links::LinkStatusResponse;
     Client   email_change::RequestEmailChangeBody => "/v1/auth/request-email-change-otp", StatusOk;
     Client   email_change::VerifyEmailChangeBody  => "/v1/auth/verify-email-change",      email_change::EmailChanged;
 

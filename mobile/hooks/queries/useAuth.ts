@@ -30,7 +30,7 @@ export interface UnlockStateSnapshot {
   last_active_user: string | null;
 }
 
-function profileToUser(p: RawUserProfile): User {
+export function profileToUser(p: RawUserProfile): User {
   const now = Date.now();
   return {
     id: p.id,

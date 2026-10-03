@@ -123,7 +123,11 @@ fn the_endpoint_table_covers_the_whole_write_surface() {
         // `/v1/push/resolve` trades the opaque handle for the conversation it
         // was minted for, over the client's own authenticated channel, so
         // Expo/APNs/FCM never see which conversation a notification is for.
-        106,
+        //
+        // 109 since #1207 added QR device links: `/v1/link/create` and
+        // `/v1/link/status` (device-signed, from the device showing the QR) and
+        // `/v1/link/claim` (pre-credential; mints an enrollment-only session).
+        109,
         "the DS write surface changed — update this count deliberately, and make \
          sure the new endpoint is routed in BOTH pollis-delivery and the flows harness"
     );

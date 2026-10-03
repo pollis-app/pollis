@@ -92,6 +92,14 @@ they need the two-device setup below and a Mac shakedown.
 
 ## Two-client flows
 
+**QR device link (automated, #1207):** `mobile/scripts/maestro-qr-link.sh <existing-device> <new-device>`
+— the existing device shows a code from Security (PIN first), the script reads
+the code's text off its UI tree, the new device signs in with it from "Sign in
+with another device" (entered as text: a simulator camera can't be aimed at
+another screen), the existing device approves the tag-verified request, and the
+new device must finish its PIN and list the group. Needs a dev DS with the
+link endpoints.
+
 **Device link (automated):** `mobile/scripts/maestro-device-link.sh <existing-device> <new-device>`
 runs both halves of device-linking sign-in across two devices
 (`.maestro/two-client/device-link/`): the existing device signs up and makes

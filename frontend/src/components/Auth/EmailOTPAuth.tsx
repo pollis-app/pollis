@@ -2,6 +2,7 @@ import { errorMessage } from '../../utils/errorMessage';
 import React, { useState, useEffect, useRef } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { ArrowLeft } from 'lucide-react';
+import { isMac, isLinux, isWindows } from '../../utils/platform';
 import * as api from '../../services/api';
 import { Button } from '../ui/Button';
 import { InputOtp } from '../ui/InputOtp';
@@ -31,6 +32,28 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const hasAutoSubmittedRef = useRef(false);
+  // "Sign in with another device" (#1207): paste the code a signed-in device
+  // shows under its QR. Desktop has no camera scanner, so this is its way in.
+  const [linkMode, setLinkMode] = useState(false);
+  const [linkCode, setLinkCode] = useState('');
+
+  const handleClaimLink = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!linkCode.trim() || isLoading) {
+      return;
+    }
+    setIsLoading(true);
+    setError(null);
+    try {
+      const deviceName = isMac ? 'Pollis on macOS' : isWindows ? 'Pollis on Windows' : isLinux ? 'Pollis on Linux' : 'Pollis desktop';
+      const result = await api.claimDeviceLink(linkCode.trim(), deviceName);
+      await onSuccess(result);
+    } catch (err) {
+      setError(errorMessage(err) || t('link.failed'));
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (otp.length < 6) {
@@ -157,6 +180,45 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
     );
   }
 
+  if (linkMode) {
+    return (
+      <div data-testid="link-form-container" className="flex flex-col gap-6">
+        <div className="flex flex-col gap-2">
+          <h2 className="text-base text-fg">{t('link.scanTitle')}</h2>
+          <p className="text-sm text-muted leading-relaxed">{t('link.codeIntro')}</p>
+        </div>
+        {error && (
+          <p data-testid="auth-error" className="text-xs font-mono text-danger">
+            {error}
+          </p>
+        )}
+        <form data-testid="link-form" onSubmit={handleClaimLink} className="flex flex-col gap-4">
+          <TextInput
+            id="link-code-input"
+            data-testid="link-code-input"
+            label={t('link.codeLabel')}
+            value={linkCode}
+            onChange={setLinkCode}
+            placeholder={t('link.codePlaceholder')}
+            autoFocus
+            disabled={isLoading}
+            required
+          />
+          <Button data-testid="link-sign-in-button" type="submit" isLoading={isLoading} disabled={!linkCode.trim()} className="w-full">
+            {t('link.signIn')}
+          </Button>
+        </form>
+        <Button
+          data-testid="link-back-to-email-button"
+          variant="ghost"
+          onClick={() => { setLinkMode(false); setLinkCode(''); setError(null); }}
+        >
+          {t('link.useEmail')}
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <div data-testid="email-form-container" className="flex flex-col gap-4">
       {error && (
@@ -189,6 +251,13 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
           {t('otp.continue')}
         </Button>
       </form>
+      <Button
+        data-testid="sign-in-with-device-button"
+        variant="ghost"
+        onClick={() => { setLinkMode(true); setError(null); }}
+      >
+        {t('link.useDevice')}
+      </Button>
     </div>
   );
 };

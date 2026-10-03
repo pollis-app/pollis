@@ -23,7 +23,7 @@ use axum::{
 
 use crate::cert::verify_device_cert;
 use crate::error::AuthRejection;
-use crate::session::verify_session;
+use crate::session::{verify_session, verify_session_for_enrollment, SessionScope};
 use crate::writes::bad_request;
 use crate::AppState;
 use crate::util::b64_decode;
@@ -173,7 +173,8 @@ pub async fn register_device(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let claims = match verify_session(&headers, &state.sessions, crate::util::now_unix()) {
+    // OTP or device-link session (#1207): a linked device registers here.
+    let claims = match verify_session_for_enrollment(&headers, &state.sessions, crate::util::now_unix()) {
         Ok(c) => c,
         Err(rej) => return rej.into_response(),
     };
@@ -354,9 +355,13 @@ pub async fn publish_device_cert(
     let session_token = crate::session::session_token(&headers)
         .filter(|t| !t.is_empty())
         .map(|t| t.to_string());
+    // Gate (a) is first-device signup, so it takes an OTP session only. A
+    // device-link session (#1207) falls through to gate (b), cert-validity
+    // alone — strictly stronger, and the gate every subsequent device uses.
     let session_claims = session_token
         .as_ref()
-        .and_then(|t| state.sessions.resolve(t, now));
+        .and_then(|t| state.sessions.resolve(t, now))
+        .filter(|c| c.scope == SessionScope::Otp);
 
     let (user_id, device_id, invalidate_token) = match session_claims {
         Some(claims) => {
@@ -524,7 +529,8 @@ pub async fn enrollment_request(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let claims = match verify_session(&headers, &state.sessions, crate::util::now_unix()) {
+    // OTP or device-link session (#1207): a linked device files its request here.
+    let claims = match verify_session_for_enrollment(&headers, &state.sessions, crate::util::now_unix()) {
         Ok(c) => c,
         Err(rej) => return rej.into_response(),
     };
@@ -537,6 +543,21 @@ pub async fn enrollment_request(
         Err(_) => return bad_request("invalid new_device_ephemeral_pub"),
     };
 
+    // QR device link (#1207): a device-link session files exactly the request
+    // its link expects, carrying the tag the approver will verify; an OTP
+    // session never carries one. Either mismatch is a malformed request.
+    let link = match (&claims.scope, &parsed.link_tag) {
+        (SessionScope::DeviceLink { link_id }, Some(tag)) if !tag.is_empty() => {
+            Some((link_id.clone(), tag.clone()))
+        }
+        (SessionScope::DeviceLink { .. }, _) => {
+            return bad_request("link_tag is required on a device-link session")
+        }
+        (SessionScope::Otp, Some(_)) => {
+            return bad_request("link_tag is only valid on a device-link session")
+        }
+        (SessionScope::Otp, None) => None,
+    };
     let conn = match state.db.conn().await {
         Ok(c) => c,
         Err(e) => return internal(e),
@@ -557,6 +578,15 @@ pub async fn enrollment_request(
         // the same way and re-emit the nudge, since the reason to retry is
         // usually that the first notification was missed.
         Ok(EnrollmentRequestOutcome::Created | EnrollmentRequestOutcome::Duplicate) => {
+            // Attach the request to its link so the device showing the QR sees
+            // it. Only the claiming device can, once; a resubmit finds it
+            // already attached, which is fine.
+            if let Some((link_id, tag)) = &link {
+                let now = crate::util::now_unix();
+                if !state.links.record_request(link_id, &claims.device_id, &parsed.request_id, tag, now) {
+                    tracing::info!("enrollment-request: link {link_id} not attachable (expired or already attached)");
+                }
+            }
             // Notify the user's already-enrolled devices via their inbox room.
             // The requesting device can't send this itself — it is
             // pre-enrollment (no signing credential, local DB closed), so its
@@ -565,11 +595,17 @@ pub async fn enrollment_request(
             // Best-effort: a miss is covered by the sibling's login-time
             // `list_pending_enrollment_requests` poll.
             let inbox = format!("inbox-{}", claims.user_id);
+            // `link_id` (#1207) tells clients this request belongs to a QR
+            // link: the device showing that QR approves it on the link tag,
+            // and no device should pop the typed-code approval for it — the
+            // phone shows no code to type.
+            let link_id = link.as_ref().map(|(id, _)| id.clone());
             let event = serde_json::json!({
                 "type": "enrollment_requested",
                 "request_id": parsed.request_id,
                 "new_device_id": claims.device_id,
                 "verification_code": parsed.verification_code,
+                "link_id": link_id,
             });
             if let Err(e) = crate::broker::room_send_data(&state, &inbox, &event).await {
                 tracing::warn!("enrollment-request inbox notify failed (non-fatal): {e}");
