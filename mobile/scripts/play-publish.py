@@ -148,6 +148,67 @@ class Edit:
         self._discard()
         return False
 
+    def upload_bundle(self, path):
+        """Upload an AAB with Google's resumable protocol and return the bundle.
+
+        A single ~160 MB POST was reset mid-stream by the network three times in
+        a row (Oct 2026), discarding the whole edit each time. Resumable upload
+        sends 8 MB chunks; after a reset it asks the server how much it holds
+        and continues from there, so a flaky link costs one chunk, not the file.
+        """
+        size = os.path.getsize(path)
+        url = f"{UPLOAD_API}/edits/{self.id}/bundles?uploadType=resumable"
+        req = urllib.request.Request(url, data=b"", method="POST")
+        req.add_header("Authorization", f"Bearer {self.token}")
+        req.add_header("X-Upload-Content-Type", "application/octet-stream")
+        req.add_header("X-Upload-Content-Length", str(size))
+        session = urllib.request.urlopen(req, timeout=120).headers["Location"]
+        chunk = 8 * 1024 * 1024
+        offset = 0
+        failures = 0
+        with open(path, "rb") as f:
+            while True:
+                if offset >= size:
+                    # Every byte is acknowledged but the final response was
+                    # lost; the status query below returns the bundle.
+                    data, content_range = b"", f"bytes */{size}"
+                else:
+                    f.seek(offset)
+                    data = f.read(chunk)
+                    content_range = f"bytes {offset}-{offset + len(data) - 1}/{size}"
+                put = urllib.request.Request(session, data=data, method="PUT")
+                put.add_header("Content-Range", content_range)
+                put.add_header("Content-Type", "application/octet-stream")
+                try:
+                    resp = urllib.request.urlopen(put, timeout=600)
+                    return json.loads(resp.read())
+                except urllib.error.HTTPError as e:
+                    if e.code != 308:
+                        raise RuntimeError(f"bundle upload -> {e.code}: {e.read().decode()[:800]}")
+                    # 308 = "resume incomplete": Range says what the server has.
+                    got = e.headers.get("Range")
+                    offset = int(got.split("-")[1]) + 1 if got else 0
+                    failures = 0
+                    print(f"  {offset / 1e6:.0f} / {size / 1e6:.0f} MB", flush=True)
+                except (ConnectionError, TimeoutError, urllib.error.URLError) as e:
+                    failures += 1
+                    if failures > 8:
+                        raise RuntimeError(f"bundle upload: giving up after repeated network errors: {e}")
+                    print(f"  network error ({e}); resuming", flush=True)
+                    time.sleep(min(2 ** failures, 30))
+                    # Ask where the server is before resending anything.
+                    status = urllib.request.Request(session, data=b"", method="PUT")
+                    status.add_header("Content-Range", f"bytes */{size}")
+                    try:
+                        return json.loads(urllib.request.urlopen(status, timeout=120).read())
+                    except urllib.error.HTTPError as se:
+                        if se.code != 308:
+                            raise RuntimeError(f"bundle upload status -> {se.code}: {se.read().decode()[:800]}")
+                        got = se.headers.get("Range")
+                        offset = int(got.split("-")[1]) + 1 if got else 0
+                    except (ConnectionError, TimeoutError, urllib.error.URLError):
+                        pass
+
     def _discard(self):
         try:
             self.call("DELETE", f"/edits/{self.id}")
@@ -191,8 +252,7 @@ def cmd_upload(args):
     token = access_token(service_account())
     with Edit(token) as e:
         print(f"uploading {os.path.basename(aab)} ({os.path.getsize(aab) / 1e6:.0f} MB)…")
-        bundle = e.call("POST", "/bundles?uploadType=media", raw=open(aab, "rb").read(),
-                        content_type="application/octet-stream", base=UPLOAD_API)
+        bundle = e.upload_bundle(aab)
         vc = str(bundle["versionCode"])
         print(f"uploaded versionCode {vc}")
         release = {"name": args.name or vc, "versionCodes": [vc], "status": args.status}
