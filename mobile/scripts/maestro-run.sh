@@ -23,9 +23,9 @@ ENV_FILE="$MAE/.env"
 APP_ID="com.pollis.mobile"
 
 # Device names — override to match your simulators/emulators.
-IOS_DEVICE="${IOS_DEVICE:-iPhone 17 Pro}"
-IPAD_DEVICE="${IPAD_DEVICE:-iPad Pro 13-inch (M4)}"
-ANDROID_AVD="${ANDROID_AVD:-Pixel_8_API_35}"
+IOS_DEVICE="${IOS_DEVICE:-iPhone 18 Pro}"
+IPAD_DEVICE="${IPAD_DEVICE:-iPad Pro 13-inch (M5)}"
+ANDROID_AVD="${ANDROID_AVD:-pollis_e2e}"
 
 # Resolve the flow path.
 if [ "$FLOW" = "all" ]; then
@@ -71,14 +71,32 @@ case "$PLATFORM" in
   ios|ipad)
     NAME="$IOS_DEVICE"; [ "$PLATFORM" = "ipad" ] && NAME="$IPAD_DEVICE"
     echo "==> booting iOS simulator: $NAME"
-    xcrun simctl boot "$NAME" 2>/dev/null || true
-    open -a Simulator || true
-    UDID="$(xcrun simctl list devices | grep -F "$NAME (" | grep -Eo '[0-9A-F-]{36}' | head -1)"
-    [ -n "$UDID" ] && DEVICE_SEL=(--device "$UDID")
+    # Resolve the name among AVAILABLE devices first. Simulator names change
+    # with each Xcode (Xcode 27 has no "iPhone 17 Pro"), and an unmatched name
+    # used to fall through to a run with no --device at all.
+    UDID="$(xcrun simctl list devices available | grep -F "    $NAME (" | grep -Eo '[0-9A-F-]{36}' | head -1 || true)"
+    if [ -z "$UDID" ]; then
+      echo "no available simulator named \"$NAME\" — set IOS_DEVICE / IPAD_DEVICE to one of:" >&2
+      xcrun simctl list devices available | grep -E "iPhone|iPad" >&2
+      exit 1
+    fi
+    xcrun simctl boot "$UDID" 2>/dev/null || true
+    # Xcode 27 ships no Simulator.app; the simulator runs headless, which
+    # Maestro and `simctl io screenshot` are both fine with.
+    open -a Simulator 2>/dev/null || true
+    DEVICE_SEL=(--device "$UDID")
     ;;
   android)
-    echo "==> booting Android emulator: $ANDROID_AVD"
-    ( "$ANDROID_HOME/emulator/emulator" -avd "$ANDROID_AVD" -no-snapshot -no-boot-anim >/dev/null 2>&1 & )
+    if ! "$ANDROID_HOME/emulator/emulator" -list-avds 2>/dev/null | grep -qx "$ANDROID_AVD"; then
+      echo "no AVD named \"$ANDROID_AVD\" — set ANDROID_AVD to one of:" >&2
+      "$ANDROID_HOME/emulator/emulator" -list-avds >&2 || true
+      exit 1
+    fi
+    # Reuse a running emulator; a second instance of the same AVD refuses to start.
+    if ! adb devices | grep -q '^emulator-'; then
+      echo "==> booting Android emulator: $ANDROID_AVD"
+      ( "$ANDROID_HOME/emulator/emulator" -avd "$ANDROID_AVD" -no-snapshot -no-boot-anim >/dev/null 2>&1 & )
+    fi
     adb wait-for-device
     # give the launcher a moment
     adb shell 'while [ "$(getprop sys.boot_completed)" != "1" ]; do sleep 1; done'

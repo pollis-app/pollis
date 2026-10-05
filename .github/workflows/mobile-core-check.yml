@@ -288,14 +288,14 @@ jobs:
 
       # cargo-ndk drives the per-ABI cross-compile; the ubrn CLI must be the
       # exact tag pinned in mobile/CLAUDE.md — its generated C++ template has to
-      # match the npm `uniffi-bindgen-react-native` (0.31.0-2) or CMake fails
+      # match the npm `uniffi-bindgen-react-native` (0.31.0-6) or CMake fails
       # with `no member named 'string_to_buffer'`.
       - name: Install cargo-ndk + uniffi-bindgen-react-native (pinned)
         run: |
           set -euo pipefail
           cargo install cargo-ndk --locked
           cargo install --git https://github.com/jhugman/uniffi-bindgen-react-native \
-            --tag 0.31.0-2 uniffi-bindgen-react-native --locked
+            --tag 0.31.0-6 uniffi-bindgen-react-native --locked
 
       - name: Install JS dependencies
         working-directory: mobile

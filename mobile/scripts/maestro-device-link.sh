@@ -43,8 +43,10 @@ else
   TREE="$(maestro --device "$NEW" hierarchy 2>/dev/null)"
 fi
 # Only a WHOLE text value of exactly eight code characters (uiautomator XML
-# `text="…"`, Maestro JSON `"text" : "…"`), never a fragment of a longer string.
-CODE="$(printf '%s' "$TREE" | grep -oE 'text"? ?[=:] ?"[0-9A-HJKMNP-TV-Z]{8}"' | grep -oE '[0-9A-HJKMNP-TV-Z]{8}' | head -1)"
+# `text="…"`, Maestro JSON `"text" : "…"`, or — on iOS 27 / RN 0.86, where a
+# Text's string lands in the accessibility label — `"accessibilityText" : "…"`),
+# never a fragment of a longer string.
+CODE="$(printf '%s' "$TREE" | grep -oE '(text|accessibilityText)"? ?[=:] ?"[0-9A-HJKMNP-TV-Z]{8}"' | grep -oE '"[0-9A-HJKMNP-TV-Z]{8}"' | tr -d '"' | head -1)"
 [ -n "$CODE" ] || { echo "could not read the verification code from the new device" >&2; exit 1; }
 echo "    code: $CODE"
 

@@ -56,6 +56,12 @@ tags:
       - tapOn:
           id: "btn-continue"
 
+# The emergency kit's Continue pushes away with an animation, during which its
+# own btn-continue is still on screen: without this wait the conditional below
+# matches the OUTGOING button and its tap lands on the incoming tab bar (on
+# iPad, bottom centre is the Search tab). Settle first.
+- waitForAnimationToEnd:
+    timeout: 5000
 - runFlow:
     when:
       visible:

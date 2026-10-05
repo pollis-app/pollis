@@ -25,17 +25,26 @@ form factors.
 2. **A RELEASE build of the app, pointed at the dev DS.** Both halves matter.
 
    *Release, not dev-client.* Every flow opens with `clearState`, which wipes
-   expo-dev-client's stored dev-server URL — so a `pnpm expo run:ios` build
+   expo-dev-client's stored dev-server URL — so a Debug (dev-client) build
    boots to the **dev-client launcher menu** and the app never loads. The suite
    cannot drive that build at all. A Release build embeds the JS bundle and has
    no launcher. It is also the more honest target: these flows are
    timing-sensitive and dev-mode JS is not what ships.
+   Xcode 27 ships no Simulator.app, so `expo run:ios` fails (`Can't determine
+   id of Simulator app`); build and install with xcodebuild/simctl instead
+   (full sequence in `mobile/CLAUDE.md` → "Dev loop — iOS"):
    ```bash
-   cd mobile && pnpm expo run:ios --device <simulator-udid> --configuration Release
+   cd mobile
+   xcrun simctl boot <simulator-udid>
+   xcodebuild -workspace ios/Pollis.xcworkspace -scheme Pollis \
+     -configuration Release -destination id=<simulator-udid> \
+     -derivedDataPath ios/build build
+   xcrun simctl install <simulator-udid> \
+     ios/build/Build/Products/Release-iphonesimulator/Pollis.app
    ```
-   Pass the simulator by **UDID** (`xcrun simctl list devices`) and boot it
-   first; a name that matches no *booted* simulator makes xcodebuild fall
-   through to a physical-device destination and fail.
+   Address the simulator by **UDID** (`xcrun simctl list devices available`)
+   and boot it first; a name that matches no *booted* simulator makes xcodebuild
+   fall through to a physical-device destination and fail.
 
    *Dev DS.* The build must point at the dev Delivery Service (baked at build
    time, not Maestro env):
@@ -67,7 +76,15 @@ mobile/scripts/maestro-run.sh messaging android
 ```
 Screenshots land in `mobile/.maestro/artifacts/<date>/<platform>/` — that's the
 gallery the visual evaluator reviews. Override device names with `IOS_DEVICE=…`,
-`IPAD_DEVICE=…`, `ANDROID_AVD=…`.
+`IPAD_DEVICE=…`, `ANDROID_AVD=…`. The defaults are Xcode 27's `iPhone 18 Pro`
+and `iPad Pro 13-inch (M5)`, and the `pollis_e2e` AVD (Pixel 8, API 36
+`google_apis` arm64 — see `mobile/CLAUDE.md` for creating it). Simulator names change with each Xcode, so the
+script resolves the name among *available* simulators and, if none matches,
+exits printing the ones that exist rather than running with no `--device` at
+all:
+```bash
+IOS_DEVICE="iPhone 17 Pro" mobile/scripts/maestro-run.sh auth ios   # an Xcode 26 machine
+```
 
 ## Flow matrix (`flows/`)
 
@@ -83,6 +100,7 @@ gallery the visual evaluator reviews. Override device names with `IOS_DEVICE=…
 | `export` | #856 on-device archive from Security: summary renders, share button reachable, no network offer on an attachment-free account | no |
 | `ipad-two-pane` | #622 list+detail side-by-side (run on **iPad**) | no |
 | `dms` | start a DM with the seeded peer (initiator side) | yes |
+| `deep-link` | #1223 a `pollis://` link routes both warm (scene `openURLContexts`) and cold (scene `connectionOptions` → `Linking.getInitialURL`) under the UIScene life cycle | no |
 | `i18n` | switch language (copy re-renders), persists across relaunch, Arabic mirrors the layout after relaunch (#1074) | no |
 | `enrollment-approval` | #1096 the approver TYPES the code off the new device — the card shows none, approve is gated on eight characters | yes |
 

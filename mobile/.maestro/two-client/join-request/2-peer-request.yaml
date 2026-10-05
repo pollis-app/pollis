@@ -10,8 +10,10 @@ appId: com.pollis.mobile
     id: "input-group-search"
 - inputText: "${GROUP_SLUG}"
 # Dismiss the keyboard, then look the slug up (one request, not per key).
+# Tap empty space ABOVE the keyboard: iOS 27's keyboard reaches up past 65%
+# of the screen, so the old 70% point typed a key into the slug instead.
 - tapOn:
-    point: "50%,70%"
+    point: "50%,45%"
 - tapOn:
     id: "btn-group-search"
 - extendedWaitUntil:

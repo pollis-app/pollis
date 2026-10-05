@@ -26,7 +26,7 @@ ios:
   # single checked-in source of truth: ios-check in mobile-core-check.yml reads
   # it from here and asserts it reaches the built artifact. Keep it in lockstep
   # with the Expo-generated Podfile's `platform :ios`.
-  cargoExtras: ["--no-default-features", "--config", 'env.IPHONEOS_DEPLOYMENT_TARGET="15.1"']
+  cargoExtras: ["--no-default-features", "--config", 'env.IPHONEOS_DEPLOYMENT_TARGET="16.4"']
   targets:
     - aarch64-apple-ios
     - aarch64-apple-ios-sim

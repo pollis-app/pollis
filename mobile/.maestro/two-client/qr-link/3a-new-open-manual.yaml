@@ -1,0 +1,18 @@
+appId: com.pollis.mobile
+---
+# New device, BEFORE the existing device mints a code: no email code — reset,
+# then open "Sign in with another device" at the manual-entry field. A link
+# code lives 60 s (LINK_TTL_SECS); doing this slow part first leaves only the
+# paste inside that window (it overran it on a loaded machine).
+- clearState
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-email"
+    timeout: 20000
+- tapOn:
+    id: "btn-sign-in-with-device"
+- tapOn:
+    id: "btn-link-toggle-manual"
+- assertVisible:
+    id: "input-link-code"

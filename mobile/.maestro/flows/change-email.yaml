@@ -53,7 +53,14 @@ tags:
     enabled: false
 - takeScreenshot: change-email-03-one-code-blocked
 
-# With both, the action becomes available.
+# With both, the action becomes available. The number pad is still up from the
+# first code and, on iOS 27, leaves the second field clipped behind the Ctx
+# strip, so a tap on it lands on the strip. Dismiss the keyboard first, as a
+# user would: `hideKeyboard` cannot close the iOS number pad (it has no return
+# key), but Body's ScrollView is keyboardShouldPersistTaps="handled", so a tap
+# on its plain description text dismisses it.
+- tapOn:
+    point: "50%,22%"
 - tapOn:
     id: "input-current-otp"
 - inputText: "000000"

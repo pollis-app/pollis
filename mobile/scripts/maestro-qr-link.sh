@@ -34,7 +34,10 @@ EMAIL="${BASE%@*}-qr-$(date +%Y%m%d%H%M%S)@${BASE#*@}"
 echo "==> 1/5 existing device signs up ($EMAIL) and creates a group"
 maestro --device "$EXISTING" test "${ENV_ARGS[@]}" -e MAESTRO_EMAIL="$EMAIL" "$LINK/1-existing-signup.yaml"
 
-echo "==> 2/5 existing device shows a link code"
+# The new device's reset + navigation runs BEFORE the code exists: a code
+# lives 60 s, and clearState + launch + navigation + typing it overran that.
+echo "==> 2/5 new device opens manual code entry; existing device shows a link code"
+maestro --device "$NEW" test "$QR/3a-new-open-manual.yaml"
 maestro --device "$EXISTING" test "$QR/2-existing-show-code.yaml"
 
 # Read the payload off the existing device's screen (the Code tab text).

@@ -27,6 +27,7 @@
     "version": "0.62.0"
   },
   "dependencies": {
-    "uniffi-bindgen-react-native": "0.31.0-2"
+    "@ubjs/core": "0.31.0-6",
+    "uniffi-bindgen-react-native": "0.31.0-6"
   }
 }

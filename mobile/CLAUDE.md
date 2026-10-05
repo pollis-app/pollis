@@ -14,17 +14,19 @@ The `mobile/` directory is **NOT** a pnpm workspace member. It is a standalone E
   cd mobile && pnpm add <pkg> --ignore-workspace
   ```
 - `mobile/pnpm-lock.yaml` is independent of the root lock.
+- **Use pnpm 10.25.0 here, the version CI uses.** The root `packageManager: pnpm@10.25.0` does not apply under `--ignore-workspace`, so a bare `pnpm` in `mobile/` runs whatever is on `PATH` — Homebrew's is 12.x, which rewrites the lockfile differently from CI and makes `--frozen-lockfile` fail there. Install with `npx -y pnpm@10.25.0 install --ignore-workspace` (or a corepack-pinned pnpm).
 - If Expo complains about missing packages, first check that `node_modules` is inside `mobile/` and not at the repo root.
 - Mobile imports **no frontend TypeScript**. Generated data is copied across by its generator (`emojiData.ts`, `emoji/annotations/`). The ONE shared directory is the translation catalogues, `frontend/src/i18n/locales/`, reached through a `watchFolders` entry in `metro.config.js` — see [Localization](#localization-i18n-1074). Do not widen that list.
 
 ## Stack
 
-- Expo SDK 55, React Native 0.83.6, React 19.2
-- Expo Router v6 (file-based routing in `app/`)
-- Reanimated 4, Gesture Handler 2.30
-- `@gorhom/bottom-sheet` 5 for sheets
+- Expo SDK 57, React Native 0.86.3, React 19.2.3, TypeScript 6.0
+- Hermes V1 — the default engine since RN 0.84 / SDK 56; nothing configures it
+- `expo-router` 57 (file-based routing in `app/`). Since SDK 56 it carries its own fork of react-navigation, so it versions with the SDK rather than as "Router v6"
+- Reanimated 4.5, `react-native-worklets` 0.10, Gesture Handler 2.32, Screens 4.26, Safe Area Context 5.7, `react-native-svg` 15.15
 - `expo-camera`, `expo-secure-store`, `expo-notifications`
-- `expo-image` (cached + blurhash), `react-native-blurhash`
+- `expo-image` (caching, and the blurhash placeholders — there is no separate blurhash package)
+- `@livekit/react-native-webrtc` pinned to `144.1.2` + `@livekit/react-native-expo-plugin` `^1.0.3` (installed for #343, not wired — see "Voice")
 - `lucide-react-native` icons, wrapped in `components/icons.tsx` (stable `Icon.*` API, strokeWidth pinned to 1.2 to match the design's monoline spec). `react-native-svg` is still used directly for the Initializing dot-field.
 - Sora (UI) via `@expo-google-fonts/sora`. Monospace (crypto keys, e.g. the Security public-key line) uses the **system** mono face — `fonts.mono*` = `Platform.select({ ios: 'Menlo', android: 'monospace' })`, no bundled font.
 - Rust core via `pollis-native` Turbo Module (uniffi-bindgen-react-native)
@@ -131,9 +133,17 @@ Metro hot-reload handles it. No rebuild.
 
 ### iOS path
 
-Smoke-tested on macOS Tahoe (26.4.1) + Xcode 26.4.1 + iOS 26.4 simulator. `version()` round-trips from Rust through the JSI bridge to the QR screen, then swipe through the card stack works end-to-end.
+First smoke-tested (on SDK 55) on macOS Tahoe (26.4.1) + Xcode 26.4.1 + iOS 26.4 simulator. `version()` round-trips from Rust through the JSI bridge to the QR screen, then swipe through the card stack works end-to-end.
 
-**Expo SDK 55 requires Xcode 26 / macOS 26.** Earlier Xcode/macOS hits `@MainActor` parse errors in `expo-modules-core` (see [expo/expo#42525](https://github.com/expo/expo/issues/42525) — closed, won't fix). SDK 54 is the last line that supports Xcode 16.x if a downgrade is ever needed.
+**Expo SDK 55 and later require Xcode 26 / macOS 26 at minimum.** Earlier Xcode/macOS hits `@MainActor` parse errors in `expo-modules-core` (see [expo/expo#42525](https://github.com/expo/expo/issues/42525) — closed, won't fix). SDK 54 is the last line that supports Xcode 16.x if a downgrade is ever needed.
+
+#### Xcode 27 / iOS 27 SDK
+
+Three things changed under Xcode 27, each of which stops a build or a launch outright:
+
+- **UIScene life cycle is mandatory.** An app linked against the iOS 27 SDK that still uses the legacy `AppDelegate`-owns-the-window life cycle traps at launch (`EXC_BREAKPOINT` in `_UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption`) — before any JS runs, so it looks like a native crash, not a config problem. SDK 57's template still generates the legacy `AppDelegate`, so we opt in with `expo-build-properties` `ios.enableSceneSupport: true` in `app.json` (the flag landed in expo-build-properties 57.0.19, the runtime half was backported in expo 57.0.23 — expo/expo#50191, #50205; background in [expo/fyi ios-scene-lifecycle.md](https://github.com/expo/fyi/blob/main/ios-scene-lifecycle.md)). Prebuild then makes `AppDelegate` conform to `ExpoReactNativeFactoryProvider`, drops its own `UIWindow` / `startReactNative`, and adds a `UIApplicationSceneManifest` naming `EXExpoAppSceneDelegate`. Deep links still work — a cold start is rebuilt from the scene's `connectionOptions`, a warm one arrives via the scene's `openURLContexts` → `AppDelegate` → `RCTLinkingManager` — and push is unaffected (`UNUserNotificationCenter` is not tied to the life cycle). **On SDK 58 the flag is a no-op; remove it then.**
+- **Pod targets below iOS 15.0 are rejected.** On SDK 57 nothing custom is needed: RN 0.86's `post_install` raises library targets to ≥ 15.1, and expo-modules-autolinking raises resource-bundle targets (it logs `Raised resource bundle deployment targets to match their pods: RNSVG-RNSVGFilters, SDWebImage-SDWebImage`). After `pod install` every Pods target is 15.1 or 16.4. If a future pod trips this, fix it in a config plugin, not by editing the generated `Podfile`.
+- **There is no Simulator.app**, so `expo run:ios` fails with `Can't determine id of Simulator app`. Boot, build, install and launch by hand — see "Dev loop — iOS". Simulator names also changed: Xcode 27 ships **iPhone 18 Pro** and **iPad Pro 13-inch (M5)**, not the iPhone 17 Pro / iPad Pro 13-inch (M4) older notes and scripts assume.
 
 **An Xcode update silently breaks every simulator build until you download the matching runtime.** Xcode auto-updated 26.4.1 → 26.6 mid-session on 2026-08-22; the new SDK is iOS 26.5, no iOS 26.5 *simulator runtime* was installed, and `xcodebuild` then enumerates **zero** simulator destinations. Every build fails with `Unable to find a destination matching the provided destination specifier`, and the only "ineligible" entry it prints is the physical-device placeholder — which reads like a code-signing problem and is not one. Booting an older-runtime simulator does **not** help. The fix is one command and an 8.5 GB download:
 
@@ -142,14 +152,15 @@ xcodebuild -downloadPlatform iOS
 xcodebuild -workspace ios/Pollis.xcworkspace -scheme Pollis -showdestinations   # sanity: should list simulators, not just the placeholder
 ```
 
-Two related traps while you are in there: pass simulators to `expo run:ios` by **UDID** (`xcrun simctl list devices`) and boot them first — a name matching no booted simulator makes xcodebuild fall through to a device destination; and the store `.ipa` currently in `build/export` was produced under Xcode **26.4.1**, so a rebuild under 26.6 is not byte-identical.
+Two related traps while you are in there: address simulators by **UDID** (`xcrun simctl list devices`) and boot them first — a name matching no booted simulator makes xcodebuild fall through to a device destination; and the store `.ipa` currently in `build/export` was produced under Xcode **26.4.1**, so a rebuild under 26.6 is not byte-identical.
 
 ### Dev loop — iOS
 
 ```bash
 # One-time per machine
 rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
-cargo install --git https://github.com/jhugman/uniffi-bindgen-react-native --tag 0.31.0-2 uniffi-bindgen-react-native
+cargo install --git https://github.com/jhugman/uniffi-bindgen-react-native \
+  --tag 0.31.0-6 --locked uniffi-bindgen-react-native --force
 brew install cocoapods
 
 # Per Rust change
@@ -157,10 +168,27 @@ cd mobile/modules/pollis-native
 uniffi-bindgen-react-native build ios --config ubrn.config.yaml --and-generate
 # Regenerates PollisNativeFramework.xcframework + cpp/ + src/generated/.
 
-# Per build (also after ubrn regen)
-cd mobile && pnpm expo run:ios
-# prebuild runs implicitly if ios/ is missing; pod install runs if Podfile changed.
+# Per build (also after ubrn regen). Xcode 27 has no Simulator.app, so
+# `pnpm expo run:ios` cannot boot or find a simulator; do its steps by hand.
+cd mobile
+pnpm expo prebuild -p ios --no-install   # cleans ios/ by default since SDK 57; --no-install so it can't run a workspace-blind pnpm install
+(cd ios && pod install)
+xcrun simctl list devices available   # pick a UDID (e.g. iPhone 18 Pro)
+xcrun simctl boot <udid>
+xcodebuild -workspace ios/Pollis.xcworkspace -scheme Pollis \
+  -configuration Release -destination id=<udid> \
+  -derivedDataPath ios/build build
+xcrun simctl install <udid> ios/build/Build/Products/Release-iphonesimulator/Pollis.app
+xcrun simctl launch <udid> com.pollis.mobile
+xcrun simctl io <udid> screenshot shot.png   # no Simulator window to look at
 ```
+
+`-configuration Release` embeds the JS bundle, so the app runs without Metro
+(and is what Maestro needs anyway); use `Debug` plus `pnpm expo start` for a
+hot-reloading dev client. **`expo prebuild` cleans by default since SDK 57** —
+it regenerates `ios/` and `android/` from scratch each run, so anything edited
+by hand in them is gone; every native change belongs in `app.json` or a
+config plugin. (`--clean` in older commands here is now redundant.)
 
 TS-only changes are picked up by Metro hot-reload. No rebuild.
 
@@ -181,11 +209,23 @@ mobile/android-env.sh` before any ubrn/gradle/adb command. Toolchain (all
 no-sudo): OpenJDK 17 via `brew install openjdk@17`; SDK at
 `~/Library/Android/sdk` (cmdline-tools unzipped to `cmdline-tools/latest/`);
 `sdkmanager` packages `platform-tools platforms;android-36 build-tools;36.0.0
-ndk;27.1.12297006 cmake;3.22.1`. A clean `gradlew assembleDebug` produces
+ndk;27.1.12297006 cmake;3.22.1`, plus `emulator
+system-images;android-36;google_apis;arm64-v8a` for the Maestro tier, whose
+AVD is `pollis_e2e` (`maestro-run.sh`'s default): `echo no | avdmanager create
+avd -n pollis_e2e -k "system-images;android-36;google_apis;arm64-v8a" -d
+pixel_8`. AVDs live in `~/.android/avd`, outside the SDK, so they survive an SDK
+reinstall but are invisible (`emulator -list-avds` is empty) until the SDK and
+that system image are back. If the emulator dies at boot with `detected a
+hanging thread 'QEMU2 main loop'` (seen on a heavily loaded Mac, right after
+"Vulkan emulation initialized"), kill any orphan `qemu-system-aarch64` still
+holding the AVD and boot it headless on the software renderer —
+`emulator -avd pollis_e2e -no-snapshot -no-boot-anim -no-window -gpu
+swiftshader_indirect` came up in ~30 s where the default boot crashed every
+time; `maestro-run.sh` reuses an emulator that is already running. A clean `gradlew assembleDebug` produces
 `android/app/build/outputs/apk/debug/app-debug.apk` with `libpollis-native.so`
 embedded for arm64-v8a / armeabi-v7a / x86_64.
 
-**iOS build verified on macOS 26.4.1 (Tahoe) + Xcode 26.4.1, 2026-06-22.** A
+**iOS build verified on macOS 26.4.1 (Tahoe) + Xcode 26.4.1, 2026-06-22 (SDK 55).** A
 clean run from a fresh checkout works end to end with no source changes: `ubrn
 build ios` → `PollisNativeFramework.xcframework` (device `ios-arm64` + universal
 `ios-arm64_x86_64-simulator` slices), `expo prebuild --platform ios` →
@@ -193,9 +233,11 @@ build ios` → `PollisNativeFramework.xcframework` (device `ios-arm64` + univers
 the iPhone 17 Pro simulator; the bridge initializes against live Turso and the
 app reaches the auth screen. Toolchain (all no-sudo): the three iOS Rust targets
 (`rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios`),
-`uniffi-bindgen-react-native` CLI pinned to `0.31.0-2`, and CocoaPods.
+`uniffi-bindgen-react-native` CLI (then `0.31.0-2`; now `0.31.0-6`, see
+"Rough edges" #1), and CocoaPods. Under Xcode 27 the `expo run:ios` step no
+longer works — see "Xcode 27 / iOS 27 SDK".
 
-**Expo SDK 55 requires Xcode 26 / macOS 26** (verified still true June 2026: SDK
+**Expo SDK 55+ requires Xcode 26 / macOS 26** (verified June 2026: SDK
 54 was the last to accept Xcode 16.x). On an older macOS/Xcode (e.g. macOS 14.7
 + Xcode 15.1) the build hits `@MainActor` parse errors in `expo-modules-core`
 ([expo/expo#42525](https://github.com/expo/expo/issues/42525) — closed, won't
@@ -232,32 +274,35 @@ workstation dev loop above — `ubrn build android --and-generate`, then
 `expo prebuild --platform android`, then `gradlew :app:assembleRelease` — on a
 stock `ubuntu-latest` runner, and uploads the APK as `pollis-android-apk`. It
 installs the RN-pinned NDK (`27.1.12297006`) + CMake (`3.22.1`) so Gradle and
-`cargo-ndk` agree, and pins the ubrn CLI to `0.31.0-2` (template alignment, see
-below). It uses `expo prebuild` + Gradle **directly, never `eas build`** — that
+`cargo-ndk` agree, and pins the ubrn CLI to `0.31.0-6` (CLI ↔ npm alignment, see
+"Rough edges" #1). It uses `expo prebuild` + Gradle **directly, never `eas build`** — that
 predates the EAS project and still holds: the job needs no account, no token and
 no queue. The release APK is signed with the throwaway **debug keystore** the
 Expo template generates (no signing secret); real upload signing is blocked
 (needs the Play console).
 
-**`expo-doctor` is a required, clean gate.** The dependency set is pinned to the
-Expo SDK 55 canonical versions (`expo install --check` / `bundledNativeModules`),
-so doctor's version, duplicate-native-module, and missing-peer checks all pass.
-Two things worth knowing:
+**`expo-doctor` is a required, clean gate** (21/21 on SDK 57). The dependency
+set is pinned to the Expo SDK 57 canonical versions (`bundledNativeModules.json`
+in the installed `expo` package), so doctor's version, duplicate-native-module,
+and missing-peer checks all pass — including TypeScript, which doctor now
+expects at `~6.0.3`. Things worth knowing:
 
-- **`react-native` is deliberately held at `0.83.6`** even though SDK 55 now
-  recommends `0.83.10`. `uniffi-bindgen-react-native` (`0.31.0-2`) generates C++
-  JSI glue against RN 0.83.6's headers; moving RN underneath a pinned codegen is
-  the `no member named 'string_to_buffer'` failure class. It is the **only**
-  package excluded from doctor's version check, via `expo.install.exclude` in
-  `package.json` (the narrowest supported mechanism — every other check stays
-  live). Re-pin ubrn to an RN-0.83.10-aligned tag before dropping the exclusion;
-  the two move together.
-- **`react-native-worklets` is a direct dependency** (`0.7.4`, the version SDK 55
-  pairs with Reanimated `4.2.1`). Reanimated 4 split worklets into its own native
+- **Nothing is excluded from doctor's version check.** `react-native` used to be
+  held back via `expo.install.exclude` on the theory that ubrn generates C++
+  against RN's headers, so moving RN caused `no member named 'string_to_buffer'`.
+  That diagnosis was wrong: `string_to_buffer` is ubrn's *own* helper
+  (`cpp/includes/UniffiString.h` in the npm package, added in ubrn PR #378), and
+  the error means the cargo-installed ubrn CLI and the npm package are different
+  versions — "Rough edges" #1, not an RN mismatch. The exclusion is gone and RN
+  tracks the SDK. ubrn's nightly CI covers RN 0.84–0.87 (iOS builds; Android only
+  compares generated output), so an RN bump inside that range is not by itself a
+  reason to move ubrn.
+- **`react-native-worklets` is a direct dependency** (`0.10.1`, the version SDK 57
+  pairs with Reanimated `4.5.1`). Reanimated 4 split worklets into its own native
   module; a native peer must be a direct dep so autolinking picks it up, or
   doctor's missing-peer check fails.
 
-- **Doctor drifts red on its own.** Expo ships patch releases to the SDK 55 line
+- **Doctor drifts red on its own.** Expo ships patch releases to the current SDK line
   continuously, so a set of packages that passed last month goes stale and fails
   the gate on **every** PR regardless of content (this happened: 10 packages at
   once). The fix is to re-pin to the versions doctor names, as a standalone PR.
@@ -265,10 +310,10 @@ Two things worth knowing:
   `pnpm` without `--ignore-workspace`, which hoists mobile's tree into the root
   `node_modules` and destroys the install (see "Project isolation" above). Edit
   the versions in `package.json` by hand, then
-  `pnpm install --ignore-workspace`.
+  `npx -y pnpm@10.25.0 install --ignore-workspace`.
 
 `app.json` carries **no** `newArchEnabled` / `android.edgeToEdgeEnabled` — both are
-now unconditional defaults in SDK 55 / RN 0.83 and were dropped from the config
+unconditional defaults since SDK 55 / RN 0.83 and were dropped from the config
 schema, so listing them fails doctor's schema check for no behavioural gain.
 
 ## Store builds (no EAS — local `expo prebuild` + native tooling)
@@ -340,14 +385,14 @@ uniffi-bindgen-react-native build ios --config ubrn.config.yaml --and-generate \
 # `--release` matters: the debug staticlib is 700 MB against 140 MB.
 # `--no-sim` builds only the ios-arm64 slice a store build needs; it also LEAVES
 # the xcframework without simulator slices, so re-run without it before going
-# back to `pnpm expo run:ios` on a simulator.
+# back to a simulator build.
 
 # 2. Native project + pods (`--ignore-workspace`: from mobile/ a bare
 #    `pnpm install` installs the ROOT workspace instead, and the archive then
 #    dies in Metro on a missing module such as react-i18next)
 cd ../..
 pnpm install --ignore-workspace --frozen-lockfile
-pnpm expo prebuild -p ios
+pnpm expo prebuild -p ios --no-install
 cd ios && pod install && cd ..
 
 # 3. Archive UNSIGNED, then sign on export.
@@ -415,10 +460,15 @@ xcrun altool --upload-app -f build/export/Pollis.ipa -t ios \
   --apiIssuer "$(doppler secrets get ASC_ISSUER_ID -p pollis -c prd_prod --plain)"
 ```
 
-**Deployment target.** `modules/pollis-native/ubrn.config.yaml` pins
-`IPHONEOS_DEPLOYMENT_TARGET = "15.1"` via its ios `cargoExtras`
-(`cargo --config env.…`), matching `platform :ios` in the Expo-generated
-`ios/Podfile`. Without it, rustc targets iOS 10.0 while cc-rs builds the
+**Deployment target: iOS 16.4.** Expo SDK 56 raised the minimum
+(`ExpoModulesCore.podspec` requires 16.4), so the app **no longer supports
+iOS 15.x–16.3**; Android is unaffected. The app side is the top-level
+`expo.ios.deploymentTarget: "16.4"` in `app.json`, which prebuild feeds to the
+generated `ios/Podfile` (`platform :ios`). The Rust side is
+`modules/pollis-native/ubrn.config.yaml`, which pins
+`IPHONEOS_DEPLOYMENT_TARGET="16.4"` via its ios `cargoExtras`
+(`cargo --config env.…`); the two must stay in lockstep. Without the Rust pin,
+rustc targets iOS 10.0 while cc-rs builds the
 vendored OpenSSL 3.5 + SQLCipher against the current SDK, and the
 `libpollis_core.dylib` link dies on `___chkstk_darwin` (a libSystem stub that
 only exists from iOS 12). It bites **only in release** — a debug link at 10.0
@@ -434,8 +484,8 @@ silently parses as a build-script `links` override for a native library named
 "env" — three inert blocks in that file made the same mistake until #1010
 removed them). `mobile-core-check.yml`'s ios-check job
 reads the pin from ubrn.config.yaml, exports it for its own cargo build, and
-asserts the min-version reached the built artifact. Keep the value in lockstep
-with the Podfile.
+asserts the min-version reached the built artifact — so ubrn.config.yaml stays
+the single source of truth CI reads. Keep it in lockstep with `app.json`.
 
 **Encryption export compliance:** `app.json` sets
 `ITSAppUsesNonExemptEncryption: false`, and that is the current, deliberate
@@ -595,16 +645,16 @@ export EXPO_PUBLIC_POLLIS_DELIVERY_URL=https://api.pollis.com POLLIS_ABI_SPLITS=
 
 ### 1. `uniffi-bindgen-react-native` CLI ↔ npm package coupling
 
-The Rust CLI binary (from `cargo install --git`) and the npm package at `mobile/node_modules/uniffi-bindgen-react-native/` share the generated C++ template. They **must be the same revision**, or CMake fails with errors like `no member named 'string_to_buffer'`.
+The Rust CLI binary (from `cargo install --git`) generates C++ that calls helpers shipped in the npm package (`mobile/node_modules/uniffi-bindgen-react-native/cpp/includes/`). They **must be the same version**, or the native build fails with errors like `no member named 'string_to_buffer'` — the generated code references a helper (`UniffiString.h`, ubrn PR #378) that the other side's headers do not have. It looks like a React Native header problem and is not one.
 
-If either side updates, rebuild the CLI from the exact git tag matching the npm dist-tag:
+If either side updates, rebuild the CLI from the exact git tag matching the npm version:
 
 ```bash
 cargo install --git https://github.com/jhugman/uniffi-bindgen-react-native \
-  --tag 0.31.0-2 uniffi-bindgen-react-native --force
+  --tag 0.31.0-6 --locked uniffi-bindgen-react-native --force
 ```
 
-Currently pinned: **`0.31.0-2`**. If you install the CLI from `main` without a tag, you'll hit this bug within a commit or two.
+Currently pinned: **`0.31.0-6`**, in places that move together — `uniffi-bindgen-react-native` **and `@ubjs/core`** in `mobile/package.json` and `modules/pollis-native/package.json`, and the CLI tag (dev loop + CI workflows). `@ubjs/core` is the TS runtime that code generated by 0.31.0-5+ imports (older generated code imported it from `uniffi-bindgen-react-native`); without it the Release build compiles every native target and then fails in Metro on `Unable to resolve module @ubjs/core`. ubrn 0.31.0-5+ accepts any uniffi 0.31.x, so `pollis-core` stays on uniffi 0.31. **Avoid `0.31.0-3`** (its Android CMake setup breaks on a `require.resolve` bug). If you install the CLI from `main` without a tag, you'll hit the mismatch within a commit or two.
 
 ### 2. `android/android/…` double-nesting in `jniLibs` path
 
@@ -616,7 +666,7 @@ The "regenerate + gradle + install + launch" loop is manual four-command sequenc
 
 ### 4. NDK version pinning
 
-RN 0.83.6 pins NDK **27.1.12297006** (r27b). Arch AUR's `android-ndk` package ships r29 at `/opt/android-ndk`. Both coexist: r29 at `/opt/android-ndk` (used by cargo-ndk), r27b at `/opt/android-sdk/ndk/27.1.12297006/` (used by gradle). Removing either breaks one side.
+RN 0.86.3 pins NDK **27.1.12297006** (r27b) — unchanged since RN 0.83, as are compileSdk 36 and AGP 8.12. Arch AUR's `android-ndk` package ships r29 at `/opt/android-ndk`. Both coexist: r29 at `/opt/android-ndk` (used by cargo-ndk), r27b at `/opt/android-sdk/ndk/27.1.12297006/` (used by gradle). Removing either breaks one side.
 
 ### 5. Arch AUR `android-sdk` is root-owned
 
@@ -630,22 +680,22 @@ Redo if you reinstall the AUR package.
 
 `/opt/android-sdk/tools/bin/sdkmanager` uses `javax.xml.bind` (removed in JDK 9+) and crashes. Use the modern cmdline-tools at `/opt/android-sdk/cmdline-tools/latest/bin/sdkmanager` — installed manually from [commandlinetools-linux-11076708_latest.zip](https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip).
 
-### 7. Expo SDK upgrade = always rerun `expo install --fix`
+### 7. Expo SDK upgrade = re-pin every sibling package by hand
 
-Expo packages version independently but their `latest` dist-tag tracks the current SDK. Bumping `expo` alone leaves sibling packages at the old SDK's versions, producing weird Kotlin compile errors in `expo-dev-menu` et al. Always:
+Expo packages version independently but their `latest` dist-tag tracks the current SDK. Bumping `expo` alone leaves sibling packages at the old SDK's versions, producing weird Kotlin compile errors in `expo-dev-menu` et al. **Do not use `expo install --fix` (or `expo install <pkg>`) to fix it** — the Expo CLI shells out to `pnpm` without `--ignore-workspace`, which hoists mobile's tree into the root `node_modules` (see "Project isolation"). Instead, read the SDK's version map from the new `expo` package and copy it into `package.json` by hand:
 
 ```bash
-cd mobile && pnpm expo install --fix
+cd mobile && cat node_modules/expo/bundledNativeModules.json
 ```
 
-Prefer `pnpm expo install <pkg>` over `pnpm add <pkg>` for Expo-ecosystem packages — it consults the SDK version map.
+then reinstall (#8). `pnpm dlx expo-doctor` afterwards names anything still off.
 
-### 8. `pnpm-lock.yaml` can get stale vs package.json after SDK bumps
+### 8. After an SDK bump, delete `node_modules` AND the lockfile
 
-`expo install --fix` updates package.json but sometimes leaves the install tree intact. If versions visible in `node_modules/<pkg>/package.json` don't match the package.json range, nuke and reinstall:
+pnpm treats whatever is already in `node_modules` as preferred versions, so after an SDK bump stale old-SDK peers survive the reinstall — on the 55 → 57 bump `@expo/metro-runtime` 55 and `@expo/dom-webview` 55 survived **even a deleted lockfile**, because `node_modules` still had them. Remove both, and reinstall with CI's pnpm (see "Project isolation"):
 
 ```bash
-cd mobile && rm -rf node_modules pnpm-lock.yaml && pnpm install --ignore-workspace
+cd mobile && rm -rf node_modules pnpm-lock.yaml && npx -y pnpm@10.25.0 install --ignore-workspace
 ```
 
 ### 9. Bridge commands MUST run off the JS thread (small-stack overflow)

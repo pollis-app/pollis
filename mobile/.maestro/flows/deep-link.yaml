@@ -1,0 +1,44 @@
+appId: com.pollis.mobile
+---
+# DEEP LINKS under the UIScene life cycle (#1223).
+#
+# iOS 27 SDK apps run on scenes (expo-build-properties ios.enableSceneSupport),
+# which moves URL delivery off the AppDelegate: a warm link arrives through
+# the scene's openURLContexts, a cold one in its connectionOptions, which
+# EXExpoAppSceneDelegate rebuilds into launch options so that
+# Linking.getInitialURL() still sees it. Both paths are proven here with a
+# plain route link; pollis://m/… permalinks and pollis://invite/… ride the same
+# delivery.
+
+- runFlow: ../subflows/sign-in.yaml
+
+# --- Warm: the app is running and foregrounded ---
+- openLink: "pollis://self/preferences"
+# iOS asks before an app opens its own scheme from outside.
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+- assertVisible:
+    id: "screen-self-preferences"
+- takeScreenshot: deep-link-01-warm
+
+# --- Cold: the link launches the app ---
+- stopApp
+- openLink: "pollis://self/preferences"
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+# A cold start of a signed-in device unlocks with its PIN first.
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../subflows/enter-pin.yaml
+- assertVisible:
+    id: "screen-self-preferences"
+- takeScreenshot: deep-link-02-cold
