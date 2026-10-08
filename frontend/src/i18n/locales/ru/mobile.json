@@ -387,7 +387,11 @@
     "direct": "Личные",
     "groups": "Группы",
     "search": "Поиск",
-    "self": "Профиль"
+    "self": "Профиль",
+    "withUnread_few": "{{label}}, {{count}} непрочитанных",
+    "withUnread_many": "{{label}}, {{count}} непрочитанных",
+    "withUnread_one": "{{label}}, {{count}} непрочитанное",
+    "withUnread_other": "{{label}}, {{count}} непрочитанных"
   },
   "thread": {
     "sendFailed": "Не удалось отправить ответ."
@@ -396,6 +400,7 @@
     "now": "сейчас"
   },
   "ui": {
+    "backTo": "Назад: {{name}}",
     "imageUnavailable": "Изображение недоступно",
     "selectConversation": "Выберите переписку"
   },

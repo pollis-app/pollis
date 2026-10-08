@@ -354,7 +354,8 @@
     "direct": "私信",
     "groups": "群组",
     "search": "搜索",
-    "self": "我的"
+    "self": "我的",
+    "withUnread_other": "{{label}}，{{count}} 条未读"
   },
   "thread": {
     "sendFailed": "无法发送回复。"
@@ -363,6 +364,7 @@
     "now": "刚刚"
   },
   "ui": {
+    "backTo": "返回{{name}}",
     "imageUnavailable": "图片不可用",
     "selectConversation": "选择一个对话"
   },

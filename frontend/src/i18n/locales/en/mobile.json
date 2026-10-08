@@ -371,7 +371,9 @@
     "direct": "Direct",
     "groups": "Groups",
     "search": "Search",
-    "self": "Self"
+    "self": "Self",
+    "withUnread_one": "{{label}}, {{count}} unread",
+    "withUnread_other": "{{label}}, {{count}} unread"
   },
   "thread": {
     "sendFailed": "Couldn't send reply."
@@ -380,6 +382,7 @@
     "now": "now"
   },
   "ui": {
+    "backTo": "Back to {{name}}",
     "imageUnavailable": "Image unavailable",
     "selectConversation": "Select a conversation"
   },

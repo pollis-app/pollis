@@ -409,7 +409,13 @@
     "direct": "المباشرة",
     "groups": "المجموعات",
     "search": "بحث",
-    "self": "أنا"
+    "self": "أنا",
+    "withUnread_few": "{{label}}، {{count}} رسائل غير مقروءة",
+    "withUnread_many": "{{label}}، {{count}} رسالة غير مقروءة",
+    "withUnread_one": "{{label}}، رسالة واحدة غير مقروءة",
+    "withUnread_other": "{{label}}، {{count}} رسالة غير مقروءة",
+    "withUnread_two": "{{label}}، رسالتان غير مقروءتين",
+    "withUnread_zero": "{{label}}، {{count}} غير مقروءة"
   },
   "thread": {
     "sendFailed": "تعذّر إرسال الرد."
@@ -418,6 +424,7 @@
     "now": "الآن"
   },
   "ui": {
+    "backTo": "العودة إلى {{name}}",
     "imageUnavailable": "الصورة غير متوفرة",
     "selectConversation": "اختر محادثة"
   },

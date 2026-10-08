@@ -16,7 +16,7 @@ import {
 import { Icon } from "../../components/icons";
 import { LanguageSection } from "../../components/LanguageSection";
 import { useTheme } from "../../components/theme";
-import { semantic, type as ty, r, DEFAULT_ACCENT_HEX } from "../../theme/tokens";
+import { semantic, type as ty, r, ACCENT_PRESETS } from "../../theme/tokens";
 import { upper } from "../../i18n";
 import { usePreferences } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
@@ -26,14 +26,8 @@ import {
   openNotificationSettings,
 } from "../../lib/push";
 
-const SWATCHES = [
-  { n: "Amber", c: DEFAULT_ACCENT_HEX },
-  { n: "Citron", c: "#c9d65a" },
-  { n: "Mint", c: "#8ad6a7" },
-  { n: "Glass", c: "#7ec5d6" },
-  { n: "Lilac", c: "#bda3e0" },
-  { n: "Rust", c: "#d68f5a" },
-] as const;
+// The presets live in theme/accents.ts so the contrast test can check each.
+const SWATCHES = ACCENT_PRESETS;
 
 // NOTE: read receipts are deliberately NOT in this list — they are not a
 // mobile-local behavior toggle but the synced, desktop-shared top-level

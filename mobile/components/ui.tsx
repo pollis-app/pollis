@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   View,
   Text,
@@ -10,30 +10,66 @@ import {
   StyleProp,
   ViewStyle,
   TextStyle,
+  TextInputProps,
+  AccessibilityRole,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
-import { palette, semantic, type as ty, r, space, layout } from "../theme/tokens";
+import { semantic, type as ty, fonts, r, space, layout } from "../theme/tokens";
 import { useTheme } from "./theme";
 import { useLayoutClass } from "../hooks/useLayoutClass";
 import { useAndroidKeyboardInset } from "../hooks/useAndroidKeyboardInset";
+import { activeLocale } from "../i18n";
 import { Icon } from "./icons";
 
+// Primitives for the redesigned app (design: Main/Chat/Messages/Actions/You
+// .dc.html). Rules every primitive follows: 44pt minimum touch targets; one
+// spoken label per control; start/end edges, never left/right; no coloured
+// stripe on one edge of a rounded box; Text keeps system font scaling.
+
+type TypeKey =
+  | "display"
+  | "title"
+  | "heading"
+  | "body"
+  | "secondary"
+  | "section"
+  | "meta";
+
 /* ── Text ─────────────────────────────────────────────────────────── */
+// Themed Text. `variant` picks a step of the type scale (default body);
+// `style` overrides it.
 export function Txt({
   children,
   style,
   numberOfLines,
+  variant = "body",
+  testID,
+  accessibilityRole,
 }: {
   children: React.ReactNode;
   style?: StyleProp<TextStyle>;
   numberOfLines?: number;
+  variant?: TypeKey;
+  testID?: string;
+  accessibilityRole?: AccessibilityRole;
 }) {
+  const v = ty[variant];
   return (
     <Text
+      testID={testID}
+      accessibilityRole={accessibilityRole}
       numberOfLines={numberOfLines}
-      style={[{ fontFamily: ty.body.fontFamily, color: semantic.ink }, style]}
+      style={[
+        {
+          fontFamily: v.fontFamily,
+          fontSize: v.fontSize,
+          lineHeight: v.lineHeight,
+          color: v.color,
+        },
+        style,
+      ]}
     >
       {children}
     </Text>
@@ -41,6 +77,9 @@ export function Txt({
 }
 
 /* ── Screen ───────────────────────────────────────────────────────── */
+// Root of every route: background, safe area, keyboard avoidance. Put a
+// <Header> (or a tab's large title) as the first child — titles live at the
+// TOP of the screen.
 export function Screen({
   children,
   testID,
@@ -53,16 +92,14 @@ export function Screen({
   testID?: string;
   // Single-column screens (auth, self, forms) set this. On `regular` (iPad)
   // width it constrains + centers the content to a readable column; on
-  // `compact` (phones, narrow panes) it is a no-op — children render exactly as
-  // today, with no wrapper, so the phone tree is byte-for-byte unchanged.
+  // `compact` (phones, narrow panes) it is a no-op.
   centered?: boolean;
   // Tab screens set this. The tab bar already pads itself by the bottom safe
-  // area, so the screen must not pad by it again, or a dead band opens above
-  // the tab bar.
+  // area, so the screen must not pad by it again.
   aboveTabBar?: boolean;
 }) {
-  // Subscribe to the accent so the whole subtree re-renders (and the token
-  // getters resolve to the new color) when it changes.
+  // Subscribe to the theme so the whole subtree re-renders (and the token
+  // getters resolve to the new colours) when a base colour changes.
   useTheme();
   const cls = useLayoutClass();
   const centerBody = centered && cls === "regular";
@@ -70,17 +107,13 @@ export function Screen({
   return (
     <SafeAreaView
       testID={testID}
-      style={{ flex: 1, backgroundColor: palette.bg }}
+      style={{ flex: 1, backgroundColor: semantic.bg }}
       edges={aboveTabBar ? ["top"] : ["top", "bottom"]}
     >
-      {/* Every screen pins its primary action to <BottomAction> at the
-          bottom, with a <Field> above it and no per-screen keyboard
-          handling — without this, the keyboard covers the action and
-          swallows its taps instead of reaching it. iOS: KeyboardAvoidingView.
-          Android: an explicit inset (see useAndroidKeyboardInset). The app
-          is edge-to-edge (#1194), and `behavior="padding"` alone is not
-          enough there: KAV only reacts to keyboard SHOW events, so a screen
-          that mounts with the keyboard already up (email → OTP) never pads. */}
+      {/* Keeps a bottom <Field>/<BottomAction> above the keyboard.
+          iOS: KeyboardAvoidingView. Android: an explicit inset (see
+          useAndroidKeyboardInset) — the app is edge-to-edge (#1194) and KAV
+          only reacts to keyboard SHOW events. */}
       <KeyboardAvoidingView
         style={{ flex: 1, paddingBottom: androidKeyboard }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -104,198 +137,357 @@ export function Screen({
   );
 }
 
-/* ── Diamond (crumb tick / verified notch) ────────────────────────── */
-export function Diamond({
-  size = 7,
-  fill = true,
+/* ── IconButton ───────────────────────────────────────────────────── */
+// A 44×44 icon-only control. `accessibilityLabel` is required — the icon is
+// silent. `filled` gives it the round raised background (Direct's "New
+// message", Groups' "Invite people").
+export function IconButton({
+  icon,
+  onPress,
+  accessibilityLabel,
+  testID,
+  filled,
+  disabled,
+  style,
 }: {
-  size?: number;
-  fill?: boolean;
+  icon: React.ReactNode;
+  onPress?: () => void;
+  accessibilityLabel: string;
+  testID?: string;
+  filled?: boolean;
+  disabled?: boolean;
+  style?: StyleProp<ViewStyle>;
 }) {
   return (
-    <View
-      style={{
-        width: size,
-        height: size,
-        transform: [{ rotate: "45deg" }],
-        backgroundColor: fill ? semantic.accent : "transparent",
-        borderWidth: fill ? 0 : 1,
-        borderColor: semantic.ink2,
-      }}
-    />
+    <Pressable
+      onPress={disabled ? undefined : onPress}
+      disabled={disabled}
+      testID={testID}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ disabled: !!disabled }}
+      style={({ pressed }) => [
+        {
+          width: layout.touchMin,
+          height: layout.touchMin,
+          borderRadius: layout.touchMin / 2,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: filled
+            ? semantic.raised
+            : pressed
+              ? semantic.raised
+              : "transparent",
+          opacity: disabled ? 0.45 : 1,
+        },
+        style,
+      ]}
+    >
+      {icon}
+    </Pressable>
   );
 }
 
-/* ── Crumb ────────────────────────────────────────────────────────── */
-export function Crumb({
-  segs,
-  end,
+// Header-bar action: an IconButton, named for where it sits.
+export const HeaderAction = IconButton;
+
+/* ── Header ───────────────────────────────────────────────────────── */
+// Top bar for every screen. `variant="bar"` (default, pushed screens): a
+// 44×44 back chevron at the start, title (17/700) + optional subtitle, then
+// `actions` (IconButton/HeaderAction, 44×44 each) at the end, over a hairline.
+// `variant="large"`: a tab root's 28/700 title with actions and no back.
+// Back calls `onBack` or router.back(); the native edge swipe keeps working
+// because the stack itself is untouched. The back button keeps the
+// `btn-back` testID e2e flows use.
+export function Header({
+  title,
+  subtitle,
+  titleIcon,
+  actions,
+  variant = "bar",
+  onBack,
+  backTo,
+  hideBack,
+  bordered = true,
+  onTitlePress,
+  titleAccessibilityLabel,
   testID,
 }: {
-  segs: { label: string; leaf?: boolean }[];
-  end?: string;
-  // Optional passive anchor; some routes prefer `screen-*` on <Screen>, but
-  // the crumb is a convenient stable header target too.
+  title: string;
+  subtitle?: string;
+  // Small glyph before the title (e.g. Icon.hash for a channel).
+  titleIcon?: React.ReactNode;
+  actions?: React.ReactNode;
+  variant?: "bar" | "large";
+  onBack?: () => void;
+  // Name of the screen back returns to: the label becomes "Back to <x>".
+  backTo?: string;
+  // Two-pane embedded mode: nothing to pop, so no back button.
+  hideBack?: boolean;
+  // Hairline under the bar (variant "bar" only).
+  bordered?: boolean;
+  // Makes the title a button (e.g. a group menu).
+  onTitlePress?: () => void;
+  titleAccessibilityLabel?: string;
   testID?: string;
 }) {
+  const router = useRouter();
+  const { t } = useTranslation(["common", "mobile"]);
+  const large = variant === "large";
+  const showBack = !large && !hideBack;
+  const backLabel = backTo
+    ? t("mobile:ui.backTo", { name: backTo })
+    : t("common:actions.back");
+
+  const titleBlock = (
+    <View style={{ flex: 1, minWidth: 0, justifyContent: "center" }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.xs }}>
+        {titleIcon}
+        <Text
+          accessibilityRole="header"
+          numberOfLines={1}
+          style={[
+            large ? ty.display : ty.heading,
+            { color: semantic.text, flexShrink: 1 },
+          ]}
+        >
+          {title}
+        </Text>
+      </View>
+      {subtitle ? (
+        <Text numberOfLines={1} style={[ty.meta, { fontSize: 13, color: semantic.muted }]}>
+          {subtitle}
+        </Text>
+      ) : null}
+    </View>
+  );
+
   return (
     <View
       testID={testID}
       style={{
         flexDirection: "row",
         alignItems: "center",
-        gap: space.sm,
-        paddingTop: space.xs,
-        paddingBottom: space.lg,
-        paddingHorizontal: space.xxl,
+        gap: large ? space.sm : 4,
+        minHeight: large ? 56 : layout.header,
+        paddingStart: large ? space.xxl : 4,
+        paddingEnd: large ? space.lg : space.sm,
+        paddingTop: large ? 4 : 0,
+        paddingBottom: large ? space.lg : space.sm,
+        borderBottomWidth: !large && bordered ? 1 : 0,
+        borderBottomColor: semantic.hairSoft,
       }}
     >
-      <Diamond size={7} />
-      <View style={{ flexDirection: "row", alignItems: "center" }}>
-        {segs.map((s, i) => (
-          <React.Fragment key={i}>
-            {i > 0 && (
-              <Text style={[ty.crumb, { color: semantic.mute2, marginHorizontal: 4 }]}>
-                ·
-              </Text>
-            )}
-            <Text
-              style={[ty.crumb, { color: s.leaf ? semantic.ink : semantic.ink2 }]}
-            >
-              {s.label}
-            </Text>
-          </React.Fragment>
-        ))}
-      </View>
-      <View style={{ flex: 1, height: 1, backgroundColor: semantic.hairSoft }} />
-      {end ? (
-        <Text style={[ty.crumb, { color: semantic.mute }]}>{end}</Text>
+      {showBack ? (
+        <IconButton
+          testID="btn-back"
+          accessibilityLabel={backLabel}
+          onPress={onBack ?? (() => router.back())}
+          icon={<Icon.chevronLeft size={24} color={semantic.text} />}
+        />
+      ) : !large ? (
+        <View style={{ width: space.md }} />
+      ) : null}
+      {onTitlePress ? (
+        <Pressable
+          onPress={onTitlePress}
+          accessibilityRole="button"
+          accessibilityLabel={titleAccessibilityLabel ?? title}
+          style={{ flex: 1, minWidth: 0, minHeight: layout.touchMin, justifyContent: "center" }}
+        >
+          {titleBlock}
+        </Pressable>
+      ) : (
+        titleBlock
+      )}
+      {actions ? (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+          {actions}
+        </View>
       ) : null}
     </View>
   );
 }
 
 /* ── Section title ────────────────────────────────────────────────── */
+// 13/600 dim, sentence case, never uppercased or tracked. `right` is an
+// optional trailing control (e.g. an IconButton "Create a channel").
 export function SectionTitle({
   children,
   right,
   testID,
+  style,
 }: {
   children: string;
   right?: React.ReactNode;
   testID?: string;
+  style?: StyleProp<ViewStyle>;
 }) {
   return (
     <View
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: space.md,
-        paddingHorizontal: space.xxl,
-        // Room above every section so a page reads as separate blocks, not
-        // one run of text (#1211).
-        paddingTop: 40,
-        paddingBottom: space.md,
-      }}
+      style={[
+        {
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: space.md,
+          paddingHorizontal: space.xxxl,
+          paddingTop: space.xxxl,
+          paddingBottom: space.sm,
+        },
+        style,
+      ]}
     >
-      <Text testID={testID} style={[ty.label, { color: semantic.ink2 }]}>{children}</Text>
-      <View style={{ flex: 1, height: 1, backgroundColor: semantic.hairSoft }} />
+      <Text testID={testID} accessibilityRole="header" style={[ty.section, { flexShrink: 1 }]}>
+        {children}
+      </Text>
       {right}
     </View>
   );
 }
 
-/* ── Chip ─────────────────────────────────────────────────────────── */
+/* ── Dot ──────────────────────────────────────────────────────────── */
+// Unread marker (8pt, text colour). Pair it with bold text and, where known,
+// a count — state is never colour alone.
+export function Dot({ size = 8, color }: { size?: number; color?: string }) {
+  return (
+    <View
+      accessible={false}
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        backgroundColor: color ?? semantic.text,
+      }}
+    />
+  );
+}
+
+/* ── Divider ──────────────────────────────────────────────────────── */
+// 1px hairline. `inset` indents it from the start edge.
+export function Divider({ inset = 0, style }: { inset?: number; style?: StyleProp<ViewStyle> }) {
+  return (
+    <View
+      style={[{ height: 1, marginStart: inset, backgroundColor: semantic.hairSoft }, style]}
+    />
+  );
+}
+
+/* ── Chip / Pill ──────────────────────────────────────────────────── */
+// Rounded pill, 32pt visual inside a 44pt hit area (the group strip in
+// Main.dc.html). Variants: `default` raised + text, `subtle` raised + dim,
+// `on` selected (accent tint + accent border + accent text), `solid` accent
+// fill, `outline` 1px edge border. `leading`/`trailing` take a Dot, Badge or
+// icon.
 export function Chip({
   children,
   variant = "default",
+  selected,
   onPress,
   style,
   testID,
   accessibilityLabel,
   disabled,
+  leading,
+  trailing,
 }: {
   children: React.ReactNode;
-  variant?: "default" | "on" | "solid" | "subtle";
+  variant?: "default" | "on" | "solid" | "subtle" | "outline";
+  // Same as variant "on"; also announced as selected.
+  selected?: boolean;
   onPress?: () => void;
   style?: StyleProp<ViewStyle>;
-  // Set when the chip is an interactive affordance (accept/decline/toggle),
-  // e.g. `chip-accent-mint`. Harmless when the chip is purely decorative.
   testID?: string;
   accessibilityLabel?: string;
-  // Same shape as `Button`'s: the press is suppressed, the state is announced,
-  // and the chip dims — so a chip gated on an incomplete input (the enrollment
-  // approval's typed code, #1096) reads as unavailable rather than inert.
+  // Press suppressed, state announced, chip dimmed.
   disabled?: boolean;
+  leading?: React.ReactNode;
+  trailing?: React.ReactNode;
 }) {
-  const border =
-    variant === "on"
-      ? semantic.accent
-      : variant === "solid"
-        ? semantic.accent
-        : variant === "subtle"
-          ? "transparent"
-          : semantic.hairStrong;
+  const v = selected ? "on" : variant;
   const bg =
-    variant === "solid"
-      ? semantic.accent
-      : variant === "subtle"
-        ? semantic.hairSoft
-        : "transparent";
+    v === "on"
+      ? semantic.accentSoft
+      : v === "solid"
+        ? semantic.accent
+        : v === "outline"
+          ? "transparent"
+          : semantic.raised;
+  const border =
+    v === "on" ? semantic.accentLine : v === "outline" ? semantic.edge : "transparent";
   const fg =
-    variant === "on"
+    v === "on"
       ? semantic.accent
-      : variant === "solid"
-        ? palette.bg
-        : semantic.ink2;
+      : v === "solid"
+        ? semantic.onAccent
+        : v === "subtle"
+          ? semantic.dim
+          : semantic.text;
+  const label = typeof children === "string" ? children : undefined;
   return (
     <Pressable
       onPress={disabled ? undefined : onPress}
-      disabled={disabled}
+      disabled={disabled || !onPress}
       testID={testID}
-      accessibilityLabel={
-        accessibilityLabel ??
-        (typeof children === "string" ? children : undefined)
-      }
-      accessibilityState={{ disabled: !!disabled }}
+      accessibilityRole={onPress ? "button" : undefined}
+      accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityState={{ disabled: !!disabled, selected: v === "on" }}
       style={[
         {
-          flexDirection: "row",
-          alignItems: "center",
-          gap: space.xs,
-          paddingVertical: 4,
-          paddingHorizontal: space.md,
-          borderWidth: 1,
-          borderColor: border,
-          backgroundColor: bg,
-          borderRadius: r.sm,
+          minHeight: onPress ? layout.touchMin : undefined,
+          justifyContent: "center",
           opacity: disabled ? 0.45 : 1,
         },
         style,
       ]}
     >
-      {typeof children === "string" ? (
-        <Text
-          style={{
-            fontFamily: ty.body.fontFamily,
-            fontSize: 11,
-            letterSpacing: 0.9,
-            color: fg,
-          }}
-        >
-          {children}
-        </Text>
-      ) : (
-        children
-      )}
+      <View
+        style={{
+          minHeight: 32,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: space.xs,
+          paddingStart: space.lg,
+          paddingEnd: trailing ? space.xs : space.lg,
+          borderRadius: 16,
+          borderWidth: 1,
+          borderColor: border,
+          backgroundColor: bg,
+        }}
+      >
+        {leading}
+        {label !== undefined ? (
+          <Text
+            numberOfLines={1}
+            style={{
+              fontFamily: v === "subtle" ? fonts.medium : fonts.semibold,
+              fontSize: 14,
+              color: fg,
+            }}
+          >
+            {children}
+          </Text>
+        ) : (
+          children
+        )}
+        {trailing}
+      </View>
     </Pressable>
   );
 }
 
+// Alias: the design calls these pills.
+export const Pill = Chip;
+
 /* ── Button ───────────────────────────────────────────────────────── */
+// Text button, min 44pt (52 when `full`). `primary`: accent fill +
+// onAccent text — one per screen. `secondary` (alias `default`): raised fill
+// with an edge border. `subtle`: no fill, text colour. `danger` looks like
+// secondary — destructive is said by the label (and a confirm step), not a
+// third hue.
 export function Button({
   children,
-  variant = "default",
+  variant = "secondary",
   full,
   onPress,
   icon,
@@ -306,20 +498,19 @@ export function Button({
   accessibilityLabel,
 }: {
   children: string;
-  variant?: "default" | "primary" | "subtle" | "danger";
+  variant?: "primary" | "secondary" | "subtle" | "danger" | "default";
   full?: boolean;
   onPress?: () => void;
   icon?: React.ReactNode;
   iconRight?: React.ReactNode;
   disabled?: boolean;
-  align?: "center" | "left";
-  // `btn-<name>` for e2e flows; accessibilityLabel defaults to the button's
-  // text label when not given explicitly.
+  // "left" is kept for old call sites; it means the start edge.
+  align?: "center" | "start" | "left";
+  // `btn-<name>` for e2e flows; accessibilityLabel defaults to the label.
   testID?: string;
   accessibilityLabel?: string;
 }) {
   const primary = variant === "primary";
-  const danger = variant === "danger";
   const subtle = variant === "subtle";
   return (
     <Pressable
@@ -329,42 +520,34 @@ export function Button({
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? children}
       accessibilityState={{ disabled: !!disabled }}
-      style={{
-        opacity: disabled ? 0.45 : 1,
+      style={({ pressed }) => ({
+        opacity: disabled ? 0.45 : pressed ? 0.85 : 1,
         flexDirection: "row",
         alignItems: "center",
-        justifyContent: align === "left" ? "flex-start" : "center",
+        justifyContent: align === "center" ? "center" : "flex-start",
         gap: space.sm,
-        paddingVertical: full ? space.xl : space.lg,
-        paddingHorizontal: space.xl,
-        borderWidth: 1,
-        borderColor: primary
-          ? semantic.accent
-          : danger
-            ? "rgba(196,106,46,.4)"
-            : subtle
-              ? "transparent"
-              : semantic.hairStrong,
+        minHeight: full ? 52 : layout.touchMin,
+        paddingHorizontal: space.xxl,
+        paddingVertical: space.sm,
+        borderRadius: full ? r.md : layout.touchMin / 2,
+        borderWidth: primary || subtle ? 0 : 1,
+        borderColor: semantic.edge,
         backgroundColor: primary
           ? semantic.accent
           : subtle
-            ? semantic.hairSoft
-            : "transparent",
-        borderRadius: r.sm,
+            ? pressed
+              ? semantic.raised
+              : "transparent"
+            : semantic.raised,
         width: full ? "100%" : undefined,
-      }}
+      })}
     >
       {icon}
       <Text
         style={{
-          fontFamily: primary ? ty.h1.fontFamily : ty.rowN.fontFamily,
-          fontSize: full ? 15 : 14,
-          letterSpacing: 0.3,
-          color: primary
-            ? palette.bg
-            : danger
-              ? semantic.danger
-              : semantic.ink,
+          fontFamily: fonts.semibold,
+          fontSize: full ? 16 : 15,
+          color: primary ? semantic.onAccent : semantic.text,
         }}
       >
         {children}
@@ -375,104 +558,208 @@ export function Button({
 }
 
 /* ── Avatar ───────────────────────────────────────────────────────── */
+// Circle with the label's first letter (high fill, dim text); a user icon
+// when there is no label. `variant="self"` (alias `amber`) is your own
+// avatar: accent tint + accent letter. `solid`: accent fill. `shape="rounded"`
+// is the Vault tile (radius 14).
 export function Avatar({
+  label,
   size = "md",
   variant = "default",
+  shape = "circle",
   style,
 }: {
-  // `label` (initials) is still accepted so existing call sites typecheck, but
-  // it's no longer rendered: with no profile-image support yet, the avatar
-  // fallback is the lucide user icon per design.
   label?: string;
-  size?: "sm" | "md" | "lg";
-  variant?: "default" | "amber" | "solid";
+  // sm 30 · md 40 · lg 64, or an explicit size in points.
+  size?: "sm" | "md" | "lg" | number;
+  variant?: "default" | "self" | "amber" | "solid";
+  shape?: "circle" | "rounded";
   style?: StyleProp<ViewStyle>;
 }) {
-  const dim = size === "sm" ? 24 : size === "lg" ? 48 : 32;
-  const iconSize = Math.round(dim * 0.55);
-  const iconColor =
-    variant === "solid"
-      ? palette.bg
-      : variant === "amber"
-        ? semantic.accent
-        : semantic.ink2;
+  const dim =
+    typeof size === "number" ? size : size === "sm" ? 30 : size === "lg" ? 64 : 40;
+  const self = variant === "self" || variant === "amber";
+  const solid = variant === "solid";
+  const fg = solid ? semantic.onAccent : self ? semantic.accent : semantic.dim;
+  const initial = label?.trim()
+    ? Array.from(label.trim())[0].toLocaleUpperCase(activeLocale())
+    : null;
   return (
     <View
+      accessible={false}
+      importantForAccessibility="no-hide-descendants"
       style={[
         {
           width: dim,
           height: dim,
-          borderRadius: r.sm,
-          borderWidth: 1,
+          borderRadius: shape === "rounded" ? r.lg : dim / 2,
           alignItems: "center",
           justifyContent: "center",
-          borderColor:
-            variant === "default" ? semantic.hairStrong : semantic.accent,
-          backgroundColor:
-            variant === "solid" ? semantic.accent : "transparent",
+          backgroundColor: solid
+            ? semantic.accent
+            : self
+              ? semantic.accentMid
+              : semantic.high,
         },
         style,
       ]}
     >
-      <Icon.user size={iconSize} color={iconColor} />
+      {initial ? (
+        <Text
+          allowFontScaling={false}
+          style={{
+            fontFamily: fonts.bold,
+            fontSize: Math.round(dim * 0.38),
+            color: fg,
+          }}
+        >
+          {initial}
+        </Text>
+      ) : (
+        <Icon.user size={Math.round(dim * 0.5)} color={fg} />
+      )}
+    </View>
+  );
+}
+
+/* ── Badge ────────────────────────────────────────────────────────── */
+// Count pill: accent fill + onAccent text (`tone="neutral"`: high fill +
+// text, for counts that are not unread — e.g. waiting requests). Hidden from
+// screen readers: the row's label already says the count.
+export function Badge({
+  children,
+  tone = "accent",
+  size = "md",
+  testID,
+}: {
+  children: React.ReactNode;
+  tone?: "accent" | "neutral";
+  // md 22pt (rows) · sm 18pt (tab bar, pills).
+  size?: "sm" | "md";
+  testID?: string;
+}) {
+  const h = size === "sm" ? 18 : 22;
+  return (
+    <View
+      testID={testID}
+      accessible={false}
+      importantForAccessibility="no-hide-descendants"
+      style={{
+        minWidth: h,
+        height: h,
+        paddingHorizontal: size === "sm" ? 4 : space.xs,
+        borderRadius: h / 2,
+        backgroundColor: tone === "accent" ? semantic.accent : semantic.high,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Text
+        maxFontSizeMultiplier={1.2}
+        style={{
+          fontFamily: fonts.bold,
+          fontSize: size === "sm" ? 11 : 12,
+          color: tone === "accent" ? semantic.onAccent : semantic.text,
+        }}
+      >
+        {children}
+      </Text>
     </View>
   );
 }
 
 /* ── ListRow ──────────────────────────────────────────────────────── */
+// One tappable row = one control with one spoken label. Min height 44
+// (channels), 52 (settings/actions, the default) or 64 (conversations).
+// `glyph`: 20–22pt icon or an Avatar. `name`: 16pt title (bold when
+// `unread`, accent when `selected`). `sub`: 14pt dim subtitle. Trailing:
+// `value` (14pt muted), `badge` (count), `chevron`, or any `end` node.
+// Inside a <Group> rows sit flush; standalone rows get rounded selection.
 export function ListRow({
   glyph,
   name,
   sub,
   end,
+  value,
+  badge,
+  chevron,
+  unread,
   selected,
-  minHeight = 56,
+  minHeight = 52,
   onPress,
+  onLongPress,
   nameStyle,
   testID,
   accessibilityLabel,
+  accessibilityHint,
+  disabled,
 }: {
   glyph?: React.ReactNode;
   name: React.ReactNode;
   sub?: React.ReactNode;
   end?: React.ReactNode;
+  value?: string;
+  badge?: number;
+  chevron?: boolean;
+  unread?: boolean;
   selected?: boolean;
   minHeight?: number;
   onPress?: () => void;
+  onLongPress?: () => void;
   nameStyle?: StyleProp<TextStyle>;
-  // `row-<kind>-<id>` for list rows so flows can target a specific record.
+  // `row-<kind>-<id>` so flows can target a specific record.
   testID?: string;
+  // Defaults to "name, sub, value" when those are strings. Pass one
+  // explicitly when the row shows state (unread, mentions, time).
   accessibilityLabel?: string;
+  accessibilityHint?: string;
+  disabled?: boolean;
 }) {
+  const parts = [name, sub, value].filter(
+    (p): p is string => typeof p === "string" && p.length > 0,
+  );
+  const spoken = accessibilityLabel ?? (parts.length ? parts.join(", ") : undefined);
   return (
     <Pressable
-      onPress={onPress}
+      onPress={disabled ? undefined : onPress}
+      onLongPress={disabled ? undefined : onLongPress}
+      disabled={disabled || (!onPress && !onLongPress)}
       testID={testID}
-      accessibilityLabel={
-        accessibilityLabel ?? (typeof name === "string" ? name : undefined)
-      }
-      style={{
+      accessible
+      accessibilityRole={onPress ? "button" : undefined}
+      accessibilityLabel={spoken}
+      accessibilityHint={accessibilityHint}
+      accessibilityState={{ selected: !!selected, disabled: !!disabled }}
+      style={({ pressed }) => ({
         flexDirection: "row",
         alignItems: "center",
-        gap: space.lg,
-        minHeight,
-        paddingVertical: space.lg,
-        paddingHorizontal: selected ? space.lg : space.xxl,
-        marginHorizontal: selected ? space.xs : 0,
-        backgroundColor: selected ? semantic.hairSoft : "transparent",
+        gap: space.xl,
+        minHeight: Math.max(layout.touchMin, minHeight),
+        paddingVertical: space.sm,
+        paddingStart: space.xxl,
+        paddingEnd: space.xl,
         borderRadius: selected ? r.sm : 0,
-        borderBottomWidth: selected ? 0 : 1,
-        borderBottomColor: semantic.hairSoft,
-      }}
+        backgroundColor: selected
+          ? semantic.accentSoft
+          : pressed && onPress
+            ? semantic.high
+            : "transparent",
+        opacity: disabled ? 0.45 : 1,
+      })}
     >
       {glyph !== undefined && (
-        <View style={{ width: 22, alignItems: "center" }}>{glyph}</View>
+        <View style={{ minWidth: 22, alignItems: "center" }}>{glyph}</View>
       )}
-      <View style={{ flex: 1, minWidth: 0 }}>
+      <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
         {typeof name === "string" ? (
           <Text
+            numberOfLines={2}
             style={[
-              { fontFamily: ty.rowN.fontFamily, fontSize: 15, color: semantic.ink },
+              {
+                fontFamily: unread || selected ? fonts.bold : fonts.medium,
+                fontSize: 16,
+                color: selected ? semantic.accent : semantic.text,
+              },
               nameStyle,
             ]}
           >
@@ -483,192 +770,101 @@ export function ListRow({
         )}
         {sub !== undefined &&
           (typeof sub === "string" ? (
-            <Text
-              numberOfLines={1}
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 12,
-                color: semantic.mute,
-                marginTop: 2,
-              }}
-            >
+            <Text numberOfLines={1} style={ty.secondary}>
               {sub}
             </Text>
           ) : (
-            <View style={{ marginTop: 2 }}>{sub}</View>
+            sub
           ))}
       </View>
+      {value !== undefined ? (
+        <Text numberOfLines={1} style={[ty.secondary, { color: semantic.muted }]}>
+          {value}
+        </Text>
+      ) : null}
+      {badge !== undefined && badge > 0 ? <Badge>{badge > 99 ? "99+" : badge}</Badge> : null}
       {end !== undefined && (
-        <View
-          style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}
-        >
+        <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
           {end}
         </View>
       )}
+      {chevron ? <Icon.chevronRight size={18} color={semantic.muted} /> : null}
     </Pressable>
   );
 }
 
-/* ── Badge ────────────────────────────────────────────────────────── */
-export function Badge({ children }: { children: React.ReactNode }) {
-  return (
-    <View
-      style={{
-        minWidth: 18,
-        height: 18,
-        paddingHorizontal: space.xs,
-        backgroundColor: semantic.accent,
-        borderRadius: r.sm,
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
-      <Text
-        style={{
-          fontFamily: ty.h1.fontFamily,
-          fontSize: 10,
-          color: palette.bg,
-        }}
-      >
-        {children}
-      </Text>
-    </View>
-  );
-}
-
-/* ── Field ────────────────────────────────────────────────────────── */
-export function Field({
-  value,
-  onChangeText,
-  placeholder,
-  icon,
-  trailing,
-  amber,
-  editable = true,
-  secureTextEntry,
-  keyboardType,
+/* ── Group ────────────────────────────────────────────────────────── */
+// Grouped list (You.dc.html): radius 14, raised fill, rows separated by
+// hairSoft lines. Pass ListRows as children; `title` adds a SectionTitle
+// above. `surface="high"` for groups inside a sheet (Actions.dc.html).
+export function Group({
+  children,
+  title,
+  surface = "raised",
+  style,
   testID,
-  accessibilityLabel,
-  onSubmitEditing,
-  returnKeyType,
 }: {
-  value?: string;
-  onChangeText?: (v: string) => void;
-  placeholder?: string;
-  icon?: React.ReactNode;
-  trailing?: React.ReactNode;
-  amber?: boolean;
-  editable?: boolean;
-  secureTextEntry?: boolean;
-  keyboardType?: "default" | "email-address" | "number-pad";
-  // `input-<name>` on the underlying TextInput; accessibilityLabel comes from
-  // the caller's field label (Field renders no label of its own).
+  children: React.ReactNode;
+  title?: string;
+  surface?: "raised" | "high" | "panel";
+  style?: StyleProp<ViewStyle>;
   testID?: string;
-  accessibilityLabel?: string;
-  onSubmitEditing?: () => void;
-  returnKeyType?: "done" | "go" | "search" | "send" | "next";
 }) {
-  return (
+  const rows = React.Children.toArray(children).filter(React.isValidElement);
+  const box = (
     <View
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: space.sm,
-        borderWidth: 1,
-        borderColor: amber ? semantic.accent : semantic.hairStrong,
-        backgroundColor: amber ? semantic.hairSoft : semantic.fieldBg,
-        paddingVertical: space.md,
-        paddingHorizontal: space.lg,
-        borderRadius: r.sm,
-      }}
-    >
-      {icon}
-      <TextInput
-        testID={testID}
-        accessibilityLabel={accessibilityLabel}
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor={semantic.mute2}
-        editable={editable}
-        secureTextEntry={secureTextEntry}
-        keyboardType={keyboardType}
-        onSubmitEditing={onSubmitEditing}
-        returnKeyType={returnKeyType}
-        autoCapitalize="none"
-        style={{
-          flex: 1,
-          fontFamily: ty.body.fontFamily,
-          fontSize: 14,
-          color: semantic.ink,
-          padding: 0,
-        }}
-      />
-      {trailing}
-    </View>
-  );
-}
-
-/* ── Toggle ───────────────────────────────────────────────────────── */
-export function Toggle({
-  on,
-  onPress,
-  testID,
-  accessibilityLabel,
-}: {
-  on?: boolean;
-  onPress?: () => void;
-  // `toggle-<name>`; exposes switch semantics so e2e + a11y read the state.
-  testID?: string;
-  accessibilityLabel?: string;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
       testID={testID}
-      accessibilityRole="switch"
-      accessibilityLabel={accessibilityLabel}
-      accessibilityState={{ checked: !!on }}
-      style={{
-        width: 36,
-        height: 20,
-        borderWidth: 1,
-        borderColor: on ? semantic.accent : semantic.hairStrong,
-        borderRadius: r.sm,
-        justifyContent: "center",
-      }}
+      style={[
+        {
+          borderRadius: r.lg,
+          overflow: "hidden",
+          backgroundColor: semantic[surface],
+        },
+        title ? null : style,
+      ]}
     >
-      <View
-        style={{
-          position: "absolute",
-          top: 2,
-          left: on ? 18 : 2,
-          width: 14,
-          height: 14,
-          borderRadius: 1,
-          backgroundColor: on ? semantic.accent : semantic.mute,
-        }}
-      />
-    </Pressable>
+      {rows.map((row, i) => (
+        <React.Fragment key={row.key ?? i}>
+          {i > 0 ? <View style={{ height: 1, backgroundColor: semantic.hairSoft }} /> : null}
+          {row}
+        </React.Fragment>
+      ))}
+    </View>
+  );
+  if (!title) {
+    return box;
+  }
+  return (
+    <View style={[{ gap: space.sm }, style]}>
+      <SectionTitle style={{ paddingHorizontal: 4, paddingTop: 0, paddingBottom: 0 }}>
+        {title}
+      </SectionTitle>
+      {box}
+    </View>
   );
 }
 
 /* ── Card ─────────────────────────────────────────────────────────── */
+// Plain rounded container (radius 14, raised fill, 16pt padding) for
+// free-form content. Lists of rows use <Group> instead.
 export function Card({
   children,
   style,
+  surface = "raised",
+  testID,
 }: {
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
+  surface?: "raised" | "high" | "panel";
+  testID?: string;
 }) {
   return (
     <View
+      testID={testID}
       style={[
         {
-          borderWidth: 1,
-          borderColor: semantic.hairStrong,
-          backgroundColor: semantic.fieldBg,
-          padding: 16,
+          backgroundColor: semantic[surface],
+          padding: space.xxl,
           borderRadius: r.lg,
         },
         style,
@@ -679,7 +875,140 @@ export function Card({
   );
 }
 
+/* ── Field ────────────────────────────────────────────────────────── */
+// Text input: raised fill, 1px edge border (accent while focused or when
+// `amber`), radius 12, min 44pt, 16pt text, accent cursor and selection.
+// Accepts every TextInput prop; `icon` / `trailing` sit inside the box.
+export function Field({
+  icon,
+  trailing,
+  amber,
+  testID,
+  accessibilityLabel,
+  containerStyle,
+  style,
+  onFocus,
+  onBlur,
+  autoCapitalize = "none",
+  ...rest
+}: Omit<TextInputProps, "selectionColor" | "cursorColor" | "placeholderTextColor"> & {
+  icon?: React.ReactNode;
+  trailing?: React.ReactNode;
+  // Highlighted (e.g. an active verification code box).
+  amber?: boolean;
+  // `input-<name>` on the TextInput; accessibilityLabel comes from the
+  // caller's visible label (Field renders none of its own).
+  testID?: string;
+  accessibilityLabel?: string;
+  containerStyle?: StyleProp<ViewStyle>;
+}) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <View
+      style={[
+        {
+          flexDirection: "row",
+          alignItems: rest.multiline ? "flex-start" : "center",
+          gap: space.sm,
+          minHeight: layout.touchMin,
+          borderWidth: 1,
+          borderColor: amber || focused ? semantic.accent : semantic.edge,
+          backgroundColor: semantic.raised,
+          paddingVertical: rest.multiline ? space.md : 0,
+          paddingHorizontal: space.lg,
+          borderRadius: r.md,
+        },
+        containerStyle,
+      ]}
+    >
+      {icon}
+      <TextInput
+        testID={testID}
+        accessibilityLabel={accessibilityLabel}
+        placeholderTextColor={semantic.muted}
+        selectionColor={semantic.accent}
+        cursorColor={semantic.accent}
+        autoCapitalize={autoCapitalize}
+        onFocus={(e) => {
+          setFocused(true);
+          onFocus?.(e);
+        }}
+        onBlur={(e) => {
+          setFocused(false);
+          onBlur?.(e);
+        }}
+        {...rest}
+        style={[
+          {
+            flex: 1,
+            minHeight: layout.touchMin - 2,
+            fontFamily: fonts.regular,
+            fontSize: 16,
+            color: semantic.text,
+            paddingVertical: 0,
+            paddingHorizontal: 0,
+          },
+          style,
+        ]}
+      />
+      {trailing}
+    </View>
+  );
+}
+
+/* ── Toggle ───────────────────────────────────────────────────────── */
+// On/off switch: 44×26 track (accent when on, high + edge border when off)
+// inside a 44pt hit area. Exposes switch semantics with the checked state.
+export function Toggle({
+  on,
+  onPress,
+  testID,
+  accessibilityLabel,
+  disabled,
+}: {
+  on?: boolean;
+  onPress?: () => void;
+  // `toggle-<name>`.
+  testID?: string;
+  accessibilityLabel?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <Pressable
+      onPress={disabled ? undefined : onPress}
+      disabled={disabled}
+      testID={testID}
+      accessibilityRole="switch"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ checked: !!on, disabled: !!disabled }}
+      hitSlop={{ top: 9, bottom: 9 }}
+      style={{
+        width: 44,
+        height: 26,
+        borderRadius: 13,
+        borderWidth: 1,
+        borderColor: on ? semantic.accent : semantic.edge,
+        backgroundColor: on ? semantic.accent : semantic.high,
+        justifyContent: "center",
+        alignItems: on ? "flex-end" : "flex-start",
+        paddingHorizontal: 2,
+        opacity: disabled ? 0.45 : 1,
+      }}
+    >
+      <View
+        style={{
+          width: 20,
+          height: 20,
+          borderRadius: 10,
+          backgroundColor: on ? semantic.onAccent : semantic.dim,
+        }}
+      />
+    </Pressable>
+  );
+}
+
 /* ── Bottom action zone ───────────────────────────────────────────── */
+// Pinned footer for a screen's primary action(s), above the keyboard.
 export function BottomAction({ children }: { children: React.ReactNode }) {
   return (
     <View
@@ -689,7 +1018,7 @@ export function BottomAction({ children }: { children: React.ReactNode }) {
         paddingHorizontal: space.xxl,
         borderTopWidth: 1,
         borderTopColor: semantic.hairSoft,
-        backgroundColor: palette.bg,
+        backgroundColor: semantic.bg,
       }}
     >
       {children}
@@ -697,7 +1026,84 @@ export function BottomAction({ children }: { children: React.ReactNode }) {
   );
 }
 
-/* ── Context strip (bottom back bar on pushed screens) ────────────── */
+/* ── Scrollable body ──────────────────────────────────────────────── */
+// The scrolling content area under a Header. Taps reach fields/buttons
+// while the keyboard is up.
+export function Body({
+  children,
+  contentContainerStyle,
+  testID,
+}: {
+  children: React.ReactNode;
+  contentContainerStyle?: StyleProp<ViewStyle>;
+  testID?: string;
+}) {
+  return (
+    <ScrollView
+      testID={testID}
+      style={{ flex: 1 }}
+      contentContainerStyle={[{ paddingBottom: space.xxxl }, contentContainerStyle]}
+      keyboardShouldPersistTaps="handled"
+    >
+      {children}
+    </ScrollView>
+  );
+}
+
+/* ── Deprecated shims ─────────────────────────────────────────────── */
+// DEPRECATED: kept only so unmigrated screens compile. Use <Header> at the
+// top of the screen instead of <Crumb> (top) + <Ctx> (bottom back strip).
+
+// DEPRECATED: the old crumb tick. Renders a small accent dot.
+export function Diamond({ size = 7, fill = true }: { size?: number; fill?: boolean }) {
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        backgroundColor: fill ? semantic.accent : "transparent",
+        borderWidth: fill ? 0 : 1,
+        borderColor: semantic.dim,
+      }}
+    />
+  );
+}
+
+// DEPRECATED: use <Header> (pushed) or <Header variant="large"> (tab root).
+// Renders the leaf segment as a plain heading, no tracked capitals.
+export function Crumb({
+  segs,
+  end,
+  testID,
+}: {
+  segs: { label: string; leaf?: boolean }[];
+  end?: string;
+  testID?: string;
+}) {
+  const leaf = segs.find((s) => s.leaf) ?? segs[segs.length - 1];
+  return (
+    <View
+      testID={testID}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: space.sm,
+        minHeight: layout.touchMin,
+        paddingHorizontal: space.xxl,
+      }}
+    >
+      <Text accessibilityRole="header" numberOfLines={1} style={[ty.heading, { flex: 1 }]}>
+        {leaf?.label ?? ""}
+      </Text>
+      {end ? <Text style={ty.meta}>{end}</Text> : null}
+    </View>
+  );
+}
+
+// DEPRECATED: the old bottom back strip. Use <Header> at the top. Still
+// renders where it is placed (bottom) so unmigrated screens keep a back
+// button with the `btn-back` testID.
 export function Ctx({
   cr,
   name,
@@ -708,11 +1114,7 @@ export function Ctx({
   cr?: string;
   name: React.ReactNode;
   actions?: React.ReactNode;
-  // Optional anchor on the context strip container. The back Pressable always
-  // carries `btn-back` for navigation flows.
   testID?: string;
-  // Two-pane embedded mode (issue #622): the conversation sits in a pane with
-  // nothing to pop, so the back affordance is omitted. Default keeps back.
   hideBack?: boolean;
 }) {
   const router = useRouter();
@@ -723,72 +1125,39 @@ export function Ctx({
       style={{
         flexDirection: "row",
         alignItems: "center",
-        gap: space.lg,
-        minHeight: 52,
-        paddingVertical: space.md,
-        paddingHorizontal: space.xl,
+        gap: space.sm,
+        minHeight: layout.ctx,
+        paddingVertical: 4,
+        paddingHorizontal: space.sm,
         borderTopWidth: 1,
         borderTopColor: semantic.hairSoft,
-        backgroundColor: palette.bg,
+        backgroundColor: semantic.bg,
       }}
     >
       {hideBack ? null : (
-        <Pressable
-          onPress={() => router.back()}
+        <IconButton
           testID="btn-back"
-          accessibilityRole="button"
           accessibilityLabel={t("actions.back")}
-          style={{
-            width: 38,
-            height: 38,
-            alignItems: "center",
-            justifyContent: "center",
-            borderWidth: 1,
-            borderColor: semantic.hair,
-            borderRadius: r.sm,
-          }}
-        >
-          <Icon.arrowLeft />
-        </Pressable>
+          onPress={() => router.back()}
+          icon={<Icon.chevronLeft size={24} color={semantic.text} />}
+        />
       )}
       <View style={{ flex: 1, minWidth: 0 }}>
-        {cr ? (
-          <Text style={[ty.label, { fontSize: 9, letterSpacing: 1.8 }]}>
-            {cr}
+        {cr ? <Text numberOfLines={1} style={ty.meta}>{cr}</Text> : null}
+        {typeof name === "string" ? (
+          <Text numberOfLines={1} style={ty.heading}>
+            {name}
           </Text>
-        ) : null}
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: space.xs,
-            marginTop: 1,
-          }}
-        >
-          {typeof name === "string" ? (
-            <Text
-              style={{
-                fontFamily: ty.rowN.fontFamily,
-                fontSize: 15,
-                color: semantic.ink,
-              }}
-            >
-              {name}
-            </Text>
-          ) : (
-            name
-          )}
-        </View>
+        ) : (
+          name
+        )}
       </View>
-      {actions ? (
-        <View style={{ flexDirection: "row", alignItems: "center" }}>
-          {actions}
-        </View>
-      ) : null}
+      {actions ? <View style={{ flexDirection: "row", alignItems: "center" }}>{actions}</View> : null}
     </View>
   );
 }
 
+// DEPRECATED: use IconButton / HeaderAction.
 export function CtxAct({
   icon,
   onPress,
@@ -797,37 +1166,15 @@ export function CtxAct({
 }: {
   icon: React.ReactNode;
   onPress?: () => void;
-  // `btn-<name>` — bottom command actions are load-bearing in flows.
   testID?: string;
   accessibilityLabel?: string;
 }) {
   return (
-    <Pressable
+    <IconButton
+      icon={icon}
       onPress={onPress}
       testID={testID}
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      style={{
-        width: 38,
-        height: 38,
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
-      {icon}
-    </Pressable>
-  );
-}
-
-/* ── Scrollable body ──────────────────────────────────────────────── */
-export function Body({ children }: { children: React.ReactNode }) {
-  return (
-    <ScrollView
-      style={{ flex: 1 }}
-      contentContainerStyle={{ paddingBottom: space.xl }}
-      keyboardShouldPersistTaps="handled"
-    >
-      {children}
-    </ScrollView>
+      accessibilityLabel={accessibilityLabel ?? ""}
+    />
   );
 }

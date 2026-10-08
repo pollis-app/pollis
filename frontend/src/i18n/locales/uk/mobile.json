@@ -387,7 +387,11 @@
     "direct": "Особисті",
     "groups": "Групи",
     "search": "Пошук",
-    "self": "Профіль"
+    "self": "Профіль",
+    "withUnread_few": "{{label}}, {{count}} непрочитані",
+    "withUnread_many": "{{label}}, {{count}} непрочитаних",
+    "withUnread_one": "{{label}}, {{count}} непрочитане",
+    "withUnread_other": "{{label}}, {{count}} непрочитаних"
   },
   "thread": {
     "sendFailed": "Не вдалося надіслати відповідь."
@@ -396,6 +400,7 @@
     "now": "зараз"
   },
   "ui": {
+    "backTo": "Назад: {{name}}",
     "imageUnavailable": "Зображення недоступне",
     "selectConversation": "Виберіть розмову"
   },

@@ -7,23 +7,32 @@ import {
 } from "react";
 import {
   setAccentRgb,
+  setBackgroundRgb,
   hexToRgbTriplet,
   DEFAULT_ACCENT_HEX,
+  DEFAULT_BACKGROUND_HEX,
 } from "../theme/tokens";
 import { usePreferences } from "../hooks/queries/usePreferences";
 
+// The two theme bases. Everything else derives from them (theme/derive.ts).
 type ThemeCtx = {
   accentHex: string;
   setAccent: (hex: string) => void;
+  backgroundHex: string;
+  // Device-local for now: there is no synced preference key for it yet.
+  setBackground: (hex: string) => void;
 };
 
 const Ctx = createContext<ThemeCtx>({
   accentHex: DEFAULT_ACCENT_HEX,
   setAccent: () => {},
+  backgroundHex: DEFAULT_BACKGROUND_HEX,
+  setBackground: () => {},
 });
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [accentHex, setAccentHex] = useState(DEFAULT_ACCENT_HEX);
+  const [backgroundHex, setBackgroundHex] = useState(DEFAULT_BACKGROUND_HEX);
   const { data: prefs, update } = usePreferences();
 
   // Seed accent from server-side preferences when they first arrive (after
@@ -50,13 +59,20 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     [update],
   );
 
+  const setBackground = useCallback((hex: string) => {
+    setBackgroundRgb(hexToRgbTriplet(hex));
+    setBackgroundHex(hex);
+  }, []);
+
   return (
-    <Ctx.Provider value={{ accentHex, setAccent }}>{children}</Ctx.Provider>
+    <Ctx.Provider value={{ accentHex, setAccent, backgroundHex, setBackground }}>
+      {children}
+    </Ctx.Provider>
   );
 }
 
-// Subscribing to this re-renders the consumer when the accent changes — so
-// the token getters resolve to the new color. <Screen> and <TabBar> both
+// Subscribing to this re-renders the consumer when a base colour changes — so
+// the token getters resolve to the new theme. <Screen> and <TabBar> both
 // subscribe, which covers the whole tree.
 export function useTheme() {
   return useContext(Ctx);

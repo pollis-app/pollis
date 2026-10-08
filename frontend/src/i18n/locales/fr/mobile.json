@@ -365,7 +365,9 @@
     "direct": "Messages",
     "groups": "Groupes",
     "search": "Recherche",
-    "self": "Moi"
+    "self": "Moi",
+    "withUnread_one": "{{label}}, {{count}} non lu",
+    "withUnread_other": "{{label}}, {{count}} non lus"
   },
   "thread": {
     "sendFailed": "Impossible d'envoyer la réponse."
@@ -374,6 +376,7 @@
     "now": "maintenant"
   },
   "ui": {
+    "backTo": "Retour à {{name}}",
     "imageUnavailable": "Image indisponible",
     "selectConversation": "Sélectionnez une conversation"
   },

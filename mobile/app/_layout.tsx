@@ -6,11 +6,11 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import {
   useFonts,
-  Sora_400Regular,
-  Sora_500Medium,
-  Sora_600SemiBold,
-  Sora_700Bold,
-} from "@expo-google-fonts/sora";
+  Geist_400Regular,
+  Geist_500Medium,
+  Geist_600SemiBold,
+  Geist_700Bold,
+} from "@expo-google-fonts/geist";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { useObserver } from "mobx-react-lite";
 import { palette } from "../theme/tokens";
@@ -45,10 +45,10 @@ function SignedInServicesGate() {
 
 export default function RootLayout() {
   const [loaded] = useFonts({
-    Sora_400Regular,
-    Sora_500Medium,
-    Sora_600SemiBold,
-    Sora_700Bold,
+    Geist_400Regular,
+    Geist_500Medium,
+    Geist_600SemiBold,
+    Geist_700Bold,
   });
   const [bridgeReady, setBridgeReady] = useState(false);
   const [bridgeError, setBridgeError] = useState<Error | null>(null);

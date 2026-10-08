@@ -365,7 +365,9 @@
     "direct": "Directos",
     "groups": "Grupos",
     "search": "Buscar",
-    "self": "Tú"
+    "self": "Tú",
+    "withUnread_one": "{{label}}, {{count}} sin leer",
+    "withUnread_other": "{{label}}, {{count}} sin leer"
   },
   "thread": {
     "sendFailed": "No se pudo enviar la respuesta."
@@ -374,6 +376,7 @@
     "now": "ahora"
   },
   "ui": {
+    "backTo": "Volver a {{name}}",
     "imageUnavailable": "Imagen no disponible",
     "selectConversation": "Selecciona una conversación"
   },

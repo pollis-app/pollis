@@ -8,6 +8,9 @@
  * behind a translucent sheet and one behind an opaque sheet look identical —
  * so the invariant is pinned here instead: the sheet surface is an opaque
  * colour for any accent, and every sheet is painted with it.
+ *
+ * Since the redesign the sheet surface is the derived `raised` tier
+ * (theme/derive.ts), which is an opaque mix rather than an alpha composite.
  */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -16,6 +19,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { compositeOver } from "../theme/composite.ts";
+import { deriveTheme } from "../theme/derive.ts";
 
 const BG = "10, 9, 7"; // palette.bg, #0a0907
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -37,11 +41,24 @@ test("alpha 0 is the background and alpha 1 is the accent", () => {
   assert.equal(compositeOver("250, 191, 90", 1, BG), "rgb(250, 191, 90)");
 });
 
-test("the sheet surface token is the opaque composite, not a translucent tier", () => {
+test("the sheet surface token is an opaque derived tier, never a translucent one", () => {
   const tokens = read("theme/tokens.ts");
   const sheetBg = tokens.match(/get sheetBg\(\)\s*\{\s*return ([^;]+);/);
   assert.ok(sheetBg, "semantic.sheetBg must exist");
-  assert.match(sheetBg[1], /^tOpaque\(/, "sheetBg must be pre-composited (tOpaque), never t()");
+  assert.match(
+    sheetBg[1],
+    /^(_theme\.(raised|panel|high)|tOpaque\()/,
+    "sheetBg must be an opaque surface tier (or tOpaque), never t() or an rgba hairline",
+  );
+});
+
+test("the derived surface tiers are opaque for every accent", () => {
+  for (const accent of ["#fabf5a", "#5aa0fa", "#bda3e0"]) {
+    const theme = deriveTheme(accent, "#0a0907");
+    for (const key of ["panel", "raised", "high"] as const) {
+      assert.match(theme[key], /^#[0-9a-f]{6}$/, `${key} for ${accent} must be an opaque hex`);
+    }
+  }
 });
 
 test("SheetOverlay paints with sheetBg, and no sheet repaints itself translucent", () => {
