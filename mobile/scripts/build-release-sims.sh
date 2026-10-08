@@ -59,6 +59,13 @@ build_ios() {
     echo "==> iOS: ios/ missing — expo prebuild + pod install"
     "$EXPO" prebuild --platform ios --no-install
     (cd ios && pod install)
+  elif [ ! -f ios/Podfile.lock ] || [ pnpm-lock.yaml -nt ios/Podfile.lock ]; then
+    # A dependency bump can change a pod's source files (e.g. @expo/ui under an
+    # expo-router patch); a stale Pods project then fails with "Build input
+    # files cannot be found". Re-run pod install whenever the JS lockfile is
+    # newer than the pod lockfile.
+    echo "==> iOS: pnpm-lock.yaml newer than Podfile.lock — pod install"
+    (cd ios && pod install)
   fi
 
   mkdir -p ios/build
