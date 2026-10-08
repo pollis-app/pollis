@@ -1,25 +1,24 @@
 import { useState } from "react";
-import { View, Text } from "react-native";
+import { View } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useTranslation } from "react-i18next";
 import {
   Screen,
-  Crumb,
+  Header,
   Body,
   SectionTitle,
   ListRow,
   Avatar,
   Button,
-  BottomAction,
-  Ctx,
+  Group,
+  Txt,
 } from "../../components/ui";
 import { ExportArchive } from "../../components/ExportArchive";
 import { Icon } from "../../components/icons";
-import { semantic, type as ty } from "../../theme/tokens";
+import { semantic, space, layout } from "../../theme/tokens";
 import { useDMChannel, useLeaveDM } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
-import { upper } from "../../i18n";
 
 function DMInfo() {
   const router = useRouter();
@@ -50,113 +49,93 @@ function DMInfo() {
   };
 
   const members = channel.data?.members ?? [];
-  const directLabel = upper(t("tabs.direct"));
 
   return (
     <Screen testID="screen-dm-info">
-      <Crumb
-        segs={[
-          { label: directLabel },
-          { label: t("conversationInfo.info"), leaf: true },
-        ]}
-        end={members.length > 0 ? String(members.length) : undefined}
+      <Header
+        title={t("conversationInfo.info")}
+        backTo={t("conversationInfo.fallbackTitle")}
       />
       <Body>
-        <SectionTitle>
-          {upper(
-            members.length > 0
+        <View style={{ paddingHorizontal: space.xxl }}>
+          <SectionTitle style={{ paddingHorizontal: 4 }}>
+            {members.length > 0
               ? t("dm.participantsCount", { count: members.length })
-              : t("dm.participants"),
-          )}
-        </SectionTitle>
-        {channel.isLoading ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.mute,
-              paddingHorizontal: 18,
-              paddingVertical: 8,
-            }}
-          >
-            {t("common:states.loading")}
-          </Text>
-        ) : null}
-        {members.map((m) => {
-          const isMe = m.user_id === currentUser?.id;
-          const handle = m.username ?? m.user_id.slice(0, 8);
-          return (
-            <ListRow
-              key={m.user_id}
-              testID={`row-member-${m.user_id}`}
-              minHeight={54}
-              glyph={<Avatar label={handle.slice(0, 2)} />}
-              name={
-                isMe
-                  ? t("conversationInfo.memberSelf", { handle })
-                  : `@${handle}`
-              }
-              nameStyle={{ fontSize: 14 }}
-              onPress={
-                isMe
-                  ? undefined
-                  : () =>
-                      router.push({
-                        pathname: "/user/[id]",
-                        params: { id: m.user_id },
-                      })
-              }
-              end={!isMe ? <Icon.fwd color={semantic.mute} /> : undefined}
-            />
-          );
-        })}
+              : t("dm.participants")}
+          </SectionTitle>
+          {channel.isLoading ? (
+            <Txt variant="secondary" style={{ paddingHorizontal: 4 }}>
+              {t("common:states.loading")}
+            </Txt>
+          ) : null}
+          {members.length > 0 ? (
+            <Group>
+              {members.map((m) => {
+                const isMe = m.user_id === currentUser?.id;
+                const handle = m.username ?? m.user_id.slice(0, 8);
+                return (
+                  <ListRow
+                    key={m.user_id}
+                    testID={`row-member-${m.user_id}`}
+                    minHeight={52}
+                    glyph={
+                      <Avatar
+                        label={handle}
+                        size={layout.touchMin - 8}
+                        variant={isMe ? "self" : "default"}
+                      />
+                    }
+                    name={
+                      isMe
+                        ? t("conversationInfo.memberSelf", { handle })
+                        : `@${handle}`
+                    }
+                    onPress={
+                      isMe
+                        ? undefined
+                        : () =>
+                            router.push({
+                              pathname: "/user/[id]",
+                              params: { id: m.user_id },
+                            })
+                    }
+                    chevron={!isMe}
+                  />
+                );
+              })}
+            </Group>
+          ) : null}
+        </View>
 
+        {/* ExportArchive pads itself (shared with conversation info). */}
         <ExportArchive conversationId={channelId ?? null} />
 
-        <SectionTitle>{upper(t("dm.danger"))}</SectionTitle>
-        <View style={{ paddingHorizontal: 18 }}>
+        <SectionTitle>{t("dm.danger")}</SectionTitle>
+        <View style={{ gap: space.sm, paddingHorizontal: space.xxl }}>
           <Button
             full
             testID="btn-leave"
-            variant="danger"
-            icon={<Icon.exit color={semantic.danger} />}
+            variant="secondary"
+            icon={<Icon.logOut size={20} color={semantic.text} />}
             onPress={onLeave}
             disabled={leave.isPending || !channelId}
           >
-            {upper(
-              leave.isPending
-                ? t("dms:settings.submitting")
-                : confirmLeave
-                  ? t("dm.tapAgainToConfirm")
-                  : t("dms:settings.leave"),
-            )}
+            {leave.isPending
+              ? t("dms:settings.submitting")
+              : confirmLeave
+                ? t("dm.tapAgainToConfirm")
+                : t("dms:settings.leave")}
           </Button>
           {leave.isError ? (
-            <Text
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 12,
-                color: semantic.danger,
-                paddingTop: 6,
-              }}
+            <Txt
+              variant="secondary"
+              style={{ paddingHorizontal: 4, color: semantic.accent }}
             >
               {(leave.error as Error).message || t("dms:settings.leaveFailed")}
-            </Text>
+            </Txt>
           ) : null}
         </View>
       </Body>
-      <Ctx cr={directLabel} name={t("conversationInfo.info")} />
-      <BottomAction>
-        <Button
-          full
-          testID="btn-back-to-conversation"
-          variant="subtle"
-          onPress={() => router.back()}
-          icon={<Icon.back color={semantic.ink} />}
-        >
-          {t("conversationInfo.backToConversation")}
-        </Button>
-      </BottomAction>
     </Screen>
   );
 }

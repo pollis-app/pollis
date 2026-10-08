@@ -1,21 +1,22 @@
-import { View, Text, Pressable } from "react-native";
+import { View, Text } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Trans, useTranslation } from "react-i18next";
 import {
   Screen,
-  Crumb,
+  Header,
   Body,
   SectionTitle,
   Avatar,
   Card,
   Chip,
   Button,
-  Ctx,
   BottomAction,
+  Group,
+  ListRow,
+  Txt,
 } from "../../components/ui";
 import { Icon } from "../../components/icons";
-import { semantic, type as ty, fonts } from "../../theme/tokens";
-import { upper } from "../../i18n";
+import { semantic, fonts, space } from "../../theme/tokens";
 import { useQuery } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
 import {
@@ -71,7 +72,6 @@ function UserProfile() {
   const handle =
     profile.data?.username ?? peerId ?? t("mobile:user.fallbackHandle");
   const display = profile.data?.preferred_name || handle;
-  const avatarLabel = handle.slice(0, 2);
 
   const onMessage = () => {
     if (!peerId) {
@@ -111,105 +111,81 @@ function UserProfile() {
     }
   };
 
+  const verification = safety.data?.verification;
+  const blockPending = block.isPending || unblock.isPending;
+
   return (
     <Screen testID="screen-user">
-      <Crumb
-        segs={[
-          { label: upper(t("mobile:user.title")) },
-          { label: display, leaf: true },
-        ]}
-      />
-      <Body>
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 14,
-            paddingHorizontal: 18,
-            paddingTop: 14,
-            paddingBottom: 16,
-          }}
+      <Header title={t("profile.fallbackTitle")} />
+      <Body contentContainerStyle={{ padding: space.xxl, gap: space.xl }}>
+        <Card
+          surface="panel"
+          style={{ flexDirection: "row", alignItems: "center", gap: space.xl }}
         >
-          <Avatar label={avatarLabel} size="lg" />
-          <View style={{ flex: 1 }}>
-            <Text
-              style={{
-                fontFamily: ty.h1.fontFamily,
-                fontSize: 20,
-                color: semantic.ink,
-              }}
-            >
+          <Avatar
+            label={handle}
+            size="lg"
+            variant={isSelf ? "self" : "default"}
+          />
+          <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+            <Txt variant="title" accessibilityRole="header">
               {display}
-            </Text>
-            <Text
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 13,
-                color: semantic.mute,
-              }}
-            >
+            </Txt>
+            <Txt variant="secondary" style={{ color: semantic.muted }}>
               @{handle}
-            </Text>
+            </Txt>
           </View>
-        </View>
+        </Card>
 
         {isSelf ? (
-          <View style={{ paddingHorizontal: 18, paddingTop: 4 }}>
-            <Text
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 12,
-                color: semantic.mute,
+          <Txt variant="secondary" style={{ paddingHorizontal: 4 }}>
+            <Trans
+              t={t}
+              i18nKey="mobile:user.selfNote"
+              components={{
+                link: (
+                  <Text
+                    accessibilityRole="link"
+                    onPress={() => router.push("/self/user-settings")}
+                    style={{
+                      color: semantic.accent,
+                      fontFamily: fonts.semibold,
+                    }}
+                  />
+                ),
               }}
-            >
-              <Trans
-                t={t}
-                i18nKey="mobile:user.selfNote"
-                components={{
-                  link: (
-                    <Text
-                      onPress={() => router.push("/self/user-settings")}
-                      style={{ color: semantic.accent }}
-                    />
-                  ),
-                }}
-              />
-            </Text>
-          </View>
+            />
+          </Txt>
         ) : (
-          <View>
-            <SectionTitle>{upper(t("profile.safetyNumber"))}</SectionTitle>
-            <View style={{ paddingHorizontal: 18 }}>
+          <>
+            <View style={{ gap: space.sm }}>
+              <SectionTitle
+                style={{
+                  paddingHorizontal: 4,
+                  paddingTop: space.sm,
+                  paddingBottom: 0,
+                }}
+              >
+                {t("profile.safetyNumber")}
+              </SectionTitle>
               {safety.isLoading ? (
-                <Text
-                  style={{
-                    fontFamily: ty.body.fontFamily,
-                    fontSize: 13,
-                    color: semantic.mute,
-                  }}
-                >
+                <Txt variant="secondary" style={{ paddingHorizontal: 4 }}>
                   {t("mobile:user.computing")}
-                </Text>
+                </Txt>
               ) : safety.isError ? (
-                <Text
-                  style={{
-                    fontFamily: ty.body.fontFamily,
-                    fontSize: 13,
-                    color: semantic.danger,
-                  }}
-                >
+                <Txt variant="secondary" style={{ paddingHorizontal: 4 }}>
                   {(safety.error as Error).message ||
                     t("mobile:user.safetyNumberFailed")}
-                </Text>
+                </Txt>
               ) : safety.data ? (
                 <Card
                   style={{
+                    gap: space.lg,
+                    borderWidth: 1,
                     borderColor:
-                      safety.data.verification === "verified"
-                        ? semantic.accent
-                        : safety.data.verification === "changed"
-                          ? semantic.danger
-                          : semantic.hair,
+                      verification === "verified" || verification === "changed"
+                        ? semantic.accentLine
+                        : semantic.hair,
                   }}
                 >
                   <Text
@@ -217,9 +193,9 @@ function UserProfile() {
                     testID="text-safety-number"
                     style={{
                       fontFamily: fonts.mono400,
-                      fontSize: 13,
+                      fontSize: 14,
                       lineHeight: 22,
-                      color: semantic.ink,
+                      color: semantic.text,
                       letterSpacing: 0.4,
                     }}
                   >
@@ -228,90 +204,93 @@ function UserProfile() {
                   <View
                     style={{
                       flexDirection: "row",
+                      flexWrap: "wrap",
                       alignItems: "center",
-                      gap: 8,
-                      marginTop: 12,
+                      gap: space.sm,
                     }}
                   >
-                    <Pressable onPress={onToggleVerified} testID="btn-verify">
-                      <Chip
-                        variant={
-                          safety.data.verification === "verified" ? "on" : "default"
-                        }
-                      >
-                        {setVerified.isPending
-                          ? "…"
-                          : safety.data.verification === "verified"
-                            ? t("mobile:user.verified")
-                            : t("profile.markVerified")}
-                      </Chip>
-                    </Pressable>
-                    {safety.data.verification === "changed" ? (
-                      <Text
+                    <Chip
+                      testID="btn-verify"
+                      selected={verification === "verified"}
+                      variant="outline"
+                      onPress={onToggleVerified}
+                      disabled={setVerified.isPending}
+                      accessibilityLabel={
+                        verification === "verified"
+                          ? t("profile.removeVerification")
+                          : t("profile.markVerified")
+                      }
+                    >
+                      {setVerified.isPending
+                        ? t("mobile:common.working")
+                        : verification === "verified"
+                          ? t("mobile:user.verified")
+                          : t("profile.markVerified")}
+                    </Chip>
+                    {verification === "changed" ? (
+                      <View
                         style={{
-                          fontFamily: ty.body.fontFamily,
-                          fontSize: 11,
-                          color: semantic.danger,
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: space.xs,
                           flex: 1,
+                          minWidth: 160,
                         }}
                       >
-                        {t("mobile:user.keyChanged")}
-                      </Text>
+                        <Icon.alert size={16} color={semantic.accent} />
+                        <Txt
+                          variant="secondary"
+                          style={{ flex: 1, color: semantic.text }}
+                        >
+                          {t("mobile:user.keyChanged")}
+                        </Txt>
+                      </View>
                     ) : null}
                   </View>
                 </Card>
               ) : null}
-              <Text
-                style={{
-                  fontFamily: ty.body.fontFamily,
-                  fontSize: 11,
-                  color: semantic.mute,
-                  paddingTop: 10,
-                  lineHeight: 16,
-                }}
+              <Txt
+                variant="meta"
+                style={{ paddingHorizontal: 4, lineHeight: 17 }}
               >
                 {t("mobile:user.compareHint")}
-              </Text>
+              </Txt>
             </View>
 
-            <SectionTitle>{upper(t("mobile:user.safetyActionsHeading"))}</SectionTitle>
-            <View style={{ paddingHorizontal: 18, gap: 10 }}>
-              <Button
-                full
+            {/* Destructive actions: their own group at the end, told apart by
+                label and icon (danger is the accent — no third hue). */}
+            <Group title={t("mobile:user.safetyActionsHeading")}>
+              <ListRow
                 testID="btn-report-user"
-                variant="danger"
-                icon={<Icon.flag color={semantic.danger} />}
+                glyph={<Icon.flag size={20} color={semantic.text} />}
+                name={t("chat:report.titleUser", { name: `@${handle}` })}
+                chevron
                 onPress={() => {
                   if (peerId) {
-                    router.push({ pathname: "/report", params: { userId: peerId } });
+                    router.push({
+                      pathname: "/report",
+                      params: { userId: peerId },
+                    });
                   }
                 }}
-              >
-                {upper(t("dms:profile.report"))}
-              </Button>
-              <Button
-                full
+              />
+              <ListRow
                 testID={isBlocked ? "btn-unblock" : "btn-block"}
-                variant={isBlocked ? "default" : "danger"}
-                icon={
-                  <Icon.exit
-                    color={isBlocked ? semantic.ink : semantic.danger}
-                  />
+                glyph={<Icon.x size={20} color={semantic.text} />}
+                name={
+                  blockPending
+                    ? t("mobile:common.working")
+                    : isBlocked
+                      ? t("mobile:user.unblockUser")
+                      : t("mobile:user.blockUser")
                 }
                 onPress={onToggleBlock}
-                disabled={block.isPending || unblock.isPending}
-              >
-                {block.isPending || unblock.isPending
-                  ? upper(t("mobile:common.working"))
-                  : isBlocked
-                    ? upper(t("mobile:user.unblockUser"))
-                    : upper(t("mobile:user.blockUser"))}
-              </Button>
-            </View>
-          </View>
+                disabled={blockPending}
+              />
+            </Group>
+          </>
         )}
       </Body>
-      <Ctx cr={upper(t("mobile:user.title"))} name={display} />
       {!isSelf ? (
         <BottomAction>
           <Button
@@ -320,11 +299,11 @@ function UserProfile() {
             variant="primary"
             onPress={onMessage}
             disabled={createDM.isPending}
-            iconRight={<Icon.send color="#0a0907" />}
+            icon={<Icon.messageCircle size={20} color={semantic.onAccent} />}
           >
             {createDM.isPending
-              ? upper(t("mobile:user.opening"))
-              : upper(t("mobile:user.message"))}
+              ? t("mobile:user.opening")
+              : t("mobile:user.message")}
           </Button>
         </BottomAction>
       ) : null}

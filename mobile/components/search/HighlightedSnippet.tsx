@@ -1,5 +1,5 @@
 import { Text } from "react-native";
-import { semantic, type as ty } from "../../theme/tokens";
+import { semantic, type as ty, fonts } from "../../theme/tokens";
 import type { SearchSnippet } from "../../hooks/queries/useSearch";
 import { splitSnippet } from "../../lib/searchSnippet";
 
@@ -19,16 +19,17 @@ export function HighlightedSnippet({
   const parts = splitSnippet(snippet.text, snippet.highlights);
 
   return (
-    <Text
-      numberOfLines={numberOfLines}
-      style={{ fontFamily: ty.body.fontFamily, fontSize: 13, color: semantic.ink2 }}
-    >
+    <Text numberOfLines={numberOfLines} style={ty.secondary}>
       {parts.map((p, i) => (
         <Text
           key={i}
           style={
             p.hit
-              ? { color: semantic.ink, fontFamily: ty.rowN.fontFamily, backgroundColor: semantic.accentSoft }
+              ? {
+                  color: semantic.accent,
+                  fontFamily: fonts.semibold,
+                  backgroundColor: semantic.accentSoft,
+                }
               : undefined
           }
         >

@@ -1,60 +1,70 @@
-import { useCallback, useMemo } from "react";
-import { View, Text } from "react-native";
+import { useCallback, useMemo, useState } from "react";
+import { View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import {
   Screen,
-  Crumb,
+  Header,
+  IconButton,
   Body,
-  SectionTitle,
-  ListRow,
-  Avatar,
-  Chip,
+  Field,
   Button,
-  BottomAction,
+  Divider,
+  Txt,
 } from "../../components/ui";
+import { ConversationRow } from "../../components/direct/ConversationRow";
+import { RequestsRow } from "../../components/direct/RequestsRow";
+import { conversationTime } from "../../components/direct/conversationTime";
 import { Icon } from "../../components/icons";
-import { semantic, type as ty } from "../../theme/tokens";
+import { semantic, space } from "../../theme/tokens";
 import {
   useDMChannels,
   useDMRequests,
-  useAcceptDMRequest,
-  useBlockUser,
   useLastMessages,
   previewText,
 } from "../../hooks/queries";
-import { timeAgoShort } from "../../lib/timeAgo";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useLayoutClass } from "../../hooks/useLayoutClass";
 import { TwoPane, DetailPlaceholder } from "../../components/MasterDetail";
 import { ChatView } from "../chat/[id]";
-import { upper } from "../../i18n";
 
 function Direct() {
   const router = useRouter();
   const { t } = useTranslation("mobile");
   const { data: dms = [], isLoading, isError } = useDMChannels();
   const { data: requests = [] } = useDMRequests();
-  const acceptRequest = useAcceptDMRequest();
-  // "Decline" for a DM request is blocking the sender — mirrors desktop's
-  // RequestsPage / dm-request bar, which offer exactly Accept and Block
-  // (there is no decline command in pollis-core).
-  const blockUser = useBlockUser();
   const setSelectedConversationId = appStore.setSelectedConversationId;
   const selectedConversationId = appStore.selectedConversationId;
   const unreadCounts = appStore.unreadCounts;
+  const currentUserId = appStore.currentUser?.id;
   // On regular (iPad) width the list is the left column of a two-pane
   // master-detail; on compact it is the whole screen with push navigation.
   const isRegular = useLayoutClass() === "regular";
   const selectedDm = dms.find((d) => d.id === selectedConversationId);
   const selectedHandle = selectedDm?.user2_identifier || undefined;
+  // Local filter over the conversations already loaded — no extra lookup.
+  const [query, setQuery] = useState("");
+  const needle = query.trim().toLowerCase();
 
   // One batched preview fetch for every DM row (desktop #874/#936) — never
   // one call per row. A conversation with no locally-ingested messages is
   // absent from the map and its row simply renders without a preview.
   const dmIds = useMemo(() => dms.map((d) => d.id), [dms]);
   const { data: lastMessages = {} } = useLastMessages(dmIds);
+
+  const shown = useMemo(() => {
+    if (!needle) {
+      return dms;
+    }
+    return dms.filter((d) => {
+      const preview = previewText(lastMessages[d.id]) ?? "";
+      return (
+        d.user2_identifier.toLowerCase().includes(needle) ||
+        preview.toLowerCase().includes(needle)
+      );
+    });
+  }, [dms, lastMessages, needle]);
 
   // On compact, being on this list means no conversation is open — clear the
   // selection so realtime `new_message` events for the conversation the user
@@ -68,117 +78,125 @@ function Direct() {
     }, [isRegular]),
   );
 
+  const openNew = () => router.push("/dm/new");
+
   // The single-column content — rendered as the whole screen on compact, or as
-  // the left list column of the two-pane on regular. Byte-for-byte identical on
-  // compact save for the row onPress, which only skips the push on regular.
+  // the left list column of the two-pane on regular. Identical on both save
+  // for the row onPress, which only skips the push on regular.
   const listColumn = (
     <>
-      <Crumb
-        segs={[{ label: upper(t("tabs.direct")), leaf: true }]}
-        end={String(dms.length)}
+      <Header
+        variant="large"
+        title={t("tabs.direct")}
+        actions={
+          <IconButton
+            testID="btn-new-dm"
+            filled
+            accessibilityLabel={t("direct.newMessage")}
+            icon={<Icon.pencil size={20} color={semantic.text} />}
+            onPress={openNew}
+          />
+        }
       />
-      <Body>
+      {dms.length > 0 ? (
+        <View style={{ paddingHorizontal: space.xxl, paddingBottom: space.lg }}>
+          <Field
+            testID="input-dm-search"
+            accessibilityLabel={t("direct.searchLabel")}
+            placeholder={t("direct.searchLabel")}
+            value={query}
+            onChangeText={setQuery}
+            returnKeyType="search"
+            icon={<Icon.search size={18} color={semantic.muted} />}
+          />
+        </View>
+      ) : null}
+      <Body contentContainerStyle={{ paddingHorizontal: space.sm, gap: 2 }}>
         {requests.length > 0 ? (
-          <View>
-            <SectionTitle>{upper(t("dms:requests.pageTitle"))}</SectionTitle>
-            {requests.map((d) => {
-              const handle = d.user2_identifier || t("dms:profile.fallbackName");
-              return (
-                <ListRow
-                  key={d.id}
-                  testID={`row-request-${d.id}`}
-                  minHeight={64}
-                  glyph={<Avatar label={handle.slice(0, 2)} />}
-                  name={
-                    <Text
-                      style={{
-                        fontFamily: ty.rowN.fontFamily,
-                        fontSize: 15,
-                        color: semantic.ink,
-                      }}
-                    >
-                      @{handle}
-                    </Text>
-                  }
-                  sub={t("direct.wantsToMessage")}
-                  end={
-                    <View style={{ flexDirection: "row", gap: 6 }}>
-                      <Chip
-                        testID={`btn-block-request-${d.id}`}
-                        accessibilityLabel={t("direct.blockSender")}
-                        onPress={() => {
-                          if (d.user2_id) {
-                            blockUser.mutate(d.user2_id);
-                          }
-                        }}
-                      >
-                        {blockUser.isPending ? "…" : t("nav:dmRequest.block")}
-                      </Chip>
-                      <Chip
-                        testID={`btn-accept-request-${d.id}`}
-                        accessibilityLabel={t("direct.acceptRequest")}
-                        variant="on"
-                        onPress={() => acceptRequest.mutate(d.id)}
-                      >
-                        {acceptRequest.isPending ? "…" : t("nav:dmRequest.accept")}
-                      </Chip>
-                    </View>
-                  }
-                />
-              );
-            })}
-          </View>
+          <>
+            <RequestsRow
+              testID="row-dm-requests"
+              count={requests.length}
+              onPress={() => router.push("/dm/requests")}
+            />
+            <Divider
+              style={{ marginVertical: space.sm, marginHorizontal: space.sm }}
+            />
+          </>
         ) : null}
         {isLoading ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.mute,
-              paddingHorizontal: 18,
-              paddingTop: 12,
-            }}
+          <Txt
+            variant="secondary"
+            style={{ paddingHorizontal: space.sm, paddingTop: space.lg }}
           >
             {t("direct.loading")}
-          </Text>
+          </Txt>
         ) : null}
         {isError ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.danger,
-              paddingHorizontal: 18,
-              paddingTop: 12,
-            }}
+          <Txt
+            variant="secondary"
+            style={{ paddingHorizontal: space.sm, paddingTop: space.lg }}
           >
             {t("direct.loadFailed")}
-          </Text>
+          </Txt>
         ) : null}
         {!isLoading && !isError && dms.length === 0 ? (
-          <Text
+          <View
+            testID="direct-empty"
             style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.mute,
-              paddingHorizontal: 18,
-              paddingTop: 12,
+              alignItems: "center",
+              gap: space.lg,
+              paddingHorizontal: space.xxxl,
+              paddingTop: 48,
             }}
           >
-            {t("direct.empty")}
-          </Text>
+            <Icon.messageCircle size={32} color={semantic.dim} />
+            <Txt
+              variant="heading"
+              accessibilityRole="header"
+              style={{ textAlign: "center" }}
+            >
+              {t("direct.empty")}
+            </Txt>
+            <Txt variant="secondary" style={{ textAlign: "center" }}>
+              {t("direct.emptyHint")}
+            </Txt>
+            <Button
+              testID="btn-new-dm-empty"
+              variant="primary"
+              icon={<Icon.pencil size={18} color={semantic.onAccent} />}
+              onPress={openNew}
+            >
+              {t("direct.newMessage")}
+            </Button>
+          </View>
         ) : null}
-        {dms.map((d) => {
+        {needle && dms.length > 0 && shown.length === 0 ? (
+          <Txt
+            variant="secondary"
+            style={{ paddingHorizontal: space.sm, paddingTop: space.lg }}
+          >
+            {t("direct.noMatches")}
+          </Txt>
+        ) : null}
+        {shown.map((d) => {
           const handle = d.user2_identifier || t("dms:profile.fallbackName");
-          const label = handle.slice(0, 2);
           const last = lastMessages[d.id];
           const preview = previewText(last);
           const unread = unreadCounts[d.id] ?? 0;
           return (
-            <ListRow
+            <ConversationRow
               key={d.id}
               testID={`row-dm-${d.id}`}
-              minHeight={64}
+              unreadTestID={`unread-${d.id}`}
+              name={handle}
+              avatarLabels={[handle]}
+              preview={preview}
+              own={
+                !!last && !!currentUserId && last.sender_id === currentUserId
+              }
+              time={last ? conversationTime(last.created_at) : null}
+              unread={unread}
               selected={isRegular && selectedConversationId === d.id}
               onPress={() => {
                 setSelectedConversationId(d.id);
@@ -194,53 +212,10 @@ function Direct() {
                   });
                 }
               }}
-              glyph={<Avatar label={label} />}
-              name={
-                <Text
-                  style={{
-                    fontFamily: ty.rowN.fontFamily,
-                    fontSize: 15,
-                    color: semantic.ink,
-                  }}
-                >
-                  @{handle}
-                </Text>
-              }
-              sub={preview ?? undefined}
-              end={
-                <>
-                  {last ? (
-                    <Text style={[ty.label, { fontSize: 10 }]}>
-                      {timeAgoShort(last.created_at)}
-                    </Text>
-                  ) : null}
-                  {unread > 0 ? (
-                    <View
-                      testID={`unread-${d.id}`}
-                      style={{
-                        width: 7,
-                        height: 7,
-                        borderRadius: 4,
-                        backgroundColor: semantic.accent,
-                      }}
-                    />
-                  ) : null}
-                </>
-              }
             />
           );
         })}
       </Body>
-      <BottomAction>
-        <Button
-          testID="btn-new-dm"
-          full
-          icon={<Icon.plus color={semantic.ink} />}
-          onPress={() => router.push("/dm/new")}
-        >
-          {upper(t("dms:list.newMessage"))}
-        </Button>
-      </BottomAction>
     </>
   );
 
