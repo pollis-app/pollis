@@ -3,8 +3,8 @@ tags:
   - parity
 ---
 # GROUPS — create a group, open it, create/verify a channel, rename, leave.
-# Self-contained (no peer). Uses testIDs where they exist; falls back to stable
-# button TEXT where #620 left an action un-instrumented (noted in README gaps).
+# Self-contained (no peer). Every action is tapped by testID; the one text
+# match is the "General" channel row, whose row-channel-<id> is not known ahead.
 
 - runFlow: ../subflows/sign-in.yaml
 # Navigate explicitly: sign-in guarantees the tab navigator, not which tab.
@@ -14,8 +14,13 @@ tags:
     id: "screen-groups"
 - takeScreenshot: groups-01-inbox
 
-# Create a group. NOTE: the "CREATE GROUP" submit has no testID yet (#620 gap),
-# so we tap by text. input-group-name IS instrumented.
+# Create a group. A fresh account has no groups, so the Groups tab shows its
+# empty state with btn-create-group directly; with groups, btn-create-group
+# lives in the "+" sheet at the end of the group pill strip (btn-add-group).
+# The optional tap covers both.
+- tapOn:
+    id: "btn-add-group"
+    optional: true
 - tapOn:
     id: "btn-create-group"
 - assertVisible:
@@ -27,9 +32,10 @@ tags:
     id: "input-group-name"
 - inputText: "E2E Test Group"
 - takeScreenshot: groups-02-create
-- tapOn: "CREATE GROUP"
+- tapOn:
+    id: "btn-submit-group"
 
-# CREATE GROUP navigates straight into the new group's detail screen (not
+# Creating navigates straight into the new group's detail screen (not
 # back to the groups list) — better UX than assumed, matching Slack/Discord's
 # drop-into-the-new-channel pattern. Its #General channel should be visible.
 - extendedWaitUntil:
@@ -44,6 +50,11 @@ tags:
     id: "btn-back"
 - tapOn:
     id: "tab-groups"
+# Now there IS a group: the tab shows the pill strip + panel, and create is in
+# the "+" sheet.
+- tapOn:
+    id: "btn-add-group"
+    optional: true
 - tapOn:
     id: "btn-create-group"
 - assertVisible:
@@ -51,7 +62,8 @@ tags:
 - tapOn:
     id: "input-group-name"
 - inputText: "E2E No Channel Group"
-- tapOn: "CREATE GROUP"
+- tapOn:
+    id: "btn-submit-group"
 - extendedWaitUntil:
     visible:
       id: "screen-group"

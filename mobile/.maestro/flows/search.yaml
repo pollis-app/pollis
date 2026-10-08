@@ -21,6 +21,9 @@ tags:
 - tapOn:
     id: "tab-groups"
 - tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
     id: "btn-create-group"
 # #General is opt-in (off by default, like desktop); these steps open it.
 - tapOn:
@@ -28,7 +31,8 @@ tags:
 - tapOn:
     id: "input-group-name"
 - inputText: "E2E Search Group"
-- tapOn: "CREATE GROUP"
+- tapOn:
+    id: "btn-submit-group"
 - extendedWaitUntil:
     visible:
       id: "screen-group"

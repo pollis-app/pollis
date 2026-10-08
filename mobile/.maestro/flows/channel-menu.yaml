@@ -19,6 +19,9 @@ tags:
     id: "screen-groups"
 
 - tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
     id: "btn-create-group"
 # #General is opt-in (off by default, like desktop); these steps open it.
 - tapOn:
@@ -26,7 +29,8 @@ tags:
 - tapOn:
     id: "input-group-name"
 - inputText: "E2E Menu Group"
-- tapOn: "CREATE GROUP"
+- tapOn:
+    id: "btn-submit-group"
 - extendedWaitUntil:
     visible:
       id: "screen-group"
@@ -75,7 +79,8 @@ tags:
 - assertVisible:
     id: "screen-chat"
 
-# 4. Cancel closes the sheet and leaves the channel as it was.
+# 4. Close (btn-menu-cancel is the sheet's Close button now) dismisses the sheet
+#    and leaves the channel as it was.
 - tapOn:
     id: "btn-chat-menu"
 - tapOn:

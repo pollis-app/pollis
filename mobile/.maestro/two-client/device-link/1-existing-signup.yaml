@@ -4,11 +4,15 @@ appId: com.pollis.mobile
 - tapOn:
     id: "tab-groups"
 - tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
     id: "btn-create-group"
 - tapOn:
     id: "input-group-name"
 - inputText: "Link Test Group"
-- tapOn: "CREATE GROUP"
+- tapOn:
+    id: "btn-submit-group"
 - extendedWaitUntil:
     visible:
       id: "screen-group"

@@ -115,6 +115,9 @@ tags:
 - tapOn:
     id: "tab-groups"
 - tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
     id: "btn-create-group"
 - waitForAnimationToEnd:
     timeout: 3000
@@ -125,7 +128,8 @@ tags:
 - tapOn:
     id: "input-group-name"
 - inputText: "Design Team"
-- tapOn: "CREATE GROUP"
+- tapOn:
+    id: "btn-submit-group"
 - extendedWaitUntil:
     visible:
       id: "screen-group"
@@ -235,6 +239,10 @@ tags:
     timeout: 3000
 - takeScreenshot: tour-22-groups
 - tapOn:
+    id: "btn-add-group"
+    optional: true
+# Find group sits in the "+" sheet at the end of the group pill strip.
+- tapOn:
     id: "btn-join-group"
     optional: true
 - waitForAnimationToEnd:
@@ -264,9 +272,12 @@ tags:
       id: "search-sort-relevant"
     timeout: 15000
     optional: true
-# Dismiss the keyboard by tapping the empty space under the results.
-- tapOn:
-    point: "50%,45%"
+# Dismiss the keyboard before the shot. Not a point tap: the redesigned Search
+# puts the field at the top and the hits right under it, so a tap in the middle
+# of the screen lands on a result and opens the conversation. The search field
+# has a normal keyboard with a return key (unlike the number pad), so
+# hideKeyboard closes it.
+- hideKeyboard
 - waitForAnimationToEnd:
     timeout: 3000
 - takeScreenshot: tour-25-search-results

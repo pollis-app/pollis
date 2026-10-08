@@ -5,6 +5,9 @@ appId: com.pollis.mobile
 - tapOn:
     id: "tab-groups"
 - tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
     id: "btn-join-group"
 - tapOn:
     id: "input-group-search"
@@ -12,6 +15,11 @@ appId: com.pollis.mobile
 # Dismiss the keyboard, then look the slug up (one request, not per key).
 # Tap empty space ABOVE the keyboard: iOS 27's keyboard reaches up past 65%
 # of the screen, so the old 70% point typed a key into the slug instead.
+# Since the redesign the Find button (btn-group-search) sits in the body just
+# under the field rather than in a bottom bar; 45% is the empty body below it
+# (Body is keyboardShouldPersistTaps="handled", so the tap dismisses). Should
+# a large text size push the button down onto that point, the tap runs the
+# same lookup the next step does, which is harmless.
 - tapOn:
     point: "50%,45%"
 - tapOn:

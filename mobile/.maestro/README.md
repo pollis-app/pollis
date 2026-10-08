@@ -161,10 +161,10 @@ so a Maestro reinstall heals itself; drop both once Maestro ships the fix.
 ## Two-client flows
 
 **Join requests (automated):** `mobile/scripts/maestro-join-request.sh <admin-device> <peer-device>`
-— the admin creates a group and opens it from its Groups-tab header; the peer
-finds it by slug (one lookup, on Search) and requests access; the admin sees
-the request on the Groups tab (row + header badge) and approves it; the peer
-then lists the group.
+— the admin creates a group and opens it from the Groups tab's group pill
+strip; the peer finds it by slug (Groups "+" → Find group, one lookup) and
+requests access; the admin sees the request on the Groups tab (pending row +
+badge, above the channels) and approves it; the peer then lists the group.
 
 **Report (automated, #1213):** `mobile/scripts/maestro-report.sh <reporter-device> <peer-device>`
 — a fresh peer signs up, its handle is read off the screen, and the reporter
@@ -197,16 +197,33 @@ maestro --device <peer-udid> test -e MAESTRO_EMAIL=$MAESTRO_PEER_EMAIL \
 ```
 Then assert convergence on both devices (peer sends → primary sees it live).
 
-## Known `testID` gaps (small #620 follow-up)
+## Selecting by text, and the 2026-10 redesign
 
-Authoring these flows surfaced a few load-bearing actions that lack a `testID`,
-so the flows tap them by visible TEXT (works for stable labels, but a `testID`
-is more robust):
-- `group/new` — the **CREATE GROUP** / **Cancel** buttons.
-- Channel/group rows are opened by their name text where the dynamic
-  `row-channel-<id>` isn't known ahead of time.
-Add these in a #620 follow-up and switch the `tapOn: "TEXT"` calls to
-`tapOn: id:`.
+Every action the flows tap has a `testID` (`group/new`'s submit is
+`btn-submit-group`; the redesign removed its Cancel). The flows still match
+TEXT in only a few places: the "General" channel row (its dynamic
+`row-channel-<id>` isn't known ahead of time), message/search-hit regexes
+(`.*hello from maestro.*`), group names in a peer's list, and the iOS
+"Open" system prompt. The redesign made all copy sentence case — there are no
+uppercased labels any more — and Maestro's text match is a full,
+case-sensitive regex, so any new text selector must match the catalogue string
+exactly (`frontend/src/i18n/locales/en/*.json`) or use a regex.
+
+Layout changes that flows depend on (see `SELECTORS.md` for the ids):
+- **Groups tab:** with no groups it shows an empty state with
+  `btn-create-group` / `btn-join-group`; with groups, those two live in the
+  "+" sheet (`btn-add-group`) at the end of the group pill strip. Flows tap
+  `btn-add-group` with `optional: true` first. A pill (`row-group-<id>`)
+  switches the in-place `panel-group`; it does not push `screen-group`.
+- **Direct tab:** DM requests are accepted on `dm/requests`, via
+  `row-dm-requests`.
+- **Sign out** asks first, in a native Alert with no testID: after
+  `btn-sign-out`, tap the label `"Sign out"` (`auth:shell.signOutTitle`; es
+  `"Cerrar sesión"`). No flow signs out today.
+- **Search** puts its field at the top with the hits right under it, so a
+  point tap to dismiss the keyboard can open a hit; `hideKeyboard` works there
+  (normal keyboard with a return key). The number pad (OTP / change-email
+  codes) has no return key, so `hideKeyboard` cannot close it.
 
 ## Known issues found by the first real run (2026-08-22)
 

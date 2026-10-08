@@ -1,15 +1,23 @@
 appId: com.pollis.mobile
 ---
-# Admin: create a group, then reach it from the Groups tab header (no channel).
+# Admin: create a group, then reach it from the Groups tab's group pill strip
+# (no channel). A pill (row-group-<id>) switches the panel in place on the tab
+# — it does not push group/[id] — so the anchor is panel-group, not screen-group.
+# The pill id is matched as a 26-char ULID so the regex cannot also hit the
+# panel's own row-group-members / -invite / -settings / -requests.
 - runFlow: ../../subflows/sign-in.yaml
 - tapOn:
     id: "tab-groups"
+- tapOn:
+    id: "btn-add-group"
+    optional: true
 - tapOn:
     id: "btn-create-group"
 - tapOn:
     id: "input-group-name"
 - inputText: "${GROUP_NAME}"
-- tapOn: "CREATE GROUP"
+- tapOn:
+    id: "btn-submit-group"
 - extendedWaitUntil:
     visible:
       id: "screen-group"
@@ -19,7 +27,7 @@ appId: com.pollis.mobile
 - tapOn:
     id: "tab-groups"
 - tapOn:
-    id: "row-group-.*"
+    id: "row-group-[0-9A-Z]{26}"
 - assertVisible:
-    id: "screen-group"
+    id: "panel-group"
 - takeScreenshot: join-01-group-from-header

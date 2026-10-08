@@ -16,6 +16,9 @@ tags:
 
 # Make a group so we have a channel to post in.
 - tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
     id: "btn-create-group"
 # #General is opt-in (off by default, like desktop); these steps open it.
 - tapOn:
@@ -23,8 +26,9 @@ tags:
 - tapOn:
     id: "input-group-name"
 - inputText: "E2E Msg Group"
-- tapOn: "CREATE GROUP"
-# CREATE GROUP navigates straight into the new group's detail screen (not
+- tapOn:
+    id: "btn-submit-group"
+# Creating navigates straight into the new group's detail screen (not
 # back to the groups list) — see groups.yaml.
 - extendedWaitUntil:
     visible:
@@ -41,10 +45,10 @@ tags:
 - takeScreenshot: messaging-01-empty-channel
 
 # Send a message. The whole message row collapses into ONE compound
-# accessibility node (Pressable sets accessibilityLabel={`${name}: ${text}`}
-# in chat/[id].tsx), which does NOT include the "sending…"/timestamp text —
-# so that status is not independently queryable, and a bare-text selector
-# like "hello from maestro" never matches the compound "name: text" label
+# accessibility node (components/chat/MessageRow.tsx sets
+# accessibilityLabel to "<name>: <text>, <status or time>"), so the
+# "sending…"/timestamp text is not independently queryable, and a bare-text
+# selector like "hello from maestro" never matches the compound label
 # (Maestro requires a full match, not substring — use a `.*...*` regex, or
 # better, the stable `row-message-<id>` testID).
 # The send tap below happens with the keyboard UP, on purpose: if the keyboard

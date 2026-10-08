@@ -19,12 +19,21 @@ tags:
     direction: DOWN
 - tapOn:
     id: "row-export-archive"
-- extendedWaitUntil:
-    visible:
+# The summary and the share button render UNDER the row once the archive is
+# written, and the redesigned Security page puts "Your data" near the bottom
+# (only the Account section follows), so scrollUntilVisible may have stopped
+# with the row at the bottom edge and the new content below the fold. Scroll
+# to each rather than asserting in place; scrollUntilVisible keeps retrying
+# until its timeout, so it also waits out the export itself.
+- scrollUntilVisible:
+    element:
       id: "text-export-summary"
+    direction: DOWN
     timeout: 15000
-- assertVisible:
-    id: "btn-export-share"
+- scrollUntilVisible:
+    element:
+      id: "btn-export-share"
+    direction: DOWN
 - takeScreenshot: export-01-summary
 # A fresh account has no attachments, so the opt-in download offer must NOT
 # appear — the export stayed offline.
