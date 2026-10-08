@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { View, Text, Pressable } from "react-native";
+import { View, Text, Pressable, ScrollView, useWindowDimensions } from "react-native";
 import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
-import { semantic, type as ty, r } from "../../theme/tokens";
+import { Button, Group, ListRow } from "../ui";
+import { fonts, layout, semantic, type as ty, r } from "../../theme/tokens";
 import { SheetOverlay } from "./SheetOverlay";
-import { upper } from "../../i18n";
+import { MessageBodyInline } from "./MessageBody";
 import type { Message } from "../../hooks/queries";
 
 const QUICK_EMOJI = ["👍", "❤️", "😂", "🎉", "🔥", "🙏"];
@@ -14,68 +15,25 @@ const QUICK_EMOJI = ["👍", "❤️", "😂", "🎉", "🔥", "🙏"];
 type CopyState = "idle" | "copied" | "failed";
 const COPY_FEEDBACK_MS = 2000;
 
-function ActionButton({
-  icon,
-  label,
-  tone = "default",
-  onPress,
-  testID,
-  copyState,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  tone?: "default" | "accent" | "danger";
-  onPress: () => void;
-  testID?: string;
-  copyState?: CopyState;
-}) {
-  const color =
-    tone === "danger"
-      ? semantic.danger
-      : tone === "accent"
-        ? semantic.accent
-        : semantic.ink;
-  return (
-    <Pressable
-      onPress={onPress}
-      testID={testID}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityValue={copyState ? { text: copyState } : undefined}
-      style={{
-        paddingVertical: 14,
-        paddingHorizontal: 12,
-        borderWidth: 1,
-        borderColor:
-          tone === "danger" ? "rgba(196,106,46,0.4)" : semantic.hairStrong,
-        borderRadius: r.sm,
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 10,
-      }}
-    >
-      {icon}
-      <Text
-        style={{
-          fontFamily: ty.body.fontFamily,
-          fontSize: 14,
-          color,
-        }}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
+const GLYPH = 22;
+
+// Copied / failed rows say so in their label; the accent is a second cue.
+function copyColor(state: CopyState) {
+  return state === "idle" ? semantic.text : semantic.accent;
 }
 
 /**
- * Long-press action sheet for a message: quick reactions, reply-in-thread,
- * save, copy text / copy link (verified feedback, sheet stays open so the
- * outcome is visible where the tap happened), plus edit/delete for the
- * sender's own messages.
+ * Long-press action sheet for a message (Actions.dc.html): the message
+ * quoted in a plain card, quick reactions, then grouped 52pt rows — reply in
+ * thread, add reaction, copy text / copy link (verified feedback; the sheet
+ * stays open so the outcome shows where the tap happened), save — and a
+ * separate group for edit/delete on the sender's own messages or report on
+ * anyone else's.
  */
 export function MessageActionsSheet({
   target,
+  quoteName,
+  quoteTime,
   isOwn,
   isSaved,
   onReact,
@@ -90,6 +48,9 @@ export function MessageActionsSheet({
   onClose,
 }: {
   target: Message;
+  // Display name and time for the quoted message.
+  quoteName: string;
+  quoteTime: string;
   isOwn: boolean;
   isSaved: boolean;
   onReact: (emoji: string) => void;
@@ -105,6 +66,7 @@ export function MessageActionsSheet({
   onClose: () => void;
 }) {
   const { t } = useTranslation("chat");
+  const { height } = useWindowDimensions();
   const [textCopy, setTextCopy] = useState<CopyState>("idle");
   const [linkCopy, setLinkCopy] = useState<CopyState>("idle");
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -132,230 +94,166 @@ export function MessageActionsSheet({
       });
   };
 
+  const textCopyLabel =
+    textCopy === "copied"
+      ? t("mobile:chat.copied")
+      : textCopy === "failed"
+        ? t("mobile:chat.copyFailed")
+        : t("mobile:chat.copyText");
+  const linkCopyLabel =
+    linkCopy === "copied"
+      ? t("actions.copyLinkCopied")
+      : linkCopy === "failed"
+        ? t("actions.copyLinkFailed")
+        : t("actions.copyLink");
+
   return (
-    <SheetOverlay onClose={onClose}>
-      <View
-        style={{
-          flexDirection: "row",
-          justifyContent: "space-between",
-          gap: 8,
-          paddingVertical: 6,
-        }}
+    <SheetOverlay title={t("mobile:chat.messageSheetTitle")} onClose={onClose}>
+      {/* Scrolls when large text makes the sheet taller than the screen. */}
+      <ScrollView
+        style={{ maxHeight: height * 0.72 }}
+        contentContainerStyle={{ gap: 12 }}
+        bounces={false}
       >
-        {QUICK_EMOJI.map((emoji, ei) => (
-          <Pressable
-            key={emoji}
-            testID={`btn-react-${ei}`}
-            accessibilityRole="button"
-            accessibilityLabel={t("mobile:chat.reactWith", { emoji })}
-            onPress={() => onReact(emoji)}
-            style={{
-              width: 44,
-              height: 44,
-              alignItems: "center",
-              justifyContent: "center",
-              borderWidth: 1,
-              borderColor: semantic.hair,
-              borderRadius: r.sm,
-            }}
-          >
-            <Text style={{ fontSize: 22 }}>{emoji}</Text>
-          </Pressable>
-        ))}
-        <Pressable
-          testID="btn-react-more"
-          accessibilityRole="button"
-          accessibilityLabel={t("reactions.add")}
-          onPress={onOpenPicker}
+        {/* The message being acted on: a plain card, no edge stripe. */}
+        <View
+          accessible
           style={{
-            width: 44,
-            height: 44,
-            alignItems: "center",
-            justifyContent: "center",
-            borderWidth: 1,
-            borderColor: semantic.hairStrong,
-            borderRadius: r.sm,
-          }}
-        >
-          <Icon.plus color={semantic.ink} />
-        </Pressable>
-      </View>
-
-      <ActionButton
-        testID="btn-reply-thread"
-        icon={<Icon.thread color={semantic.ink} />}
-        label={t("actions.replyInThread")}
-        onPress={onReplyInThread}
-      />
-      <ActionButton
-        testID="btn-save"
-        icon={
-          <Icon.bookmark
-            color={isSaved ? semantic.accent : semantic.ink}
-          />
-        }
-        label={isSaved ? t("actions.removeBookmark") : t("actions.save")}
-        tone={isSaved ? "accent" : "default"}
-        onPress={onToggleSave}
-      />
-      <ActionButton
-        testID="btn-copy-text"
-        icon={
-          <Icon.copy
-            color={
-              textCopy === "copied"
-                ? semantic.accent
-                : textCopy === "failed"
-                  ? semantic.danger
-                  : semantic.ink
-            }
-          />
-        }
-        label={
-          textCopy === "copied"
-            ? t("mobile:chat.copied")
-            : textCopy === "failed"
-              ? t("mobile:chat.copyFailed")
-              : t("mobile:chat.copyText")
-        }
-        tone={
-          textCopy === "copied"
-            ? "accent"
-            : textCopy === "failed"
-              ? "danger"
-              : "default"
-        }
-        copyState={textCopy}
-        onPress={() => runCopy(onCopyText, setTextCopy)}
-      />
-      <ActionButton
-        testID="btn-copy-link"
-        icon={
-          <Icon.link
-            color={
-              linkCopy === "copied"
-                ? semantic.accent
-                : linkCopy === "failed"
-                  ? semantic.danger
-                  : semantic.ink
-            }
-          />
-        }
-        label={
-          linkCopy === "copied"
-            ? t("actions.copyLinkCopied")
-            : linkCopy === "failed"
-              ? t("actions.copyLinkFailed")
-              : t("actions.copyLink")
-        }
-        tone={
-          linkCopy === "copied"
-            ? "accent"
-            : linkCopy === "failed"
-              ? "danger"
-              : "default"
-        }
-        copyState={linkCopy}
-        onPress={() => runCopy(onCopyLink, setLinkCopy)}
-      />
-
-      {isOwn ? (
-        <>
-          <Pressable
-            onPress={onEdit}
-            testID="btn-edit"
-            accessibilityRole="button"
-            accessibilityLabel={t("actions.edit")}
-            style={{
-              paddingVertical: 14,
-              paddingHorizontal: 12,
-              borderWidth: 1,
-              borderColor: semantic.hairStrong,
-              borderRadius: r.sm,
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 10,
-            }}
-          >
-            <Icon.edit color={semantic.ink} />
-            <Text
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 14,
-                color: semantic.ink,
-              }}
-            >
-              {t("actions.edit")}
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={onDelete}
-            testID="btn-delete"
-            accessibilityRole="button"
-            accessibilityLabel={t("actions.delete")}
-            style={{
-              paddingVertical: 14,
-              paddingHorizontal: 12,
-              borderWidth: 1,
-              borderColor: "rgba(196,106,46,0.4)",
-              borderRadius: r.sm,
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 10,
-            }}
-          >
-            <Icon.exit color={semantic.danger} />
-            <Text
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 14,
-                color: semantic.danger,
-              }}
-            >
-              {t("actions.delete")}
-            </Text>
-          </Pressable>
-        </>
-      ) : null}
-
-      {!isOwn && onReport ? (
-        <Pressable
-          onPress={onReport}
-          testID="btn-report"
-          accessibilityRole="button"
-          accessibilityLabel={t("actions.report")}
-          style={{
-            paddingVertical: 14,
+            paddingVertical: 10,
             paddingHorizontal: 12,
+            borderRadius: r.md,
             borderWidth: 1,
-            borderColor: "rgba(196,106,46,0.4)",
-            borderRadius: r.sm,
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 10,
+            borderColor: semantic.hair,
+            backgroundColor: semantic.panel,
+            gap: 2,
           }}
         >
-          <Icon.flag color={semantic.danger} />
-          <Text style={{ fontFamily: ty.body.fontFamily, fontSize: 14, color: semantic.danger }}>
-            {t("actions.report")}
+          <Text style={[ty.section, { fontFamily: fonts.bold, color: semantic.dim }]}>
+            {`${quoteName} · ${quoteTime}`}
           </Text>
-        </Pressable>
-      ) : null}
+          {target.content ? (
+            <Text
+              numberOfLines={3}
+              style={{
+                fontFamily: fonts.regular,
+                fontSize: 15,
+                lineHeight: 21,
+                color: semantic.text,
+              }}
+            >
+              <MessageBodyInline text={target.content} emojiSize={16} />
+            </Text>
+          ) : null}
+        </View>
 
-      <Pressable
-        onPress={onClose}
-        testID="btn-action-cancel"
-        accessibilityRole="button"
-        accessibilityLabel={t("common:actions.cancel")}
-        style={{
-          paddingVertical: 14,
-          alignItems: "center",
-        }}
-      >
-        <Text style={[ty.label, { color: semantic.mute }]}>
-          {upper(t("common:actions.cancel"))}
-        </Text>
-      </Pressable>
+        <View
+          style={{
+            flexDirection: "row",
+            justifyContent: "space-between",
+            gap: 6,
+          }}
+        >
+          {QUICK_EMOJI.map((emoji, ei) => (
+            <Pressable
+              key={emoji}
+              testID={`btn-react-${ei}`}
+              accessibilityRole="button"
+              accessibilityLabel={t("mobile:chat.reactWith", { emoji })}
+              onPress={() => onReact(emoji)}
+              style={({ pressed }) => ({
+                width: layout.touchMin + 4,
+                height: layout.touchMin + 4,
+                borderRadius: (layout.touchMin + 4) / 2,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: pressed ? semantic.accentSoft : semantic.high,
+              })}
+            >
+              <Text style={{ fontSize: 24 }}>{emoji}</Text>
+            </Pressable>
+          ))}
+        </View>
+
+        <Group surface="high">
+          <ListRow
+            testID="btn-reply-thread"
+            glyph={<Icon.thread size={GLYPH} color={semantic.text} />}
+            name={t("actions.replyInThread")}
+            onPress={onReplyInThread}
+          />
+          <ListRow
+            testID="btn-react-more"
+            glyph={<Icon.smilePlus size={GLYPH} color={semantic.text} />}
+            name={t("reactions.add")}
+            onPress={onOpenPicker}
+          />
+          <ListRow
+            testID="btn-copy-text"
+            glyph={<Icon.copy size={GLYPH} color={copyColor(textCopy)} />}
+            name={textCopyLabel}
+            nameStyle={{ color: copyColor(textCopy) }}
+            onPress={() => runCopy(onCopyText, setTextCopy)}
+          />
+          <ListRow
+            testID="btn-copy-link"
+            glyph={<Icon.link size={GLYPH} color={copyColor(linkCopy)} />}
+            name={linkCopyLabel}
+            nameStyle={{ color: copyColor(linkCopy) }}
+            onPress={() => runCopy(onCopyLink, setLinkCopy)}
+          />
+          <ListRow
+            testID="btn-save"
+            glyph={
+              <Icon.bookmark
+                size={GLYPH}
+                color={isSaved ? semantic.accent : semantic.text}
+              />
+            }
+            name={isSaved ? t("actions.removeBookmark") : t("actions.save")}
+            onPress={onToggleSave}
+          />
+        </Group>
+
+        {isOwn ? (
+          <Group surface="high">
+            <ListRow
+              testID="btn-edit"
+              glyph={<Icon.pencil size={GLYPH} color={semantic.text} />}
+              name={t("actions.edit")}
+              onPress={onEdit}
+            />
+            {/* Destructive = label + trash icon + its own group, no third hue. */}
+            <ListRow
+              testID="btn-delete"
+              glyph={<Icon.trash size={GLYPH} color={semantic.danger} />}
+              name={t("actions.delete")}
+              nameStyle={{ fontFamily: fonts.semibold, color: semantic.danger }}
+              onPress={onDelete}
+            />
+          </Group>
+        ) : null}
+
+        {!isOwn && onReport ? (
+          <Group surface="high">
+            <ListRow
+              testID="btn-report"
+              glyph={<Icon.flag size={GLYPH} color={semantic.danger} />}
+              name={t("actions.report")}
+              nameStyle={{ fontFamily: fonts.semibold, color: semantic.danger }}
+              onPress={onReport}
+            />
+          </Group>
+        ) : null}
+
+        <Button
+          full
+          variant="subtle"
+          testID="btn-action-cancel"
+          onPress={onClose}
+        >
+          {t("common:actions.cancel")}
+        </Button>
+      </ScrollView>
     </SheetOverlay>
   );
 }

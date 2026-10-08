@@ -50,7 +50,7 @@ export function CustomEmojiImage({
         style={{
           fontFamily: fonts.mono400,
           fontSize: size * 0.7,
-          color: semantic.mute,
+          color: semantic.muted,
         }}
       >
         :{shortcode}:

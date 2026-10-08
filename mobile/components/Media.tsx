@@ -10,7 +10,7 @@
 // issue) can change without touching screens.
 
 import { useMemo } from "react";
-import { View, Text, StyleSheet } from "react-native";
+import { View, Text } from "react-native";
 import { Image } from "expo-image";
 import { useTranslation } from "react-i18next";
 import type { ImageStyle, StyleProp } from "react-native";
@@ -44,8 +44,21 @@ export function MediaImage({
 
   if (error) {
     return (
-      <View style={[styles.fallback, style]}>
-        <Text style={styles.fallbackText}>{t("ui.imageUnavailable")}</Text>
+      <View
+        style={[
+          {
+            borderRadius: r.md,
+            borderWidth: 1,
+            borderColor: semantic.hair,
+            backgroundColor: semantic.raised,
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 12,
+          },
+          style,
+        ]}
+      >
+        <Text style={[ty.meta, { textAlign: "center" }]}>{t("ui.imageUnavailable")}</Text>
       </View>
     );
   }
@@ -60,29 +73,10 @@ export function MediaImage({
       // expo-image must not keep its own copy of the decrypted bytes.
       cachePolicy="none"
       transition={150}
-      style={[styles.image, style]}
+      // Styles are inline (not StyleSheet.create) so the theme getters are
+      // read on every render and follow a live accent change.
+      style={[{ borderRadius: r.md, backgroundColor: semantic.raised }, style]}
       accessibilityLabel={attachment.filename}
     />
   );
 }
-
-const styles = StyleSheet.create({
-  image: {
-    borderRadius: r.lg,
-    backgroundColor: semantic.fieldBg,
-  },
-  fallback: {
-    borderRadius: r.lg,
-    borderWidth: 1,
-    borderColor: semantic.hair,
-    backgroundColor: semantic.fieldBg,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 12,
-  },
-  fallbackText: {
-    fontFamily: ty.rowSub.fontFamily,
-    fontSize: 11,
-    color: semantic.mute,
-  },
-});

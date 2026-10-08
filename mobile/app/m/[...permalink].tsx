@@ -2,9 +2,8 @@ import { useEffect, useState } from "react";
 import { Text } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
-import { Screen, Crumb, Ctx } from "../../components/ui";
+import { Screen, Header } from "../../components/ui";
 import { semantic, type as ty } from "../../theme/tokens";
-import { upper } from "../../i18n";
 import { useResolvePermalink } from "../../hooks/queries";
 import { useConversationRoute } from "../../hooks/useConversationRoute";
 import { permalinkMissCopy } from "../../lib/permalinks";
@@ -65,27 +64,23 @@ export default function PermalinkScreen() {
 
   return (
     <Screen testID="screen-permalink">
-      <Crumb
-        segs={[{ label: upper(t("mobile:permalink.title")), leaf: true }]}
-      />
+      <Header title={t("mobile:permalink.title")} />
       <Text
         testID={state === "missing" ? "permalink-unresolved" : "permalink-checking"}
-        style={{
-          fontFamily: ty.body.fontFamily,
-          fontSize: 13,
-          color: state === "missing" ? semantic.danger : semantic.mute,
-          paddingHorizontal: 18,
-          paddingTop: 14,
-        }}
+        accessibilityLiveRegion="polite"
+        style={[
+          ty.body,
+          {
+            color: state === "missing" ? semantic.text : semantic.muted,
+            paddingHorizontal: 16,
+            paddingTop: 16,
+          },
+        ]}
       >
         {state === "missing"
           ? permalinkMissCopy()
           : t("mobile:permalink.opening")}
       </Text>
-      <Ctx
-        cr={upper(t("mobile:permalink.context"))}
-        name={t("mobile:permalink.title")}
-      />
     </Screen>
   );
 }

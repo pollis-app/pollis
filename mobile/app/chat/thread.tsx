@@ -2,10 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, FlatList } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
-import { Screen, Crumb, Ctx } from "../../components/ui";
+import { Screen, Header } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
-import { timeLabel } from "../../components/chat/dates";
+import { GROUP_WINDOW_MS, timeLabel } from "../../components/chat/dates";
 import { MessageRow } from "../../components/chat/MessageRow";
 import { Composer } from "../../components/chat/Composer";
 import { authorName } from "../../lib/authorName";
@@ -20,7 +20,6 @@ import {
 import { useMentionCandidates } from "../../hooks/useMentionCandidates";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
-import { upper } from "../../i18n";
 
 /**
  * Slack-style thread screen (#831): the root message pinned at the top,
@@ -101,7 +100,13 @@ function ThreadScreen() {
   }, [newestId]);
 
   const renderRow = useCallback(
-    ({ item: m }: { item: Message }) => {
+    ({ item: m, index }: { item: Message; index: number }) => {
+      // Same sender again within the window hangs under the previous reply.
+      const prev = index > 0 ? replies[index - 1] : null;
+      const continued =
+        !!prev &&
+        prev.sender_id === m.sender_id &&
+        m.created_at - prev.created_at < GROUP_WINDOW_MS;
       const mine = currentUser?.id === m.sender_id;
       const name =
         authorName(m.sender_id, m.sender_username, currentUser) ??
@@ -119,6 +124,7 @@ function ThreadScreen() {
           pending={m.pending}
           failed={m.failed}
           edited={!!m.edited_at}
+          continued={continued}
           mentionNames={mentionNames}
           selfName={selfName}
           onPressAvatar={
@@ -133,7 +139,7 @@ function ThreadScreen() {
         />
       );
     },
-    [currentUser, router, t],
+    [currentUser, router, t, replies, mentionNames, selfName],
   );
 
   const rootName = root
@@ -157,43 +163,37 @@ function ThreadScreen() {
         />
       ) : null}
       <View
+        accessibilityRole="header"
         style={{
           flexDirection: "row",
           alignItems: "center",
           gap: 10,
-          paddingHorizontal: 18,
-          paddingVertical: 8,
+          paddingHorizontal: 16,
+          paddingTop: 14,
+          paddingBottom: 6,
         }}
       >
-        <Text style={[ty.label, { letterSpacing: 2.2 }]}>
-          {upper(t("chat:thread.replyCount", { count: replies.length }))}
+        <Text style={[ty.section, { color: semantic.muted }]}>
+          {t("chat:thread.replyCount", { count: replies.length })}
         </Text>
-        <View
-          style={{ flex: 1, height: 1, backgroundColor: semantic.hairSoft }}
-        />
+        <View style={{ flex: 1, height: 1, backgroundColor: semantic.hair }} />
       </View>
       {isLoading && replies.length === 0 ? (
         <Text
-          style={{
-            fontFamily: ty.body.fontFamily,
-            fontSize: 13,
-            color: semantic.mute,
-            paddingHorizontal: 18,
-            paddingTop: 4,
-          }}
+          style={[
+            ty.secondary,
+            { color: semantic.muted, paddingHorizontal: 16, paddingTop: 4 },
+          ]}
         >
           {t("thread.loading")}
         </Text>
       ) : null}
       {!isLoading && replies.length === 0 ? (
         <Text
-          style={{
-            fontFamily: ty.body.fontFamily,
-            fontSize: 13,
-            color: semantic.mute,
-            paddingHorizontal: 18,
-            paddingTop: 4,
-          }}
+          style={[
+            ty.secondary,
+            { color: semantic.muted, paddingHorizontal: 16, paddingTop: 4 },
+          ]}
         >
           {t("thread.empty")}
         </Text>
@@ -203,7 +203,12 @@ function ThreadScreen() {
 
   return (
     <Screen testID="screen-thread">
-      <Crumb segs={[{ label: upper(t("panel.thread")), leaf: true }]} />
+      <Header
+        title={t("panel.thread")}
+        subtitle={title !== t("panel.thread") ? title : undefined}
+        backTo={title !== t("panel.thread") ? title : undefined}
+        titleIcon={<Icon.thread size={15} color={semantic.dim} />}
+      />
       <FlatList
         ref={listRef}
         testID="list-thread"
@@ -212,50 +217,24 @@ function ThreadScreen() {
         renderItem={renderRow}
         ListHeaderComponent={header}
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingVertical: 4 }}
+        contentContainerStyle={{ paddingTop: 4, paddingBottom: 12 }}
       />
       {sendMessage.isError ? (
         <Text
-          style={{
-            fontFamily: ty.body.fontFamily,
-            fontSize: 12,
-            color: semantic.danger,
-            paddingHorizontal: 18,
-            paddingTop: 8,
-            paddingBottom: 4,
-          }}
+          accessibilityRole="alert"
+          style={[
+            ty.meta,
+            {
+              color: semantic.danger,
+              paddingHorizontal: 16,
+              paddingTop: 8,
+              paddingBottom: 4,
+            },
+          ]}
         >
           {(sendMessage.error as Error).message || t("mobile:thread.sendFailed")}
         </Text>
       ) : null}
-      <Ctx
-        cr={upper(t("panel.thread"))}
-        name={
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 6,
-              flex: 1,
-              minWidth: 0,
-            }}
-          >
-            <Icon.thread color={semantic.ink} />
-            <Text
-              numberOfLines={1}
-              ellipsizeMode="tail"
-              style={{
-                flex: 1,
-                fontFamily: ty.rowN.fontFamily,
-                fontSize: 15,
-                color: semantic.ink,
-              }}
-            >
-              {title}
-            </Text>
-          </View>
-        }
-      />
       <Composer
         draft={draft}
         onChangeDraft={setDraft}

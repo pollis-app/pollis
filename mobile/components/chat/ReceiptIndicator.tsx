@@ -34,7 +34,7 @@ export function ReceiptIndicator({
   }
   const allRead = readCount >= peerCount;
   const anyRead = readCount > 0;
-  const color = allRead ? semantic.accent : semantic.mute;
+  const color = allRead ? semantic.accent : semantic.muted;
   const label = allRead
     ? t("receipts.readByEveryone")
     : anyRead
@@ -51,17 +51,13 @@ export function ReceiptIndicator({
       style={{ flexDirection: "row", alignItems: "center", gap: 3 }}
     >
       {anyRead ? (
-        <Icon.checkCheck color={color} />
+        <Icon.checkCheck size={16} color={color} />
       ) : (
-        <Icon.check color={color} />
+        <Icon.check size={16} color={color} />
       )}
       {peerCount > 1 ? (
         <Text
-          style={{
-            fontFamily: ty.body.fontFamily,
-            fontSize: 10,
-            color,
-          }}
+          style={[ty.meta, { color }]}
         >
           {`${anyRead ? readCount : deliveredCount}/${peerCount}`}
         </Text>
