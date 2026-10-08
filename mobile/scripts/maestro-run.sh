@@ -121,7 +121,12 @@ mkdir -p "$OUT"
 FLOW_FILES=()
 if [ "$FLOW" = "all" ]; then
   for f in "$MAE"/flows/*.yaml; do
-    [ -e "$f" ] && FLOW_FILES+=("$f")
+    [ -e "$f" ] || continue
+    # ipad-* flows assert the regular-width two-pane; a phone renders compact.
+    if [ "$PLATFORM" != "ipad" ] && [[ "$(basename "$f")" == ipad-* ]]; then
+      continue
+    fi
+    FLOW_FILES+=("$f")
   done
 else
   FLOW_FILES=("$TARGET")
