@@ -74,6 +74,12 @@ export function PinKeypad({
   const { t } = useTranslation("common");
   return (
     <View
+      // Must stay a real native view. With no background or border, Fabric
+      // flattens it away while enabled and re-creates it when pointerEvents
+      // flips to "none" (busy); on Android that churn races view
+      // preallocation and the next padding update crashes the app ("Unable
+      // to find viewState for tag N" in updatePadding) on PIN submit.
+      collapsable={false}
       style={{
         alignItems: "center",
         gap: ROW_GAP,
