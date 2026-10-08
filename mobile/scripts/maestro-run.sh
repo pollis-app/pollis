@@ -81,6 +81,9 @@ case "$PLATFORM" in
       exit 1
     fi
     xcrun simctl boot "$UDID" 2>/dev/null || true
+    # Xcode 27: without this the XCTest driver never starts ("iOS driver not
+    # ready in time"). Idempotent; see the script's header.
+    "$HERE/scripts/maestro-ios-driver-fix.sh" || true
     # Xcode 27 ships no Simulator.app; the simulator runs headless, which
     # Maestro and `simctl io screenshot` are both fine with.
     open -a Simulator 2>/dev/null || true

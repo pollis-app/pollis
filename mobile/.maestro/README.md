@@ -115,6 +115,49 @@ takes one numbered screenshot of every reachable screen (`tour-01-…` to
 `tour-34-…`), so a layout or copy change can be compared before and after. It
 asserts nothing; collect the shots with `--debug-output <dir>`.
 
+## Visual before/after comparison
+
+For a re-skin or any layout change, shoot the tour on the old build and the new
+one, then pair them up:
+
+```bash
+# 1. "before": the tour on the pre-change Release build (kept, gitignored, at
+#    artifacts/baseline-before/{ios,android}/ — 34 shots each, 2026-10-04/05)
+# 2. build + install the working tree, then shoot "after"
+mobile/scripts/build-release-sims.sh both            # or ios | android
+mobile/scripts/maestro-run.sh tour ios               # -> artifacts/<date>/ios/tour-*.png
+mobile/scripts/maestro-run.sh tour android
+# 3. compare
+NAME=ios mobile/scripts/visual-compare.sh \
+  mobile/.maestro/artifacts/baseline-before/ios mobile/.maestro/artifacts/<date>/ios
+open mobile/.maestro/artifacts/compare/<run>/index.html
+```
+
+`visual-compare.sh` pairs `tour-NN-*.png` by name (falling back to the `NN`
+number when a slug was renamed) and writes, under the gitignored
+`artifacts/compare/<timestamp>[-NAME]/`: `side/<name>.png` — one labelled
+BEFORE | AFTER image per pair (composited by a small Swift helper, so nothing
+to install; one image per screen is also what a reviewing agent can open);
+`index.html` — the contact sheet, every pair side by side with a
+changed / identical / only-before / only-after tag and a "hide identical"
+toggle; `summary.txt`. The tag is a byte comparison, not a perceptual diff:
+the status-bar clock and each run's fresh signup handle make practically every
+shot "changed" even between two runs of the same build, so the review is by
+eye. Set `PREFIX=` to compare a gallery other than the tour.
+Screenshots are never committed — `artifacts/` is gitignored.
+
+## iOS driver under Xcode 27
+
+Maestro 2.11.0's iOS driver never comes up under Xcode 27 ("iOS driver not
+ready in time", on every simulator, whatever `MAESTRO_DRIVER_STARTUP_TIMEOUT`
+is): its bundle runs a unit-test class before the HTTP-server test, and Xcode
+27's XCTest then blocks after the first test in
+`XCTCrashLogTracker.waitForPendingCrashlogs()`, so the server never starts.
+`mobile/scripts/maestro-ios-driver-fix.sh` skips that class in the driver's
+`.xctestrun` inside `~/.maestro/lib/maestro-ios-driver.jar` (backup kept as
+`.orig`, `--revert` restores it). `maestro-run.sh` applies it on every iOS run,
+so a Maestro reinstall heals itself; drop both once Maestro ships the fix.
+
 ## Two-client flows
 
 **Join requests (automated):** `mobile/scripts/maestro-join-request.sh <admin-device> <peer-device>`

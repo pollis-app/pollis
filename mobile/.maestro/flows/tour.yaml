@@ -165,6 +165,12 @@ tags:
 - takeScreenshot: tour-16-conversation-info
 - tapOn:
     id: "btn-back"
+# The back transition can leave the row briefly absent from the iOS
+# accessibility tree; a bare longPressOn then fails although the message shows.
+- extendedWaitUntil:
+    visible:
+      id: "row-message-.*"
+    timeout: 10000
 - longPressOn:
     id: "row-message-.*"
 - extendedWaitUntil:
