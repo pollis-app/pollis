@@ -1,15 +1,5 @@
 {
   "auth": {
-    "crumb": {
-      "auth": "认证",
-      "emergencyKit": "应急工具包",
-      "identify": "身份验证",
-      "initializing": "初始化",
-      "pairDevice": "配对设备",
-      "setDevicePin": "设置设备 PIN 码",
-      "unlockDevice": "解锁设备",
-      "verifyEmail": "验证邮箱"
-    },
     "email": {
       "intro": "输入你的邮箱，我们会发送一个验证码。",
       "sendFailed": "无法发送验证码。请检查网络连接后重试。",
@@ -92,14 +82,13 @@
     "openThread_other": "打开话题，{{count}} 条回复",
     "reactWith": "用 {{emoji}} 回应",
     "reactionPillReacted_other": "{{emoji}} {{count}} 个回应，包括你",
-    "sendFailed": "无法发送消息。"
+    "sendFailed": "无法发送消息。",
+    "viewProfile": "查看个人资料"
   },
   "common": {
     "working": "处理中…"
   },
   "conversationInfo": {
-    "backToConversation": "返回对话",
-    "ctxName": "{{title}} · 信息",
     "fallbackTitle": "对话",
     "info": "信息",
     "memberSelf": "@{{handle}} · 你",
@@ -119,7 +108,9 @@
     "requestsWaiting_other": "消息请求，{{count}} 条待处理",
     "ownPreview": "你：{{text}}",
     "noMatches": "没有匹配的对话。",
-    "emptyHint": "通过用户名或邮箱与他人开始对话。"
+    "emptyHint": "通过用户名或邮箱与他人开始对话。",
+    "previewDeleted": "消息已删除",
+    "previewAttachment": "附件"
   },
   "dm": {
     "backToInbox": "返回收件箱",
@@ -148,12 +139,9 @@
     },
     "detail": {
       "adminCount_other": "{{count}} 位管理员",
-      "adminSection": "管理",
       "loadingChannels": "正在加载频道…",
       "memberCount_other": "{{count}} 位成员",
       "menuLabel": "群组菜单",
-      "moreMembers_other": "+{{count}}",
-      "settingsSub": "重命名、频道、危险区域",
       "textChannels": "文字频道"
     },
     "discover": {
@@ -167,7 +155,6 @@
     },
     "emoji": {
       "adminsOnly": "只有群组管理员才能添加或移除表情。",
-      "ctxTitle": "{{name}} 的表情",
       "empty": "还没有自定义表情。",
       "pickAndUpload": "选择图片并上传",
       "sizeKb_other": "{{count}} KB",
@@ -176,7 +163,6 @@
     "invite": {
       "blurb": "对方下次打开 Pollis 时会看到邀请。",
       "createLinkFailed": "无法创建邀请链接。",
-      "crumb": "邀请",
       "linkBlurb": "任何拿到链接的人都能加入。链接只显示一次。",
       "linkCreated": "链接已创建，请立即复制。",
       "linkOnce": "之后无法再查看此链接。如需稍后分享，请新建一个。",
@@ -205,7 +191,6 @@
     },
     "new": {
       "blurb": "只有成员能看到群组详情。",
-      "crumb": "新建",
       "descriptionLabel": "描述（可选）",
       "descriptionPlaceholder": "这个群组是做什么的？",
       "title": "新群组",
@@ -260,7 +245,6 @@
   "groups": {
     "acceptInviteLabel": "接受邀请",
     "declineInviteLabel": "拒绝邀请",
-    "empty": "还没有群组。创建一个开始吧。",
     "loading": "正在加载群组…",
     "pendingInvites": "待处理的邀请",
     "title": "群组",
@@ -293,7 +277,6 @@
     "restartRequired": "重启 Pollis 以切换布局方向。"
   },
   "permalink": {
-    "context": "链接",
     "opening": "正在打开消息…",
     "title": "消息链接"
   },

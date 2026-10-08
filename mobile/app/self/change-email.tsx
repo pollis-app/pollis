@@ -150,10 +150,7 @@ function ChangeEmail() {
               })}
             >
               <Field
-                // React 19 passes `ref` to function components as a prop, and
-                // Field spreads its rest props onto the TextInput; Field's
-                // prop type just doesn't declare it yet.
-                {...({ ref: currentCodeRef } as object)}
+                ref={currentCodeRef}
                 value={currentCode}
                 onChangeText={(v) =>
                   setCurrentCode(v.replace(/[^0-9]/g, "").slice(0, CODE_LENGTH))

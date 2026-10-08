@@ -2,9 +2,8 @@ import { useRef, useState } from "react";
 import { View, Text, TextInput, Pressable } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Trans, useTranslation } from "react-i18next";
-import { Screen, Body, Button, BottomAction } from "../../components/ui";
+import { Screen, Header, Body, Button, BottomAction } from "../../components/ui";
 import { Icon } from "../../components/icons";
-import { BackLink } from "../../components/auth/BackLink";
 import { Heading } from "../../components/auth/Heading";
 import { AuthError } from "../../components/auth/AuthError";
 import { semantic, fonts, r } from "../../theme/tokens";
@@ -46,9 +45,9 @@ export default function AuthOTP() {
 
   return (
     <Screen testID="screen-auth-otp" centered>
-      <BackLink
-        label={t("mobile:auth.otp.useDifferentEmail")}
-        onPress={() => router.back()}
+      <Header
+        bordered={false}
+        backLabel={t("mobile:auth.otp.useDifferentEmail")}
       />
       <Body contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, gap: 28 }}>
         <Heading

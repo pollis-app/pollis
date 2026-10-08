@@ -1,15 +1,5 @@
 {
   "auth": {
-    "crumb": {
-      "auth": "المصادقة",
-      "emergencyKit": "حقيبة الطوارئ",
-      "identify": "التعريف",
-      "initializing": "التهيئة",
-      "pairDevice": "إقران الجهاز",
-      "setDevicePin": "تعيين رمز PIN للجهاز",
-      "unlockDevice": "إلغاء قفل الجهاز",
-      "verifyEmail": "التحقق من البريد"
-    },
     "email": {
       "intro": "أدخل بريدك الإلكتروني وسنرسل لك رمزًا.",
       "sendFailed": "تعذّر إرسال الرمز. تحقق من اتصالك وحاول مرة أخرى.",
@@ -102,14 +92,13 @@
     "reactionPillReacted_other": "{{emoji}} {{count}} تفاعل، وقد تفاعلت",
     "reactionPillReacted_two": "{{emoji}} {{count}} تفاعلان، وقد تفاعلت",
     "reactionPillReacted_zero": "{{emoji}} {{count}} تفاعل، وقد تفاعلت",
-    "sendFailed": "تعذّر إرسال الرسالة."
+    "sendFailed": "تعذّر إرسال الرسالة.",
+    "viewProfile": "عرض الملف الشخصي"
   },
   "common": {
     "working": "جارٍ العمل…"
   },
   "conversationInfo": {
-    "backToConversation": "العودة إلى المحادثة",
-    "ctxName": "{{title}} · معلومات",
     "fallbackTitle": "محادثة",
     "info": "معلومات",
     "memberSelf": "‎@{{handle}}‎ · أنت",
@@ -134,7 +123,9 @@
     "requestsWaiting_other": "طلبات المراسلة، {{count}} طلب بالانتظار",
     "ownPreview": "أنت: {{text}}",
     "noMatches": "لا توجد محادثات مطابقة.",
-    "emptyHint": "ابدأ محادثة مع شخص باستخدام اسم المستخدم أو البريد الإلكتروني."
+    "emptyHint": "ابدأ محادثة مع شخص باستخدام اسم المستخدم أو البريد الإلكتروني.",
+    "previewDeleted": "تم حذف الرسالة",
+    "previewAttachment": "مرفق"
   },
   "dm": {
     "backToInbox": "العودة إلى الوارد",
@@ -173,7 +164,6 @@
       "adminCount_few": "{{count}} مشرفين",
       "adminCount_many": "{{count}} مشرفًا",
       "adminCount_other": "{{count}} مشرف",
-      "adminSection": "الإدارة",
       "loadingChannels": "جارٍ تحميل القنوات…",
       "memberCount_zero": "{{count}} عضو",
       "memberCount_one": "{{count}} عضو",
@@ -182,13 +172,6 @@
       "memberCount_many": "{{count}} عضوًا",
       "memberCount_other": "{{count}} عضو",
       "menuLabel": "قائمة المجموعة",
-      "moreMembers_zero": "‎+{{count}}",
-      "moreMembers_one": "‎+{{count}}",
-      "moreMembers_two": "‎+{{count}}",
-      "moreMembers_few": "‎+{{count}}",
-      "moreMembers_many": "‎+{{count}}",
-      "moreMembers_other": "‎+{{count}}",
-      "settingsSub": "إعادة التسمية، القنوات، منطقة الخطر",
       "textChannels": "القنوات النصية"
     },
     "discover": {
@@ -202,7 +185,6 @@
     },
     "emoji": {
       "adminsOnly": "لا يمكن إلا لمشرفي المجموعة إضافة الرموز التعبيرية أو إزالتها.",
-      "ctxTitle": "الرموز التعبيرية لـ {{name}}",
       "empty": "لا توجد رموز تعبيرية مخصصة بعد.",
       "pickAndUpload": "اختيار صورة ورفعها",
       "sizeKb_zero": "{{count}} ك.ب",
@@ -216,7 +198,6 @@
     "invite": {
       "blurb": "سيرون الدعوة في المرة القادمة التي يفتحون فيها Pollis.",
       "createLinkFailed": "تعذّر إنشاء رابط الدعوة.",
-      "crumb": "دعوة",
       "linkBlurb": "يمكن لأي شخص لديه الرابط الانضمام. لن تراه إلا مرة واحدة.",
       "linkCreated": "تم إنشاء الرابط. انسخه الآن.",
       "linkOnce": "لن ترى هذا الرابط مرة أخرى. لمشاركته لاحقًا، أنشئ رابطًا جديدًا.",
@@ -245,7 +226,6 @@
     },
     "new": {
       "blurb": "لا يرى تفاصيل المجموعة إلا الأعضاء.",
-      "crumb": "جديدة",
       "descriptionLabel": "الوصف (اختياري)",
       "descriptionPlaceholder": "ما الغرض من هذه المجموعة؟",
       "title": "مجموعة جديدة",
@@ -305,7 +285,6 @@
   "groups": {
     "acceptInviteLabel": "قبول الدعوة",
     "declineInviteLabel": "رفض الدعوة",
-    "empty": "لا توجد مجموعات بعد. أنشئ واحدة للبدء.",
     "loading": "جارٍ تحميل المجموعات…",
     "pendingInvites": "الدعوات قيد الانتظار",
     "title": "المجموعات",
@@ -338,7 +317,6 @@
     "restartRequired": "أعد تشغيل Pollis لتبديل اتجاه الواجهة."
   },
   "permalink": {
-    "context": "رابط",
     "opening": "جارٍ فتح الرسالة…",
     "title": "رابط الرسالة"
   },

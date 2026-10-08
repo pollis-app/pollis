@@ -1,15 +1,5 @@
 {
   "auth": {
-    "crumb": {
-      "auth": "Вхід",
-      "emergencyKit": "Аварійний комплект",
-      "identify": "Ідентифікація",
-      "initializing": "Ініціалізація",
-      "pairDevice": "Додати пристрій",
-      "setDevicePin": "PIN-код пристрою",
-      "unlockDevice": "Розблокування",
-      "verifyEmail": "Підтвердження пошти"
-    },
     "email": {
       "intro": "Введіть пошту, і ми надішлемо код.",
       "sendFailed": "Не вдалося надіслати код. Перевірте з'єднання та спробуйте ще раз.",
@@ -98,14 +88,13 @@
     "reactionPillReacted_many": "{{emoji}} {{count}} реакцій, ви відреагували",
     "reactionPillReacted_one": "{{emoji}} {{count}} реакція, ви відреагували",
     "reactionPillReacted_other": "{{emoji}} {{count}} реакції, ви відреагували",
-    "sendFailed": "Не вдалося надіслати повідомлення."
+    "sendFailed": "Не вдалося надіслати повідомлення.",
+    "viewProfile": "Переглянути профіль"
   },
   "common": {
     "working": "Виконується…"
   },
   "conversationInfo": {
-    "backToConversation": "Назад до розмови",
-    "ctxName": "{{title}} · Інформація",
     "fallbackTitle": "Розмова",
     "info": "Інформація",
     "memberSelf": "@{{handle}} · ви",
@@ -128,7 +117,9 @@
     "requestsWaiting_other": "Запити на листування, {{count}} очікують",
     "ownPreview": "Ви: {{text}}",
     "noMatches": "Немає відповідних розмов.",
-    "emptyHint": "Почніть розмову з людиною за її ім’ям користувача або поштою."
+    "emptyHint": "Почніть розмову з людиною за її ім’ям користувача або поштою.",
+    "previewDeleted": "Повідомлення видалено",
+    "previewAttachment": "Вкладення"
   },
   "dm": {
     "backToInbox": "Назад до вхідних",
@@ -163,18 +154,12 @@
       "adminCount_few": "{{count}} адміністратори",
       "adminCount_many": "{{count}} адміністраторів",
       "adminCount_other": "{{count}} адміністратора",
-      "adminSection": "Адміністрування",
       "loadingChannels": "Завантаження каналів…",
       "memberCount_one": "{{count}} учасник",
       "memberCount_few": "{{count}} учасники",
       "memberCount_many": "{{count}} учасників",
       "memberCount_other": "{{count}} учасника",
       "menuLabel": "Меню групи",
-      "moreMembers_one": "+{{count}}",
-      "moreMembers_few": "+{{count}}",
-      "moreMembers_many": "+{{count}}",
-      "moreMembers_other": "+{{count}}",
-      "settingsSub": "Перейменування, канали, небезпечна зона",
       "textChannels": "Текстові канали"
     },
     "discover": {
@@ -188,7 +173,6 @@
     },
     "emoji": {
       "adminsOnly": "Додавати й прибирати емодзі можуть лише адміністратори групи.",
-      "ctxTitle": "Емодзі {{name}}",
       "empty": "Власних емодзі ще немає.",
       "pickAndUpload": "Вибрати зображення й вивантажити",
       "sizeKb_one": "{{count}} КБ",
@@ -200,7 +184,6 @@
     "invite": {
       "blurb": "Запрошення з'явиться, коли людина наступного разу відкриє Pollis.",
       "createLinkFailed": "Не вдалося створити посилання-запрошення.",
-      "crumb": "Запросити",
       "linkBlurb": "За посиланням може приєднатися будь-хто. Показати його можна лише один раз.",
       "linkCreated": "Посилання створено. Скопіюйте його зараз.",
       "linkOnce": "Більше ви це посилання не побачите. Щоб поділитися пізніше, створіть нове.",
@@ -229,7 +212,6 @@
     },
     "new": {
       "blurb": "Подробиці групи бачать лише учасники.",
-      "crumb": "Нова",
       "descriptionLabel": "Опис (необов'язково)",
       "descriptionPlaceholder": "Для чого ця група?",
       "title": "Нова група",
@@ -287,7 +269,6 @@
   "groups": {
     "acceptInviteLabel": "Прийняти запрошення",
     "declineInviteLabel": "Відхилити запрошення",
-    "empty": "Груп ще немає. Створіть першу, щоб почати.",
     "loading": "Завантаження груп…",
     "pendingInvites": "Запрошення в очікуванні",
     "title": "Групи",
@@ -320,7 +301,6 @@
     "restartRequired": "Перезапустіть Pollis, щоб змінити напрямок розкладки."
   },
   "permalink": {
-    "context": "Посилання",
     "opening": "Відкриваємо повідомлення…",
     "title": "Посилання на повідомлення"
   },

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { View, Text, Pressable, ScrollView, useWindowDimensions } from "react-native";
 import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
-import { Button, Group, ListRow } from "../ui";
+import { Group, ListRow } from "../ui";
 import { fonts, layout, semantic, type as ty, r } from "../../theme/tokens";
 import { SheetOverlay } from "./SheetOverlay";
 import { MessageBodyInline } from "./MessageBody";
@@ -108,7 +108,11 @@ export function MessageActionsSheet({
         : t("actions.copyLink");
 
   return (
-    <SheetOverlay title={t("mobile:chat.messageSheetTitle")} onClose={onClose}>
+    <SheetOverlay
+      title={t("mobile:chat.messageSheetTitle")}
+      onClose={onClose}
+      closeTestID="btn-action-cancel"
+    >
       {/* Scrolls when large text makes the sheet taller than the screen. */}
       <ScrollView
         style={{ maxHeight: height * 0.72 }}
@@ -244,15 +248,6 @@ export function MessageActionsSheet({
             />
           </Group>
         ) : null}
-
-        <Button
-          full
-          variant="subtle"
-          testID="btn-action-cancel"
-          onPress={onClose}
-        >
-          {t("common:actions.cancel")}
-        </Button>
       </ScrollView>
     </SheetOverlay>
   );

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { View, Text } from "react-native";
+import { View } from "react-native";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import {
@@ -19,7 +19,7 @@ import { SearchResultRow } from "../../components/search/SearchResultRow";
 import { CorpusFooter } from "../../components/search/CorpusFooter";
 import type { SearchSort } from "../../hooks/queries/useSearch";
 import { Icon } from "../../components/icons";
-import { semantic, space, layout, type as ty } from "../../theme/tokens";
+import { semantic, space, layout } from "../../theme/tokens";
 import {
   useDMChannels,
   useSearchMessages,
@@ -212,12 +212,13 @@ export default function Search() {
           icon={<Icon.search size={18} color={semantic.muted} />}
         />
         {trimmed.length >= 2 ? (
-          <Text
+          <Txt
+            variant="meta"
             accessibilityLiveRegion="polite"
-            style={[ty.meta, { paddingHorizontal: 4 }]}
+            style={{ paddingHorizontal: 4 }}
           >
             {t("search.resultCount", { count: totalResults })}
-          </Text>
+          </Txt>
         ) : null}
       </View>
       <Body

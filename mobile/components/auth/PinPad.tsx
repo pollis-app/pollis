@@ -1,6 +1,7 @@
 import { View, Text, Pressable } from "react-native";
 import { useTranslation } from "react-i18next";
 import { semantic, fonts, layout } from "../../theme/tokens";
+import { Icon } from "../icons";
 
 // Key diameter and the gaps between keys. 72pt circles keep every key well
 // above the 44pt minimum and leave room for 28pt digits.
@@ -112,16 +113,20 @@ export function PinKeypad({
                       : semantic.raised,
                 })}
               >
-                <Text
-                  maxFontSizeMultiplier={1.4}
-                  style={{
-                    fontFamily: fonts.medium,
-                    fontSize: back ? 26 : 28,
-                    color: back ? semantic.dim : semantic.text,
-                  }}
-                >
-                  {back ? "⌫" : k}
-                </Text>
+                {back ? (
+                  <Icon.backspace size={26} color={semantic.dim} />
+                ) : (
+                  <Text
+                    maxFontSizeMultiplier={1.4}
+                    style={{
+                      fontFamily: fonts.medium,
+                      fontSize: 28,
+                      color: semantic.text,
+                    }}
+                  >
+                    {k}
+                  </Text>
+                )}
               </Pressable>
             );
           })}

@@ -41,7 +41,6 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
-  Diamond,
   Volume2,
   Info,
   MessagesSquare,
@@ -56,6 +55,9 @@ import {
   SlidersHorizontal,
   Contrast,
   Paperclip,
+  Delete,
+  UserX,
+  Ban,
   type LucideIcon,
 } from "lucide-react-native";
 import { I18nManager, View } from "react-native";
@@ -133,6 +135,11 @@ export const Icon = {
   attach: wrap(Paperclip),
   more: wrap(Ellipsis),
   kebab: wrap(MoreVertical, 14),
+  // The PIN pad's delete key. Its arrow points at the text it erases, so it
+  // mirrors under RTL.
+  backspace: mirrored(Delete, 26),
+  userX: wrap(UserX),
+  ban: wrap(Ban),
 
   /* ── Objects ── */
   hash: wrap(Hash, 14),
@@ -159,7 +166,6 @@ export const Icon = {
   flag: wrap(Flag, 14),
   info: wrap(Info, 16),
   alert: wrap(AlertCircle, 14),
-  diamond: wrap(Diamond, 16),
 
   /* ── State ── */
   check: wrap(Check, 12),

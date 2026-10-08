@@ -20,6 +20,7 @@ import {
   type InfiniteData,
 } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
+import i18n from "../../i18n";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
 import type { MessageAttachment } from "../../types";
@@ -646,13 +647,13 @@ export function previewText(message: Message | undefined): string | null {
     return null;
   }
   if (message.deleted_at) {
-    return "Message deleted";
+    return i18n.t("mobile:direct.previewDeleted");
   }
   if (message.content) {
     return message.content;
   }
   if (message.attachments && message.attachments.length > 0) {
-    return "Attachment";
+    return i18n.t("mobile:direct.previewAttachment");
   }
   return null;
 }

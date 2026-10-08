@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
-import { Button, Group, ListRow } from "../ui";
+import { Group, ListRow } from "../ui";
 import { semantic } from "../../theme/tokens";
 import { SheetOverlay } from "./SheetOverlay";
 
@@ -22,7 +22,7 @@ export function ChannelMenuSheet({
 }) {
   const { t } = useTranslation("mobile");
   return (
-    <SheetOverlay title={title} onClose={onClose}>
+    <SheetOverlay title={title} onClose={onClose} closeTestID="btn-menu-cancel">
       <Group surface="high">
         <ListRow
           testID="btn-menu-info"
@@ -41,9 +41,6 @@ export function ChannelMenuSheet({
           />
         ) : null}
       </Group>
-      <Button full variant="subtle" testID="btn-menu-cancel" onPress={onClose}>
-        {t("common:actions.cancel")}
-      </Button>
     </SheetOverlay>
   );
 }

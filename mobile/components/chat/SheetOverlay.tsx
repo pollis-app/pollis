@@ -40,12 +40,15 @@ export function SheetOverlay({
   title,
   children,
   testID,
+  closeTestID = "btn-sheet-close",
 }: {
   onClose: () => void;
   title?: string;
   children: React.ReactNode;
   // Anchor on the sheet card for e2e flows.
   testID?: string;
+  // The Close button's id; sheets whose flows tap an older dismiss id pass it.
+  closeTestID?: string;
 }) {
   useTheme();
   const { t } = useTranslation("common");
@@ -155,7 +158,7 @@ export function SheetOverlay({
               </Text>
               <Pressable
                 onPress={onClose}
-                testID="btn-sheet-close"
+                testID={closeTestID}
                 accessibilityRole="button"
                 accessibilityLabel={t("actions.close")}
                 hitSlop={4}

@@ -1,15 +1,5 @@
 {
   "auth": {
-    "crumb": {
-      "auth": "Вход",
-      "emergencyKit": "Аварийный комплект",
-      "identify": "Идентификация",
-      "initializing": "Инициализация",
-      "pairDevice": "Подключение устройства",
-      "setDevicePin": "PIN-код устройства",
-      "unlockDevice": "Разблокировка",
-      "verifyEmail": "Подтверждение почты"
-    },
     "email": {
       "intro": "Введите почту, и мы пришлём код.",
       "sendFailed": "Не удалось отправить код. Проверьте подключение и попробуйте ещё раз.",
@@ -98,14 +88,13 @@
     "reactionPillReacted_many": "{{emoji}} {{count}} реакций, вы отреагировали",
     "reactionPillReacted_one": "{{emoji}} {{count}} реакция, вы отреагировали",
     "reactionPillReacted_other": "{{emoji}} {{count}} реакции, вы отреагировали",
-    "sendFailed": "Не удалось отправить сообщение."
+    "sendFailed": "Не удалось отправить сообщение.",
+    "viewProfile": "Открыть профиль"
   },
   "common": {
     "working": "Выполняется…"
   },
   "conversationInfo": {
-    "backToConversation": "Назад к переписке",
-    "ctxName": "{{title}} · Сведения",
     "fallbackTitle": "Переписка",
     "info": "Сведения",
     "memberSelf": "@{{handle}} · вы",
@@ -128,7 +117,9 @@
     "requestsWaiting_other": "Запросы на переписку, {{count}} ожидают",
     "ownPreview": "Вы: {{text}}",
     "noMatches": "Нет подходящих переписок.",
-    "emptyHint": "Начните переписку с человеком по его имени пользователя или почте."
+    "emptyHint": "Начните переписку с человеком по его имени пользователя или почте.",
+    "previewDeleted": "Сообщение удалено",
+    "previewAttachment": "Вложение"
   },
   "dm": {
     "backToInbox": "Назад к входящим",
@@ -163,18 +154,12 @@
       "adminCount_few": "{{count}} администратора",
       "adminCount_many": "{{count}} администраторов",
       "adminCount_other": "{{count}} администратора",
-      "adminSection": "Администрирование",
       "loadingChannels": "Загрузка каналов…",
       "memberCount_one": "{{count}} участник",
       "memberCount_few": "{{count}} участника",
       "memberCount_many": "{{count}} участников",
       "memberCount_other": "{{count}} участника",
       "menuLabel": "Меню группы",
-      "moreMembers_one": "+{{count}}",
-      "moreMembers_few": "+{{count}}",
-      "moreMembers_many": "+{{count}}",
-      "moreMembers_other": "+{{count}}",
-      "settingsSub": "Переименование, каналы, опасная зона",
       "textChannels": "Текстовые каналы"
     },
     "discover": {
@@ -188,7 +173,6 @@
     },
     "emoji": {
       "adminsOnly": "Добавлять и удалять эмодзи могут только администраторы группы.",
-      "ctxTitle": "Эмодзи {{name}}",
       "empty": "Своих эмодзи пока нет.",
       "pickAndUpload": "Выбрать изображение и загрузить",
       "sizeKb_one": "{{count}} КБ",
@@ -200,7 +184,6 @@
     "invite": {
       "blurb": "Приглашение появится, когда человек в следующий раз откроет Pollis.",
       "createLinkFailed": "Не удалось создать ссылку-приглашение.",
-      "crumb": "Приглашение",
       "linkBlurb": "По ссылке может вступить любой. Показать её можно только один раз.",
       "linkCreated": "Ссылка создана. Скопируйте её сейчас.",
       "linkOnce": "Больше вы эту ссылку не увидите. Чтобы поделиться позже, создайте новую.",
@@ -229,7 +212,6 @@
     },
     "new": {
       "blurb": "Подробности группы видят только участники.",
-      "crumb": "Новая",
       "descriptionLabel": "Описание (необязательно)",
       "descriptionPlaceholder": "Для чего эта группа?",
       "title": "Новая группа",
@@ -287,7 +269,6 @@
   "groups": {
     "acceptInviteLabel": "Принять приглашение",
     "declineInviteLabel": "Отклонить приглашение",
-    "empty": "Групп пока нет. Создайте первую, чтобы начать.",
     "loading": "Загрузка групп…",
     "pendingInvites": "Ожидающие приглашения",
     "title": "Группы",
@@ -320,7 +301,6 @@
     "restartRequired": "Перезапустите Pollis, чтобы изменить направление интерфейса."
   },
   "permalink": {
-    "context": "Ссылка",
     "opening": "Открываем сообщение…",
     "title": "Ссылка на сообщение"
   },

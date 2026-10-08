@@ -115,6 +115,14 @@ export function MessageRow({
   const showHeader = !continued;
   const statusLabel = failed ? t("status.failed") : null;
 
+  // The row is one accessible element, so the nested avatar button is out of
+  // a screen reader's reach; "View profile" is offered as a custom action
+  // instead. Activate and long press both open the message actions.
+  const a11yActions = [
+    ...(onLongPress ? [{ name: "activate" }, { name: "longpress" }] : []),
+    ...(onPressAvatar ? [{ name: "viewProfile", label: t("mobile:chat.viewProfile") }] : []),
+  ];
+
   return (
     <Pressable
       onLongPress={onLongPress}
@@ -123,6 +131,15 @@ export function MessageRow({
       accessibilityLabel={`${text ? t("preview.withSender", { name, text }) : name}, ${
         statusLabel ?? time
       }`}
+      accessibilityActions={a11yActions}
+      onAccessibilityAction={(e) => {
+        const action = e.nativeEvent.actionName;
+        if (action === "viewProfile") {
+          onPressAvatar?.();
+        } else if (action === "activate" || action === "longpress") {
+          onLongPress?.();
+        }
+      }}
       style={{
         flexDirection: "row",
         gap: AVATAR_GAP,

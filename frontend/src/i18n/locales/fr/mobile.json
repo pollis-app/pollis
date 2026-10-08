@@ -1,15 +1,5 @@
 {
   "auth": {
-    "crumb": {
-      "auth": "Authentification",
-      "emergencyKit": "Kit d'urgence",
-      "identify": "Identification",
-      "initializing": "Initialisation",
-      "pairDevice": "Associer l'appareil",
-      "setDevicePin": "Définir le code PIN",
-      "unlockDevice": "Déverrouiller l'appareil",
-      "verifyEmail": "Vérifier l'e-mail"
-    },
     "email": {
       "intro": "Saisissez votre e-mail et nous vous enverrons un code.",
       "sendFailed": "Impossible d'envoyer le code. Vérifiez votre connexion et réessayez.",
@@ -94,14 +84,13 @@
     "reactWith": "Réagir avec {{emoji}}",
     "reactionPillReacted_one": "{{emoji}} {{count}} réaction, vous avez réagi",
     "reactionPillReacted_other": "{{emoji}} {{count}} réactions, vous avez réagi",
-    "sendFailed": "Impossible d'envoyer le message."
+    "sendFailed": "Impossible d'envoyer le message.",
+    "viewProfile": "Voir le profil"
   },
   "common": {
     "working": "Traitement…"
   },
   "conversationInfo": {
-    "backToConversation": "Retour à la conversation",
-    "ctxName": "{{title}} · Infos",
     "fallbackTitle": "Conversation",
     "info": "Infos",
     "memberSelf": "@{{handle}} · vous",
@@ -122,7 +111,9 @@
     "requestsWaiting_other": "Demandes de message, {{count}} en attente",
     "ownPreview": "Vous : {{text}}",
     "noMatches": "Aucune conversation ne correspond.",
-    "emptyHint": "Démarrez une conversation avec quelqu'un via son nom d'utilisateur ou son e-mail."
+    "emptyHint": "Démarrez une conversation avec quelqu'un via son nom d'utilisateur ou son e-mail.",
+    "previewDeleted": "Message supprimé",
+    "previewAttachment": "Pièce jointe"
   },
   "dm": {
     "backToInbox": "Retour à la boîte de réception",
@@ -153,14 +144,10 @@
     "detail": {
       "adminCount_one": "{{count}} admin",
       "adminCount_other": "{{count}} admins",
-      "adminSection": "Administration",
       "loadingChannels": "Chargement des canaux…",
       "memberCount_one": "{{count}} membre",
       "memberCount_other": "{{count}} membres",
       "menuLabel": "Menu du groupe",
-      "moreMembers_one": "+{{count}}",
-      "moreMembers_other": "+{{count}}",
-      "settingsSub": "Renommer, canaux, zone de danger",
       "textChannels": "Canaux textuels"
     },
     "discover": {
@@ -174,7 +161,6 @@
     },
     "emoji": {
       "adminsOnly": "Seuls les administrateurs du groupe peuvent ajouter ou retirer des émojis.",
-      "ctxTitle": "Émojis de {{name}}",
       "empty": "Aucun émoji personnalisé pour l'instant.",
       "pickAndUpload": "Choisir une image et l'envoyer",
       "sizeKb_one": "{{count}} Ko",
@@ -184,7 +170,6 @@
     "invite": {
       "blurb": "L'invitation apparaîtra à sa prochaine ouverture de Pollis.",
       "createLinkFailed": "Impossible de créer le lien d'invitation.",
-      "crumb": "Inviter",
       "linkBlurb": "Toute personne qui a le lien peut rejoindre. Vous ne le verrez qu'une fois.",
       "linkCreated": "Lien créé. Copiez-le maintenant.",
       "linkOnce": "Vous ne reverrez plus ce lien. Pour le partager plus tard, créez-en un nouveau.",
@@ -213,7 +198,6 @@
     },
     "new": {
       "blurb": "Seuls les membres voient les détails du groupe.",
-      "crumb": "Nouveau",
       "descriptionLabel": "Description (facultative)",
       "descriptionPlaceholder": "À quoi sert ce groupe ?",
       "title": "Nouveau groupe",
@@ -269,7 +253,6 @@
   "groups": {
     "acceptInviteLabel": "Accepter l'invitation",
     "declineInviteLabel": "Refuser l'invitation",
-    "empty": "Aucun groupe pour l'instant. Créez-en un pour commencer.",
     "loading": "Chargement des groupes…",
     "pendingInvites": "Invitations en attente",
     "title": "Groupes",
@@ -302,7 +285,6 @@
     "restartRequired": "Redémarrez Pollis pour changer le sens de la mise en page."
   },
   "permalink": {
-    "context": "Lien",
     "opening": "Ouverture du message…",
     "title": "Lien vers le message"
   },

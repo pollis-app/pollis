@@ -3,9 +3,8 @@ import { ActivityIndicator, Platform, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { Screen, Body, Button, BottomAction, Field } from "../../components/ui";
+import { Screen, Header, Body, Button, BottomAction, Field } from "../../components/ui";
 import { Heading } from "../../components/auth/Heading";
-import { BackLink } from "../../components/auth/BackLink";
 import { AuthError } from "../../components/auth/AuthError";
 import { semantic, type as ty, fonts, r } from "../../theme/tokens";
 import { useClaimDeviceLink } from "../../hooks/queries";
@@ -52,10 +51,10 @@ export default function LinkSignIn() {
     <Screen testID="screen-auth-link" centered>
       {/* Back to email. The id predates the top bar: the tour flow taps it
           to return from this screen. */}
-      <BackLink
-        testID="btn-link-use-email"
-        label={t("link.useEmail")}
-        onPress={() => router.back()}
+      <Header
+        bordered={false}
+        backTestID="btn-link-use-email"
+        backLabel={t("link.useEmail")}
       />
       <Body contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, gap: 24 }}>
         <Heading title={t("link.scanTitle")} subtitle={manual ? t("link.codeIntro") : t("link.scanIntro")} />

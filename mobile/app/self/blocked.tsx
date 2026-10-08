@@ -1,7 +1,6 @@
 import { Text } from "react-native";
 import { useTranslation } from "react-i18next";
-import { Screen, Header, Body, Group, Avatar, Chip } from "../../components/ui";
-import { ActionRow } from "../../components/self/ActionRow";
+import { Screen, Header, Body, Group, Avatar, Chip, ActionRow } from "../../components/ui";
 import { ErrorText } from "../../components/self/SettingsField";
 import { type as ty, space } from "../../theme/tokens";
 import { activeLocale } from "../../i18n";

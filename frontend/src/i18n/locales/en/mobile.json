@@ -1,15 +1,5 @@
 {
   "auth": {
-    "crumb": {
-      "auth": "Auth",
-      "emergencyKit": "Emergency kit",
-      "identify": "Identify",
-      "initializing": "Initializing",
-      "pairDevice": "Pair device",
-      "setDevicePin": "Set device PIN",
-      "unlockDevice": "Unlock device",
-      "verifyEmail": "Verify email"
-    },
     "email": {
       "intro": "Enter your email and we'll send you a code.",
       "sendFailed": "Couldn't send code. Check your connection and try again.",
@@ -94,14 +84,13 @@
     "reactWith": "React with {{emoji}}",
     "reactionPillReacted_one": "{{emoji}} {{count}} reaction, you reacted",
     "reactionPillReacted_other": "{{emoji}} {{count}} reactions, you reacted",
-    "sendFailed": "Couldn't send message."
+    "sendFailed": "Couldn't send message.",
+    "viewProfile": "View profile"
   },
   "common": {
     "working": "Working…"
   },
   "conversationInfo": {
-    "backToConversation": "Back to conversation",
-    "ctxName": "{{title}} · Info",
     "fallbackTitle": "Conversation",
     "info": "Info",
     "memberSelf": "@{{handle}} · you",
@@ -122,7 +111,9 @@
     "requestsWaiting_other": "Message requests, {{count}} waiting",
     "ownPreview": "You: {{text}}",
     "noMatches": "No conversations match.",
-    "emptyHint": "Start a conversation with someone by their username or email."
+    "emptyHint": "Start a conversation with someone by their username or email.",
+    "previewDeleted": "Message deleted",
+    "previewAttachment": "Attachment"
   },
   "dm": {
     "backToInbox": "Back to inbox",
@@ -153,14 +144,10 @@
     "detail": {
       "adminCount_one": "{{count}} admin",
       "adminCount_other": "{{count}} admins",
-      "adminSection": "Admin",
       "loadingChannels": "Loading channels…",
       "memberCount_one": "{{count}} member",
       "memberCount_other": "{{count}} members",
       "menuLabel": "Group menu",
-      "moreMembers_one": "+{{count}}",
-      "moreMembers_other": "+{{count}}",
-      "settingsSub": "Rename, channels, danger zone",
       "textChannels": "Text channels"
     },
     "discover": {
@@ -174,7 +161,6 @@
     },
     "emoji": {
       "adminsOnly": "Only group admins can add or remove emoji.",
-      "ctxTitle": "{{name}} emoji",
       "empty": "No custom emoji yet.",
       "pickAndUpload": "Pick image & upload",
       "sizeKb_one": "{{count}} KB",
@@ -184,7 +170,6 @@
     "invite": {
       "blurb": "They'll see the invite the next time they open Pollis.",
       "createLinkFailed": "Couldn't create invite link.",
-      "crumb": "Invite",
       "linkBlurb": "Anyone with the link can join. You can only see it once.",
       "linkCreated": "Link created. Copy it now.",
       "linkOnce": "You won't see this link again. To share it later, make a new one.",
@@ -213,7 +198,6 @@
     },
     "new": {
       "blurb": "Only members can see the group's details.",
-      "crumb": "New",
       "descriptionLabel": "Description (optional)",
       "descriptionPlaceholder": "What's this group for?",
       "title": "New group",
@@ -269,7 +253,6 @@
   "groups": {
     "acceptInviteLabel": "Accept invite",
     "declineInviteLabel": "Decline invite",
-    "empty": "No groups yet. Create one to get started.",
     "loading": "Loading groups…",
     "pendingInvites": "Pending invites",
     "title": "Groups",
@@ -306,7 +289,6 @@
     "restartRequired": "Restart Pollis to switch the layout direction."
   },
   "permalink": {
-    "context": "Link",
     "opening": "Opening message…",
     "title": "Message link"
   },

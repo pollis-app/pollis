@@ -47,6 +47,7 @@ export function Txt({
   variant = "body",
   testID,
   accessibilityRole,
+  accessibilityLiveRegion,
 }: {
   children: React.ReactNode;
   style?: StyleProp<TextStyle>;
@@ -54,12 +55,16 @@ export function Txt({
   variant?: TypeKey;
   testID?: string;
   accessibilityRole?: AccessibilityRole;
+  // Announce changes (e.g. a result count) — "polite" on Android; iOS reads
+  // it when focused.
+  accessibilityLiveRegion?: "none" | "polite" | "assertive";
 }) {
   const v = ty[variant];
   return (
     <Text
       testID={testID}
       accessibilityRole={accessibilityRole}
+      accessibilityLiveRegion={accessibilityLiveRegion}
       numberOfLines={numberOfLines}
       style={[
         {
@@ -198,7 +203,9 @@ export const HeaderAction = IconButton;
 // `variant="large"`: a tab root's 28/700 title with actions and no back.
 // Back calls `onBack` or router.back(); the native edge swipe keeps working
 // because the stack itself is untouched. The back button keeps the
-// `btn-back` testID e2e flows use.
+// `btn-back` testID e2e flows use. Leave `title` out for a back-only bar
+// (auth steps, whose large heading sits in the body); pair it with
+// `bordered={false}`.
 export function Header({
   title,
   subtitle,
@@ -211,9 +218,11 @@ export function Header({
   bordered = true,
   onTitlePress,
   titleAccessibilityLabel,
+  backLabel: backLabelProp,
+  backTestID = "btn-back",
   testID,
 }: {
-  title: string;
+  title?: string;
   subtitle?: string;
   // Small glyph before the title (e.g. Icon.hash for a channel).
   titleIcon?: React.ReactNode;
@@ -229,17 +238,24 @@ export function Header({
   // Makes the title a button (e.g. a group menu).
   onTitlePress?: () => void;
   titleAccessibilityLabel?: string;
+  // Spoken label for the back button when "Back" / "Back to <x>" doesn't
+  // say where it goes (e.g. "Use a different email").
+  backLabel?: string;
+  // Screens whose e2e flows tap a specific back id pass it here.
+  backTestID?: string;
   testID?: string;
 }) {
   const router = useRouter();
   const { t } = useTranslation(["common", "mobile"]);
   const large = variant === "large";
   const showBack = !large && !hideBack;
-  const backLabel = backTo
-    ? t("mobile:ui.backTo", { name: backTo })
-    : t("common:actions.back");
+  const backLabel =
+    backLabelProp ??
+    (backTo ? t("mobile:ui.backTo", { name: backTo }) : t("common:actions.back"));
 
-  const titleBlock = (
+  const titleBlock = title === undefined ? (
+    <View style={{ flex: 1 }} />
+  ) : (
     <View style={{ flex: 1, minWidth: 0, justifyContent: "center" }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: space.xs }}>
         {titleIcon}
@@ -280,7 +296,7 @@ export function Header({
     >
       {showBack ? (
         <IconButton
-          testID="btn-back"
+          testID={backTestID}
           accessibilityLabel={backLabel}
           onPress={onBack ?? (() => router.back())}
           icon={<Icon.chevronLeft size={24} color={semantic.text} />}
@@ -292,7 +308,7 @@ export function Header({
         <Pressable
           onPress={onTitlePress}
           accessibilityRole="button"
-          accessibilityLabel={titleAccessibilityLabel ?? title}
+          accessibilityLabel={titleAccessibilityLabel ?? title ?? ""}
           style={{ flex: 1, minWidth: 0, minHeight: layout.touchMin, justifyContent: "center" }}
         >
           {titleBlock}
@@ -793,6 +809,59 @@ export function ListRow({
   );
 }
 
+/* ── ActionRow ────────────────────────────────────────────────────── */
+// A grouped-list row that carries its own button (Unblock, Revoke…). Unlike
+// ListRow the row itself is not one accessible element — that would swallow
+// the button — so the text block is one element with the full spoken label
+// and `action` is a second, separately focusable control.
+export function ActionRow({
+  glyph,
+  name,
+  sub,
+  action,
+  testID,
+  accessibilityLabel,
+  minHeight = 64,
+}: {
+  glyph?: React.ReactNode;
+  name: string;
+  sub?: string;
+  action?: React.ReactNode;
+  testID?: string;
+  accessibilityLabel?: string;
+  minHeight?: number;
+}) {
+  return (
+    <View
+      testID={testID}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: space.xl,
+        minHeight: Math.max(layout.touchMin, minHeight),
+        paddingVertical: space.sm,
+        paddingStart: space.xxl,
+        paddingEnd: space.lg,
+      }}
+    >
+      {glyph !== undefined ? (
+        <View style={{ minWidth: 22, alignItems: "center" }}>{glyph}</View>
+      ) : null}
+      <View
+        accessible
+        accessibilityLabel={accessibilityLabel ?? (sub ? `${name}, ${sub}` : name)}
+        style={{ flex: 1, minWidth: 0, gap: 2 }}
+      >
+        <Text numberOfLines={2} style={{ fontFamily: fonts.medium, fontSize: 16, color: semantic.text }}>
+          {name}
+        </Text>
+        {sub ? <Text style={ty.secondary}>{sub}</Text> : null}
+      </View>
+      {action}
+    </View>
+  );
+}
+
 /* ── Group ────────────────────────────────────────────────────────── */
 // Grouped list (You.dc.html): radius 14, raised fill, rows separated by
 // hairSoft lines. Pass ListRows as children; `title` adds a SectionTitle
@@ -879,7 +948,9 @@ export function Card({
 // Text input: raised fill, 1px edge border (accent while focused or when
 // `amber`), radius 12, min 44pt, 16pt text, accent cursor and selection.
 // Accepts every TextInput prop; `icon` / `trailing` sit inside the box.
+// `ref` reaches the TextInput (React 19 passes it as a plain prop).
 export function Field({
+  ref,
   icon,
   trailing,
   amber,
@@ -892,6 +963,7 @@ export function Field({
   autoCapitalize = "none",
   ...rest
 }: Omit<TextInputProps, "selectionColor" | "cursorColor" | "placeholderTextColor"> & {
+  ref?: React.Ref<TextInput>;
   icon?: React.ReactNode;
   trailing?: React.ReactNode;
   // Highlighted (e.g. an active verification code box).
@@ -923,6 +995,7 @@ export function Field({
     >
       {icon}
       <TextInput
+        ref={ref}
         testID={testID}
         accessibilityLabel={accessibilityLabel}
         placeholderTextColor={semantic.muted}
@@ -1047,134 +1120,5 @@ export function Body({
     >
       {children}
     </ScrollView>
-  );
-}
-
-/* ── Deprecated shims ─────────────────────────────────────────────── */
-// DEPRECATED: kept only so unmigrated screens compile. Use <Header> at the
-// top of the screen instead of <Crumb> (top) + <Ctx> (bottom back strip).
-
-// DEPRECATED: the old crumb tick. Renders a small accent dot.
-export function Diamond({ size = 7, fill = true }: { size?: number; fill?: boolean }) {
-  return (
-    <View
-      style={{
-        width: size,
-        height: size,
-        borderRadius: size / 2,
-        backgroundColor: fill ? semantic.accent : "transparent",
-        borderWidth: fill ? 0 : 1,
-        borderColor: semantic.dim,
-      }}
-    />
-  );
-}
-
-// DEPRECATED: use <Header> (pushed) or <Header variant="large"> (tab root).
-// Renders the leaf segment as a plain heading, no tracked capitals.
-export function Crumb({
-  segs,
-  end,
-  testID,
-}: {
-  segs: { label: string; leaf?: boolean }[];
-  end?: string;
-  testID?: string;
-}) {
-  const leaf = segs.find((s) => s.leaf) ?? segs[segs.length - 1];
-  return (
-    <View
-      testID={testID}
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: space.sm,
-        minHeight: layout.touchMin,
-        paddingHorizontal: space.xxl,
-      }}
-    >
-      <Text accessibilityRole="header" numberOfLines={1} style={[ty.heading, { flex: 1 }]}>
-        {leaf?.label ?? ""}
-      </Text>
-      {end ? <Text style={ty.meta}>{end}</Text> : null}
-    </View>
-  );
-}
-
-// DEPRECATED: the old bottom back strip. Use <Header> at the top. Still
-// renders where it is placed (bottom) so unmigrated screens keep a back
-// button with the `btn-back` testID.
-export function Ctx({
-  cr,
-  name,
-  actions,
-  testID,
-  hideBack,
-}: {
-  cr?: string;
-  name: React.ReactNode;
-  actions?: React.ReactNode;
-  testID?: string;
-  hideBack?: boolean;
-}) {
-  const router = useRouter();
-  const { t } = useTranslation("common");
-  return (
-    <View
-      testID={testID}
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: space.sm,
-        minHeight: layout.ctx,
-        paddingVertical: 4,
-        paddingHorizontal: space.sm,
-        borderTopWidth: 1,
-        borderTopColor: semantic.hairSoft,
-        backgroundColor: semantic.bg,
-      }}
-    >
-      {hideBack ? null : (
-        <IconButton
-          testID="btn-back"
-          accessibilityLabel={t("actions.back")}
-          onPress={() => router.back()}
-          icon={<Icon.chevronLeft size={24} color={semantic.text} />}
-        />
-      )}
-      <View style={{ flex: 1, minWidth: 0 }}>
-        {cr ? <Text numberOfLines={1} style={ty.meta}>{cr}</Text> : null}
-        {typeof name === "string" ? (
-          <Text numberOfLines={1} style={ty.heading}>
-            {name}
-          </Text>
-        ) : (
-          name
-        )}
-      </View>
-      {actions ? <View style={{ flexDirection: "row", alignItems: "center" }}>{actions}</View> : null}
-    </View>
-  );
-}
-
-// DEPRECATED: use IconButton / HeaderAction.
-export function CtxAct({
-  icon,
-  onPress,
-  testID,
-  accessibilityLabel,
-}: {
-  icon: React.ReactNode;
-  onPress?: () => void;
-  testID?: string;
-  accessibilityLabel?: string;
-}) {
-  return (
-    <IconButton
-      icon={icon}
-      onPress={onPress}
-      testID={testID}
-      accessibilityLabel={accessibilityLabel ?? ""}
-    />
   );
 }

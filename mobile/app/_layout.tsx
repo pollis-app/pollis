@@ -13,7 +13,7 @@ import {
 } from "@expo-google-fonts/geist";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { useObserver } from "mobx-react-lite";
-import { palette } from "../theme/tokens";
+import { semantic } from "../theme/tokens";
 import { drillIn, settingsPage } from "../lib/transitions";
 import { ThemeProvider } from "../components/theme";
 import { queryClient } from "../lib/queryClient";
@@ -94,7 +94,7 @@ export default function RootLayout() {
   void bridgeError;
 
   return (
-    <GestureHandlerRootView style={{ flex: 1, backgroundColor: palette.bg }}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: semantic.bg }}>
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
           <ThemeProvider>
@@ -106,10 +106,10 @@ export default function RootLayout() {
             <Stack
               screenOptions={{
                 headerShown: false,
-                contentStyle: { backgroundColor: palette.bg },
+                contentStyle: { backgroundColor: semantic.bg },
                 // Drilling further into a route (tab → group → channel) pushes
-                // the new screen in from the right; back reverses it. Settings
-                // pages override this (below). Timing lives in lib/transitions.
+                // the new screen in from the right; back reverses it. Timing
+                // lives in lib/transitions.
                 ...drillIn,
               }}
             >
@@ -130,14 +130,14 @@ export default function RootLayout() {
               <Stack.Screen name="group/discover" />
               <Stack.Screen name="dm/new" />
               <Stack.Screen name="dm/info" />
+              <Stack.Screen name="dm/requests" />
               <Stack.Screen name="conversation/info" />
               <Stack.Screen name="chat/[id]" />
               <Stack.Screen name="chat/thread" />
               <Stack.Screen name="user/[id]" />
               <Stack.Screen name="report" options={settingsPage} />
-              {/* Personal settings pages pop up from the bottom on iOS (fade on
-                  Android — see lib/transitions), pushing the current screen off
-                  and reversing on back — a full-screen push, not an overlay. */}
+              {/* Personal settings pages (settingsPage = drillIn since the
+                  redesign, so the edge swipe pops them like any push). */}
               <Stack.Screen
                 name="self/preferences"
                 options={settingsPage}

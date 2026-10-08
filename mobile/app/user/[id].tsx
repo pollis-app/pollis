@@ -276,7 +276,7 @@ function UserProfile() {
               />
               <ListRow
                 testID={isBlocked ? "btn-unblock" : "btn-block"}
-                glyph={<Icon.x size={20} color={semantic.text} />}
+                glyph={<Icon.userX size={20} color={semantic.text} />}
                 name={
                   blockPending
                     ? t("mobile:common.working")

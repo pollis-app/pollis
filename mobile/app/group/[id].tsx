@@ -1,8 +1,7 @@
 import { useCallback } from "react";
 import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
 import { observer } from "mobx-react-lite";
-import { Screen } from "../../components/ui";
-import { BackBar } from "../../components/groups/BackBar";
+import { Screen, Header } from "../../components/ui";
 import { GroupPanel } from "../../components/groups/GroupPanel";
 import { appStore } from "../../stores/appStore";
 
@@ -25,7 +24,18 @@ function GroupDetail() {
 
   return (
     <Screen testID="screen-group">
-      <BackBar />
+      {/* Back-only bar: the group panel below carries the title. With
+          nothing to pop (cold deep link / invite) back goes to the Groups tab. */}
+      <Header
+        bordered={false}
+        onBack={() => {
+          if (router.canGoBack()) {
+            router.back();
+          } else {
+            router.replace("/(tabs)/groups");
+          }
+        }}
+      />
       {groupId ? (
         <GroupPanel
           groupId={groupId}

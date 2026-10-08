@@ -11,9 +11,9 @@ import {
   Chip,
   Button,
   Field,
+  ActionRow,
 } from "../../components/ui";
 import { Icon } from "../../components/icons";
-import { ActionRow } from "../../components/self/ActionRow";
 import { ErrorText, Note } from "../../components/self/SettingsField";
 import { confirmSignOut } from "../../components/self/confirmSignOut";
 import { useSectionScroll } from "../../components/self/useSectionScroll";
@@ -468,7 +468,7 @@ export default function Security() {
           <Group title={t("mobile:self.security.safetyHeading")}>
             <ListRow
               testID="row-blocked-users"
-              glyph={<Icon.shield size={22} color={semantic.text} />}
+              glyph={<Icon.ban size={22} color={semantic.text} />}
               name={t("mobile:self.security.blockedUsers")}
               chevron
               onPress={() => router.push("/self/blocked")}

@@ -87,9 +87,10 @@ Rules that are easy to get wrong here:
 - **Every `toLocale*` / `Intl.*` call passes `activeLocale()`.** A bare
   `undefined` formats against the host locale and puts an English date under an
   Arabic heading (desktop's #902).
-- **Uppercase labels go through `upper(t(...))`**, never `.toUpperCase()` on
-  translated text (locale-invariant casing is wrong in Turkish and a no-op in
-  Arabic). The label style (`SELF`, `PREFERENCES`) makes this the common case.
+- **UI copy is sentence case** — no uppercased labels since the 2026-10
+  redesign. Where an uppercase string is genuinely needed (an acronym), use
+  `upper(t(...))`, never `.toUpperCase()` on translated text
+  (locale-invariant casing is wrong in Turkish and a no-op in Arabic).
 - **RTL is `I18nManager`.** `setLanguage` calls `forceRTL` for the language's
   `dir`, which React Native applies on the **next launch**; `LanguageSection`
   shows `mobile:language.restartRequired` until then (`layoutRestartPending`).
@@ -729,29 +730,36 @@ bottom sheets, AA contrast throughout (see "Design tokens").
 
 ```
 app/
-  _layout.tsx          root Stack, font loading, splash gate
+  _layout.tsx          root Stack (every route registered), fonts, splash gate
   index.tsx            redirect → /(auth)/email
   (auth)/              email → otp → pin → initializing (gestureEnabled: false)
   (tabs)/              groups · direct · search · self (custom <TabBar>)
-  group/[id].tsx       GroupDetail   (pushed; <Ctx> back bar, no tab bar)
-  chat/[id].tsx        TextChat      (pushed; <Ctx> + composer)
-  self/{preferences,user-settings,security}.tsx
+  group/[id].tsx       one group's channel panel (pushed, no tab bar)
+  group/*              new, invite, invite-links, members, settings, emoji, requests, discover
+  chat/[id].tsx        conversation (Header + list + composer); chat/thread.tsx
+  dm/{new,info,requests}.tsx · conversation/info.tsx · user/[id].tsx · report.tsx
+  self/*               preferences, user-settings, security, blocked, saved, …
 components/
-  ui.tsx               primitives: Screen, Header, IconButton, SectionTitle,
-                       ListRow, Group, Card, Field, Avatar, Chip/Pill, Badge,
-                       Button, Toggle, Dot, Divider, BottomAction, Body…
-  icons.tsx            monoline SVG icon set (Icon.*)
+  ui.tsx               primitives: Txt, Screen, Header, IconButton, SectionTitle,
+                       ListRow, ActionRow, Group, Card, Field, Avatar, Chip/Pill,
+                       Badge, Button, Toggle, Dot, Divider, BottomAction, Body
+  chat/SheetOverlay.tsx the one bottom sheet (every *Sheet is built on it)
+  icons.tsx            lucide wrapper (Icon.*, stroke 1.75)
   TabBar.tsx           custom bottom tab bar (accent active, unread badges)
-  PollisMark.tsx       auth-screen wordmark
-theme/tokens.ts        palette / semantic / type / r / space / layout (derive.ts: colour math)
+  auth|chat|direct|groups|search|self/   per-area pieces (rows, sheets, pads)
+theme/tokens.ts        semantic / type / fonts / r / space / layout (derive.ts: colour math)
 ```
 
-Navigation (2026-10 redesign): no native header — every screen draws a
-`<Header>` (components/ui.tsx) at the top, with a 44×44 back chevron at the
-top-left on pushed screens and the system edge swipe (every push, settings
-pages included, uses `drillIn`). Tab roots use `<Header variant="large">`.
-`<Crumb>` / `<Ctx>` (the old top crumb + bottom back strip) are deprecated
-shims pending migration. Sub-screens are stack pushes outside `(tabs)`.
+Navigation: no native header — every screen draws a `<Header>`
+(components/ui.tsx) at the top: a 44×44 back chevron top-left (`btn-back`,
+"Back" / "Back to <x>"), title 17/700, actions at the end. Pushed screens
+also get the system edge swipe (every push, settings pages included, uses
+`drillIn`). Tab roots use `<Header variant="large">` (no back). Leave out
+`title` for a back-only bar (auth steps, `group/[id]`, whose heading is in
+the body); `backLabel` / `backTestID` override the spoken label and id.
+There is no bottom back strip any more (`Ctx`/`Crumb` are gone). Auth
+screens disable the edge swipe, so their top-left back is the only way out.
+Sub-screens are stack pushes outside `(tabs)`.
 
 ## Backend integration — wired vs pending
 
@@ -985,9 +993,22 @@ no react-native) and the accent presets in `theme/accents.ts`.
   14/400, Section 13/600, Meta 12/400, Tab 12. Sentence case, no tracked
   capitals, nothing below 12; all text follows system font scaling.
 - `r` radii 4/10/12/14/16/20(sheet); `layout.touchMin` 44.
+- Font: Geist via `fonts.regular/medium/semibold/bold` (one family per
+  weight, never with `fontWeight`); spread a `type.*` step rather than
+  hand-setting size + family.
 
-UI rules: 44pt targets; one spoken label per row; start/end edges, never
-left/right; never a coloured stripe on one edge of a rounded box (emphasis is
-a full tint, a full border, weight, a dot or a count); no "end-to-end
-encrypted" copy. Titles and back live at the TOP (`<Header>`); bottom sheets
-are `SheetOverlay` (Modal, full-screen backdrop, title + Close, no handle).
+UI rules: two base colours — use `semantic.*` / `type.*`, never a hex or
+rgba in `app/` or `components/` (QrCode's black/white is the one deliberate
+exception, for scannability); icons/text on an accent fill use
+`semantic.onAccent`. 44pt targets (hitSlop/padding for small visuals); one
+spoken label per row (`ListRow` is one element; `ActionRow` when the row
+holds its own button; a message row exposes "View profile" as an
+accessibility action); headings `accessibilityRole="header"`; state never by
+colour alone; system font scaling stays on (`minHeight`, not `height`, on
+text containers); start/end edges, never left/right; never a coloured
+stripe on one edge of a rounded box (emphasis is a full tint, a full border,
+weight, a dot or a count); sentence case; no "end-to-end encrypted" copy.
+Titles and back live at the TOP (`<Header>`). Bottom sheets are
+`SheetOverlay` (Modal, full-screen backdrop, title + 44×44 Close —
+`btn-sheet-close`, or the sheet's `closeTestID` — no drag handle, no extra
+Cancel button): rows in `Group surface="high"`.
