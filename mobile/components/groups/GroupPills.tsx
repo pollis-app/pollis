@@ -1,8 +1,9 @@
-import { ScrollView, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
-import { Chip, Dot, IconButton } from "../ui";
+import { Dot, IconButton } from "../ui";
 import { Icon } from "../icons";
-import { semantic, space } from "../../theme/tokens";
+import { semantic, fonts, space, layout } from "../../theme/tokens";
+import { useTheme } from "../theme";
 
 export interface GroupPill {
   id: string;
@@ -10,10 +11,12 @@ export interface GroupPill {
   unread: boolean;
 }
 
-// The horizontal strip of group-name pills at the top of the Groups tab
-// (Main.dc.html): 32pt pills in 44pt targets. Selected = accent tint + accent
-// border + accent text; unread = a dot before the name; read = dim. Ends with
-// "+" (create or find a group). Tapping a pill selects that group in place.
+// The horizontal strip of group-name pills at the top of the Groups tab: 32pt
+// pills in 44pt targets, no borders. Selected = accent fill + dark (onAccent)
+// text; the rest are the inverse, a dark fill + accent text. Unread = a dot
+// before the name, plus a bolder label, so it is not told by colour alone.
+// Ends with "+" (create or find a group) as an accent circle with a dark
+// glyph. Tapping a pill selects that group in place.
 export function GroupPills({
   groups,
   selectedId,
@@ -26,6 +29,8 @@ export function GroupPills({
   onAdd: () => void;
 }) {
   const { t } = useTranslation("mobile");
+  // Re-render on a live accent change; the colours below are getters.
+  useTheme();
   return (
     <View accessibilityLabel={t("groups.stripLabel")} style={{ flexShrink: 0 }}>
       <ScrollView
@@ -33,7 +38,7 @@ export function GroupPills({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={{
           alignItems: "center",
-          gap: 2,
+          gap: space.xs,
           paddingStart: space.lg,
           paddingEnd: space.sm,
           paddingBottom: 4,
@@ -49,18 +54,47 @@ export function GroupPills({
                 : g.unread
                   ? t("groups.pillUnread", { name: g.name })
                   : g.name;
+          const fg = selected ? semantic.onAccent : semantic.accent;
           return (
-            <Chip
+            <Pressable
               key={g.id}
               testID={`row-group-${g.id}`}
-              selected={selected}
-              variant={g.unread ? "default" : "subtle"}
-              leading={g.unread ? <Dot size={7} color={selected ? semantic.accent : undefined} /> : undefined}
-              accessibilityLabel={label}
               onPress={() => onSelect(g.id)}
+              accessibilityRole="button"
+              accessibilityLabel={label}
+              accessibilityState={{ selected }}
+              style={{ minHeight: layout.touchMin, justifyContent: "center" }}
             >
-              {g.name}
-            </Chip>
+              {({ pressed }) => (
+                <View
+                  style={{
+                    minHeight: 32,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: space.xs,
+                    paddingHorizontal: space.lg,
+                    borderRadius: 16,
+                    backgroundColor: selected
+                      ? semantic.accent
+                      : pressed
+                        ? semantic.high
+                        : semantic.raised,
+                  }}
+                >
+                  {g.unread ? <Dot size={7} color={fg} /> : null}
+                  <Text
+                    numberOfLines={1}
+                    style={{
+                      fontFamily: selected || g.unread ? fonts.semibold : fonts.medium,
+                      fontSize: 14,
+                      color: fg,
+                    }}
+                  >
+                    {g.name}
+                  </Text>
+                </View>
+              )}
+            </Pressable>
           );
         })}
         <IconButton
@@ -73,13 +107,12 @@ export function GroupPills({
                 width: 32,
                 height: 32,
                 borderRadius: 16,
-                borderWidth: 1,
-                borderColor: semantic.edge,
+                backgroundColor: semantic.accent,
                 alignItems: "center",
                 justifyContent: "center",
               }}
             >
-              <Icon.plus size={16} color={semantic.text} />
+              <Icon.plus size={18} color={semantic.onAccent} />
             </View>
           }
         />

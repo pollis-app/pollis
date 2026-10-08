@@ -1,9 +1,10 @@
 import { Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
-import { Avatar, Button } from "../ui";
+import { Avatar, IconButton } from "../ui";
+import { Icon } from "../icons";
 import { semantic, type as ty, r, space } from "../../theme/tokens";
 
-/** Top of the Self tab (You.dc.html): avatar, name, handle, Edit profile. */
+/** Top of the Self tab (You.dc.html): avatar, name, handle, and an Edit profile icon button. */
 export function ProfileCard({
   displayName,
   handle,
@@ -19,7 +20,6 @@ export function ProfileCard({
     <View
       testID="card-self-profile"
       style={{
-        gap: space.lg,
         padding: space.xxl,
         borderRadius: r.xl,
         backgroundColor: semantic.panel,
@@ -46,12 +46,14 @@ export function ProfileCard({
             {sub}
           </Text>
         </View>
-      </View>
-      {/* Below the name rather than beside it, so it never squeezes the text. */}
-      <View style={{ alignItems: "flex-start" }}>
-        <Button testID="btn-edit-profile" onPress={onEdit}>
-          {t("mobile:self.hub.editProfile")}
-        </Button>
+        {/* Icon only (user's call); the spoken label keeps the full name. */}
+        <IconButton
+          testID="btn-edit-profile"
+          filled
+          accessibilityLabel={t("mobile:self.hub.editProfile")}
+          onPress={onEdit}
+          icon={<Icon.pencil size={20} color={semantic.text} />}
+        />
       </View>
     </View>
   );

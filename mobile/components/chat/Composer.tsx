@@ -334,6 +334,9 @@ export function Composer({
             minWidth: 0,
             alignItems: "flex-end",
             borderRadius: layout.touchMin / 2,
+            // No border: the raised fill, placeholder and the attach/send
+            // buttons on either side already mark it as the message field.
+            borderWidth: 0,
             paddingVertical: 0,
             paddingStart: 16,
             paddingEnd: 4,
@@ -364,8 +367,9 @@ export function Composer({
             </Pressable>
           }
         />
-        {/* Disabled send is told apart by more than colour: neutral fill +
-            edge ring + muted glyph, and it leaves the focus order. */}
+        {/* Always the accent fill with a dark glyph and no border (user's
+            call). With nothing to send it is announced as disabled and leaves
+            the focus order; a tap then does nothing. */}
         <Pressable
           onPress={onSend}
           disabled={sendDisabled}
@@ -380,15 +384,10 @@ export function Composer({
             borderRadius: layout.touchMin / 2,
             alignItems: "center",
             justifyContent: "center",
-            backgroundColor: sendDisabled ? semantic.raised : semantic.accent,
-            borderWidth: sendDisabled ? 1 : 0,
-            borderColor: semantic.edge,
+            backgroundColor: semantic.accent,
           }}
         >
-          <Icon.arrowUp
-            size={22}
-            color={sendDisabled ? semantic.muted : semantic.onAccent}
-          />
+          <Icon.arrowUp size={22} color={semantic.onAccent} />
         </Pressable>
       </View>
       {pickerOpen ? (
