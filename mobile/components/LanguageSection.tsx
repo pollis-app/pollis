@@ -87,7 +87,9 @@ export function LanguageSection({ onLayout }: { onLayout?: (e: LayoutChangeEvent
           );
         })}
       </View>
-      <Text style={ty.meta}>{t("language.description")}</Text>
+      {/* #1231: a lone Text doesn't follow the layout direction on its own.
+          "left" is the start edge — React Native swaps it under RTL. */}
+      <Text style={[ty.meta, { textAlign: "left" }]}>{t("language.description")}</Text>
       {restartPending ? (
         <View
           style={{ flexDirection: "row", alignItems: "flex-start", gap: space.xs }}
