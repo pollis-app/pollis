@@ -61,8 +61,13 @@ tags:
     id: "btn-back"
     optional: true
 # On iPad the composer keeps focus after send and the keyboard covers the tab
-# bar, so the tab tap would land on a key.
-- hideKeyboard
+# bar, so the tab tap would land on a key. iOS only: on Android hideKeyboard
+# presses Back when no keyboard is up, which leaves the app.
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - hideKeyboard
 
 # Message hit, count, sort, corpus.
 - tapOn:
