@@ -113,12 +113,16 @@
       <section class="doc-section">
         <h2 class="doc-section-title">IP addresses</h2>
         <p>
-          <strong>No client IP address is written to any database, log or table.</strong> IPs are read for rate
-          limiting and kept only in an in-memory counter that does not survive a restart. The relay reads a peer
-          address for the same reason and stores nothing.
+          <strong>No client IP address is written to any database, log or table.</strong> IPs are used for rate
+          limiting only, and even in memory they are held as a one-way keyed hash whose key is random, never
+          stored, and gone at the next restart. Our edge strips your IP before the request reaches our servers,
+          which receive only that hash. The relay and the call server work the same way: the relay keys its
+          limits on a hash, and the call server keeps no logs. Device names name the system ("macOS desktop"),
+          and any IP-shaped text in one is removed before it is stored.
         </p>
         <p>
-          Our edge provider still sees your IP, as does any network between you and us. The optional
+          Our edge provider still sees your IP, as does any network between you and us, and its account
+          administrators can view client IPs in its security dashboards. The optional
           <a href="subprocessors.html">relay overlay</a> hides your IP from our own services and is off unless you
           turn it on. This section covers what we retain, not what providers see.
         </p>

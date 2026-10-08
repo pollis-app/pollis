@@ -53,7 +53,7 @@ Corrupt-index snapshots (`accounts.bad-<unix-ms>.json`) have the same contents a
 
 ### 1.2 What the server can and cannot see
 
-**The Delivery Service** is the only client-facing server for data (§8). It sees everything Turso stores, plus live request metadata: the authenticated user and device on every signed request (`X-Pollis-User` / `X-Pollis-Device`, `pollis-delivery/src/auth.rs`) and the client IP (unless the user has opted into the relay overlay, below).
+**The Delivery Service** is the only client-facing server for data (§8). It sees everything Turso stores, plus live request metadata: the authenticated user and device on every signed request (`X-Pollis-User` / `X-Pollis-Device`, `pollis-delivery/src/auth.rs`). It does **not** see the client IP: the Cloudflare edge does, and the DS Worker's Durable Object strips every IP-bearing header and forwards only a keyed hash of it, which the DS hashes again under a per-process key for rate limiting (`docs/metadata-retention-policy.md` §3). The edge provider, and its account administrators through its security dashboards, can still see client IPs unless the user has opted into the relay overlay (below).
 
 **Turso** holds metadata in plaintext:
 - user records (id, email, username, avatar URL);

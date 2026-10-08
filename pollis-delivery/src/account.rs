@@ -422,6 +422,10 @@ pub async fn apply_record_security_event(
     if recent >= SECURITY_EVENT_MAX_PER_WINDOW {
         return Ok(WriteOutcome::Forbidden);
     }
+    // Client-supplied free text. Shipped clients copy the device name in here
+    // (`name=<device_name>`), and that name can embed an IP; no client IP may be
+    // stored, so redact rather than refuse.
+    let metadata = body.metadata.as_deref().map(crate::util::redact_ip_literals);
     conn.execute(
         "INSERT INTO security_event (id, user_id, kind, device_id, metadata) \
          VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -430,7 +434,7 @@ pub async fn apply_record_security_event(
             actor,
             body.kind.clone(),
             body.device_id.clone(),
-            body.metadata.clone(),
+            metadata,
         ],
     )
     .await?;

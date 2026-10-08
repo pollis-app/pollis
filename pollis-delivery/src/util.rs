@@ -15,6 +15,71 @@
 /// its boundary — request-signature skew is compared against a *client*-supplied
 /// timestamp, so that arithmetic has to be signed or a client ahead of the
 /// server wraps into "valid".
+/// Replace every IP-address-looking token in client-supplied free text (a
+/// device name, a security-event note) with `[redacted]`.
+///
+/// No client IP may be readable anywhere the DS stores, admins included, and
+/// these fields are text the client chooses. Shipped desktop builds send a
+/// device name of `"{hostname} ({os})"`, and a cloud, corporate or ISP hostname
+/// routinely embeds the machine's address (`ip-10-0-0-12`,
+/// `c-73-162-1-2.hsd1.ca.comcast.net`). Current clients send an OS label
+/// instead, but old builds stay in the field, so the DS REDACTS rather than
+/// rejects: their writes must keep succeeding.
+///
+/// Tokens are split on whitespace and `= , ; ( ) < > { } " '`, so `name=…`
+/// keeps its key. A token is redacted when it parses as an IPv4/IPv6 address
+/// or socket address (brackets and `%zone` allowed), or contains four
+/// consecutive `0..=255` decimal parts separated by `.`, `-` or `_`.
+pub fn redact_ip_literals(text: &str) -> String {
+    const SEPARATORS: &str = "=,;()<>{}\"'";
+    let mut out = String::with_capacity(text.len());
+    let mut token = String::new();
+    let flush = |token: &mut String, out: &mut String| {
+        if !token.is_empty() {
+            if looks_like_ip(token) {
+                out.push_str("[redacted]");
+            } else {
+                out.push_str(token);
+            }
+            token.clear();
+        }
+    };
+    for c in text.chars() {
+        if c.is_whitespace() || SEPARATORS.contains(c) {
+            flush(&mut token, &mut out);
+            out.push(c);
+        } else {
+            token.push(c);
+        }
+    }
+    flush(&mut token, &mut out);
+    out
+}
+
+fn looks_like_ip(token: &str) -> bool {
+    let bare = token.trim_start_matches('[').trim_end_matches(']');
+    if bare.parse::<std::net::IpAddr>().is_ok() || token.parse::<std::net::SocketAddr>().is_ok() {
+        return true;
+    }
+    // `fe80::1%en0` — a scoped IPv6 literal.
+    if let Some((addr, _zone)) = bare.split_once('%') {
+        if addr.parse::<std::net::Ipv6Addr>().is_ok() {
+            return true;
+        }
+    }
+    // Four consecutive octets inside a longer token: `ip-10-0-0-12`,
+    // `c-73-162-1-2.hsd1…`, `192_168_1_5.lan`.
+    let parts: Vec<&str> = bare.split(['.', '-', '_', ':', '[', ']']).collect();
+    parts.windows(4).any(|w| {
+        w.iter().all(|p| {
+            !p.is_empty()
+                && p.len() <= 3
+                && p.bytes().all(|b| b.is_ascii_digit())
+                && p.parse::<u16>().is_ok_and(|n| n <= 255)
+        })
+    })
+}
+
 pub fn now_unix() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -188,4 +253,43 @@ pub fn b64(bytes: &[u8]) -> String {
 pub fn b64_decode(s: &str) -> anyhow::Result<Vec<u8>> {
     use base64::Engine as _;
     Ok(base64::engine::general_purpose::STANDARD.decode(s)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::redact_ip_literals;
+
+    #[test]
+    fn ip_literals_are_redacted_wherever_they_hide() {
+        let cases = [
+            ("203.0.113.7 (linux)", "[redacted] (linux)"),
+            ("ip-10-0-0-12 (linux)", "[redacted] (linux)"),
+            ("c-73-162-1-2.hsd1.ca.comcast.net (macos)", "[redacted] (macos)"),
+            ("192_168_1_5.lan (windows)", "[redacted] (windows)"),
+            ("name=ip-10-0-0-5 (linux)", "name=[redacted] (linux)"),
+            ("2001:db8::1", "[redacted]"),
+            ("fe80::1%en0 box", "[redacted] box"),
+            ("[2001:db8::1]:443", "[redacted]"),
+            ("10.0.0.1:8080", "[redacted]"),
+        ];
+        for (input, want) in cases {
+            assert_eq!(redact_ip_literals(input), want, "input {input:?}");
+        }
+    }
+
+    #[test]
+    fn ordinary_names_are_untouched() {
+        for name in [
+            "macOS desktop",
+            "Pollis on Windows",
+            "dans-macbook-pro (macos)",
+            "Pixel 8",
+            "name=iPhone 15",
+            "via=qr,approver=01HQ7Z",
+            "v1.2.3 build",
+            "credential=signature,new_identity_version=3",
+        ] {
+            assert_eq!(redact_ip_literals(name), name);
+        }
+    }
 }

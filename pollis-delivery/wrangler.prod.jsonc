@@ -72,5 +72,16 @@
     { "binding": "POLLIS_DS_METRICS_TOKEN", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_POLLIS_DS_METRICS_TOKEN" },
     { "binding": "EXPO_TOKEN", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_EXPO_TOKEN" }
   ],
-  "routes": [{ "pattern": "api.pollis.com", "custom_domain": true }]
+  "routes": [{ "pattern": "api.pollis.com", "custom_domain": true }],
+  // No plain client IPs readable anywhere, admins included. Workers Logs records
+  // every invocation's request (headers + the `cf` object, i.e. the client IP)
+  // where any account member can read it in the dashboard, and Logpush exports
+  // the same to a sink. Both OFF, explicitly, so every deploy resets them
+  // whatever the dashboard or a wrangler default says. Deployed config is verified through
+  // GET /v1/config (lib.rs `effective_config`), not through logs. NB: a live
+  // `wrangler tail` still streams request metadata to whoever runs it; that is
+  // an account permission, not something config can disable.
+  // Guarded by tests/no_client_ip_exposure.rs.
+  "observability": { "enabled": false },
+  "logpush": false
 }

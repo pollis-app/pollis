@@ -109,7 +109,9 @@
                   Your device's push token, fixed text ("New message") and an opaque per-recipient handle that
                   names no conversation and cannot be matched across users. No content, sender or preview. It
                   still reveals that <em>this device had activity at this time</em>. The Delivery Service sends
-                  the push, so Expo sees Cloudflare's address, not the sender's.
+                  the push, so Expo sees Cloudflare's address, not the sender's. Your device contacts Expo
+                  directly when it registers for a push token, so Expo sees the recipient device's IP then, and
+                  Apple or Google see it when they deliver a notification.
                 </td>
                 <td class="doc-td-dim">Provider-determined</td>
               </tr>
@@ -127,9 +129,10 @@
                 <td>A single leased virtual server</td>
                 <td class="doc-td-dim">Runs the self-hosted LiveKit media server and TURN relay</td>
                 <td class="doc-td-dim">
-                  Who is in a call, which room, when, and your IP. Call audio and video are end-to-end encrypted
-                  and forwarded as ciphertext; the realtime signalling JSON is not encrypted at the application
-                  layer. No call record is written to any database.
+                  Who is in a call, which room, when, and your IP, which it needs to route media. Call audio and
+                  video are end-to-end encrypted and forwarded as ciphertext; the realtime signalling JSON is not
+                  encrypted at the application layer. No call record is written to any database, and the server
+                  keeps no access, error or container logs.
                 </td>
                 <td class="doc-td-dim">One host, one location</td>
               </tr>

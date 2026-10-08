@@ -285,9 +285,11 @@ pub async fn claim_link(State(state): State<AppState>, _headers: HeaderMap, body
     if parsed.device_id.trim().is_empty() || parsed.device_id.len() > 64 {
         return bad_request("invalid device_id");
     }
+    // Free text the claiming device chose: redact anything IP-shaped before it
+    // is held or shown to the approving device.
     let device_name = parsed
         .device_name
-        .map(|n| n.chars().take(64).collect::<String>())
+        .map(|n| crate::util::redact_ip_literals(&n.chars().take(64).collect::<String>()))
         .filter(|n| !n.trim().is_empty());
     let now = crate::util::now_unix();
     let user_id = match state.links.claim(&parsed.link_id, &claim, &parsed.device_id, device_name, now) {

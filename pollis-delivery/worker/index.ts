@@ -105,6 +105,57 @@ const SECRET_KEYS = [
   "APP_REVIEW_LOGIN",
 ] as const;
 
+// Non-secret per-environment tunables, set (or not) as wrangler `vars` and
+// forwarded to the container only when set — an unset key leaves the DS on its
+// compiled-in default (ratelimit.rs `RateLimitConfig::from_env`). Every per-IP
+// rate-limit tier is listed so any of them can be tuned per environment with a
+// config change alone; today only dev sets the two OTP tiers (the mobile e2e
+// suites sign up many accounts from one IP). Checked against
+// ds-config-manifest.json `optional_container_vars` by
+// scripts/check-ds-config-chain.py.
+const TUNABLE_VAR_KEYS = [
+  "RL_REQUEST_OTP_MAX",
+  "RL_REQUEST_OTP_WINDOW_SECS",
+  "RL_VERIFY_OTP_MAX",
+  "RL_VERIFY_OTP_WINDOW_SECS",
+  "RL_WRITE_MAX",
+  "RL_WRITE_WINDOW_SECS",
+  "RL_READ_MAX",
+  "RL_READ_WINDOW_SECS",
+  "RL_PROBE_MAX",
+  "RL_PROBE_WINDOW_SECS",
+  "RL_GET_MAX",
+  "RL_GET_WINDOW_SECS",
+  "RL_INVITE_REDEEM_MAX",
+  "RL_INVITE_REDEEM_WINDOW_SECS",
+] as const;
+
+// Every request header through which a client IP can reach the container. The
+// Durable Object deletes ALL of them before forwarding (see `fetch` below), so
+// the DS process never receives a plain client address — it receives only
+// CLIENT_BUCKET_HEADER. Listed exhaustively, including headers Cloudflare adds
+// only under optional zone settings (Pseudo IPv4, the "Add True-Client-IP"
+// managed transform), so toggling one in the dashboard cannot leak an address.
+// tests/no_client_ip_exposure.rs asserts this list is complete.
+const CLIENT_IP_HEADERS = [
+  "cf-connecting-ip",
+  "cf-connecting-ipv6",
+  "cf-pseudo-ipv4",
+  "true-client-ip",
+  "x-real-ip",
+  "x-forwarded-for",
+  "forwarded",
+] as const;
+
+// The ONLY client identity the container sees: a per-instance keyed hash of the
+// client IP, which the DS rate limiter keys on (ratelimit.rs). Always deleted
+// from the inbound request first, so a client cannot choose its own bucket.
+const CLIENT_BUCKET_HEADER = "x-pollis-client-bucket";
+
+// Bytes of HMAC-SHA256 output kept in the bucket — matches the DS's own
+// truncation; 128 bits makes two clients sharing a budget negligible.
+const CLIENT_BUCKET_BYTES = 16;
+
 interface SecretStoreBinding {
   get(): Promise<string>;
 }
@@ -122,7 +173,21 @@ type Env = {
   // is exactly how a routine dev migration would become a production outage.
   // Absent → DS_SINGLETON_NAME_FALLBACK, which is prod's existing object.
   DS_SINGLETON_NAME?: string;
-} & Record<(typeof SECRET_KEYS)[number], SecretStoreBinding | undefined>;
+} & Record<(typeof SECRET_KEYS)[number], SecretStoreBinding | undefined> &
+  Partial<Record<(typeof TUNABLE_VAR_KEYS)[number], string>>;
+
+// The tunables this environment actually sets, ready to spread into envVars.
+// Unset/empty keys are omitted so the DS default applies.
+function tunableVarEnv(env: Env): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const key of TUNABLE_VAR_KEYS) {
+    const value = env[key];
+    if (value) {
+      out[key] = value;
+    }
+  }
+  return out;
+}
 
 // Derived from the base method so we don't depend on the (unexported)
 // CancellationOptions / StartAndWaitForPortsOptions types.
@@ -160,6 +225,52 @@ export class PollisDelivery extends Container<Env> {
   // The DS reaches out to Turso, Resend, LiveKit and R2 — needs egress.
   enableInternet = true;
 
+  // HMAC key for CLIENT_BUCKET_HEADER: random, non-extractable, generated once
+  // per Durable Object instance and held only in its memory. A per-instance key
+  // is enough — and needs no secret to provision — because every request goes
+  // through this ONE object (the DS is a single serialized instance), so one
+  // client always lands in one bucket for as long as the object lives. When the
+  // object is recreated the key changes, which resets per-IP counters exactly as
+  // a container restart already does.
+  private bucketKey?: Promise<CryptoKey>;
+
+  // hex(HMAC-SHA256(bucketKey, ip)[..CLIENT_BUCKET_BYTES]).
+  private async clientBucket(ip: string): Promise<string> {
+    this.bucketKey ??= crypto.subtle.generateKey(
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    ) as Promise<CryptoKey>;
+    const mac = await crypto.subtle.sign(
+      "HMAC",
+      await this.bucketKey,
+      new TextEncoder().encode(ip),
+    );
+    return [...new Uint8Array(mac, 0, CLIENT_BUCKET_BYTES)]
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
+  // Replace every client-IP header with the keyed bucket before the request
+  // reaches the container. `CF-Connecting-IP` is set by Cloudflare's edge and
+  // cannot be forged through it; the first `X-Forwarded-For` hop is a fallback
+  // that never applies in practice behind Cloudflare.
+  override async fetch(request: Request): Promise<Response> {
+    const headers = new Headers(request.headers);
+    const ip =
+      headers.get("cf-connecting-ip")?.trim() ||
+      headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      "";
+    for (const name of CLIENT_IP_HEADERS) {
+      headers.delete(name);
+    }
+    headers.delete(CLIENT_BUCKET_HEADER);
+    if (ip) {
+      headers.set(CLIENT_BUCKET_HEADER, await this.clientBucket(ip));
+    }
+    return super.fetch(new Request(request, { headers }));
+  }
+
   // Non-secret config baked at deploy time (from wrangler `vars`). Secret env
   // vars are injected in startAndWaitForPorts below (they need async .get()).
   envVars = {
@@ -172,6 +283,8 @@ export class PollisDelivery extends Container<Env> {
     ...(this.env.POLLIS_DS_WATERMARK_STALE_MONTHS
       ? { POLLIS_DS_WATERMARK_STALE_MONTHS: this.env.POLLIS_DS_WATERMARK_STALE_MONTHS }
       : {}),
+    // Per-environment rate-limit tunables (TUNABLE_VAR_KEYS), only those set.
+    ...tunableVarEnv(this.env),
   };
 
   // Resolve every Secrets Store binding into a plain env map. Optional/unset

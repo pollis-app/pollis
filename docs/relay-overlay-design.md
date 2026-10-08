@@ -58,7 +58,7 @@ This is the section to be most honest in. The overlay's value is real but narrow
 
 ### 2.1 What it defends: network-layer IP metadata
 
-Today, when a client opens its direct libSQL read connection to Turso (one network hop — see `ARCHITECTURE.md` §Network architecture), Turso's operator sees the client's **source IP** on every Hrana stream. The whitepaper lists exactly this under what Turso can observe: *"connection patterns (IP address, libSQL Hrana streams)"* (`docs/security-whitepaper.md` §1.2). Same for LiveKit (RTP routing metadata + source IP) and the DS.
+Without the overlay, the first-party services' network edges see the client's **source IP**. Since #987 that no longer includes Turso — no client connects to it; the DS is its only client (`docs/security-whitepaper.md` §1.2). It does include the DS's edge (Cloudflare, which terminates the connection; the DS container itself receives only a keyed hash — `docs/metadata-retention-policy.md` §3), LiveKit (RTP routing needs the source IP; it keeps no logs of it), and R2. *This paragraph originally described a direct libSQL connection to Turso; that path is gone.*
 
 With the overlay on, a relayed request reaches the service **wearing the relay peer's IP**. The service operator sees a connection from the relay, not from the originating user. The property delivered is:
 
@@ -127,13 +127,13 @@ The specific overclaim to forbid: *"Your messages are safe because we route them
 
 We enumerate adversaries and state, per adversary, what they learn with the overlay **on** vs **off**. "On" assumes the recommended phased target; where hop count matters we split it.
 
-### 4.1 Honest-but-curious service operator (Turso / LiveKit / R2 / DS)
+### 4.1 Honest-but-curious service operator (DS edge / LiveKit / R2)
 
 The operator runs the infrastructure, logs faithfully, does not actively attack, but *reads what it has*. This is the primary adversary the overlay targets.
 
 | | Overlay OFF | Overlay ON |
 |---|---|---|
-| Source IP of the connecting user | ✅ Sees real IP (`whitepaper` §1.2) | ❌ Sees a relay's IP |
+| Source IP of the connecting user | ✅ At the edge (Cloudflare for the DS, LiveKit for media), never stored or logged by us (`whitepaper` §1.2, retention policy §3) | ❌ Sees a relay's IP |
 | Social graph / message metadata by `user_id` | ✅ Full (data model) | ✅ **Still full** — unchanged (§2.2) |
 | Message / file / voice plaintext | ❌ Never (MLS) | ❌ Never |
 | Timing of a user's activity | ✅ | 🟡 Sees timing of the *relay's* forwarded traffic; correlatable if the operator also controls/observes the relay's ingress (see §2.3) |

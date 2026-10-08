@@ -274,8 +274,8 @@ async fn verify_otp_ds(
 
         // 3. register-device (session-gated): the DS inserts the user_device row
         //    + seeds watermarks.
-        let hostname = gethostname::gethostname().to_string_lossy().to_string();
-        let device_name = format!("{hostname} ({})", std::env::consts::OS);
+        // OS + form factor only — never the hostname (see `util::device_label`).
+        let device_name = crate::util::device_label();
         crate::commands::mls::ds_post_session_ok(
             state,
             &session_token,
@@ -390,8 +390,8 @@ pub(crate) async fn bootstrap_existing_identity_device(
         // Brand-new device for this account (nothing in the keystore yet), or
         // one that just adopted the session's id above: the session minted
         // above is bound to exactly this device_id, so it can authorize the row.
-        let hostname = gethostname::gethostname().to_string_lossy().to_string();
-        let device_name = format!("{hostname} ({})", std::env::consts::OS);
+        // OS + form factor only — never the hostname (see `util::device_label`).
+        let device_name = crate::util::device_label();
         crate::commands::mls::ds_post_session_ok(
             state,
             &session_token,
@@ -1203,8 +1203,8 @@ async fn dev_login_ds(state: &Arc<AppState>, email: String) -> Result<UserProfil
 
     // register-device (session-gated): creates/upserts the DS `user_device` row —
     // the row a pre-#419 device is missing. Idempotent.
-    let hostname = gethostname::gethostname().to_string_lossy().to_string();
-    let device_name = format!("{hostname} ({})", std::env::consts::OS);
+    // OS + form factor only — never the hostname (see `util::device_label`).
+    let device_name = crate::util::device_label();
     crate::commands::mls::ds_post_session_ok(
         state,
         &session_token,
@@ -1660,8 +1660,10 @@ pub async fn revoke_device(
         device_id: Some(device_id.clone()),
         // The device's name at the moment it was revoked. `user_device` keeps
         // the tombstoned row, but a log that says only "device 01HQ7Z…" is not
-        // the answer to "was it the laptop or the phone?".
-        metadata: device_name.map(|n| format!("name={n}")),
+        // the answer to "was it the laptop or the phone?". A legacy
+        // "{hostname} ({os})" name is reduced to its OS label first, so a
+        // hostname (which can embed an IP) is never copied into the log.
+        metadata: device_name.map(|n| format!("name={}", crate::util::public_device_name(&n))),
         // The DS's no-auth fallback for the acting user
         // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
         // user and this must EQUAL it; auth off → this IS the actor, and a

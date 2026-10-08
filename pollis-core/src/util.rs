@@ -15,6 +15,55 @@
 /// Returns `u64` because a Unix second is not negative. Callers whose downstream
 /// arithmetic is signed — request-signature skew, which must not wrap when a
 /// client's clock is ahead — cast at the boundary.
+/// The name this device registers under: the OS and the form factor, e.g.
+/// "macOS desktop" or "Android device".
+///
+/// It used to be `"{hostname} ({os})"`. A hostname is chosen by whoever set the
+/// machine up and routinely carries a person's name or — on cloud and corporate
+/// machines (`ip-10-0-0-12`) — an IP address, and it was stored in the DS's
+/// `user_device` table where operators can read it. The device list needs to
+/// tell a user's devices apart, not identify the machine, and the creation date
+/// beside each entry does the rest.
+pub fn device_label() -> String {
+    let os = std::env::consts::OS;
+    let pretty = match os {
+        "macos" => "macOS",
+        "windows" => "Windows",
+        "linux" => "Linux",
+        "ios" => "iOS",
+        "android" => "Android",
+        other => other,
+    };
+    let kind = match os {
+        "ios" | "android" => "device",
+        _ => "desktop",
+    };
+    format!("{pretty} {kind}")
+}
+
+/// A device name safe to copy into the account's security log.
+///
+/// Devices registered by builds before this change are named
+/// `"{hostname} ({os})"`. The hostname must not be copied anywhere new, so a
+/// name of that shape is reduced to the OS label [`device_label`] would give
+/// that OS; any other name (a current OS label, a name chosen at device link)
+/// passes through.
+pub fn public_device_name(name: &str) -> String {
+    const LEGACY: [(&str, &str); 5] = [
+        ("(macos)", "macOS desktop"),
+        ("(windows)", "Windows desktop"),
+        ("(linux)", "Linux desktop"),
+        ("(ios)", "iOS device"),
+        ("(android)", "Android device"),
+    ];
+    for (suffix, label) in LEGACY {
+        if name.ends_with(suffix) && name.len() > suffix.len() {
+            return label.to_string();
+        }
+    }
+    name.to_string()
+}
+
 pub fn now_unix() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -135,5 +184,32 @@ mod tests {
         let masked = mask_email("dangerously.identifying@example.com");
         assert!(!masked.contains("dangerously"));
         assert!(!masked.contains('d') || masked.starts_with("***@"));
+    }
+
+    /// The registered device name carries the OS and form factor only — never
+    /// the machine's hostname, which can name a person or embed an IP.
+    #[test]
+    fn device_label_never_includes_the_hostname() {
+        let label = device_label();
+        let host = gethostname_for_test();
+        if !host.is_empty() {
+            assert!(!label.contains(&host), "{label:?} contains hostname {host:?}");
+        }
+        assert!(label.ends_with(" desktop") || label.ends_with(" device"), "{label:?}");
+    }
+
+    fn gethostname_for_test() -> String {
+        std::process::Command::new("hostname")
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn legacy_hostname_names_reduce_to_the_os_label() {
+        assert_eq!(public_device_name("ip-10-0-0-5 (linux)"), "Linux desktop");
+        assert_eq!(public_device_name("dans-macbook (macos)"), "macOS desktop");
+        assert_eq!(public_device_name("macOS desktop"), "macOS desktop");
+        assert_eq!(public_device_name("Pollis on Windows"), "Pollis on Windows");
     }
 }

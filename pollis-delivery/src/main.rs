@@ -43,8 +43,11 @@ use pollis_delivery::{build_app_state, build_router_with_state, db::Db};
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
+            // No `tower_http` target: the DS has no request-tracing layer, and one
+            // must not be added — it would log request headers, client IP
+            // included (tests/no_client_ip_exposure.rs).
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "pollis_delivery=info,tower_http=info".into()),
+                .unwrap_or_else(|_| "pollis_delivery=info".into()),
         )
         .init();
 
