@@ -10,16 +10,18 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import { semantic, type as ty, r, space } from "../../theme/tokens";
 import { useTheme } from "../theme";
 import { Icon } from "../icons";
+import { useBottomInset } from "../ui";
 import { useAndroidKeyboardInset } from "../../hooks/useAndroidKeyboardInset";
 
 // Entry timing (#1193): in line with the ~200 ms stack transitions — fast
 // enough to read as a response to the tap, not a presentation.
 const ENTER_MS = 180;
+// Upper bound on the entrance: past this the sheet is shown statically.
+const SETTLE_FALLBACK_MS = 600;
 
 /**
  * Bottom sheet (Actions.dc.html). Rendered in a transparent `Modal`, so the
@@ -52,13 +54,28 @@ export function SheetOverlay({
 }) {
   useTheme();
   const { t } = useTranslation("common");
-  const insets = useSafeAreaInsets();
+  // The root SafeAreaProvider's insets reach the Modal through React context.
+  // They are the right ones here because the Modal is statusBarTranslucent +
+  // navigationBarTranslucent: its window is full-screen under both system
+  // bars, exactly like the activity's. (A nested SafeAreaProvider would
+  // measure the same values but render nothing until its first native
+  // measurement, delaying the sheet.) Android gets the nav-bar floor.
+  const bottomInset = useBottomInset();
   const androidKeyboard = useAndroidKeyboardInset();
   const progress = useRef(new Animated.Value(0)).current;
   // The card's own height, so it starts exactly below the screen edge
   // whatever its content. Until measured it is held fully off-screen.
   const [cardHeight, setCardHeight] = useState(0);
   const [reduceMotion, setReduceMotion] = useState(false);
+  // The Modal's window is on screen (onShow). On iOS the content mounts
+  // before the modal view controller is presented; a native-driven animation
+  // started then can be lost, leaving the sheet present (its Close button
+  // findable) but fully transparent — review #1. So the entrance waits for
+  // onShow as well as the measurement.
+  const [shown, setShown] = useState(false);
+  // The entrance is over (or was skipped): render plain static styles from
+  // here on, so no later re-render can leave the sheet at an animated 0.
+  const [settled, setSettled] = useState(false);
 
   useEffect(() => {
     AccessibilityInfo.isReduceMotionEnabled()
@@ -67,7 +84,7 @@ export function SheetOverlay({
   }, []);
 
   useEffect(() => {
-    if (cardHeight === 0) {
+    if (cardHeight === 0 || !shown || settled) {
       return;
     }
     Animated.timing(progress, {
@@ -75,8 +92,15 @@ export function SheetOverlay({
       duration: reduceMotion ? 0 : ENTER_MS,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
-    }).start();
-  }, [cardHeight, progress, reduceMotion]);
+    }).start(() => setSettled(true));
+  }, [cardHeight, shown, settled, progress, reduceMotion]);
+
+  // Belt and braces: whatever happens to onShow, onLayout or the animation,
+  // the sheet is fully visible shortly after it mounts.
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(true), SETTLE_FALLBACK_MS);
+    return () => clearTimeout(timer);
+  }, []);
 
   return (
     <Modal
@@ -86,6 +110,7 @@ export function SheetOverlay({
       statusBarTranslucent
       navigationBarTranslucent
       onRequestClose={onClose}
+      onShow={() => setShown(true)}
     >
       <View style={{ flex: 1 }}>
         <Animated.View
@@ -96,7 +121,7 @@ export function SheetOverlay({
             start: 0,
             end: 0,
             backgroundColor: semantic.backdrop,
-            opacity: progress,
+            opacity: settled ? 1 : progress,
           }}
         >
           {/* The backdrop is a plain tap target, hidden from screen readers:
@@ -126,15 +151,17 @@ export function SheetOverlay({
               }
             }}
             style={{
-              opacity: cardHeight === 0 ? 0 : 1,
-              transform: [
-                {
-                  translateY: progress.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [cardHeight, 0],
-                  }),
-                },
-              ],
+              opacity: settled || cardHeight > 0 ? 1 : 0,
+              transform: settled
+                ? []
+                : [
+                    {
+                      translateY: progress.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [cardHeight, 0],
+                      }),
+                    },
+                  ],
               // Opaque: the sheet floats over the header and composer, and a
               // translucent card let them show through its buttons (#1193).
               backgroundColor: semantic.sheetBg,
@@ -144,7 +171,7 @@ export function SheetOverlay({
               borderTopColor: semantic.hair,
               paddingHorizontal: space.xxl,
               paddingTop: space.xl,
-              paddingBottom: insets.bottom + space.lg,
+              paddingBottom: bottomInset + space.lg,
               gap: space.lg,
             }}
           >

@@ -13,10 +13,11 @@ import {
   TextInputProps,
   AccessibilityRole,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
-import { semantic, type as ty, fonts, r, space, layout } from "../theme/tokens";
+import { semantic, type as ty, fonts, r, space, layout, currentTheme } from "../theme/tokens";
+import { buttonColors } from "../theme/button";
 import { useTheme } from "./theme";
 import { useLayoutClass } from "../hooks/useLayoutClass";
 import { useAndroidKeyboardInset } from "../hooks/useAndroidKeyboardInset";
@@ -81,6 +82,24 @@ export function Txt({
   );
 }
 
+/* ── Bottom inset ─────────────────────────────────────────────────── */
+// The space bottom chrome (tab bar, BottomAction, sheets) keeps below itself.
+// iOS: exactly the home-indicator inset, as before. Android: the gesture /
+// navigation-bar inset the root SafeAreaProvider reports (the app is always
+// edge-to-edge, so it draws under that bar) — but never less than
+// ANDROID_MIN_BOTTOM, because a device or emulator that reports no
+// navigation bar (an inset of 0) otherwise leaves labels and CTAs flush with
+// the glass edge (review #5).
+const ANDROID_MIN_BOTTOM = space.lg;
+
+export function useBottomInset(): number {
+  const insets = useSafeAreaInsets();
+  if (Platform.OS === "android") {
+    return Math.max(insets.bottom, ANDROID_MIN_BOTTOM);
+  }
+  return insets.bottom;
+}
+
 /* ── Screen ───────────────────────────────────────────────────────── */
 // Root of every route: background, safe area, keyboard avoidance. Put a
 // <Header> (or a tab's large title) as the first child — titles live at the
@@ -109,11 +128,18 @@ export function Screen({
   const cls = useLayoutClass();
   const centerBody = centered && cls === "regular";
   const androidKeyboard = useAndroidKeyboardInset();
+  const bottomInset = useBottomInset();
+  // The top edge comes from SafeAreaView; the bottom is padded by hand so it
+  // gets the same Android floor as the tab bar and sheets (useBottomInset).
   return (
     <SafeAreaView
       testID={testID}
-      style={{ flex: 1, backgroundColor: semantic.bg }}
-      edges={aboveTabBar ? ["top"] : ["top", "bottom"]}
+      style={{
+        flex: 1,
+        backgroundColor: semantic.bg,
+        paddingBottom: aboveTabBar ? 0 : bottomInset,
+      }}
+      edges={["top"]}
     >
       {/* Keeps a bottom <Field>/<BottomAction> above the keyboard.
           iOS: KeyboardAvoidingView. Android: an explicit inset (see
@@ -328,6 +354,9 @@ export function Header({
 /* ── Section title ────────────────────────────────────────────────── */
 // 13/600 dim, sentence case, never uppercased or tracked. `right` is an
 // optional trailing control (e.g. an IconButton "Create a channel").
+// Default padding (20 h) suits a full-bleed list. Inside a padded content
+// column pass `paddingHorizontal: 0` so the title shares the column's left
+// edge with field labels and body text — never a 4pt nudge (review #11).
 export function SectionTitle({
   children,
   right,
@@ -500,7 +529,8 @@ export const Pill = Chip;
 // onAccent text — one per screen. `secondary` (alias `default`): raised fill
 // with an edge border. `subtle`: no fill, text colour. `danger` looks like
 // secondary — destructive is said by the label (and a confirm step), not a
-// third hue.
+// third hue. Disabled (every variant): raised fill, DASHED edge border, dim
+// label — ≥4.5:1 and told apart from enabled by more than colour.
 export function Button({
   children,
   variant = "secondary",
@@ -526,8 +556,7 @@ export function Button({
   testID?: string;
   accessibilityLabel?: string;
 }) {
-  const primary = variant === "primary";
-  const subtle = variant === "subtle";
+  const c = buttonColors(currentTheme(), variant, !!disabled);
   return (
     <Pressable
       onPress={disabled ? undefined : onPress}
@@ -536,8 +565,10 @@ export function Button({
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? children}
       accessibilityState={{ disabled: !!disabled }}
+      // Disabled is solid colours (theme/button.ts), never a faded button:
+      // Android fades each child separately, which sank the label (#3/#4).
       style={({ pressed }) => ({
-        opacity: disabled ? 0.45 : pressed ? 0.85 : 1,
+        opacity: !disabled && pressed ? 0.85 : 1,
         flexDirection: "row",
         alignItems: "center",
         justifyContent: align === "center" ? "center" : "flex-start",
@@ -546,15 +577,10 @@ export function Button({
         paddingHorizontal: space.xxl,
         paddingVertical: space.sm,
         borderRadius: full ? r.md : layout.touchMin / 2,
-        borderWidth: primary || subtle ? 0 : 1,
-        borderColor: semantic.edge,
-        backgroundColor: primary
-          ? semantic.accent
-          : subtle
-            ? pressed
-              ? semantic.raised
-              : "transparent"
-            : semantic.raised,
+        borderWidth: c.border ? 1 : 0,
+        borderColor: c.border,
+        borderStyle: c.borderStyle,
+        backgroundColor: (pressed && !disabled ? c.pressedFill : c.fill) ?? "transparent",
         width: full ? "100%" : undefined,
       })}
     >
@@ -563,7 +589,7 @@ export function Button({
         style={{
           fontFamily: fonts.semibold,
           fontSize: full ? 16 : 15,
-          color: primary ? semantic.onAccent : semantic.text,
+          color: c.label,
         }}
       >
         {children}
@@ -905,7 +931,9 @@ export function Group({
   }
   return (
     <View style={[{ gap: space.sm }, style]}>
-      <SectionTitle style={{ paddingHorizontal: 4, paddingTop: 0, paddingBottom: 0 }}>
+      {/* Flush with the group's edge, so a column of field labels, body
+          text and group titles shares one left edge (review #11). */}
+      <SectionTitle style={{ paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0 }}>
         {title}
       </SectionTitle>
       {box}

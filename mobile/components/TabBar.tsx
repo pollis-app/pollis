@@ -1,11 +1,11 @@
 import { View, Pressable, Text, Platform } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { semantic, fonts, layout } from "../theme/tokens";
 import { useTheme } from "./theme";
 import { Icon } from "./icons";
+import { useBottomInset } from "./ui";
 import { appStore } from "../stores/appStore";
 import { useDMChannels, useUserGroupsWithChannels } from "../hooks/queries";
 
@@ -30,7 +30,9 @@ const TABS: {
 export const TabBar = observer(function TabBar({ state, navigation }: any) {
   useTheme();
   const { t } = useTranslation("mobile");
-  const insets = useSafeAreaInsets();
+  // Home-indicator inset on iOS; on Android the nav-bar inset, floored so
+  // the labels never sit on the glass edge (see useBottomInset).
+  const bottomInset = useBottomInset();
   // Per-tab unread badge: sum the store's unread counts over the ids each tab
   // lists. The same cached queries the tabs render from split the id space
   // into channels (Groups) and DM conversations (Direct). Read `unreadCounts`
@@ -52,8 +54,8 @@ export const TabBar = observer(function TabBar({ state, navigation }: any) {
       accessibilityRole={Platform.OS === "ios" ? "tabbar" : "tablist"}
       style={{
         flexDirection: "row",
-        height: layout.tabBar + insets.bottom,
-        paddingBottom: insets.bottom,
+        height: layout.tabBar + bottomInset,
+        paddingBottom: bottomInset,
         borderTopWidth: 1,
         borderTopColor: semantic.hairSoft,
         backgroundColor: semantic.panel,
