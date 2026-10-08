@@ -18,8 +18,8 @@ import { useTranslation } from "react-i18next";
 import * as Clipboard from "expo-clipboard";
 import { Card, Button } from "./ui";
 import { Icon } from "./icons";
-import { palette, semantic, type as ty } from "../theme/tokens";
-import { activeLocale, upper } from "../i18n";
+import { semantic, type as ty, fonts, r, space } from "../theme/tokens";
+import { activeLocale } from "../i18n";
 import type { CreatedInviteLink } from "../hooks/queries";
 
 type CopyState = "idle" | "copied" | "failed";
@@ -74,28 +74,25 @@ export function CreatedInviteLinkCard({ link }: { link: CreatedInviteLink }) {
     bounds.length > 0 ? bounds.join(" · ") : t("inviteLinks.unbounded");
 
   return (
-    <Card style={{ gap: 10 }}>
-      <Text style={[ty.label, { color: semantic.accent }]}>
-        {upper(t("mobile:group.invite.linkCreated"))}
-      </Text>
-      <Text
-        style={{
-          fontFamily: ty.body.fontFamily,
-          fontSize: 11,
-          color: semantic.mute,
-          lineHeight: 16,
-        }}
-      >
-        {t("mobile:group.invite.linkOnce")}
-      </Text>
+    <Card style={{ gap: space.md }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+        <Icon.check size={16} color={semantic.accent} />
+        <Text
+          accessibilityRole="header"
+          style={{ flex: 1, fontFamily: fonts.semibold, fontSize: 16, color: semantic.text }}
+        >
+          {t("mobile:group.invite.linkCreated")}
+        </Text>
+      </View>
+      <Text style={[ty.secondary, { lineHeight: 20 }]}>{t("mobile:group.invite.linkOnce")}</Text>
       <View
         style={{
           borderWidth: 1,
-          borderColor: semantic.hairStrong,
-          backgroundColor: palette.bg,
-          paddingVertical: 8,
-          paddingHorizontal: 10,
-          borderRadius: 3,
+          borderColor: semantic.hair,
+          backgroundColor: semantic.panel,
+          paddingVertical: space.md,
+          paddingHorizontal: space.lg,
+          borderRadius: r.md,
         }}
       >
         <Text
@@ -103,35 +100,42 @@ export function CreatedInviteLinkCard({ link }: { link: CreatedInviteLink }) {
           selectable
           style={{
             fontFamily: ty.mono.fontFamily,
-            fontSize: 11,
-            color: semantic.ink,
+            fontSize: 13,
+            color: semantic.text,
           }}
         >
           {link.url}
         </Text>
       </View>
-      <View style={{ flexDirection: "row", gap: 8 }}>
+      <View style={{ flexDirection: "row", gap: space.sm }}>
         <View style={{ flex: 1 }}>
           <Button
             full
             testID="btn-copy-invite-link"
-            variant={copyState === "failed" ? "danger" : "primary"}
+            variant={copyState === "failed" ? "secondary" : "primary"}
             onPress={onCopy}
+            accessibilityLabel={
+              copyState === "copied"
+                ? t("inviteLinks.copiedLabel")
+                : copyState === "failed"
+                  ? t("inviteLinks.copyFailedLabel")
+                  : t("inviteLinks.copyLabel")
+            }
             icon={
               copyState === "copied" ? (
-                <Icon.check color={palette.bg} />
+                <Icon.check size={18} color={semantic.onAccent} />
               ) : copyState === "failed" ? (
-                <Icon.alert color={semantic.danger} />
+                <Icon.alert size={18} color={semantic.text} />
               ) : (
-                <Icon.copy color={palette.bg} />
+                <Icon.copy size={18} color={semantic.onAccent} />
               )
             }
           >
             {copyState === "copied"
-              ? upper(t("inviteLinks.copied"))
+              ? t("inviteLinks.copied")
               : copyState === "failed"
-                ? upper(t("inviteLinks.copyFailed"))
-                : upper(t("inviteLinks.copy"))}
+                ? t("inviteLinks.copyFailed")
+                : t("inviteLinks.copy")}
           </Button>
         </View>
         <View style={{ flex: 1 }}>
@@ -139,21 +143,13 @@ export function CreatedInviteLinkCard({ link }: { link: CreatedInviteLink }) {
             full
             testID="btn-share-invite-link"
             onPress={onShare}
-            icon={<Icon.share color={semantic.ink} />}
+            icon={<Icon.share size={18} color={semantic.text} />}
           >
-            {upper(t("mobile:group.invite.share"))}
+            {t("mobile:group.invite.share")}
           </Button>
         </View>
       </View>
-      <Text
-        style={{
-          fontFamily: ty.body.fontFamily,
-          fontSize: 11,
-          color: semantic.mute,
-        }}
-      >
-        {boundsLabel}
-      </Text>
+      <Text style={ty.meta}>{boundsLabel}</Text>
     </Card>
   );
 }

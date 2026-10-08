@@ -1,22 +1,22 @@
 import { useEffect, useState } from "react";
-import { View, Text } from "react-native";
+import { View } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useTranslation } from "react-i18next";
 import {
   Screen,
-  Crumb,
+  Header,
   Body,
   SectionTitle,
   ListRow,
+  Group,
   Field,
   Button,
   BottomAction,
   Chip,
-  Ctx,
 } from "../../components/ui";
-import { FormField, FormStack } from "../../components/FormField";
+import { LabeledField, Hint, ErrorText } from "../../components/groups/FormBits";
 import { Icon } from "../../components/icons";
-import { semantic, type as ty } from "../../theme/tokens";
+import { semantic, space } from "../../theme/tokens";
 import {
   useGroupChannels,
   useUserGroupsWithChannels,
@@ -25,7 +25,6 @@ import {
   useDeleteChannel,
   useGroupMembers,
 } from "../../hooks/queries";
-import { upper } from "../../i18n";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 
@@ -101,166 +100,139 @@ function GroupSettings() {
 
   return (
     <Screen testID="screen-group-settings">
-      <Crumb
-        segs={[
-          { label: upper(t("nav:breadcrumb.groups")) },
-          { label: group?.name ?? t("mobile:group.common.fallbackName") },
-          { label: t("nav:breadcrumb.settings"), leaf: true },
-        ]}
+      <Header
+        title={t("mobile:group.settings.title")}
+        subtitle={group?.name}
       />
-      <Body>
+      <Body contentContainerStyle={{ paddingHorizontal: space.xxl }}>
         {!iAmAdmin ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.mute,
-              paddingHorizontal: 18,
-              paddingTop: 14,
-            }}
-          >
-            {t("mobile:group.settings.notAdmin")}
-          </Text>
+          <View style={{ paddingTop: space.xxl }}>
+            <Hint>{t("mobile:group.settings.notAdmin")}</Hint>
+          </View>
         ) : null}
 
-        <SectionTitle>{upper(t("mobile:group.settings.identitySection"))}</SectionTitle>
-        <FormStack>
-          <FormField label={t("renameGroup.nameLabel")}>
+        <SectionTitle style={{ paddingHorizontal: 4 }}>
+          {t("mobile:group.settings.identitySection")}
+        </SectionTitle>
+        <View style={{ gap: space.xxl }}>
+          <LabeledField label={t("mobile:group.settings.nameLabel")}>
             <Field
               value={name}
               onChangeText={setName}
               editable={iAmAdmin}
+              autoCapitalize="words"
               testID="input-group-name"
-              accessibilityLabel={t("renameGroup.nameLabel")}
+              accessibilityLabel={t("mobile:group.settings.nameLabel")}
             />
-          </FormField>
-          <FormField label={t("renameGroup.descriptionLabel")}>
+          </LabeledField>
+          <LabeledField label={t("renameGroup.descriptionLabel")}>
             <Field
               value={description}
               onChangeText={setDescription}
               editable={iAmAdmin}
+              autoCapitalize="sentences"
               testID="input-group-description"
               accessibilityLabel={t("mobile:group.common.descriptionLabel")}
             />
-          </FormField>
-        </FormStack>
+          </LabeledField>
+          {updateGroup.isError ? (
+            <ErrorText>
+              {(updateGroup.error as Error).message || t("renameGroup.renameFailed")}
+            </ErrorText>
+          ) : null}
+        </View>
 
-        <SectionTitle>{upper(t("mobile:group.settings.channelsSection"))}</SectionTitle>
-        {channels.map((c) => {
-          const armed = confirmDeleteChannel === c.id;
-          return (
-            <ListRow
-              key={c.id}
-              testID={`row-channel-${c.id}`}
-              minHeight={48}
-              glyph={<Icon.hash color={semantic.mute} />}
-              name={c.name}
-              nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
-              sub={c.description ?? undefined}
-              end={
-                iAmAdmin && channels.length > 1 ? (
-                  <Chip
-                    variant={armed ? "on" : "default"}
-                    testID={`btn-delete-channel-${c.id}`}
-                    accessibilityLabel={t("channel.deleteLabel")}
-                    onPress={() => onDeleteChannel(c.id)}
-                  >
-                    {deleteChannel.isPending && armed
-                      ? "…"
-                      : armed
-                        ? t("mobile:group.common.confirm")
-                        : t("common:actions.delete")}
-                  </Chip>
-                ) : null
-              }
-            />
-          );
-        })}
+        <SectionTitle style={{ paddingHorizontal: 4 }}>
+          {t("mobile:group.settings.channelsSection")}
+        </SectionTitle>
         {channels.length === 0 ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.mute,
-              paddingHorizontal: 18,
-              paddingTop: 6,
-            }}
-          >
-            {t("mobile:group.common.noChannels")}
-          </Text>
-        ) : null}
+          <Hint>{t("mobile:group.common.noChannels")}</Hint>
+        ) : (
+          <Group>
+            {channels.map((c) => {
+              const armed = confirmDeleteChannel === c.id;
+              return (
+                <ListRow
+                  key={c.id}
+                  testID={`row-channel-${c.id}`}
+                  glyph={<Icon.hash size={16} color={semantic.dim} />}
+                  name={c.name}
+                  sub={c.description || undefined}
+                  end={
+                    iAmAdmin && channels.length > 1 ? (
+                      <Chip
+                        variant="outline"
+                        selected={armed}
+                        testID={`btn-delete-channel-${c.id}`}
+                        accessibilityLabel={
+                          armed
+                            ? t("mobile:group.settings.tapAgainToConfirm")
+                            : t("mobile:group.settings.deleteChannel", { name: c.name })
+                        }
+                        leading={<Icon.trash size={14} color={armed ? semantic.accent : semantic.text} />}
+                        onPress={() => onDeleteChannel(c.id)}
+                      >
+                        {deleteChannel.isPending && armed
+                          ? "…"
+                          : armed
+                            ? t("mobile:group.common.confirm")
+                            : t("common:actions.delete")}
+                      </Chip>
+                    ) : null
+                  }
+                />
+              );
+            })}
+          </Group>
+        )}
 
-        <SectionTitle>{upper(t("mobile:group.common.emoji"))}</SectionTitle>
-        <ListRow
-          testID="row-group-emoji"
-          minHeight={48}
-          glyph={<Icon.plus color={semantic.mute} />}
-          name={t("group.customEmoji")}
-          nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
-          sub={t("mobile:group.settings.customEmojiSub")}
-          onPress={() =>
-            id
-              ? router.push({
-                  pathname: "/group/emoji",
-                  params: { groupId: id },
-                })
-              : undefined
-          }
-        />
+        <SectionTitle style={{ paddingHorizontal: 4 }}>{t("mobile:group.common.emoji")}</SectionTitle>
+        <Group>
+          <ListRow
+            testID="row-group-emoji"
+            glyph={<Icon.smile size={20} color={semantic.dim} />}
+            name={t("mobile:group.panel.customEmoji")}
+            sub={t("mobile:group.settings.customEmojiSub")}
+            chevron
+            onPress={() =>
+              id
+                ? router.push({
+                    pathname: "/group/emoji",
+                    params: { groupId: id },
+                  })
+                : undefined
+            }
+          />
+        </Group>
 
         {iAmOwner ? (
-          <View>
-            <SectionTitle>{upper(t("mobile:group.common.danger"))}</SectionTitle>
-            <View style={{ paddingHorizontal: 18 }}>
-              <Button
-                full
+          <View style={{ paddingTop: space.xxxl * 2, gap: space.sm }}>
+            {/* Destructive, on its own at the end, two taps to confirm. */}
+            <Group>
+              <ListRow
                 testID="btn-delete-group"
-                variant="danger"
-                icon={<Icon.exit color={semantic.danger} />}
-                onPress={onDeleteGroup}
+                glyph={<Icon.trash size={20} color={semantic.accent} />}
+                name={
+                  deleteGroup.isPending
+                    ? t("mobile:group.settings.deleting")
+                    : confirmDeleteGroup
+                      ? t("mobile:group.settings.tapAgainToConfirm")
+                      : t("mobile:group.settings.deleteGroup")
+                }
+                nameStyle={{ color: semantic.accent }}
                 disabled={deleteGroup.isPending}
-              >
-                {deleteGroup.isPending
-                  ? upper(t("mobile:group.settings.deleting"))
-                  : confirmDeleteGroup
-                    ? upper(t("mobile:group.settings.tapAgainToConfirm"))
-                    : upper(t("mobile:group.settings.deleteGroup"))}
-              </Button>
-              {deleteGroup.isError ? (
-                <Text
-                  style={{
-                    fontFamily: ty.body.fontFamily,
-                    fontSize: 12,
-                    color: semantic.danger,
-                    paddingTop: 6,
-                  }}
-                >
-                  {(deleteGroup.error as Error).message ||
-                    t("mobile:group.settings.deleteFailed")}
-                </Text>
-              ) : null}
-            </View>
+                onPress={onDeleteGroup}
+              />
+            </Group>
+            {deleteGroup.isError ? (
+              <ErrorText>
+                {(deleteGroup.error as Error).message ||
+                  t("mobile:group.settings.deleteFailed")}
+              </ErrorText>
+            ) : null}
           </View>
         ) : null}
-
-        {updateGroup.isError ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 12,
-              color: semantic.danger,
-              paddingHorizontal: 18,
-              paddingTop: 6,
-            }}
-          >
-            {(updateGroup.error as Error).message || t("renameGroup.renameFailed")}
-          </Text>
-        ) : null}
       </Body>
-      <Ctx
-        cr={group?.name ?? upper(t("mobile:group.common.fallbackName"))}
-        name={t("nav:breadcrumb.settings")}
-      />
       {iAmAdmin ? (
         <BottomAction>
           <Button
@@ -269,11 +241,8 @@ function GroupSettings() {
             variant="primary"
             onPress={onSave}
             disabled={!dirty || !name.trim() || updateGroup.isPending}
-            iconRight={<Icon.check color="#0a0907" />}
           >
-            {updateGroup.isPending
-              ? upper(t("renameGroup.submitting"))
-              : upper(t("renameGroup.submit"))}
+            {updateGroup.isPending ? t("renameGroup.submitting") : t("renameGroup.submit")}
           </Button>
         </BottomAction>
       ) : null}

@@ -1,38 +1,32 @@
-import { useCallback, useMemo } from "react";
-import { Pressable, View, Text } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Text, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
-import {
-  Screen,
-  Crumb,
-  Body,
-  SectionTitle,
-  ListRow,
-  Chip,
-  Button,
-  BottomAction,
-} from "../../components/ui";
+import { observer } from "mobx-react-lite";
+import { Screen, Header, Body, Button } from "../../components/ui";
 import { Icon } from "../../components/icons";
-import { semantic, type as ty } from "../../theme/tokens";
+import { semantic, type as ty, space } from "../../theme/tokens";
 import {
   useUserGroupsWithChannels,
   usePendingGroupInvites,
-  useAcceptGroupInvite,
-  useDeclineGroupInvite,
-  useLastMessages,
-  previewText,
   useAdminPendingJoinRequestCounts,
 } from "../../hooks/queries";
-import { timeAgoShort } from "../../lib/timeAgo";
-import { upper } from "../../i18n";
 import { appStore } from "../../stores/appStore";
-import { observer } from "mobx-react-lite";
 import { useLayoutClass } from "../../hooks/useLayoutClass";
 import { TwoPane, DetailPlaceholder } from "../../components/MasterDetail";
+import { GroupPills } from "../../components/groups/GroupPills";
+import { GroupPanel } from "../../components/groups/GroupPanel";
+import { PendingRows } from "../../components/groups/PendingRows";
+import { AddGroupSheet } from "../../components/groups/AddGroupSheet";
+import { readLastGroupId, writeLastGroupId } from "../../components/groups/lastGroup";
+import type { Channel } from "../../types";
 import { ChatView } from "../chat/[id]";
 
+// The Groups tab (Main.dc.html): a strip of group pills, then the selected
+// group's channel panel. Picking a pill switches the group in place; the
+// choice is remembered across launches.
 function Groups() {
-  const { t } = useTranslation("channels");
+  const { t } = useTranslation("mobile");
   const router = useRouter();
   const { data: groups = [], isLoading, isError } = useUserGroupsWithChannels();
   const { data: invites = [] } = usePendingGroupInvites();
@@ -41,25 +35,39 @@ function Groups() {
     [groups],
   );
   const pendingByGroup = useAdminPendingJoinRequestCounts(adminGroupIds);
-  const acceptInvite = useAcceptGroupInvite();
-  const declineInvite = useDeclineGroupInvite();
-  const setSelectedGroupId = appStore.setSelectedGroupId;
-  const setSelectedChannelId = appStore.setSelectedChannelId;
   const selectedGroupId = appStore.selectedGroupId;
   const selectedChannelId = appStore.selectedChannelId;
   const unreadCounts = appStore.unreadCounts;
-  // On regular (iPad) width the list is the left column of a two-pane
-  // master-detail; on compact it is the whole screen with push navigation.
+  const me = appStore.currentUser?.id ?? null;
+  const [addOpen, setAddOpen] = useState(false);
+  // On regular (iPad) width the strip + panel are the left column of a
+  // two-pane master-detail; on compact they are the whole screen.
   const isRegular = useLayoutClass() === "regular";
 
-  // One batched preview fetch for every channel row (desktop #874/#936) —
-  // never one call per row. A channel with no locally-ingested messages is
-  // simply absent from the map and its row falls back to the description.
-  const channelIds = useMemo(
-    () => groups.flatMap((g) => g.channels.map((c) => c.id)),
-    [groups],
-  );
-  const { data: lastMessages = {} } = useLastMessages(channelIds);
+  // The group last picked here, from a previous launch.
+  const [storedGroupId, setStoredGroupId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!me) {
+      return;
+    }
+    let live = true;
+    readLastGroupId(me).then((id) => {
+      if (live) {
+        setStoredGroupId(id);
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, [me]);
+
+  // The shown group: the app-wide selection (set by opening a channel or a
+  // group anywhere), else the remembered one, else the first.
+  const current =
+    groups.find((g) => g.id === selectedGroupId) ??
+    groups.find((g) => g.id === storedGroupId) ??
+    groups[0] ??
+    null;
 
   // On compact, being on this list means no conversation is open — clear the
   // selection so realtime `new_message` events for the conversation the user
@@ -73,253 +81,113 @@ function Groups() {
     }, [isRegular]),
   );
 
-  const totalChannels = groups.reduce((acc, g) => acc + g.channels.length, 0);
+  const selectGroup = (id: string) => {
+    if (id !== appStore.selectedGroupId) {
+      appStore.setSelectedGroupId(id);
+    }
+    setStoredGroupId(id);
+    if (me) {
+      writeLastGroupId(me, id);
+    }
+  };
 
-  // The single-column content — rendered as the whole screen on compact, or as
-  // the left list column of the two-pane on regular. Byte-for-byte identical on
-  // compact save for the row onPress, which only skips the push on regular.
-  const listColumn = (
-    <>
-      <Crumb
-        segs={[{ label: upper(t("nav:breadcrumb.groups")), leaf: true }]}
-        end={String(totalChannels)}
-      />
-      <Body>
-        {/* Join requests waiting on you, one row per group (#1216). */}
-        {pendingByGroup.size > 0 ? (
-          <View>
-            <SectionTitle>{upper(t("group.joinRequests"))}</SectionTitle>
-            {groups
-              .filter((g) => pendingByGroup.has(g.id))
-              .map((g) => (
-                <ListRow
-                  key={g.id}
-                  testID={`row-join-requests-${g.id}`}
-                  glyph={<Icon.inbox color={semantic.accent} />}
-                  name={g.name}
-                  sub={t("groups.joinRequestsPending", { count: pendingByGroup.get(g.id) })}
-                  onPress={() => router.push({ pathname: "/group/requests", params: { groupId: g.id } })}
-                  end={<Icon.fwd color={semantic.mute} />}
-                />
-              ))}
-          </View>
-        ) : null}
-        {invites.length > 0 ? (
-          <View>
-            <SectionTitle>{upper(t("mobile:groups.pendingInvites"))}</SectionTitle>
-            {invites.map((inv) => (
-              <ListRow
-                key={inv.id}
-                testID={`row-invite-${inv.id}`}
-                glyph={<Icon.inbox color={semantic.accent} />}
-                name={inv.group_name}
-                sub={t("invites.invitedBy", {
-                  name: inv.inviter_username
-                    ? `@${inv.inviter_username}`
-                    : t("nav:statusBar.someone"),
-                })}
-                end={
-                  <View style={{ flexDirection: "row", gap: 6 }}>
-                    <Chip
-                      testID={`btn-decline-invite-${inv.id}`}
-                      accessibilityLabel={t("mobile:groups.declineInviteLabel")}
-                      onPress={() => declineInvite.mutate(inv.id)}
-                    >
-                      {t("invites.decline")}
-                    </Chip>
-                    <Chip
-                      testID={`btn-accept-invite-${inv.id}`}
-                      accessibilityLabel={t("mobile:groups.acceptInviteLabel")}
-                      variant="on"
-                      onPress={() => acceptInvite.mutate(inv.id)}
-                    >
-                      {acceptInvite.isPending ? "…" : t("invites.accept")}
-                    </Chip>
-                  </View>
-                }
-              />
-            ))}
-          </View>
-        ) : null}
-        {isLoading ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.mute,
-              paddingHorizontal: 18,
-              paddingTop: 12,
-            }}
-          >
-            {t("mobile:groups.loading")}
-          </Text>
-        ) : null}
-        {isError ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.danger,
-              paddingHorizontal: 18,
-              paddingTop: 12,
-            }}
-          >
-            {t("groups.loadFailed")}
-          </Text>
-        ) : null}
-        {!isLoading && !isError && groups.length === 0 ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.mute,
-              paddingHorizontal: 18,
-              paddingTop: 12,
-            }}
-          >
-            {t("mobile:groups.empty")}
-          </Text>
-        ) : null}
-        {groups.map((g) => (
-          <View key={g.id}>
-            {/* The group header opens the group (members, invite, settings,
-                join requests) without going through a channel (#1216). */}
-            <Pressable
-              testID={`row-group-${g.id}`}
-              accessibilityRole="button"
-              accessibilityLabel={g.name}
-              onPress={() => router.push({ pathname: "/group/[id]", params: { id: g.id } })}
-            >
-              <SectionTitle
-                right={
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                    {pendingByGroup.has(g.id) ? (
-                      <View
-                        testID={`badge-join-requests-${g.id}`}
-                        style={{
-                          minWidth: 18,
-                          paddingHorizontal: 5,
-                          height: 18,
-                          borderRadius: 9,
-                          backgroundColor: semantic.accent,
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <Text style={{ fontFamily: ty.body.fontFamily, fontSize: 11, color: "#0a0907" }}>
-                          {pendingByGroup.get(g.id)}
-                        </Text>
-                      </View>
-                    ) : null}
-                    <Icon.fwd color={semantic.mute} />
-                  </View>
-                }
-              >
-                {upper(g.name)}
-              </SectionTitle>
-            </Pressable>
-            {g.channels.length === 0 ? (
-              <Text
-                style={{
-                  fontFamily: ty.body.fontFamily,
-                  fontSize: 12,
-                  color: semantic.mute,
-                  paddingHorizontal: 18,
-                  paddingVertical: 6,
-                }}
-              >
-                {t("mobile:group.common.noChannels")}
-              </Text>
-            ) : null}
-            {g.channels.map((c) => {
-              const last = lastMessages[c.id];
-              const preview = previewText(last);
-              const unread = unreadCounts[c.id] ?? 0;
-              return (
-                <ListRow
-                  key={c.id}
-                  testID={`row-channel-${c.id}`}
-                  selected={isRegular && selectedChannelId === c.id}
-                  glyph={<Icon.hash color={semantic.mute} />}
-                  name={c.name}
-                  sub={
-                    preview
-                      ? last?.sender_username
-                        ? t("chat:preview.withSender", {
-                            name: last.sender_username,
-                            text: preview,
-                          })
-                        : preview
-                      : (c.description ?? undefined)
-                  }
-                  end={
-                    <>
-                      {last ? (
-                        <Text style={[ty.label, { fontSize: 10 }]}>
-                          {timeAgoShort(last.created_at)}
-                        </Text>
-                      ) : null}
-                      {unread > 0 ? (
-                        <View
-                          testID={`unread-${c.id}`}
-                          style={{
-                            width: 7,
-                            height: 7,
-                            borderRadius: 4,
-                            backgroundColor: semantic.accent,
-                          }}
-                        />
-                      ) : null}
-                    </>
-                  }
-                  onPress={() => {
-                    setSelectedGroupId(g.id);
-                    setSelectedChannelId(c.id);
-                    // Opening a conversation clears its unread count (desktop
-                    // does the same in its Channel page).
-                    appStore.markRead(c.id);
-                    // On regular the right pane updates in place; on compact push
-                    // the channel chat as today.
-                    if (!isRegular) {
-                      router.push({
-                        pathname: "/chat/[id]",
-                        params: { id: c.id, kind: "channel", name: c.name },
-                      });
-                    }
-                  }}
-                />
-              );
-            })}
-          </View>
-        ))}
-      </Body>
-      <BottomAction>
-        <Button
-          testID="btn-create-group"
-          full
-          icon={<Icon.plus color={semantic.ink} />}
-          onPress={() => router.push("/group/new")}
-        >
-          {t("groups.create")}
-        </Button>
-        <Button
-          testID="btn-join-group"
-          variant="subtle"
-          full
-          icon={<Icon.search color={semantic.ink} />}
-          onPress={() => router.push("/group/discover")}
-        >
-          {t("groups.find")}
-        </Button>
-      </BottomAction>
-    </>
+  const openChannel = (groupId: string, c: Channel) => {
+    selectGroup(groupId);
+    appStore.setSelectedChannelId(c.id);
+    // Opening a conversation clears its unread count (desktop does the same
+    // in its Channel page).
+    appStore.markRead(c.id);
+    // On regular the right pane updates in place; on compact push the chat.
+    if (!isRegular) {
+      router.push({
+        pathname: "/chat/[id]",
+        params: { id: c.id, kind: "channel", name: c.name },
+      });
+    }
+  };
+
+  const pills = groups.map((g) => ({
+    id: g.id,
+    name: g.name,
+    unread: g.channels.some((c) => (unreadCounts[c.id] ?? 0) > 0),
+  }));
+
+  const pending = (
+    <PendingRows groups={groups} pendingByGroup={pendingByGroup} invites={invites} />
   );
+
+  let column: React.ReactNode;
+  if (current) {
+    column = (
+      <View style={{ flex: 1 }}>
+        <GroupPills
+          groups={pills}
+          selectedId={current.id}
+          onSelect={selectGroup}
+          onAdd={() => setAddOpen(true)}
+        />
+        <GroupPanel
+          testID="panel-group"
+          groupId={current.id}
+          selectedChannelId={isRegular ? selectedChannelId : null}
+          onOpenChannel={(c) => openChannel(current.id, c)}
+          top={pending}
+        />
+      </View>
+    );
+  } else {
+    column = (
+      <>
+        <Header variant="large" title={t("groups.title")} />
+        <Body contentContainerStyle={{ paddingHorizontal: space.xxl, gap: space.xxl }}>
+          {isLoading ? (
+            <Text style={ty.secondary}>{t("groups.loading")}</Text>
+          ) : null}
+          {isError ? (
+            <Text style={[ty.secondary, { color: semantic.text }]}>
+              {t("channels:groups.loadFailed")}
+            </Text>
+          ) : null}
+          {pending}
+          {!isLoading && !isError ? (
+            <View style={{ gap: space.sm }}>
+              <Text accessibilityRole="header" style={ty.title}>
+                {t("groups.emptyTitle")}
+              </Text>
+              <Text style={ty.secondary}>{t("groups.emptyBody")}</Text>
+            </View>
+          ) : null}
+          {isLoading ? null : (
+            <View style={{ gap: space.md }}>
+              <Button
+                testID="btn-create-group"
+                variant="primary"
+                full
+                icon={<Icon.plus size={18} color={semantic.onAccent} />}
+                onPress={() => router.push("/group/new")}
+              >
+                {t("groups.create")}
+              </Button>
+              <Button
+                testID="btn-join-group"
+                full
+                icon={<Icon.search size={18} color={semantic.text} />}
+                onPress={() => router.push("/group/discover")}
+              >
+                {t("groups.find")}
+              </Button>
+            </View>
+          )}
+        </Body>
+      </>
+    );
+  }
 
   return (
     <Screen testID="screen-groups" aboveTabBar>
       {isRegular ? (
         <TwoPane
-          list={listColumn}
+          list={column}
           detail={
             selectedChannelId ? (
               <ChatView
@@ -334,8 +202,9 @@ function Groups() {
           }
         />
       ) : (
-        listColumn
+        column
       )}
+      {addOpen ? <AddGroupSheet onClose={() => setAddOpen(false)} /> : null}
     </Screen>
   );
 }

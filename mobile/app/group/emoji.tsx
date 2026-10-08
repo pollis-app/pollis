@@ -1,21 +1,22 @@
 import { useState } from "react";
-import { View, Text } from "react-native";
+import { View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { useTranslation } from "react-i18next";
 import * as ImagePicker from "expo-image-picker";
 import {
   Screen,
-  Crumb,
+  Header,
   Body,
   SectionTitle,
   ListRow,
+  Group,
   Field,
   Button,
   Chip,
-  Ctx,
 } from "../../components/ui";
+import { LabeledField, Hint, ErrorText } from "../../components/groups/FormBits";
 import { Icon } from "../../components/icons";
-import { semantic, type as ty } from "../../theme/tokens";
+import { semantic, space } from "../../theme/tokens";
 import {
   useUserGroupsWithChannels,
   useGroupMembers,
@@ -25,7 +26,6 @@ import {
   SHORTCODE_RE,
 } from "../../hooks/queries";
 import { CustomEmojiImage } from "../../components/emoji/CustomEmojiImage";
-import { upper } from "../../i18n";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 
@@ -95,187 +95,111 @@ function GroupEmoji() {
 
   return (
     <Screen testID="screen-group-emoji">
-      <Crumb
-        segs={[
-          { label: upper(t("nav:breadcrumb.groups")) },
-          { label: groupName },
-          { label: t("mobile:group.common.emoji"), leaf: true },
-        ]}
-      />
-      <Body>
-        <SectionTitle>{upper(t("manage.title"))}</SectionTitle>
-        {isLoading ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.mute,
-              paddingHorizontal: 18,
-              paddingTop: 6,
-            }}
-          >
-            {t("common:states.loading")}
-          </Text>
-        ) : null}
-        {!isLoading && emoji.length === 0 ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.mute,
-              paddingHorizontal: 18,
-              paddingTop: 6,
-            }}
-          >
-            {t("mobile:group.emoji.empty")}
-          </Text>
-        ) : null}
-        {emoji.map((e) => {
-          const armed = confirmRemove === e.shortcode;
-          const size = t("mobile:group.emoji.sizeKb", {
-            count: Math.max(1, Math.round(e.size_bytes / 1024)),
-          });
-          return (
-            <ListRow
-              key={e.shortcode}
-              testID={`row-emoji-${e.shortcode}`}
-              minHeight={48}
-              glyph={
-                <CustomEmojiImage
-                  shortcode={e.shortcode}
-                  contentHash={e.content_hash}
-                  size={22}
+      <Header title={t("mobile:group.panel.customEmoji")} subtitle={group ? groupName : undefined} />
+      <Body contentContainerStyle={{ paddingHorizontal: space.xxl }}>
+        <SectionTitle style={{ paddingHorizontal: 4 }}>
+          {t("mobile:group.panel.customEmoji")}
+        </SectionTitle>
+        {isLoading ? <Hint>{t("common:states.loading")}</Hint> : null}
+        {!isLoading && emoji.length === 0 ? <Hint>{t("mobile:group.emoji.empty")}</Hint> : null}
+        {emoji.length > 0 ? (
+          <Group>
+            {emoji.map((e) => {
+              const armed = confirmRemove === e.shortcode;
+              const size = t("mobile:group.emoji.sizeKb", {
+                count: Math.max(1, Math.round(e.size_bytes / 1024)),
+              });
+              return (
+                <ListRow
+                  key={e.shortcode}
+                  testID={`row-emoji-${e.shortcode}`}
+                  glyph={
+                    <CustomEmojiImage
+                      shortcode={e.shortcode}
+                      contentHash={e.content_hash}
+                      size={22}
+                    />
+                  }
+                  name={`:${e.shortcode}:`}
+                  sub={e.animated ? t("manage.sizeAnimated", { size }) : size}
+                  end={
+                    iAmAdmin ? (
+                      <Chip
+                        variant="outline"
+                        selected={armed}
+                        testID={`btn-remove-emoji-${e.shortcode}`}
+                        accessibilityLabel={
+                          armed
+                            ? t("mobile:group.settings.tapAgainToConfirm")
+                            : t("manage.remove", { shortcode: e.shortcode })
+                        }
+                        onPress={() => onRemove(e.shortcode)}
+                      >
+                        {remove.isPending && armed
+                          ? "…"
+                          : armed
+                            ? t("mobile:group.common.confirm")
+                            : t("mobile:group.common.remove")}
+                      </Chip>
+                    ) : null
+                  }
                 />
-              }
-              name={`:${e.shortcode}:`}
-              nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
-              sub={e.animated ? t("manage.sizeAnimated", { size }) : size}
-              end={
-                iAmAdmin ? (
-                  <Chip
-                    variant={armed ? "on" : "default"}
-                    testID={`btn-remove-emoji-${e.shortcode}`}
-                    accessibilityLabel={t("manage.remove", { shortcode: e.shortcode })}
-                    onPress={() => onRemove(e.shortcode)}
-                  >
-                    {remove.isPending && armed
-                      ? "…"
-                      : armed
-                        ? t("mobile:group.common.confirm")
-                        : t("mobile:group.common.remove")}
-                  </Chip>
-                ) : null
-              }
-            />
-          );
-        })}
+              );
+            })}
+          </Group>
+        ) : null}
         {remove.isError ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 12,
-              color: semantic.danger,
-              paddingHorizontal: 18,
-              paddingTop: 6,
-            }}
-          >
-            {(remove.error as Error).message || t("manage.removeFailed")}
-          </Text>
+          <View style={{ paddingTop: space.md }}>
+            <ErrorText>{(remove.error as Error).message || t("manage.removeFailed")}</ErrorText>
+          </View>
         ) : null}
 
         {iAmAdmin ? (
           <View>
-            <SectionTitle>{upper(t("manage.add"))}</SectionTitle>
-            <View style={{ paddingHorizontal: 18, paddingTop: 6, gap: 6 }}>
-              <Text style={ty.label}>{upper(t("manage.shortcodeLabel"))}</Text>
-              <Field
-                value={shortcode}
-                onChangeText={(v) => setShortcode(v.toLowerCase())}
-                placeholder={t("manage.shortcodePlaceholder")}
-                testID="input-emoji-shortcode"
-                accessibilityLabel={t("manage.shortcodeLabel")}
-              />
-              {shortcode.length > 0 && !shortcodeValid ? (
-                <Text
-                  style={{
-                    fontFamily: ty.body.fontFamily,
-                    fontSize: 12,
-                    color: semantic.danger,
-                  }}
-                >
-                  {t("manage.shortcodeInvalid")}
-                </Text>
-              ) : null}
-              {shortcodeTaken ? (
-                <Text
-                  style={{
-                    fontFamily: ty.body.fontFamily,
-                    fontSize: 12,
-                    color: semantic.danger,
-                  }}
-                >
-                  {t("manage.shortcodeTaken", { shortcode })}
-                </Text>
-              ) : null}
-              <View style={{ paddingTop: 8 }}>
-                <Button
-                  full
-                  testID="btn-upload-emoji"
-                  icon={<Icon.plus color={semantic.ink} />}
-                  onPress={() => void onPickAndUpload()}
-                  disabled={
-                    !shortcodeValid || shortcodeTaken || upload.isPending
-                  }
-                >
-                  {upload.isPending
-                    ? upper(t("mobile:group.emoji.uploading"))
-                    : upper(t("mobile:group.emoji.pickAndUpload"))}
-                </Button>
-              </View>
+            <SectionTitle style={{ paddingHorizontal: 4 }}>{t("manage.add")}</SectionTitle>
+            <View style={{ gap: space.lg }}>
+              <LabeledField
+                label={t("manage.shortcodeLabel")}
+                error={
+                  shortcode.length > 0 && !shortcodeValid
+                    ? t("manage.shortcodeInvalid")
+                    : shortcodeTaken
+                      ? t("manage.shortcodeTaken", { shortcode })
+                      : null
+                }
+              >
+                <Field
+                  value={shortcode}
+                  onChangeText={(v) => setShortcode(v.toLowerCase())}
+                  placeholder={t("manage.shortcodePlaceholder")}
+                  autoCorrect={false}
+                  testID="input-emoji-shortcode"
+                  accessibilityLabel={t("manage.shortcodeLabel")}
+                />
+              </LabeledField>
+              <Button
+                full
+                testID="btn-upload-emoji"
+                icon={<Icon.plus size={18} color={semantic.text} />}
+                onPress={() => void onPickAndUpload()}
+                disabled={!shortcodeValid || shortcodeTaken || upload.isPending}
+              >
+                {upload.isPending
+                  ? t("mobile:group.emoji.uploading")
+                  : t("mobile:group.emoji.pickAndUpload")}
+              </Button>
               {upload.isError ? (
-                <Text
-                  style={{
-                    fontFamily: ty.body.fontFamily,
-                    fontSize: 12,
-                    color: semantic.danger,
-                    paddingTop: 6,
-                  }}
-                >
-                  {(upload.error as Error).message || t("manage.addFailed")}
-                </Text>
+                <ErrorText>{(upload.error as Error).message || t("manage.addFailed")}</ErrorText>
               ) : null}
-              {pickError ? (
-                <Text
-                  style={{
-                    fontFamily: ty.body.fontFamily,
-                    fontSize: 12,
-                    color: semantic.danger,
-                    paddingTop: 6,
-                  }}
-                >
-                  {pickError}
-                </Text>
-              ) : null}
+              {pickError ? <ErrorText>{pickError}</ErrorText> : null}
             </View>
           </View>
         ) : (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.mute,
-              paddingHorizontal: 18,
-              paddingTop: 14,
-            }}
-          >
-            {t("mobile:group.emoji.adminsOnly")}
-          </Text>
+          <View style={{ paddingTop: space.xxl }}>
+            <Hint>{t("mobile:group.emoji.adminsOnly")}</Hint>
+          </View>
         )}
       </Body>
-      <Ctx
-        cr={upper(t("mobile:group.common.fallbackName"))}
-        name={t("mobile:group.emoji.ctxTitle", { name: groupName })}
-      />
     </Screen>
   );
 }

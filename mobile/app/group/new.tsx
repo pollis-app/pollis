@@ -4,18 +4,18 @@ import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import {
   Screen,
-  Crumb,
+  Header,
   Body,
   Field,
   Button,
   BottomAction,
   Toggle,
+  Card,
 } from "../../components/ui";
-import { FormField, FormStack } from "../../components/FormField";
+import { LabeledField, Hint, ErrorText } from "../../components/groups/FormBits";
 import { Icon } from "../../components/icons";
-import { semantic, type as ty } from "../../theme/tokens";
+import { semantic, type as ty, space } from "../../theme/tokens";
 import { useCreateGroup } from "../../hooks/queries";
-import { upper } from "../../i18n";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 
@@ -57,49 +57,45 @@ function NewGroup() {
 
   return (
     <Screen testID="screen-group-new" centered>
-      <Crumb
-        segs={[
-          { label: upper(t("nav:breadcrumb.groups")) },
-          { label: t("mobile:group.new.crumb"), leaf: true },
-        ]}
-      />
-      <Body>
-        <FormStack paddingTop={12}>
-          <FormField label={t("createGroup.nameLabel")}>
-            <Field
-              testID="input-group-name"
-              accessibilityLabel={t("createGroup.nameLabel")}
-              amber
-              value={name}
-              onChangeText={setName}
-              placeholder={t("createGroup.namePlaceholder")}
-              icon={<Icon.people color={semantic.mute} />}
-            />
-          </FormField>
-          <FormField label={t("mobile:group.new.descriptionLabel")}>
-            <Field
-              testID="input-group-description"
-              accessibilityLabel={t("mobile:group.common.descriptionLabel")}
-              value={description}
-              onChangeText={setDescription}
-              placeholder={t("mobile:group.new.descriptionPlaceholder")}
-            />
-          </FormField>
-          {/* Opt-in, off by default, like desktop. No voice option: voice is
-              not supported on mobile. */}
+      <Header title={t("mobile:group.new.title")} />
+      <Body contentContainerStyle={{ padding: space.xxl, gap: space.xxl }}>
+        <LabeledField label={t("mobile:group.new.nameLabel")}>
+          <Field
+            testID="input-group-name"
+            accessibilityLabel={t("mobile:group.new.nameLabel")}
+            autoCapitalize="words"
+            value={name}
+            onChangeText={setName}
+            placeholder={t("createGroup.namePlaceholder")}
+            icon={<Icon.users size={18} color={semantic.muted} />}
+          />
+        </LabeledField>
+        <LabeledField label={t("mobile:group.new.descriptionLabel")}>
+          <Field
+            testID="input-group-description"
+            accessibilityLabel={t("mobile:group.common.descriptionLabel")}
+            autoCapitalize="sentences"
+            value={description}
+            onChangeText={setDescription}
+            placeholder={t("mobile:group.new.descriptionPlaceholder")}
+          />
+        </LabeledField>
+        {/* Opt-in, off by default, like desktop. No voice option: voice is
+            not supported on mobile. */}
+        <Card>
           <Pressable
             accessibilityRole="switch"
             accessibilityState={{ checked: createTextChannel }}
+            accessibilityLabel={t("createGroup.textChannelLabel")}
+            accessibilityHint={t("createGroup.textChannelDescription")}
             onPress={() => setCreateTextChannel((v) => !v)}
-            style={{ flexDirection: "row", alignItems: "center", gap: 14 }}
+            style={{ flexDirection: "row", alignItems: "center", gap: space.xl }}
           >
             <View style={{ flex: 1, gap: 4 }}>
-              <Text style={{ fontFamily: ty.body.fontFamily, fontSize: 14, color: semantic.ink }}>
+              <Text style={[ty.body, { color: semantic.text }]}>
                 {t("createGroup.textChannelLabel")}
               </Text>
-              <Text style={{ fontFamily: ty.body.fontFamily, fontSize: 11, lineHeight: 16, color: semantic.mute }}>
-                {t("createGroup.textChannelDescription")}
-              </Text>
+              <Text style={ty.secondary}>{t("createGroup.textChannelDescription")}</Text>
             </View>
             <Toggle
               testID="toggle-general-channel"
@@ -108,44 +104,25 @@ function NewGroup() {
               accessibilityLabel={t("createGroup.textChannelLabel")}
             />
           </Pressable>
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 11,
-              color: semantic.mute,
-              lineHeight: 16,
-            }}
-          >
-            {t("mobile:group.new.blurb")}
-          </Text>
-          {createGroup.isError ? (
-            <Text
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 12,
-                color: semantic.danger,
-              }}
-            >
-              {(createGroup.error as Error).message ||
-                t("createGroup.createFailed")}
-            </Text>
-          ) : null}
-        </FormStack>
+        </Card>
+        <Hint>{t("mobile:group.new.blurb")}</Hint>
+        {createGroup.isError ? (
+          <ErrorText>
+            {(createGroup.error as Error).message || t("createGroup.createFailed")}
+          </ErrorText>
+        ) : null}
       </Body>
       <BottomAction>
         <Button
           full
+          testID="btn-submit-group"
           variant="primary"
           onPress={onSubmit}
           disabled={!name.trim() || createGroup.isPending}
-          iconRight={<Icon.arrowRight color="#0a0907" />}
         >
           {createGroup.isPending
-            ? upper(t("createGroup.submitting"))
-            : upper(t("createGroup.submit"))}
-        </Button>
-        <Button variant="subtle" full onPress={() => router.back()}>
-          {t("common:actions.cancel")}
+            ? t("createGroup.submitting")
+            : t("mobile:group.new.submit")}
         </Button>
       </BottomAction>
     </Screen>

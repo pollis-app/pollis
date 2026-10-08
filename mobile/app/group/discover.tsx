@@ -1,25 +1,14 @@
 import { useState } from "react";
 import { View, Text } from "react-native";
-import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
-import {
-  Screen,
-  Crumb,
-  Body,
-  Field,
-  Button,
-  BottomAction,
-  Card,
-  Ctx,
-} from "../../components/ui";
+import { Screen, Header, Body, Field, Button, Card } from "../../components/ui";
+import { LabeledField, Hint, ErrorText } from "../../components/groups/FormBits";
 import { Icon } from "../../components/icons";
-import { semantic, type as ty } from "../../theme/tokens";
+import { semantic, type as ty, fonts, space } from "../../theme/tokens";
 import { useGroupBySlug, useRequestGroupAccess, useMyJoinRequest } from "../../hooks/queries";
-import { upper } from "../../i18n";
 
 export default function Discover() {
   const { t } = useTranslation("search");
-  const router = useRouter();
   const [slug, setSlug] = useState("");
   // Looked up on Search / return, never per keystroke: slug lookups share a
   // tight per-IP budget on the DS (60 per 10 min), and a slug typed one
@@ -50,154 +39,90 @@ export default function Discover() {
   const sentForThisGroup = requestAccess.isSuccess && requestAccess.data === search.data?.id;
   const status = sentForThisGroup ? "pending" : myRequest.data?.status;
 
+  const statusText =
+    status === "pending"
+      ? t("mobile:group.discover.requestPending")
+      : status === "approved"
+        ? t("mobile:group.discover.approved")
+        : status === "rejected"
+          ? t("mobile:group.discover.requestDeclined")
+          : null;
+
   return (
     <Screen testID="screen-group-discover">
-      <Crumb
-        segs={[
-          { label: upper(t("nav:breadcrumb.groups")) },
-          { label: t("mobile:group.discover.title"), leaf: true },
-        ]}
-      />
-      <Body>
-        <View style={{ paddingHorizontal: 18, paddingTop: 12, gap: 8 }}>
-          <Text style={ty.label}>{upper(t("group.slugLabel"))}</Text>
+      <Header title={t("mobile:group.discover.title")} />
+      <Body contentContainerStyle={{ padding: space.xxl, gap: space.xxl }}>
+        <LabeledField label={t("mobile:group.discover.slugLabel")} hint={t("mobile:group.discover.blurb")}>
           <Field
-            amber
             value={slug}
             onChangeText={setSlug}
             onSubmitEditing={submit}
             returnKeyType="search"
             placeholder={t("group.slugPlaceholder")}
             testID="input-group-search"
-            accessibilityLabel={t("group.slugLabel")}
-            icon={<Icon.diamond size={14} color={semantic.mute} />}
+            accessibilityLabel={t("mobile:group.discover.slugLabel")}
+            icon={<Icon.search size={18} color={semantic.muted} />}
           />
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 11,
-              color: semantic.mute,
-              lineHeight: 16,
-            }}
-          >
-            {t("mobile:group.discover.blurb")}
-          </Text>
-        </View>
+        </LabeledField>
+        <Button
+          testID="btn-group-search"
+          full
+          disabled={slug.trim().replace(/^#/, "").length < 2 || search.isFetching}
+          onPress={submit}
+        >
+          {search.isFetching ? t("group.searching") : t("group.submit")}
+        </Button>
 
-        <View style={{ paddingHorizontal: 18, paddingTop: 14 }}>
-          <Button
-            testID="btn-group-search"
-            variant="subtle"
-            full
-            disabled={slug.trim().replace(/^#/, "").length < 2 || search.isFetching}
-            onPress={submit}
-          >
-            {upper(search.isFetching ? t("group.searching") : t("group.submit"))}
-          </Button>
-        </View>
-        <View style={{ paddingHorizontal: 18, paddingTop: 18 }}>
-          {search.isLoading && !!submitted ? (
-            <Text
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 13,
-                color: semantic.mute,
-              }}
-            >
-              {t("group.searching")}
-            </Text>
-          ) : null}
-          {search.isError ? (
-            <Text
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 13,
-                color: semantic.danger,
-              }}
-            >
-              {(search.error as Error).message || t("group.notFound")}
-            </Text>
-          ) : null}
-          {search.data ? (
-            <Card>
-              <Text
-                style={{
-                  fontFamily: ty.h1.fontFamily,
-                  fontSize: 18,
-                  color: semantic.ink,
-                }}
-              >
+        {search.isLoading && !!submitted ? <Hint>{t("group.searching")}</Hint> : null}
+        {search.isError ? (
+          <ErrorText>{(search.error as Error).message || t("group.notFound")}</ErrorText>
+        ) : null}
+        {search.data ? (
+          <Card style={{ gap: space.md }}>
+            <View style={{ gap: 4 }}>
+              <Text accessibilityRole="header" style={ty.heading}>
                 {search.data.name}
               </Text>
               {search.data.description ? (
-                <Text
-                  style={{
-                    fontFamily: ty.body.fontFamily,
-                    fontSize: 13,
-                    color: semantic.mute,
-                    marginTop: 4,
-                  }}
-                >
-                  {search.data.description}
-                </Text>
+                <Text style={ty.secondary}>{search.data.description}</Text>
               ) : null}
-              <View style={{ paddingTop: 12 }}>
-                {status === "pending" ? (
-                  <Text
-                    style={[ty.label, { color: semantic.accent }]}
-                  >
-                    {upper(t("mobile:group.discover.requestPending"))}
-                  </Text>
-                ) : status === "approved" ? (
-                  <Text style={[ty.label, { color: semantic.accent }]}>
-                    {upper(t("mobile:group.discover.approved"))}
-                  </Text>
-                ) : status === "rejected" ? (
-                  <Text style={[ty.label, { color: semantic.danger }]}>
-                    {upper(t("mobile:group.discover.requestDeclined"))}
-                  </Text>
+            </View>
+            {statusText ? (
+              <View
+                accessible
+                accessibilityLiveRegion="polite"
+                style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}
+              >
+                {status === "rejected" ? (
+                  <Icon.alert size={16} color={semantic.dim} />
                 ) : (
-                  <Button
-                    full
-                    testID="btn-request-access"
-                    variant="primary"
-                    onPress={onRequest}
-                    disabled={requestAccess.isPending}
-                    iconRight={<Icon.arrowRight color="#0a0907" />}
-                  >
-                    {requestAccess.isPending
-                      ? upper(t("group.sendingRequest"))
-                      : upper(t("group.requestAccess"))}
-                  </Button>
+                  <Icon.check size={16} color={semantic.accent} />
                 )}
-                {requestAccess.isError ? (
-                  <Text
-                    testID="discover-request-error"
-                    style={{ fontFamily: ty.body.fontFamily, fontSize: 12, color: semantic.danger, marginTop: 8 }}
-                  >
-                    {(requestAccess.error as Error).message || t("group.requestFailed")}
-                  </Text>
-                ) : null}
+                <Text style={{ flex: 1, fontFamily: fonts.semibold, fontSize: 15, color: semantic.text }}>
+                  {statusText}
+                </Text>
               </View>
-            </Card>
-          ) : null}
-        </View>
+            ) : (
+              <Button
+                full
+                testID="btn-request-access"
+                variant="primary"
+                onPress={onRequest}
+                disabled={requestAccess.isPending}
+              >
+                {requestAccess.isPending
+                  ? t("group.sendingRequest")
+                  : t("mobile:group.discover.requestAccess")}
+              </Button>
+            )}
+            {requestAccess.isError ? (
+              <ErrorText testID="discover-request-error">
+                {(requestAccess.error as Error).message || t("group.requestFailed")}
+              </ErrorText>
+            ) : null}
+          </Card>
+        ) : null}
       </Body>
-      <Ctx
-        cr={upper(t("nav:breadcrumb.groups"))}
-        name={t("mobile:group.discover.title")}
-      />
-      <BottomAction>
-        <Button
-          full
-          testID="btn-back"
-          variant="subtle"
-          onPress={() => router.back()}
-          icon={<Icon.back color={semantic.ink} />}
-        >
-          {t("common:actions.back")}
-        </Button>
-      </BottomAction>
     </Screen>
   );
 }

@@ -19,13 +19,7 @@ export function DetailPlaceholder() {
         padding: 24,
       }}
     >
-      <Text
-        style={{
-          fontFamily: ty.body.fontFamily,
-          fontSize: 14,
-          color: semantic.mute,
-        }}
-      >
+      <Text style={[ty.secondary, { color: semantic.muted, textAlign: "center" }]}>
         {t("ui.selectConversation")}
       </Text>
     </View>
