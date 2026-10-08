@@ -67,6 +67,7 @@
       "createTitle": "رمز PIN جديد للجهاز",
       "invalidPin": "رمز PIN غير صالح.",
       "noActiveUser": "لا يوجد مستخدم نشط. سجّل الدخول مرة أخرى.",
+      "progress": "تم إدخال {{entered}} من {{total}} أرقام",
       "saveFailed": "تعذّر حفظ رمز PIN.",
       "stepConfirm": "الخطوة 2 من 2 · أكّد رمز PIN",
       "stepEnter": "الخطوة 1 من 2 · أدخل رمز PIN",
@@ -82,23 +83,25 @@
     "editPlaceholder": "تعديل الرسالة…",
     "emojiSuggestionLabel": "رمز تعبيري ‎:{{shortcode}}:‎",
     "groupSettings": "إعدادات المجموعة",
+    "lastReply": "آخر رد {{time}}",
     "loadFailed": "تعذّر تحميل الرسائل.",
     "loading": "جارٍ تحميل الرسائل…",
     "loadingOlder": "جارٍ تحميل الرسائل الأقدم…",
     "mentionLabel": "الإشارة إلى ‎@{{name}}",
-    "openThread_zero": "فتح السلسلة، {{count}} رد",
-    "openThread_one": "فتح السلسلة، {{count}} رد",
-    "openThread_two": "فتح السلسلة، {{count}} ردان",
+    "messageSheetTitle": "رسالة",
     "openThread_few": "فتح السلسلة، {{count}} ردود",
     "openThread_many": "فتح السلسلة، {{count}} ردًّا",
+    "openThread_one": "فتح السلسلة، {{count}} رد",
     "openThread_other": "فتح السلسلة، {{count}} رد",
+    "openThread_two": "فتح السلسلة، {{count}} ردان",
+    "openThread_zero": "فتح السلسلة، {{count}} رد",
     "reactWith": "التفاعل بـ {{emoji}}",
-    "reactionPillReacted_zero": "{{emoji}} {{count}} تفاعل، وقد تفاعلت",
-    "reactionPillReacted_one": "{{emoji}} {{count}} تفاعل، وقد تفاعلت",
-    "reactionPillReacted_two": "{{emoji}} {{count}} تفاعلان، وقد تفاعلت",
     "reactionPillReacted_few": "{{emoji}} {{count}} تفاعلات، وقد تفاعلت",
     "reactionPillReacted_many": "{{emoji}} {{count}} تفاعلًا، وقد تفاعلت",
+    "reactionPillReacted_one": "{{emoji}} {{count}} تفاعل، وقد تفاعلت",
     "reactionPillReacted_other": "{{emoji}} {{count}} تفاعل، وقد تفاعلت",
+    "reactionPillReacted_two": "{{emoji}} {{count}} تفاعلان، وقد تفاعلت",
+    "reactionPillReacted_zero": "{{emoji}} {{count}} تفاعل، وقد تفاعلت",
     "sendFailed": "تعذّر إرسال الرسالة."
   },
   "common": {
@@ -119,7 +122,19 @@
     "empty": "لا توجد رسائل مباشرة بعد.",
     "loadFailed": "تعذّر تحميل المحادثات.",
     "loading": "جارٍ تحميل المحادثات…",
-    "wantsToMessage": "يريد مراسلتك"
+    "wantsToMessage": "يريد مراسلتك",
+    "newMessage": "رسالة جديدة",
+    "searchLabel": "ابحث في المحادثات",
+    "requests": "طلبات المراسلة",
+    "requestsWaiting_zero": "طلبات المراسلة، {{count}} بالانتظار",
+    "requestsWaiting_one": "طلبات المراسلة، طلب واحد بالانتظار",
+    "requestsWaiting_two": "طلبات المراسلة، طلبان بالانتظار",
+    "requestsWaiting_few": "طلبات المراسلة، {{count}} طلبات بالانتظار",
+    "requestsWaiting_many": "طلبات المراسلة، {{count}} طلبًا بالانتظار",
+    "requestsWaiting_other": "طلبات المراسلة، {{count}} طلب بالانتظار",
+    "ownPreview": "أنت: {{text}}",
+    "noMatches": "لا توجد محادثات مطابقة.",
+    "emptyHint": "ابدأ محادثة مع شخص باستخدام اسم المستخدم أو البريد الإلكتروني."
   },
   "dm": {
     "backToInbox": "العودة إلى الوارد",
@@ -135,7 +150,8 @@
     "participantsCount_other": "المشاركون · {{count}}",
     "searchFailed": "فشل البحث.",
     "startWith": "بدء رسالة مباشرة مع ‎@{{name}}",
-    "tapAgainToConfirm": "انقر مرة أخرى للتأكيد"
+    "tapAgainToConfirm": "انقر مرة أخرى للتأكيد",
+    "identifierLabel": "اسم المستخدم أو البريد الإلكتروني"
   },
   "emoji": {
     "groupFallback": "مجموعة"
@@ -180,7 +196,9 @@
       "blurb": "اطلب المعرّف من مالك المجموعة. لا توجد قائمة عامة بالمجموعات.",
       "requestDeclined": "رُفض الطلب",
       "requestPending": "الطلب قيد الانتظار",
-      "title": "البحث عن مجموعة"
+      "title": "البحث عن مجموعة",
+      "slugLabel": "معرّف المجموعة",
+      "requestAccess": "طلب الوصول"
     },
     "emoji": {
       "adminsOnly": "لا يمكن إلا لمشرفي المجموعة إضافة الرموز التعبيرية أو إزالتها.",
@@ -206,7 +224,9 @@
       "manageLinksSub": "مراجعة الروابط الحالية وإبطالها",
       "share": "مشاركة",
       "shareableLink": "رابط قابل للمشاركة",
-      "thisGroup": "هذه المجموعة"
+      "thisGroup": "هذه المجموعة",
+      "identifierLabel": "اسم المستخدم أو البريد الإلكتروني",
+      "submit": "إرسال الدعوة"
     },
     "inviteLinks": {
       "blurb": "لا يمكن عرض الروابط مرة أخرى. إلغاء الرابط يوقفه فورًا.",
@@ -219,20 +239,27 @@
       "joined": "انضم {{date}}",
       "makeAdmin": "تعيين مشرفًا",
       "removeAdmin": "إزالة الإشراف",
-      "roleOwner": "المالك"
+      "roleOwner": "المالك",
+      "roleAdmin": "مشرف",
+      "removeLabel": "إزالة {{name}} من المجموعة"
     },
     "new": {
       "blurb": "لا يرى تفاصيل المجموعة إلا الأعضاء.",
       "crumb": "جديدة",
       "descriptionLabel": "الوصف (اختياري)",
-      "descriptionPlaceholder": "ما الغرض من هذه المجموعة؟"
+      "descriptionPlaceholder": "ما الغرض من هذه المجموعة؟",
+      "title": "مجموعة جديدة",
+      "nameLabel": "اسم المجموعة",
+      "submit": "إنشاء المجموعة"
     },
     "requests": {
       "approveLabel": "الموافقة على الطلب",
       "declineLabel": "رفض الطلب",
       "pendingSection": "الطلبات قيد الانتظار",
       "processFailed": "تعذّرت معالجة الطلب.",
-      "requested": "طُلب {{date}}"
+      "requested": "طُلب {{date}}",
+      "approve": "موافقة",
+      "decline": "رفض"
     },
     "settings": {
       "channelsSection": "القنوات",
@@ -242,7 +269,37 @@
       "deleting": "جارٍ الحذف…",
       "identitySection": "الهوية",
       "notAdmin": "ليست لديك صلاحيات الإشراف على هذه المجموعة.",
-      "tapAgainToConfirm": "انقر مرة أخرى للتأكيد"
+      "tapAgainToConfirm": "انقر مرة أخرى للتأكيد",
+      "title": "إعدادات المجموعة",
+      "nameLabel": "اسم المجموعة",
+      "deleteChannel": "حذف #{{name}}"
+    },
+    "panel": {
+      "menuLabel": "{{name}}، قائمة المجموعة",
+      "invite": "دعوة أشخاص",
+      "search": "البحث في {{name}}",
+      "createChannel": "إنشاء قناة",
+      "thisGroup": "هذه المجموعة",
+      "members": "الأعضاء",
+      "settings": "إعدادات المجموعة",
+      "joinRequests": "طلبات الانضمام",
+      "customEmoji": "رموز تعبيرية مخصصة",
+      "leave": "مغادرة المجموعة",
+      "leaveConfirm": "اضغط مرة أخرى لمغادرة {{name}}",
+      "leaveHint": "ستحتاج إلى دعوة جديدة للعودة.",
+      "leaving": "جارٍ المغادرة…",
+      "channelSelected": "{{name}}، محددة",
+      "channelUnread_zero": "{{name}}، {{count}} غير مقروءة",
+      "channelUnread_one": "{{name}}، {{count}} غير مقروءة",
+      "channelUnread_two": "{{name}}، {{count}} غير مقروءتين",
+      "channelUnread_few": "{{name}}، {{count}} غير مقروءة",
+      "channelUnread_many": "{{name}}، {{count}} غير مقروءة",
+      "channelUnread_other": "{{name}}، {{count}} غير مقروءة"
+    },
+    "newChannel": {
+      "title": "قناة جديدة",
+      "nameLabel": "اسم القناة",
+      "submit": "إنشاء القناة"
     }
   },
   "groups": {
@@ -250,7 +307,22 @@
     "declineInviteLabel": "رفض الدعوة",
     "empty": "لا توجد مجموعات بعد. أنشئ واحدة للبدء.",
     "loading": "جارٍ تحميل المجموعات…",
-    "pendingInvites": "الدعوات قيد الانتظار"
+    "pendingInvites": "الدعوات قيد الانتظار",
+    "title": "المجموعات",
+    "stripLabel": "مجموعاتك",
+    "addGroup": "إنشاء مجموعة أو البحث عنها",
+    "create": "إنشاء مجموعة",
+    "createSub": "ابدأ مجموعة جديدة وادعُ أشخاصًا",
+    "find": "البحث عن مجموعة",
+    "findSub": "اطلب الانضمام إلى مجموعة باستخدام معرّفها",
+    "emptyTitle": "لا توجد مجموعات بعد",
+    "emptyBody": "أنشئ مجموعة لأصحابك، أو ابحث عن مجموعة أُخبرت عنها.",
+    "pillSelected": "{{name}}، محددة",
+    "pillUnread": "{{name}}، رسائل غير مقروءة",
+    "pillSelectedUnread": "{{name}}، محددة، رسائل غير مقروءة",
+    "joinRequestsSection": "طلبات الانضمام",
+    "accept": "قبول",
+    "decline": "رفض"
   },
   "invite": {
     "backToPollis": "العودة إلى Pollis",
@@ -299,7 +371,8 @@
       "enterCodeIntro": "أدخل الرمز الذي أرسلناه إلى ‎{{email}}‎.",
       "enterEmailIntro": "أدخل البريد الإلكتروني الجديد. سنرسل رمزًا من 6 أرقام لتأكيد ملكيتك له.",
       "title": "تغيير البريد الإلكتروني",
-      "useDifferentEmail": "استخدام بريد إلكتروني آخر"
+      "useDifferentEmail": "استخدام بريد إلكتروني آخر",
+      "sendCode": "إرسال الرمز"
     },
     "deleteAccount": {
       "consequences": "يحذف هذا حساب Pollis الخاص بك نهائيًا. ستُزال من كل مجموعة ومحادثة، وسيُلغى تسجيل أجهزتك، وستُمحى بياناتك المشفَّرة على هذا الهاتف. يحتفظ الأعضاء الآخرون بنسخهم من الرسائل السابقة، لكن لا يمكن أبدًا قراءة أي شيء يُرسل بعد الحذف بمفاتيحك.",
@@ -322,7 +395,25 @@
       "savedSub": "الرسائل المحفوظة",
       "securitySub": "المفاتيح، الأجهزة، تسجيل الخروج",
       "signingOut": "جارٍ تسجيل الخروج…",
-      "userSettingsSub": "اسم العرض، اسم المستخدم، البريد الإلكتروني"
+      "userSettingsSub": "اسم العرض، اسم المستخدم، البريد الإلكتروني",
+      "customAccent": "مخصص",
+      "off": "متوقفة",
+      "profileSub": "@{{handle}} · هذا الجهاز",
+      "editProfile": "تعديل الملف الشخصي",
+      "accountSection": "الحساب",
+      "appSection": "التطبيق",
+      "accountDetails": "تفاصيل الحساب",
+      "securityDevices": "الأمان والأجهزة",
+      "deviceCount_zero": "{{count}} أجهزة",
+      "deviceCount_one": "جهاز واحد",
+      "deviceCount_two": "جهازان",
+      "deviceCount_few": "{{count}} أجهزة",
+      "deviceCount_many": "{{count}} جهازًا",
+      "deviceCount_other": "{{count}} جهاز",
+      "savedMessages": "الرسائل المحفوظة",
+      "appearance": "المظهر",
+      "signOut": "تسجيل الخروج…",
+      "signOutConfirmTitle": "هل تريد تسجيل الخروج من Pollis على هذا الجهاز؟"
     },
     "identityHeading": "الهوية",
     "preferences": {
@@ -395,14 +486,16 @@
       "rejectA11y": "رفض التسجيل",
       "safetyHeading": "السلامة",
       "showOlderA11y": "عرض الأحداث الأقدم",
-      "thisDevice": "{{name}} · هذا الجهاز"
+      "thisDevice": "{{name}} · هذا الجهاز",
+      "blockedUsers": "المستخدمون المحظورون"
     },
     "title": "أنا",
     "userSettings": {
       "displayName": "اسم العرض",
       "handle": "اسم المستخدم",
       "handleHint": "يمكن للأعضاء الآخرين العثور عليك ومراسلتك عبر ‎@handle‎.",
-      "handleInvalid": "اسم المستخدم من 3 إلى 32 حرفًا: أحرف لاتينية صغيرة وأرقام و'_' و'.' و'-'."
+      "handleInvalid": "اسم المستخدم من 3 إلى 32 حرفًا: أحرف لاتينية صغيرة وأرقام و'_' و'.' و'-'.",
+      "save": "حفظ التغييرات"
     }
   },
   "tabs": {

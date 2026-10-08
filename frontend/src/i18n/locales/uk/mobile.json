@@ -67,6 +67,7 @@
       "createTitle": "Новий PIN-код пристрою",
       "invalidPin": "Хибний PIN-код.",
       "noActiveUser": "Немає активного користувача. Увійдіть знову.",
+      "progress": "Введено цифр: {{entered}} з {{total}}",
       "saveFailed": "Не вдалося зберегти PIN-код.",
       "stepConfirm": "Крок 2 з 2 · Підтвердьте PIN-код",
       "stepEnter": "Крок 1 з 2 · Введіть PIN-код",
@@ -82,18 +83,20 @@
     "editPlaceholder": "Змінити повідомлення…",
     "emojiSuggestionLabel": "Емодзі :{{shortcode}}:",
     "groupSettings": "Налаштування групи",
+    "lastReply": "остання {{time}}",
     "loadFailed": "Не вдалося завантажити повідомлення.",
     "loading": "Завантаження повідомлень…",
     "loadingOlder": "Завантаження давніших повідомлень…",
     "mentionLabel": "Згадати @{{name}}",
-    "openThread_one": "Відкрити гілку, {{count}} відповідь",
+    "messageSheetTitle": "Повідомлення",
     "openThread_few": "Відкрити гілку, {{count}} відповіді",
     "openThread_many": "Відкрити гілку, {{count}} відповідей",
+    "openThread_one": "Відкрити гілку, {{count}} відповідь",
     "openThread_other": "Відкрити гілку, {{count}} відповіді",
     "reactWith": "Відреагувати {{emoji}}",
-    "reactionPillReacted_one": "{{emoji}} {{count}} реакція, ви відреагували",
     "reactionPillReacted_few": "{{emoji}} {{count}} реакції, ви відреагували",
     "reactionPillReacted_many": "{{emoji}} {{count}} реакцій, ви відреагували",
+    "reactionPillReacted_one": "{{emoji}} {{count}} реакція, ви відреагували",
     "reactionPillReacted_other": "{{emoji}} {{count}} реакції, ви відреагували",
     "sendFailed": "Не вдалося надіслати повідомлення."
   },
@@ -115,7 +118,17 @@
     "empty": "Особистих повідомлень ще немає.",
     "loadFailed": "Не вдалося завантажити розмови.",
     "loading": "Завантаження розмов…",
-    "wantsToMessage": "хоче писати вам"
+    "wantsToMessage": "хоче писати вам",
+    "newMessage": "Нове повідомлення",
+    "searchLabel": "Пошук розмов",
+    "requests": "Запити на листування",
+    "requestsWaiting_one": "Запити на листування, {{count}} очікує",
+    "requestsWaiting_few": "Запити на листування, {{count}} очікують",
+    "requestsWaiting_many": "Запити на листування, {{count}} очікують",
+    "requestsWaiting_other": "Запити на листування, {{count}} очікують",
+    "ownPreview": "Ви: {{text}}",
+    "noMatches": "Немає відповідних розмов.",
+    "emptyHint": "Почніть розмову з людиною за її ім’ям користувача або поштою."
   },
   "dm": {
     "backToInbox": "Назад до вхідних",
@@ -129,7 +142,8 @@
     "participantsCount_other": "Учасники · {{count}}",
     "searchFailed": "Пошук не вдався.",
     "startWith": "Почати розмову з @{{name}}",
-    "tapAgainToConfirm": "Торкніться ще раз для підтвердження"
+    "tapAgainToConfirm": "Торкніться ще раз для підтвердження",
+    "identifierLabel": "Ім’я користувача або пошта"
   },
   "emoji": {
     "groupFallback": "Група"
@@ -168,7 +182,9 @@
       "blurb": "Запитайте ідентифікатор у власника групи. Публічного списку груп немає.",
       "requestDeclined": "Запит відхилено",
       "requestPending": "Запит в очікуванні",
-      "title": "Знайти групу"
+      "title": "Знайти групу",
+      "slugLabel": "Адреса групи",
+      "requestAccess": "Запросити доступ"
     },
     "emoji": {
       "adminsOnly": "Додавати й прибирати емодзі можуть лише адміністратори групи.",
@@ -192,7 +208,9 @@
       "manageLinksSub": "Переглянути й відкликати наявні посилання",
       "share": "Поділитися",
       "shareableLink": "Посилання для поширення",
-      "thisGroup": "цієї групи"
+      "thisGroup": "цієї групи",
+      "identifierLabel": "Ім'я користувача або пошта",
+      "submit": "Надіслати запрошення"
     },
     "inviteLinks": {
       "blurb": "Посилання не можна показати повторно. Відкликання одразу його вимикає.",
@@ -205,20 +223,27 @@
       "joined": "у групі з {{date}}",
       "makeAdmin": "Зробити адміністратором",
       "removeAdmin": "Зняти права адміністратора",
-      "roleOwner": "Власник"
+      "roleOwner": "Власник",
+      "roleAdmin": "Адміністратор",
+      "removeLabel": "Видалити {{name}} з групи"
     },
     "new": {
       "blurb": "Подробиці групи бачать лише учасники.",
       "crumb": "Нова",
       "descriptionLabel": "Опис (необов'язково)",
-      "descriptionPlaceholder": "Для чого ця група?"
+      "descriptionPlaceholder": "Для чого ця група?",
+      "title": "Нова група",
+      "nameLabel": "Назва групи",
+      "submit": "Створити групу"
     },
     "requests": {
       "approveLabel": "Схвалити запит",
       "declineLabel": "Відхилити запит",
       "pendingSection": "Запити в очікуванні",
       "processFailed": "Не вдалося обробити запит.",
-      "requested": "запит від {{date}}"
+      "requested": "запит від {{date}}",
+      "approve": "Схвалити",
+      "decline": "Відхилити"
     },
     "settings": {
       "channelsSection": "Канали",
@@ -228,7 +253,35 @@
       "deleting": "Видалення…",
       "identitySection": "Основне",
       "notAdmin": "У вас немає прав адміністратора в цій групі.",
-      "tapAgainToConfirm": "Торкніться ще раз для підтвердження"
+      "tapAgainToConfirm": "Торкніться ще раз для підтвердження",
+      "title": "Налаштування групи",
+      "nameLabel": "Назва групи",
+      "deleteChannel": "Видалити #{{name}}"
+    },
+    "panel": {
+      "menuLabel": "{{name}}, меню групи",
+      "invite": "Запросити людей",
+      "search": "Пошук у {{name}}",
+      "createChannel": "Створити канал",
+      "thisGroup": "Ця група",
+      "members": "Учасники",
+      "settings": "Налаштування групи",
+      "joinRequests": "Заявки на вступ",
+      "customEmoji": "Власні емодзі",
+      "leave": "Покинути групу",
+      "leaveConfirm": "Торкніться ще раз, щоб покинути {{name}}",
+      "leaveHint": "Щоб повернутися, знадобиться нове запрошення.",
+      "leaving": "Вихід…",
+      "channelSelected": "{{name}}, вибраний",
+      "channelUnread_one": "{{name}}, {{count}} непрочитане",
+      "channelUnread_few": "{{name}}, {{count}} непрочитані",
+      "channelUnread_many": "{{name}}, {{count}} непрочитаних",
+      "channelUnread_other": "{{name}}, {{count}} непрочитаного"
+    },
+    "newChannel": {
+      "title": "Новий канал",
+      "nameLabel": "Назва каналу",
+      "submit": "Створити канал"
     }
   },
   "groups": {
@@ -236,7 +289,22 @@
     "declineInviteLabel": "Відхилити запрошення",
     "empty": "Груп ще немає. Створіть першу, щоб почати.",
     "loading": "Завантаження груп…",
-    "pendingInvites": "Запрошення в очікуванні"
+    "pendingInvites": "Запрошення в очікуванні",
+    "title": "Групи",
+    "stripLabel": "Ваші групи",
+    "addGroup": "Створити або знайти групу",
+    "create": "Створити групу",
+    "createSub": "Почніть нову групу й запросіть людей",
+    "find": "Знайти групу",
+    "findSub": "Попросіть приєднатися до групи за її адресою",
+    "emptyTitle": "Груп ще немає",
+    "emptyBody": "Створіть групу для своїх людей або знайдіть ту, про яку вам розповіли.",
+    "pillSelected": "{{name}}, вибрано",
+    "pillUnread": "{{name}}, є непрочитані",
+    "pillSelectedUnread": "{{name}}, вибрано, є непрочитані",
+    "joinRequestsSection": "Заявки на вступ",
+    "accept": "Прийняти",
+    "decline": "Відхилити"
   },
   "invite": {
     "backToPollis": "Назад до Pollis",
@@ -283,7 +351,8 @@
       "enterCodeIntro": "Введіть код, який ми надіслали на {{email}}.",
       "enterEmailIntro": "Введіть нову електронну пошту. Ми надішлемо 6-значний код, щоб підтвердити, що вона ваша.",
       "title": "Змінити пошту",
-      "useDifferentEmail": "Використати іншу пошту"
+      "useDifferentEmail": "Використати іншу пошту",
+      "sendCode": "Надіслати код"
     },
     "deleteAccount": {
       "consequences": "Це назавжди видалить ваш обліковий запис Pollis. Вас буде вилучено з усіх груп і розмов, ваші пристрої буде відв'язано, а зашифровані дані на цьому телефоні — стерто. Інші учасники збережуть свої копії минулих повідомлень, але нічого, надісланого після видалення, вже не можна буде прочитати вашими ключами.",
@@ -306,7 +375,23 @@
       "savedSub": "Збережені повідомлення",
       "securitySub": "Ключі, пристрої, вихід",
       "signingOut": "Виходимо…",
-      "userSettingsSub": "Відображуване ім'я, ім'я користувача, пошта"
+      "userSettingsSub": "Відображуване ім'я, ім'я користувача, пошта",
+      "customAccent": "Власний",
+      "off": "Вимк.",
+      "profileSub": "@{{handle}} · цей пристрій",
+      "editProfile": "Змінити профіль",
+      "accountSection": "Обліковий запис",
+      "appSection": "Застосунок",
+      "accountDetails": "Дані облікового запису",
+      "securityDevices": "Безпека й пристрої",
+      "deviceCount_one": "{{count}} пристрій",
+      "deviceCount_few": "{{count}} пристрої",
+      "deviceCount_many": "{{count}} пристроїв",
+      "deviceCount_other": "{{count}} пристрою",
+      "savedMessages": "Збережені повідомлення",
+      "appearance": "Вигляд",
+      "signOut": "Вийти…",
+      "signOutConfirmTitle": "Вийти з Pollis на цьому пристрої?"
     },
     "identityHeading": "Ідентичність",
     "preferences": {
@@ -373,14 +458,16 @@
       "rejectA11y": "Відхилити додавання пристрою",
       "safetyHeading": "Захист",
       "showOlderA11y": "Показати давніші події",
-      "thisDevice": "{{name}} · цей пристрій"
+      "thisDevice": "{{name}} · цей пристрій",
+      "blockedUsers": "Заблоковані користувачі"
     },
     "title": "Профіль",
     "userSettings": {
       "displayName": "Відображуване ім'я",
       "handle": "Ім'я користувача",
       "handleHint": "Інші учасники можуть знайти вас і написати вам за @handle.",
-      "handleInvalid": "Ім'я користувача — від 3 до 32 символів: малі латинські літери, цифри, '_', '.' або '-'."
+      "handleInvalid": "Ім'я користувача — від 3 до 32 символів: малі латинські літери, цифри, '_', '.' або '-'.",
+      "save": "Зберегти зміни"
     }
   },
   "tabs": {

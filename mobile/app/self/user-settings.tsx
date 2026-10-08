@@ -2,25 +2,23 @@ import { useEffect, useState } from "react";
 import { View, Text } from "react-native";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
+import { observer } from "mobx-react-lite";
 import {
   Screen,
-  Crumb,
+  Header,
   Body,
   SectionTitle,
   Avatar,
   Field,
-  Ctx,
   Button,
   BottomAction,
 } from "../../components/ui";
-import { FormField, FormStack } from "../../components/FormField";
+import { SettingsField, ErrorText } from "../../components/self/SettingsField";
 import { Icon } from "../../components/icons";
-import { semantic, type as ty } from "../../theme/tokens";
-import { upper } from "../../i18n";
+import { semantic, type as ty, space } from "../../theme/tokens";
 import { useUserProfile, useUpdateProfile } from "../../hooks/queries";
 import { isValidUsername } from "../../lib/username";
 import { appStore } from "../../stores/appStore";
-import { observer } from "mobx-react-lite";
 
 function UserSettings() {
   const { t } = useTranslation("settings");
@@ -66,63 +64,35 @@ function UserSettings() {
     });
   };
 
-  const avatarLabel = (handle || currentUser?.username || "us").slice(0, 2);
+  const shownName = displayName || handle || currentUser?.username || "";
 
   return (
     <Screen testID="screen-self-user-settings" centered>
-      <Crumb
-        segs={[
-          { label: upper(t("mobile:self.title")) },
-          { label: t("user.title"), leaf: true },
-        ]}
-      />
-      <Body>
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 14,
-            paddingHorizontal: 18,
-            paddingTop: 14,
-            paddingBottom: 8,
-          }}
-        >
-          <Avatar label={avatarLabel} size="lg" variant="amber" />
-          <View style={{ flex: 1 }}>
-            <Text
-              style={{
-                fontFamily: ty.h1.fontFamily,
-                fontSize: 18,
-                color: semantic.ink,
-              }}
-            >
-              {displayName || handle || "—"}
+      <Header title={t("mobile:self.hub.accountDetails")} backTo={t("mobile:self.title")} />
+      <Body contentContainerStyle={{ paddingHorizontal: space.xxl, paddingTop: space.xxl, gap: space.xxxl }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: space.xl }}>
+          <Avatar label={shownName} size="lg" variant="self" />
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text accessibilityRole="header" numberOfLines={2} style={ty.title}>
+              {shownName || "—"}
             </Text>
-            {isLoading ? (
-              <Text
-                style={{
-                  fontFamily: ty.body.fontFamily,
-                  fontSize: 12,
-                  color: semantic.mute,
-                }}
-              >
-                {t("common:states.loading")}
-              </Text>
-            ) : null}
+            {isLoading ? <Text style={ty.meta}>{t("common:states.loading")}</Text> : null}
           </View>
         </View>
 
-        <SectionTitle>{upper(t("mobile:self.identityHeading"))}</SectionTitle>
-        <FormStack>
-          <FormField label={t("mobile:self.userSettings.displayName")}>
+        <View style={{ gap: space.xxl }}>
+          <SectionTitle style={{ paddingHorizontal: 4, paddingTop: 0, paddingBottom: 0 }}>
+            {t("mobile:self.identityHeading")}
+          </SectionTitle>
+          <SettingsField label={t("mobile:self.userSettings.displayName")}>
             <Field
               value={displayName}
               onChangeText={setDisplayName}
               testID="input-display-name"
               accessibilityLabel={t("mobile:self.userSettings.displayName")}
             />
-          </FormField>
-          <FormField
+          </SettingsField>
+          <SettingsField
             label={t("mobile:self.userSettings.handle")}
             hint={t("mobile:self.userSettings.handleHint")}
             error={handleInvalid && nextHandle ? t("mobile:self.userSettings.handleInvalid") : null}
@@ -133,66 +103,44 @@ function UserSettings() {
               onChangeText={setHandle}
               testID="input-handle"
               accessibilityLabel={t("mobile:self.userSettings.handle")}
-              icon={
-                <Text
-                  style={{
-                    fontFamily: ty.body.fontFamily,
-                    color: semantic.mute,
-                  }}
-                >
-                  @
-                </Text>
-              }
+              icon={<Text style={[ty.body, { color: semantic.muted }]}>@</Text>}
             />
-          </FormField>
-          <FormField label={t("user.emailLabel")}>
+          </SettingsField>
+        </View>
+
+        <View style={{ gap: space.lg }}>
+          <SettingsField label={t("user.emailLabel")}>
             <Field
               value={profile?.email ?? currentUser?.email ?? ""}
               editable={false}
               testID="input-email"
               accessibilityLabel={t("user.emailLabel")}
-              icon={<Icon.mail color={semantic.mute} />}
+              icon={<Icon.mail size={18} color={semantic.muted} />}
             />
-            <Button
-              variant="subtle"
-              full
-              testID="btn-change-email"
-              onPress={() => router.push("/self/change-email")}
-              icon={<Icon.edit color={semantic.ink} />}
-            >
-              {t("user.changeEmailButton")}
-            </Button>
-          </FormField>
-        </FormStack>
+          </SettingsField>
+          <Button
+            testID="btn-change-email"
+            onPress={() => router.push("/self/change-email")}
+            icon={<Icon.pencil size={18} color={semantic.text} />}
+          >
+            {t("mobile:self.changeEmail.title")}
+          </Button>
+        </View>
 
         {updateProfile.isError ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 12,
-              color: semantic.danger,
-              paddingHorizontal: 18,
-              paddingTop: 10,
-            }}
-          >
+          <ErrorText>
             {(updateProfile.error as Error).message || t("user.saveFailed")}
-          </Text>
+          </ErrorText>
         ) : null}
         {updateProfile.isSuccess && !dirty ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 12,
-              color: semantic.accent,
-              paddingHorizontal: 18,
-              paddingTop: 10,
-            }}
-          >
-            {t("user.saved")}
-          </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: space.xs }}>
+            <Icon.check size={16} color={semantic.accent} />
+            <Text accessibilityRole="alert" style={[ty.secondary, { color: semantic.text }]}>
+              {t("user.saved")}
+            </Text>
+          </View>
         ) : null}
       </Body>
-      <Ctx cr={upper(t("mobile:self.title"))} name={t("user.title")} />
       <BottomAction>
         <Button
           full
@@ -200,11 +148,11 @@ function UserSettings() {
           variant="primary"
           onPress={onSave}
           disabled={!dirty || !nextHandle || handleInvalid || updateProfile.isPending}
-          iconRight={<Icon.check color="#0a0907" />}
+          iconRight={<Icon.check size={18} color={semantic.onAccent} />}
         >
           {updateProfile.isPending
-            ? upper(t("user.saving"))
-            : upper(t("user.saveButton"))}
+            ? t("user.saving")
+            : t("mobile:self.userSettings.save")}
         </Button>
         <Button
           variant="subtle"

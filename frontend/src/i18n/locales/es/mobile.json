@@ -67,6 +67,7 @@
       "createTitle": "PIN del dispositivo",
       "invalidPin": "PIN no válido.",
       "noActiveUser": "No hay ningún usuario activo. Inicia sesión de nuevo.",
+      "progress": "{{entered}} de {{total}} dígitos introducidos",
       "saveFailed": "No se pudo guardar el PIN.",
       "stepConfirm": "Paso 2 de 2 · Confirma el PIN",
       "stepEnter": "Paso 1 de 2 · Introduce el PIN",
@@ -82,10 +83,12 @@
     "editPlaceholder": "Editar mensaje…",
     "emojiSuggestionLabel": "Emoji :{{shortcode}}:",
     "groupSettings": "Ajustes del grupo",
+    "lastReply": "última {{time}}",
     "loadFailed": "No se pudieron cargar los mensajes.",
     "loading": "Cargando mensajes…",
     "loadingOlder": "Cargando mensajes anteriores…",
     "mentionLabel": "Mencionar a @{{name}}",
+    "messageSheetTitle": "Mensaje",
     "openThread_one": "Abrir hilo, {{count}} respuesta",
     "openThread_other": "Abrir hilo, {{count}} respuestas",
     "reactWith": "Reaccionar con {{emoji}}",
@@ -111,7 +114,15 @@
     "empty": "Todavía no hay mensajes directos.",
     "loadFailed": "No se pudieron cargar las conversaciones.",
     "loading": "Cargando conversaciones…",
-    "wantsToMessage": "quiere escribirte"
+    "wantsToMessage": "quiere escribirte",
+    "newMessage": "Nuevo mensaje",
+    "searchLabel": "Buscar conversaciones",
+    "requests": "Solicitudes de mensajes",
+    "requestsWaiting_one": "Solicitudes de mensajes, {{count}} pendiente",
+    "requestsWaiting_other": "Solicitudes de mensajes, {{count}} pendientes",
+    "ownPreview": "Tú: {{text}}",
+    "noMatches": "Ninguna conversación coincide.",
+    "emptyHint": "Empieza una conversación con alguien por su nombre de usuario o correo."
   },
   "dm": {
     "backToInbox": "Volver a la bandeja",
@@ -123,7 +134,8 @@
     "participantsCount_other": "Participantes · {{count}}",
     "searchFailed": "La búsqueda falló.",
     "startWith": "Iniciar mensaje directo con @{{name}}",
-    "tapAgainToConfirm": "Toca de nuevo para confirmar"
+    "tapAgainToConfirm": "Toca de nuevo para confirmar",
+    "identifierLabel": "Nombre de usuario o correo"
   },
   "emoji": {
     "groupFallback": "Grupo"
@@ -156,7 +168,9 @@
       "blurb": "Pide el identificador al dueño del grupo. No hay una lista pública de grupos.",
       "requestDeclined": "Solicitud rechazada",
       "requestPending": "Solicitud pendiente",
-      "title": "Buscar grupo"
+      "title": "Buscar grupo",
+      "slugLabel": "Identificador del grupo",
+      "requestAccess": "Solicitar acceso"
     },
     "emoji": {
       "adminsOnly": "Solo los admins del grupo pueden añadir o quitar emoji.",
@@ -178,7 +192,9 @@
       "manageLinksSub": "Revisa y revoca los enlaces existentes",
       "share": "Compartir",
       "shareableLink": "Enlace para compartir",
-      "thisGroup": "este grupo"
+      "thisGroup": "este grupo",
+      "identifierLabel": "Usuario o correo",
+      "submit": "Enviar invitación"
     },
     "inviteLinks": {
       "blurb": "Los enlaces no se pueden volver a mostrar. Revocar un enlace lo desactiva al instante.",
@@ -191,20 +207,27 @@
       "joined": "se unió el {{date}}",
       "makeAdmin": "Hacer admin",
       "removeAdmin": "Quitar admin",
-      "roleOwner": "Propietario"
+      "roleOwner": "Propietario",
+      "roleAdmin": "Admin",
+      "removeLabel": "Quitar a {{name}} del grupo"
     },
     "new": {
       "blurb": "Solo los miembros pueden ver los detalles del grupo.",
       "crumb": "Nuevo",
       "descriptionLabel": "Descripción (opcional)",
-      "descriptionPlaceholder": "¿Para qué es este grupo?"
+      "descriptionPlaceholder": "¿Para qué es este grupo?",
+      "title": "Grupo nuevo",
+      "nameLabel": "Nombre del grupo",
+      "submit": "Crear grupo"
     },
     "requests": {
       "approveLabel": "Aprobar solicitud",
       "declineLabel": "Rechazar solicitud",
       "pendingSection": "Solicitudes pendientes",
       "processFailed": "No se pudo procesar la solicitud.",
-      "requested": "solicitado el {{date}}"
+      "requested": "solicitado el {{date}}",
+      "approve": "Aprobar",
+      "decline": "Rechazar"
     },
     "settings": {
       "channelsSection": "Canales",
@@ -214,7 +237,33 @@
       "deleting": "Eliminando…",
       "identitySection": "Identidad",
       "notAdmin": "No tienes permisos de admin en este grupo.",
-      "tapAgainToConfirm": "Toca de nuevo para confirmar"
+      "tapAgainToConfirm": "Toca de nuevo para confirmar",
+      "title": "Ajustes del grupo",
+      "nameLabel": "Nombre del grupo",
+      "deleteChannel": "Eliminar #{{name}}"
+    },
+    "panel": {
+      "menuLabel": "{{name}}, menú del grupo",
+      "invite": "Invitar a gente",
+      "search": "Buscar en {{name}}",
+      "createChannel": "Crear un canal",
+      "thisGroup": "Este grupo",
+      "members": "Miembros",
+      "settings": "Ajustes del grupo",
+      "joinRequests": "Solicitudes de acceso",
+      "customEmoji": "Emoji personalizados",
+      "leave": "Salir del grupo",
+      "leaveConfirm": "Toca otra vez para salir de {{name}}",
+      "leaveHint": "Necesitarás una invitación nueva para volver.",
+      "leaving": "Saliendo…",
+      "channelSelected": "{{name}}, seleccionado",
+      "channelUnread_one": "{{name}}, {{count}} sin leer",
+      "channelUnread_other": "{{name}}, {{count}} sin leer"
+    },
+    "newChannel": {
+      "title": "Canal nuevo",
+      "nameLabel": "Nombre del canal",
+      "submit": "Crear canal"
     }
   },
   "groups": {
@@ -222,7 +271,22 @@
     "declineInviteLabel": "Rechazar invitación",
     "empty": "Todavía no hay grupos. Crea uno para empezar.",
     "loading": "Cargando grupos…",
-    "pendingInvites": "Invitaciones pendientes"
+    "pendingInvites": "Invitaciones pendientes",
+    "title": "Grupos",
+    "stripLabel": "Tus grupos",
+    "addGroup": "Crear o buscar un grupo",
+    "create": "Crear grupo",
+    "createSub": "Empieza un grupo nuevo e invita a gente",
+    "find": "Buscar grupo",
+    "findSub": "Pide unirte a un grupo por su identificador",
+    "emptyTitle": "Todavía no hay grupos",
+    "emptyBody": "Crea un grupo para tu gente o busca uno del que te hayan hablado.",
+    "pillSelected": "{{name}}, seleccionado",
+    "pillUnread": "{{name}}, mensajes sin leer",
+    "pillSelectedUnread": "{{name}}, seleccionado, mensajes sin leer",
+    "joinRequestsSection": "Solicitudes de acceso",
+    "accept": "Aceptar",
+    "decline": "Rechazar"
   },
   "invite": {
     "backToPollis": "Volver a Pollis",
@@ -267,7 +331,8 @@
       "enterCodeIntro": "Introduce el código que hemos enviado a {{email}}.",
       "enterEmailIntro": "Escribe el correo nuevo. Te enviaremos un código de 6 dígitos para confirmar que es tuyo.",
       "title": "Cambiar el correo",
-      "useDifferentEmail": "Usar otro correo"
+      "useDifferentEmail": "Usar otro correo",
+      "sendCode": "Enviar código"
     },
     "deleteAccount": {
       "consequences": "Esto elimina tu cuenta de Pollis de forma permanente. Se te quita de todos los grupos y conversaciones, se anula el registro de tus dispositivos y se borran los datos cifrados de este teléfono. Los demás miembros conservan sus propias copias de los mensajes anteriores, pero nada de lo enviado después de la eliminación podrá leerse jamás con tus claves.",
@@ -290,7 +355,21 @@
       "savedSub": "Mensajes guardados",
       "securitySub": "Claves, dispositivos, cerrar sesión",
       "signingOut": "Cerrando sesión…",
-      "userSettingsSub": "Nombre preferido, nombre de usuario, correo"
+      "userSettingsSub": "Nombre preferido, nombre de usuario, correo",
+      "customAccent": "Personalizado",
+      "off": "Desactivadas",
+      "profileSub": "@{{handle}} · este dispositivo",
+      "editProfile": "Editar perfil",
+      "accountSection": "Cuenta",
+      "appSection": "App",
+      "accountDetails": "Datos de la cuenta",
+      "securityDevices": "Seguridad y dispositivos",
+      "deviceCount_one": "{{count}} dispositivo",
+      "deviceCount_other": "{{count}} dispositivos",
+      "savedMessages": "Mensajes guardados",
+      "appearance": "Apariencia",
+      "signOut": "Cerrar sesión…",
+      "signOutConfirmTitle": "¿Cerrar sesión de Pollis en este dispositivo?"
     },
     "identityHeading": "Identidad",
     "preferences": {
@@ -351,14 +430,16 @@
       "rejectA11y": "Rechazar el registro",
       "safetyHeading": "Seguridad",
       "showOlderA11y": "Mostrar eventos anteriores",
-      "thisDevice": "{{name}} · este dispositivo"
+      "thisDevice": "{{name}} · este dispositivo",
+      "blockedUsers": "Usuarios bloqueados"
     },
     "title": "Tú",
     "userSettings": {
       "displayName": "Nombre preferido",
       "handle": "Nombre de usuario",
       "handleHint": "Los demás miembros pueden encontrarte y escribirte con @handle.",
-      "handleInvalid": "El nombre de usuario debe tener entre 3 y 32 caracteres: minúsculas, dígitos, '_', '.' o '-'."
+      "handleInvalid": "El nombre de usuario debe tener entre 3 y 32 caracteres: minúsculas, dígitos, '_', '.' o '-'.",
+      "save": "Guardar cambios"
     }
   },
   "tabs": {

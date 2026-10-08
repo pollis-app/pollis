@@ -67,6 +67,7 @@
       "createTitle": "New device PIN",
       "invalidPin": "Invalid PIN.",
       "noActiveUser": "No active user. Sign in again.",
+      "progress": "{{entered}} of {{total}} digits entered",
       "saveFailed": "Couldn't save PIN.",
       "stepConfirm": "Step 2 of 2 · Confirm PIN",
       "stepEnter": "Step 1 of 2 · Enter PIN",
@@ -82,10 +83,12 @@
     "editPlaceholder": "Edit message…",
     "emojiSuggestionLabel": "Emoji :{{shortcode}}:",
     "groupSettings": "Group settings",
+    "lastReply": "last {{time}}",
     "loadFailed": "Couldn't load messages.",
     "loading": "Loading messages…",
     "loadingOlder": "Loading older messages…",
     "mentionLabel": "Mention @{{name}}",
+    "messageSheetTitle": "Message",
     "openThread_one": "Open thread, {{count}} reply",
     "openThread_other": "Open thread, {{count}} replies",
     "reactWith": "React with {{emoji}}",
@@ -111,7 +114,15 @@
     "empty": "No direct messages yet.",
     "loadFailed": "Couldn't load conversations.",
     "loading": "Loading conversations…",
-    "wantsToMessage": "wants to message you"
+    "wantsToMessage": "wants to message you",
+    "newMessage": "New message",
+    "searchLabel": "Search conversations",
+    "requests": "Message requests",
+    "requestsWaiting_one": "Message requests, {{count}} waiting",
+    "requestsWaiting_other": "Message requests, {{count}} waiting",
+    "ownPreview": "You: {{text}}",
+    "noMatches": "No conversations match.",
+    "emptyHint": "Start a conversation with someone by their username or email."
   },
   "dm": {
     "backToInbox": "Back to inbox",
@@ -123,7 +134,8 @@
     "participantsCount_other": "Participants · {{count}}",
     "searchFailed": "Search failed.",
     "startWith": "Start DM with @{{name}}",
-    "tapAgainToConfirm": "Tap again to confirm"
+    "tapAgainToConfirm": "Tap again to confirm",
+    "identifierLabel": "Username or email"
   },
   "emoji": {
     "groupFallback": "Group"
@@ -156,7 +168,9 @@
       "blurb": "Ask the group's owner for its slug. There's no public list of groups.",
       "requestDeclined": "Request declined",
       "requestPending": "Request pending",
-      "title": "Find Group"
+      "title": "Find group",
+      "slugLabel": "Group slug",
+      "requestAccess": "Request access"
     },
     "emoji": {
       "adminsOnly": "Only group admins can add or remove emoji.",
@@ -178,7 +192,9 @@
       "manageLinksSub": "Review and revoke existing links",
       "share": "Share",
       "shareableLink": "Shareable link",
-      "thisGroup": "this group"
+      "thisGroup": "this group",
+      "identifierLabel": "Username or email",
+      "submit": "Send invite"
     },
     "inviteLinks": {
       "blurb": "Links can't be shown again. Revoking a link stops it right away.",
@@ -191,20 +207,27 @@
       "joined": "joined {{date}}",
       "makeAdmin": "Make admin",
       "removeAdmin": "Remove admin",
-      "roleOwner": "Owner"
+      "roleOwner": "Owner",
+      "roleAdmin": "Admin",
+      "removeLabel": "Remove {{name}} from the group"
     },
     "new": {
       "blurb": "Only members can see the group's details.",
       "crumb": "New",
       "descriptionLabel": "Description (optional)",
-      "descriptionPlaceholder": "What's this group for?"
+      "descriptionPlaceholder": "What's this group for?",
+      "title": "New group",
+      "nameLabel": "Group name",
+      "submit": "Create group"
     },
     "requests": {
       "approveLabel": "Approve request",
       "declineLabel": "Decline request",
       "pendingSection": "Pending requests",
       "processFailed": "Couldn't process the request.",
-      "requested": "requested {{date}}"
+      "requested": "requested {{date}}",
+      "approve": "Approve",
+      "decline": "Decline"
     },
     "settings": {
       "channelsSection": "Channels",
@@ -214,7 +237,33 @@
       "deleting": "Deleting…",
       "identitySection": "Identity",
       "notAdmin": "You don't have admin permissions for this group.",
-      "tapAgainToConfirm": "Tap again to confirm"
+      "tapAgainToConfirm": "Tap again to confirm",
+      "title": "Group settings",
+      "nameLabel": "Group name",
+      "deleteChannel": "Delete #{{name}}"
+    },
+    "panel": {
+      "menuLabel": "{{name}}, group menu",
+      "invite": "Invite people",
+      "search": "Search {{name}}",
+      "createChannel": "Create a channel",
+      "thisGroup": "This group",
+      "members": "Members",
+      "settings": "Group settings",
+      "joinRequests": "Join requests",
+      "customEmoji": "Custom emoji",
+      "leave": "Leave group",
+      "leaveConfirm": "Tap again to leave {{name}}",
+      "leaveHint": "You'll need a new invite to rejoin.",
+      "leaving": "Leaving…",
+      "channelSelected": "{{name}}, selected",
+      "channelUnread_one": "{{name}}, {{count}} unread",
+      "channelUnread_other": "{{name}}, {{count}} unread"
+    },
+    "newChannel": {
+      "title": "New channel",
+      "nameLabel": "Channel name",
+      "submit": "Create channel"
     }
   },
   "groups": {
@@ -222,7 +271,22 @@
     "declineInviteLabel": "Decline invite",
     "empty": "No groups yet. Create one to get started.",
     "loading": "Loading groups…",
-    "pendingInvites": "Pending invites"
+    "pendingInvites": "Pending invites",
+    "title": "Groups",
+    "stripLabel": "Your groups",
+    "addGroup": "Create or find a group",
+    "create": "Create group",
+    "createSub": "Start a new group and invite people",
+    "find": "Find group",
+    "findSub": "Ask to join a group by its slug",
+    "emptyTitle": "No groups yet",
+    "emptyBody": "Create a group for your people, or find one you've been told about.",
+    "pillSelected": "{{name}}, selected",
+    "pillUnread": "{{name}}, unread messages",
+    "pillSelectedUnread": "{{name}}, selected, unread messages",
+    "joinRequestsSection": "Join requests",
+    "accept": "Accept",
+    "decline": "Decline"
   },
   "invite": {
     "backToPollis": "Back to Pollis",
@@ -273,7 +337,8 @@
       "enterEmailIntro": "Enter the new email. We'll send a 6-digit code to it, and another to your current address to approve the change.",
       "newCodeLabel": "Code sent to {{email}}",
       "title": "Change email",
-      "useDifferentEmail": "Use a different email"
+      "useDifferentEmail": "Use a different email",
+      "sendCode": "Send code"
     },
     "deleteAccount": {
       "consequences": "This permanently deletes your Pollis account. You are removed from every group and conversation, your devices are unregistered, and your encrypted data on this phone is wiped. Other members keep their own copies of past messages, but nothing sent after deletion can ever be read with your keys.",
@@ -296,7 +361,21 @@
       "savedSub": "Bookmarked messages",
       "securitySub": "Keys, devices, sign out",
       "signingOut": "Signing out…",
-      "userSettingsSub": "Display name, handle, email"
+      "userSettingsSub": "Display name, handle, email",
+      "customAccent": "Custom",
+      "off": "Off",
+      "profileSub": "@{{handle}} · this device",
+      "editProfile": "Edit profile",
+      "accountSection": "Account",
+      "appSection": "App",
+      "accountDetails": "Account details",
+      "securityDevices": "Security & devices",
+      "deviceCount_one": "{{count}} device",
+      "deviceCount_other": "{{count}} devices",
+      "savedMessages": "Saved messages",
+      "appearance": "Appearance",
+      "signOut": "Sign out…",
+      "signOutConfirmTitle": "Sign out of Pollis on this device?"
     },
     "identityHeading": "Identity",
     "preferences": {
@@ -357,14 +436,16 @@
       "rejectA11y": "Reject enrollment",
       "safetyHeading": "Safety",
       "showOlderA11y": "Show older events",
-      "thisDevice": "{{name}} · this device"
+      "thisDevice": "{{name}} · this device",
+      "blockedUsers": "Blocked users"
     },
     "title": "Self",
     "userSettings": {
       "displayName": "Display name",
       "handle": "Handle",
       "handleHint": "Other members can find and DM you with @handle.",
-      "handleInvalid": "Handles are 3–32 characters: lowercase letters, digits, '_', '.' or '-'."
+      "handleInvalid": "Handles are 3–32 characters: lowercase letters, digits, '_', '.' or '-'.",
+      "save": "Save changes"
     }
   },
   "tabs": {

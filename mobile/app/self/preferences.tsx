@@ -1,30 +1,20 @@
-import { useCallback, useState } from "react";
-import { View, Text, Pressable } from "react-native";
-import { useFocusEffect } from "expo-router";
+import { ScrollView, View } from "react-native";
+import { useLocalSearchParams } from "expo-router";
 import { useObserver } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
-import type { TFunction } from "i18next";
-import {
-  Screen,
-  Crumb,
-  Body,
-  SectionTitle,
-  ListRow,
-  Toggle,
-  Ctx,
-} from "../../components/ui";
-import { Icon } from "../../components/icons";
+import { Screen, Header, Group } from "../../components/ui";
 import { LanguageSection } from "../../components/LanguageSection";
+import { AccentSwatch } from "../../components/self/AccentSwatch";
+import { ToggleRow } from "../../components/self/ToggleRow";
+import { accentPresetLabel } from "../../components/self/accentName";
+import { useNotificationPermission } from "../../components/self/useNotificationPermission";
+import { useSectionScroll } from "../../components/self/useSectionScroll";
 import { useTheme } from "../../components/theme";
-import { semantic, type as ty, r, ACCENT_PRESETS } from "../../theme/tokens";
-import { upper } from "../../i18n";
+import { space, ACCENT_PRESETS } from "../../theme/tokens";
 import { usePreferences } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
-import {
-  getPushPermissionInfo,
-  ensurePushRegistration,
-  openNotificationSettings,
-} from "../../lib/push";
+import { ensurePushRegistration, openNotificationSettings } from "../../lib/push";
+import type { TFunction } from "i18next";
 
 // The presets live in theme/accents.ts so the contrast test can check each.
 const SWATCHES = ACCENT_PRESETS;
@@ -40,25 +30,6 @@ const BEHAVIOR_KEYS = [
   { key: "mark_verified_peers", defaultOn: true },
   { key: "reduce_motion", defaultOn: false },
 ] as const;
-
-// The wire values above stay English; only the rendered label is keyed, one
-// literal call per value so `i18n-check` can see every key.
-function swatchLabel(t: TFunction, n: (typeof SWATCHES)[number]["n"]): string {
-  switch (n) {
-    case "Amber":
-      return t("mobile:self.preferences.swatch.amber");
-    case "Citron":
-      return t("mobile:self.preferences.swatch.citron");
-    case "Mint":
-      return t("mobile:self.preferences.swatch.mint");
-    case "Glass":
-      return t("mobile:self.preferences.swatch.glass");
-    case "Lilac":
-      return t("mobile:self.preferences.swatch.lilac");
-    case "Rust":
-      return t("mobile:self.preferences.swatch.rust");
-  }
-}
 
 function behaviorLabel(
   t: TFunction,
@@ -83,19 +54,7 @@ function behaviorLabel(
 function NotificationsSetting() {
   const { t } = useTranslation("settings");
   const userId = useObserver(() => appStore.currentUser?.id ?? null);
-  const [info, setInfo] = useState<{
-    granted: boolean;
-    canAskAgain: boolean;
-  } | null>(null);
-
-  const refresh = useCallback(() => {
-    void getPushPermissionInfo()
-      .then(setInfo)
-      .catch(() => {});
-  }, []);
-
-  // Re-check on focus so returning from system Settings reflects the change.
-  useFocusEffect(refresh);
+  const { info, refresh } = useNotificationPermission();
 
   const granted = info?.granted ?? false;
   const sub = granted
@@ -119,26 +78,20 @@ function NotificationsSetting() {
   };
 
   return (
-    <ListRow
-      minHeight={46}
-      name={t("notifications.heading")}
-      nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
+    <ToggleRow
+      testID="toggle-notifications"
+      label={t("notifications.heading")}
       sub={sub}
-      onPress={onPress}
-      end={
-        <Toggle
-          on={granted}
-          onPress={onPress}
-          testID="toggle-notifications"
-          accessibilityLabel={t("notifications.heading")}
-        />
-      }
+      on={granted}
+      onToggle={onPress}
     />
   );
 }
 
 export default function Preferences() {
   const { t } = useTranslation("settings");
+  const { section } = useLocalSearchParams<{ section?: string }>();
+  const { scrollRef, sectionLayout } = useSectionScroll(section);
   const { accentHex, setAccent } = useTheme();
   const { data: prefs, update } = usePreferences();
 
@@ -160,108 +113,80 @@ export default function Preferences() {
 
   return (
     <Screen testID="screen-self-preferences" centered>
-      <Crumb
-        segs={[
-          { label: upper(t("mobile:self.title")) },
-          { label: t("preferences.title"), leaf: true },
-        ]}
-      />
-      <Body>
-        <SectionTitle>{upper(t("mobile:self.preferences.accentHeading"))}</SectionTitle>
-        <View style={{ paddingHorizontal: 18 }}>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-            {SWATCHES.map((s) => {
-              const sel = accentHex.toLowerCase() === s.c.toLowerCase();
-              const label = swatchLabel(t, s.n);
-              return (
-                <Pressable
-                  key={s.n}
-                  testID={`chip-accent-${s.n.toLowerCase()}`}
-                  accessibilityLabel={t("mobile:self.preferences.accentA11y", {
-                    name: label,
-                  })}
-                  onPress={() => setAccent(s.c)}
-                  style={{
-                    width: "31.5%",
-                    borderWidth: 1,
-                    borderColor: sel ? s.c : semantic.hair,
-                    backgroundColor: sel
-                      ? semantic.accentSoft
-                      : "transparent",
-                    paddingVertical: 10,
-                    paddingHorizontal: 10,
-                    borderRadius: r.sm,
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 8,
-                  }}
-                >
-                  <View
-                    style={{
-                      width: 14,
-                      height: 14,
-                      backgroundColor: s.c,
-                      borderRadius: r.sm,
-                    }}
+      <Header title={t("preferences.title")} backTo={t("mobile:self.title")} />
+      <ScrollView
+        ref={scrollRef}
+        style={{ flex: 1 }}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{
+          paddingHorizontal: space.xxl,
+          paddingTop: space.xxl,
+          paddingBottom: space.xxxl,
+          gap: space.xxxl,
+        }}
+      >
+        <View onLayout={sectionLayout("accent")}>
+          <Group title={t("mobile:self.preferences.accentHeading")}>
+            <View
+              accessibilityRole="radiogroup"
+              accessibilityLabel={t("mobile:self.preferences.accentHeading")}
+              style={{
+                flexDirection: "row",
+                flexWrap: "wrap",
+                justifyContent: "space-around",
+                rowGap: space.sm,
+                padding: space.sm,
+              }}
+            >
+              {SWATCHES.map((s) => {
+                const label = accentPresetLabel(t, s.n);
+                return (
+                  <AccentSwatch
+                    key={s.n}
+                    testID={`chip-accent-${s.n.toLowerCase()}`}
+                    color={s.c}
+                    label={label}
+                    selected={accentHex.toLowerCase() === s.c.toLowerCase()}
+                    accessibilityLabel={t("mobile:self.preferences.accentA11y", {
+                      name: label,
+                    })}
+                    onPress={() => setAccent(s.c)}
                   />
-                  <Text
-                    style={{
-                      fontFamily: ty.body.fontFamily,
-                      fontSize: 13,
-                      color: semantic.ink,
-                    }}
-                  >
-                    {label}
-                  </Text>
-                  {sel && (
-                    <View style={{ marginLeft: "auto" }}>
-                      <Icon.check color={s.c} />
-                    </View>
-                  )}
-                </Pressable>
-              );
-            })}
-          </View>
+                );
+              })}
+            </View>
+          </Group>
         </View>
 
-        <LanguageSection />
+        <LanguageSection onLayout={sectionLayout("language")} />
 
-        <SectionTitle>{upper(t("voice:settings.behaviorHeading"))}</SectionTitle>
-        {BEHAVIOR_KEYS.map((b) => (
-          <ListRow
-            key={b.key}
-            minHeight={46}
-            name={behaviorLabel(t, b.key)}
-            nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
-            end={
-              <Toggle
-                on={isBehaviorOn(b.key, b.defaultOn)}
-                onPress={() => toggleBehavior(b.key, b.defaultOn)}
+        <View onLayout={sectionLayout("behavior")}>
+          <Group title={t("voice:settings.behaviorHeading")}>
+            {BEHAVIOR_KEYS.map((b) => (
+              <ToggleRow
+                key={b.key}
                 testID={`toggle-${b.key.replace(/_/g, "-")}`}
-                accessibilityLabel={behaviorLabel(t, b.key)}
+                label={behaviorLabel(t, b.key)}
+                on={isBehaviorOn(b.key, b.defaultOn)}
+                onToggle={() => toggleBehavior(b.key, b.defaultOn)}
               />
-            }
-          />
-        ))}
-        <ListRow
-          minHeight={46}
-          name={t("readReceipts.heading")}
-          sub={t("mobile:self.preferences.readReceiptsSub")}
-          nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
-          end={
-            <Toggle
-              on={sendReadReceipts}
-              onPress={() => update({ send_read_receipts: !sendReadReceipts })}
+            ))}
+            <ToggleRow
               testID="toggle-read-receipts"
-              accessibilityLabel={t("readReceipts.heading")}
+              label={t("readReceipts.heading")}
+              sub={t("mobile:self.preferences.readReceiptsSub")}
+              on={sendReadReceipts}
+              onToggle={() => update({ send_read_receipts: !sendReadReceipts })}
             />
-          }
-        />
+          </Group>
+        </View>
 
-        <SectionTitle>{upper(t("notifications.heading"))}</SectionTitle>
-        <NotificationsSetting />
-      </Body>
-      <Ctx cr={upper(t("mobile:self.title"))} name={t("preferences.title")} />
+        <View onLayout={sectionLayout("notifications")}>
+          <Group title={t("notifications.heading")}>
+            <NotificationsSetting />
+          </Group>
+        </View>
+      </ScrollView>
     </Screen>
   );
 }

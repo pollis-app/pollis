@@ -4,12 +4,13 @@ import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import * as Clipboard from "expo-clipboard";
 import { useObserver } from "mobx-react-lite";
-import { Screen, Crumb, Button, BottomAction, Chip } from "../../components/ui";
+import { Screen, Header, Button, BottomAction, Chip } from "../../components/ui";
+import { Icon } from "../../components/icons";
+import { ErrorText } from "../../components/self/SettingsField";
 import { Heading } from "../../components/auth/Heading";
 import { PinCells, PinKeypad } from "../../components/auth/PinPad";
 import { QrCode } from "../../components/QrCode";
-import { palette, semantic, type as ty, fonts, r } from "../../theme/tokens";
-import { upper } from "../../i18n";
+import { semantic, type as ty, fonts, r, space } from "../../theme/tokens";
 import { appStore } from "../../stores/appStore";
 import {
   approveDeviceLink,
@@ -134,7 +135,7 @@ export default function LinkDevice() {
   };
 
   const crumb = (
-    <Crumb segs={[{ label: upper(t("mobile:self.title")) }, { label: t("linkDevice.heading"), leaf: true }]} />
+    <Header title={t("linkDevice.heading")} backTo={t("settings:security.title")} onBack={() => void leave()} />
   );
 
   if (step.kind === "pin") {
@@ -146,9 +147,9 @@ export default function LinkDevice() {
           <View style={{ gap: 14 }}>
             <PinCells length={pin.length} />
             {pinError ? (
-              <Text testID="link-device-pin-error" style={{ fontFamily: ty.body.fontFamily, fontSize: 13, color: semantic.danger, textAlign: "center" }}>
-                {pinError}
-              </Text>
+              <View style={{ alignSelf: "center" }}>
+                <ErrorText testID="link-device-pin-error">{pinError}</ErrorText>
+              </View>
             ) : null}
           </View>
         </View>
@@ -166,7 +167,7 @@ export default function LinkDevice() {
         </View>
         <BottomAction>
           <Button testID="btn-link-device-done" variant="primary" full onPress={() => router.back()}>
-            {upper(t("linkDevice.done"))}
+            {t("linkDevice.done")}
           </Button>
         </BottomAction>
       </Screen>
@@ -190,10 +191,10 @@ export default function LinkDevice() {
         </View>
         <BottomAction>
           <Button variant="primary" full onPress={restart}>
-            {upper(t("linkDevice.newCode"))}
+            {t("linkDevice.newCode")}
           </Button>
           <Button variant="subtle" full onPress={leave}>
-            {upper(t("common:actions.cancel"))}
+            {t("common:actions.cancel")}
           </Button>
         </BottomAction>
       </Screen>
@@ -213,11 +214,11 @@ export default function LinkDevice() {
         </View>
         <BottomAction>
           <Button testID="btn-link-device-approve" variant="primary" full disabled={busy} onPress={() => approve(handle, name)}>
-            {upper(t("linkDevice.approve"))}
+            {t("linkDevice.approve")}
           </Button>
           <Button
             testID="btn-link-device-reject"
-            variant="danger"
+            variant="secondary"
             full
             disabled={busy}
             onPress={() => {
@@ -225,7 +226,7 @@ export default function LinkDevice() {
               void leave();
             }}
           >
-            {upper(t("linkDevice.reject"))}
+            {t("linkDevice.reject")}
           </Button>
         </BottomAction>
       </Screen>
@@ -242,7 +243,7 @@ export default function LinkDevice() {
         </View>
         <BottomAction>
           <Button variant="subtle" full onPress={leave}>
-            {upper(t("common:actions.cancel"))}
+            {t("common:actions.cancel")}
           </Button>
         </BottomAction>
       </Screen>
@@ -279,20 +280,18 @@ function ShowCode({ handle, crumb, onCancel }: { handle: DeviceLinkHandle; crumb
           title={t("linkDevice.showTitle")}
           subtitle={mode === "qr" ? t("linkDevice.showSubtitle") : t("linkDevice.codeSubtitle")}
         />
-        <View style={{ flexDirection: "row", gap: 8, alignSelf: "center" }}>
-          <Chip testID="chip-link-qr" variant={mode === "qr" ? "on" : "default"} onPress={() => setMode("qr")}>
+        <View accessibilityRole="tablist" style={{ flexDirection: "row", gap: space.sm, alignSelf: "center" }}>
+          <Chip testID="chip-link-qr" selected={mode === "qr"} onPress={() => setMode("qr")}>
             {t("linkDevice.tabQr")}
           </Chip>
-          <Chip testID="chip-link-code" variant={mode === "code" ? "on" : "default"} onPress={() => setMode("code")}>
+          <Chip testID="chip-link-code" selected={mode === "code"} onPress={() => setMode("code")}>
             {t("linkDevice.tabCode")}
           </Chip>
         </View>
 
         {mode === "qr" ? (
           <View testID="link-device-showing" style={{ alignItems: "center" }}>
-            <View style={{ padding: 12, backgroundColor: semantic.accent, borderRadius: r.lg }}>
-              <QrCode testID="link-device-qr" value={handle.qr_payload} size={232} dark={palette.bg} light={semantic.accent} />
-            </View>
+            <QrCode testID="link-device-qr" value={handle.qr_payload} size={232} frame={space.lg} radius={r.lg} />
           </View>
         ) : (
           <Pressable
@@ -302,23 +301,26 @@ function ShowCode({ handle, crumb, onCancel }: { handle: DeviceLinkHandle; crumb
             onPress={copy}
             style={({ pressed }) => ({
               borderWidth: 1,
-              borderColor: semantic.accent,
-              backgroundColor: pressed ? semantic.accentSoft : semantic.fieldBg,
+              borderColor: semantic.edge,
+              backgroundColor: pressed ? semantic.high : semantic.raised,
               borderRadius: r.lg,
-              padding: 18,
-              gap: 12,
+              padding: space.xxl,
+              gap: space.lg,
             })}
           >
-            <Text testID="link-device-payload" style={{ fontFamily: fonts.mono400, fontSize: 15, lineHeight: 22, color: semantic.ink }}>
+            <Text testID="link-device-payload" style={{ fontFamily: fonts.mono400, fontSize: 15, lineHeight: 22, color: semantic.text }}>
               {handle.qr_payload}
             </Text>
-            <Text style={[ty.label, { color: copied ? semantic.accent : semantic.mute }]}>
-              {upper(copied ? t("linkDevice.copied") : t("linkDevice.copyHint"))}
-            </Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: space.xs }}>
+              {copied ? <Icon.check size={16} color={semantic.accent} /> : <Icon.copy size={16} color={semantic.dim} />}
+              <Text style={[ty.section, { color: copied ? semantic.text : semantic.dim }]}>
+                {copied ? t("linkDevice.copied") : t("linkDevice.copyHint")}
+              </Text>
+            </View>
           </Pressable>
         )}
 
-        <Text testID="link-device-status" style={{ fontFamily: ty.body.fontFamily, fontSize: 13, color: semantic.mute, textAlign: "center" }}>
+        <Text testID="link-device-status" style={[ty.secondary, { textAlign: "center" }]}>
           {secondsLeft > 0
             ? t("linkDevice.expiresIn", { time: `${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, "0")}` })
             : t("linkDevice.expiredTitle")}
@@ -326,7 +328,7 @@ function ShowCode({ handle, crumb, onCancel }: { handle: DeviceLinkHandle; crumb
       </View>
       <BottomAction>
         <Button variant="subtle" full onPress={onCancel}>
-          {upper(t("common:actions.cancel"))}
+          {t("common:actions.cancel")}
         </Button>
       </BottomAction>
     </Screen>

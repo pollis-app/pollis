@@ -3,21 +3,13 @@ import { View, Text } from "react-native";
 import { useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import {
-  Screen,
-  Crumb,
-  Body,
-  Field,
-  Button,
-  BottomAction,
-  Ctx,
-} from "../../components/ui";
+import { observer } from "mobx-react-lite";
+import { Screen, Header, Body, Card, Field, Button, BottomAction } from "../../components/ui";
+import { SettingsField, ErrorText } from "../../components/self/SettingsField";
 import { Icon } from "../../components/icons";
-import { semantic, type as ty } from "../../theme/tokens";
-import { upper } from "../../i18n";
+import { semantic, type as ty, space } from "../../theme/tokens";
 import { useDeleteAccount } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
-import { observer } from "mobx-react-lite";
 
 // The word the user must type to arm deletion. Matches desktop's
 // SecurityPage: deliberately a constant, not translatable copy, so the
@@ -50,98 +42,55 @@ function DeleteAccount() {
     });
   };
 
+  const confirmLabel = t("security.deleteConfirmLabel", { word: DELETE_CONFIRM_WORD });
+
   return (
     <Screen testID="screen-self-delete-account" centered>
-      <Crumb
-        segs={[
-          { label: upper(t("mobile:self.title")) },
-          { label: t("security.title") },
-          { label: t("mobile:self.deleteAccount.title"), leaf: true },
-        ]}
-      />
-      <Body>
-        <View style={{ paddingHorizontal: 18, paddingTop: 14, gap: 14 }}>
-          <Text style={[ty.h1, { color: semantic.danger }]}>
-            {t("mobile:self.deleteAccount.title")}
-          </Text>
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              lineHeight: 19,
-              color: semantic.mute,
-            }}
-          >
+      <Header title={t("mobile:self.deleteAccount.title")} backTo={t("security.title")} />
+      <Body contentContainerStyle={{ paddingHorizontal: space.xxl, paddingTop: space.xxl, gap: space.xxl }}>
+        <Card style={{ gap: space.lg }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+            <Icon.alert size={20} color={semantic.accent} />
+            <Text accessibilityRole="header" style={[ty.heading, { flex: 1 }]}>
+              {t("mobile:self.deleteAccount.irreversible")}
+            </Text>
+          </View>
+          <Text style={[ty.body, { color: semantic.dim }]}>
             {t("mobile:self.deleteAccount.consequences")}
           </Text>
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              lineHeight: 19,
-              color: semantic.mute,
-            }}
-          >
-            {t("mobile:self.deleteAccount.irreversible")}
-          </Text>
+        </Card>
 
-          <View style={{ gap: 6, paddingTop: 8 }}>
-            <Text style={ty.label}>
-              {upper(
-                t("security.deleteConfirmLabel", { word: DELETE_CONFIRM_WORD }),
-              )}
-            </Text>
-            <Field
-              value={confirmText}
-              onChangeText={setConfirmText}
-              placeholder={DELETE_CONFIRM_WORD}
-              testID="input-delete-confirm"
-              accessibilityLabel={t("security.deleteConfirmLabel", {
-                word: DELETE_CONFIRM_WORD,
-              })}
-              icon={<Icon.shield color={semantic.danger} />}
-            />
-          </View>
+        <SettingsField label={confirmLabel}>
+          <Field
+            value={confirmText}
+            onChangeText={setConfirmText}
+            placeholder={DELETE_CONFIRM_WORD}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            testID="input-delete-confirm"
+            accessibilityLabel={confirmLabel}
+          />
+        </SettingsField>
 
-          {deleteAccount.isError ? (
-            <Text
-              testID="text-delete-error"
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 12,
-                lineHeight: 17,
-                color: semantic.danger,
-              }}
-            >
-              {(deleteAccount.error as Error).message ||
-                t("mobile:self.deleteAccount.failed")}
-            </Text>
-          ) : null}
-        </View>
+        {deleteAccount.isError ? (
+          <ErrorText testID="text-delete-error">
+            {(deleteAccount.error as Error).message || t("mobile:self.deleteAccount.failed")}
+          </ErrorText>
+        ) : null}
       </Body>
       <BottomAction>
         <Button
           full
-          variant="danger"
           testID="btn-delete-account"
-          icon={<Icon.exit color={semantic.danger} />}
+          icon={<Icon.trash size={20} color={semantic.text} />}
           disabled={!armed || deleteAccount.isPending || !currentUser}
           onPress={onDelete}
         >
           {deleteAccount.isPending
-            ? upper(t("security.deletingAccount"))
-            : upper(t("mobile:self.deleteAccount.submit"))}
+            ? t("security.deletingAccount")
+            : t("mobile:self.deleteAccount.submit")}
         </Button>
       </BottomAction>
-      <Ctx
-        cr={upper(
-          t("mobile:self.deleteAccount.contextPath", {
-            parent: t("mobile:self.title"),
-            child: t("security.title"),
-          }),
-        )}
-        name={t("mobile:self.deleteAccount.title")}
-      />
     </Screen>
   );
 }

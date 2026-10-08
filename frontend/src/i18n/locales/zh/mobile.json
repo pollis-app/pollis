@@ -67,6 +67,7 @@
       "createTitle": "新设备 PIN 码",
       "invalidPin": "PIN 码无效。",
       "noActiveUser": "没有当前用户。请重新登录。",
+      "progress": "已输入 {{entered}}/{{total}} 位数字",
       "saveFailed": "无法保存 PIN 码。",
       "stepConfirm": "第 2 步，共 2 步 · 确认 PIN 码",
       "stepEnter": "第 1 步，共 2 步 · 输入 PIN 码",
@@ -82,10 +83,12 @@
     "editPlaceholder": "编辑消息…",
     "emojiSuggestionLabel": "表情 :{{shortcode}}:",
     "groupSettings": "群组设置",
+    "lastReply": "最后回复 {{time}}",
     "loadFailed": "无法加载消息。",
     "loading": "正在加载消息…",
     "loadingOlder": "正在加载更早的消息…",
     "mentionLabel": "提及 @{{name}}",
+    "messageSheetTitle": "消息",
     "openThread_other": "打开话题，{{count}} 条回复",
     "reactWith": "用 {{emoji}} 回应",
     "reactionPillReacted_other": "{{emoji}} {{count}} 个回应，包括你",
@@ -109,7 +112,14 @@
     "empty": "还没有私信。",
     "loadFailed": "无法加载对话。",
     "loading": "正在加载对话…",
-    "wantsToMessage": "想给你发消息"
+    "wantsToMessage": "想给你发消息",
+    "newMessage": "新消息",
+    "searchLabel": "搜索对话",
+    "requests": "消息请求",
+    "requestsWaiting_other": "消息请求，{{count}} 条待处理",
+    "ownPreview": "你：{{text}}",
+    "noMatches": "没有匹配的对话。",
+    "emptyHint": "通过用户名或邮箱与他人开始对话。"
   },
   "dm": {
     "backToInbox": "返回收件箱",
@@ -120,7 +130,8 @@
     "participantsCount_other": "参与者 · {{count}}",
     "searchFailed": "搜索失败。",
     "startWith": "与 @{{name}} 开始私信",
-    "tapAgainToConfirm": "再次点击以确认"
+    "tapAgainToConfirm": "再次点击以确认",
+    "identifierLabel": "用户名或邮箱"
   },
   "emoji": {
     "groupFallback": "群组"
@@ -150,7 +161,9 @@
       "blurb": "请向群主索要群组标识。没有公开的群组列表。",
       "requestDeclined": "申请已被拒绝",
       "requestPending": "申请待处理",
-      "title": "查找群组"
+      "title": "查找群组",
+      "slugLabel": "群组标识",
+      "requestAccess": "申请加入"
     },
     "emoji": {
       "adminsOnly": "只有群组管理员才能添加或移除表情。",
@@ -171,7 +184,9 @@
       "manageLinksSub": "查看并撤销现有链接",
       "share": "分享",
       "shareableLink": "可分享的链接",
-      "thisGroup": "此群组"
+      "thisGroup": "此群组",
+      "identifierLabel": "用户名或邮箱",
+      "submit": "发送邀请"
     },
     "inviteLinks": {
       "blurb": "链接无法再次显示。撤销后立即失效。",
@@ -184,20 +199,27 @@
       "joined": "加入于 {{date}}",
       "makeAdmin": "设为管理员",
       "removeAdmin": "取消管理员",
-      "roleOwner": "所有者"
+      "roleOwner": "所有者",
+      "roleAdmin": "管理员",
+      "removeLabel": "将 {{name}} 移出群组"
     },
     "new": {
       "blurb": "只有成员能看到群组详情。",
       "crumb": "新建",
       "descriptionLabel": "描述（可选）",
-      "descriptionPlaceholder": "这个群组是做什么的？"
+      "descriptionPlaceholder": "这个群组是做什么的？",
+      "title": "新群组",
+      "nameLabel": "群组名称",
+      "submit": "创建群组"
     },
     "requests": {
       "approveLabel": "批准申请",
       "declineLabel": "拒绝申请",
       "pendingSection": "待处理的申请",
       "processFailed": "无法处理该申请。",
-      "requested": "申请于 {{date}}"
+      "requested": "申请于 {{date}}",
+      "approve": "批准",
+      "decline": "拒绝"
     },
     "settings": {
       "channelsSection": "频道",
@@ -207,7 +229,32 @@
       "deleting": "正在删除…",
       "identitySection": "身份",
       "notAdmin": "你没有此群组的管理员权限。",
-      "tapAgainToConfirm": "再次点击以确认"
+      "tapAgainToConfirm": "再次点击以确认",
+      "title": "群组设置",
+      "nameLabel": "群组名称",
+      "deleteChannel": "删除 #{{name}}"
+    },
+    "panel": {
+      "menuLabel": "{{name}}，群组菜单",
+      "invite": "邀请成员",
+      "search": "搜索 {{name}}",
+      "createChannel": "创建频道",
+      "thisGroup": "此群组",
+      "members": "成员",
+      "settings": "群组设置",
+      "joinRequests": "加入申请",
+      "customEmoji": "自定义表情",
+      "leave": "退出群组",
+      "leaveConfirm": "再次轻点以退出 {{name}}",
+      "leaveHint": "重新加入需要新的邀请。",
+      "leaving": "正在退出…",
+      "channelSelected": "{{name}}，已选中",
+      "channelUnread_other": "{{name}}，{{count}} 条未读"
+    },
+    "newChannel": {
+      "title": "新频道",
+      "nameLabel": "频道名称",
+      "submit": "创建频道"
     }
   },
   "groups": {
@@ -215,7 +262,22 @@
     "declineInviteLabel": "拒绝邀请",
     "empty": "还没有群组。创建一个开始吧。",
     "loading": "正在加载群组…",
-    "pendingInvites": "待处理的邀请"
+    "pendingInvites": "待处理的邀请",
+    "title": "群组",
+    "stripLabel": "你的群组",
+    "addGroup": "创建或查找群组",
+    "create": "创建群组",
+    "createSub": "新建群组并邀请成员",
+    "find": "查找群组",
+    "findSub": "通过标识申请加入群组",
+    "emptyTitle": "还没有群组",
+    "emptyBody": "为你的伙伴创建一个群组，或查找别人告诉你的群组。",
+    "pillSelected": "{{name}}，已选中",
+    "pillUnread": "{{name}}，有未读消息",
+    "pillSelectedUnread": "{{name}}，已选中，有未读消息",
+    "joinRequestsSection": "加入申请",
+    "accept": "接受",
+    "decline": "拒绝"
   },
   "invite": {
     "backToPollis": "返回 Pollis",
@@ -259,7 +321,8 @@
       "enterCodeIntro": "输入我们发送到 {{email}} 的验证码。",
       "enterEmailIntro": "输入新邮箱。我们会发送 6 位验证码以确认它属于你。",
       "title": "更改邮箱",
-      "useDifferentEmail": "使用其他邮箱"
+      "useDifferentEmail": "使用其他邮箱",
+      "sendCode": "发送验证码"
     },
     "deleteAccount": {
       "consequences": "这会永久删除你的 Pollis 账户。你将被移出所有群组和对话，你的设备会被注销，此手机上的加密数据也会被清除。其他成员会保留他们自己的历史消息副本，但删除后发送的任何内容都无法再用你的密钥读取。",
@@ -282,7 +345,20 @@
       "savedSub": "收藏的消息",
       "securitySub": "密钥、设备、退出登录",
       "signingOut": "正在退出登录…",
-      "userSettingsSub": "显示名称、用户名、邮箱"
+      "userSettingsSub": "显示名称、用户名、邮箱",
+      "customAccent": "自定义",
+      "off": "关闭",
+      "profileSub": "@{{handle}} · 此设备",
+      "editProfile": "编辑个人资料",
+      "accountSection": "账户",
+      "appSection": "应用",
+      "accountDetails": "账户详情",
+      "securityDevices": "安全与设备",
+      "deviceCount_other": "{{count}} 台设备",
+      "savedMessages": "已保存的消息",
+      "appearance": "外观",
+      "signOut": "退出登录…",
+      "signOutConfirmTitle": "要在此设备上退出 Pollis 吗？"
     },
     "identityHeading": "身份",
     "preferences": {
@@ -340,14 +416,16 @@
       "rejectA11y": "拒绝设备注册",
       "safetyHeading": "安全",
       "showOlderA11y": "显示更早的事件",
-      "thisDevice": "{{name}} · 此设备"
+      "thisDevice": "{{name}} · 此设备",
+      "blockedUsers": "已屏蔽的用户"
     },
     "title": "我的",
     "userSettings": {
       "displayName": "显示名称",
       "handle": "用户名",
       "handleHint": "其他成员可以通过 @handle 找到你并发私信。",
-      "handleInvalid": "用户名为 3–32 个字符：小写字母、数字、'_'、'.' 或 '-'。"
+      "handleInvalid": "用户名为 3–32 个字符：小写字母、数字、'_'、'.' 或 '-'。",
+      "save": "保存更改"
     }
   },
   "tabs": {

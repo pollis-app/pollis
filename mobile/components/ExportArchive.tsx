@@ -9,10 +9,10 @@
 import { useState } from "react";
 import { View, Text } from "react-native";
 import { useTranslation } from "react-i18next";
-import { SectionTitle, ListRow, Chip, Button } from "./ui";
+import { Group, ListRow, Button, SectionTitle } from "./ui";
 import { Icon } from "./icons";
-import { semantic, type as ty } from "../theme/tokens";
-import { upper } from "../i18n";
+import { ErrorText } from "./self/SettingsField";
+import { semantic, type as ty, space } from "../theme/tokens";
 import {
   useExportArchive,
   useFetchExportAttachments,
@@ -20,14 +20,14 @@ import {
 } from "../hooks/queries/useExport";
 import { formatBytes } from "../lib/exportArchive";
 
-const noteStyle = {
-  fontFamily: ty.body.fontFamily,
-  fontSize: 12,
-  color: semantic.mute,
-  lineHeight: 17,
-} as const;
-
-export function ExportArchive({ conversationId = null }: { conversationId?: string | null }) {
+export function ExportArchive({
+  conversationId = null,
+  padded = true,
+}: {
+  conversationId?: string | null;
+  // Adds the 16pt side gutter. Pass false when the parent already pads.
+  padded?: boolean;
+}) {
   const { t } = useTranslation("settings");
   const exportArchive = useExportArchive();
   const fetchAttachments = useFetchExportAttachments();
@@ -43,34 +43,32 @@ export function ExportArchive({ conversationId = null }: { conversationId?: stri
     null;
 
   return (
-    <View>
-      <SectionTitle>
-        {upper(t(conversationId ? "mobile:self.export.conversationHeading" : "security.exportHeading"))}
+    <View style={{ gap: space.md, paddingHorizontal: padded ? space.xxl : 0 }}>
+      <SectionTitle style={{ paddingHorizontal: 4, paddingTop: 0, paddingBottom: 0 }}>
+        {t(conversationId ? "mobile:self.export.conversationHeading" : "security.exportHeading")}
       </SectionTitle>
-      <View style={{ paddingHorizontal: 18, paddingTop: 6 }}>
-        <Text style={noteStyle}>{t("security.exportDescription")}</Text>
-      </View>
-      <ListRow
-        testID="row-export-archive"
-        minHeight={48}
-        glyph={<Icon.download color={semantic.mute} />}
-        name={t(conversationId ? "security.exportConversationButton" : "security.exportButton")}
-        nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
-        sub={exportArchive.isPending ? t("security.exporting") : t("mobile:self.export.rowSub")}
-        onPress={() => {
-          if (exportArchive.isPending) {
-            return;
-          }
-          setFetched(false);
-          fetchAttachments.reset();
-          share.reset();
-          exportArchive.mutate(conversationId);
-        }}
-        end={<Icon.fwd color={semantic.mute} />}
-      />
+      <Text style={[ty.secondary, { paddingHorizontal: 4 }]}>{t("security.exportDescription")}</Text>
+      <Group>
+        <ListRow
+          testID="row-export-archive"
+          glyph={<Icon.download size={22} color={semantic.text} />}
+          name={t(conversationId ? "security.exportConversationButton" : "security.exportButton")}
+          sub={exportArchive.isPending ? t("security.exporting") : t("mobile:self.export.rowSub")}
+          chevron
+          onPress={() => {
+            if (exportArchive.isPending) {
+              return;
+            }
+            setFetched(false);
+            fetchAttachments.reset();
+            share.reset();
+            exportArchive.mutate(conversationId);
+          }}
+        />
+      </Group>
       {summary ? (
-        <View style={{ paddingHorizontal: 18, paddingTop: 4, gap: 8 }}>
-          <Text testID="text-export-summary" style={noteStyle}>
+        <View style={{ gap: space.md, paddingHorizontal: 4 }}>
+          <Text testID="text-export-summary" style={ty.secondary}>
             {t("security.exportDone", {
               messages: t("security.exportMessages", { count: summary.messages }),
               conversations: t("security.exportConversations", { count: summary.conversations }),
@@ -79,7 +77,7 @@ export function ExportArchive({ conversationId = null }: { conversationId?: stri
             })}
           </Text>
           {summary.attachments > 0 ? (
-            <Text testID="text-export-files" style={noteStyle}>
+            <Text testID="text-export-files" style={ty.secondary}>
               {[
                 t("security.exportAttachmentsWritten", { count: summary.attachments_written }),
                 t("security.exportAttachmentsMissing", { count: missing }),
@@ -87,28 +85,27 @@ export function ExportArchive({ conversationId = null }: { conversationId?: stri
             </Text>
           ) : null}
           {missing > 0 && !fetched ? (
-            <View style={{ gap: 6 }}>
-              <Text style={{ ...noteStyle, color: semantic.mute2 }}>{t("security.exportFetchNote")}</Text>
-              <View style={{ flexDirection: "row" }}>
-                <Chip
-                  testID="btn-export-fetch"
-                  accessibilityLabel={t("security.exportFetchButton", { count: missing })}
-                  onPress={() => {
-                    if (!summary || fetchAttachments.isPending) {
-                      return;
-                    }
-                    fetchAttachments.mutate(summary, { onSuccess: () => setFetched(true) });
-                  }}
-                >
-                  {fetchAttachments.isPending
-                    ? t("security.exportFetching")
-                    : t("security.exportFetchButton", { count: missing })}
-                </Chip>
-              </View>
+            <View style={{ gap: space.sm, alignItems: "flex-start" }}>
+              <Text style={ty.meta}>{t("security.exportFetchNote")}</Text>
+              <Button
+                testID="btn-export-fetch"
+                icon={<Icon.download size={18} color={semantic.text} />}
+                accessibilityLabel={t("security.exportFetchButton", { count: missing })}
+                onPress={() => {
+                  if (!summary || fetchAttachments.isPending) {
+                    return;
+                  }
+                  fetchAttachments.mutate(summary, { onSuccess: () => setFetched(true) });
+                }}
+              >
+                {fetchAttachments.isPending
+                  ? t("security.exportFetching")
+                  : t("security.exportFetchButton", { count: missing })}
+              </Button>
             </View>
           ) : null}
           {fetchAttachments.data ? (
-            <Text testID="text-export-fetched" style={noteStyle}>
+            <Text testID="text-export-fetched" style={ty.secondary}>
               {[
                 t("security.exportFetched", { count: fetchAttachments.data.fetched }),
                 fetchAttachments.data.failed.length > 0
@@ -123,7 +120,7 @@ export function ExportArchive({ conversationId = null }: { conversationId?: stri
             full
             testID="btn-export-share"
             variant="primary"
-            icon={<Icon.share color={semantic.ink} />}
+            icon={<Icon.share size={18} color={semantic.onAccent} />}
             onPress={() => {
               if (summary && !share.isPending) {
                 share.mutate(summary);
@@ -131,17 +128,14 @@ export function ExportArchive({ conversationId = null }: { conversationId?: stri
             }}
             disabled={share.isPending}
           >
-            {upper(t(share.isPending ? "mobile:self.export.bundling" : "mobile:self.export.share"))}
+            {t(share.isPending ? "mobile:self.export.bundling" : "mobile:self.export.share")}
           </Button>
         </View>
       ) : null}
       {error ? (
-        <Text
-          testID="text-export-error"
-          style={{ ...noteStyle, color: semantic.danger, paddingHorizontal: 18, paddingTop: 6 }}
-        >
-          {error}
-        </Text>
+        <View style={{ paddingHorizontal: 4 }}>
+          <ErrorText testID="text-export-error">{error}</ErrorText>
+        </View>
       ) : null}
     </View>
   );
