@@ -94,6 +94,10 @@ Rules that are easy to get wrong here:
 - **RTL is `I18nManager`.** `setLanguage` calls `forceRTL` for the language's
   `dir`, which React Native applies on the **next launch**; `LanguageSection`
   shows `mobile:language.restartRequired` until then (`layoutRestartPending`).
+  Never write the direction before `hydrateLanguage` has read the stored
+  choice: Android's Fabric re-reads it on every root measure, so a boot-time
+  `forceRTL(false)` from the device-locale guess un-mirrors that whole launch
+  (`tests/rtl-boot.test.ts`).
   Yoga mirrors flex layout and `left/right` positioning on its own; what it
   cannot mirror is a glyph, so `components/icons.tsx` flips only the icons
   that encode direction (`back`, `fwd`, the arrows).
