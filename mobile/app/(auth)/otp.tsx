@@ -2,12 +2,15 @@ import { useRef, useState } from "react";
 import { View, Text, TextInput, Pressable } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Trans, useTranslation } from "react-i18next";
-import { Screen, Crumb, Button, BottomAction } from "../../components/ui";
+import { Screen, Body, Button, BottomAction } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { BackLink } from "../../components/auth/BackLink";
-import { semantic, type as ty, r } from "../../theme/tokens";
+import { Heading } from "../../components/auth/Heading";
+import { AuthError } from "../../components/auth/AuthError";
+import { semantic, fonts, r } from "../../theme/tokens";
 import { useVerifyOtp } from "../../hooks/queries/useAuth";
-import { upper } from "../../i18n";
+
+const CODE_LENGTH = 6;
 
 export default function AuthOTP() {
   const { t } = useTranslation("auth");
@@ -15,12 +18,13 @@ export default function AuthOTP() {
   const { email: emailParam } = useLocalSearchParams<{ email?: string }>();
   const email = (emailParam ?? "").trim();
   const [code, setCode] = useState("");
+  const [focused, setFocused] = useState(true);
   const input = useRef<TextInput>(null);
-  const cells = Array.from({ length: 6 });
+  const cells = Array.from({ length: CODE_LENGTH });
   const verifyOtp = useVerifyOtp();
 
   const onSubmit = () => {
-    if (code.length !== 6 || !email) {
+    if (code.length !== CODE_LENGTH || !email) {
       return;
     }
     verifyOtp.mutate(
@@ -42,113 +46,90 @@ export default function AuthOTP() {
 
   return (
     <Screen testID="screen-auth-otp" centered>
-      <Crumb
-        segs={[
-          { label: upper(t("mobile:auth.crumb.auth")) },
-          { label: t("mobile:auth.crumb.verifyEmail"), leaf: true },
-        ]}
+      <BackLink
+        label={t("mobile:auth.otp.useDifferentEmail")}
+        onPress={() => router.back()}
       />
-      <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 30, gap: 22 }}>
-        <View style={{ gap: 8 }}>
-          <Text style={[ty.h1, { color: semantic.ink }]}>
-            {t("mobile:auth.otp.title")}
-          </Text>
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              lineHeight: 19,
-              color: semantic.mute,
-            }}
-          >
+      <Body contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, gap: 28 }}>
+        <Heading
+          title={t("mobile:auth.otp.title")}
+          subtitle={
             <Trans
               t={t}
               i18nKey="mobile:auth.otp.sentTo"
               values={{ email: email || t("mobile:auth.otp.yourEmail") }}
-              components={{ address: <Text style={{ color: semantic.ink2 }} /> }}
+              components={{
+                address: <Text style={{ fontFamily: fonts.semibold, color: semantic.text }} />,
+              }}
             />
-          </Text>
-        </View>
-
-        <Pressable
-          onPress={() => input.current?.focus()}
-          style={{
-            flexDirection: "row",
-            gap: 10,
-            justifyContent: "center",
-            paddingVertical: 10,
-          }}
-        >
-          {cells.map((_, i) => {
-            const filled = i < code.length;
-            const cursor = i === code.length;
-            return (
-              <View
-                key={i}
-                style={{
-                  width: 44,
-                  height: 56,
-                  borderWidth: 1,
-                  borderRadius: r.sm,
-                  borderColor:
-                    filled || cursor ? semantic.accent : semantic.hairStrong,
-                  backgroundColor: filled
-                    ? semantic.accentSoft
-                    : semantic.fieldBg,
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                {filled ? (
-                  <Text
-                    style={{
-                      fontFamily: ty.h1.fontFamily,
-                      fontSize: 22,
-                      color: semantic.ink,
-                    }}
-                  >
-                    {code[i]}
-                  </Text>
-                ) : cursor ? (
-                  <View
-                    style={{
-                      width: 2,
-                      height: 24,
-                      backgroundColor: semantic.accent,
-                    }}
-                  />
-                ) : null}
-              </View>
-            );
-          })}
-        </Pressable>
-        <TextInput
-          ref={input}
-          testID="input-otp"
-          accessibilityLabel={t("mobile:auth.otp.codeLabel")}
-          value={code}
-          onChangeText={(v) => setCode(v.replace(/[^0-9]/g, "").slice(0, 6))}
-          keyboardType="number-pad"
-          autoFocus
-          style={{ position: "absolute", opacity: 0 }}
+          }
         />
 
-        {verifyOtp.isError ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 12,
-              color: semantic.danger,
-              textAlign: "center",
-            }}
+        <View>
+          {/* The six boxes are a picture of the hidden input below; a tap on
+              them focuses it. Screen readers get the input itself, so the
+              boxes are hidden from them. */}
+          <Pressable
+            onPress={() => input.current?.focus()}
+            accessible={false}
+            importantForAccessibility="no-hide-descendants"
+            accessibilityElementsHidden
+            style={{ flexDirection: "row", gap: 8, justifyContent: "center" }}
           >
-            {(verifyOtp.error as Error).message ||
-              t("mobile:auth.otp.invalidCode")}
-          </Text>
-        ) : null}
+            {cells.map((_, i) => {
+              const filled = i < code.length;
+              // The box the next digit lands in (the last box once full).
+              const active =
+                focused && (i === code.length || (code.length === CODE_LENGTH && i === CODE_LENGTH - 1));
+              return (
+                <View
+                  key={i}
+                  style={{
+                    flex: 1,
+                    maxWidth: 52,
+                    minHeight: 60,
+                    borderWidth: active ? 2 : 1,
+                    borderRadius: r.md,
+                    borderColor: active ? semantic.accent : semantic.edge,
+                    backgroundColor: semantic.raised,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  {filled ? (
+                    <Text style={{ fontFamily: fonts.semibold, fontSize: 28, color: semantic.text }}>
+                      {code[i]}
+                    </Text>
+                  ) : active ? (
+                    <View style={{ width: 2, height: 26, backgroundColor: semantic.accent }} />
+                  ) : null}
+                </View>
+              );
+            })}
+          </Pressable>
+          {/* input-otp is an opacity:0 proxy over the visual boxes,
+              autofocused on mount — Maestro types into it without a tap. */}
+          <TextInput
+            ref={input}
+            testID="input-otp"
+            accessibilityLabel={t("mobile:auth.otp.codeLabel")}
+            value={code}
+            onChangeText={(v) => setCode(v.replace(/[^0-9]/g, "").slice(0, CODE_LENGTH))}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            keyboardType="number-pad"
+            autoFocus
+            style={{ position: "absolute", opacity: 0 }}
+          />
+        </View>
 
-        <BackLink label={t("mobile:auth.otp.useDifferentEmail")} onPress={() => router.back()} />
-      </View>
+        {verifyOtp.isError ? (
+          <AuthError
+            center
+            message={(verifyOtp.error as Error).message || t("mobile:auth.otp.invalidCode")}
+          />
+        ) : null}
+      </Body>
 
       <BottomAction>
         <Button
@@ -157,10 +138,10 @@ export default function AuthOTP() {
           variant="primary"
           full
           onPress={onSubmit}
-          disabled={code.length !== 6 || verifyOtp.isPending}
-          iconRight={<Icon.arrowRight color="#0a0907" />}
+          disabled={code.length !== CODE_LENGTH || verifyOtp.isPending}
+          iconRight={<Icon.arrowRight size={18} color={semantic.onAccent} />}
         >
-          {upper(verifyOtp.isPending ? t("otp.verifying") : t("otp.verify"))}
+          {verifyOtp.isPending ? t("otp.verifying") : t("otp.verify")}
         </Button>
       </BottomAction>
     </Screen>

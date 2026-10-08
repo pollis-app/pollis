@@ -1,37 +1,54 @@
 import { View, Text, Pressable } from "react-native";
 import { useTranslation } from "react-i18next";
-import { palette, semantic, fonts, r } from "../../theme/tokens";
+import { semantic, fonts, layout } from "../../theme/tokens";
 
-const SUBS = ["", "ABC", "DEF", "GHI", "JKL", "MNO", "PQRS", "TUV", "WXYZ"];
-const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "bk"];
+// Key diameter and the gaps between keys. 72pt circles keep every key well
+// above the 44pt minimum and leave room for 28pt digits.
+const KEY = 72;
+const COL_GAP = 24;
+const ROW_GAP = 14;
+const DOT = 16;
 
-/** The four PIN cells: filled dots, a cursor on the next cell. */
+const ROWS = [
+  ["1", "2", "3"],
+  ["4", "5", "6"],
+  ["7", "8", "9"],
+  ["", "0", "bk"],
+];
+
+/**
+ * The PIN progress dots. A filled dot is a solid disc; an empty one is a
+ * hollow ring — so the count reads by shape, not colour. Spoken as one
+ * element ("2 of 4 digits entered").
+ */
 export function PinCells({ length, size = 4 }: { length: number; size?: number }) {
+  const { t } = useTranslation("mobile");
   return (
-    <View style={{ flexDirection: "row", gap: 14, justifyContent: "center" }}>
+    <View
+      accessible
+      accessibilityLabel={t("auth.pin.progress", { entered: length, total: size })}
+      style={{
+        flexDirection: "row",
+        gap: 20,
+        justifyContent: "center",
+        alignItems: "center",
+        minHeight: layout.touchMin,
+      }}
+    >
       {Array.from({ length: size }, (_, i) => {
         const filled = i < length;
-        const cursor = i === length;
         return (
           <View
             key={i}
             style={{
-              width: 52,
-              height: 60,
-              borderWidth: 1,
-              borderRadius: r.sm,
-              borderColor: filled || cursor ? semantic.accent : semantic.hairStrong,
-              backgroundColor: semantic.fieldBg,
-              alignItems: "center",
-              justifyContent: "center",
+              width: DOT,
+              height: DOT,
+              borderRadius: DOT / 2,
+              borderWidth: 2,
+              borderColor: filled ? semantic.text : semantic.edge,
+              backgroundColor: filled ? semantic.text : "transparent",
             }}
-          >
-            {filled ? (
-              <Text style={{ fontFamily: fonts.sora500, fontSize: 24, color: semantic.ink }}>•</Text>
-            ) : cursor ? (
-              <View style={{ width: 2, height: 18, backgroundColor: semantic.accent }} />
-            ) : null}
-          </View>
+          />
         );
       })}
     </View>
@@ -39,9 +56,10 @@ export function PinCells({ length, size = 4 }: { length: number; size?: number }
 }
 
 /**
- * The full-width numeric keypad the PIN screens use. Keys carry
- * `btn-pin-<digit>` / `btn-pin-back` testIDs, which the Maestro PIN subflow
- * taps.
+ * The numeric keypad the PIN screens use: 72pt round keys on the raised
+ * surface with 28pt digits. Keys carry `btn-pin-<digit>` / `btn-pin-back`
+ * testIDs, which the Maestro PIN subflow taps, and speak as their digit or
+ * "Delete".
  */
 export function PinKeypad({
   onDigit,
@@ -56,52 +74,58 @@ export function PinKeypad({
   return (
     <View
       style={{
-        flexDirection: "row",
-        flexWrap: "wrap",
-        borderTopWidth: 1,
-        borderTopColor: semantic.hairSoft,
-        backgroundColor: semantic.hairSoft,
-        opacity: disabled ? 0.5 : 1,
+        alignItems: "center",
+        gap: ROW_GAP,
+        paddingTop: 12,
+        paddingBottom: 20,
+        opacity: disabled ? 0.45 : 1,
       }}
       pointerEvents={disabled ? "none" : "auto"}
     >
-      {KEYS.map((k, i) => (
-        <Pressable
-          key={i}
-          disabled={k === ""}
-          testID={k === "" ? undefined : k === "bk" ? "btn-pin-back" : `btn-pin-${k}`}
-          accessibilityRole={k === "" ? undefined : "button"}
-          accessibilityLabel={k === "" ? undefined : k === "bk" ? t("keys.delete") : k}
-          onPress={() => (k === "bk" ? onBackspace() : onDigit(k))}
-          // Subtle press feedback: the key briefly fills with the soft amber
-          // tier so a tap is acknowledged without anything flashy.
-          style={({ pressed }) => ({
-            width: "33.333%",
-            backgroundColor: pressed && k !== "" ? semantic.accentSoft : palette.bg,
-            paddingVertical: 18,
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 2,
-            marginBottom: 1,
+      {ROWS.map((row, ri) => (
+        <View key={ri} style={{ flexDirection: "row", gap: COL_GAP }}>
+          {row.map((k, ki) => {
+            if (k === "") {
+              return <View key={ki} style={{ width: KEY, height: KEY }} />;
+            }
+            const back = k === "bk";
+            return (
+              <Pressable
+                key={ki}
+                testID={back ? "btn-pin-back" : `btn-pin-${k}`}
+                accessibilityRole="button"
+                accessibilityLabel={back ? t("keys.delete") : k}
+                accessibilityState={{ disabled: !!disabled }}
+                onPress={() => (back ? onBackspace() : onDigit(k))}
+                // A tap briefly fills the key with the soft accent tier: an
+                // acknowledgement without anything flashy.
+                style={({ pressed }) => ({
+                  width: KEY,
+                  height: KEY,
+                  borderRadius: KEY / 2,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: pressed
+                    ? semantic.accentSoft
+                    : back
+                      ? "transparent"
+                      : semantic.raised,
+                })}
+              >
+                <Text
+                  maxFontSizeMultiplier={1.4}
+                  style={{
+                    fontFamily: fonts.medium,
+                    fontSize: back ? 26 : 28,
+                    color: back ? semantic.dim : semantic.text,
+                  }}
+                >
+                  {back ? "⌫" : k}
+                </Text>
+              </Pressable>
+            );
           })}
-        >
-          <Text
-            style={{
-              fontFamily: fonts.sora400,
-              fontSize: k === "bk" ? 26 : 22,
-              color: k === "bk" ? semantic.ink2 : semantic.ink,
-            }}
-          >
-            {k === "bk" ? "⌫" : k}
-          </Text>
-          {k && k !== "bk" ? (
-            <Text style={{ fontFamily: fonts.sora400, fontSize: 9, letterSpacing: 1.8, color: semantic.mute }}>
-              {SUBS[Number(k) - 1] || " "}
-            </Text>
-          ) : (
-            <Text style={{ fontSize: 9 }}> </Text>
-          )}
-        </Pressable>
+        </View>
       ))}
     </View>
   );

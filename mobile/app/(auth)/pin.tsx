@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { View, Text, Pressable } from "react-native";
+import { ActivityIndicator, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
-import { Screen, Crumb } from "../../components/ui";
-import { Icon } from "../../components/icons";
+import { Screen, Body, Button } from "../../components/ui";
 import { PinCells, PinKeypad } from "../../components/auth/PinPad";
-import { semantic, type as ty } from "../../theme/tokens";
+import { Heading } from "../../components/auth/Heading";
+import { AuthError } from "../../components/auth/AuthError";
+import { semantic } from "../../theme/tokens";
 import {
   useSetPin,
   useUnlock,
@@ -14,7 +15,6 @@ import {
 import { useFinalizeEnrollment } from "../../hooks/queries/useEnrollment";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
-import { upper } from "../../i18n";
 
 type Stage = "checking" | "create-first" | "create-confirm" | "unlock";
 
@@ -54,18 +54,13 @@ function AuthPIN() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const stageLabel = (() => {
-    switch (stage) {
-      case "checking":
-        return upper(t("settings:security.permissionChecking"));
-      case "create-first":
-        return upper(t("mobile:auth.pin.stepEnter"));
-      case "create-confirm":
-        return upper(t("mobile:auth.pin.stepConfirm"));
-      case "unlock":
-        return upper(t("mobile:auth.pin.unlockPrompt"));
-    }
-  })();
+  // A step label only where there are steps (creating a PIN takes two).
+  const stepLabel =
+    stage === "create-first"
+      ? t("mobile:auth.pin.stepEnter")
+      : stage === "create-confirm"
+        ? t("mobile:auth.pin.stepConfirm")
+        : undefined;
 
   const headline =
     stage === "unlock"
@@ -170,83 +165,34 @@ function AuthPIN() {
 
   return (
     <Screen testID="screen-auth-pin" centered>
-      <Crumb
-        segs={[
-          { label: upper(t("mobile:auth.crumb.auth")) },
-          {
-            label:
-              stage === "unlock"
-                ? t("mobile:auth.crumb.unlockDevice")
-                : t("mobile:auth.crumb.setDevicePin"),
-            leaf: true,
-          },
-        ]}
-      />
-      <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 24, gap: 18 }}>
-        <View style={{ gap: 8 }}>
-          <Text style={[ty.h1, { color: semantic.ink }]}>{headline}</Text>
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              lineHeight: 19,
-              color: semantic.mute,
-            }}
-          >
-            {subtitle}
-          </Text>
-        </View>
+      <Body contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 32, gap: 24 }}>
+        {stage === "checking" ? (
+          <ActivityIndicator
+            color={semantic.accent}
+            accessibilityLabel={t("settings:security.permissionChecking")}
+          />
+        ) : (
+          <Heading step={stepLabel} title={headline} subtitle={subtitle} />
+        )}
 
-        <View style={{ paddingVertical: 14 }}>
+        <View style={{ gap: 16 }}>
           <PinCells length={pin.length} />
-          <Text
-            style={[ty.label, { textAlign: "center", marginTop: 14 }]}
-          >
-            {stageLabel}
-          </Text>
-          {error ? (
-            <Text
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 12,
-                color: semantic.danger,
-                textAlign: "center",
-                marginTop: 8,
-              }}
-            >
-              {error}
-            </Text>
-          ) : null}
-
-          {/* Always offer a way out of this screen — without it, an error
-              like "no key material to wrap; sign in again" strands the user
-              on the keypad with no path back to sign-in. */}
-          <Pressable
-            onPress={() => router.replace("/(auth)/email")}
-            testID="btn-pin-signout"
-            accessibilityRole="button"
-            accessibilityLabel={t("enroll.signInAgain")}
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              alignSelf: "flex-start",
-              gap: 8,
-              marginTop: 40,
-            }}
-          >
-            <Icon.back color={semantic.ink} />
-            <Text
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 16,
-                color: semantic.ink,
-              }}
-            >
-              {t("enroll.signInAgain")}
-            </Text>
-          </Pressable>
+          {error ? <AuthError center message={error} /> : null}
         </View>
-      </View>
+
+        {/* Always offer a way out of this screen — without it, an error
+            like "no key material to wrap; sign in again" strands the user
+            on the keypad with no path back to sign-in. */}
+        <View style={{ alignItems: "center" }}>
+          <Button
+            testID="btn-pin-signout"
+            variant="subtle"
+            onPress={() => router.replace("/(auth)/email")}
+          >
+            {t("enroll.signInAgain")}
+          </Button>
+        </View>
+      </Body>
 
       <PinKeypad
         onDigit={push}

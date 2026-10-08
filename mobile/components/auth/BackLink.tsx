@@ -1,23 +1,39 @@
-import { Pressable, Text } from "react-native";
+import { View } from "react-native";
+import { IconButton } from "../ui";
 import { Icon } from "../icons";
-import { semantic, type as ty } from "../../theme/tokens";
+import { semantic, layout } from "../../theme/tokens";
 
 /**
- * The quiet "‹ Use a different email" style link auth screens use for their
- * way out — lighter than a full-width button, so it never competes with the
- * screen's one primary action.
+ * The top-left way out of an auth step ("Back to Sign in"): a 44×44 back
+ * chevron in a bar with no title — the screen's large <Heading> below is the
+ * title. Auth screens disable the stack's edge swipe (it would lose flow
+ * progress), so this is the one back affordance. `testID` defaults to the
+ * shared `btn-back`; screens whose e2e flows tap a specific id pass it.
  */
-export function BackLink({ label, onPress, testID }: { label: string; onPress: () => void; testID?: string }) {
+export function BackLink({
+  label,
+  onPress,
+  testID = "btn-back",
+}: {
+  label: string;
+  onPress: () => void;
+  testID?: string;
+}) {
   return (
-    <Pressable
-      testID={testID}
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      style={{ flexDirection: "row", alignItems: "center", alignSelf: "flex-start", gap: 8, paddingVertical: 6 }}
+    <View
+      style={{
+        minHeight: layout.header,
+        flexDirection: "row",
+        alignItems: "center",
+        paddingStart: 4,
+      }}
     >
-      <Icon.back color={semantic.ink} />
-      <Text style={{ fontFamily: ty.body.fontFamily, fontSize: 16, color: semantic.ink }}>{label}</Text>
-    </Pressable>
+      <IconButton
+        testID={testID}
+        accessibilityLabel={label}
+        onPress={onPress}
+        icon={<Icon.chevronLeft size={24} color={semantic.text} />}
+      />
+    </View>
   );
 }

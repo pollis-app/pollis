@@ -2,11 +2,12 @@ import { useState } from "react";
 import { Linking, View, Text } from "react-native";
 import { useRouter } from "expo-router";
 import { Trans, useTranslation } from "react-i18next";
-import { Screen, Crumb, Field, Button, BottomAction } from "../../components/ui";
+import { Screen, Body, Field, Button, BottomAction } from "../../components/ui";
 import { Icon } from "../../components/icons";
+import { Heading } from "../../components/auth/Heading";
+import { AuthError } from "../../components/auth/AuthError";
 import { semantic, type as ty } from "../../theme/tokens";
 import { useRequestOtp } from "../../hooks/queries/useAuth";
-import { upper } from "../../i18n";
 
 export default function AuthEmail() {
   const { t } = useTranslation("auth");
@@ -26,57 +27,36 @@ export default function AuthEmail() {
     });
   };
 
+  const linkStyle = {
+    color: semantic.accent,
+    textDecorationLine: "underline" as const,
+  };
+
   return (
     <Screen testID="screen-auth-email" centered>
-      <Crumb
-        segs={[
-          { label: upper(t("mobile:auth.crumb.auth")) },
-          { label: t("mobile:auth.crumb.identify"), leaf: true },
-        ]}
-      />
-      <View
-        style={{ flex: 1, paddingHorizontal: 24, paddingTop: 30, gap: 24 }}
-      >
-        <View style={{ marginTop: 14, gap: 8 }}>
-          <Text style={[ty.h1, { color: semantic.ink }]}>
-            {t("mobile:auth.email.title")}
-          </Text>
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              lineHeight: 19,
-              color: semantic.mute,
-            }}
-          >
-            {t("mobile:auth.email.intro")}
-          </Text>
-        </View>
+      <Body contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 52, gap: 28 }}>
+        <Heading title={t("mobile:auth.email.title")} subtitle={t("mobile:auth.email.intro")} />
         <View style={{ gap: 8 }}>
-          <Text style={ty.label}>{upper(t("otp.emailLabel"))}</Text>
+          <Text style={ty.section}>{t("otp.emailLabel")}</Text>
           <Field
             testID="input-email"
             accessibilityLabel={t("otp.emailLabel")}
-            amber
             value={email}
             onChangeText={setEmail}
             keyboardType="email-address"
-            icon={<Icon.mail color={semantic.mute} />}
+            autoComplete="email"
+            textContentType="emailAddress"
+            autoCorrect={false}
+            placeholder={t("otp.emailPlaceholder")}
+            icon={<Icon.mail size={18} color={semantic.muted} />}
           />
         </View>
         {requestOtp.isError ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 12,
-              color: semantic.danger,
-            }}
-          >
-            {(requestOtp.error as Error).message ||
-              t("mobile:auth.email.sendFailed")}
-          </Text>
+          <AuthError
+            message={(requestOtp.error as Error).message || t("mobile:auth.email.sendFailed")}
+          />
         ) : null}
-      </View>
+      </Body>
       <BottomAction>
         <Button
           testID="btn-submit-email"
@@ -85,39 +65,47 @@ export default function AuthEmail() {
           full
           onPress={onSubmit}
           disabled={requestOtp.isPending || !email.trim()}
-          iconRight={<Icon.arrowRight color="#0a0907" />}
+          iconRight={<Icon.arrowRight size={18} color={semantic.onAccent} />}
         >
-          {upper(requestOtp.isPending ? t("otp.sending") : t("otp.continue"))}
+          {requestOtp.isPending ? t("otp.sending") : t("otp.continue")}
         </Button>
         {/* Agreeing to the terms is part of creating the account (#1213; App
             Store 1.2): the terms say abusive content is not tolerated. */}
-        <Text
-          testID="text-legal"
-          style={{ fontFamily: ty.body.fontFamily, fontSize: 11, lineHeight: 16, color: semantic.mute, textAlign: "center" }}
-        >
+        <Text testID="text-legal" style={[ty.meta, { textAlign: "center" }]}>
           <Trans
             t={t}
             i18nKey="auth:legal.agree"
             components={{
-              terms: <Text style={{ color: semantic.accent }} onPress={() => void Linking.openURL("https://pollis.com/terms")} />,
-              privacy: <Text style={{ color: semantic.accent }} onPress={() => void Linking.openURL("https://pollis.com/privacy")} />,
+              terms: (
+                <Text
+                  accessibilityRole="link"
+                  style={linkStyle}
+                  onPress={() => void Linking.openURL("https://pollis.com/terms")}
+                />
+              ),
+              privacy: (
+                <Text
+                  accessibilityRole="link"
+                  style={linkStyle}
+                  onPress={() => void Linking.openURL("https://pollis.com/privacy")}
+                />
+              ),
             }}
           />
         </Text>
         {/* QR device link (#1207): scan the code a signed-in device shows,
-            instead of the email code. */}
+            instead of the email code. Recovery needs no button of its own: a
+            fresh device that verifies the email code is routed to enrollment,
+            which offers the recovery key. */}
         <Button
           testID="btn-sign-in-with-device"
-          variant="subtle"
+          variant="secondary"
           full
           onPress={() => router.push("/(auth)/link")}
+          icon={<Icon.device size={18} color={semantic.text} />}
         >
-          {upper(t("link.useDevice"))}
+          {t("link.useDevice")}
         </Button>
-        {/* Recovery is reachable through the standard sign-in flow: enter
-            your email, verify the OTP, and Pollis routes you to the
-            recovery-key entry on a fresh device. No dedicated button
-            needed. */}
       </BottomAction>
     </Screen>
   );
