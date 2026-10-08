@@ -354,6 +354,9 @@
       "signOutConfirmTitle": "Se déconnecter de Pollis sur cet appareil ?"
     },
     "identityHeading": "Identité",
+    "linkDevice": {
+      "codeTitle": "Connectez-vous avec un code"
+    },
     "preferences": {
       "accentA11y": "Accentuation {{name}}",
       "accentHeading": "Accentuation",

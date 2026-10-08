@@ -1,6 +1,6 @@
 import { Text, View } from "react-native";
 import { Icon } from "../icons";
-import { semantic, type as ty, space } from "../../theme/tokens";
+import { semantic, type as ty, space, fonts, r, layout } from "../../theme/tokens";
 
 /**
  * One labelled input on a settings page: sentence-case label above, the
@@ -62,5 +62,52 @@ export function Note({ children, testID }: { children: string; testID?: string }
     <Text testID={testID} style={[ty.secondary, { paddingHorizontal: 4 }]}>
       {children}
     </Text>
+  );
+}
+
+/**
+ * A value the person can see but not edit here (e.g. the email), drawn in the
+ * same box as a Field. A Text rather than a non-editable TextInput: Android
+ * scrolls a TextInput to the end of a long value, clipping its start, while a
+ * Text always shows the start and ends in an ellipsis on both platforms.
+ */
+export function ReadOnlyField({
+  value,
+  icon,
+  testID,
+  accessibilityLabel,
+}: {
+  value: string;
+  icon?: React.ReactNode;
+  testID?: string;
+  accessibilityLabel: string;
+}) {
+  return (
+    <View
+      testID={testID}
+      accessible
+      accessibilityLabel={`${accessibilityLabel}, ${value}`}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: space.sm,
+        minHeight: layout.touchMin,
+        borderWidth: 1,
+        borderColor: semantic.edge,
+        backgroundColor: semantic.raised,
+        paddingHorizontal: space.lg,
+        paddingVertical: space.md,
+        borderRadius: r.md,
+      }}
+    >
+      {icon}
+      <Text
+        numberOfLines={1}
+        ellipsizeMode="tail"
+        style={{ flex: 1, fontFamily: fonts.regular, fontSize: 16, color: semantic.text }}
+      >
+        {value}
+      </Text>
+    </View>
   );
 }

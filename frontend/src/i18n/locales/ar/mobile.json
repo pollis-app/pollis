@@ -394,6 +394,9 @@
       "signOutConfirmTitle": "هل تريد تسجيل الخروج من Pollis على هذا الجهاز؟"
     },
     "identityHeading": "الهوية",
+    "linkDevice": {
+      "codeTitle": "سجّل الدخول باستخدام رمز"
+    },
     "preferences": {
       "accentA11y": "لون التمييز {{name}}",
       "accentHeading": "لون التمييز",

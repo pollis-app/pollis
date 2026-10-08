@@ -374,6 +374,9 @@
       "signOutConfirmTitle": "Выйти из Pollis на этом устройстве?"
     },
     "identityHeading": "Идентификация",
+    "linkDevice": {
+      "codeTitle": "Вход по коду"
+    },
     "preferences": {
       "accentA11y": "Акцент {{name}}",
       "accentHeading": "Акцентный цвет",

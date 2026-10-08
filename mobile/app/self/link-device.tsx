@@ -4,12 +4,13 @@ import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import * as Clipboard from "expo-clipboard";
 import { useObserver } from "mobx-react-lite";
-import { Screen, Header, Button, BottomAction, Chip } from "../../components/ui";
+import { Screen, Header, Button, BottomAction } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { ErrorText } from "../../components/self/SettingsField";
 import { Heading } from "../../components/auth/Heading";
 import { PinCells, PinKeypad } from "../../components/auth/PinPad";
 import { QrCode } from "../../components/QrCode";
+import { SegmentedControl } from "../../components/self/SegmentedControl";
 import { semantic, type as ty, fonts, r, space } from "../../theme/tokens";
 import { appStore } from "../../stores/appStore";
 import {
@@ -277,17 +278,17 @@ function ShowCode({ handle, crumb, onCancel }: { handle: DeviceLinkHandle; crumb
       {crumb}
       <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 32, gap: 28 }}>
         <Heading
-          title={t("linkDevice.showTitle")}
+          title={mode === "qr" ? t("linkDevice.showTitle") : t("mobile:self.linkDevice.codeTitle")}
           subtitle={mode === "qr" ? t("linkDevice.showSubtitle") : t("linkDevice.codeSubtitle")}
         />
-        <View accessibilityRole="tablist" style={{ flexDirection: "row", gap: space.sm, alignSelf: "center" }}>
-          <Chip testID="chip-link-qr" selected={mode === "qr"} onPress={() => setMode("qr")}>
-            {t("linkDevice.tabQr")}
-          </Chip>
-          <Chip testID="chip-link-code" selected={mode === "code"} onPress={() => setMode("code")}>
-            {t("linkDevice.tabCode")}
-          </Chip>
-        </View>
+        <SegmentedControl
+          value={mode}
+          onChange={setMode}
+          segments={[
+            { key: "qr", label: t("linkDevice.tabQr"), testID: "chip-link-qr" },
+            { key: "code", label: t("linkDevice.tabCode"), testID: "chip-link-code" },
+          ]}
+        />
 
         {mode === "qr" ? (
           <View testID="link-device-showing" style={{ alignItems: "center" }}>

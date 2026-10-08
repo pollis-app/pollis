@@ -10,6 +10,9 @@ import { semantic, fonts, r } from "../../theme/tokens";
 import { useVerifyOtp } from "../../hooks/queries/useAuth";
 
 const CODE_LENGTH = 6;
+// Zero-width U+2060 after the address: forbids a line break between it and the
+// sentence's closing punctuation, so Android never strands the "." on a line.
+const WORD_JOINER = "\u2060";
 
 export default function AuthOTP() {
   const { t } = useTranslation("auth");
@@ -56,7 +59,7 @@ export default function AuthOTP() {
             <Trans
               t={t}
               i18nKey="mobile:auth.otp.sentTo"
-              values={{ email: email || t("mobile:auth.otp.yourEmail") }}
+              values={{ email: `${email || t("mobile:auth.otp.yourEmail")}${WORD_JOINER}` }}
               components={{
                 address: <Text style={{ fontFamily: fonts.semibold, color: semantic.text }} />,
               }}

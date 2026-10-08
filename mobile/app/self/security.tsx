@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ScrollView, View, Text } from "react-native";
+import { ScrollView, View, Text, useWindowDimensions } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import {
@@ -15,6 +15,8 @@ import {
 } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { ErrorText, Note } from "../../components/self/SettingsField";
+import { ChoiceGrid } from "../../components/self/ChoiceGrid";
+import { ChoiceChip } from "../../components/self/ChoiceChip";
 import { confirmSignOut } from "../../components/self/confirmSignOut";
 import { useSectionScroll } from "../../components/self/useSectionScroll";
 import { semantic, type as ty, fonts, space } from "../../theme/tokens";
@@ -218,6 +220,10 @@ export default function Security() {
   const [typedCodes, setTypedCodes] = useState<Record<string, string>>({});
   const { minutes: autoLockMinutes, setMinutes: setAutoLockMinutes } =
     useAutoLockMinutes();
+  // Auto-lock options sit in an even grid: three across at default text
+  // sizes, fewer as Dynamic Type grows, so labels never squeeze or strand.
+  const { fontScale } = useWindowDimensions();
+  const autoLockColumns = fontScale >= 1.6 ? 1 : fontScale >= 1.25 ? 2 : 3;
   const lockNow = useLockNow();
   const { data: identity } = useIdentity();
   const { data: events = [], isError: eventsError } = useSecurityEvents();
@@ -480,29 +486,24 @@ export default function Security() {
           <Group title={t("security.autoLockHeading")}>
             <View style={{ padding: space.xxl, gap: space.md }}>
               <Text style={ty.secondary}>{t("mobile:self.security.autoLockDescription")}</Text>
-              <View
+              <ChoiceGrid
+                columns={autoLockColumns}
                 accessibilityRole="radiogroup"
                 accessibilityLabel={t("security.autoLockAriaLabel")}
-                style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}
               >
-                {AUTO_LOCK_OPTIONS_MINUTES.map((opt) => {
-                  const selected = autoLockMinutes === opt;
-                  return (
-                    <Chip
-                      key={opt === null ? "off" : String(opt)}
-                      testID={`chip-autolock-${opt === null ? "off" : opt}`}
-                      accessibilityLabel={t("mobile:self.security.autoLockA11y", {
-                        label: autoLockLabel(opt),
-                      })}
-                      selected={selected}
-                      leading={selected ? <Icon.check size={16} color={semantic.accent} /> : undefined}
-                      onPress={() => setAutoLockMinutes(opt)}
-                    >
-                      {autoLockLabel(opt)}
-                    </Chip>
-                  );
-                })}
-              </View>
+                {AUTO_LOCK_OPTIONS_MINUTES.map((opt) => (
+                  <ChoiceChip
+                    key={opt === null ? "off" : String(opt)}
+                    testID={`chip-autolock-${opt === null ? "off" : opt}`}
+                    label={autoLockLabel(opt)}
+                    accessibilityLabel={t("mobile:self.security.autoLockA11y", {
+                      label: autoLockLabel(opt),
+                    })}
+                    selected={autoLockMinutes === opt}
+                    onPress={() => setAutoLockMinutes(opt)}
+                  />
+                ))}
+              </ChoiceGrid>
             </View>
             <ListRow
               testID="row-lock-now"

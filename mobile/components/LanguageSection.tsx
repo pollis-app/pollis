@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useObserver } from "mobx-react-lite";
 import { Chip, SectionTitle } from "./ui";
 import { Icon } from "./icons";
-import { type as ty, semantic, space } from "../theme/tokens";
+import { type as ty, semantic, space, fonts } from "../theme/tokens";
 import { SUPPORTED_LANGUAGES } from "../i18n/languages";
 import { layoutRestartPending, setLanguage } from "../i18n";
 import { appStore } from "../stores/appStore";
@@ -22,6 +22,27 @@ import { appStore } from "../stores/appStore";
  * next launch (`I18nManager` is applied at startup), so the section says so
  * rather than leaving a mirrored chip row under an unmirrored screen.
  */
+// Geist covers Latin and Cyrillic only. A label in another script (Arabic,
+// Chinese) set in Geist falls back to the platform font at its regular weight
+// on Android — dimmer and smaller than its neighbours — so those labels use the
+// system font at the same size, weight and colour instead.
+const GEIST_SCRIPTS = /^[\u0000-\u024F\u0400-\u04FF\s]*$/;
+
+function ChipLabel({ label, selected }: { label: string; selected: boolean }) {
+  const geist = GEIST_SCRIPTS.test(label);
+  return (
+    <Text
+      numberOfLines={1}
+      style={[
+        { fontSize: 14, color: selected ? semantic.accent : semantic.text },
+        geist ? { fontFamily: fonts.semibold } : { fontWeight: "600" },
+      ]}
+    >
+      {label}
+    </Text>
+  );
+}
+
 export function LanguageSection({ onLayout }: { onLayout?: (e: LayoutChangeEvent) => void }) {
   const { t, i18n } = useTranslation("settings");
   const userId = useObserver(() => appStore.currentUser?.id ?? null);
@@ -61,7 +82,7 @@ export function LanguageSection({ onLayout }: { onLayout?: (e: LayoutChangeEvent
                 });
               }}
             >
-              {option.label}
+              <ChipLabel label={option.label} selected={selected} />
             </Chip>
           );
         })}

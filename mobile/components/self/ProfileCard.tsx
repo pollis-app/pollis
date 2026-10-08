@@ -19,31 +19,40 @@ export function ProfileCard({
     <View
       testID="card-self-profile"
       style={{
-        flexDirection: "row",
-        alignItems: "center",
-        flexWrap: "wrap",
-        gap: space.xl,
+        gap: space.lg,
         padding: space.xxl,
         borderRadius: r.xl,
         backgroundColor: semantic.panel,
       }}
     >
-      <Avatar label={displayName} size="lg" variant="self" />
-      <View
-        accessible
-        accessibilityLabel={`${displayName}, ${sub}`}
-        style={{ flex: 1, minWidth: 120, gap: 2 }}
-      >
-        <Text accessibilityRole="header" numberOfLines={2} style={ty.title}>
-          {displayName}
-        </Text>
-        <Text numberOfLines={2} style={ty.secondary}>
-          {sub}
-        </Text>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.xl }}>
+        <Avatar label={displayName} size="lg" variant="self" />
+        <View
+          accessible
+          accessibilityLabel={`${displayName}, ${sub}`}
+          style={{ flex: 1, minWidth: 0, gap: 2 }}
+        >
+          {/* One line each, cut at the end — long generated names and
+              handles must not wrap and then truncate mid-word. */}
+          <Text
+            accessibilityRole="header"
+            numberOfLines={1}
+            ellipsizeMode="tail"
+            style={ty.title}
+          >
+            {displayName}
+          </Text>
+          <Text numberOfLines={1} ellipsizeMode="tail" style={ty.secondary}>
+            {sub}
+          </Text>
+        </View>
       </View>
-      <Button testID="btn-edit-profile" onPress={onEdit}>
-        {t("mobile:self.hub.editProfile")}
-      </Button>
+      {/* Below the name rather than beside it, so it never squeezes the text. */}
+      <View style={{ alignItems: "flex-start" }}>
+        <Button testID="btn-edit-profile" onPress={onEdit}>
+          {t("mobile:self.hub.editProfile")}
+        </Button>
+      </View>
     </View>
   );
 }

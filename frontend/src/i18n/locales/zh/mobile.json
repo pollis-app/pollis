@@ -344,6 +344,9 @@
       "signOutConfirmTitle": "要在此设备上退出 Pollis 吗？"
     },
     "identityHeading": "身份",
+    "linkDevice": {
+      "codeTitle": "使用代码登录"
+    },
     "preferences": {
       "accentA11y": "强调色 {{name}}",
       "accentHeading": "强调色",

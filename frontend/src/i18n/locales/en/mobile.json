@@ -360,6 +360,9 @@
       "signOutConfirmTitle": "Sign out of Pollis on this device?"
     },
     "identityHeading": "Identity",
+    "linkDevice": {
+      "codeTitle": "Sign in with a code"
+    },
     "preferences": {
       "accentA11y": "Accent {{name}}",
       "accentHeading": "Accent",

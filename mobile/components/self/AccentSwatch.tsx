@@ -5,7 +5,8 @@ import { semantic, type as ty, fonts, r, space, layout } from "../../theme/token
 /**
  * One accent preset: a 44pt colour disc with its name under it. Selected is
  * said three ways, never by colour alone: an accent ring, a check on the disc
- * and bold text — plus the radio's checked state for screen readers.
+ * and bold text — plus the radio's checked state for screen readers. It
+ * fills its grid cell (see `ChoiceGrid`) so the preset row is even.
  */
 export function AccentSwatch({
   color,
@@ -32,7 +33,6 @@ export function AccentSwatch({
       style={({ pressed }) => ({
         alignItems: "center",
         gap: space.xs,
-        minWidth: 72,
         paddingVertical: space.sm,
         paddingHorizontal: 4,
         borderRadius: r.md,

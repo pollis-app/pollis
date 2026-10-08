@@ -13,7 +13,7 @@ import {
   Button,
   BottomAction,
 } from "../../components/ui";
-import { SettingsField, ErrorText } from "../../components/self/SettingsField";
+import { SettingsField, ErrorText, ReadOnlyField } from "../../components/self/SettingsField";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty, space } from "../../theme/tokens";
 import { useUserProfile, useUpdateProfile } from "../../hooks/queries";
@@ -73,7 +73,7 @@ function UserSettings() {
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.xl }}>
           <Avatar label={shownName} size="lg" variant="self" />
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text accessibilityRole="header" numberOfLines={2} style={ty.title}>
+            <Text accessibilityRole="header" numberOfLines={1} ellipsizeMode="tail" style={ty.title}>
               {shownName || "—"}
             </Text>
             {isLoading ? <Text style={ty.meta}>{t("common:states.loading")}</Text> : null}
@@ -110,9 +110,8 @@ function UserSettings() {
 
         <View style={{ gap: space.lg }}>
           <SettingsField label={t("user.emailLabel")}>
-            <Field
+            <ReadOnlyField
               value={profile?.email ?? currentUser?.email ?? ""}
-              editable={false}
               testID="input-email"
               accessibilityLabel={t("user.emailLabel")}
               icon={<Icon.mail size={18} color={semantic.muted} />}

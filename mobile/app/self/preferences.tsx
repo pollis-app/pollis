@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Screen, Header, Group } from "../../components/ui";
 import { LanguageSection } from "../../components/LanguageSection";
 import { AccentSwatch } from "../../components/self/AccentSwatch";
+import { ChoiceGrid } from "../../components/self/ChoiceGrid";
 import { ToggleRow } from "../../components/self/ToggleRow";
 import { accentPresetLabel } from "../../components/self/accentName";
 import { useNotificationPermission } from "../../components/self/useNotificationPermission";
@@ -127,16 +128,14 @@ export default function Preferences() {
       >
         <View onLayout={sectionLayout("accent")}>
           <Group title={t("mobile:self.preferences.accentHeading")}>
-            <View
+            {/* A fixed 3 × 2 grid with equal cells, so the swatches line up the
+                same on iOS and Android whatever the label widths. */}
+            <ChoiceGrid
+              columns={3}
+              gap={space.xs}
               accessibilityRole="radiogroup"
               accessibilityLabel={t("mobile:self.preferences.accentHeading")}
-              style={{
-                flexDirection: "row",
-                flexWrap: "wrap",
-                justifyContent: "space-around",
-                rowGap: space.sm,
-                padding: space.sm,
-              }}
+              style={{ padding: space.sm }}
             >
               {SWATCHES.map((s) => {
                 const label = accentPresetLabel(t, s.n);
@@ -154,7 +153,7 @@ export default function Preferences() {
                   />
                 );
               })}
-            </View>
+            </ChoiceGrid>
           </Group>
         </View>
 

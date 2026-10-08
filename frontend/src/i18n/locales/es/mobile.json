@@ -354,6 +354,9 @@
       "signOutConfirmTitle": "¿Cerrar sesión de Pollis en este dispositivo?"
     },
     "identityHeading": "Identidad",
+    "linkDevice": {
+      "codeTitle": "Inicia sesión con un código"
+    },
     "preferences": {
       "accentA11y": "Acento {{name}}",
       "accentHeading": "Acento",
