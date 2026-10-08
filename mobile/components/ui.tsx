@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React from "react";
 import {
   View,
   Text,
@@ -17,7 +17,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { semantic, type as ty, fonts, r, space, layout, currentTheme } from "../theme/tokens";
-import { buttonColors, controlDisabled } from "../theme/button";
+import { buttonColors, controlDisabled, type ControlSurface } from "../theme/button";
 import { useTheme } from "./theme";
 import { useLayoutClass } from "../hooks/useLayoutClass";
 import { useAndroidKeyboardInset } from "../hooks/useAndroidKeyboardInset";
@@ -178,6 +178,15 @@ function disabledGlyph(node: React.ReactNode, disabled: boolean | undefined): Re
   return React.cloneElement(node, { color: controlDisabled(currentTheme()).fg });
 }
 
+// A caller-supplied icon element recoloured to `color` (a Button's label
+// colour), so a glyph always matches the text beside it.
+function tintGlyph(node: React.ReactNode, color: string): React.ReactNode {
+  if (!React.isValidElement<{ color?: string }>(node)) {
+    return node;
+  }
+  return React.cloneElement(node, { color });
+}
+
 /* ── IconButton ───────────────────────────────────────────────────── */
 // A 44×44 icon-only control. `accessibilityLabel` is required — the icon is
 // silent. `filled` gives it the round raised background (Direct's "New
@@ -214,18 +223,18 @@ export function IconButton({
           borderRadius: layout.touchMin / 2,
           alignItems: "center",
           justifyContent: "center",
-          // Disabled: solid dim glyph + dashed edge ring, never a fade
-          // (Android fades children separately — review #3/#4).
+          // No border in any state. Disabled: the solid raised disc + dim
+          // glyph, never a fade (Android fades children separately — review
+          // #3/#4).
           backgroundColor: disabled
-            ? filled
-              ? semantic.raised
-              : "transparent"
-            : filled || pressed
-              ? semantic.raised
-              : "transparent",
-          borderWidth: disabled ? 1 : 0,
-          borderColor: semantic.edge,
-          borderStyle: disabled ? "dashed" : "solid",
+            ? controlDisabled(currentTheme()).fill
+            : filled
+              ? pressed
+                ? semantic.high
+                : semantic.raised
+              : pressed
+                ? semantic.raised
+                : "transparent",
         },
         style,
       ]}
@@ -436,9 +445,11 @@ export function Divider({ inset = 0, style }: { inset?: number; style?: StylePro
 
 /* ── Chip / Pill ──────────────────────────────────────────────────── */
 // Rounded pill, 32pt visual inside a 44pt hit area (the group strip in
-// Main.dc.html). Variants: `default` raised + text, `subtle` raised + dim,
-// `on` selected (accent tint + accent border + accent text), `solid` accent
-// fill, `outline` 1px edge border. `leading`/`trailing` take a Dot, Badge or
+// Main.dc.html). Never a border — shape comes from the fill, as in
+// GroupPills. Variants: `default` raised fill + accent label; `outline` the
+// same on a `raised` row or card (a `high` fill, so it still reads as a
+// shape); `on` / `selected` and `solid` accent fill + dark onAccent label;
+// `subtle` no fill + dim label. `leading`/`trailing` take a Dot, Badge or
 // icon.
 export function Chip({
   children,
@@ -461,45 +472,35 @@ export function Chip({
   testID?: string;
   accessibilityLabel?: string;
   // Press suppressed, state announced; drawn in the shared disabled look
-  // (raised fill, dashed edge border, dim label).
+  // (solid surface fill, dim label, no border).
   disabled?: boolean;
   leading?: React.ReactNode;
   trailing?: React.ReactNode;
 }) {
   const v = selected ? "on" : variant;
-  const off = disabled ? controlDisabled(currentTheme()) : null;
+  const surface: ControlSurface = variant === "outline" ? "raised" : "base";
+  const off = disabled ? controlDisabled(currentTheme(), surface) : null;
+  const accentFill = v === "on" || v === "solid";
   const bg = off
-    ? v === "outline"
-      ? "transparent"
-      : off.fill
-    :
-    v === "on"
-      ? semantic.accentSoft
-      : v === "solid"
-        ? semantic.accent
+    ? off.fill
+    : accentFill
+      ? semantic.accent
+      : v === "subtle"
+        ? "transparent"
         : v === "outline"
-          ? "transparent"
+          ? semantic.high
           : semantic.raised;
-  const border = off
-    ? off.border
-    : v === "on"
-      ? semantic.accentLine
-      : v === "outline"
-        ? semantic.edge
-        : "transparent";
-  // A disabled chip that is selected keeps its accent label (accent passes
-  // 4.5:1 on raised), so selection survives the disabled look.
+  // A disabled chip that is selected keeps an accent label (accent passes
+  // 4.5:1 on raised and high), so selection survives the disabled look.
   const fg = off
     ? v === "on"
       ? semantic.accent
       : off.fg
-    : v === "on"
-      ? semantic.accent
-      : v === "solid"
-        ? semantic.onAccent
-        : v === "subtle"
-          ? semantic.dim
-          : semantic.text;
+    : accentFill
+      ? semantic.onAccent
+      : v === "subtle"
+        ? semantic.dim
+        : semantic.accent;
   const label = typeof children === "string" ? children : undefined;
   return (
     <Pressable
@@ -526,9 +527,6 @@ export function Chip({
           paddingStart: space.lg,
           paddingEnd: trailing ? space.xs : space.lg,
           borderRadius: 16,
-          borderWidth: 1,
-          borderColor: border,
-          borderStyle: off ? off.borderStyle : "solid",
           backgroundColor: bg,
         }}
       >
@@ -557,12 +555,14 @@ export function Chip({
 export const Pill = Chip;
 
 /* ── Button ───────────────────────────────────────────────────────── */
-// Text button, min 44pt (52 when `full`). `primary`: accent fill +
-// onAccent text — one per screen. `secondary` (alias `default`): raised fill
-// with an edge border. `subtle`: no fill, text colour. `danger` looks like
-// secondary — destructive is said by the label (and a confirm step), not a
-// third hue. Disabled (every variant): raised fill, DASHED edge border, dim
-// label — ≥4.5:1 and told apart from enabled by more than colour.
+// Text button, min 44pt (52 when `full`). Never a border, in any state.
+// `primary`: accent fill + onAccent text — one per screen. `secondary`
+// (alias `default`): the inverse, a dark raised fill + accent label.
+// `subtle`: no fill, accent label. `danger` looks like secondary —
+// destructive is said by the label (and a confirm step), not a third hue.
+// Disabled (every variant): solid raised fill + dim label, ≥4.5:1. Pass
+// `surface="raised"` when the button sits on a raised card, so its fill
+// steps up to `high` and still reads as a shape.
 export function Button({
   children,
   variant = "secondary",
@@ -574,6 +574,7 @@ export function Button({
   align = "center",
   testID,
   accessibilityLabel,
+  surface = "base",
 }: {
   children: string;
   variant?: "primary" | "secondary" | "subtle" | "danger" | "default";
@@ -587,8 +588,10 @@ export function Button({
   // `btn-<name>` for e2e flows; accessibilityLabel defaults to the label.
   testID?: string;
   accessibilityLabel?: string;
+  // What the button sits on: the screen, or a raised card / group.
+  surface?: ControlSurface;
 }) {
-  const c = buttonColors(currentTheme(), variant, !!disabled);
+  const c = buttonColors(currentTheme(), variant, !!disabled, surface);
   return (
     <Pressable
       onPress={disabled ? undefined : onPress}
@@ -609,14 +612,11 @@ export function Button({
         paddingHorizontal: space.xxl,
         paddingVertical: space.sm,
         borderRadius: full ? r.md : layout.touchMin / 2,
-        borderWidth: c.border ? 1 : 0,
-        borderColor: c.border,
-        borderStyle: c.borderStyle,
         backgroundColor: (pressed && !disabled ? c.pressedFill : c.fill) ?? "transparent",
         width: full ? "100%" : undefined,
       })}
     >
-      {icon}
+      {tintGlyph(icon, c.label)}
       <Text
         style={{
           fontFamily: fonts.semibold,
@@ -626,7 +626,7 @@ export function Button({
       >
         {children}
       </Text>
-      {iconRight}
+      {tintGlyph(iconRight, c.label)}
     </Pressable>
   );
 }
@@ -1009,10 +1009,12 @@ export function Card({
 }
 
 /* ── Field ────────────────────────────────────────────────────────── */
-// Text input: raised fill, 1px edge border (accent while focused or when
-// `amber`), radius 12, min 44pt, 16pt text, accent cursor and selection.
-// Accepts every TextInput prop; `icon` / `trailing` sit inside the box.
-// `ref` reaches the TextInput (React 19 passes it as a plain prop).
+// Text input: a borderless filled box — `raised` on the screen, `high` with
+// `surface="raised"` (a field on a raised card) so it still reads as a
+// shape; `amber` swaps in the accentSoft fill (a highlighted box). Radius 12,
+// min 44pt, 16pt text; focus shows as the accent cursor and selection, not
+// a ring. Accepts every TextInput prop; `icon` / `trailing` sit inside the
+// box. `ref` reaches the TextInput (React 19 passes it as a plain prop).
 export function Field({
   ref,
   icon,
@@ -1022,23 +1024,23 @@ export function Field({
   accessibilityLabel,
   containerStyle,
   style,
-  onFocus,
-  onBlur,
+  surface = "base",
   autoCapitalize = "none",
   ...rest
 }: Omit<TextInputProps, "selectionColor" | "cursorColor" | "placeholderTextColor"> & {
   ref?: React.Ref<TextInput>;
   icon?: React.ReactNode;
   trailing?: React.ReactNode;
-  // Highlighted (e.g. an active verification code box).
+  // Highlighted (an accentSoft fill instead of the plain surface).
   amber?: boolean;
+  // What the field sits on: the screen, or a raised card / group.
+  surface?: ControlSurface;
   // `input-<name>` on the TextInput; accessibilityLabel comes from the
   // caller's visible label (Field renders none of its own).
   testID?: string;
   accessibilityLabel?: string;
   containerStyle?: StyleProp<ViewStyle>;
 }) {
-  const [focused, setFocused] = useState(false);
   return (
     <View
       style={[
@@ -1047,9 +1049,11 @@ export function Field({
           alignItems: rest.multiline ? "flex-start" : "center",
           gap: space.sm,
           minHeight: layout.touchMin,
-          borderWidth: 1,
-          borderColor: amber || focused ? semantic.accent : semantic.edge,
-          backgroundColor: semantic.raised,
+          backgroundColor: amber
+            ? semantic.accentSoft
+            : surface === "raised"
+              ? semantic.high
+              : semantic.raised,
           paddingVertical: rest.multiline ? space.md : 0,
           paddingHorizontal: space.lg,
           borderRadius: r.md,
@@ -1066,19 +1070,11 @@ export function Field({
         selectionColor={semantic.accent}
         cursorColor={semantic.accent}
         autoCapitalize={autoCapitalize}
-        onFocus={(e) => {
-          setFocused(true);
-          onFocus?.(e);
-        }}
-        onBlur={(e) => {
-          setFocused(false);
-          onBlur?.(e);
-        }}
         {...rest}
         style={[
           {
             flex: 1,
-            minHeight: layout.touchMin - 2,
+            minHeight: layout.touchMin,
             fontFamily: fonts.regular,
             fontSize: 16,
             color: semantic.text,
@@ -1094,8 +1090,9 @@ export function Field({
 }
 
 /* ── Toggle ───────────────────────────────────────────────────────── */
-// On/off switch: 44×26 track (accent when on, high + edge border when off)
-// inside a 44pt hit area. Exposes switch semantics with the checked state.
+// On/off switch: 44×26 borderless track (accent when on, high when off)
+// inside a 44pt hit area; the knob's side says on/off, not colour alone.
+// Exposes switch semantics with the checked state.
 export function Toggle({
   on,
   onPress,
@@ -1123,12 +1120,14 @@ export function Toggle({
         width: 44,
         height: 26,
         borderRadius: 13,
-        borderWidth: 1,
-        // Disabled: raised track, dashed edge border, dim knob — on/off still
-        // read from the knob's side, not from colour.
-        borderColor: disabled ? semantic.edge : on ? semantic.accent : semantic.edge,
-        borderStyle: disabled ? "dashed" : "solid",
-        backgroundColor: disabled ? semantic.raised : on ? semantic.accent : semantic.high,
+        // Toggles sit in raised rows, so the off and disabled tracks are
+        // `high`. Disabled: a dim knob (enabled-off's is `text`), and on/off
+        // still read from the knob's side.
+        backgroundColor: disabled
+          ? controlDisabled(currentTheme(), "raised").fill
+          : on
+            ? semantic.accent
+            : semantic.high,
         justifyContent: "center",
         alignItems: on ? "flex-end" : "flex-start",
         paddingHorizontal: 2,
@@ -1139,7 +1138,7 @@ export function Toggle({
           width: 20,
           height: 20,
           borderRadius: 10,
-          backgroundColor: disabled ? semantic.dim : on ? semantic.onAccent : semantic.dim,
+          backgroundColor: disabled ? semantic.dim : on ? semantic.onAccent : semantic.text,
         }}
       />
     </Pressable>

@@ -301,8 +301,6 @@ function ShowCode({ handle, crumb, onCancel }: { handle: DeviceLinkHandle; crumb
             accessibilityLabel={t("linkDevice.copyHint")}
             onPress={copy}
             style={({ pressed }) => ({
-              borderWidth: 1,
-              borderColor: semantic.edge,
               backgroundColor: pressed ? semantic.high : semantic.raised,
               borderRadius: r.lg,
               padding: space.xxl,

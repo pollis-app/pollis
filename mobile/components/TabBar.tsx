@@ -9,22 +9,26 @@ import { useBottomInset } from "./ui";
 import { appStore } from "../stores/appStore";
 import { useDMChannels, useUserGroupsWithChannels } from "../hooks/queries";
 
-// Groups / Direct / Search / Self (Main.dc.html): 24pt icon over a 12pt
-// label; active = accent, inactive = dim. The `tab-<name>` testIDs and the
-// `badge-<name>` anchors are load-bearing in e2e flows.
+// Groups / Direct / Search / Self (Main.dc.html): 22pt icon over a 12pt
+// label, set 10pt below the bar's top hairline; active = accent icon and
+// label, a bolder label, and a short rounded accent bar at the top of the
+// cell (so where you are is not told by colour alone); inactive = dim. The
+// `tab-<name>` testIDs and the `badge-<name>` anchors are load-bearing in
+// e2e flows.
+const ICON = 22;
 const TABS: {
   name: string;
   label: (t: TFunction) => string;
   glyph: (c: string) => React.ReactNode;
 }[] = [
-  { name: "groups", label: (t) => t("tabs.groups"), glyph: (c) => <Icon.users size={24} color={c} /> },
+  { name: "groups", label: (t) => t("tabs.groups"), glyph: (c) => <Icon.users size={ICON} color={c} /> },
   {
     name: "direct",
     label: (t) => t("tabs.direct"),
-    glyph: (c) => <Icon.messageCircle size={24} color={c} />,
+    glyph: (c) => <Icon.messageCircle size={ICON} color={c} />,
   },
-  { name: "search", label: (t) => t("tabs.search"), glyph: (c) => <Icon.search size={24} color={c} /> },
-  { name: "self", label: (t) => t("tabs.self"), glyph: (c) => <Icon.user size={24} color={c} /> },
+  { name: "search", label: (t) => t("tabs.search"), glyph: (c) => <Icon.search size={ICON} color={c} /> },
+  { name: "self", label: (t) => t("tabs.self"), glyph: (c) => <Icon.user size={ICON} color={c} /> },
 ];
 
 export const TabBar = observer(function TabBar({ state, navigation }: any) {
@@ -79,10 +83,24 @@ export const TabBar = observer(function TabBar({ state, navigation }: any) {
             style={{
               flex: 1,
               alignItems: "center",
-              justifyContent: "center",
+              justifyContent: "flex-start",
+              paddingTop: 10,
               gap: 3,
             }}
           >
+            {focused ? (
+              <View
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  alignSelf: "center",
+                  width: 26,
+                  height: 3,
+                  borderRadius: 1.5,
+                  backgroundColor: semantic.accent,
+                }}
+              />
+            ) : null}
             <View>
               {tab.glyph(color)}
               {count > 0 ? (
@@ -90,8 +108,8 @@ export const TabBar = observer(function TabBar({ state, navigation }: any) {
                   testID={`badge-${tab.name}`}
                   style={{
                     position: "absolute",
-                    top: -4,
-                    end: -10,
+                    top: -5,
+                    end: -11,
                     minWidth: 18,
                     height: 18,
                     paddingHorizontal: 4,

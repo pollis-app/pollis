@@ -119,15 +119,14 @@ export function MessageActionsSheet({
         contentContainerStyle={{ gap: 12 }}
         bounces={false}
       >
-        {/* The message being acted on: a plain card, no edge stripe. */}
+        {/* The message being acted on: a plain panel card on the sheet —
+            the fill separates it, so no border and no edge stripe. */}
         <View
           accessible
           style={{
             paddingVertical: 10,
             paddingHorizontal: 12,
             borderRadius: r.md,
-            borderWidth: 1,
-            borderColor: semantic.hair,
             backgroundColor: semantic.panel,
             gap: 2,
           }}

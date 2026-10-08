@@ -156,8 +156,6 @@ export default function Enrollment() {
           <View style={{ gap: 20 }}>
             <Card
               style={{
-                borderWidth: 1,
-                borderColor: semantic.edge,
                 alignItems: "center",
                 gap: 10,
                 paddingVertical: 24,

@@ -279,6 +279,7 @@ export default function Security() {
                     <Text style={ty.body}>{t("mobile:self.security.pairIntro")}</Text>
                     <Field
                       testID={`input-approval-code-${req.request_id}`}
+                      surface="raised"
                       accessibilityLabel={t("auth:approval.codeLabel")}
                       value={typed}
                       onChangeText={(next) =>
@@ -295,6 +296,7 @@ export default function Security() {
                     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
                       <Button
                         testID={`btn-reject-${req.request_id}`}
+                        surface="raised"
                         accessibilityLabel={t("mobile:self.security.rejectA11y")}
                         onPress={() => rejectEnrollment.mutate(req.request_id)}
                       >
@@ -303,6 +305,7 @@ export default function Security() {
                       <Button
                         variant="primary"
                         testID={`btn-approve-${req.request_id}`}
+                        surface="raised"
                         accessibilityLabel={t("mobile:self.security.approveA11y")}
                         disabled={typed.length !== SAS_LENGTH}
                         onPress={() =>

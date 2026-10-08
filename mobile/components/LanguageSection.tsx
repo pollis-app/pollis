@@ -34,7 +34,7 @@ function ChipLabel({ label, selected }: { label: string; selected: boolean }) {
     <Text
       numberOfLines={1}
       style={[
-        { fontSize: 14, color: selected ? semantic.accent : semantic.text },
+        { fontSize: 14, color: selected ? semantic.onAccent : semantic.accent },
         geist ? { fontFamily: fonts.semibold } : { fontWeight: "600" },
       ]}
     >
@@ -71,7 +71,7 @@ export function LanguageSection({ onLayout }: { onLayout?: (e: LayoutChangeEvent
               accessibilityLabel={option.label}
               selected={selected}
               leading={
-                selected ? <Icon.check size={16} color={semantic.accent} /> : undefined
+                selected ? <Icon.check size={16} color={semantic.onAccent} /> : undefined
               }
               onPress={() => {
                 if (selected) {

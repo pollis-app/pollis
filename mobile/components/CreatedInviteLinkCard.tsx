@@ -87,8 +87,6 @@ export function CreatedInviteLinkCard({ link }: { link: CreatedInviteLink }) {
       <Text style={[ty.secondary, { lineHeight: 20 }]}>{t("mobile:group.invite.linkOnce")}</Text>
       <View
         style={{
-          borderWidth: 1,
-          borderColor: semantic.hair,
           backgroundColor: semantic.panel,
           paddingVertical: space.md,
           paddingHorizontal: space.lg,
@@ -112,6 +110,7 @@ export function CreatedInviteLinkCard({ link }: { link: CreatedInviteLink }) {
           <Button
             full
             testID="btn-copy-invite-link"
+            surface="raised"
             variant={copyState === "failed" ? "secondary" : "primary"}
             onPress={onCopy}
             accessibilityLabel={
@@ -142,6 +141,7 @@ export function CreatedInviteLinkCard({ link }: { link: CreatedInviteLink }) {
           <Button
             full
             testID="btn-share-invite-link"
+            surface="raised"
             onPress={onShare}
             icon={<Icon.share size={18} color={semantic.text} />}
           >

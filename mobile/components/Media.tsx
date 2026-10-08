@@ -48,8 +48,6 @@ export function MediaImage({
         style={[
           {
             borderRadius: r.md,
-            borderWidth: 1,
-            borderColor: semantic.hair,
             backgroundColor: semantic.raised,
             alignItems: "center",
             justifyContent: "center",

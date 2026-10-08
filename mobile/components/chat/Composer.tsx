@@ -261,8 +261,6 @@ export function Composer({
                 minHeight: 32,
                 paddingStart: 12,
                 paddingEnd: 8,
-                borderWidth: 1,
-                borderColor: semantic.edge,
                 borderRadius: r.pill,
                 backgroundColor: semantic.raised,
               }}
@@ -305,14 +303,12 @@ export function Composer({
             borderRadius: layout.touchMin / 2,
             alignItems: "center",
             justifyContent: "center",
-            // Unavailable: dashed edge ring + dim glyph, never a fade.
+            // No border. Unavailable: the solid raised disc + a dim glyph
+            // (accent when available), never a fade.
             backgroundColor: pressed && onAttach ? semantic.high : semantic.raised,
-            borderWidth: onAttach ? 0 : 1,
-            borderColor: semantic.edge,
-            borderStyle: "dashed",
           })}
         >
-          <Icon.plus size={22} color={onAttach ? semantic.text : semantic.dim} />
+          <Icon.plus size={22} color={onAttach ? semantic.accent : semantic.dim} />
         </Pressable>
         <Field
           testID="input-composer"
@@ -334,9 +330,6 @@ export function Composer({
             minWidth: 0,
             alignItems: "flex-end",
             borderRadius: layout.touchMin / 2,
-            // No border: the raised fill, placeholder and the attach/send
-            // buttons on either side already mark it as the message field.
-            borderWidth: 0,
             paddingVertical: 0,
             paddingStart: 16,
             paddingEnd: 4,
@@ -406,8 +399,6 @@ function suggestionBox() {
   return {
     marginHorizontal: 12,
     marginBottom: 6,
-    borderWidth: 1,
-    borderColor: semantic.hair,
     borderRadius: r.lg,
     backgroundColor: semantic.raised,
     maxHeight: 240,

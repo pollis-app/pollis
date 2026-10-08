@@ -128,7 +128,7 @@ function EmergencyKit() {
         />
 
         <View style={{ gap: 12 }}>
-          <Card style={{ borderWidth: 1, borderColor: semantic.edge }}>
+          <Card>
             <Text
               selectable
               style={{
@@ -196,7 +196,9 @@ function EmergencyKit() {
         </View>
 
         {/* The acknowledgement: a full-width row (one control, one label),
-            its state shown by a filled box with a check — not by colour. */}
+            its state shown by the box: empty, or accent with a check — not
+            by colour alone. No borders: the row is a raised fill and the
+            unchecked box a `high` square on it. */}
         <Pressable
           onPress={() => setAcknowledged((v) => !v)}
           testID="toggle-recovery-ack"
@@ -211,8 +213,6 @@ function EmergencyKit() {
             paddingHorizontal: 16,
             paddingVertical: 12,
             borderRadius: r.md,
-            borderWidth: 1,
-            borderColor: acknowledged ? semantic.accent : semantic.edge,
             backgroundColor: pressed ? semantic.high : semantic.raised,
           })}
         >
@@ -221,9 +221,7 @@ function EmergencyKit() {
               width: 24,
               height: 24,
               borderRadius: 6,
-              borderWidth: 2,
-              borderColor: acknowledged ? semantic.accent : semantic.edge,
-              backgroundColor: acknowledged ? semantic.accent : "transparent",
+              backgroundColor: acknowledged ? semantic.accent : semantic.high,
               alignItems: "center",
               justifyContent: "center",
             }}

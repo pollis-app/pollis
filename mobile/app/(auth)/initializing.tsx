@@ -117,8 +117,6 @@ function Initializing() {
         <Card
           style={{
             width: "100%",
-            borderWidth: 1,
-            borderColor: semantic.edge,
             padding: 20,
             gap: 20,
           }}

@@ -56,7 +56,7 @@ export function EditBar({
             backgroundColor: pressed ? semantic.high : semantic.raised,
           })}
         >
-          <Icon.close size={20} color={semantic.text} />
+          <Icon.close size={20} color={semantic.accent} />
         </Pressable>
         <Field
           testID="input-edit-composer"
@@ -99,9 +99,8 @@ export function EditBar({
             borderRadius: layout.touchMin / 2,
             alignItems: "center",
             justifyContent: "center",
+            // No border: disabled is the solid raised disc + a muted check.
             backgroundColor: saveDisabled ? semantic.raised : semantic.accent,
-            borderWidth: saveDisabled ? 1 : 0,
-            borderColor: semantic.edge,
           }}
         >
           <Icon.check

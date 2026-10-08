@@ -331,8 +331,10 @@ export const layout = {
   touchMin: 44,
   // Header bar content height (below the status bar inset).
   header: 52,
-  // Tab bar content height (above the home-indicator inset).
-  tabBar: 49,
+  // Tab bar content height (above the home-indicator inset): a 10pt gap
+  // under the hairline (the active-tab bar sits in it), the 22pt icon, the
+  // 12pt label and a little air below.
+  tabBar: 56,
   composer: 58,
   // Deprecated: the old bottom context strip.
   ctx: 52,

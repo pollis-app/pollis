@@ -179,14 +179,7 @@ function UserProfile() {
                 </Txt>
               ) : safety.data ? (
                 <Card
-                  style={{
-                    gap: space.lg,
-                    borderWidth: 1,
-                    borderColor:
-                      verification === "verified" || verification === "changed"
-                        ? semantic.accentLine
-                        : semantic.hair,
-                  }}
+                  style={{ gap: space.lg }}
                 >
                   <Text
                     selectable

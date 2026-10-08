@@ -10,8 +10,9 @@ export interface Segment<K extends string> {
 /**
  * A two-or-more way view switch (e.g. QR code / Code): one pill track with a
  * segment per option, each a full 44pt tall so the visible shape is the hit
- * area. The selected segment is filled accentSoft with an accentLine border
- * and accent label, and announced as the selected tab.
+ * area. No borders: the track is a raised fill; the selected segment is an
+ * accent fill with a dark onAccent label (and announced as the selected
+ * tab), the others sit on the dark track with an accent label.
  */
 export function SegmentedControl<K extends string>({
   segments,
@@ -51,16 +52,14 @@ export function SegmentedControl<K extends string>({
               justifyContent: "center",
               alignItems: "center",
               borderRadius: layout.touchMin / 2,
-              borderWidth: 1,
-              borderColor: selected ? semantic.accentLine : "transparent",
-              backgroundColor: selected ? semantic.accentSoft : "transparent",
+              backgroundColor: selected ? semantic.accent : "transparent",
             }}
           >
             <Text
               style={{
                 fontFamily: fonts.semibold,
                 fontSize: 14,
-                color: selected ? semantic.accent : semantic.text,
+                color: selected ? semantic.onAccent : semantic.accent,
               }}
             >
               {s.label}

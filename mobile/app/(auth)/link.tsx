@@ -66,8 +66,6 @@ export default function LinkSignIn() {
               width: "100%",
               overflow: "hidden",
               borderRadius: r.lg,
-              borderWidth: 1,
-              borderColor: semantic.edge,
               backgroundColor: semantic.raised,
             }}
           >

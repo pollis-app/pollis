@@ -92,8 +92,6 @@ export function ReadOnlyField({
         alignItems: "center",
         gap: space.sm,
         minHeight: layout.touchMin,
-        borderWidth: 1,
-        borderColor: semantic.edge,
         backgroundColor: semantic.raised,
         paddingHorizontal: space.lg,
         paddingVertical: space.md,

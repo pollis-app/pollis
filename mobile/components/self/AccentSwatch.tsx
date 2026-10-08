@@ -3,11 +3,14 @@ import { Icon } from "../icons";
 import { semantic, type as ty, fonts, r, space, layout } from "../../theme/tokens";
 
 /**
- * One accent preset: a 44pt colour disc with its name under it. Selected is
- * said three ways, never by colour alone: an accent ring, a check on the disc
- * and bold text — plus the radio's checked state for screen readers. It
- * fills its grid cell (see `ChoiceGrid`) so the preset row is even.
+ * One accent preset: a colour disc with its name under it. No ring: selected
+ * is said by a dark check on the disc, a larger disc (52pt against 44), a
+ * filled `high` backing tile behind the whole cell (it sits in a raised
+ * Group) and bold text — plus the radio's checked state for screen readers.
+ * It fills its grid cell (see `ChoiceGrid`) so the preset row is even.
  */
+const DISC = layout.touchMin;
+const DISC_SELECTED = layout.touchMin + 8;
 export function AccentSwatch({
   color,
   label,
@@ -36,31 +39,29 @@ export function AccentSwatch({
         paddingVertical: space.sm,
         paddingHorizontal: 4,
         borderRadius: r.md,
-        backgroundColor: pressed ? semantic.high : "transparent",
+        backgroundColor: selected || pressed ? semantic.high : "transparent",
       })}
     >
+      {/* A fixed box at the selected size, so the row does not shift. */}
       <View
         style={{
-          width: layout.touchMin + 8,
-          height: layout.touchMin + 8,
-          borderRadius: (layout.touchMin + 8) / 2,
-          borderWidth: 2,
-          borderColor: selected ? semantic.text : "transparent",
+          width: DISC_SELECTED,
+          height: DISC_SELECTED,
           alignItems: "center",
           justifyContent: "center",
         }}
       >
         <View
           style={{
-            width: layout.touchMin,
-            height: layout.touchMin,
-            borderRadius: layout.touchMin / 2,
+            width: selected ? DISC_SELECTED : DISC,
+            height: selected ? DISC_SELECTED : DISC,
+            borderRadius: (selected ? DISC_SELECTED : DISC) / 2,
             backgroundColor: color,
             alignItems: "center",
             justifyContent: "center",
           }}
         >
-          {selected ? <Icon.check size={22} color={semantic.onAccent} /> : null}
+          {selected ? <Icon.check size={24} color={semantic.onAccent} /> : null}
         </View>
       </View>
       <Text

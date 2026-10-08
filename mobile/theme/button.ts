@@ -2,16 +2,27 @@
 // tests/button-contrast.test.ts can check every pair against the derived
 // theme for every accent preset.
 //
+// No button has a border, in any state: shape comes from the fill. Primary is
+// an accent fill with a dark (onAccent) label; secondary / default / danger
+// are the inverse, a dark surface fill with an accent label; subtle has no
+// fill. On a `raised` card the dark fill steps up to `high` so the button
+// still reads as a shape.
+//
 // Disabled is drawn with SOLID derived tokens, never `opacity` on the whole
 // button: on Android a translucent parent fades each child separately (no
 // offscreen compositing), so the label blended into the faded fill and fell
-// far below 4.5:1 (#3/#4). Disabled is also told apart from enabled by more
-// than colour: the fill steps down to the plain `raised` surface and the
-// border turns dashed.
+// far below 4.5:1 (#3/#4). Disabled is told apart from enabled by more than
+// hue: the label drops to `dim` (no accent anywhere), every variant gets the
+// same plain surface fill, and the control is announced and skipped as
+// disabled.
 
 import type { Theme } from "./derive";
 
 export type ButtonVariant = "primary" | "secondary" | "subtle" | "danger" | "default";
+
+// The surface a control sits on: the screen (`bg`/`panel`) or a `raised`
+// card or group, where a `raised` fill would vanish.
+export type ControlSurface = "base" | "raised";
 
 export type ButtonColors = {
   // `undefined` = transparent (the label then sits on whatever is behind).
@@ -19,24 +30,28 @@ export type ButtonColors = {
   // Fill while pressed (enabled only; enabled buttons also dim slightly on
   // press — transient, so its effect on the label doesn't matter).
   pressedFill: string | undefined;
-  border: string | undefined;
-  borderStyle: "solid" | "dashed";
   label: string;
 };
 
+/** The dark fill a non-primary control uses on `surface`. */
+export function controlFill(theme: Theme, surface: ControlSurface = "base"): string {
+  return surface === "raised" ? theme.high : theme.raised;
+}
+
 /**
  * The one disabled look every control shares (Button, IconButton, Chip,
- * ListRow, Toggle, PinPad, the composer's attach): the plain `raised` fill,
- * a DASHED `edge` border (the non-colour cue) and `dim` for the label, glyph
- * or knob. All solid, so nothing depends on an opacity fade.
+ * ListRow, Toggle, PinPad, the composer's attach): a solid surface fill
+ * (`raised`, or `high` on a raised card) and `dim` for the label, glyph or
+ * knob. No border; nothing depends on an opacity fade.
  */
-export function controlDisabled(theme: Theme): {
+export function controlDisabled(
+  theme: Theme,
+  surface: ControlSurface = "base",
+): {
   fill: string;
-  border: string;
-  borderStyle: "dashed";
   fg: string;
 } {
-  return { fill: theme.raised, border: theme.edge, borderStyle: "dashed", fg: theme.dim };
+  return { fill: controlFill(theme, surface), fg: theme.dim };
 }
 
 /** The colours a Button paints with, from the current theme. */
@@ -44,41 +59,22 @@ export function buttonColors(
   theme: Theme,
   variant: ButtonVariant,
   disabled: boolean,
+  surface: ControlSurface = "base",
 ): ButtonColors {
-  const subtle = variant === "subtle";
   if (disabled) {
-    const d = controlDisabled(theme);
-    return {
-      fill: subtle ? undefined : d.fill,
-      pressedFill: subtle ? undefined : d.fill,
-      border: d.border,
-      borderStyle: d.borderStyle,
-      label: d.fg,
-    };
+    const d = controlDisabled(theme, surface);
+    return { fill: d.fill, pressedFill: d.fill, label: d.fg };
   }
   if (variant === "primary") {
-    return {
-      fill: theme.accent,
-      pressedFill: theme.accent,
-      border: undefined,
-      borderStyle: "solid",
-      label: theme.onAccent,
-    };
+    return { fill: theme.accent, pressedFill: theme.accent, label: theme.onAccent };
   }
-  if (subtle) {
-    return {
-      fill: undefined,
-      pressedFill: theme.raised,
-      border: undefined,
-      borderStyle: "solid",
-      label: theme.text,
-    };
+  if (variant === "subtle") {
+    return { fill: undefined, pressedFill: controlFill(theme, surface), label: theme.accent };
   }
+  const fill = controlFill(theme, surface);
   return {
-    fill: theme.raised,
-    pressedFill: theme.raised,
-    border: theme.edge,
-    borderStyle: "solid",
-    label: theme.text,
+    fill,
+    pressedFill: surface === "raised" ? theme.accentSoft : theme.high,
+    label: theme.accent,
   };
 }

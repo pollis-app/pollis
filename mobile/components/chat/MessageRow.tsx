@@ -268,8 +268,6 @@ export function MessageRow({
                     gap: 6,
                     minHeight: 36,
                     paddingHorizontal: 12,
-                    borderWidth: 1,
-                    borderColor: semantic.hair,
                     borderRadius: r.md,
                     backgroundColor: semantic.raised,
                   }}
@@ -311,13 +309,11 @@ export function MessageRow({
               marginTop: 6,
               paddingHorizontal: 10,
               borderRadius: 16,
-              borderWidth: 1,
-              borderColor: semantic.hair,
               backgroundColor: pressed ? semantic.high : semantic.raised,
             })}
           >
-            <Icon.messageCircle size={15} color={semantic.dim} />
-            <Text style={[ty.section, { color: semantic.dim, flexShrink: 1 }]}>
+            <Icon.messageCircle size={15} color={semantic.accent} />
+            <Text style={[ty.section, { color: semantic.accent, flexShrink: 1 }]}>
               {threadLastReply
                 ? `${t("thread.replyCount", { count: threadCount })} · ${t(
                     "mobile:chat.lastReply",

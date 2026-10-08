@@ -4,11 +4,12 @@ import { semantic, fonts, layout, space } from "../../theme/tokens";
 
 /**
  * One option of a single-choice set laid out in a `ChoiceGrid`: fills its
- * cell, at least 44pt tall so the visible shape is the whole hit area. Unselected
- * options carry an outline so each reads as tappable on any surface;
- * selected is said by a check, the accentSoft fill + accentLine border, the
- * accent label and the radio's checked state — never by colour alone. The
- * label wraps rather than truncates at large text sizes.
+ * cell, at least 44pt tall so the visible shape is the whole hit area. No
+ * border: it sits in a raised Group, so unselected options are a `high` fill
+ * with an accent label (the shape says "tappable"); selected is the inverse,
+ * an accent fill with a dark onAccent check and label, plus the radio's
+ * checked state — never by colour alone. The label wraps rather than
+ * truncates at large text sizes.
  */
 export function ChoiceChip({
   label,
@@ -33,13 +34,11 @@ export function ChoiceChip({
       style={({ pressed }) => ({
         minHeight: layout.touchMin,
         borderRadius: layout.touchMin / 2,
-        borderWidth: 1,
-        borderColor: selected ? semantic.accentLine : semantic.edge,
         backgroundColor: selected
-          ? semantic.accentSoft
+          ? semantic.accent
           : pressed
-            ? semantic.high
-            : "transparent",
+            ? semantic.accentSoft
+            : semantic.high,
         paddingHorizontal: space.sm,
         paddingVertical: space.xs,
         justifyContent: "center",
@@ -53,14 +52,14 @@ export function ChoiceChip({
           gap: space.xs,
         }}
       >
-        {selected ? <Icon.check size={16} color={semantic.accent} /> : null}
+        {selected ? <Icon.check size={16} color={semantic.onAccent} /> : null}
         <Text
           style={{
             flexShrink: 1,
             textAlign: "center",
             fontFamily: fonts.semibold,
             fontSize: 14,
-            color: selected ? semantic.accent : semantic.text,
+            color: selected ? semantic.onAccent : semantic.accent,
           }}
         >
           {label}

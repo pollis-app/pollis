@@ -49,6 +49,7 @@ export function CreateChannelSheet({
       <Text style={ty.section}>{t("group.newChannel.nameLabel")}</Text>
       <Field
         testID="input-channel-name"
+        surface="raised"
         accessibilityLabel={t("group.newChannel.nameLabel")}
         value={name}
         onChangeText={setName}
@@ -72,6 +73,7 @@ export function CreateChannelSheet({
         full
         variant="primary"
         testID="btn-create-channel-submit"
+        surface="raised"
         onPress={onSubmit}
         disabled={!trimmed || duplicate || createChannel.isPending}
       >

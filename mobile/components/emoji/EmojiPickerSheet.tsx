@@ -233,6 +233,7 @@ export function EmojiPickerSheet({
       <View style={{ height: 460, gap: 12 }}>
         <Field
           testID="input-emoji-search"
+          surface="raised"
           accessibilityLabel={t("picker.searchPlaceholder")}
           value={query}
           onChangeText={setQuery}
@@ -259,12 +260,11 @@ export function EmojiPickerSheet({
                 height: layout.touchMin,
                 alignItems: "center",
                 justifyContent: "center",
-                borderWidth: toneIndex === index ? 2 : 1,
-                borderColor:
-                  toneIndex === index ? semantic.accentLine : semantic.hair,
                 borderRadius: layout.touchMin / 2,
+                // No ring: selected is the accent disc, the rest a dark
+                // `high` disc on the raised sheet.
                 backgroundColor:
-                  toneIndex === index ? semantic.accentSoft : "transparent",
+                  toneIndex === index ? semantic.accent : semantic.high,
               }}
             >
               <Text style={{ fontSize: 20 }}>{`${TONE_BASE}${tone}`}</Text>

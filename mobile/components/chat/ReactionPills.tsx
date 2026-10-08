@@ -82,25 +82,24 @@ export function ReactionPills({
               gap: 6,
               minHeight: 32,
               paddingHorizontal: 10,
-              borderWidth: 1,
-              borderColor: reacted ? semantic.accentLine : semantic.hair,
               borderRadius: r.pill,
               backgroundColor: reacted
-                ? semantic.accentSoft
+                ? semantic.accent
                 : pressed
                   ? semantic.high
                   : semantic.raised,
             })}
           >
             <ReactionFace emoji={reaction.emoji} />
-            {/* Reacted = accent tint + border + bold count, never colour alone. */}
+            {/* Reacted = accent fill + dark bold count (the inverse of the
+                others' dark fill + accent count), never colour alone. */}
             <Text
               style={[
                 ty.meta,
                 {
                   fontFamily: reacted ? fonts.bold : fonts.medium,
                   fontSize: 13,
-                  color: reacted ? semantic.accent : semantic.dim,
+                  color: reacted ? semantic.onAccent : semantic.accent,
                 },
               ]}
             >

@@ -1,6 +1,7 @@
 import { View, Text, Pressable } from "react-native";
 import { useTranslation } from "react-i18next";
-import { semantic, fonts, layout } from "../../theme/tokens";
+import { semantic, fonts, layout, currentTheme } from "../../theme/tokens";
+import { controlDisabled } from "../../theme/button";
 import { Icon } from "../icons";
 
 // Key diameter and the gaps between keys. 72pt circles keep every key well
@@ -58,7 +59,7 @@ export function PinCells({ length, size = 4 }: { length: number; size?: number }
 
 /**
  * The numeric keypad the PIN screens use: 72pt round keys on the raised
- * surface with 28pt digits. Keys carry `btn-pin-<digit>` / `btn-pin-back`
+ * surface with 28pt digits, no borders. Keys carry `btn-pin-<digit>` / `btn-pin-back`
  * testIDs, which the Maestro PIN subflow taps, and speak as their digit or
  * "Delete".
  */
@@ -111,18 +112,18 @@ export function PinKeypad({
                   borderRadius: KEY / 2,
                   alignItems: "center",
                   justifyContent: "center",
-                  // Disabled (busy): solid dim digits and a dashed edge ring
-                  // instead of fading the pad — review #3/#4.
-                  backgroundColor: disabled
-                    ? "transparent"
-                    : pressed
+                  // No border in any state. Disabled (busy): the solid
+                  // disabled fill and dim digits instead of fading the pad —
+                  // review #3/#4. Delete has no disc in any state.
+                  backgroundColor: back
+                    ? pressed && !disabled
                       ? semantic.accentSoft
-                      : back
-                        ? "transparent"
+                      : "transparent"
+                    : disabled
+                      ? controlDisabled(currentTheme()).fill
+                      : pressed
+                        ? semantic.accentSoft
                         : semantic.raised,
-                  borderWidth: disabled && !back ? 1 : 0,
-                  borderColor: semantic.edge,
-                  borderStyle: "dashed",
                 })}
               >
                 {back ? (

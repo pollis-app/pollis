@@ -106,6 +106,7 @@ export default function Discover() {
               <Button
                 full
                 testID="btn-request-access"
+                surface="raised"
                 variant="primary"
                 onPress={onRequest}
                 disabled={requestAccess.isPending}

@@ -90,10 +90,10 @@ export default function AuthOTP() {
                     flex: 1,
                     maxWidth: 52,
                     minHeight: 60,
-                    borderWidth: active ? 2 : 1,
                     borderRadius: r.md,
-                    borderColor: active ? semantic.accent : semantic.edge,
-                    backgroundColor: semantic.raised,
+                    // Borderless: the box the next digit lands in is the
+                    // accentSoft fill (plus the accent caret inside it).
+                    backgroundColor: active ? semantic.accentSoft : semantic.raised,
                     alignItems: "center",
                     justifyContent: "center",
                   }}
