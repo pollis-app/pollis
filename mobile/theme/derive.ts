@@ -117,6 +117,9 @@ export type Theme = {
   accentSoft: string;
   accentMid: string;
   accentLine: string;
+  // A disabled primary button's fill: the accent dimmed toward the
+  // background (theme/button.ts), so it keeps a primary identity.
+  accentDisabled: string;
   // Text/icons drawn ON an accent fill.
   onAccent: string;
   // Destructive actions. There is no third hue (two-colour rule): destructive
@@ -151,6 +154,7 @@ export function deriveTheme(accentRgb: string, bgRgb: string): Theme {
     accentSoft: toHex(mix(a, bg, 0.16)),
     accentMid: toHex(mix(a, bg, 0.22)),
     accentLine: toHex(mix(a, bg, 0.55)),
+    accentDisabled: toHex(mix(a, bg, 0.4)),
     onAccent: toHex(bg),
     danger: toHex(a),
     backdrop: toRgba(darken(bg, 0.6), 0.62),

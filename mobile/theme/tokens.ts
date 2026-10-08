@@ -151,6 +151,10 @@ export const semantic = {
   get accentLine() {
     return _theme.accentLine;
   },
+  // A disabled primary button's fill (40% accent over the background).
+  get accentDisabled() {
+    return _theme.accentDisabled;
+  },
   // Text and icons drawn on an accent fill.
   get onAccent() {
     return _theme.onAccent;
@@ -341,6 +345,12 @@ export const layout = {
   statusBar: 38,
   // Max width for a single-column screen on regular (iPad) width.
   readableMaxWidth: 560,
+  // Max width of every <Screen>'s content column on regular (iPad) width,
+  // unless the screen opts out with `wide` (chat, two-pane).
+  screenMaxWidth: 640,
+  // Max width of a bottom sheet card on regular width (centred; the backdrop
+  // still covers the whole screen).
+  sheetMaxWidth: 520,
   // Two-pane left (list) column width.
   listPaneWidth: 340,
 };

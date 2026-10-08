@@ -173,3 +173,17 @@ export const Icon = {
 };
 
 export type IconName = keyof typeof Icon;
+
+// Every Icon.* component, so a control can tell an icon element it may
+// recolour (IconButton / Button tint the glyph) from a composed node.
+const ICON_COMPONENTS: ReadonlySet<unknown> = new Set<unknown>(Object.values(Icon));
+
+/** True when `node` is an `<Icon.* />` element. */
+export function isIconElement(node: unknown): boolean {
+  return (
+    typeof node === "object" &&
+    node !== null &&
+    "type" in node &&
+    ICON_COMPONENTS.has((node as { type: unknown }).type)
+  );
+}

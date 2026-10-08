@@ -12,17 +12,18 @@ import {
   TextStyle,
   TextInputProps,
   AccessibilityRole,
+  useWindowDimensions,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { semantic, type as ty, fonts, r, space, layout, currentTheme } from "../theme/tokens";
-import { buttonColors, controlDisabled, type ControlSurface } from "../theme/button";
+import { buttonColors, checkboxColors, controlDisabled, type ControlSurface } from "../theme/button";
 import { useTheme } from "./theme";
 import { useLayoutClass } from "../hooks/useLayoutClass";
 import { useAndroidKeyboardInset } from "../hooks/useAndroidKeyboardInset";
 import { activeLocale } from "../i18n";
-import { Icon } from "./icons";
+import { Icon, isIconElement } from "./icons";
 
 // Primitives for the redesigned app (design: Main/Chat/Messages/Actions/You
 // .dc.html). Rules every primitive follows: 44pt minimum touch targets; one
@@ -101,23 +102,72 @@ export function useBottomInset(): number {
 }
 
 /* ── Screen ───────────────────────────────────────────────────────── */
+// How far a full-width hairline must reach past each side of the content
+// column to span the whole screen. 0 on compact width, on `wide` screens,
+// and outside a <Screen>.
+const ScreenBleedContext = React.createContext(0);
+
+/**
+ * The bleed (pt) on each side of the current <Screen>'s centred column. A
+ * hairline that should run edge to edge (a Header's bottom rule, a
+ * BottomAction's top rule) extends by this much on both sides; see
+ * <BleedHairline>.
+ */
+export function useScreenBleed(): number {
+  return React.useContext(ScreenBleedContext);
+}
+
+/**
+ * A 1px hairline across the whole screen, even when it is drawn inside a
+ * <Screen>'s centred column (review6 #16): absolutely positioned on the
+ * `edge` of its parent and extended by the column's bleed on both sides.
+ * The parent must not clip (`overflow: "hidden"`).
+ */
+export function BleedHairline({ edge }: { edge: "top" | "bottom" }) {
+  const bleed = useScreenBleed();
+  return (
+    <View
+      accessible={false}
+      pointerEvents="none"
+      style={{
+        position: "absolute",
+        start: -bleed,
+        end: -bleed,
+        height: 1,
+        ...(edge === "top" ? { top: 0 } : { bottom: 0 }),
+        backgroundColor: semantic.hairSoft,
+      }}
+    />
+  );
+}
+
 // Root of every route: background, safe area, keyboard avoidance. Put a
 // <Header> (or a tab's large title) as the first child — titles live at the
 // TOP of the screen.
+//
+// On `regular` width (iPad) the content sits in a centred column at most
+// `layout.screenMaxWidth` wide (review6 #3), so fields and buttons never
+// stretch across a 1300pt window; hairlines drawn by Header / BottomAction /
+// BleedHairline still run the full width. Screens that are genuinely wide —
+// a chat, a two-pane master-detail — pass `wide` to opt out. On `compact`
+// (phones, narrow panes) nothing changes.
 export function Screen({
   children,
   testID,
   centered,
+  wide,
   aboveTabBar,
 }: {
   children: React.ReactNode;
   // Each route sets `screen-<route>` here so e2e flows have one stable root
   // anchor per screen. Inert in production.
   testID?: string;
-  // Single-column screens (auth, self, forms) set this. On `regular` (iPad)
-  // width it constrains + centers the content to a readable column; on
-  // `compact` (phones, narrow panes) it is a no-op.
+  // Single-column forms (auth, small settings forms): the narrower
+  // `layout.readableMaxWidth` column instead of `screenMaxWidth`.
   centered?: boolean;
+  // Opt out of the centred column: content spans the full width (chat,
+  // two-pane screens, anything that lays out its own columns).
+  wide?: boolean;
   // Tab screens set this. The tab bar already pads itself by the bottom safe
   // area, so the screen must not pad by it again.
   aboveTabBar?: boolean;
@@ -126,7 +176,14 @@ export function Screen({
   // getters resolve to the new colours) when a base colour changes.
   useTheme();
   const cls = useLayoutClass();
-  const centerBody = centered && cls === "regular";
+  const { width: windowWidth } = useWindowDimensions();
+  // The screen's own width (a detail pane is narrower than the window).
+  // Until it is measured, assume the window.
+  const [measured, setMeasured] = React.useState<number | null>(null);
+  const width = measured ?? windowWidth;
+  const maxWidth = centered ? layout.readableMaxWidth : layout.screenMaxWidth;
+  const column = !wide && cls === "regular";
+  const bleed = column ? Math.max(0, (width - maxWidth) / 2) : 0;
   const androidKeyboard = useAndroidKeyboardInset();
   const bottomInset = useBottomInset();
   // The top edge comes from SafeAreaView; the bottom is padded by hand so it
@@ -134,6 +191,7 @@ export function Screen({
   return (
     <SafeAreaView
       testID={testID}
+      onLayout={(e) => setMeasured(e.nativeEvent.layout.width)}
       style={{
         flex: 1,
         backgroundColor: semantic.bg,
@@ -149,30 +207,38 @@ export function Screen({
         style={{ flex: 1, paddingBottom: androidKeyboard }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        {centerBody ? (
-          <View
-            style={{
-              flex: 1,
-              width: "100%",
-              maxWidth: layout.readableMaxWidth,
-              alignSelf: "center",
-            }}
-          >
-            {children}
-          </View>
-        ) : (
-          children
-        )}
+        <ScreenBleedContext.Provider value={bleed}>
+          {column ? (
+            <View
+              style={{
+                flex: 1,
+                width: "100%",
+                maxWidth,
+                alignSelf: "center",
+              }}
+            >
+              {children}
+            </View>
+          ) : (
+            children
+          )}
+        </ScreenBleedContext.Provider>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 /* ── Disabled glyph ───────────────────────────────────────────────── */
+// True for a caller-supplied `<Icon.* />` element, the only node a control
+// recolours. A composed node (a View holding a glyph) is left alone.
+function isTintableGlyph(node: React.ReactNode): node is React.ReactElement<{ color?: string }> {
+  return React.isValidElement<{ color?: string }>(node) && isIconElement(node);
+}
+
 // A caller-supplied icon element (Icon.* takes `color`) recoloured to the
 // disabled tier. Anything else passes through untouched.
 function disabledGlyph(node: React.ReactNode, disabled: boolean | undefined): React.ReactNode {
-  if (!disabled || !React.isValidElement<{ color?: string }>(node)) {
+  if (!disabled || !isTintableGlyph(node)) {
     return node;
   }
   return React.cloneElement(node, { color: controlDisabled(currentTheme()).fg });
@@ -181,7 +247,7 @@ function disabledGlyph(node: React.ReactNode, disabled: boolean | undefined): Re
 // A caller-supplied icon element recoloured to `color` (a Button's label
 // colour), so a glyph always matches the text beside it.
 function tintGlyph(node: React.ReactNode, color: string): React.ReactNode {
-  if (!React.isValidElement<{ color?: string }>(node)) {
+  if (!isTintableGlyph(node)) {
     return node;
   }
   return React.cloneElement(node, { color });
@@ -191,6 +257,14 @@ function tintGlyph(node: React.ReactNode, color: string): React.ReactNode {
 // A 44×44 icon-only control. `accessibilityLabel` is required — the icon is
 // silent. `filled` gives it the round raised background (Direct's "New
 // message", Groups' "Invite people").
+//
+// Glyph colour (review6 #15): an icon button is a secondary control, so its
+// glyph is the ACCENT by default — whatever colour the caller gave the
+// Icon.* element is replaced. `tone="neutral"` paints it `text` instead
+// (the Header back chevron, per the mockups); `tone="inherit"` keeps the
+// caller's colour (a composed or deliberately coloured glyph). A composed
+// node (e.g. a View holding a glyph) is never recoloured. Disabled is
+// always the shared `dim` glyph.
 export function IconButton({
   icon,
   onPress,
@@ -198,6 +272,7 @@ export function IconButton({
   testID,
   filled,
   disabled,
+  tone = "accent",
   style,
 }: {
   icon: React.ReactNode;
@@ -206,8 +281,14 @@ export function IconButton({
   testID?: string;
   filled?: boolean;
   disabled?: boolean;
+  tone?: "accent" | "neutral" | "inherit";
   style?: StyleProp<ViewStyle>;
 }) {
+  const glyph = disabled
+    ? disabledGlyph(icon, true)
+    : tone === "inherit"
+      ? icon
+      : tintGlyph(icon, tone === "neutral" ? semantic.text : semantic.accent);
   return (
     <Pressable
       onPress={disabled ? undefined : onPress}
@@ -239,7 +320,7 @@ export function IconButton({
         style,
       ]}
     >
-      {disabledGlyph(icon, disabled)}
+      {glyph}
     </Pressable>
   );
 }
@@ -341,15 +422,17 @@ export function Header({
         paddingEnd: large ? space.lg : space.sm,
         paddingTop: large ? 4 : 0,
         paddingBottom: large ? space.lg : space.sm,
-        borderBottomWidth: !large && bordered ? 1 : 0,
-        borderBottomColor: semantic.hairSoft,
       }}
     >
+      {/* The rule under the bar runs the full screen width even when the
+          bar sits in a <Screen>'s centred column (review6 #16). */}
+      {!large && bordered ? <BleedHairline edge="bottom" /> : null}
       {showBack ? (
         <IconButton
           testID={backTestID}
           accessibilityLabel={backLabel}
           onPress={onBack ?? (() => router.back())}
+          tone="neutral"
           icon={<Icon.chevronLeft size={24} color={semantic.text} />}
         />
       ) : !large ? (
@@ -444,7 +527,7 @@ export function Divider({ inset = 0, style }: { inset?: number; style?: StylePro
 }
 
 /* ── Chip / Pill ──────────────────────────────────────────────────── */
-// Rounded pill, 32pt visual inside a 44pt hit area (the group strip in
+// Rounded pill, 32pt visual inside a ≥44×44 hit area (the group strip in
 // Main.dc.html). Never a border — shape comes from the fill, as in
 // GroupPills. Variants: `default` raised fill + accent label; `outline` the
 // same on a `raised` row or card (a `high` fill, so it still reads as a
@@ -512,7 +595,12 @@ export function Chip({
       accessibilityState={{ disabled: !!disabled, selected: v === "on" }}
       style={[
         {
+          // The 44×44 hit area (review6 #7): the Pressable is at least 44pt
+          // in BOTH dimensions around the 32pt visual pill, so a short label
+          // ("1 use") is still a full target. Rows of chips need no extra
+          // gap: each one's hit area already includes the air around it.
           minHeight: onPress ? layout.touchMin : undefined,
+          minWidth: onPress ? layout.touchMin : undefined,
           justifyContent: "center",
         },
         style,
@@ -560,7 +648,9 @@ export const Pill = Chip;
 // (alias `default`): the inverse, a dark raised fill + accent label.
 // `subtle`: no fill, accent label. `danger` looks like secondary —
 // destructive is said by the label (and a confirm step), not a third hue.
-// Disabled (every variant): solid raised fill + dim label, ≥4.5:1. Pass
+// Disabled: solid raised fill + dim label, ≥4.5:1 — except PRIMARY, which
+// keeps its identity as a dimmed accent fill (`accentDisabled`) with a light
+// `text` label (review6 #10), so it never reads as a secondary button. Pass
 // `surface="raised"` when the button sits on a raised card, so its fill
 // steps up to `high` and still reads as a shape.
 export function Button({
@@ -1145,6 +1235,113 @@ export function Toggle({
   );
 }
 
+/* ── Checkbox ─────────────────────────────────────────────────────── */
+// A 24pt borderless box (review6 #9). Unchecked: a light `muted` square
+// that reads as a shape on a raised or high card (≥3:1 against both);
+// checked: an accent fill with a dark onAccent check. The check glyph, not
+// the hue, carries the state. With `onPress` it is its own 44×44 control
+// (checkbox role, checked state); without, it is a silent visual for a row
+// that is the control — use <CheckRow> for the common labelled row.
+export function Checkbox({
+  checked,
+  onPress,
+  testID,
+  accessibilityLabel,
+  disabled,
+}: {
+  checked: boolean;
+  onPress?: () => void;
+  testID?: string;
+  accessibilityLabel?: string;
+  disabled?: boolean;
+}) {
+  const c = checkboxColors(currentTheme(), checked);
+  const box = (
+    <View
+      accessible={false}
+      style={{
+        width: 24,
+        height: 24,
+        borderRadius: 6,
+        backgroundColor: c.fill,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      {checked ? <Icon.check size={16} color={c.glyph} /> : null}
+    </View>
+  );
+  if (!onPress) {
+    return box;
+  }
+  return (
+    <Pressable
+      onPress={disabled ? undefined : onPress}
+      disabled={disabled}
+      testID={testID}
+      accessibilityRole="checkbox"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ checked, disabled: !!disabled }}
+      style={{
+        minWidth: layout.touchMin,
+        minHeight: layout.touchMin,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      {box}
+    </Pressable>
+  );
+}
+
+/* ── CheckRow ─────────────────────────────────────────────────────── */
+// A full-width checkbox row: one control, one spoken label, its state in the
+// box (<Checkbox>) — e.g. the emergency kit's "I've saved my recovery key".
+// A raised, borderless fill (high while pressed); the label wraps.
+export function CheckRow({
+  checked,
+  onPress,
+  label,
+  accessibilityLabel,
+  testID,
+  disabled,
+}: {
+  checked: boolean;
+  onPress: () => void;
+  label: string;
+  // Defaults to `label`.
+  accessibilityLabel?: string;
+  // `toggle-<name>` for e2e flows.
+  testID?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <Pressable
+      onPress={disabled ? undefined : onPress}
+      disabled={disabled}
+      testID={testID}
+      accessibilityRole="checkbox"
+      accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityState={{ checked, disabled: !!disabled }}
+      style={({ pressed }) => ({
+        flexDirection: "row",
+        alignItems: "center",
+        gap: space.xl,
+        minHeight: 56,
+        paddingHorizontal: space.xxl,
+        paddingVertical: space.lg,
+        borderRadius: r.md,
+        backgroundColor: pressed && !disabled ? semantic.high : semantic.raised,
+      })}
+    >
+      <Checkbox checked={checked} />
+      <Text style={[ty.body, { flex: 1 }, disabled ? { color: semantic.dim } : null]}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 /* ── Bottom action zone ───────────────────────────────────────────── */
 // Pinned footer for a screen's primary action(s), above the keyboard.
 export function BottomAction({ children }: { children: React.ReactNode }) {
@@ -1154,11 +1351,11 @@ export function BottomAction({ children }: { children: React.ReactNode }) {
         gap: space.md,
         paddingVertical: space.xl,
         paddingHorizontal: space.xxl,
-        borderTopWidth: 1,
-        borderTopColor: semantic.hairSoft,
         backgroundColor: semantic.bg,
       }}
     >
+      {/* Full-width top rule, even inside a centred column (review6 #16). */}
+      <BleedHairline edge="top" />
       {children}
     </View>
   );

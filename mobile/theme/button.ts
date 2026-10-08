@@ -12,9 +12,13 @@
 // button: on Android a translucent parent fades each child separately (no
 // offscreen compositing), so the label blended into the faded fill and fell
 // far below 4.5:1 (#3/#4). Disabled is told apart from enabled by more than
-// hue: the label drops to `dim` (no accent anywhere), every variant gets the
-// same plain surface fill, and the control is announced and skipped as
-// disabled.
+// hue: the label leaves the accent / onAccent tiers, and the control is
+// announced and skipped as disabled. Secondary / default / danger / subtle
+// share the plain surface fill + `dim` label. Disabled PRIMARY keeps its own
+// identity (review6 #10) so it never reads as a secondary button: a dimmed
+// accent fill (`accentDisabled`: 40% accent over the background)
+// with a light `text` label. A dark label on that fill cannot reach 4.5:1 for
+// every preset (it tops out near 3:1), while `text` stays above 5.9:1.
 
 import type { Theme } from "./derive";
 
@@ -54,6 +58,30 @@ export function controlDisabled(
   return { fill: controlFill(theme, surface), fg: theme.dim };
 }
 
+/**
+ * The fill + label of a disabled PRIMARY button: the accent dimmed toward
+ * the background, with a light `text` label. Same on every surface.
+ */
+export function disabledPrimary(theme: Theme): { fill: string; fg: string } {
+  return { fill: theme.accentDisabled, fg: theme.text };
+}
+
+/**
+ * A checkbox box (review6 #9). No border in any state. Unchecked: a light
+ * `muted` square that reads as a shape on a raised or high card (≥3:1 vs
+ * both). Checked: an accent fill with a dark onAccent check glyph — the
+ * glyph, not the hue, carries the state.
+ */
+export function checkboxColors(
+  theme: Theme,
+  checked: boolean,
+): { fill: string; glyph: string } {
+  if (checked) {
+    return { fill: theme.accent, glyph: theme.onAccent };
+  }
+  return { fill: theme.muted, glyph: theme.onAccent };
+}
+
 /** The colours a Button paints with, from the current theme. */
 export function buttonColors(
   theme: Theme,
@@ -61,6 +89,10 @@ export function buttonColors(
   disabled: boolean,
   surface: ControlSurface = "base",
 ): ButtonColors {
+  if (disabled && variant === "primary") {
+    const d = disabledPrimary(theme);
+    return { fill: d.fill, pressedFill: d.fill, label: d.fg };
+  }
   if (disabled) {
     const d = controlDisabled(theme, surface);
     return { fill: d.fill, pressedFill: d.fill, label: d.fg };

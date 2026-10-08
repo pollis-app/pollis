@@ -11,11 +11,12 @@ import {
   Platform,
 } from "react-native";
 import { useTranslation } from "react-i18next";
-import { semantic, type as ty, r, space } from "../../theme/tokens";
+import { semantic, type as ty, r, space, layout } from "../../theme/tokens";
 import { useTheme } from "../theme";
 import { Icon } from "../icons";
 import { useBottomInset } from "../ui";
 import { useAndroidKeyboardInset } from "../../hooks/useAndroidKeyboardInset";
+import { useIsRegular } from "../../hooks/useLayoutClass";
 
 // Entry timing (#1193): in line with the ~200 ms stack transitions — fast
 // enough to read as a response to the tap, not a presentation.
@@ -50,7 +51,9 @@ export function afterSheetClose(fn: () => void): void {
  * backdrop covers the WHOLE screen — status bar and home-indicator area
  * included — and screen-reader focus is confined to the sheet. The card is
  * anchored to the bottom edge, edge to edge, with a 20pt top radius and the
- * bottom safe-area inset as extra padding. No drag handle: the header row
+ * bottom safe-area inset as extra padding. On regular width (iPad) the card
+ * is at most `layout.sheetMaxWidth` wide and centred (review6 #4); the
+ * backdrop still covers the whole screen. No drag handle: the header row
  * carries the title and a 44×44 Close button; a backdrop tap or Android back
  * also closes.
  *
@@ -83,6 +86,7 @@ export function SheetOverlay({
   // measure the same values but render nothing until its first native
   // measurement, delaying the sheet.) Android gets the nav-bar floor.
   const bottomInset = useBottomInset();
+  const regular = useIsRegular();
   const androidKeyboard = useAndroidKeyboardInset();
   const progress = useRef(new Animated.Value(0)).current;
   // The card's own height, so it starts exactly below the screen edge
@@ -187,6 +191,9 @@ export function SheetOverlay({
               // Opaque: the sheet floats over the header and composer, and a
               // translucent card let them show through its buttons (#1193).
               backgroundColor: semantic.sheetBg,
+              width: "100%",
+              maxWidth: regular ? layout.sheetMaxWidth : undefined,
+              alignSelf: "center",
               borderTopStartRadius: r.sheet,
               borderTopEndRadius: r.sheet,
               borderTopWidth: 1,
