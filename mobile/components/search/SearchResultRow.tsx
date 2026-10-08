@@ -14,10 +14,13 @@ import { HighlightedSnippet } from "./HighlightedSnippet";
  */
 export function SearchResultRow({
   result,
+  isSelf = false,
   conversationLabel,
   onPress,
 }: {
   result: SearchMessageResult;
+  // The reader's own message: the amber "self" avatar, as in the chat.
+  isSelf?: boolean;
   conversationLabel: string | null;
   onPress: () => void;
 }) {
@@ -59,7 +62,8 @@ export function SearchResultRow({
         backgroundColor: pressed ? semantic.high : "transparent",
       })}
     >
-      <Avatar label={sender} size="sm" />
+      {/* The chat timeline's avatar: 40pt, amber for the reader's own. */}
+      <Avatar label={sender} size="md" variant={isSelf ? "self" : "default"} />
       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
         <View
           style={{

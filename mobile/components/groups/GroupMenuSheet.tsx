@@ -20,7 +20,8 @@ export function GroupMenuSheet({
 }: {
   groupId: string;
   groupName: string;
-  memberCount: number;
+  // Undefined while the roster is loading: the row shows no count.
+  memberCount?: number;
   pendingRequests: number;
   onClose: () => void;
 }) {
@@ -60,7 +61,7 @@ export function GroupMenuSheet({
           testID="btn-menu-members"
           glyph={<Icon.users size={22} color={semantic.dim} />}
           name={t("group.panel.members")}
-          value={String(memberCount)}
+          value={memberCount !== undefined ? String(memberCount) : undefined}
           onPress={() => go("/group/members")}
         />
         <ListRow

@@ -211,15 +211,6 @@ export default function Search() {
           placeholder={t("search.placeholder")}
           icon={<Icon.search size={18} color={semantic.muted} />}
         />
-        {trimmed.length >= 2 ? (
-          <Txt
-            variant="meta"
-            accessibilityLiveRegion="polite"
-            style={{ paddingHorizontal: 4 }}
-          >
-            {t("search.resultCount", { count: totalResults })}
-          </Txt>
-        ) : null}
       </View>
       <Body
         contentContainerStyle={{ paddingHorizontal: space.xxl, gap: space.xs }}
@@ -401,7 +392,14 @@ export default function Search() {
                 paddingHorizontal: 4,
               }}
             >
-              <Txt variant="meta" testID="search-about-results">
+              {/* The one result count (desktop's "About N results"); a second
+                  total under the field only repeated it. Announced as it
+                  changes while typing. */}
+              <Txt
+                variant="meta"
+                testID="search-about-results"
+                accessibilityLiveRegion="polite"
+              >
                 {ts("view.aboutResults", { count: messageTotal })}
               </Txt>
               <View
@@ -441,6 +439,7 @@ export default function Search() {
                   <SearchResultRow
                     key={m.message_id}
                     result={m}
+                    isSelf={m.sender_id === appStore.currentUser?.id}
                     conversationLabel={label}
                     onPress={() => {
                       // The row carries its kind now; the cached lists are the

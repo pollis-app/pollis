@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
 import { observer } from "mobx-react-lite";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Screen, Header } from "../../components/ui";
 import { GroupPanel } from "../../components/groups/GroupPanel";
 import { appStore } from "../../stores/appStore";
@@ -12,6 +13,7 @@ function GroupDetail() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const groupId = id ?? null;
+  const insets = useSafeAreaInsets();
 
   // Being on this list means no conversation is open — clear the channel
   // selection so realtime `new_message` events for the channel the user just
@@ -22,8 +24,10 @@ function GroupDetail() {
     }, []),
   );
 
+  // No bottom safe-area edge: the panel runs to the screen's bottom edge
+  // (no black strip under it) and pads its own list by the inset instead.
   return (
-    <Screen testID="screen-group">
+    <Screen testID="screen-group" aboveTabBar>
       {/* Back-only bar: the group panel below carries the title. With
           nothing to pop (cold deep link / invite) back goes to the Groups tab. */}
       <Header
@@ -39,6 +43,7 @@ function GroupDetail() {
       {groupId ? (
         <GroupPanel
           groupId={groupId}
+          bottomInset={insets.bottom}
           onOpenChannel={(c) => {
             appStore.setSelectedGroupId(groupId);
             appStore.setSelectedChannelId(c.id);

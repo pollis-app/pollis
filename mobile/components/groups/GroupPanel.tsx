@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
@@ -18,6 +18,11 @@ import { ChannelRow } from "./ChannelRow";
 import { GroupMenuSheet } from "./GroupMenuSheet";
 import { CreateChannelSheet } from "./CreateChannelSheet";
 
+// Re-reads of an empty roster (a just-created group's read can lag the
+// create): a few, spaced out, then give up and show no count.
+const ROSTER_RETRIES = 3;
+const ROSTER_RETRY_MS = 1500;
+
 // One group's channel sheet (Main.dc.html, the panel under the group strip):
 // group header (name + chevron → group menu, member count) with Invite, a
 // "Search <group>" button, then "Text channels" (+ create, for admins) and
@@ -30,6 +35,7 @@ function GroupPanelImpl({
   onOpenChannel,
   top,
   testID,
+  bottomInset = 0,
 }: {
   groupId: string;
   // Highlighted row (iPad two-pane, where the chat stays visible).
@@ -39,6 +45,9 @@ function GroupPanelImpl({
   // and pending invites).
   top?: React.ReactNode;
   testID?: string;
+  // Extra bottom padding for the list when the panel runs to the screen's
+  // bottom edge (the /group/[id] route, which has no tab bar to clear).
+  bottomInset?: number;
 }) {
   const { t } = useTranslation("mobile");
   const router = useRouter();
@@ -51,7 +60,38 @@ function GroupPanelImpl({
   const group = groups.find((g) => g.id === groupId);
   const channelsQuery = useGroupChannels(groupId);
   const channels = channelsQuery.data ?? group?.channels ?? [];
-  const { data: members = [] } = useGroupMembers(groupId);
+  const membersQuery = useGroupMembers(groupId);
+  // A member is always in their own group's roster, so an empty or missing
+  // roster means it has not loaded yet (or the read lagged a just-created
+  // group): show no count rather than a wrong "0 members".
+  const members = membersQuery.data ?? [];
+  const membersKnown = members.length > 0;
+  const refetchMembers = membersQuery.refetch;
+  const [rosterRetries, setRosterRetries] = useState(0);
+  // The Groups tab reuses one panel across groups: each gets its own retries.
+  useEffect(() => {
+    setRosterRetries(0);
+  }, [groupId]);
+  useEffect(() => {
+    if (membersKnown || membersQuery.isFetching || rosterRetries >= ROSTER_RETRIES) {
+      return;
+    }
+    if (!membersQuery.isSuccess && !membersQuery.isError) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      setRosterRetries((n) => n + 1);
+      void refetchMembers();
+    }, ROSTER_RETRY_MS);
+    return () => clearTimeout(timer);
+  }, [
+    membersKnown,
+    membersQuery.isFetching,
+    membersQuery.isSuccess,
+    membersQuery.isError,
+    rosterRetries,
+    refetchMembers,
+  ]);
   const { data: joinRequests = [] } = useGroupJoinRequests(groupId);
   const unreadCounts = appStore.unreadCounts;
   const me = appStore.currentUser?.id;
@@ -59,7 +99,9 @@ function GroupPanelImpl({
   const myRole = members.find((m) => m.user_id === me)?.role ?? group?.current_user_role;
   const isAdmin = myRole === "admin" || myRole === "owner";
   const groupName = group?.name ?? t("group.common.fallbackName");
-  const memberCountLabel = t("group.detail.memberCount", { count: members.length });
+  const memberCountLabel = membersKnown
+    ? t("group.detail.memberCount", { count: members.length })
+    : null;
   const channelNames = useMemo(() => channels.map((c) => c.name.toLowerCase()), [channels]);
 
   return (
@@ -89,7 +131,11 @@ function GroupPanelImpl({
           testID="btn-group-menu"
           onPress={() => setMenuOpen(true)}
           accessibilityRole="button"
-          accessibilityLabel={`${t("group.panel.menuLabel", { name: groupName })}, ${memberCountLabel}`}
+          accessibilityLabel={
+            memberCountLabel
+              ? `${t("group.panel.menuLabel", { name: groupName })}, ${memberCountLabel}`
+              : t("group.panel.menuLabel", { name: groupName })
+          }
           style={{ flex: 1, minWidth: 0, minHeight: layout.touchMin, justifyContent: "center", gap: 2 }}
         >
           <View style={{ flexDirection: "row", alignItems: "center", gap: space.xs }}>
@@ -102,7 +148,9 @@ function GroupPanelImpl({
             </Text>
             <Icon.chevronDown size={18} color={semantic.dim} />
           </View>
-          <Text style={[ty.meta, { fontSize: 13 }]}>{memberCountLabel}</Text>
+          {memberCountLabel ? (
+            <Text style={[ty.meta, { fontSize: 13 }]}>{memberCountLabel}</Text>
+          ) : null}
         </Pressable>
         <IconButton
           testID="row-group-invite"
@@ -143,7 +191,7 @@ function GroupPanelImpl({
         contentContainerStyle={{
           paddingTop: space.lg,
           paddingHorizontal: space.lg,
-          paddingBottom: space.xxxl,
+          paddingBottom: space.xxxl + bottomInset,
           gap: 2,
         }}
       >
@@ -214,8 +262,12 @@ function GroupPanelImpl({
           testID="row-group-members"
           icon={<Icon.users size={16} color={semantic.dim} />}
           name={t("group.panel.members")}
-          value={String(members.length)}
-          accessibilityLabel={`${t("group.panel.members")}, ${memberCountLabel}`}
+          value={membersKnown ? String(members.length) : undefined}
+          accessibilityLabel={
+            memberCountLabel
+              ? `${t("group.panel.members")}, ${memberCountLabel}`
+              : t("group.panel.members")
+          }
           onPress={() => router.push({ pathname: "/group/members", params: { groupId } })}
         />
         <ChannelRow
@@ -242,7 +294,7 @@ function GroupPanelImpl({
         <GroupMenuSheet
           groupId={groupId}
           groupName={groupName}
-          memberCount={members.length}
+          memberCount={membersKnown ? members.length : undefined}
           pendingRequests={joinRequests.length}
           onClose={() => setMenuOpen(false)}
         />

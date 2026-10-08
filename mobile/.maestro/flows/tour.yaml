@@ -175,13 +175,16 @@ tags:
     visible:
       id: "row-message-.*"
     timeout: 10000
-- longPressOn:
-    id: "row-message-.*"
+# A just-sent message stays pending while MLS sets the new group up (15-60 s,
+# see messaging.yaml), and a pending row has no long-press action, so a long
+# press made too early does nothing. Let it settle, then use the retrying
+# subflow, which waits for the sheet's Edit row.
 - extendedWaitUntil:
     visible:
-      id: "btn-action-cancel"
-    timeout: 20000
+      id: "__never_matches__"
+    timeout: 30000
     optional: true
+- runFlow: ../subflows/long-press-message.yaml
 - waitForAnimationToEnd:
     timeout: 3000
 - takeScreenshot: tour-17-message-actions

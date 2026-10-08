@@ -17,7 +17,7 @@ import {
   Group,
 } from "../../components/ui";
 import { ExportArchive } from "../../components/ExportArchive";
-import { semantic, type as ty } from "../../theme/tokens";
+import { fonts, semantic, space, type as ty } from "../../theme/tokens";
 import {
   useDMChannel,
   useGroupMembers,
@@ -143,6 +143,15 @@ function ConversationInfo() {
           <Group style={{ marginHorizontal: 16 }}>
             {roster.map((m) => {
               const isMe = m.userId === currentUser?.id;
+              const memberName = isMe
+                ? t("conversationInfo.memberSelf", { handle: m.handle })
+                : `@${m.handle}`;
+              const roleLabel =
+                m.role === "owner"
+                  ? t("conversationInfo.roleOwner")
+                  : m.role === "admin"
+                    ? t("conversationInfo.roleAdmin")
+                    : undefined;
               return (
                 <ListRow
                   key={m.userId}
@@ -155,17 +164,24 @@ function ConversationInfo() {
                       variant={isMe ? "self" : "default"}
                     />
                   }
+                  // One line, truncated in the middle: a long handle gives
+                  // way so the "· you" suffix never wraps onto a line alone.
                   name={
-                    isMe
-                      ? t("conversationInfo.memberSelf", { handle: m.handle })
-                      : `@${m.handle}`
+                    <Text
+                      numberOfLines={1}
+                      ellipsizeMode="middle"
+                      style={{
+                        fontFamily: fonts.medium,
+                        fontSize: 16,
+                        color: semantic.text,
+                      }}
+                    >
+                      {memberName}
+                    </Text>
                   }
-                  sub={
-                    m.role === "owner"
-                      ? t("conversationInfo.roleOwner")
-                      : m.role === "admin"
-                        ? t("conversationInfo.roleAdmin")
-                        : undefined
+                  sub={roleLabel}
+                  accessibilityLabel={
+                    roleLabel ? `${memberName}, ${roleLabel}` : memberName
                   }
                   chevron={!isMe}
                   onPress={
@@ -213,7 +229,11 @@ function ConversationInfo() {
           </View>
         )}
 
-        <ExportArchive conversationId={conversationId} />
+        {/* The export block's heading has no top padding of its own; give it
+            the same gap every other section gets above its title. */}
+        <View style={{ paddingTop: space.xxxl }}>
+          <ExportArchive conversationId={conversationId} />
+        </View>
       </Body>
     </Screen>
   );
