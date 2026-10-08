@@ -9,7 +9,7 @@
       "ackLabel": "I've saved my recovery key",
       "ackText": "I've saved my recovery key in a safe place.",
       "copyFailed": "Copy failed",
-      "intro": "If you lose this phone, this key is how you sign in on a new one. We can't recover it for you, so write it down or save it in a password manager.",
+      "intro": "If you lose this device, this key is how you sign in on a new one. We can't recover it for you, so write it down or save it in a password manager.",
       "title": "Save your recovery key",
       "warning": "Anyone with this key can sign in as you."
     },
@@ -53,7 +53,7 @@
       "yourEmail": "your email"
     },
     "pin": {
-      "createIntro": "You'll use this PIN to unlock Pollis on this phone. It never leaves the phone.",
+      "createIntro": "You'll use this PIN to unlock Pollis on this device. It never leaves the device.",
       "createTitle": "New device PIN",
       "invalidPin": "Invalid PIN.",
       "noActiveUser": "No active user. Sign in again.",
@@ -100,7 +100,7 @@
   "direct": {
     "acceptRequest": "Accept request",
     "blockSender": "Block sender",
-    "empty": "No direct messages yet.",
+    "empty": "No direct messages yet",
     "loadFailed": "Couldn't load conversations.",
     "loading": "Loading conversations…",
     "wantsToMessage": "wants to message you",
@@ -161,6 +161,7 @@
     },
     "emoji": {
       "adminsOnly": "Only group admins can add or remove emoji.",
+      "loadFailed": "Couldn't load this group's emoji.",
       "empty": "No custom emoji yet.",
       "pickAndUpload": "Pick image & upload",
       "sizeKb_one": "{{count}} KB",
@@ -323,7 +324,7 @@
       "sendCode": "Send code"
     },
     "deleteAccount": {
-      "consequences": "This permanently deletes your Pollis account. You are removed from every group and conversation, your devices are unregistered, and your encrypted data on this phone is wiped. Other members keep their own copies of past messages, but nothing sent after deletion can ever be read with your keys.",
+      "consequences": "This permanently deletes your Pollis account. You are removed from every group and conversation, your devices are unregistered, and your encrypted data on this device is wiped. Other members keep their own copies of past messages, but nothing sent after deletion can ever be read with your keys.",
       "contextPath": "{{parent}} · {{child}}",
       "failed": "Couldn't delete the account. Nothing changed. Try again.",
       "irreversible": "This cannot be undone. There is no grace period and no recovery.",
@@ -395,7 +396,7 @@
       "approve": "Approve",
       "approveA11y": "Approve enrollment",
       "autoLockA11y": "Auto-lock {{label}}",
-      "autoLockDescription": "Lock Pollis when you've been away a while. Only affects this phone.",
+      "autoLockDescription": "Lock Pollis when you've been away a while. Only affects this device.",
       "current": "Current",
       "daysAgo_one": "{{count}}d ago",
       "daysAgo_other": "{{count}}d ago",

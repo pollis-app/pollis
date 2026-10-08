@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { View, Text } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { useTranslation } from "react-i18next";
 import { Screen, Header, Body, Chip, Group } from "../../components/ui";
 import { Hint, ErrorText } from "../../components/groups/FormBits";
@@ -22,7 +22,8 @@ import { activeLocale } from "../../i18n";
 // once, at creation, on the invite screen.
 export default function GroupInviteLinks() {
   const { t } = useTranslation("channels");
-  const { groupId } = useLocalSearchParams<{ groupId?: string }>();
+  const { groupId } = useRouteParams<{ groupId?: string }>();
+  const router = useNav();
   const id = groupId ?? null;
 
   const { data: groups = [] } = useUserGroupsWithChannels();
@@ -73,8 +74,8 @@ export default function GroupInviteLinks() {
   };
 
   return (
-    <Screen testID="screen-group-invite-links" centered>
-      <Header title={t("mobile:group.inviteLinks.title")} subtitle={group?.name} />
+    <Screen testID="screen-group-invite-links" aboveTabBar={router.inPane} centered>
+      <Header onBack={router.onBack} title={t("mobile:group.inviteLinks.title")} subtitle={group?.name} />
       <Body contentContainerStyle={{ padding: space.xxl, gap: space.lg }}>
         <Hint>{t("mobile:group.inviteLinks.blurb")}</Hint>
 

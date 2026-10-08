@@ -9,7 +9,7 @@
       "ackLabel": "He guardado mi clave secreta",
       "ackText": "He guardado mi clave secreta en un sitio seguro.",
       "copyFailed": "No se pudo copiar",
-      "intro": "Si pierdes este teléfono, esta clave es la forma de entrar en uno nuevo. No podemos recuperarla por ti, así que anótala o guárdala en un gestor de contraseñas.",
+      "intro": "Si pierdes este dispositivo, esta clave es la forma de entrar en uno nuevo. No podemos recuperarla por ti, así que anótala o guárdala en un gestor de contraseñas.",
       "title": "Guarda tu clave secreta",
       "warning": "Cualquiera con esta clave puede entrar como tú."
     },
@@ -53,7 +53,7 @@
       "yourEmail": "tu correo"
     },
     "pin": {
-      "createIntro": "Usarás este PIN para desbloquear Pollis en este teléfono. Nunca sale del teléfono.",
+      "createIntro": "Usarás este PIN para desbloquear Pollis en este dispositivo. Nunca sale del dispositivo.",
       "createTitle": "PIN del dispositivo",
       "invalidPin": "PIN no válido.",
       "noActiveUser": "No hay ningún usuario activo. Inicia sesión de nuevo.",
@@ -100,7 +100,7 @@
   "direct": {
     "acceptRequest": "Aceptar solicitud",
     "blockSender": "Bloquear remitente",
-    "empty": "Todavía no hay mensajes directos.",
+    "empty": "Todavía no hay mensajes directos",
     "loadFailed": "No se pudieron cargar las conversaciones.",
     "loading": "Cargando conversaciones…",
     "wantsToMessage": "quiere escribirte",
@@ -161,6 +161,7 @@
     },
     "emoji": {
       "adminsOnly": "Solo los admins del grupo pueden añadir o quitar emoji.",
+      "loadFailed": "No se pudieron cargar los emoji de este grupo.",
       "empty": "Todavía no hay emoji personalizados.",
       "pickAndUpload": "Elegir imagen y subir",
       "sizeKb_one": "{{count}} KB",
@@ -317,7 +318,7 @@
       "sendCode": "Enviar código"
     },
     "deleteAccount": {
-      "consequences": "Esto elimina tu cuenta de Pollis de forma permanente. Se te quita de todos los grupos y conversaciones, se anula el registro de tus dispositivos y se borran los datos cifrados de este teléfono. Los demás miembros conservan sus propias copias de los mensajes anteriores, pero nada de lo enviado después de la eliminación podrá leerse jamás con tus claves.",
+      "consequences": "Esto elimina tu cuenta de Pollis de forma permanente. Se te quita de todos los grupos y conversaciones, se anula el registro de tus dispositivos y se borran los datos cifrados de este dispositivo. Los demás miembros conservan sus propias copias de los mensajes anteriores, pero nada de lo enviado después de la eliminación podrá leerse jamás con tus claves.",
       "contextPath": "{{parent}} · {{child}}",
       "failed": "No se pudo eliminar la cuenta. No cambió nada. Inténtalo de nuevo.",
       "irreversible": "No se puede deshacer. No hay periodo de gracia ni recuperación.",
@@ -389,7 +390,7 @@
       "approve": "Aprobar",
       "approveA11y": "Aprobar el registro",
       "autoLockA11y": "Bloqueo automático {{label}}",
-      "autoLockDescription": "Bloquea Pollis cuando lleves un rato sin usarlo. Solo afecta a este teléfono.",
+      "autoLockDescription": "Bloquea Pollis cuando lleves un rato sin usarlo. Solo afecta a este dispositivo.",
       "current": "Actual",
       "daysAgo_one": "hace {{count}} d",
       "daysAgo_other": "hace {{count}} d",

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { View } from "react-native";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { useTranslation } from "react-i18next";
 import { Screen, Header, Body, ListRow, Group, Avatar, Chip } from "../../components/ui";
 import { Hint, ErrorText } from "../../components/groups/FormBits";
@@ -18,8 +18,8 @@ import { observer } from "mobx-react-lite";
 
 function Members() {
   const { t } = useTranslation("channels");
-  const router = useRouter();
-  const { groupId } = useLocalSearchParams<{ groupId?: string }>();
+  const router = useNav();
+  const { groupId } = useRouteParams<{ groupId?: string }>();
   const id = groupId ?? null;
   const currentUser = appStore.currentUser;
 
@@ -60,8 +60,8 @@ function Members() {
   };
 
   return (
-    <Screen testID="screen-group-members">
-      <Header
+    <Screen testID="screen-group-members" aboveTabBar={router.inPane}>
+      <Header onBack={router.onBack}
         title={t("mobile:group.panel.members")}
         subtitle={
           group

@@ -1,5 +1,6 @@
 import { View, Text } from "react-native";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useNav, useRouteParams } from "../../components/pane/paneContext";
+import { useOpenConversation } from "../../hooks/useOpenConversation";
 import { Trans, useTranslation } from "react-i18next";
 import {
   Screen,
@@ -39,8 +40,9 @@ interface RawProfile {
 
 function UserProfile() {
   const { t } = useTranslation("dms");
-  const router = useRouter();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useNav();
+  const { openConversation } = useOpenConversation();
+  const { id } = useRouteParams<{ id: string }>();
   const peerId = id ?? null;
   const currentUser = appStore.currentUser;
   const isSelf = currentUser?.id === peerId;
@@ -81,10 +83,9 @@ function UserProfile() {
       { memberIds: [peerId] },
       {
         onSuccess: (channel) => {
-          router.replace({
-            pathname: "/chat/[id]",
-            params: { id: channel.id, kind: "dm" },
-          });
+          // Phones: replace this profile with the DM. iPad: the DM opens
+          // in the Direct tab's two-pane.
+          openConversation({ id: channel.id, kind: "dm" }, { replace: true });
         },
       },
     );
@@ -115,8 +116,8 @@ function UserProfile() {
   const blockPending = block.isPending || unblock.isPending;
 
   return (
-    <Screen testID="screen-user">
-      <Header title={t("profile.fallbackTitle")} />
+    <Screen testID="screen-user" aboveTabBar={router.inPane}>
+      <Header onBack={router.onBack} title={t("profile.fallbackTitle")} />
       <Body contentContainerStyle={{ padding: space.xxl, gap: space.xl }}>
         <Card
           surface="panel"

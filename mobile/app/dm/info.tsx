@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { View } from "react-native";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { useTranslation } from "react-i18next";
 import {
   Screen,
@@ -21,9 +21,9 @@ import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 
 function DMInfo() {
-  const router = useRouter();
+  const router = useNav();
   const { t } = useTranslation("mobile");
-  const { id } = useLocalSearchParams<{ id?: string }>();
+  const { id } = useRouteParams<{ id?: string }>();
   const channelId = id ?? null;
   const currentUser = appStore.currentUser;
   const [confirmLeave, setConfirmLeave] = useState(false);
@@ -44,15 +44,15 @@ function DMInfo() {
       return;
     }
     leave.mutate(channelId, {
-      onSuccess: () => router.replace("/(tabs)/direct"),
+      onSuccess: () => router.exitToTab("direct"),
     });
   };
 
   const members = channel.data?.members ?? [];
 
   return (
-    <Screen testID="screen-dm-info">
-      <Header
+    <Screen testID="screen-dm-info" aboveTabBar={router.inPane}>
+      <Header onBack={router.onBack}
         title={t("conversationInfo.info")}
         backTo={t("conversationInfo.fallbackTitle")}
       />

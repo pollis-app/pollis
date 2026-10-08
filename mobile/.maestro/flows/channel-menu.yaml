@@ -31,10 +31,16 @@ tags:
 - inputText: "E2E Menu Group"
 - tapOn:
     id: "btn-submit-group"
+# Creating lands on the Groups tab with the new group selected (pill strip +
+# its channel panel, tab bar visible) — not a pushed group page. Wait for
+# THIS group's panel header (the account may already have other groups).
 - extendedWaitUntil:
     visible:
-      id: "screen-group"
+      id: "btn-group-menu"
+      text: "E2E Menu Group, .*"
     timeout: 15000
+- assertVisible:
+    id: "panel-group"
 - tapOn:
     text: "General"
 - assertVisible:

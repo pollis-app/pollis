@@ -3,6 +3,7 @@ import { ActivityIndicator, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { Screen, Body, Button } from "../../components/ui";
+import { useIsRegular } from "../../hooks/useLayoutClass";
 import { PinCells, PinKeypad } from "../../components/auth/PinPad";
 import { Heading } from "../../components/auth/Heading";
 import { AuthError } from "../../components/auth/AuthError";
@@ -158,47 +159,67 @@ function AuthPIN() {
     }
   };
 
+  const regular = useIsRegular();
   const busy =
     stage === "checking" ||
     setPinMutation.isPending ||
     unlockMutation.isPending;
 
+  const pinContent = (
+    <>
+      {stage === "checking" ? (
+        <ActivityIndicator
+          color={semantic.accent}
+          accessibilityLabel={t("settings:security.permissionChecking")}
+        />
+      ) : (
+        <Heading step={stepLabel} title={headline} subtitle={subtitle} />
+      )}
+
+      <View style={{ gap: 16 }}>
+        <PinCells length={pin.length} />
+        {error ? <AuthError center message={error} /> : null}
+      </View>
+
+      {/* Always offer a way out of this screen — without it, an error
+          like "no key material to wrap; sign in again" strands the user
+          on the keypad with no path back to sign-in. */}
+      <View style={{ alignItems: "center" }}>
+        <Button
+          testID="btn-pin-signout"
+          variant="subtle"
+          onPress={() => router.replace("/(auth)/email")}
+        >
+          {t("enroll.signInAgain")}
+        </Button>
+      </View>
+    </>
+  );
+  const keypad = (
+    <PinKeypad
+      onDigit={push}
+      onBackspace={() => setPin(pin.slice(0, -1))}
+      disabled={busy}
+    />
+  );
+
   return (
     <Screen testID="screen-auth-pin" centered>
-      <Body contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 32, gap: 24 }}>
-        {stage === "checking" ? (
-          <ActivityIndicator
-            color={semantic.accent}
-            accessibilityLabel={t("settings:security.permissionChecking")}
-          />
-        ) : (
-          <Heading step={stepLabel} title={headline} subtitle={subtitle} />
-        )}
-
-        <View style={{ gap: 16 }}>
-          <PinCells length={pin.length} />
-          {error ? <AuthError center message={error} /> : null}
+      {regular ? (
+        // iPad: heading, dots and keypad as one block centred vertically —
+        // pinned to the bottom, the keypad sat ~500pt below the dots.
+        <View style={{ flex: 1, justifyContent: "center", gap: 32 }}>
+          <View style={{ paddingHorizontal: 24, gap: 24 }}>{pinContent}</View>
+          {keypad}
         </View>
-
-        {/* Always offer a way out of this screen — without it, an error
-            like "no key material to wrap; sign in again" strands the user
-            on the keypad with no path back to sign-in. */}
-        <View style={{ alignItems: "center" }}>
-          <Button
-            testID="btn-pin-signout"
-            variant="subtle"
-            onPress={() => router.replace("/(auth)/email")}
-          >
-            {t("enroll.signInAgain")}
-          </Button>
-        </View>
-      </Body>
-
-      <PinKeypad
-        onDigit={push}
-        onBackspace={() => setPin(pin.slice(0, -1))}
-        disabled={busy}
-      />
+      ) : (
+        <>
+          <Body contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 32, gap: 24 }}>
+            {pinContent}
+          </Body>
+          {keypad}
+        </>
+      )}
     </Screen>
   );
 }

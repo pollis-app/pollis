@@ -1,5 +1,5 @@
 import { Text, View } from "react-native";
-import { useRouter } from "expo-router";
+import { useNav } from "../pane/paneContext";
 import { useTranslation } from "react-i18next";
 import { Badge, Chip, Group, ListRow } from "../ui";
 import { Icon } from "../icons";
@@ -24,7 +24,8 @@ export function PendingRows({
   invites: PendingInvite[];
 }) {
   const { t } = useTranslation("mobile");
-  const router = useRouter();
+  // iPad two-pane: group pages open in the detail pane (useNav).
+  const router = useNav();
   const acceptInvite = useAcceptGroupInvite();
   const declineInvite = useDeclineGroupInvite();
   const requestGroups = groups.filter((g) => pendingByGroup.has(g.id));

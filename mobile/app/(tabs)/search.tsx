@@ -27,6 +27,7 @@ import {
   useUserSearch,
 } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
+import { useOpenConversation } from "../../hooks/useOpenConversation";
 
 // Search filter syntax, shown as pills. The operators are typed literally,
 // so they are not translated; only the label above them is. `token` is what a
@@ -43,6 +44,8 @@ const SEARCH_FILTERS = [
 
 export default function Search() {
   const router = useRouter();
+  // Phones push the conversation/group; iPad opens it in its tab's two-pane.
+  const { openConversation, openGroup } = useOpenConversation();
   const { t } = useTranslation("mobile");
   const [q, setQ] = useState("");
   const trimmed = q.trim();
@@ -309,12 +312,7 @@ export default function Search() {
                   glyph={<Avatar label={g.name} size={30} shape="rounded" />}
                   name={g.name}
                   chevron
-                  onPress={() =>
-                    router.push({
-                      pathname: "/group/[id]",
-                      params: { id: g.id },
-                    })
-                  }
+                  onPress={() => openGroup(g.id)}
                 />
               ))}
             </Group>
@@ -339,9 +337,11 @@ export default function Search() {
                     appStore.setSelectedGroupId(c.groupId);
                     appStore.setSelectedChannelId(c.id);
                     appStore.markRead(c.id);
-                    router.push({
-                      pathname: "/chat/[id]",
-                      params: { id: c.id, kind: "channel", name: c.name },
+                    openConversation({
+                      id: c.id,
+                      kind: "channel",
+                      name: c.name,
+                      groupId: c.groupId,
                     });
                   }}
                 />
@@ -458,13 +458,11 @@ export default function Search() {
                       }
                       appStore.markRead(m.conversation_id);
                       const name = m.conversation_name ?? info?.name;
-                      router.push({
-                        pathname: "/chat/[id]",
-                        params: {
-                          id: m.conversation_id,
-                          kind,
-                          ...(name ? { name } : {}),
-                        },
+                      openConversation({
+                        id: m.conversation_id,
+                        kind,
+                        name: name ?? undefined,
+                        groupId: m.group_id ?? info?.groupId ?? undefined,
                       });
                     }}
                   />

@@ -1,5 +1,5 @@
 import { View } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { useTranslation } from "react-i18next";
 import { Screen, Header, Body, ListRow, Group, Avatar, Chip, SectionTitle } from "../../components/ui";
 import { Hint, ErrorText } from "../../components/groups/FormBits";
@@ -14,7 +14,8 @@ import { activeLocale } from "../../i18n";
 
 export default function JoinRequests() {
   const { t } = useTranslation("channels");
-  const { groupId } = useLocalSearchParams<{ groupId?: string }>();
+  const { groupId } = useRouteParams<{ groupId?: string }>();
+  const router = useNav();
   const id = groupId ?? null;
   const { data: groups = [] } = useUserGroupsWithChannels();
   const group = groups.find((g) => g.id === id);
@@ -23,8 +24,8 @@ export default function JoinRequests() {
   const reject = useRejectJoinRequest(id);
 
   return (
-    <Screen testID="screen-group-requests">
-      <Header title={t("mobile:group.panel.joinRequests")} subtitle={group?.name} />
+    <Screen testID="screen-group-requests" aboveTabBar={router.inPane}>
+      <Header onBack={router.onBack} title={t("mobile:group.panel.joinRequests")} subtitle={group?.name} />
       <Body contentContainerStyle={{ paddingHorizontal: space.xxl }}>
         <SectionTitle style={{ paddingHorizontal: 0 }}>
           {t("mobile:group.requests.pendingSection")}

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useRouter } from "expo-router";
+import { useNav } from "../pane/paneContext";
 import { useTranslation } from "react-i18next";
 import { SheetOverlay, afterSheetClose } from "../chat/SheetOverlay";
 import { Group, ListRow } from "../ui";
@@ -26,7 +26,8 @@ export function GroupMenuSheet({
   onClose: () => void;
 }) {
   const { t } = useTranslation("mobile");
-  const router = useRouter();
+  // iPad two-pane: group pages open in the detail pane (useNav).
+  const router = useNav();
   const leaveGroup = useLeaveGroup();
   const [armed, setArmed] = useState(false);
 
@@ -43,7 +44,7 @@ export function GroupMenuSheet({
     leaveGroup.mutate(groupId, {
       onSuccess: () => {
         onClose();
-        afterSheetClose(() => router.replace("/(tabs)/groups"));
+        afterSheetClose(() => router.exitToTab("groups"));
       },
     });
   };

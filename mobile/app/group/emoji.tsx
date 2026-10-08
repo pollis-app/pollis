@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { View } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { useTranslation } from "react-i18next";
 import * as ImagePicker from "expo-image-picker";
 import {
@@ -21,6 +21,7 @@ import {
   useUserGroupsWithChannels,
   useGroupMembers,
   useGroupEmoji,
+  useUsableEmoji,
   useUploadGroupEmoji,
   useRemoveGroupEmoji,
   SHORTCODE_RE,
@@ -39,14 +40,28 @@ function uriToPath(uri: string): string {
 
 function GroupEmoji() {
   const { t } = useTranslation("emoji");
-  const { groupId } = useLocalSearchParams<{ groupId?: string }>();
+  const { groupId } = useRouteParams<{ groupId?: string }>();
+  const router = useNav();
   const id = groupId ?? null;
   const currentUser = appStore.currentUser;
 
   const { data: groups = [] } = useUserGroupsWithChannels();
   const group = groups.find((g) => g.id === id);
   const { data: members = [] } = useGroupMembers(id);
-  const { data: emoji = [], isLoading } = useGroupEmoji(id);
+  // The group's own list is a separate DS read that can lag far behind on a
+  // busy bridge (a just-created group is still setting up MLS), which left
+  // this page on "Loading…". The usable set the composer already fetched
+  // holds every emoji of every group the user is in, so its slice for this
+  // group stands in until the group's own list arrives.
+  const groupEmoji = useGroupEmoji(id);
+  const usable = useUsableEmoji();
+  const fromUsable = useMemo(
+    () => (usable.data ? usable.data.filter((e) => e.group_id === id) : undefined),
+    [usable.data, id],
+  );
+  const emoji = groupEmoji.data ?? fromUsable ?? [];
+  const isLoading = groupEmoji.isLoading && fromUsable === undefined;
+  const loadFailed = groupEmoji.isError && fromUsable === undefined;
   const upload = useUploadGroupEmoji(id);
   const remove = useRemoveGroupEmoji(id);
 
@@ -62,6 +77,12 @@ function GroupEmoji() {
 
   const onPickAndUpload = async () => {
     setPickError(null);
+    // The button stays enabled (a disabled secondary reads as plain text);
+    // a missing or bad shortcode is explained instead.
+    if (!shortcode) {
+      setPickError(t("manage.shortcodeRequired"));
+      return;
+    }
     if (!shortcodeValid || shortcodeTaken) {
       return;
     }
@@ -94,14 +115,17 @@ function GroupEmoji() {
   const groupName = group?.name ?? t("mobile:group.common.fallbackName");
 
   return (
-    <Screen testID="screen-group-emoji">
-      <Header title={t("mobile:group.panel.customEmoji")} subtitle={group ? groupName : undefined} />
+    <Screen testID="screen-group-emoji" aboveTabBar={router.inPane}>
+      <Header onBack={router.onBack} title={t("mobile:group.panel.customEmoji")} subtitle={group ? groupName : undefined} />
       <Body contentContainerStyle={{ paddingHorizontal: space.xxl }}>
         <SectionTitle style={{ paddingHorizontal: 0 }}>
           {t("mobile:group.panel.customEmoji")}
         </SectionTitle>
         {isLoading ? <Hint>{t("common:states.loading")}</Hint> : null}
-        {!isLoading && emoji.length === 0 ? <Hint>{t("mobile:group.emoji.empty")}</Hint> : null}
+        {loadFailed ? <ErrorText>{t("mobile:group.emoji.loadFailed")}</ErrorText> : null}
+        {!isLoading && !loadFailed && emoji.length === 0 ? (
+          <Hint>{t("mobile:group.emoji.empty")}</Hint>
+        ) : null}
         {emoji.length > 0 ? (
           <Group>
             {emoji.map((e) => {
@@ -180,9 +204,10 @@ function GroupEmoji() {
               <Button
                 full
                 testID="btn-upload-emoji"
-                icon={<Icon.plus size={18} color={semantic.text} />}
+                variant="secondary"
+                icon={<Icon.plus size={18} color={semantic.accent} />}
                 onPress={() => void onPickAndUpload()}
-                disabled={!shortcodeValid || shortcodeTaken || upload.isPending}
+                disabled={upload.isPending}
               >
                 {upload.isPending
                   ? t("mobile:group.emoji.uploading")

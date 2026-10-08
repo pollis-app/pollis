@@ -215,6 +215,13 @@ Layout changes that flows depend on (see `SELECTORS.md` for the ids):
   "+" sheet (`btn-add-group`) at the end of the group pill strip. Flows tap
   `btn-add-group` with `optional: true` first. A pill (`row-group-<id>`)
   switches the in-place `panel-group`; it does not push `screen-group`.
+  Creating a group (`btn-submit-group`) also lands here, with the new group
+  selected: wait for `btn-group-menu` with text `"<name>, .*"` (its label is
+  "<name>, group menu…") and `panel-group` — there is no back step.
+- **iPad (regular width):** Groups/Direct are two-pane; a conversation opens
+  in the right pane (`screen-chat`, no `btn-back`) and the pages it opens
+  (info, members, settings, thread, profile) push inside that pane. Flows that
+  tap `btn-back` to leave a conversation mark it `optional: true`.
 - **Direct tab:** DM requests are accepted on `dm/requests`, via
   `row-dm-requests`.
 - **Sign out** asks first, in a native Alert with no testID: after

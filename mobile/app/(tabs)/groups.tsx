@@ -13,7 +13,14 @@ import {
 } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
 import { useLayoutClass } from "../../hooks/useLayoutClass";
-import { TwoPane, DetailPlaceholder } from "../../components/MasterDetail";
+import {
+  TwoPane,
+  DetailPlaceholder,
+  DetailPane,
+  PaneProvider,
+  CenteredColumn,
+} from "../../components/MasterDetail";
+import { usePaneStack } from "../../components/pane/paneContext";
 import { GroupPills } from "../../components/groups/GroupPills";
 import { GroupPanel } from "../../components/groups/GroupPanel";
 import { PendingRows } from "../../components/groups/PendingRows";
@@ -43,6 +50,14 @@ function Groups() {
   // On regular (iPad) width the strip + panel are the left column of a
   // two-pane master-detail; on compact they are the whole screen.
   const isRegular = useLayoutClass() === "regular";
+  // The right pane's own page stack (channel info, members, settings, a
+  // thread…) on regular width. A different group or conversation starts it
+  // over — whoever changed the selection (this list, Search, a deep link).
+  const pane = usePaneStack();
+  const resetPane = pane.api.reset;
+  useEffect(() => {
+    resetPane();
+  }, [selectedGroupId, selectedChannelId, resetPane]);
 
   // The group last picked here, from a previous launch.
   const [storedGroupId, setStoredGroupId] = useState<string | null>(null);
@@ -82,6 +97,7 @@ function Groups() {
   );
 
   const selectGroup = (id: string) => {
+    resetPane();
     if (id !== appStore.selectedGroupId) {
       appStore.setSelectedGroupId(id);
     }
@@ -97,6 +113,8 @@ function Groups() {
     // Opening a conversation clears its unread count (desktop does the same
     // in its Channel page).
     appStore.markRead(c.id);
+    // Re-opening the channel already shown closes any page over it.
+    resetPane();
     // On regular the right pane updates in place; on compact push the chat.
     if (!isRegular) {
       router.push({
@@ -183,27 +201,43 @@ function Groups() {
     );
   }
 
-  return (
-    <Screen testID="screen-groups" aboveTabBar>
-      {isRegular ? (
+  // Regular width: list + conversation side by side while there is a group to
+  // pick from; with none (or still loading) the empty state is one centred
+  // column — a two-pane would squeeze its call to action into the list column
+  // beside a "Select a conversation" that has nothing to select.
+  let body: React.ReactNode = column;
+  if (isRegular && current) {
+    body = (
+      <PaneProvider pane={pane}>
         <TwoPane
           list={column}
           detail={
-            selectedChannelId ? (
-              <ChatView
-                conversationId={selectedChannelId}
-                kind="channel"
-                groupId={selectedGroupId ?? undefined}
-                embedded
-              />
-            ) : (
-              <DetailPlaceholder />
-            )
+            <DetailPane
+              pane={pane}
+              root={
+                selectedChannelId ? (
+                  <ChatView
+                    conversationId={selectedChannelId}
+                    kind="channel"
+                    groupId={selectedGroupId ?? undefined}
+                    embedded
+                  />
+                ) : (
+                  <DetailPlaceholder />
+                )
+              }
+            />
           }
         />
-      ) : (
-        column
-      )}
+      </PaneProvider>
+    );
+  } else if (isRegular) {
+    body = <CenteredColumn>{column}</CenteredColumn>;
+  }
+
+  return (
+    <Screen testID="screen-groups" aboveTabBar wide>
+      {body}
       {addOpen ? <AddGroupSheet onClose={() => setAddOpen(false)} /> : null}
     </Screen>
   );

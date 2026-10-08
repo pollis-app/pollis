@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { View, Text, FlatList, Pressable } from "react-native";
-import { useRouter } from "expo-router";
+import { useOpenConversation } from "../../hooks/useOpenConversation";
 import { useTranslation } from "react-i18next";
 import { Screen, Header, Chip } from "../../components/ui";
 import { ErrorText } from "../../components/self/SettingsField";
@@ -42,7 +42,8 @@ function timeAgo(iso: string): string {
  */
 export default function SavedScreen() {
   const { t } = useTranslation("saved");
-  const router = useRouter();
+  // Phones push the conversation; iPad opens it in its tab's two-pane.
+  const { openConversation } = useOpenConversation();
   const { data: saved = [], isLoading } = useSavedMessages();
   const unsave = useUnsaveMessage();
   const resolvePermalink = useResolvePermalink();
@@ -60,13 +61,10 @@ export default function SavedScreen() {
       return;
     }
     const route = routeFor(item.conversation_id);
-    router.push({
-      pathname: "/chat/[id]",
-      params: {
-        id: item.conversation_id,
-        kind: route.kind,
-        ...(route.name ? { name: route.name } : {}),
-      },
+    openConversation({
+      id: item.conversation_id,
+      kind: route.kind,
+      name: route.name ?? undefined,
     });
   };
 

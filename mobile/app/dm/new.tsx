@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { View } from "react-native";
-import { useRouter } from "expo-router";
+import { useOpenConversation } from "../../hooks/useOpenConversation";
 import { useTranslation } from "react-i18next";
 import {
   Screen,
@@ -18,7 +18,7 @@ import { semantic, space, layout } from "../../theme/tokens";
 import { useUserSearch, useCreateDM } from "../../hooks/queries";
 
 export default function NewDM() {
-  const router = useRouter();
+  const { openConversation } = useOpenConversation();
   const { t } = useTranslation("mobile");
   const [query, setQuery] = useState("");
   // Exact-match lookup on Find / return only, never while typing: per-key
@@ -39,10 +39,9 @@ export default function NewDM() {
       { memberIds: [userId] },
       {
         onSuccess: (channel) => {
-          router.replace({
-            pathname: "/chat/[id]",
-            params: { id: channel.id, kind: "dm" },
-          });
+          // Phones: replace this form with the DM. iPad: the DM opens in the
+          // Direct tab's two-pane.
+          openConversation({ id: channel.id, kind: "dm" }, { replace: true });
         },
       },
     );

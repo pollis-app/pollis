@@ -734,7 +734,7 @@ app/
   index.tsx            redirect → /(auth)/email
   (auth)/              email → otp → pin → initializing (gestureEnabled: false)
   (tabs)/              groups · direct · search · self (custom <TabBar>)
-  group/[id].tsx       one group's channel panel (pushed, no tab bar)
+  group/[id].tsx       one group's channel panel (phones: pushed, no tab bar; iPad: redirects to the Groups tab)
   group/*              new, invite, invite-links, members, settings, emoji, requests, discover
   chat/[id].tsx        conversation (Header + list + composer); chat/thread.tsx
   dm/{new,info,requests}.tsx · conversation/info.tsx · user/[id].tsx · report.tsx
@@ -760,6 +760,18 @@ the body); `backLabel` / `backTestID` override the spoken label and id.
 There is no bottom back strip any more (`Ctx`/`Crumb` are gone). Auth
 screens disable the edge swipe, so their top-left back is the only way out.
 Sub-screens are stack pushes outside `(tabs)`.
+
+iPad (regular width, `hooks/useLayoutClass`): Groups and Direct are a
+two-pane (`components/MasterDetail.tsx`) — list left, conversation right, tab
+bar visible. Conversation pages (info, members, group settings/invite/emoji/
+requests, thread, profile — `PANE_PATHS` in `components/pane/paneContext.ts`)
+push INSIDE the right pane: the tab owns a small entry stack and `DetailPane`
+renders the route's own component. Those screens read params with
+`useRouteParams` and navigate with `useNav` (both fall back to
+`useLocalSearchParams` / `useRouter` on phones) and pass `onBack={nav.onBack}`
+to `<Header>`. Opening a conversation/group from elsewhere goes through
+`hooks/useOpenConversation` (phones: push; iPad: select it + return to its tab);
+`chat/[id]` and `group/[id]` redirect to the tab on regular width as a net.
 
 ## Backend integration — wired vs pending
 

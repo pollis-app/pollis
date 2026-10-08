@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { View, Text, Pressable, Share } from "react-native";
+import { View, Text, Share } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
-import { Screen, Body, Card, Button, BottomAction } from "../../components/ui";
+import { Screen, Body, Card, Button, BottomAction, CheckRow } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { Heading } from "../../components/auth/Heading";
-import { semantic, type as ty, fonts, r } from "../../theme/tokens";
+import { semantic, type as ty, fonts } from "../../theme/tokens";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import i18n from "../../i18n";
@@ -195,43 +195,15 @@ function EmergencyKit() {
           </Text>
         </View>
 
-        {/* The acknowledgement: a full-width row (one control, one label),
-            its state shown by the box: empty, or accent with a check — not
-            by colour alone. No borders: the row is a raised fill and the
-            unchecked box a `high` square on it. */}
-        <Pressable
-          onPress={() => setAcknowledged((v) => !v)}
+        {/* The acknowledgement: one full-width checkbox row (the shared
+            CheckRow — a clearly visible box, accent with a check when on). */}
+        <CheckRow
           testID="toggle-recovery-ack"
-          accessibilityRole="checkbox"
+          checked={acknowledged}
+          onPress={() => setAcknowledged((v) => !v)}
+          label={t("mobile:auth.emergencyKit.ackText")}
           accessibilityLabel={t("mobile:auth.emergencyKit.ackLabel")}
-          accessibilityState={{ checked: acknowledged }}
-          style={({ pressed }) => ({
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 14,
-            minHeight: 56,
-            paddingHorizontal: 16,
-            paddingVertical: 12,
-            borderRadius: r.md,
-            backgroundColor: pressed ? semantic.high : semantic.raised,
-          })}
-        >
-          <View
-            style={{
-              width: 24,
-              height: 24,
-              borderRadius: 6,
-              backgroundColor: acknowledged ? semantic.accent : semantic.high,
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            {acknowledged ? <Icon.check size={16} color={semantic.onAccent} /> : null}
-          </View>
-          <Text style={[ty.body, { flex: 1 }]}>
-            {t("mobile:auth.emergencyKit.ackText")}
-          </Text>
-        </Pressable>
+        />
       </Body>
       <BottomAction>
         <Button

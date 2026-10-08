@@ -1,7 +1,8 @@
 // Message read + send + ingest hooks. Mirrors the read paths of
-// `frontend/src/hooks/queries/useMessages.ts` — `get_channel_messages` and
-// `get_dm_messages` both invoke envelope-ingest internally before reading
-// the local DB, so a single call gives a fresh page.
+// `frontend/src/hooks/queries/useMessages.ts` — pages are LOCAL reads
+// (`read_channel_messages` / `read_dm_messages`), so a conversation renders
+// at once; envelope ingest (`useIngestConversation`, on chat focus, realtime
+// and push) runs off the render path and invalidates the page when it lands.
 //
 // Pagination: `useMessages` is an infinite query over cursor pages. The
 // cursor for each older page is derived from the PREVIOUS PAGE'S DATA
@@ -229,12 +230,18 @@ export function useMessages(
       if (!conversationId || !kind || !currentUser) {
         return { messages: [], nextCursor: null };
       }
+      // Local-only reads, like desktop's useMessages. The `get_*` commands
+      // ingest from the DS before reading, so the first page waited on the
+      // network — and on a just-created channel, on MLS setup — leaving an
+      // empty conversation on "Loading messages…" instead of "No messages
+      // yet". Ingest runs separately (the chat's focus ingest, realtime,
+      // push) and invalidates this query when new envelopes land.
       const cmd =
-        kind === "channel" ? "get_channel_messages" : "get_dm_messages";
+        kind === "channel" ? "read_channel_messages" : "read_dm_messages";
       const args: Record<string, unknown> =
         kind === "channel"
-          ? { userId: currentUser.id, channelId: conversationId, limit }
-          : { userId: currentUser.id, dmChannelId: conversationId, limit };
+          ? { channelId: conversationId, limit }
+          : { dmChannelId: conversationId, limit };
       if (pageParam) {
         args.cursor = pageParam;
       }

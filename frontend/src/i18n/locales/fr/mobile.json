@@ -9,7 +9,7 @@
       "ackLabel": "J'ai enregistré ma clé secrète",
       "ackText": "J'ai enregistré ma clé secrète en lieu sûr.",
       "copyFailed": "Échec de la copie",
-      "intro": "Si vous perdez ce téléphone, cette clé vous permet de vous connecter sur un nouveau. Nous ne pouvons pas la récupérer pour vous : notez-la ou gardez-la dans un gestionnaire de mots de passe.",
+      "intro": "Si vous perdez cet appareil, cette clé vous permet de vous connecter sur un nouveau. Nous ne pouvons pas la récupérer pour vous : notez-la ou gardez-la dans un gestionnaire de mots de passe.",
       "title": "Enregistrez votre clé secrète",
       "warning": "Toute personne qui a cette clé peut se connecter à votre place."
     },
@@ -53,7 +53,7 @@
       "yourEmail": "votre e-mail"
     },
     "pin": {
-      "createIntro": "Ce code PIN déverrouille Pollis sur ce téléphone. Il ne quitte jamais le téléphone.",
+      "createIntro": "Ce code PIN déverrouille Pollis sur cet appareil. Il ne quitte jamais l'appareil.",
       "createTitle": "Nouveau code PIN",
       "invalidPin": "Code PIN invalide.",
       "noActiveUser": "Aucun utilisateur actif. Reconnectez-vous.",
@@ -100,7 +100,7 @@
   "direct": {
     "acceptRequest": "Accepter la demande",
     "blockSender": "Bloquer l'expéditeur",
-    "empty": "Aucun message privé pour l'instant.",
+    "empty": "Aucun message privé pour l'instant",
     "loadFailed": "Impossible de charger les conversations.",
     "loading": "Chargement des conversations…",
     "wantsToMessage": "souhaite vous écrire",
@@ -161,6 +161,7 @@
     },
     "emoji": {
       "adminsOnly": "Seuls les administrateurs du groupe peuvent ajouter ou retirer des émojis.",
+      "loadFailed": "Impossible de charger les emoji de ce groupe.",
       "empty": "Aucun émoji personnalisé pour l'instant.",
       "pickAndUpload": "Choisir une image et l'envoyer",
       "sizeKb_one": "{{count}} Ko",
@@ -317,7 +318,7 @@
       "sendCode": "Envoyer le code"
     },
     "deleteAccount": {
-      "consequences": "Cette action supprime définitivement votre compte Pollis. Vous êtes retiré de tous vos groupes et conversations, vos appareils sont désenregistrés et vos données chiffrées sur ce téléphone sont effacées. Les autres membres conservent leurs propres copies des messages passés, mais rien de ce qui sera envoyé après la suppression ne pourra jamais être lu avec vos clés.",
+      "consequences": "Cette action supprime définitivement votre compte Pollis. Vous êtes retiré de tous vos groupes et conversations, vos appareils sont désenregistrés et vos données chiffrées sur cet appareil sont effacées. Les autres membres conservent leurs propres copies des messages passés, mais rien de ce qui sera envoyé après la suppression ne pourra jamais être lu avec vos clés.",
       "contextPath": "{{parent}} · {{child}}",
       "failed": "Impossible de supprimer le compte. Rien n'a changé. Réessayez.",
       "irreversible": "Cette action est irréversible. Il n'y a ni délai de grâce ni récupération possible.",
@@ -389,7 +390,7 @@
       "approve": "Approuver",
       "approveA11y": "Approuver l'enrôlement",
       "autoLockA11y": "Verrouillage automatique {{label}}",
-      "autoLockDescription": "Verrouille Pollis après un moment d'inactivité. Ne concerne que ce téléphone.",
+      "autoLockDescription": "Verrouille Pollis après un moment d'inactivité. Ne concerne que cet appareil.",
       "current": "Actuel",
       "daysAgo_one": "il y a {{count}} j",
       "daysAgo_other": "il y a {{count}} j",

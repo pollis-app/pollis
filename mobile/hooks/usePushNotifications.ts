@@ -18,6 +18,7 @@ import { useObserver } from "mobx-react-lite";
 import { appStore } from "../stores/appStore";
 import { addPushListeners } from "../lib/push";
 import { useIngestConversation, type ConversationKind } from "./queries/useMessages";
+import { useOpenConversation } from "./useOpenConversation";
 
 function toConversationKind(kind: string): ConversationKind | null {
   if (kind === "channel" || kind === "dm") {
@@ -36,6 +37,10 @@ export function usePushNotifications() {
   // the subscriptions on every render.
   const routerRef = useRef(router);
   routerRef.current = router;
+  // Phones push the conversation; iPad opens it in its tab's two-pane.
+  const { openConversation } = useOpenConversation();
+  const openRef = useRef(openConversation);
+  openRef.current = openConversation;
   const ingestRef = useRef(ingest);
   ingestRef.current = ingest;
 
@@ -46,6 +51,11 @@ export function usePushNotifications() {
     }
     const dispose = addPushListeners({
       onOpenConversation: (conversationId, kind) => {
+        const ck = toConversationKind(kind);
+        if (ck) {
+          openRef.current({ id: conversationId, kind: ck });
+          return;
+        }
         routerRef.current.push({
           pathname: "/chat/[id]",
           params: { id: conversationId, kind },

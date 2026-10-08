@@ -33,10 +33,16 @@ tags:
 - inputText: "E2E Search Group"
 - tapOn:
     id: "btn-submit-group"
+# Creating lands on the Groups tab with the new group selected (pill strip +
+# its channel panel, tab bar visible) — not a pushed group page. Wait for
+# THIS group's panel header (the account may already have other groups).
 - extendedWaitUntil:
     visible:
-      id: "screen-group"
+      id: "btn-group-menu"
+      text: "E2E Search Group, .*"
     timeout: 15000
+- assertVisible:
+    id: "panel-group"
 - tapOn:
     text: "General"
 - assertVisible:
@@ -49,8 +55,8 @@ tags:
 - extendedWaitUntil:
     visible: ".*pelican migration notes.*"
     timeout: 15000
-- tapOn:
-    id: "btn-back"
+# Back from the channel to the Groups tab (phones). On iPad the channel is the
+# two-pane's right pane, with no back button — hence optional.
 - tapOn:
     id: "btn-back"
     optional: true
@@ -78,8 +84,11 @@ tags:
 - tapOn: ".*pelican migration notes.*"
 - assertVisible:
     id: "screen-chat"
+# Phones: back to Search. iPad: the hit opened in the Groups tab's two-pane,
+# which has no back button; the next step taps the Search tab anyway.
 - tapOn:
     id: "btn-back"
+    optional: true
 
 # Quick-jump to a settings page.
 - tapOn:

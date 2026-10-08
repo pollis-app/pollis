@@ -17,6 +17,7 @@ import { Icon } from "../../components/icons";
 import { semantic, type as ty, space } from "../../theme/tokens";
 import { useCreateGroup } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
+import { writeLastGroupId } from "../../components/groups/lastGroup";
 import { observer } from "mobx-react-lite";
 
 function NewGroup() {
@@ -42,14 +43,14 @@ function NewGroup() {
       {
         onSuccess: (group) => {
           setSelectedGroupId(group.id);
-          // The default text channel created server-side is fetched
-          // lazily by the groups list; land the user on the group page
-          // so they see the new channel render in once the query
-          // refetches.
-          router.replace({
-            pathname: "/group/[id]",
-            params: { id: group.id },
-          });
+          if (appStore.currentUser) {
+            writeLastGroupId(appStore.currentUser.id, group.id);
+          }
+          // Land on the Groups tab with the new group selected (pill strip,
+          // its channel panel, the tab bar) — not a standalone group page.
+          // Its #General (if opted in) renders once the groups list
+          // refetches. dismissTo pops this form back to the tabs.
+          router.dismissTo("/(tabs)/groups");
         },
       },
     );

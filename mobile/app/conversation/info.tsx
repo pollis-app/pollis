@@ -5,7 +5,7 @@
 
 import { useMemo } from "react";
 import { View, Text, useWindowDimensions } from "react-native";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { useTranslation } from "react-i18next";
 import {
   Screen,
@@ -37,9 +37,9 @@ import { observer } from "mobx-react-lite";
 const MEDIA_LIMIT = 30;
 
 function ConversationInfo() {
-  const router = useRouter();
+  const router = useNav();
   const { t } = useTranslation("mobile");
-  const params = useLocalSearchParams<{
+  const params = useRouteParams<{
     id?: string;
     kind?: string;
     groupId?: string;
@@ -118,8 +118,8 @@ function ConversationInfo() {
   const tile = Math.floor((width - 16 * 2 - 6 * 2) / 3);
 
   return (
-    <Screen testID="screen-conversation-info">
-      <Header
+    <Screen testID="screen-conversation-info" aboveTabBar={router.inPane}>
+      <Header onBack={router.onBack}
         title={title}
         subtitle={
           roster.length > 0

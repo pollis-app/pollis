@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, FlatList } from "react-native";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { Screen, Header, IconButton } from "../../components/ui";
 import { Icon } from "../../components/icons";
@@ -50,6 +50,9 @@ import type { PickedAttachment } from "../../lib/attachments";
 import { ensurePushRegistration } from "../../lib/push";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
+import { useNav } from "../../components/pane/paneContext";
+import { useIsRegular } from "../../hooks/useLayoutClass";
+import { selectConversation } from "../../hooks/useOpenConversation";
 
 // Props let this screen double as an embedded right-pane conversation on the
 // two-pane (regular/iPad) layout. Route usage passes NO props, so every value
@@ -69,7 +72,9 @@ type ChatListItem =
   | { type: "msg"; key: string; message: Message; continued: boolean };
 
 function TextChat(props: ChatViewProps = {}) {
-  const router = useRouter();
+  // Embedded in the iPad two-pane, pushes of info / thread / profile pages
+  // land in the detail pane (useNav); on phones it is the router.
+  const router = useNav();
   const { t } = useTranslation("mobile");
   const params = useLocalSearchParams<{
     id?: string;
@@ -756,13 +761,56 @@ function TextChat(props: ChatViewProps = {}) {
   // Embedded (two-pane right column) sits inside the list screen's own
   // <Screen>/SafeAreaView, so wrap in a plain View to avoid double-insetting.
   // Route usage renders the full <Screen> exactly as before.
+  // The embedded view keeps the route's `screen-chat` id so e2e flows find
+  // the conversation on both layouts.
   return embedded ? (
-    <View style={{ flex: 1, backgroundColor: semantic.bg }}>{content}</View>
+    <View testID="screen-chat" style={{ flex: 1, backgroundColor: semantic.bg }}>
+      {content}
+    </View>
   ) : (
-    <Screen testID="screen-chat">{content}</Screen>
+    <Screen testID="screen-chat" wide>
+      {content}
+    </Screen>
   );
 }
 
 export const ChatView = observer(TextChat);
 
-export default observer(TextChat);
+// Regular width (iPad) never shows a conversation full screen: whoever pushed
+// this route (a notification, a permalink, an older call site), the
+// conversation is selected in its tab and drawn in the two-pane's right pane.
+// Call sites use useOpenConversation to go there directly; this is the net
+// for anything that still lands here.
+function ChatRedirect() {
+  const router = useRouter();
+  const params = useLocalSearchParams<{ id?: string; kind?: string; name?: string }>();
+  const { data: groups, isLoading } = useUserGroupsWithChannels();
+  const id = typeof params.id === "string" ? params.id : null;
+  const kind = params.kind === "dm" ? "dm" : "channel";
+  useEffect(() => {
+    if (!id) {
+      router.dismissTo("/(tabs)/groups" as Href);
+      return;
+    }
+    // A channel needs its group, which the groups list knows.
+    if (kind === "channel" && isLoading) {
+      return;
+    }
+    const groupId =
+      kind === "channel"
+        ? groups?.find((g) => g.channels.some((c) => c.id === id))?.id ??
+          appStore.selectedGroupId
+        : null;
+    router.dismissTo(selectConversation({ id, kind }, groupId) as Href);
+    // Once per opened conversation; the router object is stable enough.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, kind, isLoading]);
+  return <Screen testID="screen-chat-redirect" wide>{null}</Screen>;
+}
+
+function ChatRoute() {
+  const regular = useIsRegular();
+  return regular ? <ChatRedirect /> : <ChatView />;
+}
+
+export default observer(ChatRoute);

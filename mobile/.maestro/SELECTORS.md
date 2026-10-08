@@ -70,10 +70,10 @@ delete/remove/revoke), the record id is appended to keep the selector unique
 
 | Route | `screen-*` | Key testIDs |
 | --- | --- | --- |
-| `chat/[id]` | `screen-chat` | header: `btn-back`, `btn-members` (→ `conversation/info`), `btn-chat-menu` (channel: opens the channel sheet; DM: pushes `dm/info`); `list-messages`, `row-message-<id>` (long-press → message sheet; label `"<name>: <text>, <status or time>"`), `btn-thread-<id>`, `pill-reaction-<msgId>-<emoji>`, `receipt-<msgId>`; composer `input-composer`, `btn-send`, `btn-attach`, `btn-composer-emoji`, `strip-attachments` / `chip-attachment-<id>`, `list-mention-suggestions` / `row-mention-<username>`, `list-emoji-suggestions` / `row-emoji-<shortcode>`; edit bar `input-edit-composer`, `btn-edit-save`, `btn-edit-cancel`. **Message sheet:** `btn-react-<i>`, `btn-react-more` (→ emoji picker: `input-emoji-search`, `list-emoji`, `btn-tone-<i>`), `btn-reply-thread`, `btn-copy-text`, `btn-copy-link`, `btn-save`, `btn-edit`, `btn-delete`, `btn-report`; Close = `btn-action-cancel`. **Channel sheet:** `btn-menu-info`, `btn-menu-group-settings`; Close = `btn-menu-cancel`. |
+| `chat/[id]` | `screen-chat` | On iPad (regular width) the conversation is the Groups/Direct tab's right pane — same ids, `screen-chat` on the pane, no `btn-back`; info/members/settings/thread/profile pages open inside that pane and their `btn-back` pops it. header: `btn-back`, `btn-members` (→ `conversation/info`), `btn-chat-menu` (channel: opens the channel sheet; DM: pushes `dm/info`); `list-messages`, `row-message-<id>` (long-press → message sheet; label `"<name>: <text>, <status or time>"`), `btn-thread-<id>`, `pill-reaction-<msgId>-<emoji>`, `receipt-<msgId>`; composer `input-composer`, `btn-send`, `btn-attach`, `btn-composer-emoji`, `strip-attachments` / `chip-attachment-<id>`, `list-mention-suggestions` / `row-mention-<username>`, `list-emoji-suggestions` / `row-emoji-<shortcode>`; edit bar `input-edit-composer`, `btn-edit-save`, `btn-edit-cancel`. **Message sheet:** `btn-react-<i>`, `btn-react-more` (→ emoji picker: `input-emoji-search`, `list-emoji`, `btn-tone-<i>`), `btn-reply-thread`, `btn-copy-text`, `btn-copy-link`, `btn-save`, `btn-edit`, `btn-delete`, `btn-report`; Close = `btn-action-cancel`. **Channel sheet:** `btn-menu-info`, `btn-menu-group-settings`; Close = `btn-menu-cancel`. |
 | `chat/thread` | `screen-thread` | `list-thread`, `row-thread-root-<id>`, `row-thread-<id>` |
-| `group/[id]` | `screen-group` | `btn-back` (top back bar), then the same `GroupPanel` the Groups tab shows: `btn-group-menu` (group name; opens `sheet-group-menu`: `btn-menu-members`, `btn-menu-invite`, `btn-menu-group-settings`, `btn-menu-requests` (admins, while requests are pending), `btn-leave-group`), `row-group-invite` (invite icon), `btn-search-group` (opens Search), `btn-create-channel` (admins; opens `sheet-create-channel`: `input-channel-name`, `btn-create-channel-submit`), `row-channel-<id>`, `row-group-members`, `row-group-settings`, `row-group-requests` (only while requests are pending). On the Groups tab the panel's root is `panel-group`. |
-| `group/new` | `screen-group-new` | `input-group-name`, `input-group-description`, `toggle-general-channel` (opt-in #General, off by default), `btn-submit-group` (submit; lands on `screen-group` via a replace). No Cancel button — leave with `btn-back`. |
+| `group/[id]` | `screen-group` | Phones only — reached from Search group hits and invite links; creating a group lands on the Groups tab instead (`panel-group`), and on iPad (regular width) this route redirects to the Groups tab two-pane. `btn-back` (top back bar), then the same `GroupPanel` the Groups tab shows: `btn-group-menu` (group name; opens `sheet-group-menu`: `btn-menu-members`, `btn-menu-invite`, `btn-menu-group-settings`, `btn-menu-requests` (admins, while requests are pending), `btn-leave-group`), `row-group-invite` (invite icon), `btn-search-group` (opens Search), `btn-create-channel` (admins; opens `sheet-create-channel`: `input-channel-name`, `btn-create-channel-submit`), `row-channel-<id>`, `row-group-members`, `row-group-settings`, `row-group-requests` (only while requests are pending). On the Groups tab the panel's root is `panel-group`. |
+| `group/new` | `screen-group-new` | `input-group-name`, `input-group-description`, `toggle-general-channel` (opt-in #General, off by default), `btn-submit-group` (submit; dismisses back to the Groups tab with the new group selected — wait for `btn-group-menu` with text `"<name>, .*"`, then `panel-group`). No Cancel button — leave with `btn-back`. |
 
 ## New screens (this pass)
 
@@ -111,7 +111,7 @@ delete/remove/revoke), the record id is appended to keep the selector unique
 | --- | --- | --- |
 | `group/members` | `screen-group-members` | `row-member-<userId>`, `btn-toggle-role-<userId>` (make/remove admin), `btn-remove-member-<userId>` |
 | `group/requests` | `screen-group-requests` | `row-request-<id>`, `btn-approve-<id>`, `btn-reject-<id>` |
-| `group/settings` | `screen-group-settings` | `input-group-name`, `input-group-description`, `row-channel-<id>`, `btn-delete-channel-<id>`, `row-group-emoji` (→ `group/emoji`), `btn-delete-group` (owner-only), `btn-save` |
+| `group/settings` | `screen-group-settings` | `input-group-name`, `input-group-description`, `row-channel-<id>`, `btn-delete-channel-<id>`, `row-group-emoji` (→ `group/emoji`), `btn-settings-leave-group` (everyone, two taps), `btn-delete-group` (owner-only, two taps), `btn-save` |
 | `group/emoji` | `screen-group-emoji` | `input-emoji-shortcode`, `btn-upload-emoji`, `row-emoji-<shortcode>`, `btn-remove-emoji-<shortcode>` |
 | `group/invite` | `screen-group-invite` | `input-user-search`, `btn-send-invite`; invite links: `chip-expiry-<id>`, `chip-uses-<id>`, `btn-create-invite-link`, then `created-invite-link-url`, `btn-copy-invite-link`, `btn-share-invite-link`; `row-manage-invite-links` (→ `group/invite-links`). No Cancel button (`btn-cancel` was removed) — leave with `btn-back`. |
 | `group/invite-links` | `screen-group-invite-links` | `row-invite-link-<id>`, `btn-revoke-invite-link-<id>` |
@@ -120,9 +120,9 @@ delete/remove/revoke), the record id is appended to keep the selector unique
 
 ## Coverage notes / gaps (vs. the requested selector list)
 
-- `group/settings` has **no** leave-group control on mobile — only an
-  owner-only `btn-delete-group`. There is no `btn-leave-group` here (leaving a
-  group lives in the group menu sheet, `btn-group-menu` → `btn-leave-group`). No `toggle-*` exists on
+- `group/settings` ends with `btn-settings-leave-group` (everyone) and the
+  owner-only `btn-delete-group`; the group menu sheet keeps its own
+  `btn-group-menu` → `btn-leave-group`. No `toggle-*` exists on
   this screen either (group settings are name/description text fields + channel
   management only).
 - `self/security` has **no** change-password / PIN-entry buttons — the RECOVERY

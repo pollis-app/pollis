@@ -365,7 +365,11 @@ export default function Security() {
                   sub={sub}
                   action={
                     d.is_current ? (
-                      <Chip selected>{t("mobile:self.security.current")}</Chip>
+                      // Status, not a control: plain accent text, so it can't
+                      // be mistaken for a primary button.
+                      <Text style={[ty.section, { color: semantic.accent }]}>
+                        {t("mobile:self.security.current")}
+                      </Text>
                     ) : (
                       <Chip
                         variant={armed ? "solid" : "outline"}
@@ -414,7 +418,7 @@ export default function Security() {
                   {groupKey(identity.public_key)}
                 </Text>
               ) : (
-                <Text style={[ty.secondary, { fontFamily: fonts.mono400, color: semantic.muted }]}>
+                <Text style={[ty.secondary, { color: semantic.muted }]}>
                   {t("mobile:self.security.identityMissing")}
                 </Text>
               )}

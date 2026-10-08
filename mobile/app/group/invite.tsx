@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { View, Text } from "react-native";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import {
@@ -63,8 +63,8 @@ const USES_OPTIONS: {
 
 export default function InviteToGroup() {
   const { t } = useTranslation("channels");
-  const router = useRouter();
-  const { groupId } = useLocalSearchParams<{ groupId?: string }>();
+  const router = useNav();
+  const { groupId } = useRouteParams<{ groupId?: string }>();
   const [identifier, setIdentifier] = useState("");
   const sendInvite = useSendGroupInvite(groupId ?? null);
   const { data: groups = [] } = useUserGroupsWithChannels();
@@ -99,8 +99,8 @@ export default function InviteToGroup() {
   };
 
   return (
-    <Screen testID="screen-group-invite" centered>
-      <Header title={t("mobile:group.panel.invite")} subtitle={group?.name} />
+    <Screen testID="screen-group-invite" aboveTabBar={router.inPane} centered>
+      <Header onBack={router.onBack} title={t("mobile:group.panel.invite")} subtitle={group?.name} />
       <Body contentContainerStyle={{ paddingHorizontal: space.xxl }}>
         <View style={{ paddingTop: space.xxl, gap: space.lg }}>
           <LabeledField

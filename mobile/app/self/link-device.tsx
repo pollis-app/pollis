@@ -8,6 +8,7 @@ import { Screen, Header, Button, BottomAction } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { ErrorText } from "../../components/self/SettingsField";
 import { Heading } from "../../components/auth/Heading";
+import { useIsRegular } from "../../hooks/useLayoutClass";
 import { PinCells, PinKeypad } from "../../components/auth/PinPad";
 import { QrCode } from "../../components/QrCode";
 import { SegmentedControl } from "../../components/self/SegmentedControl";
@@ -38,6 +39,7 @@ type Step =
 export default function LinkDevice() {
   const { t } = useTranslation("settings");
   const router = useRouter();
+  const regular = useIsRegular();
   const userId = useObserver(() => appStore.currentUser?.id ?? null);
   const create = useCreateDeviceLink();
   const reject = useRejectEnrollment();
@@ -143,18 +145,22 @@ export default function LinkDevice() {
     return (
       <Screen testID="screen-link-device" centered>
         {crumb}
-        <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 32, gap: 32 }}>
-          <Heading title={t("linkDevice.pinTitle")} subtitle={t("linkDevice.pinSubtitle")} />
-          <View style={{ gap: 14 }}>
-            <PinCells length={pin.length} />
-            {pinError ? (
-              <View style={{ alignSelf: "center" }}>
-                <ErrorText testID="link-device-pin-error">{pinError}</ErrorText>
-              </View>
-            ) : null}
+        {/* iPad: the PIN block (heading, dots, keypad) centred vertically
+            rather than the keypad pinned to the bottom edge. */}
+        <View style={regular ? { flex: 1, justifyContent: "center", gap: 32 } : { flex: 1 }}>
+          <View style={{ flex: regular ? 0 : 1, paddingHorizontal: 24, paddingTop: regular ? 0 : 32, gap: 32 }}>
+            <Heading title={t("linkDevice.pinTitle")} subtitle={t("linkDevice.pinSubtitle")} />
+            <View style={{ gap: 14 }}>
+              <PinCells length={pin.length} />
+              {pinError ? (
+                <View style={{ alignSelf: "center" }}>
+                  <ErrorText testID="link-device-pin-error">{pinError}</ErrorText>
+                </View>
+              ) : null}
+            </View>
           </View>
+          <PinKeypad onDigit={pushDigit} onBackspace={() => setPin(pin.slice(0, -1))} disabled={create.isPending} />
         </View>
-        <PinKeypad onDigit={pushDigit} onBackspace={() => setPin(pin.slice(0, -1))} disabled={create.isPending} />
       </Screen>
     );
   }
@@ -254,6 +260,11 @@ export default function LinkDevice() {
   return <ShowCode handle={handle} crumb={crumb} onCancel={leave} />;
 }
 
+// Lets a long unbroken token wrap at any character (see ShowCode).
+function breakAnywhere(text: string): string {
+  return Array.from(text).join("\u200B");
+}
+
 /** The code, as a QR (default) or as text with one-tap copy. */
 function ShowCode({ handle, crumb, onCancel }: { handle: DeviceLinkHandle; crumb: React.ReactNode; onCancel: () => void }) {
   const { t } = useTranslation("settings");
@@ -307,12 +318,17 @@ function ShowCode({ handle, crumb, onCancel }: { handle: DeviceLinkHandle; crumb
               gap: space.lg,
             })}
           >
+            {/* A zero-width space between every character lets the line
+                break anywhere, so the code fills each line evenly instead of
+                breaking at its hyphens. Copy uses the raw payload. */}
             <Text testID="link-device-payload" style={{ fontFamily: fonts.mono400, fontSize: 15, lineHeight: 22, color: semantic.text }}>
-              {handle.qr_payload}
+              {breakAnywhere(handle.qr_payload)}
             </Text>
+            {/* The whole card is the copy target; the hint reads as its
+                action, in accent. */}
             <View style={{ flexDirection: "row", alignItems: "center", gap: space.xs }}>
-              {copied ? <Icon.check size={16} color={semantic.accent} /> : <Icon.copy size={16} color={semantic.dim} />}
-              <Text style={[ty.section, { color: copied ? semantic.text : semantic.dim }]}>
+              {copied ? <Icon.check size={16} color={semantic.accent} /> : <Icon.copy size={16} color={semantic.accent} />}
+              <Text style={[ty.section, { color: semantic.accent }]}>
                 {copied ? t("linkDevice.copied") : t("linkDevice.copyHint")}
               </Text>
             </View>

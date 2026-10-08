@@ -72,13 +72,14 @@ export function SearchResultRow({
             gap: space.sm,
           }}
         >
+          {/* The sender as the chat's MessageRow sets it: bold, accent. */}
           <Text
             numberOfLines={1}
             style={{
               flex: 1,
-              fontFamily: fonts.semibold,
-              fontSize: 15,
-              color: semantic.text,
+              fontFamily: fonts.bold,
+              fontSize: 16,
+              color: semantic.accent,
             }}
           >
             {sender}

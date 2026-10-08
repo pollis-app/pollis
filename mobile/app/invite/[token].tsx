@@ -9,6 +9,7 @@ import { semantic, type as ty, space } from "../../theme/tokens";
 import { invoke } from "../../lib/native";
 import { restoreSession } from "../../hooks/queries/useAuth";
 import { appStore } from "../../stores/appStore";
+import { useOpenConversation } from "../../hooks/useOpenConversation";
 import { groupQueryKeys, type RedeemedInvite } from "../../hooks/queries";
 
 interface UnlockStateSnapshot {
@@ -46,6 +47,8 @@ type Phase = "working" | "confirm" | "joining" | "signedOut" | "locked" | "faile
 export default function InviteLanding() {
   const { t } = useTranslation("mobile");
   const router = useRouter();
+  // Phones land on the group page; iPad on the Groups tab's two-pane.
+  const { openGroup } = useOpenConversation();
   const queryClient = useQueryClient();
   const { token } = useLocalSearchParams<{ token?: string }>();
   const [phase, setPhase] = useState<Phase>("working");
@@ -105,10 +108,7 @@ export default function InviteLanding() {
       // The redeemer just crossed into a group they could not see before —
       // invalidate broadly, like desktop's useRedeemGroupInviteLink.
       queryClient.invalidateQueries({ queryKey: groupQueryKeys.all });
-      router.replace({
-        pathname: "/group/[id]",
-        params: { id: result.group_id },
-      });
+      openGroup(result.group_id, { replace: true });
     } catch (e) {
       console.warn("[invite] redeem failed:", e);
       setPhase("failed");

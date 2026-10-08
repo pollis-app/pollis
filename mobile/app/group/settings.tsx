@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { View } from "react-native";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { useTranslation } from "react-i18next";
 import {
   Screen,
@@ -24,14 +24,15 @@ import {
   useDeleteGroup,
   useDeleteChannel,
   useGroupMembers,
+  useLeaveGroup,
 } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 
 function GroupSettings() {
   const { t } = useTranslation("channels");
-  const router = useRouter();
-  const { groupId } = useLocalSearchParams<{ groupId?: string }>();
+  const router = useNav();
+  const { groupId } = useRouteParams<{ groupId?: string }>();
   const id = groupId ?? null;
   const currentUser = appStore.currentUser;
 
@@ -42,6 +43,7 @@ function GroupSettings() {
   const updateGroup = useUpdateGroup(id);
   const deleteGroup = useDeleteGroup();
   const deleteChannel = useDeleteChannel(id);
+  const leaveGroup = useLeaveGroup();
 
   const myRole = members.find((m) => m.user_id === currentUser?.id)?.role;
   const iAmAdmin = myRole === "admin" || myRole === "owner";
@@ -52,6 +54,7 @@ function GroupSettings() {
   const [seeded, setSeeded] = useState(false);
   const [confirmDeleteGroup, setConfirmDeleteGroup] = useState(false);
   const [confirmDeleteChannel, setConfirmDeleteChannel] = useState<string | null>(null);
+  const [confirmLeave, setConfirmLeave] = useState(false);
 
   useEffect(() => {
     if (group && !seeded) {
@@ -84,9 +87,25 @@ function GroupSettings() {
       return;
     }
     deleteGroup.mutate(id, {
-      onSuccess: () => router.replace("/(tabs)/groups"),
+      onSuccess: () => router.exitToTab("groups"),
     });
   };
+
+  // Same two-tap leave as the group menu sheet.
+  const onLeaveGroup = () => {
+    if (!confirmLeave) {
+      setConfirmLeave(true);
+      return;
+    }
+    if (!id) {
+      return;
+    }
+    leaveGroup.mutate(id, {
+      onSuccess: () => router.exitToTab("groups"),
+    });
+  };
+
+  const groupName = group?.name ?? t("mobile:group.common.fallbackName");
 
   const onDeleteChannel = (channelId: string) => {
     if (confirmDeleteChannel !== channelId) {
@@ -99,8 +118,8 @@ function GroupSettings() {
   };
 
   return (
-    <Screen testID="screen-group-settings">
-      <Header
+    <Screen testID="screen-group-settings" aboveTabBar={router.inPane}>
+      <Header onBack={router.onBack}
         title={t("mobile:group.settings.title")}
         subtitle={group?.name}
       />
@@ -111,7 +130,9 @@ function GroupSettings() {
           </View>
         ) : null}
 
-        <SectionTitle style={{ paddingHorizontal: 0 }}>
+        {/* A clear gap under the heading, so it does not read as a second
+            label stacked on "Group name". */}
+        <SectionTitle style={{ paddingHorizontal: 0, paddingBottom: space.xxl }}>
           {t("mobile:group.settings.identitySection")}
         </SectionTitle>
         <View style={{ gap: space.xxl }}>
@@ -131,6 +152,7 @@ function GroupSettings() {
               onChangeText={setDescription}
               editable={iAmAdmin}
               autoCapitalize="sentences"
+              placeholder={t("mobile:group.new.descriptionPlaceholder")}
               testID="input-group-description"
               accessibilityLabel={t("mobile:group.common.descriptionLabel")}
             />
@@ -205,10 +227,26 @@ function GroupSettings() {
           />
         </Group>
 
-        {iAmOwner ? (
-          <View style={{ paddingTop: space.xxxl * 2, gap: space.sm }}>
-            {/* Destructive, on its own at the end, two taps to confirm. */}
-            <Group>
+        {/* Leave / delete: destructive, on their own after a wide gap, each
+            two taps to confirm. Also in the group menu sheet. */}
+        <View style={{ paddingTop: space.xxxl * 2, paddingBottom: space.xxl, gap: space.sm }}>
+          <Group>
+            <ListRow
+              testID="btn-settings-leave-group"
+              glyph={<Icon.logOut size={20} color={semantic.accent} />}
+              name={
+                leaveGroup.isPending
+                  ? t("mobile:group.panel.leaving")
+                  : confirmLeave
+                    ? t("mobile:group.panel.leaveConfirm", { name: groupName })
+                    : t("mobile:group.panel.leave")
+              }
+              nameStyle={{ color: semantic.accent }}
+              sub={t("mobile:group.panel.leaveHint")}
+              disabled={leaveGroup.isPending || !id}
+              onPress={onLeaveGroup}
+            />
+            {iAmOwner ? (
               <ListRow
                 testID="btn-delete-group"
                 glyph={<Icon.trash size={20} color={semantic.accent} />}
@@ -223,15 +261,20 @@ function GroupSettings() {
                 disabled={deleteGroup.isPending}
                 onPress={onDeleteGroup}
               />
-            </Group>
-            {deleteGroup.isError ? (
-              <ErrorText>
-                {(deleteGroup.error as Error).message ||
-                  t("mobile:group.settings.deleteFailed")}
-              </ErrorText>
             ) : null}
-          </View>
-        ) : null}
+          </Group>
+          {leaveGroup.isError ? (
+            <ErrorText>
+              {(leaveGroup.error as Error).message || t("leaveGroup.leaveFailed")}
+            </ErrorText>
+          ) : null}
+          {deleteGroup.isError ? (
+            <ErrorText>
+              {(deleteGroup.error as Error).message ||
+                t("mobile:group.settings.deleteFailed")}
+            </ErrorText>
+          ) : null}
+        </View>
       </Body>
       {iAmAdmin ? (
         <BottomAction>

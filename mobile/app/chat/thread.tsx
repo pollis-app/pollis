@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, FlatList } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { useTranslation } from "react-i18next";
 import { Screen, Header } from "../../components/ui";
 import { Icon } from "../../components/icons";
@@ -28,9 +28,9 @@ import { observer } from "mobx-react-lite";
  * per thread and per conversation (#837).
  */
 function ThreadScreen() {
-  const router = useRouter();
+  const router = useNav();
   const { t } = useTranslation("nav");
-  const params = useLocalSearchParams<{
+  const params = useRouteParams<{
     threadId?: string;
     id?: string;
     kind?: string;
@@ -202,8 +202,8 @@ function ThreadScreen() {
   );
 
   return (
-    <Screen testID="screen-thread">
-      <Header
+    <Screen testID="screen-thread" aboveTabBar={router.inPane} wide>
+      <Header onBack={router.onBack}
         title={t("panel.thread")}
         subtitle={title !== t("panel.thread") ? title : undefined}
         backTo={title !== t("panel.thread") ? title : undefined}

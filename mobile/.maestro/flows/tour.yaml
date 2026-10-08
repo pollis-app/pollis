@@ -130,10 +130,15 @@ tags:
 - inputText: "Design Team"
 - tapOn:
     id: "btn-submit-group"
+# Creating lands on the Groups tab with the new group selected: tour-12 is
+# that tab's pill strip + the group's channel panel (no standalone group page).
 - extendedWaitUntil:
     visible:
-      id: "screen-group"
+      id: "btn-group-menu"
+      text: "Design Team, .*"
     timeout: 15000
+- assertVisible:
+    id: "panel-group"
 - waitForAnimationToEnd:
     timeout: 3000
 - takeScreenshot: tour-12-group
@@ -191,10 +196,14 @@ tags:
 - tapOn:
     id: "btn-action-cancel"
     optional: true
+# Phones: back from the channel to the Groups tab. iPad: the channel is the
+# two-pane's right pane (no back button) and the group panel stays on the left.
 - tapOn:
     id: "btn-back"
+    optional: true
 
-# Group pages.
+# Group pages (pushed from the Groups tab's panel; on iPad they open in the
+# right pane).
 - tapOn:
     id: "row-group-members"
     optional: true

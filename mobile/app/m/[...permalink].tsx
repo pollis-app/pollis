@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Text } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams } from "expo-router";
+import { useOpenConversation } from "../../hooks/useOpenConversation";
 import { useTranslation } from "react-i18next";
 import { Screen, Header } from "../../components/ui";
 import { semantic, type as ty } from "../../theme/tokens";
@@ -17,7 +18,7 @@ import { permalinkMissCopy } from "../../lib/permalinks";
  */
 export default function PermalinkScreen() {
   const { t } = useTranslation("mobile");
-  const router = useRouter();
+  const { openConversation } = useOpenConversation();
   const params = useLocalSearchParams<{ permalink?: string | string[] }>();
   const resolvePermalink = useResolvePermalink();
   const routeFor = useConversationRoute();
@@ -47,14 +48,10 @@ export default function PermalinkScreen() {
         return;
       }
       const route = routeFor(conversationId);
-      router.replace({
-        pathname: "/chat/[id]",
-        params: {
-          id: conversationId,
-          kind: route.kind,
-          ...(route.name ? { name: route.name } : {}),
-        },
-      });
+      openConversation(
+        { id: conversationId, kind: route.kind, name: route.name ?? undefined },
+        { replace: true },
+      );
     })();
     return () => {
       cancelled = true;

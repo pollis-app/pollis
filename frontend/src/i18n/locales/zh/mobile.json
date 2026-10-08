@@ -9,7 +9,7 @@
       "ackLabel": "我已保存安全密钥",
       "ackText": "我已把安全密钥保存在安全的地方。",
       "copyFailed": "复制失败",
-      "intro": "如果丢失这部手机，你需要用这个密钥在新设备上登录。我们无法替你找回，请把它写下来或存进密码管理器。",
+      "intro": "如果丢失这台设备，你需要用这个密钥在新设备上登录。我们无法替你找回，请把它写下来或存进密码管理器。",
       "title": "保存你的安全密钥",
       "warning": "任何拿到这个密钥的人都能以你的身份登录。"
     },
@@ -53,7 +53,7 @@
       "yourEmail": "你的邮箱"
     },
     "pin": {
-      "createIntro": "你将用这个 PIN 码在这部手机上解锁 Pollis。它不会离开这部手机。",
+      "createIntro": "你将用这个 PIN 码在这台设备上解锁 Pollis。它不会离开这台设备。",
       "createTitle": "新设备 PIN 码",
       "invalidPin": "PIN 码无效。",
       "noActiveUser": "没有当前用户。请重新登录。",
@@ -98,7 +98,7 @@
   "direct": {
     "acceptRequest": "接受请求",
     "blockSender": "屏蔽发送者",
-    "empty": "还没有私信。",
+    "empty": "还没有私信",
     "loadFailed": "无法加载对话。",
     "loading": "正在加载对话…",
     "wantsToMessage": "想给你发消息",
@@ -155,6 +155,7 @@
     },
     "emoji": {
       "adminsOnly": "只有群组管理员才能添加或移除表情。",
+      "loadFailed": "无法加载此群组的表情。",
       "empty": "还没有自定义表情。",
       "pickAndUpload": "选择图片并上传",
       "sizeKb_other": "{{count}} KB",
@@ -308,7 +309,7 @@
       "sendCode": "发送验证码"
     },
     "deleteAccount": {
-      "consequences": "这会永久删除你的 Pollis 账户。你将被移出所有群组和对话，你的设备会被注销，此手机上的加密数据也会被清除。其他成员会保留他们自己的历史消息副本，但删除后发送的任何内容都无法再用你的密钥读取。",
+      "consequences": "这会永久删除你的 Pollis 账户。你将被移出所有群组和对话，你的设备会被注销，此设备上的加密数据也会被清除。其他成员会保留他们自己的历史消息副本，但删除后发送的任何内容都无法再用你的密钥读取。",
       "contextPath": "{{parent}} · {{child}}",
       "failed": "无法删除账户。没有任何更改，请重试。",
       "irreversible": "此操作无法撤销。没有宽限期，也无法恢复。",
@@ -379,7 +380,7 @@
       "approve": "批准",
       "approveA11y": "批准设备注册",
       "autoLockA11y": "自动锁定 {{label}}",
-      "autoLockDescription": "一段时间不用时锁定 Pollis。只影响这部手机。",
+      "autoLockDescription": "一段时间不用时锁定 Pollis。只影响这台设备。",
       "current": "当前",
       "daysAgo_other": "{{count}} 天前",
       "deleteAccountSub": "永久删除你的账户并清除此设备",

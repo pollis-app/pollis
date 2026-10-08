@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
@@ -26,7 +26,14 @@ import {
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useLayoutClass } from "../../hooks/useLayoutClass";
-import { TwoPane, DetailPlaceholder } from "../../components/MasterDetail";
+import {
+  TwoPane,
+  DetailPlaceholder,
+  DetailPane,
+  PaneProvider,
+  CenteredColumn,
+} from "../../components/MasterDetail";
+import { usePaneStack } from "../../components/pane/paneContext";
 import { ChatView } from "../chat/[id]";
 
 function Direct() {
@@ -41,6 +48,13 @@ function Direct() {
   // On regular (iPad) width the list is the left column of a two-pane
   // master-detail; on compact it is the whole screen with push navigation.
   const isRegular = useLayoutClass() === "regular";
+  // The right pane's own page stack (conversation info, a profile…) on
+  // regular width; another conversation starts it over.
+  const pane = usePaneStack();
+  const resetPane = pane.api.reset;
+  useEffect(() => {
+    resetPane();
+  }, [selectedConversationId, resetPane]);
   const selectedDm = dms.find((d) => d.id === selectedConversationId);
   const selectedHandle = selectedDm?.user2_identifier || undefined;
   // Local filter over the conversations already loaded — no extra lookup.
@@ -200,6 +214,9 @@ function Direct() {
               selected={isRegular && selectedConversationId === d.id}
               onPress={() => {
                 setSelectedConversationId(d.id);
+                // Re-opening the conversation already shown closes any page
+                // over it.
+                resetPane();
                 // Opening a conversation clears its unread count (desktop
                 // does the same in its DM page).
                 appStore.markRead(d.id);
@@ -219,27 +236,44 @@ function Direct() {
     </>
   );
 
-  return (
-    <Screen testID="screen-direct" aboveTabBar>
-      {isRegular ? (
+  // Regular width: list + conversation side by side once there is something
+  // to pick (or a conversation was just opened from elsewhere, ahead of the
+  // list's refetch); the empty state is one centred column.
+  const hasList =
+    dms.length > 0 || requests.length > 0 || !!selectedConversationId;
+  let body: React.ReactNode = listColumn;
+  if (isRegular && hasList) {
+    body = (
+      <PaneProvider pane={pane}>
         <TwoPane
           list={listColumn}
           detail={
-            selectedConversationId ? (
-              <ChatView
-                conversationId={selectedConversationId}
-                kind="dm"
-                embedded
-                name={selectedHandle}
-              />
-            ) : (
-              <DetailPlaceholder />
-            )
+            <DetailPane
+              pane={pane}
+              root={
+                selectedConversationId ? (
+                  <ChatView
+                    conversationId={selectedConversationId}
+                    kind="dm"
+                    embedded
+                    name={selectedHandle}
+                  />
+                ) : (
+                  <DetailPlaceholder />
+                )
+              }
+            />
           }
         />
-      ) : (
-        listColumn
-      )}
+      </PaneProvider>
+    );
+  } else if (isRegular) {
+    body = <CenteredColumn>{listColumn}</CenteredColumn>;
+  }
+
+  return (
+    <Screen testID="screen-direct" aboveTabBar wide>
+      {body}
     </Screen>
   );
 }

@@ -35,21 +35,22 @@ tags:
 - tapOn:
     id: "btn-submit-group"
 
-# Creating navigates straight into the new group's detail screen (not
-# back to the groups list) — better UX than assumed, matching Slack/Discord's
-# drop-into-the-new-channel pattern. Its #General channel should be visible.
+# Creating lands on the Groups tab with the new group selected (pill strip +
+# its channel panel, tab bar visible) — not a pushed group page. Wait for
+# THIS group's panel header (the account may already have other groups).
 - extendedWaitUntil:
     visible:
-      id: "screen-group"
+      id: "btn-group-menu"
+      text: "E2E Test Group, .*"
     timeout: 15000
+- assertVisible:
+    id: "panel-group"
+# Its #General channel should be visible.
 - assertVisible: "General"
 - takeScreenshot: groups-03-created
 
 # Without the toggle, a new group has no channel at all (desktop parity).
-- tapOn:
-    id: "btn-back"
-- tapOn:
-    id: "tab-groups"
+# Already on the Groups tab — no back step.
 # Now there IS a group: the tab shows the pill strip + panel, and create is in
 # the "+" sheet.
 - tapOn:
@@ -64,9 +65,15 @@ tags:
 - inputText: "E2E No Channel Group"
 - tapOn:
     id: "btn-submit-group"
+# Creating lands on the Groups tab with the new group selected (pill strip +
+# its channel panel, tab bar visible) — not a pushed group page. Wait for
+# THIS group's panel header (the account may already have other groups).
 - extendedWaitUntil:
     visible:
-      id: "screen-group"
+      id: "btn-group-menu"
+      text: "E2E No Channel Group, .*"
     timeout: 15000
+- assertVisible:
+    id: "panel-group"
 - assertNotVisible: "General"
 - takeScreenshot: groups-04-created-without-channel

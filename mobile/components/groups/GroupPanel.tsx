@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { useRouter } from "expo-router";
+import { useNav } from "../pane/paneContext";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
 import { Divider, IconButton } from "../ui";
@@ -50,7 +50,8 @@ function GroupPanelImpl({
   bottomInset?: number;
 }) {
   const { t } = useTranslation("mobile");
-  const router = useRouter();
+  // iPad two-pane: group pages open in the detail pane (useNav).
+  const router = useNav();
   const [menuOpen, setMenuOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
 
