@@ -78,6 +78,8 @@ function EmergencyKit() {
     return null;
   }
 
+  const keyGroups = pendingSecretKey.split("-");
+
   const onContinue = () => {
     setPendingSecretKey(null);
     router.replace("/(auth)/initializing");
@@ -129,17 +131,28 @@ function EmergencyKit() {
 
         <View style={{ gap: 12 }}>
           <Card>
-            <Text
-              selectable
-              style={{
-                fontFamily: fonts.mono400,
-                fontSize: 17,
-                lineHeight: 26,
-                color: semantic.text,
-              }}
+            {/* One Text per hyphen group so a line only ever breaks between
+                groups — Android's breaker otherwise strands a lone "-86394".
+                Copy and Save below carry the exact string. */}
+            <View
+              accessible
+              accessibilityLabel={pendingSecretKey}
+              style={{ flexDirection: "row", flexWrap: "wrap" }}
             >
-              {pendingSecretKey}
-            </Text>
+              {keyGroups.map((g, i) => (
+                <Text
+                  key={i}
+                  style={{
+                    fontFamily: fonts.mono400,
+                    fontSize: 17,
+                    lineHeight: 26,
+                    color: semantic.text,
+                  }}
+                >
+                  {i < keyGroups.length - 1 ? `${g}-` : g}
+                </Text>
+              ))}
+            </View>
           </Card>
 
           <View style={{ flexDirection: "row", gap: 8 }}>

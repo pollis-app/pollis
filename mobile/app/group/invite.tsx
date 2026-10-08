@@ -99,7 +99,7 @@ export default function InviteToGroup() {
   };
 
   return (
-    <Screen testID="screen-group-invite" aboveTabBar={router.inPane} centered>
+    <Screen testID="screen-group-invite" aboveTabBar={router.inPane}>
       <Header onBack={router.onBack} title={t("mobile:group.panel.invite")} subtitle={group?.name} />
       <Body contentContainerStyle={{ paddingHorizontal: space.xxl }}>
         <View style={{ paddingTop: space.xxl, gap: space.lg }}>

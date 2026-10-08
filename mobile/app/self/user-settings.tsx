@@ -67,7 +67,7 @@ function UserSettings() {
   const shownName = displayName || handle || currentUser?.username || "";
 
   return (
-    <Screen testID="screen-self-user-settings" centered>
+    <Screen testID="screen-self-user-settings">
       <Header title={t("mobile:self.hub.accountDetails")} backTo={t("mobile:self.title")} />
       <Body contentContainerStyle={{ paddingHorizontal: space.xxl, paddingTop: space.xxl, gap: space.xxxl }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.xl }}>

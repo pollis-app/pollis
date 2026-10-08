@@ -95,7 +95,7 @@ function ChangeEmail() {
   const error = requestOtp.error ?? verify.error;
 
   return (
-    <Screen testID="screen-self-change-email" centered>
+    <Screen testID="screen-self-change-email">
       <Header
         title={t("mobile:self.changeEmail.title")}
         backTo={t("mobile:self.hub.accountDetails")}

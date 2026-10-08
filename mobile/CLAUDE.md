@@ -772,6 +772,11 @@ renders the route's own component. Those screens read params with
 to `<Header>`. Opening a conversation/group from elsewhere goes through
 `hooks/useOpenConversation` (phones: push; iPad: select it + return to its tab);
 `chat/[id]` and `group/[id]` redirect to the tab on regular width as a net.
+A selected group with no conversation open auto-opens its first channel in
+the right pane (Groups tab, while focused). Content width on iPad: every
+full-screen page and every pane page uses `<Screen>`'s one
+`layout.screenMaxWidth` column; only auth steps pass `centered`
+(`layout.authMaxWidth`) — tests/screen-widths.test.ts pins this.
 
 ## Backend integration — wired vs pending
 

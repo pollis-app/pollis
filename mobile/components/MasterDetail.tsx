@@ -135,14 +135,15 @@ export function TwoPane({
 }
 
 // A tab's empty state on regular width: no two-pane (there is nothing to
-// select), one readable column centred on the screen.
+// select), one column centred on the screen — the same width as every other
+// full-screen page (`layout.screenMaxWidth`).
 export function CenteredColumn({ children }: { children: ReactNode }) {
   return (
     <View
       style={{
         flex: 1,
         width: "100%",
-        maxWidth: layout.readableMaxWidth,
+        maxWidth: layout.screenMaxWidth,
         alignSelf: "center",
       }}
     >

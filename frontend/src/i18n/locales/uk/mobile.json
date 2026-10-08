@@ -417,7 +417,7 @@
       "daysAgo_many": "{{count}} д тому",
       "daysAgo_other": "{{count}} д тому",
       "deleteAccountSub": "Назавжди видалити обліковий запис і стерти дані на цьому пристрої",
-      "deviceSub": "додано {{paired}} · востаннє в мережі {{lastSeen}}",
+      "deviceSub": "Додано {{paired}} · востаннє в мережі {{lastSeen}}",
       "enrollmentFailed": "Не вдалося обробити запит на додавання пристрою.",
       "eventsEmpty": "Подій безпеки поки немає.",
       "hoursAgo_one": "{{count}} год тому",

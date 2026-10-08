@@ -29,7 +29,7 @@ export default function DMRequests() {
   const blockUser = useBlockUser();
 
   return (
-    <Screen testID="screen-dm-requests" centered>
+    <Screen testID="screen-dm-requests">
       <Header title={t("direct.requests")} backTo={t("tabs.direct")} />
       <Body contentContainerStyle={{ padding: space.xxl }}>
         {!isLoading && requests.length === 0 ? (

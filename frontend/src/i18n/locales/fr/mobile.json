@@ -395,7 +395,7 @@
       "daysAgo_one": "il y a {{count}} j",
       "daysAgo_other": "il y a {{count}} j",
       "deleteAccountSub": "Supprimer définitivement votre compte et effacer cet appareil",
-      "deviceSub": "associé {{paired}} · vu {{lastSeen}}",
+      "deviceSub": "Associé {{paired}} · vu {{lastSeen}}",
       "enrollmentFailed": "Impossible de traiter la demande d'enrôlement.",
       "eventsEmpty": "Aucun événement de sécurité pour l'instant.",
       "hoursAgo_one": "il y a {{count}} h",

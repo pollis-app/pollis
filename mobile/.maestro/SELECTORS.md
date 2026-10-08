@@ -111,7 +111,7 @@ delete/remove/revoke), the record id is appended to keep the selector unique
 | --- | --- | --- |
 | `group/members` | `screen-group-members` | `row-member-<userId>`, `btn-toggle-role-<userId>` (make/remove admin), `btn-remove-member-<userId>` |
 | `group/requests` | `screen-group-requests` | `row-request-<id>`, `btn-approve-<id>`, `btn-reject-<id>` |
-| `group/settings` | `screen-group-settings` | `input-group-name`, `input-group-description`, `row-channel-<id>`, `btn-delete-channel-<id>`, `row-group-emoji` (→ `group/emoji`), `btn-settings-leave-group` (everyone, two taps), `btn-delete-group` (owner-only, two taps), `btn-save` |
+| `group/settings` | `screen-group-settings` | `input-group-name`, `input-group-description`, `row-channel-<id>`, `btn-delete-channel-<id>`, `row-group-emoji` (→ `group/emoji`), `btn-settings-leave-group` (everyone, two taps), `btn-delete-group` (admins, two taps), `btn-save` |
 | `group/emoji` | `screen-group-emoji` | `input-emoji-shortcode`, `btn-upload-emoji`, `row-emoji-<shortcode>`, `btn-remove-emoji-<shortcode>` |
 | `group/invite` | `screen-group-invite` | `input-user-search`, `btn-send-invite`; invite links: `chip-expiry-<id>`, `chip-uses-<id>`, `btn-create-invite-link`, then `created-invite-link-url`, `btn-copy-invite-link`, `btn-share-invite-link`; `row-manage-invite-links` (→ `group/invite-links`). No Cancel button (`btn-cancel` was removed) — leave with `btn-back`. |
 | `group/invite-links` | `screen-group-invite-links` | `row-invite-link-<id>`, `btn-revoke-invite-link-<id>` |
@@ -121,7 +121,7 @@ delete/remove/revoke), the record id is appended to keep the selector unique
 ## Coverage notes / gaps (vs. the requested selector list)
 
 - `group/settings` ends with `btn-settings-leave-group` (everyone) and the
-  owner-only `btn-delete-group`; the group menu sheet keeps its own
+  admin-only `btn-delete-group`; the group menu sheet keeps its own
   `btn-group-menu` → `btn-leave-group`. No `toggle-*` exists on
   this screen either (group settings are name/description text fields + channel
   management only).

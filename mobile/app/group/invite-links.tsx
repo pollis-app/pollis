@@ -74,7 +74,7 @@ export default function GroupInviteLinks() {
   };
 
   return (
-    <Screen testID="screen-group-invite-links" aboveTabBar={router.inPane} centered>
+    <Screen testID="screen-group-invite-links" aboveTabBar={router.inPane}>
       <Header onBack={router.onBack} title={t("mobile:group.inviteLinks.title")} subtitle={group?.name} />
       <Body contentContainerStyle={{ padding: space.xxl, gap: space.lg }}>
         <Hint>{t("mobile:group.inviteLinks.blurb")}</Hint>

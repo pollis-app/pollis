@@ -57,7 +57,7 @@ function NewGroup() {
   };
 
   return (
-    <Screen testID="screen-group-new" centered>
+    <Screen testID="screen-group-new">
       <Header title={t("mobile:group.new.title")} />
       <Body contentContainerStyle={{ padding: space.xxl, gap: space.xxl }}>
         <LabeledField label={t("mobile:group.new.nameLabel")}>

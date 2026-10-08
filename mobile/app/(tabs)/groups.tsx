@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Text, View } from "react-native";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useIsFocused, useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
 import { Screen, Header, Body, Button } from "../../components/ui";
@@ -95,6 +95,35 @@ function Groups() {
       }
     }, [isRegular]),
   );
+
+  // Regular width: a selected group with no conversation open shows its
+  // first channel (#General) in the right pane rather than "Select a
+  // conversation" — e.g. right after creating a group, or switching pills.
+  // Only while this tab is focused: the tab stays mounted under Direct, and
+  // selecting a channel there would close the open DM. When the selection is
+  // a group the list has not refetched yet (just created), wait for it rather
+  // than opening a channel of the fallback group. Compact never auto-opens.
+  const focused = useIsFocused();
+  const autoChannel =
+    isRegular &&
+    focused &&
+    !selectedChannelId &&
+    current &&
+    (selectedGroupId === null || selectedGroupId === current.id)
+      ? (current.channels[0] ?? null)
+      : null;
+  const autoGroupId = current?.id ?? null;
+  useEffect(() => {
+    if (!autoChannel || !autoGroupId) {
+      return;
+    }
+    if (appStore.selectedGroupId !== autoGroupId) {
+      appStore.setSelectedGroupId(autoGroupId);
+    }
+    appStore.setSelectedChannelId(autoChannel.id);
+    // Showing a conversation clears its unread count, as opening it does.
+    appStore.markRead(autoChannel.id);
+  }, [autoChannel, autoGroupId]);
 
   const selectGroup = (id: string) => {
     resetPane();

@@ -255,7 +255,7 @@ export default function Security() {
   const sectionGap = { gap: space.md };
 
   return (
-    <Screen testID="screen-self-security" centered>
+    <Screen testID="screen-self-security">
       <Header title={t("security.title")} backTo={t("mobile:self.title")} />
       <ScrollView
         ref={scrollRef}

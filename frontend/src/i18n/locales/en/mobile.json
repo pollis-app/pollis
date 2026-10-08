@@ -401,7 +401,7 @@
       "daysAgo_one": "{{count}}d ago",
       "daysAgo_other": "{{count}}d ago",
       "deleteAccountSub": "Permanently delete your account and wipe this device",
-      "deviceSub": "paired {{paired}} · last seen {{lastSeen}}",
+      "deviceSub": "Paired {{paired}} · last seen {{lastSeen}}",
       "enrollmentFailed": "Couldn't process the enrollment request.",
       "eventsEmpty": "No security events yet.",
       "hoursAgo_one": "{{count}}h ago",

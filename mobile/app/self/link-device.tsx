@@ -143,7 +143,7 @@ export default function LinkDevice() {
 
   if (step.kind === "pin") {
     return (
-      <Screen testID="screen-link-device" centered>
+      <Screen testID="screen-link-device">
         {crumb}
         {/* iPad: the PIN block (heading, dots, keypad) centred vertically
             rather than the keypad pinned to the bottom edge. */}
@@ -167,7 +167,7 @@ export default function LinkDevice() {
 
   if (step.kind === "linked") {
     return (
-      <Screen testID="screen-link-device" centered>
+      <Screen testID="screen-link-device">
         {crumb}
         <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 32 }}>
           <Heading testID="link-device-done" title={t("linkDevice.linked", { name: step.name })} />
@@ -187,7 +187,7 @@ export default function LinkDevice() {
   if (error || status.state === "tampered" || status.state === "expired") {
     const tampered = status.state === "tampered";
     return (
-      <Screen testID="screen-link-device" centered>
+      <Screen testID="screen-link-device">
         {crumb}
         <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 32 }}>
           <Heading
@@ -210,7 +210,7 @@ export default function LinkDevice() {
 
   if (status.state === "ready_to_approve") {
     return (
-      <Screen testID="screen-link-device" centered>
+      <Screen testID="screen-link-device">
         {crumb}
         <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 32 }}>
           <Heading
@@ -242,7 +242,7 @@ export default function LinkDevice() {
 
   if (status.state === "claimed") {
     return (
-      <Screen testID="screen-link-device" centered>
+      <Screen testID="screen-link-device">
         {crumb}
         <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 32, gap: 32 }}>
           <Heading testID="link-device-claimed" title={t("linkDevice.claimedTitle")} subtitle={t("linkDevice.claimed", { name })} />
@@ -285,7 +285,7 @@ function ShowCode({ handle, crumb, onCancel }: { handle: DeviceLinkHandle; crumb
   };
 
   return (
-    <Screen testID="screen-link-device" centered>
+    <Screen testID="screen-link-device">
       {crumb}
       <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 32, gap: 28 }}>
         <Heading

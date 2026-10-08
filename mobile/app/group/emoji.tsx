@@ -180,7 +180,7 @@ function GroupEmoji() {
 
         {iAmAdmin ? (
           <View>
-            <SectionTitle style={{ paddingHorizontal: 0 }}>{t("manage.add")}</SectionTitle>
+            <SectionTitle style={{ paddingHorizontal: 0, paddingBottom: space.xxl }}>{t("manage.add")}</SectionTitle>
             <View style={{ gap: space.lg }}>
               <LabeledField
                 label={t("manage.shortcodeLabel")}

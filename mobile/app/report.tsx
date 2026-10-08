@@ -77,7 +77,7 @@ export default function ReportScreen() {
 
   if (done) {
     return (
-      <Screen testID="screen-report" centered>
+      <Screen testID="screen-report">
         {header}
         <Body contentContainerStyle={{ padding: space.xxl }}>
           <View
@@ -109,7 +109,7 @@ export default function ReportScreen() {
   }
 
   return (
-    <Screen testID="screen-report" centered>
+    <Screen testID="screen-report">
       {header}
       <Body contentContainerStyle={{ padding: space.xxl, gap: space.xxl }}>
         <View style={{ gap: space.sm }}>

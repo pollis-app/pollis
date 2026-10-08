@@ -129,7 +129,7 @@ export default function InviteLanding() {
           : t("mobile:invite.failed");
 
   return (
-    <Screen testID="screen-invite-landing" centered>
+    <Screen testID="screen-invite-landing">
       {/* Nothing to go back to: a link opened this screen. */}
       <Header title={t("mobile:invite.groupInvite")} hideBack />
       <Body contentContainerStyle={{ padding: space.xxl }}>

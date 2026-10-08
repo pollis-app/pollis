@@ -52,7 +52,7 @@ export default function NewDM() {
     !search.isFetching && !search.isError && submitted.length >= 2 && !found;
 
   return (
-    <Screen testID="screen-dm-new" centered>
+    <Screen testID="screen-dm-new">
       <Header title={t("direct.newMessage")} backTo={t("tabs.direct")} />
       <Body contentContainerStyle={{ padding: space.xxl, gap: space.lg }}>
         <View style={{ gap: space.sm }}>

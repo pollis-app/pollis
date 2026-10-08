@@ -22,6 +22,7 @@ import { buttonColors, checkboxColors, controlDisabled, type ControlSurface } fr
 import { useTheme } from "./theme";
 import { useLayoutClass } from "../hooks/useLayoutClass";
 import { useAndroidKeyboardInset } from "../hooks/useAndroidKeyboardInset";
+import { PaneEntryContext } from "./pane/paneContext";
 import { activeLocale } from "../i18n";
 import { Icon, isIconElement } from "./icons";
 
@@ -148,9 +149,11 @@ export function BleedHairline({ edge }: { edge: "top" | "bottom" }) {
 // On `regular` width (iPad) the content sits in a centred column at most
 // `layout.screenMaxWidth` wide (review6 #3), so fields and buttons never
 // stretch across a 1300pt window; hairlines drawn by Header / BottomAction /
-// BleedHairline still run the full width. Screens that are genuinely wide —
-// a chat, a two-pane master-detail — pass `wide` to opt out. On `compact`
-// (phones, narrow panes) nothing changes.
+// BleedHairline still run the full width. That one width is shared by every
+// full-screen page and every page drawn in the two-pane's right pane; only
+// the auth steps pass `centered` for the narrower `layout.authMaxWidth`.
+// Screens that are genuinely wide — a chat, a two-pane master-detail — pass
+// `wide` to opt out. On `compact` (phones, narrow panes) nothing changes.
 export function Screen({
   children,
   testID,
@@ -162,8 +165,9 @@ export function Screen({
   // Each route sets `screen-<route>` here so e2e flows have one stable root
   // anchor per screen. Inert in production.
   testID?: string;
-  // Single-column forms (auth, small settings forms): the narrower
-  // `layout.readableMaxWidth` column instead of `screenMaxWidth`.
+  // Auth steps only (app/(auth)): the narrower `layout.authMaxWidth`
+  // column instead of `screenMaxWidth`. Ignored inside the iPad detail pane,
+  // whose pages all share one width.
   centered?: boolean;
   // Opt out of the centred column: content spans the full width (chat,
   // two-pane screens, anything that lays out its own columns).
@@ -181,7 +185,10 @@ export function Screen({
   // Until it is measured, assume the window.
   const [measured, setMeasured] = React.useState<number | null>(null);
   const width = measured ?? windowWidth;
-  const maxWidth = centered ? layout.readableMaxWidth : layout.screenMaxWidth;
+  // Inside the iPad detail pane every page uses the same column, so a pane
+  // page never nests a narrower inset of its own.
+  const inPane = React.useContext(PaneEntryContext) !== null;
+  const maxWidth = centered && !inPane ? layout.authMaxWidth : layout.screenMaxWidth;
   const column = !wide && cls === "regular";
   const bleed = column ? Math.max(0, (width - maxWidth) / 2) : 0;
   const androidKeyboard = useAndroidKeyboardInset();

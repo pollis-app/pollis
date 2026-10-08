@@ -7,6 +7,7 @@ import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
 import type { Channel, Group } from "../../types";
+import { groupInviteQueryKeys, type GroupMember } from "./useGroupInvites";
 
 export interface GroupWithChannels extends Group {
   channels: Channel[];
@@ -90,12 +91,33 @@ export function useCreateGroup() {
         createDefaultVoiceChannel: false,
       });
     },
-    onSuccess: () => {
+    onSuccess: (group) => {
       queryClient.invalidateQueries({
         queryKey: groupQueryKeys.userGroups(currentUser?.id ?? null),
       });
       queryClient.invalidateQueries({
         queryKey: groupQueryKeys.userGroupsWithChannels(currentUser?.id ?? null),
+      });
+      // The app lands on the new group's panel straight away. Its roster read
+      // can lag the create, so seed it with the one member it is known to
+      // have — the creator, as admin (core inserts that row with the group) —
+      // and the panel shows "1 member" on landing instead of no count. The
+      // seed is fresh for the query's staleTime; later reads replace it.
+      if (currentUser) {
+        const creator: GroupMember = {
+          user_id: currentUser.id,
+          username: currentUser.username,
+          role: "admin",
+          joined_at: new Date().toISOString(),
+        };
+        queryClient.setQueryData<GroupMember[]>(
+          groupInviteQueryKeys.members(group.id),
+          (cached) => (cached && cached.length > 0 ? cached : [creator]),
+        );
+      }
+      // The channel list (#General, when opted in) is read on landing too.
+      queryClient.invalidateQueries({
+        queryKey: groupQueryKeys.channels(group.id),
       });
     },
   });

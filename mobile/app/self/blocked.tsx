@@ -12,7 +12,7 @@ export default function Blocked() {
   const unblock = useUnblockUser();
 
   return (
-    <Screen testID="screen-self-blocked" centered>
+    <Screen testID="screen-self-blocked">
       <Header
         title={t("mobile:self.security.blockedUsers")}
         subtitle={isLoading ? undefined : String(blocked.length)}

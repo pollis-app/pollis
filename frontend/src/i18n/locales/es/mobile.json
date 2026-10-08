@@ -395,7 +395,7 @@
       "daysAgo_one": "hace {{count}} d",
       "daysAgo_other": "hace {{count}} d",
       "deleteAccountSub": "Elimina tu cuenta de forma permanente y borra este dispositivo",
-      "deviceSub": "vinculado {{paired}} · visto por última vez {{lastSeen}}",
+      "deviceSub": "Vinculado {{paired}} · visto por última vez {{lastSeen}}",
       "enrollmentFailed": "No se pudo procesar la solicitud de registro.",
       "eventsEmpty": "Aún no hay eventos de seguridad.",
       "hoursAgo_one": "hace {{count}} h",

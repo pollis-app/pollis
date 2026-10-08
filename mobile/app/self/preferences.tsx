@@ -113,7 +113,7 @@ export default function Preferences() {
   };
 
   return (
-    <Screen testID="screen-self-preferences" centered>
+    <Screen testID="screen-self-preferences">
       <Header title={t("preferences.title")} backTo={t("mobile:self.title")} />
       <ScrollView
         ref={scrollRef}

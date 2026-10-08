@@ -45,7 +45,7 @@ function DeleteAccount() {
   const confirmLabel = t("security.deleteConfirmLabel", { word: DELETE_CONFIRM_WORD });
 
   return (
-    <Screen testID="screen-self-delete-account" centered>
+    <Screen testID="screen-self-delete-account">
       <Header title={t("mobile:self.deleteAccount.title")} backTo={t("security.title")} />
       <Body contentContainerStyle={{ paddingHorizontal: space.xxl, paddingTop: space.xxl, gap: space.xxl }}>
         <Card style={{ gap: space.lg }}>

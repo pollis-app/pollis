@@ -80,6 +80,11 @@ tags:
       id: "screen-group-settings"
     timeout: 10000
 - takeScreenshot: channel-menu-03-group-settings
+# The creator is an admin, and admins may delete the group (the DS gate).
+- scrollUntilVisible:
+    element:
+      id: "btn-delete-group"
+    direction: DOWN
 - tapOn:
     id: "btn-back"
 - assertVisible:

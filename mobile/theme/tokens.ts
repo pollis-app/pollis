@@ -343,11 +343,15 @@ export const layout = {
   // Deprecated: the old bottom context strip.
   ctx: 52,
   statusBar: 38,
-  // Max width for a single-column screen on regular (iPad) width.
-  readableMaxWidth: 560,
-  // Max width of every <Screen>'s content column on regular (iPad) width,
-  // unless the screen opts out with `wide` (chat, two-pane).
+  // The ONE content width on regular (iPad) width: every full-screen page
+  // (tab roots, sub pages, forms, a tab's empty state) and every page drawn
+  // in the two-pane's right pane centres its content in a column at most
+  // this wide, unless it opts out with `wide` (chat, two-pane).
   screenMaxWidth: 640,
+  // The narrower column the auth steps share (email, OTP, PIN, link,
+  // enrollment, emergency kit, initializing) — `<Screen centered>`. Nothing
+  // outside app/(auth) uses it.
+  authMaxWidth: 560,
   // Max width of a bottom sheet card on regular width (centred; the backdrop
   // still covers the whole screen).
   sheetMaxWidth: 520,

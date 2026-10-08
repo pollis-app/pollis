@@ -46,8 +46,8 @@ function GroupSettings() {
   const leaveGroup = useLeaveGroup();
 
   const myRole = members.find((m) => m.user_id === currentUser?.id)?.role;
+  // Migration 000008 renamed 'owner' to 'admin'; the DS lets any admin delete.
   const iAmAdmin = myRole === "admin" || myRole === "owner";
-  const iAmOwner = myRole === "owner";
 
   const [name, setName] = useState(group?.name ?? "");
   const [description, setDescription] = useState(group?.description ?? "");
@@ -246,7 +246,7 @@ function GroupSettings() {
               disabled={leaveGroup.isPending || !id}
               onPress={onLeaveGroup}
             />
-            {iAmOwner ? (
+            {iAmAdmin ? (
               <ListRow
                 testID="btn-delete-group"
                 glyph={<Icon.trash size={20} color={semantic.accent} />}
