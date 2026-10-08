@@ -70,6 +70,8 @@ export interface SearchPage {
 }
 
 export const searchQueryKeys = {
+  /** Every message search — invalidated when the local message store changes. */
+  all: ["search"] as const,
   messages: (q: string, sort: SearchSort | null) =>
     ["search", "messages", q, sort] as const,
 };

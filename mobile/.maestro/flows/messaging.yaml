@@ -85,7 +85,11 @@ tags:
 - takeScreenshot: messaging-03-actions
 - tapOn:
     id: "btn-edit"
-- tapOn:
+# No tap on the field: the edit bar autofocuses it with the caret after the
+# text. A tap at the field's centre moves the caret there, and in the
+# redesigned bar (round buttons either side of the field) the centre falls
+# inside "hello from maestro" on Android, so the suffix landed mid-word.
+- assertVisible:
     id: "input-edit-composer"
 - inputText: " (edited)"
 - tapOn:

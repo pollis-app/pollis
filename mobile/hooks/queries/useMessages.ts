@@ -24,6 +24,7 @@ import i18n from "../../i18n";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
 import type { MessageAttachment } from "../../types";
+import { searchQueryKeys } from "./useSearch";
 import {
   buildMessageContent,
   type PickedAttachment,
@@ -360,6 +361,10 @@ export function useSendMessage(
       return { previous, optimisticId, key, threadId: vars.threadId };
     },
     onSuccess: (confirmed, _vars, ctx) => {
+      // The row reaches the local store (and its FTS index) only when
+      // send_message resolves — after the optimistic stub is already on
+      // screen. A search that ran in between cached "no matches"; drop it.
+      queryClient.invalidateQueries({ queryKey: searchQueryKeys.all });
       if (!ctx) {
         return;
       }
@@ -494,6 +499,10 @@ export function useEditMessage(
       );
       return { previous, key };
     },
+    onSuccess: () => {
+      // The local store (and its search index) changed; cached hits are stale.
+      queryClient.invalidateQueries({ queryKey: searchQueryKeys.all });
+    },
     onError: (_e, _vars, ctx) => {
       if (ctx?.previous) {
         queryClient.setQueryData(ctx.key, ctx.previous);
@@ -530,6 +539,10 @@ export function useDeleteMessage(
         mapPages(cache, (msgs) => msgs.filter((m) => m.id !== messageId)),
       );
       return { previous, key };
+    },
+    onSuccess: () => {
+      // The local store (and its search index) changed; cached hits are stale.
+      queryClient.invalidateQueries({ queryKey: searchQueryKeys.all });
     },
     onError: (_e, _vars, ctx) => {
       if (ctx?.previous) {
@@ -582,6 +595,8 @@ export function useIngestConversation() {
         queryClient.invalidateQueries({
           queryKey: messageQueryKeys.threadSummaries(conversationId),
         });
+        // Newly decrypted rows are newly searchable.
+        queryClient.invalidateQueries({ queryKey: searchQueryKeys.all });
       } catch (e) {
         // Best-effort — ingest is advisory. The next refetch will retry.
         console.warn("[useIngestConversation] ingest failed:", e);
