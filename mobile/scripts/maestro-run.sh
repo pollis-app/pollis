@@ -142,7 +142,7 @@ for f in "${FLOW_FILES[@]}"; do
   # `${arr[@]+"${arr[@]}"}`: macOS's bash 3.2 treats an EMPTY array as unbound
   # under `set -u`, which killed every Android run before Maestro started.
   maestro ${DEVICE_SEL[@]+"${DEVICE_SEL[@]}"} test --debug-output "$DEBUG" \
-    ${ENV_ARGS[@]+"${ENV_ARGS[@]}"} -e MAESTRO_EMAIL="$(fresh_email "$fname")" "$f" || {
+    ${ENV_ARGS[@]+"${ENV_ARGS[@]}"} -e MAESTRO_EMAIL="$(fresh_email "$PLATFORM-$fname")" "$f" || {
     FAILED+=("$fname")
     echo "!! $fname reported failures — screenshots (incl. the failing state) are in $OUT" >&2
   }

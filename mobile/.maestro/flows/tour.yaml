@@ -321,10 +321,13 @@ tags:
 - takeScreenshot: tour-31-security-bottom
 
 # Link a new device: PIN, the QR, the copyable code.
+# Centre it: scrolled only to the top edge, the row sits partly under the
+# Header and the tap lands on the header instead of the row.
 - scrollUntilVisible:
     element:
       id: "row-link-device"
     direction: UP
+    centerElement: true
     optional: true
 - tapOn:
     id: "row-link-device"

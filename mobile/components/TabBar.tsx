@@ -1,4 +1,4 @@
-import { View, Pressable, Text } from "react-native";
+import { View, Pressable, Text, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
@@ -47,7 +47,9 @@ export const TabBar = observer(function TabBar({ state, navigation }: any) {
   };
   return (
     <View
-      accessibilityRole="tabbar"
+      // "tabbar" exists only on iOS; Android throws "Invalid accessibility
+      // role value: tabbar" and crashes the moment the tab bar mounts.
+      accessibilityRole={Platform.OS === "ios" ? "tabbar" : "tablist"}
       style={{
         flexDirection: "row",
         height: layout.tabBar + insets.bottom,
