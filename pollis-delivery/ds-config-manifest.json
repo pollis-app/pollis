@@ -46,6 +46,32 @@
     "keys": ["PORT", "POLLIS_DS_REQUIRE_AUTH", "POLLIS_DS_WATERMARK_STALE_MONTHS"]
   },
 
+  "optional_container_vars": {
+    "$comment": [
+      "Non-secret tunables an environment MAY set as a wrangler `var`; unset means the DS's",
+      "compiled-in default. Must be read by the DS and listed in TUNABLE_VAR_KEYS in",
+      "worker/index.ts (forwarded only when set). Neither wrangler config is required to set",
+      "them. Today only dev sets the two OTP tiers: the mobile e2e suites sign up many",
+      "accounts from one IP. Prod keeps the defaults."
+    ],
+    "keys": [
+      "RL_REQUEST_OTP_MAX",
+      "RL_REQUEST_OTP_WINDOW_SECS",
+      "RL_VERIFY_OTP_MAX",
+      "RL_VERIFY_OTP_WINDOW_SECS",
+      "RL_WRITE_MAX",
+      "RL_WRITE_WINDOW_SECS",
+      "RL_READ_MAX",
+      "RL_READ_WINDOW_SECS",
+      "RL_PROBE_MAX",
+      "RL_PROBE_WINDOW_SECS",
+      "RL_GET_MAX",
+      "RL_GET_WINDOW_SECS",
+      "RL_INVITE_REDEEM_MAX",
+      "RL_INVITE_REDEEM_WINDOW_SECS"
+    ]
+  },
+
   "worker_vars": {
     "$comment": "Read by the WORKER itself and deliberately NOT forwarded to the container. Declared so the checker does not demand a forward that would be meaningless.",
     "keys": ["DS_SINGLETON_NAME"]

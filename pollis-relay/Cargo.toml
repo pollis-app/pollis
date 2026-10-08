@@ -33,6 +33,10 @@ ml-dsa = { version = "0.1", default-features = false, features = ["alloc"] }
 # handshake verifies the exact chain pollis-core mints — no drift, no cycle.
 pollis-device-cert = { path = "../pollis-device-cert" }
 sha2 = "0.10"
+# Keyed pseudonyms for source IPs in the in-memory limiters (ratelimit.rs
+# `IpKey`), so no client address is held in the relay's maps. Already in the
+# workspace lockfile via pollis-delivery.
+hmac = "0.12"
 base64 = "0.22"
 getrandom = "0.2"
 # Verification ONLY, for the signed relay-revocation list (#813): the same

@@ -65,9 +65,48 @@ block (`ssl_preread`), because only one process can bind 443:
 
 > **Connection accounting:** a 443 connection now costs **four** `worker_connections`
 > slots (stream accept, stream→loopback, loopback accept, upstream) rather than
-> two, which is why `worker_connections` moved 8192 → 16384. PROXY protocol
-> carries the real client IP across the loopback hop, so access logs keep showing
-> real addresses instead of `127.0.0.1`.
+> two, which is why `worker_connections` moved 8192 → 16384. The loopback hop
+> carries **no** PROXY protocol header: it only ever fed nginx's access logs,
+> and those are gone (next section).
+
+## No client IPs in logs
+
+No client IP may be readable on this box, operators included. Everything that
+could write one is off:
+
+| Source | Setting |
+|--------|---------|
+| nginx access logs (`http` + `stream`) | `access_log off;` in `nginx.conf` |
+| nginx error log | `error_log /dev/null crit;` (top level) |
+| PROXY protocol / `real_ip` on the loopback hop | removed — nothing reads the client address |
+| LiveKit process | `logging: { level: warn, pion_level: error }` in `livekit.yml` |
+| Container stdout/stderr (both) | `logging: driver: none` in `docker-compose.yml` |
+
+LiveKit still learns client addresses for ICE from the media ports (7881/7882,
+the TURN relay range), which docker publishes by iptables DNAT — that is how
+WebRTC works and nothing records it. `docker compose logs` now prints nothing;
+diagnose with `nginx -t` / `nginx -T`, `docker compose ps` and the deploy
+workflow's checks.
+
+**Rolling this out (once, on the first deploy after the change):**
+
+1. The deploy's `docker compose up -d` recreates both containers, because their
+   `logging` changed; recreating a container deletes its old `json-file` log.
+   If in doubt, run `docker compose up -d --force-recreate` on the box.
+2. The deploy now runs `ufw logging off` every time and fails if either
+   container logs with anything but the `none` driver. For the one-time cleanup
+   of logs written before this change, dispatch the deploy with
+   `scrub_host_logs: true` — it does what is listed below. By hand, the same:
+   ```bash
+   ufw logging off                                   # UFW logs every blocked packet's source IP
+   truncate -s 0 /var/lib/docker/containers/*/*-json.log   # any container log left behind
+   ls -la /var/log/ufw.log* /var/log/kern.log* /var/log/syslog* /var/log/nginx 2>/dev/null
+   journalctl --disk-usage                           # journald keeps kernel/UFW lines too
+   journalctl --vacuum-time=1s                       # drop what is already there
+   ```
+   and set a short retention for anything that must stay (e.g.
+   `SystemMaxRetentionSec=1d` in `/etc/systemd/journald.conf`), removing rotated
+   `ufw.log*` / `kern.log*` files that predate `ufw logging off`.
 
 ## Workflow requirements (one-time)
 
@@ -231,7 +270,7 @@ in the ICE server list. The `:443` is hardcoded in LiveKit, not derived from
 ```bash
 cd /root/livekit
 docker compose ps                 # status (livekit + nginx)
-docker compose logs -f livekit    # LiveKit logs
+# (no `docker compose logs` — container logging is off; see "No client IPs in logs")
 docker compose exec nginx nginx -t            # validate ingress config
 docker compose exec nginx nginx -s reload     # graceful reload after a cert renew
 docker stats                      # live CPU/memory per container

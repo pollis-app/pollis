@@ -47,6 +47,13 @@ services:
       # a TLS keypair — one fewer process holding the private key.
     command: --config /etc/livekit.yml
     restart: unless-stopped
+    # No container log. LiveKit logs participant connections and ICE candidates,
+    # which carry client IPs, and no client IP may be readable on this box —
+    # operators included. livekit.yml also drops the level to warn. Changing a
+    # service's `logging` makes `docker compose up -d` RECREATE the container,
+    # which deletes its old json-file log with it (see DEPLOY.md).
+    logging:
+      driver: none
 
   nginx:
     image: nginx:1.29-alpine@sha256:e7257f1ef28ba17cf7c248cb8ccf6f0c6e0228ab9c315c152f9c203cd34cf6d1
@@ -62,3 +69,7 @@ services:
     depends_on:
       - livekit
     restart: unless-stopped
+    # No container log: nginx's would carry client IPs. nginx.conf also turns
+    # off its access and error logs; this covers anything written to stdout.
+    logging:
+      driver: none

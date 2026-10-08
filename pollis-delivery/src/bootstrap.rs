@@ -187,9 +187,12 @@ pub async fn register_device(
         return AuthRejection::Forbidden.into_response();
     }
     let device_id = claims.device_id.clone();
+    // Shipped clients send "{hostname} ({os})", and a hostname can embed the
+    // machine's IP; no client IP may be stored, so redact rather than refuse.
     let device_name = parsed
         .device_name
         .filter(|s| !s.trim().is_empty())
+        .map(|s| crate::util::redact_ip_literals(&s))
         .unwrap_or_else(|| "device".to_string());
 
     let conn = match state.db.conn().await {

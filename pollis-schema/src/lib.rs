@@ -282,6 +282,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "user_report",
         include_str!("../migrations/000033_user_report.sql"),
     ),
+    (
+        34,
+        "scrub_ip_shaped_device_names",
+        include_str!("../migrations/000034_scrub_ip_shaped_device_names.sql"),
+    ),
 ];
 
 /// Every script for the MAIN DB, in apply order (baseline first). One element

@@ -12,18 +12,37 @@
 //! **Store:** in-memory fixed-window counters (the DS is single-container, same
 //! as the OTP/session stores). Behind [`RateLimiter`] so a scaled-out DS can
 //! swap it for a shared store without touching the handlers. Reusable beyond the
-//! OTP endpoints — `check` is keyed by an arbitrary bucket string.
+//! OTP endpoints — `check` is keyed by a tier plus a client identity.
 //!
-//! **Client IP:** the DS terminates TLS at a reverse proxy (Cloudflare) and
-//! serves plain HTTP, so the socket peer is the proxy, not the client. The real
-//! client IP is read from `CF-Connecting-IP` (set/overwritten by Cloudflare — a
-//! client cannot forge it *through* Cloudflare), falling back to the first
-//! `X-Forwarded-For` hop. Requests with neither header (local/dev/test, never
-//! real internet traffic) share one bucket so the limiter is still exercised
-//! rather than silently disabled.
+//! **Client identity:** the DS sits behind Cloudflare and serves plain HTTP, so
+//! the socket peer is the proxy, not the client. In production the container
+//! never sees a client IP at all: the Worker's Durable Object
+//! (`worker/index.ts`) deletes every IP-bearing header and sends
+//! `X-Pollis-Client-Bucket` — a keyed hash of the IP under a key only it holds —
+//! which a client cannot set (the object deletes any inbound copy). Without the
+//! Worker (local runs, tests) the DS falls back to `CF-Connecting-IP`, then the
+//! first `X-Forwarded-For` hop; requests with none of these share one bucket so
+//! the limiter is still exercised rather than silently disabled.
+//!
+//! **The IP is never a key.** The limiter needs to tell clients APART, not to
+//! know who they are, so the map holds `{tier}:{h}` where `h` is the first 16
+//! bytes of HMAC-SHA256 over the client identity above (the Worker's bucket, or
+//! in a local run the IP) under a 32-byte key drawn from the OS CSPRNG when the
+//! [`RateLimiter`] is built. That key lives only in this process's
+//! memory — it is not logged, persisted or configurable — so a memory dump or a
+//! debug print of the map yields per-process pseudonyms that cannot be reversed
+//! by enumerating the IPv4 space, and that stop meaning anything at the next
+//! restart. [`ClientKey`] is the only thing [`RateLimiter::check`] accepts, and
+//! the only way to build one is [`RateLimiter::client_key`], which hashes — so a
+//! raw IP cannot reach the map by construction.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+
+use hmac::{Hmac, Mac};
+use rand::rngs::OsRng;
+use rand::RngCore;
+use sha2::Sha256;
 
 use axum::{
     extract::{Request, State},
@@ -199,11 +218,38 @@ struct Window {
     window_secs: u64,
 }
 
+type HmacSha256 = Hmac<Sha256>;
+
+/// Bytes of the HMAC output kept in a [`ClientKey`]. 128 bits makes a collision
+/// between two clients (which would merely share a budget) negligible while
+/// halving what each entry stores.
+const CLIENT_HASH_BYTES: usize = 16;
+
+/// A rate-limit bucket: a tier name plus a keyed, per-process hash of the client
+/// IP — `{tier}:{hex(HMAC-SHA256(process_key, ip)[..16])}`.
+///
+/// The field is private and the only constructor is [`RateLimiter::client_key`],
+/// so a `ClientKey` holding a raw IP cannot exist. `Debug` is safe to derive for
+/// the same reason: there is nothing in here but the tier and the pseudonym.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ClientKey(String);
+
 /// In-memory per-key fixed-window rate limiter. `Clone` is shallow (shared
-/// `Arc`) so it rides on the `Clone` `AppState`.
-#[derive(Clone, Default)]
+/// `Arc`s) so it rides on the `Clone` `AppState`, and every clone hashes with the
+/// same process key and counts into the same map.
+#[derive(Clone)]
 pub struct RateLimiter {
-    inner: Arc<Mutex<HashMap<String, Window>>>,
+    inner: Arc<Mutex<HashMap<ClientKey, Window>>>,
+    /// HMAC-SHA256 already keyed with this limiter's 32 random bytes. The raw
+    /// key is not kept anywhere else; cloning the keyed state per lookup avoids
+    /// re-running the key schedule on every request.
+    mac: Arc<HmacSha256>,
+}
+
+impl Default for RateLimiter {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Above this many tracked keys, a `check` opportunistically drops windows whose
@@ -212,13 +258,46 @@ pub struct RateLimiter {
 const PRUNE_THRESHOLD: usize = 10_000;
 
 impl RateLimiter {
+    /// A fresh limiter with an empty map and a fresh random hashing key. Each
+    /// instance's key is independent, so the same IP hashes differently in two
+    /// limiters (and therefore across restarts).
+    pub fn new() -> Self {
+        let mut key = [0u8; 32];
+        OsRng.fill_bytes(&mut key);
+        // HMAC accepts a key of any length; 32 bytes cannot fail.
+        let mac = HmacSha256::new_from_slice(&key).expect("HMAC accepts any key length");
+        // Best-effort: don't leave a second copy of the key on the stack frame.
+        key.fill(0);
+        Self {
+            inner: Arc::new(Mutex::new(HashMap::new())),
+            mac: Arc::new(mac),
+        }
+    }
+
+    /// The bucket for the request's client in `tier`. The public way to build a
+    /// [`ClientKey`]: the client IP is read from `headers` and hashed in the same
+    /// expression, so the raw IP never leaves this module — not to the
+    /// middleware, not to a handler, not to a log line.
+    pub fn client_key(&self, tier: &str, headers: &HeaderMap) -> ClientKey {
+        self.key_for_ip(tier, client_identity(headers))
+    }
+
+    /// Hash `ip` into a [`ClientKey`]. Private: callers outside this module go
+    /// through [`Self::client_key`], which takes headers, not an IP.
+    fn key_for_ip(&self, tier: &str, ip: &str) -> ClientKey {
+        let mut mac = (*self.mac).clone();
+        mac.update(ip.as_bytes());
+        let digest = mac.finalize().into_bytes();
+        ClientKey(format!("{tier}:{}", hex::encode(&digest[..CLIENT_HASH_BYTES])))
+    }
+
     /// Record one hit for `key` and report whether it is within `max` per
     /// `window_secs`. Fixed window: the first hit starts a window; once the
     /// window elapses the counter resets. A key over its limit stays [`Limited`]
     /// until its window rolls over.
     ///
     /// [`Limited`]: RateLimitOutcome::Limited
-    pub fn check(&self, key: &str, max: u32, window_secs: u64, now: u64) -> RateLimitOutcome {
+    pub fn check(&self, key: &ClientKey, max: u32, window_secs: u64, now: u64) -> RateLimitOutcome {
         let mut guard = self.inner.lock().expect("rate limiter mutex poisoned");
 
         if guard.len() > PRUNE_THRESHOLD {
@@ -235,13 +314,13 @@ impl RateLimiter {
         }
 
         // Probed before `entry`, deliberately: `entry` takes an OWNED key, so
-        // every request would allocate a `String` for a key the map almost
-        // always already holds, and then drop it. Two hash lookups on the hit
+        // every request would clone a `ClientKey` the map almost always already
+        // holds, and then drop it. Two hash lookups on the hit
         // path are cheaper than one heap allocation on every request the DS
         // serves.
         if !guard.contains_key(key) {
             guard.insert(
-                key.to_string(),
+                key.clone(),
                 Window {
                     count: 0,
                     window_start: now,
@@ -267,11 +346,26 @@ impl RateLimiter {
     }
 }
 
-/// The client IP for rate-limit keying. Prefers `CF-Connecting-IP` (Cloudflare
-/// sets it and a client cannot forge it through Cloudflare), then the first
-/// `X-Forwarded-For` hop. Absent both (local/dev/test), returns a shared
-/// sentinel so the limiter is still exercised rather than bypassed.
-pub fn client_ip(headers: &HeaderMap) -> &str {
+/// The Worker's per-client bucket header (`worker/index.ts`). Set by the
+/// Durable Object after it deletes every IP header; never client-controlled.
+const CLIENT_BUCKET_HEADER: &str = "x-pollis-client-bucket";
+
+/// The client identity for rate-limit keying — PRIVATE, and its only caller
+/// hashes the result immediately ([`RateLimiter::client_key`]). Prefers the
+/// Worker's bucket (production: the only identity the container receives), and
+/// only without it — a local run with no Worker in front — the client IP.
+fn client_identity(headers: &HeaderMap) -> &str {
+    if let Some(bucket) = header_str(headers, CLIENT_BUCKET_HEADER) {
+        return bucket;
+    }
+    client_ip(headers)
+}
+
+/// The client IP, for a DS running without the Worker in front. Prefers
+/// `CF-Connecting-IP`, then the first `X-Forwarded-For` hop. Absent both,
+/// returns a shared sentinel so the limiter is still exercised rather than
+/// bypassed.
+fn client_ip(headers: &HeaderMap) -> &str {
     if let Some(ip) = header_str(headers, "cf-connecting-ip") {
         return ip;
     }
@@ -387,16 +481,17 @@ fn is_read_path(path: &str) -> bool {
 }
 
 /// Axum middleware: per-IP rate limiting for the whole service, keyed by
-/// `{tier}:{ip}` so each tier has its own budget. Runs before the handler and
+/// `{tier}:{keyed hash of ip}` (see [`ClientKey`]) so each tier has its own
+/// budget and the raw IP is never stored. Runs before the handler and
 /// short-circuits to 429 when a client exceeds its tier. Replaces per-handler
 /// checks so throttling lives in exactly one place (#345).
 pub async fn rate_limit(State(state): State<AppState>, req: Request, next: Next) -> Response {
     if let Some((tier, max, window)) = classify(req.method(), req.uri().path(), &state.ratelimit_config)
     {
-        let ip = client_ip(req.headers());
+        let key = state.ratelimit.client_key(tier, req.headers());
         if state
             .ratelimit
-            .check(&format!("{tier}:{ip}"), max, window, crate::util::now_unix())
+            .check(&key, max, window, crate::util::now_unix())
             == RateLimitOutcome::Limited
         {
             return too_many_requests();
@@ -427,29 +522,32 @@ mod tests {
         const WRITE_WINDOW: u64 = 60;
         let limiter = RateLimiter::default();
         let t0 = 1_000_000;
+        let victim = limiter.key_for_ip("otp_request", "198.51.100.1");
 
         // An OTP client burns its budget and is now Limited.
         for _ in 0..5 {
-            limiter.check("otp:victim", 5, OTP_WINDOW, t0);
+            limiter.check(&victim, 5, OTP_WINDOW, t0);
         }
         assert_eq!(
-            limiter.check("otp:victim", 5, OTP_WINDOW, t0),
+            limiter.check(&victim, 5, OTP_WINDOW, t0),
             RateLimitOutcome::Limited,
             "premise: the OTP key is over its limit before anything is pruned"
         );
 
         // Unrelated write traffic fills the shared map past the prune threshold.
         for i in 0..=PRUNE_THRESHOLD {
-            limiter.check(&format!("write:{i}"), 10_000, WRITE_WINDOW, t0);
+            let filler = limiter.key_for_ip("write", &i.to_string());
+            limiter.check(&filler, 10_000, WRITE_WINDOW, t0);
         }
 
         // 90s later the write windows have elapsed but the OTP window has NOT.
         // This write call is what triggers the prune.
         let t1 = t0 + 90;
-        limiter.check("write:trigger", 10_000, WRITE_WINDOW, t1);
+        let trigger = limiter.key_for_ip("write", "trigger");
+        limiter.check(&trigger, 10_000, WRITE_WINDOW, t1);
 
         assert_eq!(
-            limiter.check("otp:victim", 5, OTP_WINDOW, t1),
+            limiter.check(&victim, 5, OTP_WINDOW, t1),
             RateLimitOutcome::Limited,
             "a throttled OTP client got its counter reset by unrelated write \
              traffic — the prune judged a 600s window by a 60s cutoff"
@@ -517,35 +615,108 @@ mod tests {
     #[test]
     fn allows_up_to_max_then_limits() {
         let rl = RateLimiter::default();
+        let k = rl.key_for_ip("t", "1.2.3.4");
         // max = 3 per 60s.
         for _ in 0..3 {
-            assert_eq!(rl.check("1.2.3.4", 3, 60, 1000), RateLimitOutcome::Allowed);
+            assert_eq!(rl.check(&k, 3, 60, 1000), RateLimitOutcome::Allowed);
         }
-        assert_eq!(rl.check("1.2.3.4", 3, 60, 1000), RateLimitOutcome::Limited);
+        assert_eq!(rl.check(&k, 3, 60, 1000), RateLimitOutcome::Limited);
         // Still limited later in the same window.
-        assert_eq!(rl.check("1.2.3.4", 3, 60, 1030), RateLimitOutcome::Limited);
+        assert_eq!(rl.check(&k, 3, 60, 1030), RateLimitOutcome::Limited);
     }
 
     #[test]
     fn window_resets_after_it_elapses() {
         let rl = RateLimiter::default();
+        let k = rl.key_for_ip("t", "1.2.3.4");
         for _ in 0..3 {
-            rl.check("1.2.3.4", 3, 60, 1000);
+            rl.check(&k, 3, 60, 1000);
         }
-        assert_eq!(rl.check("1.2.3.4", 3, 60, 1000), RateLimitOutcome::Limited);
+        assert_eq!(rl.check(&k, 3, 60, 1000), RateLimitOutcome::Limited);
         // A full window later, the counter resets.
-        assert_eq!(rl.check("1.2.3.4", 3, 60, 1061), RateLimitOutcome::Allowed);
+        assert_eq!(rl.check(&k, 3, 60, 1061), RateLimitOutcome::Allowed);
     }
 
+    /// Limiting is still per IP after hashing: one IP over its budget does not
+    /// throttle another, and the SAME IP looked up afresh from headers (as the
+    /// middleware does on every request) lands in the same, exhausted bucket.
     #[test]
-    fn keys_are_independent() {
+    fn limiting_is_still_per_ip() {
         let rl = RateLimiter::default();
+        let headers_for = |ip: &str| {
+            let mut h = HeaderMap::new();
+            h.insert("cf-connecting-ip", ip.parse().unwrap());
+            h
+        };
         for _ in 0..3 {
-            rl.check("1.1.1.1", 3, 60, 1000);
+            rl.check(&rl.client_key("t", &headers_for("1.1.1.1")), 3, 60, 1000);
         }
-        assert_eq!(rl.check("1.1.1.1", 3, 60, 1000), RateLimitOutcome::Limited);
+        assert_eq!(
+            rl.check(&rl.client_key("t", &headers_for("1.1.1.1")), 3, 60, 1000),
+            RateLimitOutcome::Limited
+        );
         // A different IP has its own fresh window.
-        assert_eq!(rl.check("2.2.2.2", 3, 60, 1000), RateLimitOutcome::Allowed);
+        assert_eq!(
+            rl.check(&rl.client_key("t", &headers_for("2.2.2.2")), 3, 60, 1000),
+            RateLimitOutcome::Allowed
+        );
+        // And the same IP in a different tier has its own budget too.
+        assert_eq!(
+            rl.check(&rl.client_key("u", &headers_for("1.1.1.1")), 3, 60, 1000),
+            RateLimitOutcome::Allowed
+        );
+    }
+
+    /// No plain IP is ever readable from the limiter's memory. Drive hits through
+    /// the same header path the middleware uses and inspect every stored key —
+    /// the tier prefix survives, the IP (v4, v6 or the sentinel) does not, and
+    /// neither does it in the key's `Debug` form.
+    #[test]
+    fn stored_keys_never_contain_the_ip() {
+        let rl = RateLimiter::default();
+        let ips = ["203.0.113.7", "2001:db8::1"];
+        for ip in ips {
+            let mut h = HeaderMap::new();
+            h.insert("cf-connecting-ip", ip.parse().unwrap());
+            rl.check(&rl.client_key("otp_request", &h), 10, 600, 1000);
+        }
+        // No header at all → the shared sentinel, which must be hashed too.
+        rl.check(&rl.client_key("otp_request", &HeaderMap::new()), 10, 600, 1000);
+        let guard = rl.inner.lock().unwrap();
+        assert_eq!(guard.len(), ips.len() + 1);
+        for key in guard.keys() {
+            let debug = format!("{key:?}");
+            for ip in ips.iter().chain(["unknown"].iter()) {
+                assert!(!key.0.contains(ip), "stored key {:?} contains {ip}", key.0);
+                assert!(!debug.contains(ip), "Debug of {debug} contains {ip}");
+            }
+            let (tier, hash) = key.0.split_once(':').expect("tier:hash");
+            assert_eq!(tier, "otp_request");
+            assert_eq!(hash.len(), CLIENT_HASH_BYTES * 2);
+            assert!(hash.bytes().all(|b| b.is_ascii_hexdigit()));
+        }
+    }
+
+    /// Within one process the mapping is stable, or the limiter could not count.
+    #[test]
+    fn same_ip_maps_to_same_key_within_a_limiter() {
+        let rl = RateLimiter::default();
+        assert_eq!(rl.key_for_ip("t", "203.0.113.7"), rl.key_for_ip("t", "203.0.113.7"));
+        // A clone (every `AppState` clone) shares the key, so requests handled
+        // through different clones still count into the same bucket.
+        let clone = rl.clone();
+        assert_eq!(rl.key_for_ip("t", "203.0.113.7"), clone.key_for_ip("t", "203.0.113.7"));
+        assert_ne!(rl.key_for_ip("t", "203.0.113.7"), rl.key_for_ip("t", "203.0.113.8"));
+    }
+
+    /// The hashing key is per instance (i.e. per process): the same IP hashes to
+    /// unrelated pseudonyms in two limiters, so a key seen in one process's
+    /// memory says nothing about any other, and none survive a restart.
+    #[test]
+    fn different_limiters_hash_the_same_ip_differently() {
+        let a = RateLimiter::new();
+        let b = RateLimiter::new();
+        assert_ne!(a.key_for_ip("t", "203.0.113.7"), b.key_for_ip("t", "203.0.113.7"));
     }
 
     #[test]
@@ -558,5 +729,28 @@ mod tests {
 
         h.insert("cf-connecting-ip", "203.0.113.7".parse().unwrap());
         assert_eq!(client_ip(&h), "203.0.113.7");
+    }
+
+    /// Behind the Worker the container receives no IP, only the bucket — and
+    /// the bucket wins over any IP header that does arrive, so a local-run
+    /// fallback can never take precedence over the edge's answer.
+    #[test]
+    fn the_worker_bucket_is_the_identity_when_present() {
+        let mut h = HeaderMap::new();
+        h.insert("cf-connecting-ip", "203.0.113.7".parse().unwrap());
+        assert_eq!(client_identity(&h), "203.0.113.7");
+        h.insert(CLIENT_BUCKET_HEADER, "0123456789abcdef0123456789abcdef".parse().unwrap());
+        assert_eq!(client_identity(&h), "0123456789abcdef0123456789abcdef");
+
+        // Two clients with distinct buckets are limited independently.
+        let rl = RateLimiter::default();
+        let bucket = |b: &str| {
+            let mut h = HeaderMap::new();
+            h.insert(CLIENT_BUCKET_HEADER, b.parse().unwrap());
+            h
+        };
+        rl.check(&rl.client_key("t", &bucket("aa")), 1, 60, 1000);
+        assert_eq!(rl.check(&rl.client_key("t", &bucket("aa")), 1, 60, 1000), RateLimitOutcome::Limited);
+        assert_eq!(rl.check(&rl.client_key("t", &bucket("bb")), 1, 60, 1000), RateLimitOutcome::Allowed);
     }
 }

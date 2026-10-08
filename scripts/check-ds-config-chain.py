@@ -91,6 +91,16 @@ def worker_secret_keys() -> set[str]:
     return set(re.findall(r'"([A-Z_0-9]+)"', m.group(1)))
 
 
+def worker_tunable_keys() -> set[str]:
+    """TUNABLE_VAR_KEYS = [ ... ] as const (link 4, optional-vars half): forwarded to the
+    container only when the environment sets them."""
+    m = re.search(r"const TUNABLE_VAR_KEYS = \[(.*?)\] as const", WORKER.read_text(), re.DOTALL)
+    if not m:
+        fail(f"{WORKER.name}: could not find `const TUNABLE_VAR_KEYS = [ ... ] as const`")
+        return set()
+    return set(re.findall(r'"([A-Z_0-9]+)"', m.group(1)))
+
+
 def worker_forwarded_vars() -> set[str]:
     """Names the worker copies into the container's `envVars` (link 4, vars half).
 
@@ -113,7 +123,10 @@ def ds_read_vars() -> set[str]:
     """Every env var the DS actually reads (link 5)."""
     found: set[str] = set()
     for rs in DS_SRC.rglob("*.rs"):
-        found |= set(re.findall(r'(?:env::)?var\("([A-Z_0-9]+)"\)', rs.read_text()))
+        text = rs.read_text()
+        found |= set(re.findall(r'(?:env::)?var\("([A-Z_0-9]+)"\)', text))
+        # ratelimit.rs reads its tiers through a typed helper, `env_parse::<T>("KEY")`.
+        found |= set(re.findall(r'env_parse::<[^>]+>\("([A-Z_0-9]+)"\)', text))
     return found
 
 
@@ -123,11 +136,12 @@ def main() -> int:
     sec_dev = set(man["secrets"]["dev_only"])
     all_secrets = sec_both | sec_dev
     container_vars = set(man["container_vars"]["keys"])
+    optional_vars = set(man["optional_container_vars"]["keys"])
     worker_vars = set(man["worker_vars"]["keys"])
     aliases = man["aliases"]["keys"]
     code_defaults = set(man["code_default_only"]["keys"])
 
-    declared = all_secrets | container_vars | worker_vars | set(aliases) | code_defaults
+    declared = all_secrets | container_vars | optional_vars | worker_vars | set(aliases) | code_defaults
 
     # ── Link 2: the sync script pushes every declared secret ────────────────
     sk = sync_keys()
@@ -148,7 +162,7 @@ def main() -> int:
             fail(f"link 3 [{env}]: container var {k} is missing from `vars` in wrangler.{env}.jsonc")
         for k in sorted(worker_vars - variables):
             fail(f"link 3 [{env}]: worker var {k} is missing from `vars` in wrangler.{env}.jsonc")
-        undeclared = variables - container_vars - worker_vars
+        undeclared = variables - container_vars - optional_vars - worker_vars
         for k in sorted(undeclared):
             fail(f"link 3 [{env}]: wrangler.{env}.jsonc sets var {k}, which the manifest does not declare")
 
@@ -162,7 +176,12 @@ def main() -> int:
     fwd = worker_forwarded_vars()
     for k in sorted(container_vars - fwd):
         fail(f"link 4: container var {k} is set in wrangler `vars` but NOT forwarded via envVars in {WORKER.name} — a var binds to the WORKER, so the DS will silently use its compiled-in default (this is the #720 bug)")
-    for k in sorted(worker_vars & fwd):
+    tun = worker_tunable_keys()
+    for k in sorted(optional_vars - tun):
+        fail(f"link 4: optional var {k} is not in TUNABLE_VAR_KEYS in {WORKER.name} — setting it in wrangler `vars` would never reach the container")
+    for k in sorted(tun - optional_vars):
+        fail(f"link 4: {WORKER.name} lists {k} in TUNABLE_VAR_KEYS, which the manifest does not declare as an optional container var")
+    for k in sorted(worker_vars & (fwd | tun)):
         fail(f"link 4: {k} is declared worker-only but IS forwarded to the container in {WORKER.name} — declare it a container var or stop forwarding it")
 
     # ── Link 5: the DS reads what we deliver, and we declare what it reads ──
@@ -185,7 +204,8 @@ def main() -> int:
 
     print(
         f"DS config chain OK — {len(all_secrets)} secret(s), {len(container_vars)} container var(s), "
-        f"{len(worker_vars)} worker var(s), {len(code_defaults)} code-default-only, "
+        f"{len(optional_vars)} optional container var(s), {len(worker_vars)} worker var(s), "
+        f"{len(code_defaults)} code-default-only, "
         f"{len(aliases)} alias(es) verified across links 2-5."
     )
     return 0

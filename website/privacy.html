@@ -87,8 +87,8 @@
               </tr>
               <tr>
                 <td>Account and device identifiers</td>
-                <td class="doc-td-dim">App-generated IDs plus an optional device name, so you can see and revoke
-                  your own devices.</td>
+                <td class="doc-td-dim">App-generated IDs plus a device name such as "macOS desktop", so you can
+                  see and revoke your own devices. It names the system, never your computer's hostname.</td>
                 <td class="doc-td-dim">Yes, in the clear.</td>
               </tr>
               <tr>
@@ -128,8 +128,10 @@
         </div>
 
         <p>
-          Your IP address is <strong>not stored</strong>. It is read in memory for rate limiting and does not
-          survive a server restart. The network edge (Cloudflare) sees it in transit, as any edge does.
+          Your IP address is <strong>not stored or logged</strong> by any of our servers. For rate limiting it
+          is held in memory only as a one-way keyed hash, for the length of the rate-limit window, and does
+          not survive a server restart. The network edge (Cloudflare) sees it in transit, as any edge does,
+          and that provider's account administrators can view client IPs in its security dashboards.
         </p>
         <p>
           Your device PIN never leaves your device; it locks the local keystore. The local message database on

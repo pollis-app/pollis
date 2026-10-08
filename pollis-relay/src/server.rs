@@ -85,7 +85,7 @@ use crate::onion;
 use crate::park::{ParkedPeer, ParkedPeers, Tunnel};
 use crate::policy::{RelayIdentity, RevocationStore};
 use crate::proto::{self, ClientFrame, Command, Connect, Extend, Handshake, Park, RejectReason};
-use crate::ratelimit::{ConnectionLimiter, RateLimitConfig, RateLimiter};
+use crate::ratelimit::{ConnectionLimiter, IpKey, RateLimitConfig, RateLimiter};
 use crate::stream::{DuplexStream, RelayStream};
 use crate::tls::{self, FingerprintPinnedVerifier, SelfSignedIdentity};
 
@@ -639,7 +639,9 @@ impl RelayServer {
                             }
                             continue;
                         }
-                        let ip = incoming.remote_address().ip();
+                        // Hashed on the spot: the limiter only ever holds the
+                        // per-boot pseudonym, never the address.
+                        let ip = IpKey::of(incoming.remote_address().ip());
                         // Shed load cleanly: at either global cap, refuse rather
                         // than handshake for nothing.
                         if handshaking.load(Ordering::Relaxed) >= max_conns
@@ -711,7 +713,8 @@ impl RelayServer {
 /// makes "a `Park` cannot be smuggled through a layer" structural rather than
 /// remembered: parking needs the connection handle, and there is none.
 struct StreamOrigin {
-    ip: IpAddr,
+    /// The peer's per-boot pseudonym (`IpKey::of`), never its address.
+    ip: IpKey,
     connection: Option<quinn::Connection>,
 }
 
@@ -756,11 +759,12 @@ async fn handle_connection(connection: quinn::Connection, inner: Arc<RelayInner>
     if let Some(observer) = &inner.peer_observer {
         observer(peer);
     }
+    let peer_key = IpKey::of(peer.ip());
     // Each target gets its own bi-stream; serve them until the peer goes away.
     while let Ok((send, recv)) = connection.accept_bi().await {
         let inner = inner.clone();
         let origin = StreamOrigin {
-            ip: peer.ip(),
+            ip: peer_key,
             connection: Some(connection.clone()),
         };
         // The clock on negotiating starts the moment the stream exists.

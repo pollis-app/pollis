@@ -248,7 +248,6 @@ openmls_basic_credential = { version = "0.5", features = [
   "test-utils",
   "draft-ietf-mls-pq-ciphersuites",
 ] }
-gethostname = "1.1.0"
 # Account-key transparency: reuse the SAME shared URL-based verifier the
 # `pollis-verify` auditor CLI runs (account::verify_account), so the client's
 # self-audit / peer-audit can never reach a different verdict than the

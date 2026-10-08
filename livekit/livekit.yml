@@ -1,4 +1,13 @@
 port: 7880
+
+# Quiet by policy: LiveKit's info/debug lines name participants' IPs (ICE
+# candidates, connection events), and no client IP may be readable on this box.
+# docker-compose.yml also discards the container's output (`logging: driver:
+# none`); this keeps the process from producing it in the first place.
+logging:
+  level: warn
+  pion_level: error
+
 rtc:
   tcp_port: 7881
   udp_port: 7882

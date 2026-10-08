@@ -23,6 +23,11 @@ on:
         description: Git ref to deploy (branch, tag, or SHA)
         required: false
         default: main
+      scrub_host_logs:
+        description: One-time cleanup of client IPs already sitting in host logs (UFW/kernel/syslog lines, journald, leftover container logs) and a 1-day journald retention. Off by default — it discards ops history.
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -227,6 +232,52 @@ jobs:
             docker compose exec -T nginx nginx -T < /dev/null 2>/dev/null | grep -E "worker_processes|worker_connections" || true
 
             docker compose ps < /dev/null
+
+            # No client IP may be readable on this box, operators included
+            # (#1235). The compose file sets both containers' log driver to
+            # `none`; changing it recreated them above, which discarded their
+            # old json-file logs. Assert that held, so a later compose edit
+            # cannot quietly start keeping logs again.
+            for c in livekit-livekit-1 livekit-nginx-1; do
+              driver="$(docker inspect -f '{{.HostConfig.LogConfig.Type}}' "${c}")"
+              if [ "${driver}" != "none" ]; then
+                echo "::error::${c} logs with driver '${driver}', expected 'none' — it would keep client IPs."
+                exit 1
+              fi
+            done
+            # The host firewall's own log records SRC=<client ip> for every
+            # blocked packet. Idempotent: a no-op once it is off.
+            if command -v ufw >/dev/null; then
+              ufw logging off < /dev/null
+            fi
+          REMOTE
+
+      - name: Scrub client IPs already in host logs (opt-in, one-time)
+        if: ${{ inputs.scrub_host_logs }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/id_deploy "${VPS_USER}@${VPS_HOST}" 'bash -seuo pipefail' <<'REMOTE'
+            # #1235: no client IP may stay readable on this box. Logs written
+            # before the logging changes still hold them.
+            # Container logs left behind by containers that no longer log.
+            find /var/lib/docker/containers -name '*-json.log' -exec truncate -s 0 {} + 2>/dev/null || true
+            # UFW's own log, current and rotated.
+            rm -f /var/log/ufw.log /var/log/ufw.log.* 2>/dev/null || true
+            # UFW block lines also land in the kernel log and syslog: strip them
+            # from the live files and drop the rotated history.
+            for f in /var/log/kern.log /var/log/syslog; do
+              if [ -f "${f}" ]; then
+                sed -i '/\[UFW /d' "${f}"
+              fi
+            done
+            rm -f /var/log/kern.log.* /var/log/syslog.* 2>/dev/null || true
+            # journald keeps the same kernel lines: keep at most a day, and drop
+            # what is already there.
+            mkdir -p /etc/systemd/journald.conf.d
+            printf '[Journal]\nMaxRetentionSec=1day\n' > /etc/systemd/journald.conf.d/pollis-retention.conf
+            systemctl restart systemd-journald
+            journalctl --vacuum-time=1s >/dev/null
+            echo "host logs scrubbed; journald retention 1 day"
           REMOTE
 
       - name: Validate — LiveKit up
