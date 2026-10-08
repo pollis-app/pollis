@@ -24,6 +24,28 @@ const ENTER_MS = 180;
 const SETTLE_FALLBACK_MS = 600;
 
 /**
+ * Runs `fn` once a sheet that was just closed (its SheetOverlay unmounted in
+ * the same handler) is really gone. Use it for whatever a sheet action does
+ * NEXT that presents or navigates: a push / replace, or opening another sheet.
+ *
+ * iOS needs it: a sheet is a Modal, i.e. a presented view controller, and the
+ * unmount only dismisses it when Fabric mounts the commit on the UI thread.
+ * A navigation push or a second Modal started in the same tick races that
+ * dismissal — UIKit can drop the dismiss (the screen keeps a stale presented
+ * controller) or refuse the new presentation ("already presenting"), so the
+ * next sheet silently never appears. Two frames covers the commit plus the
+ * non-animated dismissal. Android has no presenting controller, so it runs
+ * `fn` immediately and behaves exactly as before.
+ */
+export function afterSheetClose(fn: () => void): void {
+  if (Platform.OS !== "ios") {
+    fn();
+    return;
+  }
+  requestAnimationFrame(() => requestAnimationFrame(fn));
+}
+
+/**
  * Bottom sheet (Actions.dc.html). Rendered in a transparent `Modal`, so the
  * backdrop covers the WHOLE screen — status bar and home-indicator area
  * included — and screen-reader focus is confined to the sheet. The card is

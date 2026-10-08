@@ -57,7 +57,7 @@ export default function NewDM() {
       <Header title={t("direct.newMessage")} backTo={t("tabs.direct")} />
       <Body contentContainerStyle={{ padding: space.xxl, gap: space.lg }}>
         <View style={{ gap: space.sm }}>
-          <Txt variant="section" style={{ paddingHorizontal: 4 }}>
+          <Txt variant="section">
             {t("dm.identifierLabel")}
           </Txt>
           <Field
@@ -71,7 +71,7 @@ export default function NewDM() {
             placeholder={t("dms:start.identifierPlaceholder")}
             icon={<Icon.search size={18} color={semantic.muted} />}
           />
-          <Txt variant="meta" style={{ paddingHorizontal: 4 }}>
+          <Txt variant="meta">
             {t("dm.exactMatchHint")}
           </Txt>
         </View>
@@ -88,17 +88,17 @@ export default function NewDM() {
         </Button>
 
         {search.isLoading && submitted.length >= 2 ? (
-          <Txt variant="secondary" style={{ paddingHorizontal: 4 }}>
+          <Txt variant="secondary">
             {t("search:view.searching")}
           </Txt>
         ) : null}
         {search.isError ? (
-          <Txt variant="secondary" style={{ paddingHorizontal: 4 }}>
+          <Txt variant="secondary">
             {t("dm.searchFailed")}
           </Txt>
         ) : null}
         {showEmpty ? (
-          <Txt variant="secondary" style={{ paddingHorizontal: 4 }}>
+          <Txt variant="secondary">
             {t("dms:start.userNotFound")}
           </Txt>
         ) : null}
@@ -124,7 +124,7 @@ export default function NewDM() {
         {createDM.isError ? (
           <Txt
             variant="secondary"
-            style={{ paddingHorizontal: 4, color: semantic.accent }}
+            style={{ color: semantic.accent }}
           >
             {(createDM.error as Error).message || t("dms:start.startFailed")}
           </Txt>

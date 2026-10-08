@@ -26,7 +26,7 @@ export default function JoinRequests() {
     <Screen testID="screen-group-requests">
       <Header title={t("mobile:group.panel.joinRequests")} subtitle={group?.name} />
       <Body contentContainerStyle={{ paddingHorizontal: space.xxl }}>
-        <SectionTitle style={{ paddingHorizontal: 4 }}>
+        <SectionTitle style={{ paddingHorizontal: 0 }}>
           {t("mobile:group.requests.pendingSection")}
         </SectionTitle>
         {isLoading ? <Hint>{t("common:states.loading")}</Hint> : null}

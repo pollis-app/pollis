@@ -59,7 +59,7 @@ export function ErrorText({
 /** Explanatory paragraph under a section title. */
 export function Note({ children, testID }: { children: string; testID?: string }) {
   return (
-    <Text testID={testID} style={[ty.secondary, { paddingHorizontal: 4 }]}>
+    <Text testID={testID} style={ty.secondary}>
       {children}
     </Text>
   );

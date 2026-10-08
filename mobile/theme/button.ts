@@ -24,6 +24,21 @@ export type ButtonColors = {
   label: string;
 };
 
+/**
+ * The one disabled look every control shares (Button, IconButton, Chip,
+ * ListRow, Toggle, PinPad, the composer's attach): the plain `raised` fill,
+ * a DASHED `edge` border (the non-colour cue) and `dim` for the label, glyph
+ * or knob. All solid, so nothing depends on an opacity fade.
+ */
+export function controlDisabled(theme: Theme): {
+  fill: string;
+  border: string;
+  borderStyle: "dashed";
+  fg: string;
+} {
+  return { fill: theme.raised, border: theme.edge, borderStyle: "dashed", fg: theme.dim };
+}
+
 /** The colours a Button paints with, from the current theme. */
 export function buttonColors(
   theme: Theme,
@@ -32,12 +47,13 @@ export function buttonColors(
 ): ButtonColors {
   const subtle = variant === "subtle";
   if (disabled) {
+    const d = controlDisabled(theme);
     return {
-      fill: subtle ? undefined : theme.raised,
-      pressedFill: subtle ? undefined : theme.raised,
-      border: theme.edge,
-      borderStyle: "dashed",
-      label: theme.dim,
+      fill: subtle ? undefined : d.fill,
+      pressedFill: subtle ? undefined : d.fill,
+      border: d.border,
+      borderStyle: d.borderStyle,
+      label: d.fg,
     };
   }
   if (variant === "primary") {

@@ -124,7 +124,7 @@ export default function ReportScreen() {
           accessibilityLabel={t("report.reasonLabel")}
         >
           <SectionTitle
-            style={{ paddingHorizontal: 4, paddingTop: 0, paddingBottom: 0 }}
+            style={{ paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0 }}
           >
             {t("report.reasonLabel")}
           </SectionTitle>

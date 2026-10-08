@@ -19,7 +19,7 @@ export function CorpusFooter({ corpus }: { corpus: SearchCorpus }) {
   return (
     <View
       testID="search-corpus-footer"
-      style={{ paddingHorizontal: 4, paddingVertical: space.xl, gap: 4 }}
+      style={{ paddingVertical: space.xl, gap: 4 }}
     >
       <Text style={style}>
         {earliest

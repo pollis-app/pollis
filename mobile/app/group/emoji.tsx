@@ -97,7 +97,7 @@ function GroupEmoji() {
     <Screen testID="screen-group-emoji">
       <Header title={t("mobile:group.panel.customEmoji")} subtitle={group ? groupName : undefined} />
       <Body contentContainerStyle={{ paddingHorizontal: space.xxl }}>
-        <SectionTitle style={{ paddingHorizontal: 4 }}>
+        <SectionTitle style={{ paddingHorizontal: 0 }}>
           {t("mobile:group.panel.customEmoji")}
         </SectionTitle>
         {isLoading ? <Hint>{t("common:states.loading")}</Hint> : null}
@@ -156,7 +156,7 @@ function GroupEmoji() {
 
         {iAmAdmin ? (
           <View>
-            <SectionTitle style={{ paddingHorizontal: 4 }}>{t("manage.add")}</SectionTitle>
+            <SectionTitle style={{ paddingHorizontal: 0 }}>{t("manage.add")}</SectionTitle>
             <View style={{ gap: space.lg }}>
               <LabeledField
                 label={t("manage.shortcodeLabel")}

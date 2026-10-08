@@ -79,7 +79,6 @@ export function PinKeypad({
         gap: ROW_GAP,
         paddingTop: 12,
         paddingBottom: 20,
-        opacity: disabled ? 0.45 : 1,
       }}
       pointerEvents={disabled ? "none" : "auto"}
     >
@@ -106,11 +105,18 @@ export function PinKeypad({
                   borderRadius: KEY / 2,
                   alignItems: "center",
                   justifyContent: "center",
-                  backgroundColor: pressed
-                    ? semantic.accentSoft
-                    : back
-                      ? "transparent"
-                      : semantic.raised,
+                  // Disabled (busy): solid dim digits and a dashed edge ring
+                  // instead of fading the pad — review #3/#4.
+                  backgroundColor: disabled
+                    ? "transparent"
+                    : pressed
+                      ? semantic.accentSoft
+                      : back
+                        ? "transparent"
+                        : semantic.raised,
+                  borderWidth: disabled && !back ? 1 : 0,
+                  borderColor: semantic.edge,
+                  borderStyle: "dashed",
                 })}
               >
                 {back ? (
@@ -121,7 +127,7 @@ export function PinKeypad({
                     style={{
                       fontFamily: fonts.medium,
                       fontSize: 28,
-                      color: semantic.text,
+                      color: disabled ? semantic.dim : semantic.text,
                     }}
                   >
                     {k}

@@ -53,7 +53,7 @@ export function LanguageSection({ onLayout }: { onLayout?: (e: LayoutChangeEvent
     <View testID="pref-language" onLayout={onLayout} style={{ gap: space.sm }}>
       <SectionTitle
         testID="pref-language-heading"
-        style={{ paddingHorizontal: 4, paddingTop: 0, paddingBottom: 0 }}
+        style={{ paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0 }}
       >
         {t("language.heading")}
       </SectionTitle>
@@ -87,10 +87,10 @@ export function LanguageSection({ onLayout }: { onLayout?: (e: LayoutChangeEvent
           );
         })}
       </View>
-      <Text style={[ty.meta, { paddingHorizontal: 4 }]}>{t("language.description")}</Text>
+      <Text style={ty.meta}>{t("language.description")}</Text>
       {restartPending ? (
         <View
-          style={{ flexDirection: "row", alignItems: "flex-start", gap: space.xs, paddingHorizontal: 4 }}
+          style={{ flexDirection: "row", alignItems: "flex-start", gap: space.xs }}
         >
           <View style={{ paddingTop: 1 }}>
             <Icon.info size={16} color={semantic.accent} />

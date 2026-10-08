@@ -44,10 +44,10 @@ export function ExportArchive({
 
   return (
     <View style={{ gap: space.md, paddingHorizontal: padded ? space.xxl : 0 }}>
-      <SectionTitle style={{ paddingHorizontal: 4, paddingTop: 0, paddingBottom: 0 }}>
+      <SectionTitle style={{ paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0 }}>
         {t(conversationId ? "mobile:self.export.conversationHeading" : "security.exportHeading")}
       </SectionTitle>
-      <Text style={[ty.secondary, { paddingHorizontal: 4 }]}>{t("security.exportDescription")}</Text>
+      <Text style={ty.secondary}>{t("security.exportDescription")}</Text>
       <Group>
         <ListRow
           testID="row-export-archive"
@@ -67,7 +67,7 @@ export function ExportArchive({
         />
       </Group>
       {summary ? (
-        <View style={{ gap: space.md, paddingHorizontal: 4 }}>
+        <View style={{ gap: space.md }}>
           <Text testID="text-export-summary" style={ty.secondary}>
             {t("security.exportDone", {
               messages: t("security.exportMessages", { count: summary.messages }),
@@ -133,7 +133,7 @@ export function ExportArchive({
         </View>
       ) : null}
       {error ? (
-        <View style={{ paddingHorizontal: 4 }}>
+        <View>
           <ErrorText testID="text-export-error">{error}</ErrorText>
         </View>
       ) : null}

@@ -305,11 +305,14 @@ export function Composer({
             borderRadius: layout.touchMin / 2,
             alignItems: "center",
             justifyContent: "center",
-            backgroundColor: pressed ? semantic.high : semantic.raised,
-            opacity: onAttach ? 1 : 0.45,
+            // Unavailable: dashed edge ring + dim glyph, never a fade.
+            backgroundColor: pressed && onAttach ? semantic.high : semantic.raised,
+            borderWidth: onAttach ? 0 : 1,
+            borderColor: semantic.edge,
+            borderStyle: "dashed",
           })}
         >
-          <Icon.plus size={22} color={semantic.text} />
+          <Icon.plus size={22} color={onAttach ? semantic.text : semantic.dim} />
         </Pressable>
         <Field
           testID="input-composer"

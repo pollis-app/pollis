@@ -19,6 +19,7 @@ import { EditBar } from "../../components/chat/EditBar";
 import { MessageActionsSheet } from "../../components/chat/MessageActionsSheet";
 import { ChannelMenuSheet } from "../../components/chat/ChannelMenuSheet";
 import { EmojiPickerSheet } from "../../components/emoji/EmojiPickerSheet";
+import { afterSheetClose } from "../../components/chat/SheetOverlay";
 import {
   useMessages,
   useSendMessage,
@@ -676,13 +677,16 @@ function TextChat(props: ChatViewProps = {}) {
             setActionTarget(null);
           }}
           onOpenPicker={() => {
-            setPickerTarget(actionTarget);
+            const m = actionTarget;
             setActionTarget(null);
+            // A second sheet (Modal) only after the first is dismissed — iOS
+            // refuses to present over a modal that is still going away.
+            afterSheetClose(() => setPickerTarget(m));
           }}
           onReplyInThread={() => {
             const rootId = actionTarget.id;
             setActionTarget(null);
-            openThread(rootId);
+            afterSheetClose(() => openThread(rootId));
           }}
           onEdit={() => {
             setEditTarget(actionTarget);
@@ -696,10 +700,12 @@ function TextChat(props: ChatViewProps = {}) {
           onReport={() => {
             const m = actionTarget;
             setActionTarget(null);
-            router.push({
-              pathname: "/report",
-              params: { userId: m.sender_id, conversationId: m.conversation_id, messageId: m.id },
-            });
+            afterSheetClose(() =>
+              router.push({
+                pathname: "/report",
+                params: { userId: m.sender_id, conversationId: m.conversation_id, messageId: m.id },
+              }),
+            );
           }}
           onClose={() => setActionTarget(null)}
         />
@@ -720,19 +726,24 @@ function TextChat(props: ChatViewProps = {}) {
           title={title}
           onInfo={() => {
             setMenuOpen(false);
-            router.push({
-              pathname: "/conversation/info",
-              params: { id: conversationId, kind: "channel" },
-            });
+            // Navigate once the sheet's Modal is dismissed (see afterSheetClose).
+            afterSheetClose(() =>
+              router.push({
+                pathname: "/conversation/info",
+                params: { id: conversationId, kind: "channel" },
+              }),
+            );
           }}
           onGroupSettings={
             groupId
               ? () => {
                   setMenuOpen(false);
-                  router.push({
-                    pathname: "/group/settings",
-                    params: { groupId },
-                  });
+                  afterSheetClose(() =>
+                    router.push({
+                      pathname: "/group/settings",
+                      params: { groupId },
+                    }),
+                  );
                 }
               : undefined
           }

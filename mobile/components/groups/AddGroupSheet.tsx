@@ -1,6 +1,6 @@
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
-import { SheetOverlay } from "../chat/SheetOverlay";
+import { SheetOverlay, afterSheetClose } from "../chat/SheetOverlay";
 import { Group, ListRow } from "../ui";
 import { Icon } from "../icons";
 import { semantic } from "../../theme/tokens";
@@ -20,7 +20,7 @@ export function AddGroupSheet({ onClose }: { onClose: () => void }) {
           chevron
           onPress={() => {
             onClose();
-            router.push("/group/new");
+            afterSheetClose(() => router.push("/group/new"));
           }}
         />
         <ListRow
@@ -31,7 +31,7 @@ export function AddGroupSheet({ onClose }: { onClose: () => void }) {
           chevron
           onPress={() => {
             onClose();
-            router.push("/group/discover");
+            afterSheetClose(() => router.push("/group/discover"));
           }}
         />
       </Group>

@@ -8,6 +8,10 @@
  * every accent preset, and that disabled differs from enabled by more than
  * colour (a dashed border).
  *
+ * The same disabled look (`controlDisabled`) is shared by IconButton, Chip,
+ * ListRow, Toggle, ToggleRow, the PIN pad and the composer's attach button,
+ * so it is pinned on every surface those can sit on.
+ *
  *   cd mobile && pnpm test
  */
 
@@ -16,7 +20,7 @@ import assert from "node:assert/strict";
 
 import { contrast, deriveTheme } from "../theme/derive.ts";
 import { ACCENT_PRESETS, DEFAULT_BACKGROUND_HEX } from "../theme/accents.ts";
-import { buttonColors, type ButtonVariant } from "../theme/button.ts";
+import { buttonColors, controlDisabled, type ButtonVariant } from "../theme/button.ts";
 
 const VARIANTS: ButtonVariant[] = ["primary", "secondary", "default", "danger", "subtle"];
 // A transparent button's label sits on whatever surface holds it.
@@ -53,5 +57,18 @@ for (const preset of ACCENT_PRESETS) {
       const behind = off.fill ?? theme.bg;
       assert.ok(contrast(off.border!, behind) >= 3, `${variant} disabled border vs fill`);
     }
+  });
+
+  test(`${preset.n}: the shared disabled look is legible on every surface`, () => {
+    const d = controlDisabled(theme);
+    assert.equal(d.borderStyle, "dashed");
+    // Transparent disabled controls (IconButton, PIN keys, outline chips)
+    // put the dim glyph straight on the surface beneath.
+    for (const surface of [d.fill, ...SURFACES.map((k) => theme[k])]) {
+      const fg = contrast(d.fg, surface);
+      assert.ok(fg >= 4.5, `disabled fg ${d.fg} on ${surface} is ${fg.toFixed(2)}:1`);
+    }
+    const ring = contrast(d.border, d.fill);
+    assert.ok(ring >= 3, `disabled border on its fill is ${ring.toFixed(2)}:1`);
   });
 }

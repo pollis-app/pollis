@@ -39,12 +39,19 @@ export function ToggleRow({
         paddingVertical: space.sm,
         paddingStart: space.xxl,
         paddingEnd: space.xl,
-        backgroundColor: pressed ? semantic.high : "transparent",
-        opacity: disabled ? 0.45 : 1,
+        // Disabled is solid colours (dim label, the Toggle's own disabled
+        // look), never an opacity fade — review #3/#4.
+        backgroundColor: pressed && !disabled ? semantic.high : "transparent",
       })}
     >
       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-        <Text style={{ fontFamily: fonts.medium, fontSize: 16, color: semantic.text }}>
+        <Text
+          style={{
+            fontFamily: fonts.medium,
+            fontSize: 16,
+            color: disabled ? semantic.dim : semantic.text,
+          }}
+        >
           {label}
         </Text>
         {sub ? <Text style={ty.secondary}>{sub}</Text> : null}

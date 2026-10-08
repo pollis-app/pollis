@@ -111,7 +111,7 @@ function GroupSettings() {
           </View>
         ) : null}
 
-        <SectionTitle style={{ paddingHorizontal: 4 }}>
+        <SectionTitle style={{ paddingHorizontal: 0 }}>
           {t("mobile:group.settings.identitySection")}
         </SectionTitle>
         <View style={{ gap: space.xxl }}>
@@ -142,7 +142,7 @@ function GroupSettings() {
           ) : null}
         </View>
 
-        <SectionTitle style={{ paddingHorizontal: 4 }}>
+        <SectionTitle style={{ paddingHorizontal: 0 }}>
           {t("mobile:group.settings.channelsSection")}
         </SectionTitle>
         {channels.length === 0 ? (
@@ -186,7 +186,7 @@ function GroupSettings() {
           </Group>
         )}
 
-        <SectionTitle style={{ paddingHorizontal: 4 }}>{t("mobile:group.common.emoji")}</SectionTitle>
+        <SectionTitle style={{ paddingHorizontal: 0 }}>{t("mobile:group.common.emoji")}</SectionTitle>
         <Group>
           <ListRow
             testID="row-group-emoji"

@@ -33,7 +33,7 @@ export default function DMRequests() {
       <Header title={t("direct.requests")} backTo={t("tabs.direct")} />
       <Body contentContainerStyle={{ padding: space.xxl }}>
         {!isLoading && requests.length === 0 ? (
-          <Txt variant="secondary" style={{ paddingHorizontal: 4 }}>
+          <Txt variant="secondary">
             {t("dms:requests.empty")}
           </Txt>
         ) : null}

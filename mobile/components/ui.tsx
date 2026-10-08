@@ -17,7 +17,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { semantic, type as ty, fonts, r, space, layout, currentTheme } from "../theme/tokens";
-import { buttonColors } from "../theme/button";
+import { buttonColors, controlDisabled } from "../theme/button";
 import { useTheme } from "./theme";
 import { useLayoutClass } from "../hooks/useLayoutClass";
 import { useAndroidKeyboardInset } from "../hooks/useAndroidKeyboardInset";
@@ -168,6 +168,16 @@ export function Screen({
   );
 }
 
+/* ── Disabled glyph ───────────────────────────────────────────────── */
+// A caller-supplied icon element (Icon.* takes `color`) recoloured to the
+// disabled tier. Anything else passes through untouched.
+function disabledGlyph(node: React.ReactNode, disabled: boolean | undefined): React.ReactNode {
+  if (!disabled || !React.isValidElement<{ color?: string }>(node)) {
+    return node;
+  }
+  return React.cloneElement(node, { color: controlDisabled(currentTheme()).fg });
+}
+
 /* ── IconButton ───────────────────────────────────────────────────── */
 // A 44×44 icon-only control. `accessibilityLabel` is required — the icon is
 // silent. `filled` gives it the round raised background (Direct's "New
@@ -204,17 +214,23 @@ export function IconButton({
           borderRadius: layout.touchMin / 2,
           alignItems: "center",
           justifyContent: "center",
-          backgroundColor: filled
-            ? semantic.raised
-            : pressed
+          // Disabled: solid dim glyph + dashed edge ring, never a fade
+          // (Android fades children separately — review #3/#4).
+          backgroundColor: disabled
+            ? filled
+              ? semantic.raised
+              : "transparent"
+            : filled || pressed
               ? semantic.raised
               : "transparent",
-          opacity: disabled ? 0.45 : 1,
+          borderWidth: disabled ? 1 : 0,
+          borderColor: semantic.edge,
+          borderStyle: disabled ? "dashed" : "solid",
         },
         style,
       ]}
     >
-      {icon}
+      {disabledGlyph(icon, disabled)}
     </Pressable>
   );
 }
@@ -444,13 +460,19 @@ export function Chip({
   style?: StyleProp<ViewStyle>;
   testID?: string;
   accessibilityLabel?: string;
-  // Press suppressed, state announced, chip dimmed.
+  // Press suppressed, state announced; drawn in the shared disabled look
+  // (raised fill, dashed edge border, dim label).
   disabled?: boolean;
   leading?: React.ReactNode;
   trailing?: React.ReactNode;
 }) {
   const v = selected ? "on" : variant;
-  const bg =
+  const off = disabled ? controlDisabled(currentTheme()) : null;
+  const bg = off
+    ? v === "outline"
+      ? "transparent"
+      : off.fill
+    :
     v === "on"
       ? semantic.accentSoft
       : v === "solid"
@@ -458,10 +480,20 @@ export function Chip({
         : v === "outline"
           ? "transparent"
           : semantic.raised;
-  const border =
-    v === "on" ? semantic.accentLine : v === "outline" ? semantic.edge : "transparent";
-  const fg =
-    v === "on"
+  const border = off
+    ? off.border
+    : v === "on"
+      ? semantic.accentLine
+      : v === "outline"
+        ? semantic.edge
+        : "transparent";
+  // A disabled chip that is selected keeps its accent label (accent passes
+  // 4.5:1 on raised), so selection survives the disabled look.
+  const fg = off
+    ? v === "on"
+      ? semantic.accent
+      : off.fg
+    : v === "on"
       ? semantic.accent
       : v === "solid"
         ? semantic.onAccent
@@ -481,7 +513,6 @@ export function Chip({
         {
           minHeight: onPress ? layout.touchMin : undefined,
           justifyContent: "center",
-          opacity: disabled ? 0.45 : 1,
         },
         style,
       ]}
@@ -497,10 +528,11 @@ export function Chip({
           borderRadius: 16,
           borderWidth: 1,
           borderColor: border,
+          borderStyle: off ? off.borderStyle : "solid",
           backgroundColor: bg,
         }}
       >
-        {leading}
+        {disabledGlyph(leading, disabled)}
         {label !== undefined ? (
           <Text
             numberOfLines={1}
@@ -786,11 +818,12 @@ export function ListRow({
           : pressed && onPress
             ? semantic.high
             : "transparent",
-        opacity: disabled ? 0.45 : 1,
       })}
     >
       {glyph !== undefined && (
-        <View style={{ minWidth: 22, alignItems: "center" }}>{glyph}</View>
+        <View style={{ minWidth: 22, alignItems: "center" }}>
+          {disabledGlyph(glyph, disabled)}
+        </View>
       )}
       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
         {typeof name === "string" ? (
@@ -803,6 +836,7 @@ export function ListRow({
                 color: selected ? semantic.accent : semantic.text,
               },
               nameStyle,
+              disabled ? { color: semantic.dim } : null,
             ]}
           >
             {name}
@@ -830,7 +864,9 @@ export function ListRow({
           {end}
         </View>
       )}
-      {chevron ? <Icon.chevronRight size={18} color={semantic.muted} /> : null}
+      {/* A disabled row leads nowhere, so it drops its chevron — the
+          non-colour cue beside the dim name. */}
+      {chevron && !disabled ? <Icon.chevronRight size={18} color={semantic.muted} /> : null}
     </Pressable>
   );
 }
@@ -1088,12 +1124,14 @@ export function Toggle({
         height: 26,
         borderRadius: 13,
         borderWidth: 1,
-        borderColor: on ? semantic.accent : semantic.edge,
-        backgroundColor: on ? semantic.accent : semantic.high,
+        // Disabled: raised track, dashed edge border, dim knob — on/off still
+        // read from the knob's side, not from colour.
+        borderColor: disabled ? semantic.edge : on ? semantic.accent : semantic.edge,
+        borderStyle: disabled ? "dashed" : "solid",
+        backgroundColor: disabled ? semantic.raised : on ? semantic.accent : semantic.high,
         justifyContent: "center",
         alignItems: on ? "flex-end" : "flex-start",
         paddingHorizontal: 2,
-        opacity: disabled ? 0.45 : 1,
       }}
     >
       <View
@@ -1101,7 +1139,7 @@ export function Toggle({
           width: 20,
           height: 20,
           borderRadius: 10,
-          backgroundColor: on ? semantic.onAccent : semantic.dim,
+          backgroundColor: disabled ? semantic.dim : on ? semantic.onAccent : semantic.dim,
         }}
       />
     </Pressable>

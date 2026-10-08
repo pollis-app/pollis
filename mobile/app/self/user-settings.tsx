@@ -81,7 +81,7 @@ function UserSettings() {
         </View>
 
         <View style={{ gap: space.xxl }}>
-          <SectionTitle style={{ paddingHorizontal: 4, paddingTop: 0, paddingBottom: 0 }}>
+          <SectionTitle style={{ paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0 }}>
             {t("mobile:self.identityHeading")}
           </SectionTitle>
           <SettingsField label={t("mobile:self.userSettings.displayName")}>

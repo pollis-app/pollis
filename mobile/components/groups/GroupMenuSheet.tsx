@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
-import { SheetOverlay } from "../chat/SheetOverlay";
+import { SheetOverlay, afterSheetClose } from "../chat/SheetOverlay";
 import { Group, ListRow } from "../ui";
 import { Icon } from "../icons";
 import { ErrorText } from "./FormBits";
@@ -32,7 +32,7 @@ export function GroupMenuSheet({
 
   const go = (pathname: "/group/members" | "/group/invite" | "/group/settings" | "/group/requests") => {
     onClose();
-    router.push({ pathname, params: { groupId } });
+    afterSheetClose(() => router.push({ pathname, params: { groupId } }));
   };
 
   const onLeave = () => {
@@ -43,7 +43,7 @@ export function GroupMenuSheet({
     leaveGroup.mutate(groupId, {
       onSuccess: () => {
         onClose();
-        router.replace("/(tabs)/groups");
+        afterSheetClose(() => router.replace("/(tabs)/groups"));
       },
     });
   };

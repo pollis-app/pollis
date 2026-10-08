@@ -138,7 +138,7 @@ function UserProfile() {
         </Card>
 
         {isSelf ? (
-          <Txt variant="secondary" style={{ paddingHorizontal: 4 }}>
+          <Txt variant="secondary">
             <Trans
               t={t}
               i18nKey="mobile:user.selfNote"
@@ -161,7 +161,7 @@ function UserProfile() {
             <View style={{ gap: space.sm }}>
               <SectionTitle
                 style={{
-                  paddingHorizontal: 4,
+                  paddingHorizontal: 0,
                   paddingTop: space.sm,
                   paddingBottom: 0,
                 }}
@@ -169,11 +169,11 @@ function UserProfile() {
                 {t("profile.safetyNumber")}
               </SectionTitle>
               {safety.isLoading ? (
-                <Txt variant="secondary" style={{ paddingHorizontal: 4 }}>
+                <Txt variant="secondary">
                   {t("mobile:user.computing")}
                 </Txt>
               ) : safety.isError ? (
-                <Txt variant="secondary" style={{ paddingHorizontal: 4 }}>
+                <Txt variant="secondary">
                   {(safety.error as Error).message ||
                     t("mobile:user.safetyNumberFailed")}
                 </Txt>
@@ -251,7 +251,7 @@ function UserProfile() {
               ) : null}
               <Txt
                 variant="meta"
-                style={{ paddingHorizontal: 4, lineHeight: 17 }}
+                style={{ lineHeight: 17 }}
               >
                 {t("mobile:user.compareHint")}
               </Txt>

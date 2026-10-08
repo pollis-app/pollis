@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Text } from "react-native";
 import { useTranslation } from "react-i18next";
-import { SheetOverlay } from "../chat/SheetOverlay";
+import { SheetOverlay, afterSheetClose } from "../chat/SheetOverlay";
 import { Button, Field } from "../ui";
 import { Icon } from "../icons";
 import { ErrorText } from "./FormBits";
@@ -38,7 +38,7 @@ export function CreateChannelSheet({
       {
         onSuccess: (channel) => {
           onClose();
-          onCreated(channel);
+          afterSheetClose(() => onCreated(channel));
         },
       },
     );

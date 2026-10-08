@@ -58,13 +58,13 @@ function DMInfo() {
       />
       <Body>
         <View style={{ paddingHorizontal: space.xxl }}>
-          <SectionTitle style={{ paddingHorizontal: 4 }}>
+          <SectionTitle style={{ paddingHorizontal: 0 }}>
             {members.length > 0
               ? t("dm.participantsCount", { count: members.length })
               : t("dm.participants")}
           </SectionTitle>
           {channel.isLoading ? (
-            <Txt variant="secondary" style={{ paddingHorizontal: 4 }}>
+            <Txt variant="secondary">
               {t("common:states.loading")}
             </Txt>
           ) : null}
@@ -129,7 +129,7 @@ function DMInfo() {
           {leave.isError ? (
             <Txt
               variant="secondary"
-              style={{ paddingHorizontal: 4, color: semantic.accent }}
+              style={{ color: semantic.accent }}
             >
               {(leave.error as Error).message || t("dms:settings.leaveFailed")}
             </Txt>

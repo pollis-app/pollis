@@ -143,7 +143,7 @@ export default function InviteToGroup() {
           </Button>
         </View>
 
-        <SectionTitle style={{ paddingHorizontal: 4, paddingTop: space.xxxl * 1.5 }}>
+        <SectionTitle style={{ paddingHorizontal: 0, paddingTop: space.xxxl * 1.5 }}>
           {t("mobile:group.invite.shareableLink")}
         </SectionTitle>
         <View style={{ gap: space.lg }}>

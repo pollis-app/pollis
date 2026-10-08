@@ -218,7 +218,7 @@ export default function Search() {
         {trimmed.length < 2 ? (
           <Txt
             variant="secondary"
-            style={{ paddingHorizontal: 4, paddingTop: space.sm }}
+            style={{ paddingTop: space.sm }}
           >
             {t("search.hint")}
           </Txt>
@@ -251,7 +251,7 @@ export default function Search() {
         {showEmpty ? (
           <Txt
             variant="body"
-            style={{ paddingHorizontal: 4, paddingTop: space.lg }}
+            style={{ paddingTop: space.lg }}
           >
             {t("search:panel.noMatches")}
           </Txt>
@@ -260,7 +260,6 @@ export default function Search() {
           <View
             testID="search-no-results-why"
             style={{
-              paddingHorizontal: 4,
               paddingTop: space.sm,
               gap: space.xs,
             }}
@@ -389,7 +388,6 @@ export default function Search() {
                 alignItems: "center",
                 justifyContent: "space-between",
                 columnGap: space.sm,
-                paddingHorizontal: 4,
               }}
             >
               {/* The one result count (desktop's "About N results"); a second
@@ -499,4 +497,4 @@ export default function Search() {
 }
 
 // Section headings inside the padded results column.
-const sectionStyle = { paddingHorizontal: 4, paddingTop: space.xxl };
+const sectionStyle = { paddingHorizontal: 0, paddingTop: space.xxl };
