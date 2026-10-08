@@ -44,14 +44,17 @@ maestro --device "$EXISTING" test "$QR/2-existing-show-code.yaml"
 # `uiautomator dump` waits for an idle screen, which the code screen never is
 # (its expiry countdown re-renders every second), so on Android it can fail
 # with "could not get idle state"; Maestro's hierarchy reader does not wait.
+# The code is rendered with a zero-width space between characters (so it can
+# wrap anywhere); drop them, raw or JSON-escaped, before matching.
+strip_zwsp() { sed -e $'s/\xe2\x80\x8b//g' -e 's/\\u200[bB]//g'; }
 TREE=""
 if [[ "$EXISTING" == emulator-* || "$EXISTING" == *:* ]]; then
   if adb -s "$EXISTING" shell uiautomator dump /sdcard/qr-ui.xml >/dev/null 2>&1; then
-    TREE="$(adb -s "$EXISTING" exec-out cat /sdcard/qr-ui.xml)"
+    TREE="$(adb -s "$EXISTING" exec-out cat /sdcard/qr-ui.xml | strip_zwsp)"
   fi
 fi
 if ! printf '%s' "$TREE" | grep -q 'pollis-link:v1:'; then
-  TREE="$(maestro --device "$EXISTING" hierarchy 2>/dev/null)"
+  TREE="$(maestro --device "$EXISTING" hierarchy 2>/dev/null | strip_zwsp)"
 fi
 PAYLOAD="$(printf '%s' "$TREE" | grep -oE 'pollis-link:v1:[0-9A-Za-z]+:[A-Za-z0-9_-]{43}' | head -1)"
 [ -n "$PAYLOAD" ] || { echo "could not read the link code from the existing device" >&2; exit 1; }
