@@ -169,11 +169,15 @@ jobs:
 
       # POLLIS_BUILD is read by app.config.js here (versionCode lands in the
       # generated build.gradle) and again when Gradle's bundle step evaluates
-      # the config, so it is set on both steps.
+      # the config, so it is set on both steps. POLLIS_OTA=production likewise:
+      # this is a prod build, so it takes signed over-the-air updates (#1250),
+      # and app.config.js fails the build if the OTA code-signing certificate
+      # (mobile/store/ota-code-signing.pem) is missing.
       - name: Expo prebuild (android)
         working-directory: mobile
         env:
           POLLIS_BUILD: ${{ steps.version.outputs.build }}
+          POLLIS_OTA: production
         run: pnpm expo prebuild --platform android --no-install --clean
 
       # The keystore and its passwords exist only for this step and the next:
@@ -195,6 +199,7 @@ jobs:
         env:
           GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx4096m
           POLLIS_BUILD: ${{ steps.version.outputs.build }}
+          POLLIS_OTA: production
           POLLIS_ABI_SPLITS: "true"
           POLLIS_RELEASE_KEY: sideload
           POLLIS_SIDELOAD_KEYSTORE_B64: ${{ secrets.POLLIS_SIDELOAD_KEYSTORE_B64 }}

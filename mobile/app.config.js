@@ -38,7 +38,89 @@
 // because a versionCode that goes backwards is unrecoverable without a new
 // package name.
 
+const fs = require("fs");
+const path = require("path");
 const pkg = require("./package.json");
+
+// ## Over-the-air JS updates (#1250)
+//
+// expo-updates is in every binary, but it is switched ON only for a build that
+// says so: POLLIS_OTA=production, set by the store builds and the sideload APK
+// release. Everything else (dev clients, the Maestro Release builds against
+// api-dev, CI's debug-keystore APK) gets `enabled: false` and no URL at all, so
+// it cannot ask the update server for anything — a dev build never takes a
+// prod update, and there is no dev update server whose output could reach a
+// prod build.
+//
+// A prod build REFUSES to configure without the code-signing certificate:
+// expo-updates then rejects every manifest that is unsigned or signed by any
+// other key. The private half never touches this repo or the update server;
+// see scripts/generate-ota-signing-key.sh and mobile/CLAUDE.md "OTA updates".
+const OTA_CHANNEL = "production";
+// Served by the DS front-door Worker itself (pollis-delivery/worker/updates.ts),
+// never forwarded to the DS container.
+const OTA_UPDATE_URL = "https://api.pollis.com/updates/api/manifest";
+const OTA_CERT_PATH = "./store/ota-code-signing.pem";
+const OTA_PROD_DS = "https://api.pollis.com";
+// Every install sends the same value: nothing in an update request identifies one.
+const OTA_NEUTRAL_CLIENT_ID = "00000000-0000-0000-0000-000000000000";
+
+function updatesConfigFor(env, certExists) {
+  const mode = env.POLLIS_OTA;
+  if (mode === undefined || mode === "" || mode === "off") {
+    return { enabled: false };
+  }
+  if (mode !== OTA_CHANNEL) {
+    throw new Error(
+      `POLLIS_OTA must be "${OTA_CHANNEL}" or "off" (or unset), got ${JSON.stringify(mode)}`,
+    );
+  }
+  if (!certExists) {
+    throw new Error(
+      `POLLIS_OTA=${OTA_CHANNEL} but the OTA code-signing certificate ${OTA_CERT_PATH} is missing. ` +
+        "A prod build must not ship expo-updates without it. Run scripts/generate-ota-signing-key.sh " +
+        "(owner only) and commit the certificate, or build with POLLIS_OTA unset.",
+    );
+  }
+  // The DS URL is only visible here when it is in the environment (the Expo CLI
+  // loads mobile/.env; the native build phase that re-reads this file does not).
+  // When it IS visible it must be prod: an api-dev bundle taking prod updates is
+  // exactly the cross-over this switch exists to prevent.
+  const ds = env.EXPO_PUBLIC_POLLIS_DELIVERY_URL;
+  if (ds !== undefined && ds !== OTA_PROD_DS) {
+    throw new Error(
+      `POLLIS_OTA=${OTA_CHANNEL} needs EXPO_PUBLIC_POLLIS_DELIVERY_URL=${OTA_PROD_DS}, got ${JSON.stringify(ds)}`,
+    );
+  }
+  return {
+    enabled: true,
+    url: OTA_UPDATE_URL,
+    // Check on every launch, in the background; never hold the launch for it.
+    // A downloaded update runs on the NEXT cold start. No UI.
+    checkAutomatically: "ON_LOAD",
+    fallbackToCacheTimeout: 0,
+    // The update server serves whole assets only; asking for bsdiff patches
+    // would add a request header the server has no use for.
+    enableBsdiffPatchSupport: false,
+    codeSigningCertificate: OTA_CERT_PATH,
+    codeSigningMetadata: { keyid: "main", alg: "rsa-v1_5-sha256" },
+    requestHeaders: {
+      "expo-channel-name": OTA_CHANNEL,
+      // expo-updates attaches an install-scoped random UUID (`EAS-Client-ID`,
+      // stored on the device) to every manifest AND asset request — a stable
+      // per-install identifier the update server has no use for, and which
+      // Cloudflare's edge would see next to the client IP. Both platforms'
+      // FileDownloader apply `requestHeaders` after setting it (iOS
+      // `setValue`, Android OkHttp `header()` — both replace), so a constant
+      // here overwrites it on every request.
+      "EAS-Client-ID": OTA_NEUTRAL_CLIENT_ID,
+      // The previous launch's fatal JS error text (up to 1 KiB) is otherwise
+      // sent on the next manifest request; it is diagnostic data that could
+      // carry anything the error message did. Also applied last, so blanked.
+      "Expo-Fatal-Error": "",
+    },
+  };
+}
 
 // Guard the inputs rather than silently shipping a wrong number: a bad version
 // string here becomes NaN in a store field, which fails late and confusingly.
@@ -73,10 +155,16 @@ module.exports = ({ config }) => {
   }
   const code = versionCodeFrom(pkg.version, build);
 
+  const certExists = fs.existsSync(path.join(__dirname, OTA_CERT_PATH));
+
   return {
     ...config,
     version: pkg.version,
     ios: { ...config.ios, buildNumber: String(code) },
     android: { ...config.android, versionCode: code },
+    updates: updatesConfigFor(process.env, certExists),
   };
 };
+
+module.exports.updatesConfigFor = updatesConfigFor;
+module.exports.OTA = { OTA_CHANNEL, OTA_UPDATE_URL, OTA_CERT_PATH, OTA_PROD_DS, OTA_NEUTRAL_CLIENT_ID };

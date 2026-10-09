@@ -1,0 +1,442 @@
+name: Mobile OTA Release (signed JS updates)
+
+# Over-the-air JS/asset updates for the mobile app (#1250), served with the
+# Expo Updates protocol by the DS front-door Worker at api.pollis.com/updates/
+# (pollis-delivery/worker/updates.ts) — straight from R2, never through the DS
+# container. The update store is the `ota/` prefix of the public release bucket
+# `pollis`, written with the same R2 credentials the release workflows (and
+# this workflow's provenance step) already use; the publish CLI applies the
+# prefix itself.
+# An OTA replaces the code that handles plaintext and skips store review, so:
+#
+#   * Every manifest and directive is SIGNED (RSA-SHA256) by a key that exists
+#     only in the `ota-signing` environment, which has a required reviewer. The
+#     `sign` job is the only job that can read it, it runs no npm tree (bare
+#     node + mobile/scripts/ota/lib.ts, node: built-ins only), and it re-derives
+#     every hash and the prod-DS check from the bytes before it signs. The app
+#     refuses anything the matching certificate (mobile/store/ota-code-signing.pem)
+#     does not verify. The update server never sees the key.
+#   * Every published update (and every rollback directive) is appended to the
+#     binary-transparency log BEFORE it goes live, the way desktop releases are
+#     logged: three leaves per update (manifest, launch bundle, asset list),
+#     keyed by runtime version, each with SLSA provenance on cdn.pollis.com.
+#   * The bundle must name api.pollis.com and never api-dev, and may read only
+#     the four public EXPO_PUBLIC_* values — the store build's checks.
+#   * After going live, the job fetches the update back THROUGH the Worker as a
+#     phone would and verifies signature and every hash.
+#
+# Triggers:
+#   * Tag push `mobile-ota-<anything>` on a commit reachable from main —
+#     publishes the JS on that commit. `mobile-ota-` cannot match the desktop's
+#     `v*` or the sideload APK's `mobile-v*` (globs anchor at the start), and
+#     neither of theirs can match this one.
+#   * workflow_dispatch:
+#       dry-run               (any ref) build + every check, plan as a run
+#                             artifact; signs nothing, publishes nothing
+#       publish               (on a mobile-ota-* tag ref) re-run a publish
+#       republish             (on main) re-serve an earlier group's bytes under
+#                             new update ids — roll back to a known-good update
+#       rollback-to-embedded  (on main) signed rollBackToEmbedded directives —
+#                             roll back to the store binary's own bundle
+#
+# Native changes (pollis-core, a new native module, config plugins) change the
+# runtime version, so an update built after one reaches only binaries built
+# after it. That is the point: store builds remain the path for native code.
+on:
+  push:
+    tags:
+      - "mobile-ota-*"
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "dry-run | publish (tag ref) | republish (main) | rollback-to-embedded (main)"
+        type: choice
+        options: [dry-run, publish, republish, rollback-to-embedded]
+        default: dry-run
+      from_group:
+        description: "republish: the group id to re-serve (from an earlier run's summary or groups/ in the bucket)"
+        required: false
+        default: ""
+      platform:
+        description: "rollback-to-embedded: ios | android | all"
+        type: choice
+        options: [all, ios, android]
+        default: all
+      runtime_version:
+        description: "rollback-to-embedded: a runtime version, or 'all' for every one with a live update"
+        required: false
+        default: all
+
+permissions:
+  contents: read
+
+# One OTA operation at a time: the live pointers and the transparency
+# accumulator are shared state.
+concurrency:
+  group: mobile-ota-release
+  cancel-in-progress: false
+
+jobs:
+  # Decide what this run does, and refuse combinations that make no sense
+  # before anything is built or anyone is asked to approve a signature.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.mode.outputs.mode }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Resolve mode
+        id: mode
+        env:
+          ACTION: ${{ github.event.inputs.action }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "push" ]; then
+            mode=publish
+          else
+            mode="$ACTION"
+          fi
+          case "$mode" in
+            publish)
+              if [ "$GITHUB_REF_TYPE" != "tag" ] || [[ "$GITHUB_REF_NAME" != mobile-ota-* ]]; then
+                echo "::error::publish runs only on a mobile-ota-* tag (dispatch dry-run on a branch instead)"
+                exit 1
+              fi
+              # Only reviewed code ships over the air: the tagged commit must be on main.
+              git fetch --no-tags origin main
+              if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+                echo "::error::${GITHUB_REF_NAME} (${GITHUB_SHA}) is not on main"
+                exit 1
+              fi
+              ;;
+            republish|rollback-to-embedded)
+              if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+                echo "::error::${mode} is dispatched from main (it runs main's pipeline and certificate)"
+                exit 1
+              fi
+              ;;
+            dry-run) ;;
+            *)
+              echo "::error::unknown action ${mode}"
+              exit 1
+              ;;
+          esac
+          echo "mode=${mode}" >> "$GITHUB_OUTPUT"
+          echo "OTA mode: ${mode}"
+
+  # Build the update. Holds no secret beyond the public endpoints Metro inlines
+  # (the same values the sideload APK build gets), no signing key, no write key.
+  build:
+    needs: plan
+    if: needs.plan.outputs.mode == 'publish' || needs.plan.outputs.mode == 'dry-run'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10.25.0
+
+      # The JS bundle imports pollis-core's uniffi TypeScript bindings, which
+      # ubrn generates from a compiled library. One Android ABI is enough: the
+      # bindings are the same for every target (and the runtime version, not
+      # these files, is what ties an update to a binary — fingerprint.config.js).
+      - name: Add the android rust target
+        run: rustup target add aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: mobile-ota-bindings
+
+      - name: Install the RN-pinned Android NDK
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          SDKMGR="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMGR" ]; then
+            SDKMGR="$(command -v sdkmanager)"
+          fi
+          { yes || true; } | "$SDKMGR" --licenses >/dev/null
+          "$SDKMGR" "ndk;27.1.12297006"
+          {
+            echo "ANDROID_NDK_HOME=$SDK/ndk/27.1.12297006"
+            echo "ANDROID_NDK_ROOT=$SDK/ndk/27.1.12297006"
+          } >> "$GITHUB_ENV"
+
+      - name: Install cargo-ndk + uniffi-bindgen-react-native (pinned)
+        run: |
+          set -euo pipefail
+          cargo install cargo-ndk --locked
+          cargo install --git https://github.com/jhugman/uniffi-bindgen-react-native \
+            --tag 0.31.0-6 uniffi-bindgen-react-native --locked
+
+      - name: Install JS dependencies
+        working-directory: mobile
+        run: pnpm install --ignore-workspace --frozen-lockfile
+
+      - name: Generate the uniffi bindings
+        working-directory: mobile/modules/pollis-native
+        run: uniffi-bindgen-react-native build android --config ubrn.config.yaml --targets aarch64-linux-android --and-generate
+
+      # expo export + the store-build checks + unsigned manifests. The DS URL
+      # is a literal: it is the one value this pipeline exists to get right,
+      # and the bundle check proves it landed. EXPO_NO_DOTENV is set by the
+      # script itself.
+      - name: Build the update
+        working-directory: mobile
+        env:
+          EXPO_PUBLIC_POLLIS_DELIVERY_URL: https://api.pollis.com
+          EXPO_PUBLIC_LIVEKIT_URL: ${{ secrets.LIVEKIT_URL }}
+          EXPO_PUBLIC_R2_ENDPOINT: ${{ secrets.R2_S3_ENDPOINT }}
+          EXPO_PUBLIC_R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
+        run: node scripts/ota-publish.ts build --out "$RUNNER_TEMP/ota"
+
+      - name: Upload the plan
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ota-plan
+          path: |
+            ${{ runner.temp }}/ota/plan.json
+            ${{ runner.temp }}/ota/summary.md
+            ${{ runner.temp }}/ota/files/
+          if-no-files-found: error
+
+  # Republish / rollback plans read the bucket's archive; nothing is built.
+  prepare:
+    needs: plan
+    if: needs.plan.outputs.mode == 'republish' || needs.plan.outputs.mode == 'rollback-to-embedded'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Prepare the plan
+        working-directory: mobile
+        env:
+          MODE: ${{ needs.plan.outputs.mode }}
+          FROM_GROUP: ${{ github.event.inputs.from_group }}
+          PLATFORM: ${{ github.event.inputs.platform }}
+          RUNTIME_VERSION: ${{ github.event.inputs.runtime_version }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          endpoint="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          if [ "$MODE" = "republish" ]; then
+            if ! [[ "$FROM_GROUP" =~ ^[0-9a-f-]{36}$ ]]; then
+              echo "::error::from_group must be a group id (UUID), got '${FROM_GROUP}'"
+              exit 1
+            fi
+            node scripts/ota-publish.ts prepare-republish --from-group "$FROM_GROUP" \
+              --out "$RUNNER_TEMP/ota" --bucket pollis --endpoint "$endpoint"
+          else
+            node scripts/ota-publish.ts prepare-rollback --platform "$PLATFORM" \
+              --runtime-version "${RUNTIME_VERSION:-all}" \
+              --out "$RUNNER_TEMP/ota" --bucket pollis --endpoint "$endpoint"
+          fi
+
+      - name: Upload the plan
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ota-plan
+          path: |
+            ${{ runner.temp }}/ota/plan.json
+            ${{ runner.temp }}/ota/summary.md
+            ${{ runner.temp }}/ota/files/
+          if-no-files-found: error
+
+  # THE approval gate. `ota-signing` is a GitHub environment with a required
+  # reviewer and the OTA_CODE_SIGNING_KEY secret; this job waits for a human
+  # before it can read the key. The reviewer approves the summary the build or
+  # prepare job printed (platforms, runtime versions, update ids, bundle hashes).
+  sign:
+    needs: [plan, build, prepare]
+    if: >-
+      always() && !cancelled() && needs.plan.outputs.mode != 'dry-run' &&
+      (needs.build.result == 'success' || needs.prepare.result == 'success')
+    runs-on: ubuntu-latest
+    environment: ota-signing
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Download the plan
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ota-plan
+          path: ${{ runner.temp }}/ota
+
+      # No `pnpm install`: the signer runs only node: built-ins, from this
+      # commit's checkout, against the certificate committed in it.
+      - name: Re-check and sign
+        working-directory: mobile
+        env:
+          OTA_CODE_SIGNING_KEY: ${{ secrets.OTA_CODE_SIGNING_KEY }}
+        run: node scripts/ota-publish.ts sign --in "$RUNNER_TEMP/ota"
+
+      - name: Upload the signed plan
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ota-signed
+          path: |
+            ${{ runner.temp }}/ota/plan.json
+            ${{ runner.temp }}/ota/summary.md
+            ${{ runner.temp }}/ota/files/
+          if-no-files-found: error
+
+  # Log, then go live, then check from the outside. Each write key is
+  # step-scoped `env:`, never $GITHUB_ENV.
+  publish:
+    needs: [plan, sign]
+    if: always() && !cancelled() && needs.sign.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Keyless SLSA provenance (Fulcio/Rekor) for every logged artifact.
+      id-token: write
+      attestations: write
+      # Only to dispatch transparency-publish at the end.
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Download the signed plan
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ota-signed
+          path: ${{ runner.temp }}/ota
+
+      # 1. Bytes and archive. Nothing a phone sees changes yet.
+      - name: Upload content to R2
+        working-directory: mobile
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          node scripts/ota-publish.ts upload --phase content --in "$RUNNER_TEMP/ota" \
+            --bucket pollis --endpoint "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+
+      # 2. The transparency leaves, with SLSA provenance published at each
+      #    leaf's provenance_uri — the same shape as desktop-release.yml's
+      #    provenance + attest-and-log jobs.
+      - name: Stage the logged artifacts
+        id: stage
+        working-directory: mobile
+        run: |
+          set -euo pipefail
+          node scripts/ota-publish.ts attest --in "$RUNNER_TEMP/ota" --out "$RUNNER_TEMP/attest"
+          tag="$(jq -r '.[0].release_tag' "$RUNNER_TEMP/ota/records.json")"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          jq '.' "$RUNNER_TEMP/ota/records.json"
+
+      - name: Generate SLSA build provenance (keyless, Fulcio/Rekor)
+        id: attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/attest/*
+
+      - name: Publish provenance to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
+          AWS_DEFAULT_REGION: auto
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TAG: ${{ steps.stage.outputs.tag }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          for f in "$RUNNER_TEMP"/attest/*; do
+            base="$(basename "$f")"
+            aws s3 cp "$BUNDLE" "s3://pollis/releases/mobile-ota/${TAG}/${base}.intoto.jsonl" \
+              --endpoint-url "${ENDPOINT}" --content-type "application/json" --only-show-errors
+          done
+
+      # A leaf is permanent; one naming a 404 can never be repaired (v1.9.0/1).
+      - name: Assert every provenance_uri resolves
+        run: |
+          set -euo pipefail
+          rc=0
+          while IFS= read -r uri; do
+            if curl -fsIL --max-time 20 "https://${uri}" >/dev/null 2>&1; then
+              echo "  ok   ${uri}"
+            else
+              echo "::error::provenance_uri does not resolve: https://${uri}"
+              rc=1
+            fi
+          done < <(jq -r '[.[].provenance_uri] | unique | .[]' "$RUNNER_TEMP/ota/records.json")
+          exit "$rc"
+
+      # 3. Append BEFORE going live: no update is ever served that the log
+      #    does not hold. Conditional write on the shared accumulator (desktop
+      #    releases append to the same object).
+      - name: Append to the transparency log
+        working-directory: mobile
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_TRANSPARENCY_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_TRANSPARENCY_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_TRANSPARENCY_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_TRANSPARENCY_BUCKET }}
+        run: |
+          node scripts/ota-publish.ts log-append --records "$RUNNER_TEMP/ota/records.json" \
+            --bucket "$R2_BUCKET" --endpoint "$R2_ENDPOINT"
+
+      # 4. Live.
+      - name: Flip the live pointers
+        working-directory: mobile
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          node scripts/ota-publish.ts upload --phase live --in "$RUNNER_TEMP/ota" \
+            --bucket pollis --endpoint "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+
+      # 5. "Workflow green" is not "live": fetch it back as a phone would.
+      - name: Verify through api.pollis.com/updates
+        working-directory: mobile
+        run: node scripts/ota-publish.ts verify --in "$RUNNER_TEMP/ota"
+
+      - name: Publish the transparency tree with the new leaves
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run transparency-publish.yml --repo "$GITHUB_REPOSITORY"
+          echo "dispatched transparency-publish; the binaries tree will carry ${{ steps.stage.outputs.tag }} shortly"
+
+      - name: Keep the signed plan
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ota-published
+          path: |
+            ${{ runner.temp }}/ota/plan.json
+            ${{ runner.temp }}/ota/records.json
+            ${{ runner.temp }}/ota/summary.md
+          if-no-files-found: error

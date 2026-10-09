@@ -7,13 +7,16 @@
   "scripts": {
     "deploy:dev": "wrangler deploy -c wrangler.dev.jsonc",
     "deploy:prod": "wrangler deploy -c wrangler.prod.jsonc",
-    "dev": "wrangler dev -c wrangler.dev.jsonc"
+    "dev": "wrangler dev -c wrangler.dev.jsonc",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:worker": "node --test worker-tests/*.test.ts"
   },
   "dependencies": {
     "@cloudflare/containers": "^0.3.7"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260702.1",
+    "typescript": "^5.9.3",
     "wrangler": "^4.107.1"
   }
 }

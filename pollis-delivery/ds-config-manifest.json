@@ -76,7 +76,7 @@
 
   "worker_vars": {
     "$comment": "Read by the WORKER itself and deliberately NOT forwarded to the container. Declared so the checker does not demand a forward that would be meaningless.",
-    "keys": ["DS_SINGLETON_NAME"]
+    "keys": ["DS_SINGLETON_NAME", "OTA_CHANNEL"]
   },
 
   "aliases": {

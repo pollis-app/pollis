@@ -78,6 +78,9 @@
     // `locationHint` did not move a container-backed durable object. The cause of
     // the dev/prod gap is therefore still UNKNOWN — see the spike on #658.
     "DS_SINGLETON_NAME": "pollis-delivery-singleton-enam",
+    // Mobile OTA (#1250): a worker var both configs carry (ds-config-manifest.json).
+    // Inert here: dev binds no `UPDATES` bucket, so /updates/ answers 404.
+    "OTA_CHANNEL": "production",
     // request-otp is OFF on dev (ratelimit.rs `RateLimitConfig::from_env`, `off`
     // = never limits): the mobile e2e suites run iPhone, iPad and Android in
     // parallel from ONE machine and every flow signs up a fresh account, and dev
@@ -120,6 +123,14 @@
   // Custom-domain cutover (route, not NS — zone already on CF). Attached only
   // once the container is smoke-tested; rollback = flip this DNS back to the VPS.
   "routes": [{ "pattern": "api-dev.pollis.com", "custom_domain": true }],
+  // Mobile OTA updates (#1250): deliberately NOT bound here — no `UPDATES`
+  // bucket (`OTA_CHANNEL` is set above but inert without it), so api-dev's /updates/ routes answer 404. No
+  // dev or test build enables expo-updates (mobile/app.config.js turns it on
+  // only for POLLIS_OTA=production, pointed at api.pollis.com), so nothing asks
+  // dev; and binding the prod release bucket here would hand a dev deploy a
+  // write-capable handle on prod data, which #515's separate configs exist to
+  // rule out.
+
   // No plain client IPs readable anywhere, admins included. Workers Logs records
   // every invocation's request (headers + the `cf` object, i.e. the client IP)
   // where any account member can read it in the dashboard, and Logpush exports

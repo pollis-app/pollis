@@ -252,6 +252,31 @@ artifacts, where both hashes are equal). Use `--json` to get full hashes:
 sha256sum pollis-v1.3.6-linux.AppImage
 ```
 
+### Mobile over-the-air updates
+
+Every JS update the mobile app can receive is a "release" in this tree, tagged
+`mobile-ota-<group id>` (the group id is in the release workflow's run summary).
+Its leaves are `ota-manifest`, `ota-bundle` and `ota-assets` per platform, with
+the runtime version in the `arch` column; a rollback is one `ota-directive` leaf
+per platform and runtime version:
+
+```bash
+pollis-verify release https://verify.pollis.com mobile-ota-<group id>
+```
+
+To check what your phone is offered right now against the log, fetch the update
+the way the app does and hash the manifest part (it is the exact signed bytes the
+`ota-manifest` leaf commits to); from a repo checkout this also verifies the code
+signature and every asset hash:
+
+```bash
+cd mobile && node scripts/ota-publish.ts verify --platform ios --runtime-version <rv>
+# ok ios/<rv>: update <id>, manifest sha256 <hash>, <n> files verified
+```
+
+The runtime version is the native fingerprint of the build you run; a build with
+no update published for it gets `204 No Content` and has nothing to check.
+
 ## 6. Fully offline: `monitor verify`
 
 To avoid trusting the network during verification, download a signed bundle once

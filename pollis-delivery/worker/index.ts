@@ -16,6 +16,7 @@ import {
   Container,
   type ContainerStartConfigOptions,
 } from "@cloudflare/containers";
+import { handleUpdates, isUpdatesPath } from "./updates";
 
 // WHERE the DS container physically runs (#658).
 //
@@ -176,6 +177,11 @@ type Env = {
   // is exactly how a routine dev migration would become a production outage.
   // Absent → DS_SINGLETON_NAME_FALLBACK, which is prod's existing object.
   DS_SINGLETON_NAME?: string;
+  // Mobile OTA updates (#1250, updates.ts): the public release bucket, read
+  // under its `ota/` prefix, and the one channel served. Prod only — dev binds
+  // neither, so its /updates/ routes answer 404.
+  UPDATES?: R2Bucket;
+  OTA_CHANNEL?: string;
 } & Record<(typeof SECRET_KEYS)[number], SecretStoreBinding | undefined> &
   Partial<Record<(typeof TUNABLE_VAR_KEYS)[number], string>>;
 
@@ -359,8 +365,14 @@ export class PollisDelivery extends Container<Env> {
 export default {
   // Forward everything to the single serialized container instance. No
   // per-route allowlist (the nginx-vhost rot this migration kills, #515) —
-  // the app owns its routing.
+  // the app owns its routing. The ONE exception is `/updates/`, the mobile
+  // OTA update server (updates.ts): answered here from R2 and never forwarded,
+  // so it neither wakes the container nor queues behind it, and it never
+  // passes through the client-IP bucketing above (it reads no client IP).
   async fetch(request: Request, env: Env): Promise<Response> {
+    if (isUpdatesPath(new URL(request.url).pathname)) {
+      return handleUpdates(request, env);
+    }
     // Same resolution getContainer performed (idFromName + get), plus the
     // placement hint it gives no way to pass. See DS_LOCATION_HINT above.
     const id = env.POLLIS_DELIVERY.idFromName(

@@ -29,6 +29,10 @@ yarn-error.*
 # macOS
 .DS_Store
 *.pem
+# ...except the PUBLIC half of the OTA code-signing identity (#1250): a
+# certificate, compiled into every prod build. Its private key never enters the
+# repo (scripts/generate-ota-signing-key.sh writes it to ~/.pollis/).
+!store/ota-code-signing.pem
 
 # local env files (.env holds real EXPO_PUBLIC_* secrets; .env.example is tracked)
 .env

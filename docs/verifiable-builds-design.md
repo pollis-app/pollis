@@ -442,6 +442,19 @@ after `release`** (it needs the built + signed artifacts in hand):
 > operator's manual steps — it's additional automated jobs on a tag push. The
 > operator keeps doing `git tag vX.Y.Z && git push --tags`.
 
+### 2.4a Mobile OTA updates (#1250)
+
+`mobile-ota-release.yml` appends to the same accumulator with the same frozen
+`BinaryRecord`: `platform` ios/android, `arch` = the runtime version, `bundle` =
+`ota-manifest` / `ota-bundle` / `ota-assets` / `ota-directive`, `layer` payload,
+SLSA provenance at `cdn.pollis.com/releases/mobile-ota/<tag>/`. Differences from
+the desktop flow, both deliberate: the append is a **conditional write** on the
+accumulator's ETag (two releases can no longer race the read-modify-write), and it
+happens **before** the update goes live rather than after the release, because an
+OTA reaches phones the moment its pointer flips. Pinned by
+`verifiable-log-serve/tests/binaries_e2e.rs` (`ota_update_groups_verify_alongside_desktop_releases`)
+and `mobile/tests/ota-manifest.test.ts` (field order against `binaries.rs`).
+
 ### 2.5 Static read API additions
 
 Mirroring the existing tables in `transparency.md`:

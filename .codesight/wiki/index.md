@@ -24,6 +24,7 @@ Start here. Navigate to the article you need.
 - [Message Search](./search.md) — On-device FTS5 index, ranking, Slack-style filters, and why server-side search is impossible (#850)
 - [Localization (i18n)](./i18n.md) — i18next setup, namespace/key conventions, device-local language preference, adding a locale (#855)
 - [Terminal Client (pollis-tui)](./pollis-tui.md) — Headless ratatui/crossterm client on `pollis-core` (no Tauri/IPC): architecture, run headless, the auth-order gotcha
+- [Mobile OTA Updates](./ota-updates.md) — Signed over-the-air JS updates: app config, fingerprint runtime version, publish pipeline, update Worker, transparency leaves (#1250)
 
 ## Quick Reference
 

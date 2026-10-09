@@ -52,8 +52,18 @@
     // as unreproducible until the hosting-strategy spike on #658 says otherwise.
     // Stated explicitly rather than left to the code fallback so any rename is a
     // visible, reviewable diff.
-    "DS_SINGLETON_NAME": "pollis-delivery-singleton"
+    "DS_SINGLETON_NAME": "pollis-delivery-singleton",
+    // Mobile OTA updates (#1250): the one channel /updates/ answers for. A
+    // build sends it as `expo-channel-name` (mobile/app.config.js); any other
+    // value gets a 400.
+    "OTA_CHANNEL": "production"
   },
+  // Mobile OTA updates (#1250, worker/updates.ts): the Worker serves
+  // api.pollis.com/updates/ straight from the public release bucket, under its
+  // `ota/` prefix, without forwarding to the container. Read-only in practice:
+  // the code only ever calls get(). The publish pipeline writes those objects
+  // with the release workflows' existing R2 credentials.
+  "r2_buckets": [{ "binding": "UPDATES", "bucket_name": "pollis" }],
   // Synced from Doppler prd_prod into the account Secrets Store under DS_PROD_.
   "secrets_store_secrets": [
     { "binding": "TURSO_URL", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_TURSO_URL" },

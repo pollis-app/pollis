@@ -413,3 +413,84 @@ fn remote_verify_notes_absent_binaries_tree() {
         report.notes
     );
 }
+
+/// One leaf of a mobile over-the-air JS update (#1250), in the exact shape
+/// `mobile/scripts/ota/lib.ts` `attestedFiles` writes: platform `ios`/`android`,
+/// `arch` = the runtime version (the native binary the update targets),
+/// `bundle` = `ota-manifest` | `ota-bundle` | `ota-assets` | `ota-directive`,
+/// payload layer only (nothing re-signs the bytes after they are logged).
+fn ota_record(group: &str, platform: &str, runtime_version: &str, bundle: &str, digest: u8) -> BinaryRecord {
+    let tag = format!("mobile-ota-{group}");
+    let artifact_name = format!("pollis-ota-{group}-{platform}.{bundle}");
+    BinaryRecord {
+        release_tag: tag.clone(),
+        commit: "e".repeat(40),
+        platform: platform.to_string(),
+        arch: runtime_version.to_string(),
+        bundle: bundle.to_string(),
+        artifact_name: artifact_name.clone(),
+        layer: Layer::Payload,
+        payload_sha256: hex::encode([digest; 32]),
+        artifact_sha256: hex::encode([digest; 32]),
+        toolchain: toolchain(),
+        provenance_uri: format!("cdn.pollis.com/releases/mobile-ota/{tag}/{artifact_name}.intoto.jsonl"),
+    }
+}
+
+/// OTA updates share the binaries tree with desktop releases without any change
+/// to the frozen leaf contract: a publish, a rollback naming two runtime
+/// versions of one platform, and a republish of the first publish's bytes
+/// (same hashes, new tag) all satisfy the invariant, and `pollis-verify release
+/// mobile-ota-<group>` reports exactly that group's leaves.
+#[test]
+fn ota_update_groups_verify_alongside_desktop_releases() {
+    let rv_ios = "376466c81d9428da79f80525da44567b98aa4e4a";
+    let rv_ios_old = "0000000000000000000000000000000000000001";
+    let rv_android = "650428a8330d3d6e164e93a21f4fa73aa7088395";
+    let publish = "11111111-1111-4111-8111-111111111111";
+    let rollback = "22222222-2222-4222-8222-222222222222";
+    let republish = "33333333-3333-4333-8333-333333333333";
+
+    let mut records = fixture_records();
+    for (platform, rv, base) in [("ios", rv_ios, 0x40u8), ("android", rv_android, 0x50u8)] {
+        records.push(ota_record(publish, platform, rv, "ota-manifest", base));
+        records.push(ota_record(publish, platform, rv, "ota-bundle", base + 1));
+        records.push(ota_record(publish, platform, rv, "ota-assets", base + 2));
+    }
+    records.push(ota_record(rollback, "ios", rv_ios, "ota-directive", 0x60));
+    records.push(ota_record(rollback, "ios", rv_ios_old, "ota-directive", 0x61));
+    for (platform, rv, base) in [("ios", rv_ios, 0x40u8), ("android", rv_android, 0x50u8)] {
+        // A republish is a new manifest (new update id) over the same bytes.
+        records.push(ota_record(republish, platform, rv, "ota-manifest", base + 8));
+        records.push(ota_record(republish, platform, rv, "ota-bundle", base + 1));
+        records.push(ota_record(republish, platform, rv, "ota-assets", base + 2));
+    }
+
+    let bundle = to_serve_bundle(&build_binaries_bundle(&records, &signing_key(), TS).unwrap());
+
+    let report = release::verify_release_in_bundle(&bundle, &format!("mobile-ota-{publish}"));
+    assert!(report.chain_valid, "violations: {:?}", report.violations);
+    assert_eq!(report.artifacts.len(), 6);
+    assert!(report.artifacts.iter().all(|a| a.included && a.layer == Layer::Payload));
+    let ios_bundle = report
+        .artifacts
+        .iter()
+        .find(|a| a.platform == "ios" && a.bundle == "ota-bundle")
+        .expect("the iOS launch bundle leaf");
+    assert_eq!(ios_bundle.arch, rv_ios);
+
+    let rolled = release::verify_release_in_bundle(&bundle, &format!("mobile-ota-{rollback}"));
+    assert!(rolled.chain_valid, "violations: {:?}", rolled.violations);
+    assert_eq!(rolled.artifacts.len(), 2);
+
+    // The desktop release is untouched by the mobile leaves around it.
+    assert!(release::verify_release_in_bundle(&bundle, "v1.3.0").chain_valid);
+
+    // Appending a group twice (a re-run without the accumulator's idempotency
+    // check) is out of publish order once another tag has followed it, which
+    // is why `ota-publish.ts log-append` skips a tag already present.
+    let mut twice = records.clone();
+    twice.push(ota_record(publish, "ios", rv_ios, "ota-manifest", 0x40));
+    let err = build_binaries_bundle(&twice, &signing_key(), TS).unwrap_err();
+    assert!(err.to_string().contains("out of publish order"), "got: {err}");
+}

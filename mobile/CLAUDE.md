@@ -49,7 +49,10 @@ option requires) rather than excluding `tests/` from typechecking the way
 
 It runs in CI in the **`expo-doctor` job** of `mobile-core-check.yml` — the
 cheap one, with no Rust, NDK or Gradle — so a broken reducer fails in seconds
-instead of behind a 3-ABI cross-compile.
+instead of behind a 3-ABI cross-compile. The same job runs the OTA update
+routes' tests (`node --test pollis-delivery/worker-tests/*.test.ts`); `tests/ota-*`
+cover the publish pipeline (signing with a throwaway in-memory certificate,
+never the real one) and the app's `updates` config.
 
 Anything needing a device or a renderer stays out: Maestro (`.maestro/`) is the
 tier for that.
@@ -263,7 +266,9 @@ carries is a stale prior artifact.
   the core changes. `fingerprint` ties the runtime version to a hash of the
   native layer, so any native change forces a fresh binary instead of letting an
   incompatible OTA land on an old one — `sdkVersion`/`appVersion` would allow
-  exactly that. Do not switch it without understanding this.
+  exactly that. Do not switch it without understanding this. It is computed
+  locally, with no EAS involved, and `fingerprint.config.js` widens it to cover
+  pollis-core — see [OTA updates](#ota-updates-1250).
   **It belongs to the app config, not to a build profile:** `runtimeVersion` is
   not in the eas.json schema, and a profile carrying it makes current EAS CLI
   reject the entire file (`"build.<profile>.runtimeVersion" is not allowed`) —
@@ -357,8 +362,12 @@ because a versionCode that goes backwards cannot be fixed without a new package
 name. `app.json` keeps everything else (plugins, icons, privacy manifests); it
 no longer carries `version`, `ios.buildNumber` or `android.versionCode` at all.
 
-**Environment first.** `EXPO_PUBLIC_*` vars inline into the shipped JS bundle,
-so before any store build check `mobile/.env`:
+**Environment first.** `export POLLIS_OTA=production` for the prebuild AND the
+native build (Xcode archive / Gradle): it switches on signed OTA updates
+(#1250), and `app.config.js` fails if the OTA code-signing certificate is
+missing. Without it the store build ships with updates disabled and can never
+take one. Then, because `EXPO_PUBLIC_*` vars inline into the shipped JS bundle,
+check `mobile/.env`:
 
 - `EXPO_PUBLIC_POLLIS_DELIVERY_URL` **must** be `https://api.pollis.com` (prod
   DS), not api-dev.
@@ -397,6 +406,7 @@ uniffi-bindgen-react-native build ios --config ubrn.config.yaml --and-generate \
 #    dies in Metro on a missing module such as react-i18next)
 cd ../..
 pnpm install --ignore-workspace --frozen-lockfile
+export POLLIS_OTA=production   # OTA updates on; also needed by the archive's build phase
 pnpm expo prebuild -p ios --no-install
 cd ios && pod install && cd ..
 
@@ -513,6 +523,7 @@ pnpm install --ignore-workspace --frozen-lockfile
 # Rust core for every Android ABI, release profile
 (cd modules/pollis-native && uniffi-bindgen-react-native build android \
   --config ubrn.config.yaml --and-generate --release)
+export POLLIS_OTA=production   # OTA updates on (prebuild AND gradle)
 pnpm expo prebuild -p android --no-install
 cd android && ./gradlew :app:bundleRelease
 # → android/app/build/outputs/bundle/release/app-release.aab
@@ -617,9 +628,12 @@ install and crash loading the core.
   ABI, `libpollis-native.so` included; and the raw bytes of `assets/index.android.bundle` contain `api.pollis.com`
   and not `api-dev.pollis.com` (Hermes bytecode — `strings` can miss it). After
   upload it re-downloads both CDN URLs and `latest.json` and compares hashes.
-- **No auto-update.** Nothing in the app checks for a newer APK; users come
-  back to the page. Push still goes through Expo → FCM, so it needs Play
-  services on the phone; the page says that too.
+- **No native auto-update.** Nothing in the app checks for a newer APK; users
+  come back to the page for native changes. JS-only changes reach sideloaded
+  installs over the air like any other prod build (the workflow builds with
+  `POLLIS_OTA=production`; see [OTA updates](#ota-updates-1250)). Push still goes
+  through Expo → FCM, so it needs Play services on the phone; the page says
+  that too.
 
 Local build, same steps as the workflow (no `mobile/.env` needed — the
 `EXPO_PUBLIC_*` values come from the environment, which wins over `.env`):
@@ -630,6 +644,7 @@ source android-env.sh
 pnpm install --ignore-workspace --frozen-lockfile
 (cd modules/pollis-native && uniffi-bindgen-react-native build android \
   --config ubrn.config.yaml --and-generate --release)
+export POLLIS_OTA=production
 pnpm expo prebuild -p android --no-install --clean
 export POLLIS_RELEASE_KEY=sideload POLLIS_SIDELOAD_STORE_FILE=~/.pollis/pollis-sideload.jks
 export POLLIS_SIDELOAD_KEY_ALIAS=pollis-sideload
@@ -643,6 +658,149 @@ export EXPO_PUBLIC_POLLIS_DELIVERY_URL=https://api.pollis.com POLLIS_ABI_SPLITS=
 ```
 
 (The key is PKCS12, so its key password is the store password.)
+
+
+## OTA updates (#1250)
+
+The app updates its own JS and assets without prompting: on every launch
+expo-updates asks `api.pollis.com/updates/api/manifest` in the background
+(`checkAutomatically: ON_LOAD`, `fallbackToCacheTimeout: 0` — launch is never
+held), downloads a newer update if there is one, and runs it on the **next
+cold start**. There is no UI. Our own server speaks the Expo Updates protocol;
+there is no EAS Update and no EAS account involved.
+
+**What it can ship:** anything in the JS bundle and its assets — screens,
+copy, hooks, styling, the bridge *calls* (not the bridge). **What it cannot:**
+anything native — pollis-core (Rust), a new native module or version bump,
+a config plugin, permissions, entitlements, icons, `app.json` native fields.
+Those change the runtime version, so they need a store build; an update built
+afterwards targets only the binaries built afterwards.
+
+### How it fits together
+
+- **App** (`app.config.js`): `updates` is on only when the build sets
+  `POLLIS_OTA=production` (store builds, the sideload APK workflow). Then it
+  has the URL, `ON_LOAD`/`0`, the channel header `expo-channel-name:
+  production`, and `codeSigningCertificate: ./store/ota-code-signing.pem` +
+  `codeSigningMetadata {keyid: main, alg: rsa-v1_5-sha256}` — the app refuses
+  any unsigned or wrongly signed manifest or directive. **No per-install
+  identifier on update requests:** expo-updates puts a random per-install UUID
+  in `EAS-Client-ID` on every manifest and asset request (and the last fatal
+  JS error in `Expo-Fatal-Error`); `requestHeaders` overrides them with a
+  constant all-zero UUID and `""`. This works because both native
+  FileDownloaders apply `requestHeaders` after their own headers (a test pins
+  that ordering in the installed expo-updates — re-check it on an SDK bump).
+  What remains is per-release (runtime version, current/embedded/failed update
+  ids), the platform, and the OS HTTP client's generic User-Agent. Every other build
+  (dev client, Maestro's api-dev Release builds, CI's debug APK) gets
+  `enabled: false` and **no URL**, so it cannot fetch anything: a dev build
+  never takes a prod update, and nothing publishes a dev update a prod build
+  could take. `POLLIS_OTA=production` without the certificate, or with an
+  api-dev DS in the environment, fails the config. `tests/ota-config.test.ts`
+  pins all of it.
+- **Runtime version** = the native fingerprint (`runtimeVersion.policy:
+  "fingerprint"`), computed by `@expo/fingerprint` **locally**: expo-updates'
+  Xcode phase / Gradle plugin bakes it into the binary at build time, and the
+  publish script computes the same function. Confirmed working with no EAS
+  (and identical with/without the generated ubrn files present).
+  `fingerprint.config.js` (a) adds a hash of every git-tracked file of
+  pollis-core and of each crate it reaches by `path =` (computed, so a new
+  crate dependency is covered automatically), plus `Cargo.lock`,
+  `rust-toolchain.toml`, `.cargo/config.toml` and the ubrn version — so any
+  core change means a new store build before an update can land; (b) ignores
+  ubrn's generated output (`cpp/`, `src/`, the xcframework, jniLibs), which
+  exists only where `ubrn build` ran; (c) skips the version fields and the
+  `updates` block, which move without the native code moving; (d) hashes the
+  code-signing certificate, so a rotated certificate is a new runtime version
+  and old binaries keep their own, old-key-signed pointers.
+  Consequence: **a pollis-core change blocks OTA for every binary built before
+  it** — that is intended.
+- **Server**: the DS front-door Worker itself (`pollis-delivery/worker/updates.ts`,
+  wired in `worker/index.ts`) — no separate project, domain or bucket. Under
+  `/updates/` on api.pollis.com it serves `GET /updates/api/manifest`
+  (protocol v1, multipart/mixed, routed on `expo-platform` +
+  `expo-runtime-version`, 204 when nothing is published) and
+  `GET /updates/assets/<sha256>` (content-addressed, immutable), **in the
+  Worker, straight from R2**: an update request never reaches the DS container
+  or its Durable Object, so it neither wakes the single instance nor queues
+  behind message traffic. Storage is the `ota/` prefix of the public release
+  bucket `pollis` (binding `UPDATES`, `OTA_CHANNEL=production`, prod config
+  only; api-dev binds neither and answers 404 — no dev build enables updates,
+  and a dev deploy must not hold a handle on prod's bucket). It passes
+  pre-signed bytes and their `expo-signature` through unchanged and **never
+  holds the key**: a compromised Worker can withhold or replay, never forge.
+  Workers Logs + Logpush off on both DS configs, no logging, no
+  client-identifying header read
+  (`pollis-delivery/worker-tests/updates-no-client-ip.test.ts`). It ships with
+  the normal DS deploy (`delivery-deploy-prod.yml`).
+- **Publish** (`.github/workflows/mobile-ota-release.yml`, driven by
+  `scripts/ota-publish.ts`): `build` (expo export with prod `EXPO_PUBLIC_*`
+  from the environment, `EXPO_NO_DOTENV`, runtime versions, the store-build
+  checks: bundle names `api.pollis.com` and never `api-dev`, only the four
+  public `EXPO_PUBLIC_*` reads, no secret value in any file) → `sign` in the
+  **`ota-signing` environment** (required reviewer; re-derives every hash and
+  the prod-DS check from the bytes, bare node with no npm tree, then signs) →
+  `publish`: upload bytes + archive, SLSA provenance, **append to the
+  transparency log**, only then flip the live pointers, then re-fetch through
+  `api.pollis.com/updates/` and verify signature + every hash. The update
+  store is written with the release workflows' existing R2 credentials
+  (`R2_ACCESS_KEY_ID` / `R2_SECRET_KEY`); the CLI adds the `ota/` prefix.
+- **Transparency**: each update is three `binaries`-tree leaves — the signed
+  manifest (`ota-manifest`, which commits to the update id, runtime version and
+  every asset hash), the launch bundle (`ota-bundle`) and the asset list
+  (`ota-assets`) — and each rollback directive one (`ota-directive`); `platform`
+  = ios/android, `arch` = the runtime version, release tag
+  `mobile-ota-<group id>`. `pollis-verify release https://verify.pollis.com
+  mobile-ota-<group>` checks them like a desktop release.
+
+### Keys
+
+- **Private key**: generated once by the owner with
+  `scripts/generate-ota-signing-key.sh` (writes `~/.pollis/ota-signing/`,
+  refuses to overwrite, proves the pair, prints the next steps). It goes to
+  Doppler as `OTA_CODE_SIGNING_KEY`, synced **only** to the `ota-signing`
+  environment secret, plus an offline copy; then it is deleted locally. Never
+  in the repo, never a repository-level secret, never on the DS or its Worker.
+- **Certificate**: `store/ota-code-signing.pem` (the one `*.pem` that
+  `.gitignore` lets through), compiled into every prod build. 20-year
+  validity — expo-updates checks it, and an expired certificate silently ends
+  OTA for every build carrying it. Rotation = new key + new certificate + a
+  store build; the certificate is part of the fingerprint, so the new build has
+  a new runtime version, and builds carrying the old certificate keep taking
+  only old-key-signed updates (or none, once the old key is retired). If the
+  key leaked: `docs/signing-key-compromise-runbook.md` → "OTA code-signing key".
+
+### Runbook
+
+```bash
+# Publish the JS on a commit that is on main (signs after approval):
+git tag mobile-ota-$(date -u +%Y%m%d)-1 <commit> && git push origin mobile-ota-…
+# Dry run on any branch (build + every check, nothing signed or published):
+gh workflow run mobile-ota-release.yml --ref <branch> -f action=dry-run
+# Roll back to a known-good update (new ids, old bytes), from main:
+gh workflow run mobile-ota-release.yml --ref main -f action=republish -f from_group=<group id>
+# Roll back to the store binary's embedded bundle (panic button), from main:
+gh workflow run mobile-ota-release.yml --ref main -f action=rollback-to-embedded \
+  -f platform=all -f runtime_version=all
+# Check what a phone gets right now (signature + every hash):
+cd mobile && node scripts/ota-publish.ts verify --platform ios --runtime-version <rv>
+```
+
+Every operation is approved in the `ota-signing` environment and logged before
+it goes live. The group id is in each run's summary and in `ota/groups/` in
+the `pollis` bucket. Rolling forward after a rollback is simply the next publish (a newer
+`createdAt` wins). The client keeps a crashing update from bricking the app on
+its own (expo-updates rolls back to the previous update if one fails before
+its first render), but a bug that renders fine needs one of the two rollbacks
+above. Each step runs by hand too (`node scripts/ota-publish.ts help`); the
+private key is only ever handed to `sign`.
+
+**First OTA-capable build:** expo-updates is a native module, so the first
+store build that can receive updates is the next one cut after this lands
+(**1.0.2**), built with `POLLIS_OTA=production` and the certificate committed.
+Nothing published before then reaches anyone; 1.0.0/1.0.1 never check. The
+update routes go live with the first DS prod deploy after this lands (they
+answer 204 until something is published); there is no other server to set up.
 
 ---
 

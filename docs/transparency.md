@@ -65,7 +65,9 @@ history:
   itself). Anyone can check that the binary they run is the one logged for its tag,
   and that its reproducible payload was logged too. Check one release with
   `pollis-verify release <base-url> <tag>`, which runs the same `verify_release`
-  function that produces the published `/verify/release/<tag>` report.
+  function that produces the published `/verify/release/<tag>` report. Since #1250
+  the same tree also holds every **mobile over-the-air update** and rollback (see
+  "Mobile OTA updates in the binaries tree" below).
 
 One key signs all three, under different domain-separation contexts
 (`pollis-verifiable-log:sth:v2`, `…:sth:v2:account-keys`, `…:sth:v2:binaries`). A head
@@ -270,6 +272,30 @@ On replay, the binaries tree enforces three rules over the whole tree:
 A violation in the source records aborts the build, and `pollis-verify release`
 checks the invariant again, so a forked or unpaired tree is rejected even if it is
 correctly signed.
+
+### Mobile OTA updates in the binaries tree (#1250)
+
+An over-the-air update replaces the mobile app's JS — the code that handles
+plaintext — without a store review, so it is logged exactly like a release,
+**before** it goes live (`mobile-ota-release.yml` appends, then flips the live
+pointer). It uses the same frozen `BinaryRecord`; nothing in the leaf contract or
+the verifier changed:
+
+| field | value |
+|---|---|
+| `release_tag` | `mobile-ota-<group id>` — one per publish, republish or rollback |
+| `platform` | `ios` / `android` |
+| `arch` | the **runtime version** (native fingerprint) the update targets — the binary it can run on |
+| `bundle` | `ota-manifest` (the exact signed manifest bytes: update id, runtime version, every asset's sha256), `ota-bundle` (the launch bundle), `ota-assets` (the sorted `sha256  key.ext` asset list), or `ota-directive` (a signed `rollBackToEmbedded`) |
+| `layer` | `payload` (artifact = payload; nothing re-signs the bytes after they are logged) |
+| `provenance_uri` | `cdn.pollis.com/releases/mobile-ota/<tag>/<artifact_name>.intoto.jsonl` (SLSA, keyless) |
+
+What this makes detectable: an update served to anyone that is not in the log
+(fetch the manifest from `api.pollis.com/updates/api/manifest` with your platform and runtime
+version, hash the manifest part, look for it), and a targeted update (the log is
+the same for everyone, and every group is one tag). What it does not prevent: the
+update server withholding an update from someone — that is availability, and the
+app's code-signing check, not the log, is what stops a forged one.
 
 ## The static read API
 

@@ -245,6 +245,19 @@ either, operators included.** IPs are used for rate limiting only, and only as k
   (`pollis-relay/src/server.rs`, accept loop and `handle_connection`) and immediately reduces it to an
   `IpKey` — 16 bytes of HMAC-SHA256 under a per-boot random key (`pollis-relay/src/ratelimit.rs`). Its
   per-IP connection and circuit maps hold only those keys. Nothing is logged.
+- **OTA update server (`api.pollis.com/updates/`, the DS front-door Worker, #1250).** The mobile app's update check is a
+  plain `GET` carrying only what the Expo Updates protocol needs (platform, runtime version,
+  channel, the per-release current/embedded update ids). expo-updates would also attach an
+  install-scoped random `EAS-Client-ID` and the previous launch's fatal-error text; the app
+  overrides both with constants (`EAS-Client-ID: 00000000-…`, `Expo-Fatal-Error: ""`) through
+  `updates.requestHeaders`, which both platforms apply last, so nothing in an update request
+  identifies an install (`mobile/tests/ota-config.test.ts`). The Worker answers these routes
+  itself (`pollis-delivery/worker/updates.ts`) — they never reach the DS container, so they never
+  pass through the client-IP bucketing either: no IP is read at all. It reads only the routing
+  headers, logs nothing, and both DS wrangler configs pin `observability.enabled: false` and
+  `logpush: false`; `pollis-delivery/worker-tests/updates-no-client-ip.test.ts` fails the build
+  otherwise. It keeps no per-client state at all — the `ota/` prefix of the release bucket holds
+  only the published updates.
 - **LiveKit (calls).** The media server must see the client IP to route media; it keeps no logs of it:
   nginx access and error logs are off, the PROXY-protocol hop that carried the client address to nginx is
   gone, LiveKit logs at `warn`, and both containers run with docker `logging: driver: none`

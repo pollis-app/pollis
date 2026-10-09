@@ -93,6 +93,36 @@ Which is to say: root compromise puts you back where signer compromise used to b
 That asymmetry is the argument for keeping the root offline, on a machine that never
 holds a CI token, and for it signing nothing but key sets.
 
+## A different key: the OTA code-signing key (#1250)
+
+`OTA_CODE_SIGNING_KEY` is not a log key, but it is the key whose leak matters most
+on mobile: every OTA-capable phone runs whatever JS it signs, without a store review.
+Assume compromise on the same triggers as above (read out of the `ota-signing`
+environment, a workflow or Action that could reach it, an admin change, or an
+update in `ota/current/` of the release bucket — or a phone — that no
+`mobile-ota-release.yml` run produced).
+
+1. **Stop serving.** Publish `rollback-to-embedded` for every platform and runtime
+   version (`gh workflow run mobile-ota-release.yml --ref main -f action=rollback-to-embedded
+   -f platform=all -f runtime_version=all`). Phones go back to the store-reviewed
+   bundle. This uses the leaked key, which is fine: the directive is the one thing
+   you want every phone to accept.
+2. **Find what was signed.** Every legitimate update and directive is a
+   `mobile-ota-*` tag in the binaries tree (`pollis-verify release`), logged before
+   it went live. Anything served that is not there was signed outside the pipeline.
+3. **Rotate.** Delete the environment secret, run
+   `mobile/scripts/generate-ota-signing-key.sh` (move the old files aside first),
+   commit the new certificate. The certificate is part of the native fingerprint,
+   so the next store build has a new runtime version and trusts only the new key.
+4. **The hard part, stated plainly:** builds already in the field pin the leaked
+   certificate and cannot be told to stop trusting it — expo-updates has no
+   revocation. Until those builds age out, whoever holds the leaked key can sign
+   an update they would accept; only the update server — the DS Worker's
+   `/updates/` routes and the release bucket's `ota/` prefix behind them, which they
+   would also need to control (or a network position against TLS) — stands between
+   them. Ship the
+   rotated store build quickly and treat old builds as untrusted for OTA.
+
 ## Related
 
 - `docs/sth-signing-key-custody.md` — §4 custody decision, §6 anchor split.
