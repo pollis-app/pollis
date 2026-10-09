@@ -132,7 +132,7 @@
         "expo-image-picker",
         {
           "photosPermission": "Pollis needs access to your photo library so you can attach images to messages and upload custom group emoji.",
-          "cameraPermission": false,
+          "cameraPermission": "Pollis needs your camera to scan the pairing QR code from your desktop.",
           "microphonePermission": false
         }
       ]

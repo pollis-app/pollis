@@ -880,7 +880,11 @@ Current state:
   config plugins, **no** `registerGlobals()`, and deliberately **no microphone /
   camera-for-voice permissions** (we do not want to request mic/video access from
   users — not now, not speculatively). The `CAMERA` permission that exists is for
-  QR pairing only. When voice is actually built, add the LiveKit/webrtc Expo
+  QR pairing only. Never set a plugin's `cameraPermission` to `false` to keep it
+  that way: expo-image-picker turns `false` into a blocked CAMERA on Android
+  (`tools:node="remove"`, which also strips expo-camera's) and a deleted
+  `NSCameraUsageDescription` on iOS — that shipped in 1.0.0/1.0.1 (#1255);
+  `tests/camera-permission.test.ts` pins it. When voice is actually built, add the LiveKit/webrtc Expo
   config plugins, `registerGlobals()`, the permission declarations, and the call
   UI together — all in one go, under #343.
 
