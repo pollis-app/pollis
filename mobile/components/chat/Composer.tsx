@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, Pressable, Platform, ScrollView, type TextInput } from "react-native";
+import { useMemo, useState } from "react";
+import { View, Text, Pressable, Platform, ScrollView } from "react-native";
 import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
 import { Avatar, Field } from "../ui";
@@ -74,16 +74,13 @@ export function Composer({
 }) {
   const { t } = useTranslation("common");
   const [caret, setCaret] = useState(0);
-  const inputRef = useRef<TextInput>(null);
   // iOS: a multiline field grows with its lines but keeps that height when its
   // `value` is reset to "" (the send clears the draft), so after a two-line
-  // message the empty composer stayed two lines tall. Clearing the native view
-  // as well makes it re-measure. Android re-measures on its own.
-  useEffect(() => {
-    if (Platform.OS === "ios" && draft === "") {
-      inputRef.current?.clear();
-    }
-  }, [draft]);
+  // message the empty composer stayed two lines tall (Android re-measures on
+  // its own). Record the field's natural one-line height the first time it
+  // lays out empty, and cap an empty field at it. Measured at runtime, so it
+  // follows the system text size instead of hard-coding one.
+  const [emptyHeight, setEmptyHeight] = useState<number | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const mentionQuery =
@@ -321,7 +318,6 @@ export function Composer({
           <Icon.plus size={22} color={onAttach ? semantic.accent : semantic.dim} />
         </Pressable>
         <Field
-          ref={inputRef}
           testID="input-composer"
           accessibilityLabel={t("composer.inputLabel")}
           value={draft}
@@ -344,8 +340,16 @@ export function Composer({
             paddingEnd: 4,
             gap: 4,
           }}
+          onLayout={(e) => {
+            if (emptyHeight === null && draft === "") {
+              setEmptyHeight(e.nativeEvent.layout.height);
+            }
+          }}
           style={{
-            maxHeight: layout.composerInputMax,
+            maxHeight:
+              Platform.OS === "ios" && draft === "" && emptyHeight !== null
+                ? emptyHeight
+                : layout.composerInputMax,
             paddingTop: 11,
             paddingBottom: 11,
             textAlignVertical: "center",
