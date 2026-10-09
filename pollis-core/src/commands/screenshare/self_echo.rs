@@ -308,6 +308,18 @@ mod tests {
         let mix = tone_at(MIX_RATE, MIX_RATE as usize / 100);
         let capture = tone_at(SHARED_AUDIO_RATE_HZ, SHARED_AUDIO_FRAME_SAMPLES);
 
+        // Prime one tick of reference before the first capture. The off-rate
+        // resampler holds its first block back (it cannot emit a 48 kHz frame
+        // until a second 10 ms block completes it), so without this every
+        // reference frame reaches the canceller one tick AFTER the capture it
+        // matches. An echo canceller can only subtract what it has already
+        // seen, so that ordering is uncancellable; it passed on Linux only
+        // because a steady tone repeats every 10 ms and the late copy still
+        // lined up (#1209: it failed deterministically on Apple silicon). A
+        // real call is never in that order — the mix reaches the sink monitor
+        // only after the playback buffer, tens of ms behind the reference.
+        analyze_render(&s, &mix, MIX_RATE);
+
         let mut input_energy = 0.0f64;
         let mut output_energy = 0.0f64;
         const FRAMES: usize = 300;
