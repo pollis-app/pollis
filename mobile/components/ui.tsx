@@ -5,7 +5,6 @@ import {
   TextInput,
   Pressable,
   ScrollView,
-  KeyboardAvoidingView,
   Platform,
   StyleProp,
   ViewStyle,
@@ -15,13 +14,13 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { semantic, type as ty, fonts, r, space, layout, currentTheme } from "../theme/tokens";
 import { buttonColors, checkboxColors, controlDisabled, type ControlSurface } from "../theme/button";
 import { useTheme } from "./theme";
 import { useLayoutClass } from "../hooks/useLayoutClass";
-import { useAndroidKeyboardInset } from "../hooks/useAndroidKeyboardInset";
 import { PaneEntryContext } from "./pane/paneContext";
 import { activeLocale } from "../i18n";
 import { Icon, isIconElement } from "./icons";
@@ -108,6 +107,11 @@ export function useBottomInset(): number {
 // and outside a <Screen>.
 const ScreenBleedContext = React.createContext(0);
 
+// True under a <Screen>, whose KeyboardAvoidingView already lifts everything
+// inside it. A <Screen> nested in another (an iPad pane page inside a tab's
+// two-pane screen) must not avoid the keyboard a second time.
+const KeyboardAvoidedContext = React.createContext(false);
+
 /**
  * The bleed (pt) on each side of the current <Screen>'s centred column. A
  * hairline that should run edge to edge (a Header's bottom rule, a
@@ -191,7 +195,7 @@ export function Screen({
   const maxWidth = centered && !inPane ? layout.authMaxWidth : layout.screenMaxWidth;
   const column = !wide && cls === "regular";
   const bleed = column ? Math.max(0, (width - maxWidth) / 2) : 0;
-  const androidKeyboard = useAndroidKeyboardInset();
+  const nested = React.useContext(KeyboardAvoidedContext);
   const bottomInset = useBottomInset();
   // The top edge comes from SafeAreaView; the bottom is padded by hand so it
   // gets the same Android floor as the tab bar and sheets (useBottomInset).
@@ -206,30 +210,38 @@ export function Screen({
       }}
       edges={["top"]}
     >
-      {/* Keeps a bottom <Field>/<BottomAction> above the keyboard.
-          iOS: KeyboardAvoidingView. Android: an explicit inset (see
-          useAndroidKeyboardInset) — the app is edge-to-edge (#1194) and KAV
-          only reacts to keyboard SHOW events. */}
+      {/* Keeps a bottom <Field>/<BottomAction>/composer above the keyboard on
+          both platforms, in step with its animation (#1246). The app is
+          edge-to-edge (#1194), so the window never resizes; keyboard-controller
+          reads the real IME inset and pads by however much of the keyboard
+          overlaps this view, measured from the view's position in the window
+          (tab bar, pane, bottom inset all included). A screen that mounts
+          with the keyboard already up (email → OTP) starts from the current
+          keyboard height, so it never waits for a show event. */}
       <KeyboardAvoidingView
-        style={{ flex: 1, paddingBottom: androidKeyboard }}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={{ flex: 1 }}
+        behavior="padding"
+        automaticOffset
+        enabled={!nested}
       >
-        <ScreenBleedContext.Provider value={bleed}>
-          {column ? (
-            <View
-              style={{
-                flex: 1,
-                width: "100%",
-                maxWidth,
-                alignSelf: "center",
-              }}
-            >
-              {children}
-            </View>
-          ) : (
-            children
-          )}
-        </ScreenBleedContext.Provider>
+        <KeyboardAvoidedContext.Provider value={true}>
+          <ScreenBleedContext.Provider value={bleed}>
+            {column ? (
+              <View
+                style={{
+                  flex: 1,
+                  width: "100%",
+                  maxWidth,
+                  alignSelf: "center",
+                }}
+              >
+                {children}
+              </View>
+            ) : (
+              children
+            )}
+          </ScreenBleedContext.Provider>
+        </KeyboardAvoidedContext.Provider>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );

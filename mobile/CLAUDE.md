@@ -782,6 +782,16 @@ full-screen page and every pane page uses `<Screen>`'s one
 `layout.screenMaxWidth` column; only auth steps pass `centered`
 (`layout.authMaxWidth`) — tests/screen-widths.test.ts pins this.
 
+Keyboard (#1246): `react-native-keyboard-controller` owns it. `KeyboardProvider`
+wraps the root layout; `<Screen>` and `SheetOverlay` use its
+`KeyboardAvoidingView` (`behavior="padding"`, `automaticOffset`) on both
+platforms, and a `<Screen>` nested in another skips its own. Never import
+`KeyboardAvoidingView` from `react-native` or hand-roll an inset from
+`Keyboard` events: the app is edge-to-edge, so `adjustResize` is inert and
+`keyboardDidShow` heights come out short. A screen that mounts with the
+keyboard already up (email → OTP) seeds from the current keyboard state.
+`tests/keyboard.test.ts` pins this.
+
 ## Backend integration — wired vs pending
 
 Most of what older notes called "stubs" is now wired through the
