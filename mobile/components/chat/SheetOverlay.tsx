@@ -7,15 +7,14 @@ import {
   Text,
   View,
   AccessibilityInfo,
-  KeyboardAvoidingView,
   Platform,
 } from "react-native";
 import { useTranslation } from "react-i18next";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { semantic, type as ty, r, space, layout } from "../../theme/tokens";
 import { useTheme } from "../theme";
 import { Icon } from "../icons";
 import { useBottomInset } from "../ui";
-import { useAndroidKeyboardInset } from "../../hooks/useAndroidKeyboardInset";
 import { useIsRegular } from "../../hooks/useLayoutClass";
 
 // Entry timing (#1193): in line with the ~200 ms stack transitions — fast
@@ -87,7 +86,6 @@ export function SheetOverlay({
   // measurement, delaying the sheet.) Android gets the nav-bar floor.
   const bottomInset = useBottomInset();
   const regular = useIsRegular();
-  const androidKeyboard = useAndroidKeyboardInset();
   const progress = useRef(new Animated.Value(0)).current;
   // The card's own height, so it starts exactly below the screen edge
   // whatever its content. Until measured it is held fully off-screen.
@@ -159,14 +157,16 @@ export function SheetOverlay({
             style={{ flex: 1 }}
           />
         </Animated.View>
-        {/* A sheet with a field (emoji search) must ride above the keyboard:
-            iOS via KeyboardAvoidingView, Android via the explicit inset (the
-            same split as <Screen>). Taps outside the card fall through to the
+        {/* A sheet with a field (emoji search) must ride above the keyboard,
+            on both platforms, the same way <Screen> does (#1246).
+            keyboard-controller follows the keyboard inside a Modal's own
+            window on Android too. Taps outside the card fall through to the
             backdrop. */}
         <KeyboardAvoidingView
           pointerEvents="box-none"
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          style={{ flex: 1, justifyContent: "flex-end", paddingBottom: androidKeyboard }}
+          behavior="padding"
+          automaticOffset
+          style={{ flex: 1, justifyContent: "flex-end" }}
         >
           <Animated.View
             testID={testID}
