@@ -225,6 +225,13 @@ type HmacSha256 = Hmac<Sha256>;
 /// halving what each entry stores.
 const CLIENT_HASH_BYTES: usize = 16;
 
+/// Bytes of the HMAC kept in an ops-log email tag ([`RateLimiter::email_tag`]).
+/// 64 bits is plenty to tell a few thousand addresses apart within one process.
+const EMAIL_TAG_BYTES: usize = 8;
+
+/// The `request-otp` tier name, shared with the dev ops log.
+pub(crate) const OTP_REQUEST_TIER: &str = "otp_request";
+
 /// A rate-limit bucket: a tier name plus a keyed, per-process hash of the client
 /// IP — `{tier}:{hex(HMAC-SHA256(process_key, ip)[..16])}`.
 ///
@@ -233,6 +240,17 @@ const CLIENT_HASH_BYTES: usize = 16;
 /// the same reason: there is nothing in here but the tier and the pseudonym.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ClientKey(String);
+
+impl ClientKey {
+    /// The pseudonym half of the key — the hex HMAC, without the tier prefix.
+    /// The HMAC covers only the client identity, so the same client has the same
+    /// pseudonym in every tier, which is what lets the dev ops log
+    /// ([`crate::ops_log`]) correlate one client across endpoints. It is the
+    /// same per-process keyed hash the map already holds: no new identifier.
+    pub(crate) fn pseudonym(&self) -> &str {
+        self.0.split_once(':').map_or(self.0.as_str(), |(_, h)| h)
+    }
+}
 
 /// In-memory per-key fixed-window rate limiter. `Clone` is shallow (shared
 /// `Arc`s) so it rides on the `Clone` `AppState`, and every clone hashes with the
@@ -289,6 +307,20 @@ impl RateLimiter {
         mac.update(ip.as_bytes());
         let digest = mac.finalize().into_bytes();
         ClientKey(format!("{tier}:{}", hex::encode(&digest[..CLIENT_HASH_BYTES])))
+    }
+
+    /// A short keyed tag for a normalized email address, for the dev ops log
+    /// ([`crate::ops_log`]): it tells "the same address again" (a retry loop)
+    /// apart from "a fresh address every time" (an e2e suite) without holding the
+    /// address. Same per-process key as the client pseudonyms, domain-separated
+    /// so an email and a client identity can never produce the same tag, and
+    /// meaningless after a restart.
+    pub(crate) fn email_tag(&self, normalized_email: &str) -> String {
+        let mut mac = (*self.mac).clone();
+        mac.update(b"ops-email\0");
+        mac.update(normalized_email.as_bytes());
+        let digest = mac.finalize().into_bytes();
+        hex::encode(&digest[..EMAIL_TAG_BYTES])
     }
 
     /// Record one hit for `key` and report whether it is within `max` per
@@ -419,7 +451,7 @@ fn classify(method: &Method, path: &str, cfg: &RateLimitConfig) -> Option<(&'sta
     }
     match path {
         "/v1/auth/request-otp" => Some((
-            "otp_request",
+            OTP_REQUEST_TIER,
             cfg.request_otp_max,
             cfg.request_otp_window_secs,
         )),
@@ -489,11 +521,22 @@ pub async fn rate_limit(State(state): State<AppState>, req: Request, next: Next)
     if let Some((tier, max, window)) = classify(req.method(), req.uri().path(), &state.ratelimit_config)
     {
         let key = state.ratelimit.client_key(tier, req.headers());
-        if state
+        let limited = state
             .ratelimit
             .check(&key, max, window, crate::util::now_unix())
-            == RateLimitOutcome::Limited
-        {
+            == RateLimitOutcome::Limited;
+        // Dev-only observation (`POLLIS_DS_OPS_LOG`, see `ops_log.rs`). It only
+        // RECORDS: the limit was decided on the line above, and `observe` answers
+        // with the same 429 or the same handler response. `ops_log` is `None`
+        // unless that variable is set, and only `wrangler.dev.jsonc` sets it, so
+        // in production this branch does not exist at runtime.
+        if let Some(ops) = state.ops_log.as_ref() {
+            if limited || tier == OTP_REQUEST_TIER {
+                return crate::ops_log::observe(ops, &state.ratelimit, tier, &key, limited, req, next)
+                    .await;
+            }
+        }
+        if limited {
             return too_many_requests();
         }
     }
@@ -717,6 +760,32 @@ mod tests {
         let a = RateLimiter::new();
         let b = RateLimiter::new();
         assert_ne!(a.key_for_ip("t", "203.0.113.7"), b.key_for_ip("t", "203.0.113.7"));
+    }
+
+    /// The ops-log pseudonym is the stored key minus its tier, so one client
+    /// correlates across tiers and nothing new is derived from the IP.
+    #[test]
+    fn the_pseudonym_is_tier_independent_and_never_the_ip() {
+        let rl = RateLimiter::default();
+        let a = rl.key_for_ip("otp_request", "203.0.113.7");
+        let b = rl.key_for_ip("write", "203.0.113.7");
+        assert_eq!(a.pseudonym(), b.pseudonym());
+        assert_eq!(a.pseudonym().len(), CLIENT_HASH_BYTES * 2);
+        assert!(!a.pseudonym().contains("203.0.113.7"));
+        assert_ne!(a.pseudonym(), rl.key_for_ip("otp_request", "203.0.113.8").pseudonym());
+    }
+
+    /// Email tags are stable within a limiter, differ per address and per
+    /// process, and never contain the address.
+    #[test]
+    fn email_tags_are_keyed_and_stable() {
+        let rl = RateLimiter::default();
+        let t = rl.email_tag("alice@example.com");
+        assert_eq!(t, rl.email_tag("alice@example.com"));
+        assert_ne!(t, rl.email_tag("bob@example.com"));
+        assert_eq!(t.len(), EMAIL_TAG_BYTES * 2);
+        assert!(!t.contains("alice"));
+        assert_ne!(t, RateLimiter::new().email_tag("alice@example.com"));
     }
 
     #[test]

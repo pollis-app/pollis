@@ -110,7 +110,7 @@ const SECRET_KEYS = [
 // compiled-in default (ratelimit.rs `RateLimitConfig::from_env`). Every per-IP
 // rate-limit tier is listed so any of them can be tuned per environment with a
 // config change alone; today only dev sets the two OTP tiers (the mobile e2e
-// suites sign up many accounts from one IP). Checked against
+// suites sign up many accounts from one IP) and the ops log. Checked against
 // ds-config-manifest.json `optional_container_vars` by
 // scripts/check-ds-config-chain.py.
 const TUNABLE_VAR_KEYS = [
@@ -128,6 +128,9 @@ const TUNABLE_VAR_KEYS = [
   "RL_GET_WINDOW_SECS",
   "RL_INVITE_REDEEM_MAX",
   "RL_INVITE_REDEEM_WINDOW_SECS",
+  // Dev-only request-otp / rate-limit ops log (ops_log.rs). Only
+  // wrangler.dev.jsonc sets it; unset (prod) means no recorder exists.
+  "POLLIS_DS_OPS_LOG",
 ] as const;
 
 // Every request header through which a client IP can reach the container. The

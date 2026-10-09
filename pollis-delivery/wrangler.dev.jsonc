@@ -86,7 +86,13 @@
     "RL_REQUEST_OTP_MAX": "200",
     "RL_REQUEST_OTP_WINDOW_SECS": "600",
     "RL_VERIFY_OTP_MAX": "600",
-    "RL_VERIFY_OTP_WINDOW_SECS": "600"
+    "RL_VERIFY_OTP_WINDOW_SECS": "600",
+    // Dev-only ops log (src/ops_log.rs): every request-otp and every 429 is
+    // recorded by client PSEUDONYM (the limiter's keyed hash, never an IP), with
+    // the user agent and the email's domain + a keyed tag, so an exhausted OTP
+    // budget can be attributed. Read it on GET /v1/ops/otp-requests with the
+    // operator token. Prod must never set this (tests/otp_ops_log.rs).
+    "POLLIS_DS_OPS_LOG": "true"
   },
   // Doppler is the source of truth; the deploy workflow syncs each key into the
   // account's single Secrets Store under a DS_DEV_ prefix. Binding name == the

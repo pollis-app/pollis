@@ -205,6 +205,15 @@ full detail: `docs/metadata-retention-policy.md` §3.
   `ConnectInfo`/`peer_addr`/`TraceLayer`, if the Worker stops stripping a header
   or logs, or if either wrangler config stops pinning `observability.enabled:
   false` / `logpush: false`.
+- **DS ops log (dev only).** `ops_log.rs`, gated by `POLLIS_DS_OPS_LOG` (set
+  only in `wrangler.dev.jsonc`; `AppState::ops_log` is `None` otherwise). It
+  records each `request-otp` and each 429 by the limiter's existing client
+  pseudonym (`ClientKey::pseudonym`), the truncated, IP-redacted user agent, an
+  optional `X-Pollis-Client-Version`, the email's domain plus a keyed tag
+  (`RateLimiter::email_tag`), and the outcome. It is held in memory only and served on
+  `GET /v1/ops/otp-requests` (operator token, 404 when off).
+  `tests/otp_ops_log.rs` proves that every response is the same with the log on,
+  that no IP or address is in the view, and that prod never sets the gate.
 - **Relay.** `pollis-relay/src/ratelimit.rs` `IpKey::of(ip)` (HMAC under a
   per-boot key) is computed in the accept loop; the per-IP connection and
   circuit maps hold only `IpKey`s.

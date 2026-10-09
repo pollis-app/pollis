@@ -43,6 +43,7 @@ pub mod links;
 pub mod headers;
 pub mod invite_token;
 pub mod messages;
+pub mod ops_log;
 pub mod otp;
 pub mod participant_id;
 pub mod pins;
@@ -129,6 +130,11 @@ pub struct AppState {
     /// static operator secret rather than a device signature. See
     /// [`retention_metrics`].
     pub metrics_token: Option<String>,
+    /// Dev-only request-otp / rate-limit ops log ([`ops_log`]). `Some` only when
+    /// the DS starts with `POLLIS_DS_OPS_LOG` on, which only `wrangler.dev.jsonc`
+    /// sets; `None` everywhere else, so production has no recorder at all and
+    /// `GET /v1/ops/otp-requests` 404s there.
+    pub ops_log: Option<ops_log::OpsLog>,
 }
 
 impl AppState {
@@ -161,6 +167,8 @@ impl AppState {
             // explicitly. Leaving it `None` here keeps the integration harness and
             // every other test that never touches the endpoint unaffected.
             metrics_token: None,
+            // Default-off, like the metrics token: `main` opts in from env.
+            ops_log: None,
         }
     }
 
@@ -192,6 +200,13 @@ impl AppState {
     /// [`Self::with_otp_config`].
     pub fn with_metrics_token(mut self, token: Option<String>) -> Self {
         self.metrics_token = token;
+        self
+    }
+
+    /// Turn the dev ops log ([`ops_log`]) on or off. `main` passes
+    /// [`ops_log::enabled_from_env`]; tests opt in explicitly.
+    pub fn with_ops_log(mut self, enabled: bool) -> Self {
+        self.ops_log = enabled.then(ops_log::OpsLog::default);
         self
     }
 }
@@ -279,11 +294,20 @@ pub fn build_app_state(db: Arc<Db>, log_db: Arc<Db>) -> AppState {
             "GET /v1/retention/metrics DISABLED (POLLIS_DS_METRICS_TOKEN unset — endpoint 404s)"
         }
     );
+    let ops_log = ops_log::enabled_from_env();
+    if ops_log {
+        tracing::info!(
+            ops_log,
+            "pollis-delivery ops log: ENABLED (dev) — request-otp and rate-limited requests are \
+             recorded by client pseudonym; GET /v1/ops/otp-requests (operator token)"
+        );
+    }
     AppState::new_with_log_db(db, log_db, require_auth)
         .with_otp_config(otp::OtpConfig::from_env())
         .with_broker_config(broker::BrokerConfig::from_env())
         .with_ratelimit_config(ratelimit::RateLimitConfig::from_env())
         .with_metrics_token(metrics_token)
+        .with_ops_log(ops_log)
 }
 
 /// Read the `POLLIS_DS_METRICS_TOKEN` operator secret gating
@@ -303,6 +327,7 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route("/version", get(version))
         .route("/v1/retention/metrics", get(retention_metrics))
         .route("/v1/config", get(effective_config))
+        .route("/v1/ops/otp-requests", get(ops_log::otp_requests))
         .route(<SubmitBody as DsRequest>::PATH, post(submit))
         .route(<CommitSinceReport as DsRequest>::PATH, post(report_commit_since))
         .route(<writes::GroupInfoBody as DsRequest>::PATH, post(writes::group_info))
@@ -581,6 +606,15 @@ async fn effective_config(State(state): State<AppState>, headers: HeaderMap) -> 
             // and defend nothing.
             "invite_redeem_max": state.ratelimit_config.invite_redeem_max,
             "invite_redeem_window_secs": state.ratelimit_config.invite_redeem_window_secs,
+            // The OTP tiers dev raises (`RL_*_OTP_*` in wrangler.dev.jsonc), so
+            // "is the e2e budget really in force?" has an answer from outside the
+            // container instead of an inference from a 429.
+            "request_otp_max": state.ratelimit_config.request_otp_max,
+            "request_otp_window_secs": state.ratelimit_config.request_otp_window_secs,
+            "verify_otp_max": state.ratelimit_config.verify_otp_max,
+            "verify_otp_window_secs": state.ratelimit_config.verify_otp_window_secs,
+            // Whether the dev ops log is recording (`POLLIS_DS_OPS_LOG`).
+            "ops_log": state.ops_log.is_some(),
             // Presence only — never the token itself.
             "metrics_token_set": true,
         })),
@@ -616,7 +650,7 @@ async fn retention_metrics(State(state): State<AppState>, headers: HeaderMap) ->
 /// Constant-time over the token bytes so a wrong guess cannot be narrowed by timing
 /// (same discipline as `otp::constant_time_eq`). A missing/malformed header, or the
 /// wrong scheme, is simply a non-match.
-fn bearer_token_matches(headers: &HeaderMap, expected: &str) -> bool {
+pub(crate) fn bearer_token_matches(headers: &HeaderMap, expected: &str) -> bool {
     let Some(value) = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())

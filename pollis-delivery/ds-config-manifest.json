@@ -51,8 +51,9 @@
       "Non-secret tunables an environment MAY set as a wrangler `var`; unset means the DS's",
       "compiled-in default. Must be read by the DS and listed in TUNABLE_VAR_KEYS in",
       "worker/index.ts (forwarded only when set). Neither wrangler config is required to set",
-      "them. Today only dev sets the two OTP tiers: the mobile e2e suites sign up many",
-      "accounts from one IP. Prod keeps the defaults."
+      "them. Today only dev sets the two OTP tiers (the mobile e2e suites sign up many",
+      "accounts from one IP) and POLLIS_DS_OPS_LOG (the dev-only request-otp ops log,",
+      "src/ops_log.rs; tests/otp_ops_log.rs fails if prod ever sets it). Prod keeps the defaults."
     ],
     "keys": [
       "RL_REQUEST_OTP_MAX",
@@ -68,7 +69,8 @@
       "RL_GET_MAX",
       "RL_GET_WINDOW_SECS",
       "RL_INVITE_REDEEM_MAX",
-      "RL_INVITE_REDEEM_WINDOW_SECS"
+      "RL_INVITE_REDEEM_WINDOW_SECS",
+      "POLLIS_DS_OPS_LOG"
     ]
   },
 

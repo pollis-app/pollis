@@ -234,6 +234,13 @@ either, operators included.** IPs are used for rate limiting only, and only as k
   `pollis-delivery/tests/no_client_ip_exposure.rs` fails the build if DS or Worker code logs, traces or
   echoes an IP-bearing header, if the Worker stops stripping one, or if Workers Logs / Logpush are
   enabled in either wrangler config.
+- **DS ops log (dev environment only).** With `POLLIS_DS_OPS_LOG` set, which only the dev
+  config does, the DS keeps an in-memory ring of its last 1000 `request-otp` and rate-limited
+  requests (`pollis-delivery/src/ops_log.rs`). Each entry holds the limiter's client pseudonym
+  above (no IP), the truncated user agent with IP-shaped tokens redacted, the email's domain and a
+  keyed per-process tag of the address (never the address), the endpoint, the outcome and a
+  timestamp. It is readable only with the operator token and is gone at restart. Production never
+  enables it (`pollis-delivery/tests/otp_ops_log.rs`).
 - **Relay.** The relay reads the QUIC peer address for admission limits
   (`pollis-relay/src/server.rs`, accept loop and `handle_connection`) and immediately reduces it to an
   `IpKey` — 16 bytes of HMAC-SHA256 under a per-boot random key (`pollis-relay/src/ratelimit.rs`). Its
