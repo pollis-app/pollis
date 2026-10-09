@@ -864,6 +864,14 @@ Current state:
   (android + ios cross-compile jobs).
 - **Media:** `get_media_path` decrypts an R2 object to a sandbox `file://` for
   `expo-image` — mobile can't run desktop's loopback media server. See `lib/media/`.
+  Every path that ends a session (sign-out, account deletion, revoked-device
+  sign-out) goes through `endSession()` (`lib/session/`): it resets the store,
+  pops every signed-in screen and lands on sign-in, then clears the React Query
+  cache, decrypted media (`pollis-media/`), export archives (`pollis-export/`)
+  and the emoji cache. Never call `appStore.logout()` or route to sign-in by
+  hand. The root layout runs `sweepStalePlaintext()` once per process before
+  any session restores (not `app/index.tsx`, which is re-entered mid-session).
+  `tests/session-teardown.test.ts` enforces all of it.
 - **Foreground realtime (scaffold):** mobile joins the same SFU rooms as desktop
   via the JS LiveKit SDK in **data-only** mode (`lib/realtime/`;
   `useConversationRealtime` for the open chat, `useInboxRealtime` for the

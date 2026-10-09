@@ -159,7 +159,7 @@ on `pollis-core`.
 - `get_session()` → `AuthResult | null` — rebuild profile from `accounts.json`. Does not open the local DB.
 - `get_device_id()` → `string | null` — this device's stable `device_id` (or null pre-registration). Used to build the per-device voice identity (`voice-{user_id}:{device_id}`) so a client can tell which voice participant is itself (#140). **Not a registered Tauri command** as of 2026-08-03 (#714) — it lives in `pollis-core/src/commands/auth.rs` and is called internally; `invoke("get_device_id")` will fail.
 - `logout(delete_data)` — clear session, optionally delete local data
-- `delete_account(user_id)` — delete account from Turso + local
+- `delete_account(user_id)` — delete account from Turso + local (user DB, keystore, that user's media cache, media-server token, staged attachments)
 - `wipe_local_data()` — delete all local databases and keystore entries
 
 ## pin (`commands/pin.rs`)

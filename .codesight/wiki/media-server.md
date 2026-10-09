@@ -93,7 +93,8 @@ a second exit.
 Layout: `<app_data_dir>/media-cache/<user_id>/<hash>.<ext>.enc`, with `_anon/`
 for the pre-sign-in window. The `<user_id>` segment is the id the Delivery
 Service returned from `verify-otp` — a server-chosen string on the **untrusted**
-side of the security model — and `set_pin`, `unlock` and `logout` hand it to
+side of the security model — and `set_pin`, `unlock`, `logout` and
+`delete_account` hand it to
 `commands::r2::clear_media_cache(CacheScope::User(id))`, which empties that
 directory with `remove_dir_all` per entry. `Path::join` with an absolute
 component *replaces* the base and `..` walks out of it, so a DS answering

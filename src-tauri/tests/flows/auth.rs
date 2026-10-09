@@ -1119,6 +1119,41 @@ async fn logout_with_delete_removes_device_via_ds() {
     drop(alice);
 }
 
+/// #1256: deleting an account empties that user's media cache. `logout` always
+/// wiped it, but `delete_account` only removed the user DB — and the cache root
+/// is not under the data directory — so every cached attachment outlived the
+/// account it belonged to.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn delete_account_clears_the_users_media_cache() {
+    wipe().await;
+
+    // No other flow installs a cache root, and `set_media_cache_dir` is
+    // first-call-wins, so this one is the root for the rest of the process.
+    let root = std::env::temp_dir().join(format!("pollis-flows-media-{}", std::process::id()));
+    pollis_core::commands::r2::set_media_cache_dir(root.clone());
+
+    let mut alice = TestClient::new().await;
+    let profile = alice.sign_up("alice@test.local").await;
+    let user_id = profile.id.clone();
+
+    let user_dir = root.join(&user_id);
+    std::fs::create_dir_all(&user_dir).expect("create user cache dir");
+    let entry = user_dir.join("aaaa.png.enc");
+    std::fs::write(&entry, b"cached-media-bytes").expect("seed cache entry");
+
+    invoke::<()>(&alice.webview, "delete_account", json!({ "userId": user_id }))
+        .await
+        .expect("delete_account");
+
+    assert!(
+        !entry.exists(),
+        "delete_account left the deleted user's cached media on disk"
+    );
+
+    drop(alice);
+}
+
 /// #1099: a registered-but-not-yet-enrolled device whose LOCAL address index has
 /// gone stale must not be stranded by the pre-enrollment soft reset.
 ///

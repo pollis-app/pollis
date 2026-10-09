@@ -245,10 +245,8 @@ export default function Security() {
       return;
     }
     confirmSignOut(() => {
-      logout.mutate(undefined, {
-        onSuccess: () => router.replace("/(auth)/email"),
-        onError: () => router.replace("/(auth)/email"),
-      });
+      // `useLogout` ends the session either way, which lands on sign-in.
+      logout.mutate();
     });
   };
 

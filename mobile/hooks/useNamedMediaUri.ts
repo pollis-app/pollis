@@ -9,7 +9,11 @@
 // can defer the copy until it is on screen or the user asks to save it.
 
 import { useEffect, useState } from "react";
-import { releaseNamedMediaUri, resolveNamedMediaUri } from "../lib/media/cache";
+import {
+  mediaCacheGeneration,
+  releaseNamedMediaUri,
+  resolveNamedMediaUri,
+} from "../lib/media/cache";
 import type { MessageAttachment } from "../types";
 
 export interface NamedMediaUriState {
@@ -42,6 +46,9 @@ export function useNamedMediaUri(
     }
 
     let active = true;
+    // A release after a sign-out clear must not touch the next session's
+    // counts (see `releaseNamedMediaUri`).
+    const resolvedIn = mediaCacheGeneration();
     setState({ uri: null, loading: true, error: null });
     resolveNamedMediaUri(attachment)
       .then((uri) => {
@@ -63,7 +70,10 @@ export function useNamedMediaUri(
       active = false;
       // Pairs with the reference taken above; the last release unlinks the
       // named plaintext copy.
-      void releaseNamedMediaUri({ object_key: objectKey ?? "", content_hash: contentHash ?? "" });
+      void releaseNamedMediaUri(
+        { object_key: objectKey ?? "", content_hash: contentHash ?? "" },
+        resolvedIn,
+      );
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contentHash, objectKey, preview, enabled]);

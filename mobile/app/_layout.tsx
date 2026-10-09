@@ -24,6 +24,7 @@ import { useInboxRealtime } from "../hooks/useInboxRealtime";
 import { AutoLockProvider } from "../lib/autolock";
 import { adoptUserLanguage, hydrateLanguage } from "../i18n";
 import { appStore } from "../stores/appStore";
+import { sweepStalePlaintext } from "../lib/session";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -54,6 +55,16 @@ export default function RootLayout() {
   const [bridgeReady, setBridgeReady] = useState(false);
   const [bridgeError, setBridgeError] = useState<Error | null>(null);
   const [languageReady, setLanguageReady] = useState(false);
+  const [sweepReady, setSweepReady] = useState(false);
+
+  // Delete plaintext a crashed or killed run left on disk (decrypted media,
+  // export archives) before the boot screen restores any session (#1256).
+  // Here rather than in app/index.tsx, which is re-entered mid-session; and
+  // once per process (lib/session), so a remount of this layout can't sweep
+  // media out from under mounted screens either.
+  useEffect(() => {
+    sweepStalePlaintext().finally(() => setSweepReady(true));
+  }, []);
 
   // The stored language is read asynchronously; holding the splash for it is
   // what keeps a Spanish user from seeing one English frame on every launch.
@@ -80,12 +91,12 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
-    if (loaded && bridgeReady && languageReady) {
+    if (loaded && bridgeReady && languageReady && sweepReady) {
       SplashScreen.hideAsync();
     }
-  }, [loaded, bridgeReady, languageReady]);
+  }, [loaded, bridgeReady, languageReady, sweepReady]);
 
-  if (!loaded || !bridgeReady || !languageReady) {
+  if (!loaded || !bridgeReady || !languageReady || !sweepReady) {
     return null;
   }
 

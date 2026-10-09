@@ -1468,6 +1468,14 @@ pub async fn delete_account(
     *state.device_id.lock().await = None;
     *state.unlock.lock().await = None;
 
+    // Everything `logout` drops at the end of a session, an account deletion
+    // must drop too (#1256): the media cache (it lives outside the data
+    // directory, so removing the user DB above leaves it), the media-server
+    // token, and anything the composer had staged but not sent.
+    crate::commands::r2::clear_media_cache(crate::commands::r2::CacheScope::User(&user_id));
+    *state.media_server_token.lock().await = None;
+    crate::commands::staging::discard_all_staged();
+
     // Remove from local accounts index
     let _ = crate::accounts::remove_account(&user_id);
 

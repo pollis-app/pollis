@@ -20,11 +20,11 @@
 // refresh on their normal query lifecycle / screen focus.
 
 import { useEffect, useRef } from "react";
-import { router } from "expo-router";
 import { useObserver } from "mobx-react-lite";
 import { useQueryClient } from "@tanstack/react-query";
 import { appStore } from "../stores/appStore";
 import { invoke } from "../lib/native";
+import { endSession } from "../lib/session";
 import { subscribeRealtime, type RealtimeSubscription } from "../lib/realtime/client";
 import type { RealtimeEvent } from "../lib/realtime/events";
 import { dmQueryKeys, useDMChannels } from "./queries/useDMChannels";
@@ -164,12 +164,9 @@ export function useInboxRealtime() {
               console.warn("[realtime] this device was revoked — signing out");
               return invoke("logout", { deleteData: false })
                 .catch((e) => console.warn("[realtime] logout failed:", e))
-                .then(() => {
-                  appStore.logout();
-                  // Without this the user is stranded on a dead signed-in
-                  // screen after the self-sign-out (every command now fails).
-                  router.replace("/(auth)/email");
-                });
+                // Also routes to sign-in: without that the user is stranded
+                // on a dead signed-in screen (every command now fails).
+                .then(() => endSession());
             })
             .catch((e) => {
               console.warn("[realtime] device_revoked check failed (ignored):", e);

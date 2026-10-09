@@ -26,7 +26,11 @@ import {
   useThreadMessages,
   type ConversationKind,
 } from "../hooks/queries";
-import { releaseNamedMediaUri, resolveNamedMediaUri } from "../lib/media/cache";
+import {
+  mediaCacheGeneration,
+  releaseNamedMediaUri,
+  resolveNamedMediaUri,
+} from "../lib/media/cache";
 import { saveToPhotoLibrary, shareFile } from "../lib/media/export";
 import {
   canSaveToLibrary,
@@ -116,12 +120,14 @@ export default function MediaViewerScreen() {
 
   // Named copies handed to the share sheet stay on disk until the viewer
   // closes: the receiving app may read the file after the sheet returns.
-  const shared = useRef(new Map<string, MessageAttachment>());
+  // Each keeps the cache generation it was taken in, so a close after a
+  // sign-out clear releases nothing.
+  const shared = useRef(new Map<string, { attachment: MessageAttachment; resolvedIn: number }>());
   useEffect(() => {
     const held = shared.current;
     return () => {
-      for (const attachment of held.values()) {
-        void releaseNamedMediaUri(attachment);
+      for (const { attachment, resolvedIn } of held.values()) {
+        void releaseNamedMediaUri(attachment, resolvedIn);
       }
       held.clear();
     };
@@ -142,13 +148,14 @@ export default function MediaViewerScreen() {
     setBusy("save");
     setFeedback(null);
     try {
+      const resolvedIn = mediaCacheGeneration();
       const uri = await resolveNamedMediaUri(current);
       try {
         const result = await saveToPhotoLibrary(uri);
         announce(result === "saved" ? "saved" : "denied");
       } finally {
         // The library has its own copy once the save resolves.
-        void releaseNamedMediaUri(current);
+        void releaseNamedMediaUri(current, resolvedIn);
       }
     } catch {
       announce("saveFailed");
@@ -164,12 +171,13 @@ export default function MediaViewerScreen() {
     setBusy("share");
     setFeedback(null);
     try {
+      const resolvedIn = mediaCacheGeneration();
       const uri = await resolveNamedMediaUri(current);
       if (shared.current.has(current.id)) {
         // Already held from an earlier share: drop the extra reference.
-        void releaseNamedMediaUri(current);
+        void releaseNamedMediaUri(current, resolvedIn);
       } else {
-        shared.current.set(current.id, current);
+        shared.current.set(current.id, { attachment: current, resolvedIn });
       }
       const ok = await shareFile(uri, current.content_type, current.filename);
       if (!ok) {

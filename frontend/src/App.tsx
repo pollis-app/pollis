@@ -30,6 +30,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { installTrayVoiceBridge, installVoiceBridge } from "./voice";
 import { clearAllDrafts } from "./utils/drafts";
 import { AUTO_LOCK_EVENT } from "./utils/autoLock";
+import { clearsQueryCache } from "./utils/queryCacheLifecycle";
 import { adoptUserLanguage } from "./i18n";
 
 type AppState =
@@ -290,11 +291,13 @@ function MainApp() {
   // snapshot or one bug that re-renders a stale list away from being readable.
   //
   // Keyed on the transition into "pin-entry" so it covers Cmd/Ctrl+L, the
-  // idle auto-lock (#851), and the boot-time PIN gate alike. It runs after
-  // React has committed the pin-entry tree, so AppShell is already unmounted
-  // and no observer is left to refetch against a locked backend.
+  // idle auto-lock (#851), and the boot-time PIN gate alike — and into
+  // "email-auth", where every session end lands (sign-out, account deletion,
+  // revoked device; #1256). It runs after React has committed that tree, so
+  // AppShell is already unmounted and no observer is left to refetch against
+  // a locked or signed-out backend.
   useEffect(() => {
-    if (appState === "pin-entry") {
+    if (clearsQueryCache(appState)) {
       queryClient.clear();
     }
   }, [appState, queryClient]);

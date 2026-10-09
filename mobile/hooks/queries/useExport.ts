@@ -11,6 +11,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import { invoke } from "../../lib/native";
 import i18n from "../../i18n";
+import { EXPORT_DIR } from "../../lib/exportDir";
 import {
   exportFileName,
   type ExportSummary,
@@ -19,9 +20,7 @@ import {
 
 export type { ExportSummary, FetchSummary, MissingAttachment } from "../../lib/exportArchive";
 
-/// Under `cacheDirectory` on purpose: the OS may evict it, and the share
-/// sheet has already copied the zip wherever the user sent it.
-export const EXPORT_DIR = `${FileSystem.cacheDirectory ?? ""}pollis-export/`;
+export { EXPORT_DIR } from "../../lib/exportDir";
 
 export function useExportArchive() {
   return useMutation({

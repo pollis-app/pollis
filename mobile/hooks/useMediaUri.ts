@@ -12,7 +12,11 @@
 // has no object key yet) to no-op cleanly.
 
 import { useEffect, useState } from "react";
-import { resolveMediaUri, releaseMediaUri } from "../lib/media/cache";
+import {
+  mediaCacheGeneration,
+  resolveMediaUri,
+  releaseMediaUri,
+} from "../lib/media/cache";
 import type { MessageAttachment } from "../types";
 
 export interface MediaUriState {
@@ -46,6 +50,10 @@ export function useMediaUri(
     }
 
     let active = true;
+    // Ties this reference to the current cache generation, so a release
+    // that runs after a sign-out cleared the cache can't touch the counts
+    // of the session that follows.
+    const resolvedIn = mediaCacheGeneration();
     setState({ uri: null, loading: true, error: null });
 
     resolveMediaUri(attachment)
@@ -68,7 +76,7 @@ export function useMediaUri(
       active = false;
       // Pairs with the reference taken inside resolveMediaUri. The last
       // outstanding release unlinks the decrypted file.
-      void releaseMediaUri(contentHash);
+      void releaseMediaUri(contentHash, resolvedIn);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contentHash, objectKey]);
