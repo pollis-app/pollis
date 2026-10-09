@@ -748,17 +748,21 @@ mod tests {
 
     const SEED: &[u8; 32] = b"0123456789abcdef0123456789abcdef";
 
+    // 8-byte message ids. The sealing test searches random ciphertext for each
+    // id verbatim, and a 2-byte id ("m5") turned up in it by chance often
+    // enough to fail CI (#1244); 8 bytes makes that ~1e-17. Longer would push
+    // two cursors out of the smallest padding bucket the size test relies on.
     fn sample() -> Vec<ReadCursor> {
         vec![
             ReadCursor {
                 conversation_id: "01JCONVERSATIONALPHA0001".into(),
                 last_read_at: "2026-01-01T00:00:05Z".into(),
-                last_read_message_id: "m5".into(),
+                last_read_message_id: "msgA0005".into(),
             },
             ReadCursor {
                 conversation_id: "01JCONVERSATIONBRAVO0002".into(),
                 last_read_at: "2026-01-02T00:00:00Z".into(),
-                last_read_message_id: "n7".into(),
+                last_read_message_id: "msgB0007".into(),
             },
         ]
     }
