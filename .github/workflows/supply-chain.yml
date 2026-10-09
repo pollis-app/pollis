@@ -34,7 +34,7 @@ jobs:
       # (else --locked fails to parse). Bump these deliberately, regenerating
       # supply-chain/ in the same commit.
       - name: Install cargo-deny + cargo-vet
-        uses: taiki-e/install-action@4076c08d76dba979c11a7285295b0716c1d67908 # v2.87.15
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: cargo-deny@0.19.9,cargo-vet@0.10.2
 
