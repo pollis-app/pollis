@@ -289,6 +289,27 @@
   "language": {
     "restartRequired": "Restart Pollis to switch the layout direction."
   },
+  "media": {
+    "audioPosition": "{{current}} of {{total}}",
+    "audioProgress": "Playback position",
+    "fileHint": "Use Share to open this file in another app.",
+    "openSettings": "Open settings",
+    "pause": "Pause",
+    "play": "Play",
+    "save": "Save to photos",
+    "saveDenied": "Pollis can't save to your photos. Allow it in Settings.",
+    "saveFailed": "Couldn't save this file.",
+    "saved": "Saved to your photos",
+    "saving": "Saving…",
+    "seekBack": "Back 10 seconds",
+    "seekForward": "Forward 10 seconds",
+    "share": "Share",
+    "shareFailed": "Couldn't share this file.",
+    "shareUnavailable": "Sharing isn't available on this device.",
+    "title": "Attachment",
+    "unavailable": "This file couldn't be loaded.",
+    "zoomHint": "Pinch or double-tap to zoom"
+  },
   "permalink": {
     "opening": "Opening message…",
     "title": "Message link"

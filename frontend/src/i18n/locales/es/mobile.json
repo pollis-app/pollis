@@ -285,6 +285,27 @@
   "language": {
     "restartRequired": "Reinicia Pollis para cambiar la dirección de la interfaz."
   },
+  "media": {
+    "audioPosition": "{{current}} de {{total}}",
+    "audioProgress": "Posición de reproducción",
+    "fileHint": "Usa Compartir para abrir este archivo en otra app.",
+    "openSettings": "Abrir ajustes",
+    "pause": "Pausar",
+    "play": "Reproducir",
+    "save": "Guardar en fotos",
+    "saveDenied": "Pollis no puede guardar en tus fotos. Permítelo en Ajustes.",
+    "saveFailed": "No se pudo guardar este archivo.",
+    "saved": "Guardado en tus fotos",
+    "saving": "Guardando…",
+    "seekBack": "Retroceder 10 segundos",
+    "seekForward": "Avanzar 10 segundos",
+    "share": "Compartir",
+    "shareFailed": "No se pudo compartir este archivo.",
+    "shareUnavailable": "Compartir no está disponible en este dispositivo.",
+    "title": "Archivo adjunto",
+    "unavailable": "No se pudo cargar este archivo.",
+    "zoomHint": "Pellizca o toca dos veces para hacer zoom"
+  },
   "permalink": {
     "opening": "Abriendo mensaje…",
     "title": "Enlace al mensaje"

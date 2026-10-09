@@ -52,6 +52,7 @@ import { ensurePushRegistration } from "../../lib/push";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useNav } from "../../components/pane/paneContext";
+import { useOpenMediaViewer } from "../../hooks/useOpenMediaViewer";
 import { useIsRegular } from "../../hooks/useLayoutClass";
 import { selectConversation } from "../../hooks/useOpenConversation";
 
@@ -89,6 +90,7 @@ function TextChat(props: ChatViewProps = {}) {
     (params.kind === "channel" || params.kind === "dm" ? params.kind : null);
   const displayName =
     props.name ?? (typeof params.name === "string" ? params.name : undefined);
+  const openMedia = useOpenMediaViewer(conversationId, kind);
 
   const [draft, setDraft] = useState("");
   const [pendingAttachments, setPendingAttachments] = useState<
@@ -426,6 +428,7 @@ function TextChat(props: ChatViewProps = {}) {
           time={timeLabel(m.created_at)}
           text={m.content}
           attachments={m.attachments}
+          onOpenAttachment={openMedia}
           pending={m.pending}
           failed={m.failed}
           edited={!!m.edited_at}
@@ -474,6 +477,7 @@ function TextChat(props: ChatViewProps = {}) {
       isDm,
       threadSummaries,
       openThread,
+      openMedia,
       mentionNames,
       selfName,
       t,

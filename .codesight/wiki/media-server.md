@@ -201,5 +201,23 @@ counters make the win measurable: `FRAMES_SENT` (frames handed to a socket, one
 per client per frame) and `FRAMES_DROPPED` (frames a lagged receiver never got),
 read via `frame_fanout_counters()`.
 
+## Mobile: no loopback server
+
+A sandboxed React Native app cannot serve or fetch `http://127.0.0.1`
+(App Transport Security, Android cleartext rules), so mobile takes the
+file-path route instead: the uniffi bridge's `get_media_path` decrypts the
+R2 object to `<cacheDirectory>/pollis-media/<content_hash>` and returns a
+`file://` path; `mobile/lib/media/cache.ts` ref-counts it and unlinks the
+plaintext on the last release (`useMediaUri`).
+
+The full-screen media viewer (`mobile/app/media.tsx`, #1248) adds a second,
+NAMED copy of those same decrypted bytes under `pollis-media/named/<hash>/`
+(`resolveNamedMediaUri` / `useNamedMediaUri`): the sender's filename plus an
+extension, because AVPlayer (expo-video, expo-audio), the iOS photo library
+and the share sheet all type a file by its extension and the hash file has
+none. It is a local `copyAsync`, never a fetch, ref-counted and unlinked the
+same way; Save to photos (expo-media-library, add-only) and Share
+(expo-sharing) read from it.
+
 ---
 _Back to [index.md](./index.md)_

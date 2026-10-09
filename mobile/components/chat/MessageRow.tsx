@@ -3,29 +3,15 @@ import { View, Text, Pressable } from "react-native";
 import { useTranslation } from "react-i18next";
 import { Avatar } from "../ui";
 import { Icon } from "../icons";
-import { fonts, semantic, type as ty, r } from "../../theme/tokens";
+import { fonts, semantic, type as ty } from "../../theme/tokens";
 import { MessageBodyInline } from "./MessageBody";
 import { ReactionPills } from "./ReactionPills";
 import { ReceiptIndicator } from "./ReceiptIndicator";
-import { MediaImage } from "../Media";
+import { AttachmentTile } from "./AttachmentTile";
 import { findMentions } from "../../lib/mentions";
 import type { Reaction } from "../../hooks/queries/useReactions";
 import type { MessageReceipts } from "../../hooks/queries/useReceipts";
 import type { MessageAttachment } from "../../types";
-
-// Image sizing: fixed max width, height follows the aspect ratio within
-// sane bounds; unknown dimensions get a square fallback.
-const IMAGE_MAX_W = 220;
-function imageSize(att: MessageAttachment): { width: number; height: number } {
-  if (att.width && att.height) {
-    const height = Math.min(
-      Math.max(Math.round((IMAGE_MAX_W * att.height) / att.width), 80),
-      260,
-    );
-    return { width: IMAGE_MAX_W, height };
-  }
-  return { width: 160, height: 160 };
-}
 
 // Avatar column (40) + gap (12): a continued message's body lines up with
 // the header message's body.
@@ -63,6 +49,7 @@ export function MessageRow({
   mentionNames,
   selfName,
   attachments,
+  onOpenAttachment,
   onPressAvatar,
   onLongPress,
   continued = false,
@@ -90,6 +77,8 @@ export function MessageRow({
   mentionNames?: ReadonlySet<string>;
   selfName?: string | null;
   attachments?: MessageAttachment[];
+  // Opens the full-screen media viewer (#1248) on a tapped attachment.
+  onOpenAttachment?: (attachment: MessageAttachment) => void;
   onPressAvatar?: () => void;
   onLongPress?: () => void;
   // Same sender as the row above, within the grouping window.
@@ -118,9 +107,18 @@ export function MessageRow({
   // The row is one accessible element, so the nested avatar button is out of
   // a screen reader's reach; "View profile" is offered as a custom action
   // instead. Activate and long press both open the message actions.
+  // The attachments are nested buttons too, so each one that can open is
+  // offered as an action of its own ("Open <filename>").
+  const openableAttachments = onOpenAttachment
+    ? (attachments ?? []).filter((a) => !!a.object_key || !!a.localPreviewUri)
+    : [];
   const a11yActions = [
     ...(onLongPress ? [{ name: "activate" }, { name: "longpress" }] : []),
     ...(onPressAvatar ? [{ name: "viewProfile", label: t("mobile:chat.viewProfile") }] : []),
+    ...openableAttachments.map((a, i) => ({
+      name: `openAttachment${i}`,
+      label: t("attachment.openLabel", { filename: a.filename }),
+    })),
   ];
 
   return (
@@ -136,6 +134,11 @@ export function MessageRow({
         const action = e.nativeEvent.actionName;
         if (action === "viewProfile") {
           onPressAvatar?.();
+        } else if (action.startsWith("openAttachment")) {
+          const target = openableAttachments[Number(action.slice("openAttachment".length))];
+          if (target) {
+            onOpenAttachment?.(target);
+          }
         } else if (action === "activate" || action === "longpress") {
           onLongPress?.();
         }
@@ -242,46 +245,14 @@ export function MessageRow({
               marginTop: 4,
             }}
           >
-            {attachments.map((att) => {
-              if (att.content_type.startsWith("image/")) {
-                return (
-                  <MediaImage
-                    key={att.id}
-                    attachment={att}
-                    contentFit="cover"
-                    style={{
-                      ...imageSize(att),
-                      borderRadius: r.md,
-                      borderWidth: 1,
-                      borderColor: semantic.hair,
-                    }}
-                  />
-                );
-              }
-              // Non-image attachments: named chip (no inline preview yet).
-              return (
-                <View
-                  key={att.id}
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 6,
-                    minHeight: 36,
-                    paddingHorizontal: 12,
-                    borderRadius: r.md,
-                    backgroundColor: semantic.raised,
-                  }}
-                >
-                  <Icon.attach size={16} color={semantic.dim} />
-                  <Text
-                    numberOfLines={1}
-                    style={[ty.secondary, { maxWidth: 200 }]}
-                  >
-                    {att.filename}
-                  </Text>
-                </View>
-              );
-            })}
+            {attachments.map((att) => (
+              <AttachmentTile
+                key={att.id}
+                attachment={att}
+                onOpen={onOpenAttachment}
+                onLongPress={onLongPress}
+              />
+            ))}
           </View>
         ) : null}
         {reactions && reactions.length > 0 && onToggleReaction ? (

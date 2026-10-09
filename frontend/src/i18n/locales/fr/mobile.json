@@ -285,6 +285,27 @@
   "language": {
     "restartRequired": "Redémarrez Pollis pour changer le sens de la mise en page."
   },
+  "media": {
+    "audioPosition": "{{current}} sur {{total}}",
+    "audioProgress": "Position de lecture",
+    "fileHint": "Utilisez Partager pour ouvrir ce fichier dans une autre app.",
+    "openSettings": "Ouvrir les réglages",
+    "pause": "Pause",
+    "play": "Lire",
+    "save": "Enregistrer dans les photos",
+    "saveDenied": "Pollis ne peut pas enregistrer dans vos photos. Autorisez-le dans les Réglages.",
+    "saveFailed": "Impossible d'enregistrer ce fichier.",
+    "saved": "Enregistré dans vos photos",
+    "saving": "Enregistrement…",
+    "seekBack": "Reculer de 10 secondes",
+    "seekForward": "Avancer de 10 secondes",
+    "share": "Partager",
+    "shareFailed": "Impossible de partager ce fichier.",
+    "shareUnavailable": "Le partage n'est pas disponible sur cet appareil.",
+    "title": "Pièce jointe",
+    "unavailable": "Impossible de charger ce fichier.",
+    "zoomHint": "Pincez ou touchez deux fois pour zoomer"
+  },
   "permalink": {
     "opening": "Ouverture du message…",
     "title": "Lien vers le message"

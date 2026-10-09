@@ -138,6 +138,8 @@ export default function RootLayout() {
               <Stack.Screen name="conversation/info" />
               <Stack.Screen name="chat/[id]" />
               <Stack.Screen name="chat/thread" />
+              {/* Full-screen attachment viewer (#1248): a page, not a modal. */}
+              <Stack.Screen name="media" />
               <Stack.Screen name="user/[id]" />
               <Stack.Screen name="report" options={settingsPage} />
               {/* Personal settings pages (settingsPage = drillIn since the

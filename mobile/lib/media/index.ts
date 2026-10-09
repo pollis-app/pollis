@@ -8,6 +8,8 @@
 export {
   resolveMediaUri,
   releaseMediaUri,
+  resolveNamedMediaUri,
+  releaseNamedMediaUri,
   clearMediaCache,
   MEDIA_DIR,
 } from "./cache";

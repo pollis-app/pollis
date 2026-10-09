@@ -4,7 +4,7 @@
 // button and channel menu navigate here with { id, kind, groupId?, name? }.
 
 import { useMemo } from "react";
-import { View, Text, useWindowDimensions } from "react-native";
+import { View, Text, Pressable, useWindowDimensions } from "react-native";
 import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { useTranslation } from "react-i18next";
 import {
@@ -27,6 +27,7 @@ import {
   type ConversationKind,
 } from "../../hooks/queries";
 import { MediaImage } from "../../components/Media";
+import { useOpenMediaViewer } from "../../hooks/useOpenMediaViewer";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 
@@ -56,6 +57,7 @@ function ConversationInfo() {
       : null;
   const currentUser = appStore.currentUser;
   const { width } = useWindowDimensions();
+  const openMedia = useOpenMediaViewer(conversationId, kind);
 
   const { data: groupMembers = [] } = useGroupMembers(groupId);
   const dmChannel = useDMChannel(kind === "dm" ? conversationId : null);
@@ -219,12 +221,18 @@ function ConversationInfo() {
               paddingVertical: 4,
             }}
           >
+            {/* Each tile opens the full-screen viewer (#1248), as desktop's
+                media grid opens its lightbox. */}
             {attachments.map((a) => (
-              <MediaImage
+              <Pressable
                 key={a.id}
-                attachment={a}
-                style={{ width: tile, height: tile }}
-              />
+                testID={`btn-media-tile-${a.id}`}
+                accessibilityRole="button"
+                accessibilityLabel={t("chat:attachment.viewLabel", { filename: a.filename })}
+                onPress={() => openMedia(a)}
+              >
+                <MediaImage attachment={a} style={{ width: tile, height: tile }} />
+              </Pressable>
             ))}
           </View>
         )}

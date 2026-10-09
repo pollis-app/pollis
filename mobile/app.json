@@ -81,6 +81,13 @@
       "googleServicesFile": "./google-services.json",
       "permissions": [
         "android.permission.CAMERA"
+      ],
+      "blockedPermissions": [
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_AUDIO",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.ACCESS_MEDIA_LOCATION"
       ]
     },
     "web": {
@@ -134,6 +141,31 @@
           "photosPermission": "Pollis needs access to your photo library so you can attach images to messages and upload custom group emoji.",
           "cameraPermission": "Pollis needs your camera to scan the pairing QR code from your desktop.",
           "microphonePermission": false
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Pollis needs access to your photo library so you can attach images to messages and upload custom group emoji.",
+          "savePhotosPermission": "Pollis saves the photos and videos you choose to your photo library.",
+          "isAccessMediaLocationEnabled": false,
+          "granularPermissions": []
+        }
+      ],
+      [
+        "expo-video",
+        {
+          "supportsBackgroundPlayback": false,
+          "supportsPictureInPicture": false
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "enableBackgroundPlayback": false,
+          "enableBackgroundRecording": false
         }
       ]
     ],

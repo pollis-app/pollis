@@ -58,6 +58,13 @@ import {
   Delete,
   UserX,
   Ban,
+  Play,
+  Pause,
+  Film,
+  File,
+  ImageDown,
+  RotateCcw,
+  RotateCw,
   type LucideIcon,
 } from "lucide-react-native";
 import { I18nManager, View } from "react-native";
@@ -166,6 +173,17 @@ export const Icon = {
   flag: wrap(Flag, 14),
   info: wrap(Info, 16),
   alert: wrap(AlertCircle, 14),
+
+  /* ── Media (#1248) ── */
+  play: wrap(Play),
+  pause: wrap(Pause),
+  video: wrap(Film),
+  file: wrap(File),
+  saveImage: wrap(ImageDown),
+  // Seek back / forward: the arrows encode time, not reading direction, so
+  // they are not mirrored (a media player's controls never flip in RTL).
+  seekBack: wrap(RotateCcw),
+  seekForward: wrap(RotateCw),
 
   /* ── State ── */
   check: wrap(Check, 12),

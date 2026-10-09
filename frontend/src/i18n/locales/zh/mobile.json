@@ -277,6 +277,27 @@
   "language": {
     "restartRequired": "重启 Pollis 以切换布局方向。"
   },
+  "media": {
+    "audioPosition": "{{current}} / {{total}}",
+    "audioProgress": "播放位置",
+    "fileHint": "使用“分享”在其他应用中打开此文件。",
+    "openSettings": "打开设置",
+    "pause": "暂停",
+    "play": "播放",
+    "save": "保存到相册",
+    "saveDenied": "Pollis 无法保存到你的相册。请在设置中允许。",
+    "saveFailed": "无法保存此文件。",
+    "saved": "已保存到相册",
+    "saving": "正在保存…",
+    "seekBack": "后退 10 秒",
+    "seekForward": "前进 10 秒",
+    "share": "分享",
+    "shareFailed": "无法分享此文件。",
+    "shareUnavailable": "此设备不支持分享。",
+    "title": "附件",
+    "unavailable": "无法加载此文件。",
+    "zoomHint": "双指捏合或轻点两下以缩放"
+  },
   "permalink": {
     "opening": "正在打开消息…",
     "title": "消息链接"

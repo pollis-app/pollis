@@ -26,6 +26,7 @@ import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
 import type { MessageAttachment } from "../../types";
 import { searchQueryKeys } from "./useSearch";
+import { aliasAttachment } from "../../lib/media/viewer";
 import {
   buildMessageContent,
   type PickedAttachment,
@@ -367,7 +368,7 @@ export function useSendMessage(
       }
       return { previous, optimisticId, key, threadId: vars.threadId };
     },
-    onSuccess: (confirmed, _vars, ctx) => {
+    onSuccess: (confirmed, vars, ctx) => {
       // The row reaches the local store (and its FTS index) only when
       // send_message resolves — after the optimistic stub is already on
       // screen. A search that ran in between cached "no matches"; drop it.
@@ -381,6 +382,15 @@ export function useSendMessage(
         ...confirmed,
         sender_username: confirmed.sender_username ?? currentUser?.username,
       };
+      // The envelope keeps the picked order, so pending and confirmed
+      // attachments pair up by position. A viewer open on the pending copy
+      // follows the swap instead of losing its page.
+      (vars.attachments ?? []).forEach((att, i) => {
+        const to = confirmed.attachments?.[i]?.id;
+        if (to) {
+          aliasAttachment(att.id, to);
+        }
+      });
       queryClient.setQueryData<MessagesData>(ctx.key, (cache) =>
         mapPages(cache, (msgs) =>
           msgs.map((m) => (m.id === ctx.optimisticId ? settled : m)),

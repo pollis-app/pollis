@@ -742,6 +742,7 @@ app/
   group/*              new, invite, invite-links, members, settings, emoji, requests, discover
   chat/[id].tsx        conversation (Header + list + composer); chat/thread.tsx
   dm/{new,info,requests}.tsx · conversation/info.tsx · user/[id].tsx · report.tsx
+  media.tsx            full-screen attachment viewer (#1248): zoom/swipe, video, audio, save/share
   self/*               preferences, user-settings, security, blocked, saved, …
 components/
   ui.tsx               primitives: Txt, Screen, Header, IconButton, SectionTitle,
@@ -832,7 +833,8 @@ Current state:
   `app/m/[...permalink].tsx`, Saved screen at `app/self/saved.tsx`, verified
   clipboard copy via expo-clipboard); attachments (picker → `upload_media`
   path arg → desktop's exact `_att`/`_txt` envelope from `lib/attachments.ts`;
-  inbound images render via `components/Media.tsx` + `get_media_path`). The DS base URL
+  inbound images render via `components/Media.tsx` + `get_media_path`; tapping any
+  attachment opens the full-screen viewer `app/media.tsx`, #1248). The DS base URL
   is threaded through `initializeNativeBridge` as `pollis_delivery_url`
   (`EXPO_PUBLIC_POLLIS_DELIVERY_URL`, dev → api-dev.pollis.com) — required, and
   since #987 the ONLY backend: OTP bootstrap, every remote write and every remote

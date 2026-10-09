@@ -317,6 +317,27 @@
   "language": {
     "restartRequired": "أعد تشغيل Pollis لتبديل اتجاه الواجهة."
   },
+  "media": {
+    "audioPosition": "{{current}} من {{total}}",
+    "audioProgress": "موضع التشغيل",
+    "fileHint": "استخدم «مشاركة» لفتح هذا الملف في تطبيق آخر.",
+    "openSettings": "فتح الإعدادات",
+    "pause": "إيقاف مؤقت",
+    "play": "تشغيل",
+    "save": "حفظ في الصور",
+    "saveDenied": "لا يستطيع Pollis الحفظ في صورك. اسمح بذلك من الإعدادات.",
+    "saveFailed": "تعذّر حفظ هذا الملف.",
+    "saved": "تم الحفظ في الصور",
+    "saving": "جارٍ الحفظ…",
+    "seekBack": "رجوع 10 ثوانٍ",
+    "seekForward": "تقديم 10 ثوانٍ",
+    "share": "مشاركة",
+    "shareFailed": "تعذّرت مشاركة هذا الملف.",
+    "shareUnavailable": "المشاركة غير متاحة على هذا الجهاز.",
+    "title": "مرفق",
+    "unavailable": "تعذّر تحميل هذا الملف.",
+    "zoomHint": "اقرص أو انقر مرتين للتكبير"
+  },
   "permalink": {
     "opening": "جارٍ فتح الرسالة…",
     "title": "رابط الرسالة"
