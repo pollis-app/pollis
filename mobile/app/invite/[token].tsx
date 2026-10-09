@@ -3,12 +3,13 @@ import { View, Text, ActivityIndicator } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Screen, Crumb, Body, Button, BottomAction, Ctx } from "../../components/ui";
-import { semantic, type as ty } from "../../theme/tokens";
-import { upper } from "../../i18n";
+import { Screen, Header, Body, Button, BottomAction } from "../../components/ui";
+import { Icon } from "../../components/icons";
+import { semantic, type as ty, space } from "../../theme/tokens";
 import { invoke } from "../../lib/native";
 import { restoreSession } from "../../hooks/queries/useAuth";
 import { appStore } from "../../stores/appStore";
+import { useOpenConversation } from "../../hooks/useOpenConversation";
 import { groupQueryKeys, type RedeemedInvite } from "../../hooks/queries";
 
 interface UnlockStateSnapshot {
@@ -46,6 +47,8 @@ type Phase = "working" | "confirm" | "joining" | "signedOut" | "locked" | "faile
 export default function InviteLanding() {
   const { t } = useTranslation("mobile");
   const router = useRouter();
+  // Phones land on the group page; iPad on the Groups tab's two-pane.
+  const { openGroup } = useOpenConversation();
   const queryClient = useQueryClient();
   const { token } = useLocalSearchParams<{ token?: string }>();
   const [phase, setPhase] = useState<Phase>("working");
@@ -105,10 +108,7 @@ export default function InviteLanding() {
       // The redeemer just crossed into a group they could not see before —
       // invalidate broadly, like desktop's useRedeemGroupInviteLink.
       queryClient.invalidateQueries({ queryKey: groupQueryKeys.all });
-      router.replace({
-        pathname: "/group/[id]",
-        params: { id: result.group_id },
-      });
+      openGroup(result.group_id, { replace: true });
     } catch (e) {
       console.warn("[invite] redeem failed:", e);
       setPhase("failed");
@@ -129,53 +129,36 @@ export default function InviteLanding() {
           : t("mobile:invite.failed");
 
   return (
-    <Screen testID="screen-invite-landing" centered>
-      <Crumb
-        segs={[
-          { label: "POLLIS" },
-          { label: t("mobile:invite.title"), leaf: true },
-        ]}
-      />
-      <Body>
+    <Screen testID="screen-invite-landing">
+      {/* Nothing to go back to: a link opened this screen. */}
+      <Header title={t("mobile:invite.groupInvite")} hideBack />
+      <Body contentContainerStyle={{ padding: space.xxl }}>
         <View
-          style={{
-            paddingHorizontal: 18,
-            paddingTop: 24,
-            gap: 12,
-            alignItems: "center",
-          }}
+          accessible
+          accessibilityLiveRegion="polite"
+          style={{ paddingTop: space.xxl, gap: space.lg, alignItems: "center" }}
         >
           {phase === "working" || phase === "joining" ? (
             <ActivityIndicator color={semantic.accent} />
           ) : null}
+          {phase === "failed" ? <Icon.alert size={24} color={semantic.accent} /> : null}
           {phase === "confirm" ? (
             <Text
               testID="invite-confirm-title"
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 15,
-                color: semantic.ink,
-                textAlign: "center",
-              }}
+              accessibilityRole="header"
+              style={[ty.title, { textAlign: "center" }]}
             >
               {t("mobile:invite.confirmTitle")}
             </Text>
           ) : null}
           <Text
             testID="invite-landing-message"
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: phase === "failed" ? semantic.danger : semantic.ink2,
-              lineHeight: 19,
-              textAlign: "center",
-            }}
+            style={[ty.body, { color: semantic.dim, textAlign: "center" }]}
           >
             {message}
           </Text>
         </View>
       </Body>
-      <Ctx cr="POLLIS" name={t("mobile:invite.groupInvite")} hideBack />
       {phase === "confirm" ? (
         <BottomAction>
           <Button
@@ -184,7 +167,7 @@ export default function InviteLanding() {
             variant="primary"
             onPress={join}
           >
-            {upper(t("mobile:invite.join"))}
+            {t("mobile:invite.join")}
           </Button>
         </BottomAction>
       ) : phase === "working" || phase === "joining" ? null : (
@@ -196,8 +179,8 @@ export default function InviteLanding() {
             onPress={() => router.replace("/")}
           >
             {phase === "failed"
-              ? upper(t("mobile:invite.backToPollis"))
-              : upper(t("mobile:invite.openPollis"))}
+              ? t("mobile:invite.backToPollis")
+              : t("mobile:invite.openPollis")}
           </Button>
         </BottomAction>
       )}

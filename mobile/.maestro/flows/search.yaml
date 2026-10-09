@@ -21,6 +21,9 @@ tags:
 - tapOn:
     id: "tab-groups"
 - tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
     id: "btn-create-group"
 # #General is opt-in (off by default, like desktop); these steps open it.
 - tapOn:
@@ -28,11 +31,18 @@ tags:
 - tapOn:
     id: "input-group-name"
 - inputText: "E2E Search Group"
-- tapOn: "CREATE GROUP"
+- tapOn:
+    id: "btn-submit-group"
+# Creating lands on the Groups tab with the new group selected (pill strip +
+# its channel panel, tab bar visible) — not a pushed group page. Wait for
+# THIS group's panel header (the account may already have other groups).
 - extendedWaitUntil:
     visible:
-      id: "screen-group"
+      id: "btn-group-menu"
+      text: "E2E Search Group, .*"
     timeout: 15000
+- assertVisible:
+    id: "panel-group"
 - tapOn:
     text: "General"
 - assertVisible:
@@ -45,11 +55,19 @@ tags:
 - extendedWaitUntil:
     visible: ".*pelican migration notes.*"
     timeout: 15000
-- tapOn:
-    id: "btn-back"
+# Back from the channel to the Groups tab (phones). On iPad the channel is the
+# two-pane's right pane, with no back button — hence optional.
 - tapOn:
     id: "btn-back"
     optional: true
+# On iPad the composer keeps focus after send and the keyboard covers the tab
+# bar, so the tab tap would land on a key. iOS only: on Android hideKeyboard
+# presses Back when no keyboard is up, which leaves the app.
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - hideKeyboard
 
 # Message hit, count, sort, corpus.
 - tapOn:
@@ -74,8 +92,11 @@ tags:
 - tapOn: ".*pelican migration notes.*"
 - assertVisible:
     id: "screen-chat"
+# Phones: back to Search. iPad: the hit opened in the Groups tab's two-pane,
+# which has no back button; the next step taps the Search tab anyway.
 - tapOn:
     id: "btn-back"
+    optional: true
 
 # Quick-jump to a settings page.
 - tapOn:

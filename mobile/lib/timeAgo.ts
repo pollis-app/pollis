@@ -2,7 +2,7 @@
 // "3d", then a short date). Mobile counterpart to desktop's `utils/timeAgo`,
 // shortened to fit a list row's trailing slot.
 
-import i18n, { activeLocale, upper } from "../i18n";
+import i18n, { activeLocale } from "../i18n";
 
 export function timeAgoShort(input: string | number | Date): string {
   const d = input instanceof Date ? input : new Date(input);
@@ -26,7 +26,5 @@ export function timeAgoShort(input: string | number | Date): string {
   if (diffDay < 7) {
     return i18n.t("common:timeAgo.days", { count: diffDay });
   }
-  return upper(
-    d.toLocaleDateString(activeLocale(), { month: "short", day: "numeric" }),
-  );
+  return d.toLocaleDateString(activeLocale(), { month: "short", day: "numeric" });
 }

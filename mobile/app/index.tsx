@@ -3,7 +3,7 @@ import { View, ActivityIndicator, Image } from "react-native";
 import { useRouter } from "expo-router";
 import { restoreSession } from "../hooks/queries/useAuth";
 import { invoke } from "../lib/native";
-import { palette, semantic } from "../theme/tokens";
+import { semantic } from "../theme/tokens";
 
 interface UnlockStateSnapshot {
   pin_set: boolean;
@@ -66,7 +66,7 @@ export default function Index() {
     <View
       style={{
         flex: 1,
-        backgroundColor: palette.bg,
+        backgroundColor: semantic.bg,
         alignItems: "center",
         justifyContent: "center",
       }}

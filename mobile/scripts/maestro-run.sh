@@ -81,6 +81,9 @@ case "$PLATFORM" in
       exit 1
     fi
     xcrun simctl boot "$UDID" 2>/dev/null || true
+    # Xcode 27: without this the XCTest driver never starts ("iOS driver not
+    # ready in time"). Idempotent; see the script's header.
+    "$HERE/scripts/maestro-ios-driver-fix.sh" || true
     # Xcode 27 ships no Simulator.app; the simulator runs headless, which
     # Maestro and `simctl io screenshot` are both fine with.
     open -a Simulator 2>/dev/null || true
@@ -118,7 +121,12 @@ mkdir -p "$OUT"
 FLOW_FILES=()
 if [ "$FLOW" = "all" ]; then
   for f in "$MAE"/flows/*.yaml; do
-    [ -e "$f" ] && FLOW_FILES+=("$f")
+    [ -e "$f" ] || continue
+    # ipad-* flows assert the regular-width two-pane; a phone renders compact.
+    if [ "$PLATFORM" != "ipad" ] && [[ "$(basename "$f")" == ipad-* ]]; then
+      continue
+    fi
+    FLOW_FILES+=("$f")
   done
 else
   FLOW_FILES=("$TARGET")
@@ -133,13 +141,27 @@ echo "==> running ${#FLOW_FILES[@]} flow(s)  (platform=$PLATFORM)"
 DEBUG="$OUT/.debug"
 mkdir -p "$DEBUG"
 FAILED=()
+# Every flow signs up a fresh account, i.e. one OTP request, and the dev DS
+# allows 10 per 10 minutes per IP (pollis-delivery/src/ratelimit.rs). Starting
+# flows at least SIGNUP_SPACING seconds apart keeps one run under that; two
+# platforms run in parallel from one machine still share the budget, so run
+# them one after the other. 0 disables the spacing.
+SIGNUP_SPACING="${SIGNUP_SPACING:-62}"
+LAST_START=0
 for f in "${FLOW_FILES[@]}"; do
   fname="$(basename "$f" .yaml)"
+  NOW="$(date +%s)"
+  WAIT=$((LAST_START + SIGNUP_SPACING - NOW))
+  if [ "$LAST_START" -gt 0 ] && [ "$WAIT" -gt 0 ]; then
+    echo "    (waiting ${WAIT}s: OTP rate limit)"
+    sleep "$WAIT"
+  fi
+  LAST_START="$(date +%s)"
   echo "--> $fname"
   # `${arr[@]+"${arr[@]}"}`: macOS's bash 3.2 treats an EMPTY array as unbound
   # under `set -u`, which killed every Android run before Maestro started.
   maestro ${DEVICE_SEL[@]+"${DEVICE_SEL[@]}"} test --debug-output "$DEBUG" \
-    ${ENV_ARGS[@]+"${ENV_ARGS[@]}"} -e MAESTRO_EMAIL="$(fresh_email "$fname")" "$f" || {
+    ${ENV_ARGS[@]+"${ENV_ARGS[@]}"} -e MAESTRO_EMAIL="$(fresh_email "$PLATFORM-$fname")" "$f" || {
     FAILED+=("$fname")
     echo "!! $fname reported failures — screenshots (incl. the failing state) are in $OUT" >&2
   }

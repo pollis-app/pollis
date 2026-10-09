@@ -22,8 +22,12 @@ appId: com.pollis.mobile
     id: "btn-submit-email"
 
 # --- OTP ---
-- assertVisible:
-    id: "screen-auth-otp"
+# request-otp is a DS round trip (plus the Resend send when DEV_OTP is unset);
+# with three suites in flight it can outlast assertVisible's default wait.
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-otp"
+    timeout: 20000
 # input-otp is an opacity:0 proxy over the 6 visual boxes, autoFocus'd on
 # mount — Maestro can't tapOn a non-hittable element, but it's already
 # focused, so inputText alone reaches it.
@@ -71,8 +75,11 @@ appId: com.pollis.mobile
       visible:
         id: "btn-continue"
     commands:
+      # optional: initializing often auto-advances between the visibility
+      # check and the tap, and a vanished button is not a failed sign-in.
       - tapOn:
           id: "btn-continue"
+          optional: true
 
 # --- Landed on the tabs ---
 # Assert the TAB BAR, not a particular tab. `initializing.tsx` replaces to

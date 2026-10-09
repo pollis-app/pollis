@@ -1,38 +1,42 @@
-import { View, Pressable, Text } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { View, Pressable, Text, Platform } from "react-native";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { palette, semantic, fonts } from "../theme/tokens";
+import { semantic, fonts, layout } from "../theme/tokens";
 import { useTheme } from "./theme";
 import { Icon } from "./icons";
+import { useBottomInset } from "./ui";
 import { appStore } from "../stores/appStore";
 import { useDMChannels, useUserGroupsWithChannels } from "../hooks/queries";
-import { upper } from "../i18n";
 
+// Groups / Direct / Search / Self (Main.dc.html): 22pt icon over a 12pt
+// label, set 10pt below the bar's top hairline; active = accent icon and
+// label, a bolder label, and a short rounded accent bar at the top of the
+// cell (so where you are is not told by colour alone); inactive = dim. The
+// `tab-<name>` testIDs and the `badge-<name>` anchors are load-bearing in
+// e2e flows.
+const ICON = 22;
 const TABS: {
   name: string;
   label: (t: TFunction) => string;
   glyph: (c: string) => React.ReactNode;
 }[] = [
+  { name: "groups", label: (t) => t("tabs.groups"), glyph: (c) => <Icon.users size={ICON} color={c} /> },
   {
-    name: "groups",
-    label: (t) => t("tabs.groups"),
-    glyph: (c) => <Icon.diamond size={16} color={c} />,
+    name: "direct",
+    label: (t) => t("tabs.direct"),
+    glyph: (c) => <Icon.messageCircle size={ICON} color={c} />,
   },
-  { name: "direct", label: (t) => t("tabs.direct"), glyph: (c) => <Icon.at size={16} color={c} /> },
-  {
-    name: "search",
-    label: (t) => t("tabs.search"),
-    glyph: (c) => <Icon.search size={16} color={c} />,
-  },
-  { name: "self", label: (t) => t("tabs.self"), glyph: (c) => <Icon.user size={16} color={c} /> },
+  { name: "search", label: (t) => t("tabs.search"), glyph: (c) => <Icon.search size={ICON} color={c} /> },
+  { name: "self", label: (t) => t("tabs.self"), glyph: (c) => <Icon.user size={ICON} color={c} /> },
 ];
 
 export const TabBar = observer(function TabBar({ state, navigation }: any) {
   useTheme();
   const { t } = useTranslation("mobile");
-  const insets = useSafeAreaInsets();
+  // Home-indicator inset on iOS; on Android the nav-bar inset, floored so
+  // the labels never sit on the glass edge (see useBottomInset).
+  const bottomInset = useBottomInset();
   // Per-tab unread badge: sum the store's unread counts over the ids each tab
   // lists. The same cached queries the tabs render from split the id space
   // into channels (Groups) and DM conversations (Direct). Read `unreadCounts`
@@ -49,91 +53,99 @@ export const TabBar = observer(function TabBar({ state, navigation }: any) {
   };
   return (
     <View
+      // "tabbar" exists only on iOS; Android throws "Invalid accessibility
+      // role value: tabbar" and crashes the moment the tab bar mounts.
+      accessibilityRole={Platform.OS === "ios" ? "tabbar" : "tablist"}
       style={{
         flexDirection: "row",
-        height: 70 + insets.bottom,
-        paddingBottom: insets.bottom,
+        height: layout.tabBar + bottomInset,
+        paddingBottom: bottomInset,
         borderTopWidth: 1,
-        borderTopColor: semantic.hair,
-        backgroundColor: palette.bg,
+        borderTopColor: semantic.hairSoft,
+        backgroundColor: semantic.panel,
       }}
     >
       {TABS.map((tab, i) => {
         const focused = state.index === i;
-        const color = focused ? semantic.accent : semantic.mute;
+        const color = focused ? semantic.accent : semantic.dim;
         const label = tab.label(t);
+        const count = badgeByTab[tab.name] ?? 0;
         return (
           <Pressable
             key={tab.name}
             onPress={() => navigation.navigate(tab.name)}
             testID={`tab-${tab.name}`}
             accessibilityRole="tab"
-            accessibilityLabel={label}
+            accessibilityLabel={
+              count > 0 ? t("tabs.withUnread", { label, count }) : label
+            }
             accessibilityState={{ selected: focused }}
             style={{
               flex: 1,
               alignItems: "center",
-              justifyContent: "center",
-              gap: 4,
+              justifyContent: "flex-start",
+              paddingTop: 10,
+              gap: 3,
             }}
           >
-            {focused && (
+            {focused ? (
               <View
                 style={{
                   position: "absolute",
                   top: 0,
-                  width: 22,
-                  height: 2,
+                  alignSelf: "center",
+                  width: 26,
+                  height: 3,
+                  borderRadius: 1.5,
                   backgroundColor: semantic.accent,
                 }}
               />
-            )}
-            <View
-              style={{
-                width: 22,
-                height: 22,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
+            ) : null}
+            <View>
               {tab.glyph(color)}
-              {(badgeByTab[tab.name] ?? 0) > 0 ? (
+              {count > 0 ? (
                 <View
                   testID={`badge-${tab.name}`}
                   style={{
                     position: "absolute",
-                    top: -4,
-                    right: -10,
-                    minWidth: 15,
-                    height: 15,
-                    paddingHorizontal: 3,
-                    borderRadius: 8,
+                    top: -5,
+                    end: -11,
+                    minWidth: 18,
+                    height: 18,
+                    paddingHorizontal: 4,
+                    borderRadius: 9,
+                    borderWidth: 2,
+                    borderColor: semantic.panel,
                     backgroundColor: semantic.accent,
                     alignItems: "center",
                     justifyContent: "center",
                   }}
                 >
                   <Text
+                    maxFontSizeMultiplier={1.2}
                     style={{
-                      fontFamily: fonts.sora600,
-                      fontSize: 9,
-                      color: palette.bg,
+                      fontFamily: fonts.bold,
+                      fontSize: 11,
+                      lineHeight: 13,
+                      color: semantic.onAccent,
                     }}
                   >
-                    {Math.min(badgeByTab[tab.name], 99)}
+                    {count > 99 ? "99+" : count}
                   </Text>
                 </View>
               ) : null}
             </View>
+            {/* The bar's height is fixed, so the label caps its scaling. */}
             <Text
+              numberOfLines={1}
+              maxFontSizeMultiplier={1.3}
               style={{
-                fontFamily: fonts.sora500,
-                fontSize: 10,
-                letterSpacing: 1.4,
+                fontFamily: focused ? fonts.semibold : fonts.medium,
+                fontSize: 12,
                 color,
               }}
             >
-              {upper(label)}
+              {label}
             </Text>
           </Pressable>
         );

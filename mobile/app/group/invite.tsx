@@ -1,22 +1,22 @@
 import { useState } from "react";
 import { View, Text } from "react-native";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import {
   Screen,
-  Crumb,
+  Header,
   Body,
   Field,
   Button,
-  BottomAction,
   Chip,
   SectionTitle,
   ListRow,
-  Ctx,
+  Group,
 } from "../../components/ui";
+import { LabeledField, Hint, ErrorText } from "../../components/groups/FormBits";
 import { Icon } from "../../components/icons";
-import { semantic, type as ty } from "../../theme/tokens";
+import { semantic, type as ty, space } from "../../theme/tokens";
 import { CreatedInviteLinkCard } from "../../components/CreatedInviteLinkCard";
 import {
   useSendGroupInvite,
@@ -24,7 +24,6 @@ import {
   useCreateGroupInviteLink,
   type CreatedInviteLink,
 } from "../../hooks/queries";
-import { upper } from "../../i18n";
 
 // Expiry presets, mirroring desktop's InviteLinkManager (#847). A fixed list
 // rather than a date picker on purpose — every preset here is one a person
@@ -64,8 +63,8 @@ const USES_OPTIONS: {
 
 export default function InviteToGroup() {
   const { t } = useTranslation("channels");
-  const router = useRouter();
-  const { groupId } = useLocalSearchParams<{ groupId?: string }>();
+  const router = useNav();
+  const { groupId } = useRouteParams<{ groupId?: string }>();
   const [identifier, setIdentifier] = useState("");
   const sendInvite = useSendGroupInvite(groupId ?? null);
   const { data: groups = [] } = useUserGroupsWithChannels();
@@ -100,181 +99,123 @@ export default function InviteToGroup() {
   };
 
   return (
-    <Screen testID="screen-group-invite" centered>
-      <Crumb
-        segs={[
-          { label: upper(t("nav:breadcrumb.groups")) },
-          { label: group?.name ?? t("mobile:group.common.fallbackName") },
-          { label: t("mobile:group.invite.crumb"), leaf: true },
-        ]}
-      />
-      <Body>
-        <View style={{ paddingHorizontal: 18, paddingTop: 12, gap: 8 }}>
-          <Text style={ty.label}>{upper(t("inviteMember.identifierLabel"))}</Text>
-          <Field
-            amber
-            value={identifier}
-            onChangeText={setIdentifier}
-            testID="input-user-search"
-            accessibilityLabel={t("inviteMember.identifierLabel")}
-            icon={<Icon.at color={semantic.mute} />}
-          />
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 11,
-              color: semantic.mute,
-              lineHeight: 16,
-            }}
-          >
-            {t("mobile:group.invite.blurb", {
+    <Screen testID="screen-group-invite" aboveTabBar={router.inPane}>
+      <Header onBack={router.onBack} title={t("mobile:group.panel.invite")} subtitle={group?.name} />
+      <Body contentContainerStyle={{ paddingHorizontal: space.xxl }}>
+        <View style={{ paddingTop: space.xxl, gap: space.lg }}>
+          <LabeledField
+            label={t("mobile:group.invite.identifierLabel")}
+            hint={t("mobile:group.invite.blurb", {
               name: group?.name ?? t("mobile:group.invite.thisGroup"),
             })}
-          </Text>
+          >
+            <Field
+              value={identifier}
+              onChangeText={setIdentifier}
+              onSubmitEditing={onSend}
+              returnKeyType="send"
+              autoCorrect={false}
+              testID="input-user-search"
+              accessibilityLabel={t("mobile:group.invite.identifierLabel")}
+              icon={<Icon.at size={18} color={semantic.muted} />}
+            />
+          </LabeledField>
           {sendInvite.isError ? (
-            <Text
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 12,
-                color: semantic.danger,
-                paddingTop: 8,
-              }}
-            >
+            <ErrorText>
               {(sendInvite.error as Error).message || t("inviteMember.sendFailed")}
-            </Text>
+            </ErrorText>
           ) : null}
           {sendInvite.isSuccess ? (
-            <Text
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 12,
-                color: semantic.accent,
-                paddingTop: 8,
-              }}
-            >
+            <Text accessibilityLiveRegion="polite" style={[ty.secondary, { color: semantic.text }]}>
               {t("inviteMember.sent")}
             </Text>
           ) : null}
+          <Button
+            full
+            testID="btn-send-invite"
+            variant="primary"
+            onPress={onSend}
+            disabled={!identifier.trim() || sendInvite.isPending}
+          >
+            {sendInvite.isPending
+              ? t("inviteMember.submitting")
+              : t("mobile:group.invite.submit")}
+          </Button>
         </View>
 
-        <SectionTitle>{upper(t("mobile:group.invite.shareableLink"))}</SectionTitle>
-        <View style={{ paddingHorizontal: 18, paddingTop: 6, gap: 8 }}>
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 11,
-              color: semantic.mute,
-              lineHeight: 16,
-            }}
-          >
-            {t("mobile:group.invite.linkBlurb")}
-          </Text>
+        <SectionTitle style={{ paddingHorizontal: 0, paddingTop: space.xxxl * 1.5 }}>
+          {t("mobile:group.invite.shareableLink")}
+        </SectionTitle>
+        <View style={{ gap: space.lg }}>
+          <Hint>{t("mobile:group.invite.linkBlurb")}</Hint>
 
-          <Text style={[ty.label, { paddingTop: 6 }]}>
-            {upper(t("inviteLinks.expiresAfter"))}
-          </Text>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+          <Text style={ty.section}>{t("inviteLinks.expiresAfter")}</Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.xs }}>
             {EXPIRY_OPTIONS.map((opt) => (
               <Chip
                 key={opt.id}
-                variant={expiryHours === opt.hours ? "on" : "default"}
+                variant="outline"
+                selected={expiryHours === opt.hours}
                 testID={`chip-expiry-${opt.id}`}
                 onPress={() => setExpiryHours(opt.hours)}
               >
-                {upper(opt.label(t))}
+                {opt.label(t)}
               </Chip>
             ))}
           </View>
 
-          <Text style={[ty.label, { paddingTop: 6 }]}>
-            {upper(t("inviteLinks.maximumUses"))}
-          </Text>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+          <Text style={ty.section}>{t("inviteLinks.maximumUses")}</Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.xs }}>
             {USES_OPTIONS.map((opt) => (
               <Chip
                 key={opt.id}
-                variant={maxUses === opt.uses ? "on" : "default"}
+                variant="outline"
+                selected={maxUses === opt.uses}
                 testID={`chip-uses-${opt.id}`}
                 onPress={() => setMaxUses(opt.uses)}
               >
-                {upper(opt.label(t))}
+                {opt.label(t)}
               </Chip>
             ))}
           </View>
 
-          <View style={{ paddingTop: 8 }}>
-            <Button
-              full
-              testID="btn-create-invite-link"
-              onPress={onCreateLink}
-              disabled={createLink.isPending}
-              icon={<Icon.link color={semantic.ink} />}
-            >
-              {createLink.isPending
-                ? upper(t("inviteLinks.creating"))
-                : upper(t("inviteLinks.create"))}
-            </Button>
-          </View>
+          <Button
+            full
+            testID="btn-create-invite-link"
+            onPress={onCreateLink}
+            disabled={createLink.isPending}
+            icon={<Icon.link size={18} color={semantic.text} />}
+          >
+            {createLink.isPending ? t("inviteLinks.creating") : t("inviteLinks.create")}
+          </Button>
 
           {createLink.isError ? (
-            <Text
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 12,
-                color: semantic.danger,
-              }}
-            >
+            <ErrorText>
               {(createLink.error as Error).message ||
                 t("mobile:group.invite.createLinkFailed")}
-            </Text>
+            </ErrorText>
           ) : null}
 
           {created ? <CreatedInviteLinkCard link={created} /> : null}
-        </View>
 
-        <ListRow
-          testID="row-manage-invite-links"
-          minHeight={48}
-          glyph={<Icon.link color={semantic.mute} />}
-          name={t("mobile:group.invite.manageLinks")}
-          nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
-          sub={t("mobile:group.invite.manageLinksSub")}
-          onPress={() =>
-            groupId &&
-            router.push({
-              pathname: "/group/invite-links",
-              params: { groupId },
-            })
-          }
-          end={<Icon.fwd color={semantic.mute} />}
-        />
+          <Group>
+            <ListRow
+              testID="row-manage-invite-links"
+              glyph={<Icon.link size={20} color={semantic.dim} />}
+              name={t("mobile:group.invite.manageLinks")}
+              sub={t("mobile:group.invite.manageLinksSub")}
+              chevron
+              onPress={() =>
+                groupId &&
+                router.push({
+                  pathname: "/group/invite-links",
+                  params: { groupId },
+                })
+              }
+            />
+          </Group>
+        </View>
       </Body>
-      <Ctx
-        cr={group?.name ?? upper(t("mobile:group.common.fallbackName"))}
-        name={t("group.inviteMember")}
-      />
-      <BottomAction>
-        <Button
-          full
-          testID="btn-send-invite"
-          variant="primary"
-          onPress={onSend}
-          disabled={!identifier.trim() || sendInvite.isPending}
-          iconRight={<Icon.arrowRight color="#0a0907" />}
-        >
-          {sendInvite.isPending
-            ? upper(t("inviteMember.submitting"))
-            : upper(t("inviteMember.submit"))}
-        </Button>
-        <Button
-          variant="subtle"
-          full
-          testID="btn-cancel"
-          onPress={() => router.back()}
-        >
-          {t("common:actions.cancel")}
-        </Button>
-      </BottomAction>
     </Screen>
   );
 }

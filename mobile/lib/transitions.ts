@@ -42,10 +42,8 @@ export const drillIn: StackOptions = Platform.select({
 });
 
 /**
- * Personal settings pages. iOS keeps the slide up from the bottom, shortened;
- * Android has no bottom slide under 350 ms, so it fades instead.
+ * Personal settings pages. They used to slide up from the bottom; since the
+ * redesign every pushed screen has its back chevron at the top-left, and the
+ * system edge swipe must pop it, so they drill in like everything else.
  */
-export const settingsPage: StackOptions = Platform.select({
-  ios: { animation: "slide_from_bottom", animationDuration: DURATION_MS },
-  default: { animation: "fade" },
-});
+export const settingsPage: StackOptions = drillIn;

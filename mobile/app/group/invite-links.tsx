@@ -1,16 +1,18 @@
 import { useState } from "react";
 import { View, Text } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { useTranslation } from "react-i18next";
-import { Screen, Crumb, Body, Chip, Ctx } from "../../components/ui";
-import { semantic, type as ty } from "../../theme/tokens";
+import { Screen, Header, Body, Chip, Group } from "../../components/ui";
+import { Hint, ErrorText } from "../../components/groups/FormBits";
+import { Icon } from "../../components/icons";
+import { semantic, type as ty, fonts, space } from "../../theme/tokens";
 import {
   useUserGroupsWithChannels,
   useGroupInviteLinks,
   useRevokeGroupInviteLink,
   type InviteLinkSummary,
 } from "../../hooks/queries";
-import { activeLocale, upper } from "../../i18n";
+import { activeLocale } from "../../i18n";
 
 // #847 (mobile) — review and revoke a group's shareable invite links.
 //
@@ -20,7 +22,8 @@ import { activeLocale, upper } from "../../i18n";
 // once, at creation, on the invite screen.
 export default function GroupInviteLinks() {
   const { t } = useTranslation("channels");
-  const { groupId } = useLocalSearchParams<{ groupId?: string }>();
+  const { groupId } = useRouteParams<{ groupId?: string }>();
+  const router = useNav();
   const id = groupId ?? null;
 
   const { data: groups = [] } = useUserGroupsWithChannels();
@@ -46,12 +49,12 @@ export default function GroupInviteLinks() {
     // `is_live` is computed server-side so this badge cannot disagree with
     // what redemption will actually do.
     if (link.revoked_at) {
-      return upper(t("inviteLinks.statusRevoked"));
+      return t("inviteLinks.statusRevoked");
     }
     if (link.is_live) {
-      return upper(t("inviteLinks.statusActive"));
+      return t("inviteLinks.statusActive");
     }
-    return upper(t("inviteLinks.statusExpired"));
+    return t("inviteLinks.statusExpired");
   };
 
   const detailOf = (link: InviteLinkSummary): string => {
@@ -71,119 +74,86 @@ export default function GroupInviteLinks() {
   };
 
   return (
-    <Screen testID="screen-group-invite-links" centered>
-      <Crumb
-        segs={[
-          { label: upper(t("nav:breadcrumb.groups")) },
-          { label: group?.name ?? t("mobile:group.common.fallbackName") },
-          { label: t("mobile:group.inviteLinks.title"), leaf: true },
-        ]}
-      />
-      <Body>
-        <Text
-          style={{
-            fontFamily: ty.body.fontFamily,
-            fontSize: 11,
-            color: semantic.mute,
-            lineHeight: 16,
-            paddingHorizontal: 18,
-            paddingTop: 6,
-          }}
-        >
-          {t("mobile:group.inviteLinks.blurb")}
-        </Text>
+    <Screen testID="screen-group-invite-links" aboveTabBar={router.inPane}>
+      <Header onBack={router.onBack} title={t("mobile:group.inviteLinks.title")} subtitle={group?.name} />
+      <Body contentContainerStyle={{ padding: space.xxl, gap: space.lg }}>
+        <Hint>{t("mobile:group.inviteLinks.blurb")}</Hint>
 
-        {links.map((link) => {
-          const armed = confirmRevoke === link.id;
-          const status = statusOf(link);
-          return (
-            <View
-              key={link.id}
-              testID={`row-invite-link-${link.id}`}
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 12,
-                minHeight: 56,
-                paddingVertical: 12,
-                paddingHorizontal: 18,
-                borderBottomWidth: 1,
-                borderBottomColor: semantic.hairSoft,
-              }}
-            >
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text
+        {links.length > 0 ? (
+          <Group>
+            {links.map((link) => {
+              const armed = confirmRevoke === link.id;
+              const status = statusOf(link);
+              const detail = detailOf(link);
+              return (
+                <View
+                  key={link.id}
+                  testID={`row-invite-link-${link.id}`}
                   style={{
-                    fontFamily: ty.rowN.fontFamily,
-                    fontSize: 14,
-                    color: link.is_live ? semantic.accent : semantic.mute,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: space.lg,
+                    minHeight: 64,
+                    paddingVertical: space.md,
+                    paddingStart: space.xxl,
+                    paddingEnd: space.xl,
                   }}
                 >
-                  [{status}]
-                </Text>
-                <Text
-                  numberOfLines={1}
-                  style={{
-                    fontFamily: ty.body.fontFamily,
-                    fontSize: 12,
-                    color: semantic.mute,
-                    marginTop: 2,
-                  }}
-                >
-                  {detailOf(link)}
-                </Text>
-              </View>
-              {link.is_live ? (
-                <Chip
-                  variant={armed ? "on" : "default"}
-                  testID={`btn-revoke-invite-link-${link.id}`}
-                  accessibilityLabel={t("mobile:group.inviteLinks.revokeLabel")}
-                  onPress={() => onRevoke(link.id)}
-                >
-                  {revokeLink.isPending && armed
-                    ? "…"
-                    : armed
-                      ? t("mobile:group.common.confirm")
-                      : t("inviteLinks.revoke")}
-                </Chip>
-              ) : null}
-            </View>
-          );
-        })}
-
-        {!isLoading && links.length === 0 ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.mute,
-              paddingHorizontal: 18,
-              paddingTop: 14,
-            }}
-          >
-            {t("mobile:group.inviteLinks.empty")}
-          </Text>
+                  <View
+                    accessible
+                    accessibilityLabel={`${status}, ${detail}`}
+                    style={{ flex: 1, minWidth: 0, gap: 2 }}
+                  >
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: space.xs }}>
+                      <Icon.link size={16} color={link.is_live ? semantic.accent : semantic.muted} />
+                      <Text
+                        style={{
+                          fontFamily: link.is_live ? fonts.semibold : fonts.medium,
+                          fontSize: 16,
+                          color: link.is_live ? semantic.text : semantic.dim,
+                        }}
+                      >
+                        {status}
+                      </Text>
+                    </View>
+                    <Text numberOfLines={2} style={ty.secondary}>
+                      {detail}
+                    </Text>
+                  </View>
+                  {link.is_live ? (
+                    <Chip
+                      variant="outline"
+                      selected={armed}
+                      testID={`btn-revoke-invite-link-${link.id}`}
+                      accessibilityLabel={
+                        armed
+                          ? t("mobile:group.settings.tapAgainToConfirm")
+                          : t("mobile:group.inviteLinks.revokeLabel")
+                      }
+                      onPress={() => onRevoke(link.id)}
+                    >
+                      {revokeLink.isPending && armed
+                        ? "…"
+                        : armed
+                          ? t("mobile:group.common.confirm")
+                          : t("inviteLinks.revoke")}
+                    </Chip>
+                  ) : null}
+                </View>
+              );
+            })}
+          </Group>
         ) : null}
+
+        {!isLoading && links.length === 0 ? <Hint>{t("mobile:group.inviteLinks.empty")}</Hint> : null}
 
         {revokeLink.isError ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 12,
-              color: semantic.danger,
-              paddingHorizontal: 18,
-              paddingTop: 8,
-            }}
-          >
+          <ErrorText>
             {(revokeLink.error as Error).message ||
               t("mobile:group.inviteLinks.revokeFailed")}
-          </Text>
+          </ErrorText>
         ) : null}
       </Body>
-      <Ctx
-        cr={group?.name ?? upper(t("mobile:group.common.fallbackName"))}
-        name={t("mobile:group.inviteLinks.title")}
-      />
     </Screen>
   );
 }

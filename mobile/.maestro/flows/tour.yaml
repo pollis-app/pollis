@@ -115,6 +115,9 @@ tags:
 - tapOn:
     id: "tab-groups"
 - tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
     id: "btn-create-group"
 - waitForAnimationToEnd:
     timeout: 3000
@@ -125,11 +128,17 @@ tags:
 - tapOn:
     id: "input-group-name"
 - inputText: "Design Team"
-- tapOn: "CREATE GROUP"
+- tapOn:
+    id: "btn-submit-group"
+# Creating lands on the Groups tab with the new group selected: tour-12 is
+# that tab's pill strip + the group's channel panel (no standalone group page).
 - extendedWaitUntil:
     visible:
-      id: "screen-group"
+      id: "btn-group-menu"
+      text: "Design Team, .*"
     timeout: 15000
+- assertVisible:
+    id: "panel-group"
 - waitForAnimationToEnd:
     timeout: 3000
 - takeScreenshot: tour-12-group
@@ -165,23 +174,36 @@ tags:
 - takeScreenshot: tour-16-conversation-info
 - tapOn:
     id: "btn-back"
-- longPressOn:
-    id: "row-message-.*"
+# The back transition can leave the row briefly absent from the iOS
+# accessibility tree; a bare longPressOn then fails although the message shows.
 - extendedWaitUntil:
     visible:
-      id: "btn-action-cancel"
-    timeout: 20000
+      id: "row-message-.*"
+    timeout: 10000
+# A just-sent message stays pending while MLS sets the new group up (15-60 s,
+# see messaging.yaml), and a pending row has no long-press action, so a long
+# press made too early does nothing. Let it settle, then use the retrying
+# subflow, which waits for the sheet's Edit row.
+- extendedWaitUntil:
+    visible:
+      id: "__never_matches__"
+    timeout: 30000
     optional: true
+- runFlow: ../subflows/long-press-message.yaml
 - waitForAnimationToEnd:
     timeout: 3000
 - takeScreenshot: tour-17-message-actions
 - tapOn:
     id: "btn-action-cancel"
     optional: true
+# Phones: back from the channel to the Groups tab. iPad: the channel is the
+# two-pane's right pane (no back button) and the group panel stays on the left.
 - tapOn:
     id: "btn-back"
+    optional: true
 
-# Group pages.
+# Group pages (pushed from the Groups tab's panel; on iPad they open in the
+# right pane).
 - tapOn:
     id: "row-group-members"
     optional: true
@@ -229,6 +251,10 @@ tags:
     timeout: 3000
 - takeScreenshot: tour-22-groups
 - tapOn:
+    id: "btn-add-group"
+    optional: true
+# Find group sits in the "+" sheet at the end of the group pill strip.
+- tapOn:
     id: "btn-join-group"
     optional: true
 - waitForAnimationToEnd:
@@ -258,9 +284,12 @@ tags:
       id: "search-sort-relevant"
     timeout: 15000
     optional: true
-# Dismiss the keyboard by tapping the empty space under the results.
-- tapOn:
-    point: "50%,45%"
+# Dismiss the keyboard before the shot. Not a point tap: the redesigned Search
+# puts the field at the top and the hits right under it, so a tap in the middle
+# of the screen lands on a result and opens the conversation. The search field
+# has a normal keyboard with a return key (unlike the number pad), so
+# hideKeyboard closes it.
+- hideKeyboard
 - waitForAnimationToEnd:
     timeout: 3000
 - takeScreenshot: tour-25-search-results
@@ -304,10 +333,13 @@ tags:
 - takeScreenshot: tour-31-security-bottom
 
 # Link a new device: PIN, the QR, the copyable code.
+# Centre it: scrolled only to the top edge, the row sits partly under the
+# Header and the tap lands on the header instead of the row.
 - scrollUntilVisible:
     element:
       id: "row-link-device"
     direction: UP
+    centerElement: true
     optional: true
 - tapOn:
     id: "row-link-device"

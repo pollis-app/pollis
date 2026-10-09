@@ -16,6 +16,9 @@ tags:
 
 # Make a group so we have a channel to post in.
 - tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
     id: "btn-create-group"
 # #General is opt-in (off by default, like desktop); these steps open it.
 - tapOn:
@@ -23,13 +26,18 @@ tags:
 - tapOn:
     id: "input-group-name"
 - inputText: "E2E Msg Group"
-- tapOn: "CREATE GROUP"
-# CREATE GROUP navigates straight into the new group's detail screen (not
-# back to the groups list) — see groups.yaml.
+- tapOn:
+    id: "btn-submit-group"
+# Creating lands on the Groups tab with the new group selected (pill strip +
+# its channel panel, tab bar visible) — not a pushed group page. Wait for
+# THIS group's panel header (the account may already have other groups).
 - extendedWaitUntil:
     visible:
-      id: "screen-group"
+      id: "btn-group-menu"
+      text: "E2E Msg Group, .*"
     timeout: 15000
+- assertVisible:
+    id: "panel-group"
 
 # Open the group's channel (the row-channel-<id> id is dynamic; tap the first
 # channel row by its General label).
@@ -41,10 +49,10 @@ tags:
 - takeScreenshot: messaging-01-empty-channel
 
 # Send a message. The whole message row collapses into ONE compound
-# accessibility node (Pressable sets accessibilityLabel={`${name}: ${text}`}
-# in chat/[id].tsx), which does NOT include the "sending…"/timestamp text —
-# so that status is not independently queryable, and a bare-text selector
-# like "hello from maestro" never matches the compound "name: text" label
+# accessibility node (components/chat/MessageRow.tsx sets
+# accessibilityLabel to "<name>: <text>, <status or time>"), so the
+# "sending…"/timestamp text is not independently queryable, and a bare-text
+# selector like "hello from maestro" never matches the compound label
 # (Maestro requires a full match, not substring — use a `.*...*` regex, or
 # better, the stable `row-message-<id>` testID).
 # The send tap below happens with the keyboard UP, on purpose: if the keyboard
@@ -81,7 +89,11 @@ tags:
 - takeScreenshot: messaging-03-actions
 - tapOn:
     id: "btn-edit"
-- tapOn:
+# No tap on the field: the edit bar autofocuses it with the caret after the
+# text. A tap at the field's centre moves the caret there, and in the
+# redesigned bar (round buttons either side of the field) the centre falls
+# inside "hello from maestro" on Android, so the suffix landed mid-word.
+- assertVisible:
     id: "input-edit-composer"
 - inputText: " (edited)"
 - tapOn:

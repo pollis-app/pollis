@@ -1,12 +1,20 @@
 import { useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import { Screen, Crumb, Button, BottomAction } from "../components/ui";
-import { Heading } from "../components/auth/Heading";
-import { semantic, type as ty, r } from "../theme/tokens";
-import { upper } from "../i18n";
+import {
+  Screen,
+  Header,
+  Body,
+  Button,
+  BottomAction,
+  Group,
+  SectionTitle,
+  Txt,
+} from "../components/ui";
+import { ReasonRow } from "../components/direct/ReasonRow";
+import { semantic, space } from "../theme/tokens";
 import { invoke } from "../lib/native";
 import { useReportUser, type ReportReason } from "../hooks/queries";
 
@@ -15,9 +23,8 @@ const REASONS: ReportReason[] = ["spam", "harassment", "illegal", "other"];
 /**
  * Report a user (#1213), from a message's action sheet or their profile.
  * Signal-style: Pollis receives the account, the reason and, for a message,
- * the conversation and message ids. Never the message text, which stays
- * end-to-end encrypted. One screen: pick a reason, then Report or Report and
- * block; then a short confirmation.
+ * the conversation and message ids. Never the message text. One screen:
+ * pick a reason, then Report or Report and block; then a short confirmation.
  */
 export default function ReportScreen() {
   const { t } = useTranslation("chat");
@@ -34,41 +41,67 @@ export default function ReportScreen() {
   const profile = useQuery({
     queryKey: ["user", "profile", userId],
     queryFn: async () =>
-      await invoke<{ username?: string; preferred_name?: string } | null>("get_user_profile", { userId }),
+      await invoke<{ username?: string; preferred_name?: string } | null>(
+        "get_user_profile",
+        { userId },
+      ),
     enabled: !!userId,
     staleTime: 1000 * 60,
   });
   const name =
     profile.data?.preferred_name ||
-    (profile.data?.username ? `@${profile.data.username}` : t("report.someone"));
-  const title = messageId ? t("report.titleMessage") : t("report.titleUser", { name });
+    (profile.data?.username
+      ? `@${profile.data.username}`
+      : t("report.someone"));
+  const title = messageId
+    ? t("report.titleMessage")
+    : t("report.titleUser", { name });
 
   const submit = (alsoBlock: boolean) => {
     if (!reason || !userId) {
       return;
     }
     report.mutate(
-      { reportedId: userId, reason, conversationId: conversationId ?? null, messageId: messageId ?? null, alsoBlock },
+      {
+        reportedId: userId,
+        reason,
+        conversationId: conversationId ?? null,
+        messageId: messageId ?? null,
+        alsoBlock,
+      },
       { onSuccess: () => setDone({ blocked: alsoBlock }) },
     );
   };
 
-  const crumb = <Crumb segs={[{ label: upper(t("actions.report")), leaf: true }]} />;
+  const header = <Header title={t("actions.report")} />;
 
   if (done) {
     return (
-      <Screen testID="screen-report" centered>
-        {crumb}
-        <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 32 }}>
-          <Heading
+      <Screen testID="screen-report">
+        {header}
+        <Body contentContainerStyle={{ padding: space.xxl }}>
+          <View
             testID="report-done"
-            title={t("report.doneTitle")}
-            subtitle={done.blocked ? t("report.doneBlocked", { name }) : t("report.done")}
-          />
-        </View>
+            style={{ gap: space.sm, paddingTop: space.xxl }}
+          >
+            <Txt variant="title" accessibilityRole="header">
+              {t("report.doneTitle")}
+            </Txt>
+            <Txt style={{ color: semantic.dim }}>
+              {done.blocked
+                ? t("report.doneBlocked", { name })
+                : t("report.done")}
+            </Txt>
+          </View>
+        </Body>
         <BottomAction>
-          <Button testID="btn-report-done" variant="primary" full onPress={() => router.back()}>
-            {upper(t("report.close"))}
+          <Button
+            testID="btn-report-done"
+            variant="primary"
+            full
+            onPress={() => router.back()}
+          >
+            {t("report.close")}
           </Button>
         </BottomAction>
       </Screen>
@@ -76,43 +109,47 @@ export default function ReportScreen() {
   }
 
   return (
-    <Screen testID="screen-report" centered>
-      {crumb}
-      <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 32, gap: 28 }}>
-        <Heading title={title} subtitle={t("report.intro")} />
-        <View style={{ gap: 10 }} accessibilityRole="radiogroup" accessibilityLabel={t("report.reasonLabel")}>
-          <Text style={ty.label}>{upper(t("report.reasonLabel"))}</Text>
-          {REASONS.map((value) => {
-            const selected = reason === value;
-            return (
-              <Pressable
+    <Screen testID="screen-report">
+      {header}
+      <Body contentContainerStyle={{ padding: space.xxl, gap: space.xxl }}>
+        <View style={{ gap: space.sm }}>
+          <Txt variant="title" accessibilityRole="header">
+            {title}
+          </Txt>
+          <Txt style={{ color: semantic.dim }}>{t("report.intro")}</Txt>
+        </View>
+        <View
+          style={{ gap: space.sm }}
+          accessibilityRole="radiogroup"
+          accessibilityLabel={t("report.reasonLabel")}
+        >
+          <SectionTitle
+            style={{ paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0 }}
+          >
+            {t("report.reasonLabel")}
+          </SectionTitle>
+          <Group>
+            {REASONS.map((value) => (
+              <ReasonRow
                 key={value}
                 testID={`report-reason-${value}`}
-                accessibilityRole="radio"
-                accessibilityState={{ checked: selected }}
+                label={t(`report.reason.${value}`)}
+                selected={reason === value}
                 onPress={() => setReason(value)}
-                style={{
-                  paddingVertical: 14,
-                  paddingHorizontal: 14,
-                  borderWidth: 1,
-                  borderRadius: r.sm,
-                  borderColor: selected ? semantic.accent : semantic.hairStrong,
-                  backgroundColor: selected ? semantic.accentSoft : "transparent",
-                }}
-              >
-                <Text style={{ fontFamily: ty.body.fontFamily, fontSize: 14, color: selected ? semantic.accent : semantic.ink }}>
-                  {t(`report.reason.${value}`)}
-                </Text>
-              </Pressable>
-            );
-          })}
+              />
+            ))}
+          </Group>
         </View>
         {report.isError ? (
-          <Text testID="report-error" style={{ fontFamily: ty.body.fontFamily, fontSize: 13, color: semantic.danger }}>
+          <Txt
+            testID="report-error"
+            variant="secondary"
+            style={{ color: semantic.accent }}
+          >
             {(report.error as Error).message || t("report.failed")}
-          </Text>
+          </Txt>
         ) : null}
-      </View>
+      </Body>
       <BottomAction>
         <Button
           testID="btn-report-submit"
@@ -121,16 +158,17 @@ export default function ReportScreen() {
           disabled={!reason || report.isPending}
           onPress={() => submit(false)}
         >
-          {upper(t("report.submit"))}
+          {t("report.submit")}
         </Button>
+        {/* Report and block: secondary, below — the label says what it does. */}
         <Button
           testID="btn-report-and-block"
-          variant="danger"
+          variant="secondary"
           full
           disabled={!reason || report.isPending}
           onPress={() => submit(true)}
         >
-          {upper(t("report.submitAndBlock"))}
+          {t("report.submitAndBlock")}
         </Button>
       </BottomAction>
     </Screen>

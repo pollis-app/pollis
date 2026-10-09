@@ -7,7 +7,10 @@ tags:
 # phone it resolves to `compact` and this assertion is not meaningful.
 #
 # After sign-in, the groups tab list is the LEFT column and a right pane shows
-# either a conversation or the "Select a conversation" placeholder.
+# either a conversation or the "Select a conversation" placeholder. A selected
+# group with no conversation open auto-opens its first channel in the right
+# pane, so the placeholder only shows for a group without channels (or an
+# account with no groups, which gets the centred empty state instead).
 
 - runFlow: ../subflows/sign-in.yaml
 # Navigate explicitly: sign-in guarantees the tab navigator, not which tab.
@@ -16,10 +19,39 @@ tags:
 - assertVisible:
     id: "screen-groups"
 - takeScreenshot: ipad-01-groups-twopane
-# The right-pane placeholder proves the two-pane mounted (nothing selected yet).
+# The right-pane placeholder proves the two-pane mounted when the selected
+# group has no channel to auto-open (optional: usually a channel is open).
 - assertVisible:
     text: "Select a conversation"
     optional: true
+# Creating a group lands on the Groups tab with it selected, its member count
+# in the panel header, and — on iPad — its #General open in the right pane.
+- tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E iPad Group"
+- tapOn:
+    id: "btn-submit-group"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "E2E iPad Group, .*"
+    timeout: 15000
+- assertVisible:
+    id: "panel-group"
+- extendedWaitUntil:
+    visible:
+      id: "screen-chat"
+    timeout: 10000
+- assertNotVisible:
+    text: "Select a conversation"
+- takeScreenshot: ipad-01b-group-created-chat-open
 # DMs tab two-pane.
 - tapOn:
     id: "tab-direct"

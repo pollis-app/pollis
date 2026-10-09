@@ -27,8 +27,8 @@ The `mobile/` directory is **NOT** a pnpm workspace member. It is a standalone E
 - `expo-camera`, `expo-secure-store`, `expo-notifications`
 - `expo-image` (caching, and the blurhash placeholders — there is no separate blurhash package)
 - `@livekit/react-native-webrtc` pinned to `144.1.2` + `@livekit/react-native-expo-plugin` `^1.0.3` (installed for #343, not wired — see "Voice")
-- `lucide-react-native` icons, wrapped in `components/icons.tsx` (stable `Icon.*` API, strokeWidth pinned to 1.2 to match the design's monoline spec). `react-native-svg` is still used directly for the Initializing dot-field.
-- Sora (UI) via `@expo-google-fonts/sora`. Monospace (crypto keys, e.g. the Security public-key line) uses the **system** mono face — `fonts.mono*` = `Platform.select({ ios: 'Menlo', android: 'monospace' })`, no bundled font.
+- `lucide-react-native` icons, wrapped in `components/icons.tsx` (stable `Icon.*` API, strokeWidth pinned to 1.75 — `ICON_STROKE`). `react-native-svg` is still used directly for the Initializing dot-field.
+- Geist (UI, the desktop refined skin's face) via `@expo-google-fonts/geist`, one family name per weight (`fonts.regular/medium/semibold/bold`; never pair with `fontWeight`). Monospace (crypto keys, e.g. the Security public-key line) uses the **system** mono face — `fonts.mono*` = `Platform.select({ ios: 'Menlo', android: 'monospace' })`, no bundled font.
 - Rust core via `pollis-native` Turbo Module (uniffi-bindgen-react-native)
 
 ## Tests
@@ -87,12 +87,17 @@ Rules that are easy to get wrong here:
 - **Every `toLocale*` / `Intl.*` call passes `activeLocale()`.** A bare
   `undefined` formats against the host locale and puts an English date under an
   Arabic heading (desktop's #902).
-- **Uppercase labels go through `upper(t(...))`**, never `.toUpperCase()` on
-  translated text (locale-invariant casing is wrong in Turkish and a no-op in
-  Arabic). The label style (`SELF`, `PREFERENCES`) makes this the common case.
+- **UI copy is sentence case** — no uppercased labels since the 2026-10
+  redesign. Where an uppercase string is genuinely needed (an acronym), use
+  `upper(t(...))`, never `.toUpperCase()` on translated text
+  (locale-invariant casing is wrong in Turkish and a no-op in Arabic).
 - **RTL is `I18nManager`.** `setLanguage` calls `forceRTL` for the language's
   `dir`, which React Native applies on the **next launch**; `LanguageSection`
   shows `mobile:language.restartRequired` until then (`layoutRestartPending`).
+  Never write the direction before `hydrateLanguage` has read the stored
+  choice: Android's Fabric re-reads it on every root measure, so a boot-time
+  `forceRTL(false)` from the device-locale guess un-mirrors that whole launch
+  (`tests/rtl-boot.test.ts`).
   Yoga mirrors flex layout and `left/right` positioning on its own; what it
   cannot mirror is a glyph, so `components/icons.tsx` flips only the icons
   that encode direction (`back`, `fwd`, the arrows).
@@ -723,31 +728,59 @@ truncates thread names and won't show them).
 
 ## App structure (expo-router)
 
-The whole UI was rebuilt from the `design_handoff_pollis_mobile` spec — sci-fi
-monochrome-amber, dark. Old light/Geist card-stack UI is gone.
+Dark, two-colour (accent + background) UI in Geist, re-skinned in 2026-10 to
+match the desktop refined skin: titles and back at the top, grouped lists,
+bottom sheets, AA contrast throughout (see "Design tokens").
 
 ```
 app/
-  _layout.tsx          root Stack, font loading, splash gate
+  _layout.tsx          root Stack (every route registered), fonts, splash gate
   index.tsx            redirect → /(auth)/email
   (auth)/              email → otp → pin → initializing (gestureEnabled: false)
   (tabs)/              groups · direct · search · self (custom <TabBar>)
-  group/[id].tsx       GroupDetail   (pushed; <Ctx> back bar, no tab bar)
-  chat/[id].tsx        TextChat      (pushed; <Ctx> + composer)
-  self/{preferences,user-settings,security}.tsx
+  group/[id].tsx       one group's channel panel (phones: pushed, no tab bar; iPad: redirects to the Groups tab)
+  group/*              new, invite, invite-links, members, settings, emoji, requests, discover
+  chat/[id].tsx        conversation (Header + list + composer); chat/thread.tsx
+  dm/{new,info,requests}.tsx · conversation/info.tsx · user/[id].tsx · report.tsx
+  self/*               preferences, user-settings, security, blocked, saved, …
 components/
-  ui.tsx               primitives: Screen, Crumb, SectionTitle, ListRow, Field,
-                       Avatar, Chip, Button, Toggle, Card, Ctx, Diamond, Body…
-  icons.tsx            monoline SVG icon set (Icon.*)
-  TabBar.tsx           custom bottom tab bar (amber active indicator)
-  PollisMark.tsx       auth-screen wordmark
-theme/tokens.ts        palette / t(alpha) / semantic / type / r / space / layout
+  ui.tsx               primitives: Txt, Screen, Header, IconButton, SectionTitle,
+                       ListRow, ActionRow, Group, Card, Field, Avatar, Chip/Pill,
+                       Badge, Button, Toggle, Dot, Divider, BottomAction, Body
+  chat/SheetOverlay.tsx the one bottom sheet (every *Sheet is built on it)
+  icons.tsx            lucide wrapper (Icon.*, stroke 1.75)
+  TabBar.tsx           custom bottom tab bar (accent active, unread badges)
+  auth|chat|direct|groups|search|self/   per-area pieces (rows, sheets, pads)
+theme/tokens.ts        semantic / type / fonts / r / space / layout (derive.ts: colour math)
 ```
 
-Navigation rules from the handoff: no header (every screen draws its own
-`<Crumb>` at top); back lives at the **bottom** in the `<Ctx>` strip, not a
-header button; sub-screens are stack pushes (pushed routes live outside
-`(tabs)` so the tab bar is replaced by `<Ctx>`/composer).
+Navigation: no native header — every screen draws a `<Header>`
+(components/ui.tsx) at the top: a 44×44 back chevron top-left (`btn-back`,
+"Back" / "Back to <x>"), title 17/700, actions at the end. Pushed screens
+also get the system edge swipe (every push, settings pages included, uses
+`drillIn`). Tab roots use `<Header variant="large">` (no back). Leave out
+`title` for a back-only bar (auth steps, `group/[id]`, whose heading is in
+the body); `backLabel` / `backTestID` override the spoken label and id.
+There is no bottom back strip any more (`Ctx`/`Crumb` are gone). Auth
+screens disable the edge swipe, so their top-left back is the only way out.
+Sub-screens are stack pushes outside `(tabs)`.
+
+iPad (regular width, `hooks/useLayoutClass`): Groups and Direct are a
+two-pane (`components/MasterDetail.tsx`) — list left, conversation right, tab
+bar visible. Conversation pages (info, members, group settings/invite/emoji/
+requests, thread, profile — `PANE_PATHS` in `components/pane/paneContext.ts`)
+push INSIDE the right pane: the tab owns a small entry stack and `DetailPane`
+renders the route's own component. Those screens read params with
+`useRouteParams` and navigate with `useNav` (both fall back to
+`useLocalSearchParams` / `useRouter` on phones) and pass `onBack={nav.onBack}`
+to `<Header>`. Opening a conversation/group from elsewhere goes through
+`hooks/useOpenConversation` (phones: push; iPad: select it + return to its tab);
+`chat/[id]` and `group/[id]` redirect to the tab on regular width as a net.
+A selected group with no conversation open auto-opens its first channel in
+the right pane (Groups tab, while focused). Content width on iPad: every
+full-screen page and every pane page uses `<Screen>`'s one
+`layout.screenMaxWidth` column; only auth steps pass `centered`
+(`layout.authMaxWidth`) — tests/screen-widths.test.ts pins this.
 
 ## Backend integration — wired vs pending
 
@@ -955,23 +988,48 @@ key.
 
 ## Design tokens
 
-Defined in `theme/tokens.ts`. One bg + one accent; everything else is a
-translucent amber tier via `t(alpha)`.
+Defined in `theme/tokens.ts`; the colour math lives in `theme/derive.ts` (pure,
+no react-native) and the accent presets in `theme/accents.ts`.
 
-- `palette.bg` `#0a0907` (just-above-black), `bg2`/`bg3` raised tiers
-- Accent default `#fabf5a` — the same brand amber as the desktop app + website.
-  It is **runtime-configurable** (Self → Preferences → Accent), mirroring
-  desktop's accent picker. `t()`, `palette.accent`, `semantic.*`, and the
-  `type.*` colors are getters that re-derive from the live accent; the
-  `<ThemeProvider>` (in `components/theme.tsx`) holds the chosen hex and
-  `<Screen>` + `<TabBar>` subscribe via `useTheme()`, so a change re-renders
-  the whole tree. `palette.danger` `#c46a2e`.
-- `semantic.*` — ink/ink2/mute/mute2/hair*/accentSoft/fieldBg/cardBg (all `t()` tiers)
-- `r` = { sm: 3, lg: 4 }; `space` = irregular 6/8/10/12/14/18/22 (do NOT
-  normalize to an 8px grid — the rhythm is part of the look)
-- `type.*` — Sora UI scale + JetBrains Mono for keys. Letter-spacing is
-  pre-converted from em (RN has no em). Uppercase labels/crumbs are tracked.
+- **Exactly two base colours: accent and background.** Every other colour is
+  derived by `deriveTheme(accent, bg)` — the background mixed toward white for
+  the neutrals, the accent mixed into them for tint, the accent at an alpha for
+  hairlines. No other hex may appear in UI code. Defaults: accent `#fabf5a`
+  (brand amber), background `#0a0907`. Both are runtime-configurable
+  (`setAccentRgb/Hex`, `setBackgroundRgb/Hex`; `<ThemeProvider>` holds them and
+  `useTheme()` re-renders subscribers). `palette.*`, `semantic.*` and the
+  `type.*` colours are getters over the live derived theme.
+- `semantic`: `text` / `dim` / `muted` (text ramp), `bg` < `panel` < `raised`
+  < `high` (surfaces), `hair` / `hairSoft` (translucent separators), `edge`
+  (opaque control border, ≥3:1 vs raised), `accent`, `accentFaint/Soft/Mid/Line`
+  (opaque accent tints), `onAccent` (= bg, text on accent fills), `backdrop`,
+  `sheetBg` (= raised, opaque — #1193). `danger` = accent: there is no third
+  hue; destructive actions are told apart by label, icon and separation.
+  Old names (`ink`, `ink2`, `mute`, `mute2`, `hairStrong`, `fieldBg`, `cardBg`)
+  are deprecated aliases.
+- `tests/theme-contrast.test.ts` asserts WCAG AA for every preset: text tiers
+  and accent ≥4.5:1 on every surface, edge ≥3:1 vs raised, onAccent ≥4.5:1.
+  Tune `RECIPE` in `derive.ts` if a new preset fails — never special-case it.
+- `type.*`: Display 28/700, Title 20/700, Heading 17/700, Body 16/400, Secondary
+  14/400, Section 13/600, Meta 12/400, Tab 12. Sentence case, no tracked
+  capitals, nothing below 12; all text follows system font scaling.
+- `r` radii 4/10/12/14/16/20(sheet); `layout.touchMin` 44.
+- Font: Geist via `fonts.regular/medium/semibold/bold` (one family per
+  weight, never with `fontWeight`); spread a `type.*` step rather than
+  hand-setting size + family.
 
-Aesthetic: "The Expanse readouts / Nier Automata menus" — one-handed, all
-controls in the bottom command zone, top of every screen is a passive crumb.
-Corner brackets appear **only** on the Initializing screen.
+UI rules: two base colours — use `semantic.*` / `type.*`, never a hex or
+rgba in `app/` or `components/` (QrCode's black/white is the one deliberate
+exception, for scannability); icons/text on an accent fill use
+`semantic.onAccent`. 44pt targets (hitSlop/padding for small visuals); one
+spoken label per row (`ListRow` is one element; `ActionRow` when the row
+holds its own button; a message row exposes "View profile" as an
+accessibility action); headings `accessibilityRole="header"`; state never by
+colour alone; system font scaling stays on (`minHeight`, not `height`, on
+text containers); start/end edges, never left/right; never a coloured
+stripe on one edge of a rounded box (emphasis is a full tint, a full border,
+weight, a dot or a count); sentence case; no "end-to-end encrypted" copy.
+Titles and back live at the TOP (`<Header>`). Bottom sheets are
+`SheetOverlay` (Modal, full-screen backdrop, title + 44×44 Close —
+`btn-sheet-close`, or the sheet's `closeTestID` — no drag handle, no extra
+Cancel button): rows in `Group surface="high"`.

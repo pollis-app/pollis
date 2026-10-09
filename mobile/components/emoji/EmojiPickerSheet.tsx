@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { View, Text, TextInput, Pressable, FlatList } from "react-native";
+import { View, Text, Pressable, FlatList, useWindowDimensions } from "react-native";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { semantic, type as ty, r, t as tint } from "../../theme/tokens";
+import { layout, semantic, type as ty } from "../../theme/tokens";
+import { Field } from "../ui";
+import { Icon } from "../icons";
 import { SheetOverlay } from "../chat/SheetOverlay";
-import { upper } from "../../i18n";
 import {
   EMOJI_CATEGORIES,
   SKIN_TONES,
@@ -32,7 +33,11 @@ import { CustomEmojiImage } from "./CustomEmojiImage";
 import { emojiDisplayName, type EmojiAnnotationStack } from "./emojiAnnotations";
 import { useEmojiAnnotations } from "./useEmojiAnnotations";
 
-const COLUMNS = 8;
+// Cells are at least this wide (≥44pt targets); the column count follows the
+// sheet width, so a narrow phone gets 7 and a wide one more.
+const MIN_CELL = 46;
+// The sheet's horizontal padding (SheetOverlay: 16 each side).
+const SHEET_INSET = 32;
 
 // Same base glyph as desktop's SkinTonePicker — a single string so the
 // shaper joins the modifier.
@@ -67,13 +72,14 @@ function categoryLabel(t: TFunction, id: EmojiCategoryId): string {
 function chunkRows(
   items: PickerEmoji[],
   keyPrefix: string,
+  columns: number,
 ): PickerListItem[] {
   const rows: PickerListItem[] = [];
-  for (let i = 0; i < items.length; i += COLUMNS) {
+  for (let i = 0; i < items.length; i += columns) {
     rows.push({
       type: "row",
       key: `${keyPrefix}-${i}`,
-      items: items.slice(i, i + COLUMNS),
+      items: items.slice(i, i + columns),
     });
   }
   return rows;
@@ -99,15 +105,18 @@ function Cell({
           ? emojiDisplayName(item.emoji, annotations)
           : `:${item.emoji.shortcode}:`
       }
-      style={{
+      style={({ pressed }) => ({
         flex: 1,
         aspectRatio: 1,
+        minHeight: layout.touchMin,
         alignItems: "center",
         justifyContent: "center",
-      }}
+        borderRadius: 12,
+        backgroundColor: pressed ? semantic.high : "transparent",
+      })}
     >
       {item.kind === "standard" ? (
-        <Text style={{ fontSize: 24 }}>
+        <Text style={{ fontSize: 26 }}>
           {emojiDisplayChar(item.emoji, item.emoji.tonable ? toneIndex : 0)}
         </Text>
       ) : (
@@ -123,17 +132,21 @@ function Cell({
 
 /**
  * Full emoji picker (search, categories, skin tones, custom group emoji) in
- * the long-press sheet pattern. `onSelect` receives the insert text: the
+ * the standard sheet. `title` names the sheet (default "Add reaction"). `onSelect` receives the insert text: the
  * displayed Unicode character, or a `<:name:hash>` token for custom emoji.
  */
 export function EmojiPickerSheet({
+  title,
   onSelect,
   onClose,
 }: {
+  title?: string;
   onSelect: (text: string) => void;
   onClose: () => void;
 }) {
   const { t, i18n } = useTranslation("emoji");
+  const { width } = useWindowDimensions();
+  const columns = Math.max(6, Math.min(12, Math.floor((width - SHEET_INSET) / MIN_CELL)));
   const annotations = useEmojiAnnotations(i18n.language);
   const [query, setQuery] = useState("");
   const [toneIndex, setToneIndex] = useState(readSkinTone);
@@ -157,7 +170,7 @@ export function EmojiPickerSheet({
   const items = useMemo<PickerListItem[]>(() => {
     const needle = query.trim();
     if (needle) {
-      return chunkRows(searchEmoji(needle, customEmoji, annotations), "search");
+      return chunkRows(searchEmoji(needle, customEmoji, annotations), "search", columns);
     }
     const out: PickerListItem[] = [];
     const recents = resolveRecents(recentIds, customEmoji);
@@ -165,9 +178,9 @@ export function EmojiPickerSheet({
       out.push({
         type: "header",
         key: "h-recents",
-        label: upper(t("picker.recent")),
+        label: t("picker.recent"),
       });
-      out.push(...chunkRows(recents.slice(0, COLUMNS * 2), "recents"));
+      out.push(...chunkRows(recents.slice(0, columns * 2), "recents", columns));
     }
     // Custom emoji, one section per owning group.
     const byGroup = new Map<string, CustomEmoji[]>();
@@ -180,12 +193,13 @@ export function EmojiPickerSheet({
       out.push({
         type: "header",
         key: `h-${groupId}`,
-        label: upper(list[0]?.group_name || t("mobile:emoji.groupFallback")),
+        label: list[0]?.group_name || t("mobile:emoji.groupFallback"),
       });
       out.push(
         ...chunkRows(
           list.map((emoji) => ({ kind: "custom" as const, emoji })),
           `g-${groupId}`,
+          columns,
         ),
       );
     }
@@ -193,15 +207,15 @@ export function EmojiPickerSheet({
       out.push({
         type: "header",
         key: `h-${category.id}`,
-        label: upper(categoryLabel(t, category.id as EmojiCategoryId)),
+        label: categoryLabel(t, category.id as EmojiCategoryId),
       });
       const inCategory = STANDARD_EMOJI.filter(
         (e) => e.category === (category.id as EmojiCategoryId),
       ).map((emoji) => ({ kind: "standard" as const, emoji }));
-      out.push(...chunkRows(inCategory, category.id));
+      out.push(...chunkRows(inCategory, category.id, columns));
     }
     return out;
-  }, [query, customEmoji, recentIds, annotations, t]);
+  }, [query, customEmoji, recentIds, annotations, t, columns]);
 
   const onPick = (item: PickerEmoji) => {
     const text = pickerEmojiInsertText(item, toneIndex);
@@ -215,30 +229,20 @@ export function EmojiPickerSheet({
   };
 
   return (
-    <SheetOverlay onClose={onClose}>
-      <View style={{ height: 420, gap: 10 }}>
-        <TextInput
+    <SheetOverlay title={title ?? t("chat:reactions.add")} onClose={onClose}>
+      <View style={{ height: 460, gap: 12 }}>
+        <Field
           testID="input-emoji-search"
+          surface="raised"
           accessibilityLabel={t("picker.searchPlaceholder")}
           value={query}
           onChangeText={setQuery}
           placeholder={t("picker.searchPlaceholder")}
-          placeholderTextColor={semantic.mute}
           autoCorrect={false}
           autoCapitalize="none"
-          style={{
-            borderWidth: 1,
-            borderColor: semantic.hairStrong,
-            borderRadius: r.sm,
-            paddingVertical: 8,
-            paddingHorizontal: 12,
-            fontFamily: ty.body.fontFamily,
-            fontSize: 14,
-            color: semantic.ink,
-            backgroundColor: semantic.fieldBg,
-          }}
+          icon={<Icon.search size={20} color={semantic.muted} />}
         />
-        <View style={{ flexDirection: "row", gap: 6 }}>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
           {SKIN_TONES.map((tone, index) => (
             <Pressable
               key={index}
@@ -252,19 +256,18 @@ export function EmojiPickerSheet({
               }
               onPress={() => onTone(index)}
               style={{
-                width: 34,
-                height: 34,
+                width: layout.touchMin,
+                height: layout.touchMin,
                 alignItems: "center",
                 justifyContent: "center",
-                borderWidth: 1,
-                borderColor:
-                  toneIndex === index ? semantic.accent : semantic.hair,
-                borderRadius: r.sm,
+                borderRadius: layout.touchMin / 2,
+                // No ring: selected is the accent disc, the rest a dark
+                // `high` disc on the raised sheet.
                 backgroundColor:
-                  toneIndex === index ? tint(0.12) : "transparent",
+                  toneIndex === index ? semantic.accent : semantic.high,
               }}
             >
-              <Text style={{ fontSize: 18 }}>{`${TONE_BASE}${tone}`}</Text>
+              <Text style={{ fontSize: 20 }}>{`${TONE_BASE}${tone}`}</Text>
             </Pressable>
           ))}
         </View>
@@ -279,10 +282,8 @@ export function EmojiPickerSheet({
             if (item.type === "header") {
               return (
                 <Text
-                  style={[
-                    ty.label,
-                    { letterSpacing: 1.8, paddingTop: 12, paddingBottom: 4 },
-                  ]}
+                  accessibilityRole="header"
+                  style={[ty.section, { paddingTop: 14, paddingBottom: 6 }]}
                 >
                   {item.label}
                 </Text>
@@ -299,8 +300,8 @@ export function EmojiPickerSheet({
                     onPick={onPick}
                   />
                 ))}
-                {item.items.length < COLUMNS
-                  ? Array.from({ length: COLUMNS - item.items.length }).map(
+                {item.items.length < columns
+                  ? Array.from({ length: columns - item.items.length }).map(
                       (_, i) => <View key={`pad-${i}`} style={{ flex: 1 }} />,
                     )
                   : null}
@@ -308,14 +309,7 @@ export function EmojiPickerSheet({
             );
           }}
           ListEmptyComponent={
-            <Text
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 13,
-                color: semantic.mute,
-                paddingTop: 16,
-              }}
-            >
+            <Text style={[ty.secondary, { color: semantic.muted, paddingTop: 16 }]}>
               {t("picker.empty")}
             </Text>
           }

@@ -1,26 +1,23 @@
 // Conversation info — member roster + shared media for a channel or DM.
 // Mobile counterpart of desktop's right-hand context panel (#826): Discord's
-// member list over Messenger's shared-media grid. The chat screen's kebab
-// navigates here with { id, kind, groupId?, name? }.
+// member list over Messenger's shared-media grid. The chat screen's members
+// button and channel menu navigate here with { id, kind, groupId?, name? }.
 
 import { useMemo } from "react";
 import { View, Text, useWindowDimensions } from "react-native";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { useTranslation } from "react-i18next";
 import {
   Screen,
-  Crumb,
+  Header,
   Body,
   SectionTitle,
   ListRow,
   Avatar,
-  Ctx,
-  BottomAction,
-  Button,
+  Group,
 } from "../../components/ui";
 import { ExportArchive } from "../../components/ExportArchive";
-import { Icon } from "../../components/icons";
-import { semantic, type as ty } from "../../theme/tokens";
+import { fonts, semantic, space, type as ty } from "../../theme/tokens";
 import {
   useDMChannel,
   useGroupMembers,
@@ -32,7 +29,6 @@ import {
 import { MediaImage } from "../../components/Media";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
-import { upper } from "../../i18n";
 
 // Cap on grid tiles, matching desktop's MembersPanel (#826): each tile
 // resolves its own bytes through the media transport, so an unbounded grid
@@ -41,9 +37,9 @@ import { upper } from "../../i18n";
 const MEDIA_LIMIT = 30;
 
 function ConversationInfo() {
-  const router = useRouter();
+  const router = useNav();
   const { t } = useTranslation("mobile");
-  const params = useLocalSearchParams<{
+  const params = useRouteParams<{
     id?: string;
     kind?: string;
     groupId?: string;
@@ -116,89 +112,100 @@ function ConversationInfo() {
     return out;
   }, [messagesData]);
 
-  const ctxLabel = upper(
-    kind === "dm" ? t("tabs.direct") : t("channels:channel.fallbackTitle"),
-  );
   const title = params.name ?? t("conversationInfo.fallbackTitle");
-  // Three-column grid: screen width minus the Body's horizontal padding and
-  // the two inter-tile gaps.
-  const tile = Math.floor((width - 18 * 2 - 6 * 2) / 3);
+  // Three-column grid: screen width minus the 16pt side gutters and the two
+  // inter-tile gaps.
+  const tile = Math.floor((width - 16 * 2 - 6 * 2) / 3);
 
   return (
-    <Screen testID="screen-conversation-info">
-      <Crumb
-        segs={[
-          { label: ctxLabel },
-          { label: t("conversationInfo.info"), leaf: true },
-        ]}
-        end={roster.length > 0 ? String(roster.length) : undefined}
+    <Screen testID="screen-conversation-info" aboveTabBar={router.inPane}>
+      <Header onBack={router.onBack}
+        title={title}
+        subtitle={
+          roster.length > 0
+            ? t("group.detail.memberCount", { count: roster.length })
+            : undefined
+        }
+        backTo={params.name ?? undefined}
       />
       <Body>
-        <SectionTitle>
-          {upper(
-            roster.length > 0
-              ? t("nav:members.count", { count: roster.length })
-              : t("channels:group.members"),
-          )}
-        </SectionTitle>
+        <SectionTitle>{t("channels:group.members")}</SectionTitle>
         {roster.length === 0 ? (
           <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.mute,
-              paddingHorizontal: 18,
-              paddingVertical: 8,
-            }}
+            style={[
+              ty.secondary,
+              { color: semantic.muted, paddingHorizontal: 20, paddingVertical: 8 },
+            ]}
           >
             {t("common:states.loading")}
           </Text>
-        ) : null}
-        {roster.map((m) => {
-          const isMe = m.userId === currentUser?.id;
-          return (
-            <ListRow
-              key={m.userId}
-              testID={`row-member-${m.userId}`}
-              minHeight={54}
-              glyph={<Avatar label={m.handle.slice(0, 2)} />}
-              name={
-                isMe
-                  ? t("conversationInfo.memberSelf", { handle: m.handle })
-                  : `@${m.handle}`
-              }
-              nameStyle={{ fontSize: 14 }}
-              sub={
+        ) : (
+          <Group style={{ marginHorizontal: 16 }}>
+            {roster.map((m) => {
+              const isMe = m.userId === currentUser?.id;
+              const memberName = isMe
+                ? t("conversationInfo.memberSelf", { handle: m.handle })
+                : `@${m.handle}`;
+              const roleLabel =
                 m.role === "owner"
                   ? t("conversationInfo.roleOwner")
                   : m.role === "admin"
                     ? t("conversationInfo.roleAdmin")
-                    : undefined
-              }
-              onPress={
-                isMe
-                  ? undefined
-                  : () =>
-                      router.push({
-                        pathname: "/user/[id]",
-                        params: { id: m.userId },
-                      })
-              }
-              end={!isMe ? <Icon.fwd color={semantic.mute} /> : undefined}
-            />
-          );
-        })}
+                    : undefined;
+              return (
+                <ListRow
+                  key={m.userId}
+                  testID={`row-member-${m.userId}`}
+                  minHeight={56}
+                  glyph={
+                    <Avatar
+                      label={m.handle}
+                      size="sm"
+                      variant={isMe ? "self" : "default"}
+                    />
+                  }
+                  // One line, truncated in the middle: a long handle gives
+                  // way so the "· you" suffix never wraps onto a line alone.
+                  name={
+                    <Text
+                      numberOfLines={1}
+                      ellipsizeMode="middle"
+                      style={{
+                        fontFamily: fonts.medium,
+                        fontSize: 16,
+                        color: semantic.text,
+                      }}
+                    >
+                      {memberName}
+                    </Text>
+                  }
+                  sub={roleLabel}
+                  accessibilityLabel={
+                    roleLabel ? `${memberName}, ${roleLabel}` : memberName
+                  }
+                  chevron={!isMe}
+                  onPress={
+                    isMe
+                      ? undefined
+                      : () =>
+                          router.push({
+                            pathname: "/user/[id]",
+                            params: { id: m.userId },
+                          })
+                  }
+                />
+              );
+            })}
+          </Group>
+        )}
 
-        <SectionTitle>{upper(t("nav:media.heading"))}</SectionTitle>
+        <SectionTitle>{t("nav:media.heading")}</SectionTitle>
         {attachments.length === 0 ? (
           <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.mute,
-              paddingHorizontal: 18,
-              paddingVertical: 8,
-            }}
+            style={[
+              ty.secondary,
+              { color: semantic.muted, paddingHorizontal: 20, paddingVertical: 8 },
+            ]}
           >
             {t("nav:media.empty")}
           </Text>
@@ -208,8 +215,8 @@ function ConversationInfo() {
               flexDirection: "row",
               flexWrap: "wrap",
               gap: 6,
-              paddingHorizontal: 18,
-              paddingVertical: 8,
+              paddingHorizontal: 16,
+              paddingVertical: 4,
             }}
           >
             {attachments.map((a) => (
@@ -222,20 +229,12 @@ function ConversationInfo() {
           </View>
         )}
 
-        <ExportArchive conversationId={conversationId} />
+        {/* The export block's heading has no top padding of its own; give it
+            the same gap every other section gets above its title. */}
+        <View style={{ paddingTop: space.xxxl }}>
+          <ExportArchive conversationId={conversationId} />
+        </View>
       </Body>
-      <Ctx cr={ctxLabel} name={t("conversationInfo.ctxName", { title })} />
-      <BottomAction>
-        <Button
-          full
-          testID="btn-back-to-conversation"
-          variant="subtle"
-          onPress={() => router.back()}
-          icon={<Icon.back color={semantic.ink} />}
-        >
-          {t("conversationInfo.backToConversation")}
-        </Button>
-      </BottomAction>
     </Screen>
   );
 }

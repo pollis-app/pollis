@@ -19,6 +19,9 @@ tags:
     id: "screen-groups"
 
 - tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
     id: "btn-create-group"
 # #General is opt-in (off by default, like desktop); these steps open it.
 - tapOn:
@@ -26,11 +29,18 @@ tags:
 - tapOn:
     id: "input-group-name"
 - inputText: "E2E Menu Group"
-- tapOn: "CREATE GROUP"
+- tapOn:
+    id: "btn-submit-group"
+# Creating lands on the Groups tab with the new group selected (pill strip +
+# its channel panel, tab bar visible) — not a pushed group page. Wait for
+# THIS group's panel header (the account may already have other groups).
 - extendedWaitUntil:
     visible:
-      id: "screen-group"
+      id: "btn-group-menu"
+      text: "E2E Menu Group, .*"
     timeout: 15000
+- assertVisible:
+    id: "panel-group"
 - tapOn:
     text: "General"
 - assertVisible:
@@ -70,12 +80,18 @@ tags:
       id: "screen-group-settings"
     timeout: 10000
 - takeScreenshot: channel-menu-03-group-settings
+# The creator is an admin, and admins may delete the group (the DS gate).
+- scrollUntilVisible:
+    element:
+      id: "btn-delete-group"
+    direction: DOWN
 - tapOn:
     id: "btn-back"
 - assertVisible:
     id: "screen-chat"
 
-# 4. Cancel closes the sheet and leaves the channel as it was.
+# 4. Close (btn-menu-cancel is the sheet's Close button now) dismisses the sheet
+#    and leaves the channel as it was.
 - tapOn:
     id: "btn-chat-menu"
 - tapOn:

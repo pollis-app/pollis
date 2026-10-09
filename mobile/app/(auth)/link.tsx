@@ -1,13 +1,12 @@
 import { useRef, useState } from "react";
-import { Platform, Text, View } from "react-native";
+import { ActivityIndicator, Platform, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { Screen, Crumb, Button, BottomAction, Field } from "../../components/ui";
+import { Screen, Header, Body, Button, BottomAction, Field } from "../../components/ui";
 import { Heading } from "../../components/auth/Heading";
-import { BackLink } from "../../components/auth/BackLink";
-import { semantic, type as ty, r } from "../../theme/tokens";
-import { upper } from "../../i18n";
+import { AuthError } from "../../components/auth/AuthError";
+import { semantic, type as ty, fonts, r } from "../../theme/tokens";
 import { useClaimDeviceLink } from "../../hooks/queries";
 
 const PAYLOAD_PREFIX = "pollis-link:v1:";
@@ -15,8 +14,8 @@ const PAYLOAD_PREFIX = "pollis-link:v1:";
 /**
  * Sign in with another device (#1207): scan the code a signed-in device shows
  * under Security → Link a new device, or paste it into the field. Laid out
- * like Sign in: a title, one line, the camera (or the code field), and a quiet
- * way back to email.
+ * like Sign in: a back button to email, a title, one line, then the camera (or
+ * the code field).
  */
 export default function LinkSignIn() {
   const { t } = useTranslation("auth");
@@ -50,12 +49,26 @@ export default function LinkSignIn() {
 
   return (
     <Screen testID="screen-auth-link" centered>
-      <Crumb segs={[{ label: upper(t("mobile:auth.crumb.auth")) }, { label: t("link.useDevice"), leaf: true }]} />
-      <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 32, gap: 28 }}>
+      {/* Back to email. The id predates the top bar: the tour flow taps it
+          to return from this screen. */}
+      <Header
+        bordered={false}
+        backTestID="btn-link-use-email"
+        backLabel={t("link.useEmail")}
+      />
+      <Body contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, gap: 24 }}>
         <Heading title={t("link.scanTitle")} subtitle={manual ? t("link.codeIntro") : t("link.scanIntro")} />
 
         {!manual && permission?.granted ? (
-          <View style={{ aspectRatio: 1, width: "100%", overflow: "hidden", borderRadius: r.lg, borderWidth: 1, borderColor: semantic.hair }}>
+          <View
+            style={{
+              aspectRatio: 1,
+              width: "100%",
+              overflow: "hidden",
+              borderRadius: r.lg,
+              backgroundColor: semantic.raised,
+            }}
+          >
             <CameraView
               testID="link-camera"
               style={{ flex: 1 }}
@@ -71,52 +84,66 @@ export default function LinkSignIn() {
         ) : null}
 
         {!manual && permission && !permission.granted ? (
-          <Button testID="btn-link-allow-camera" variant="primary" full onPress={() => void requestPermission()}>
-            {upper(t("link.allowCamera"))}
+          <Button
+            testID="btn-link-allow-camera"
+            variant="primary"
+            full
+            onPress={() => void requestPermission()}
+          >
+            {t("link.allowCamera")}
           </Button>
         ) : null}
 
         {manual ? (
-          <View>
+          <View style={{ gap: 8 }}>
+            <Text style={ty.section}>{t("link.codeLabel")}</Text>
             <Field
               testID="input-link-code"
               accessibilityLabel={t("link.codeLabel")}
               value={code}
               onChangeText={setCode}
+              autoCorrect={false}
               placeholder={t("link.codePlaceholder")}
+              style={{ fontFamily: fonts.mono400 }}
             />
           </View>
         ) : null}
 
         {claim.isPending ? (
-          <Text testID="link-claiming" style={{ fontFamily: ty.body.fontFamily, fontSize: 14, color: semantic.mute, textAlign: "center" }}>
-            {t("link.signingIn")}
-          </Text>
+          <View
+            style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10 }}
+            accessibilityLiveRegion="polite"
+          >
+            <ActivityIndicator color={semantic.accent} />
+            <Text testID="link-claiming" style={ty.secondary}>
+              {t("link.signingIn")}
+            </Text>
+          </View>
         ) : null}
-        {error ? (
-          <Text testID="link-error" style={{ fontFamily: ty.body.fontFamily, fontSize: 14, color: semantic.danger }}>
-            {error}
-          </Text>
-        ) : null}
-
-        <BackLink testID="btn-link-use-email" label={t("link.useEmail")} onPress={() => router.back()} />
-      </View>
+        {error ? <AuthError testID="link-error" message={error} /> : null}
+      </Body>
       <BottomAction>
         {manual && code.trim().startsWith(PAYLOAD_PREFIX) ? (
-          <Button testID="btn-link-submit" variant="primary" full disabled={claim.isPending} onPress={() => submit(code)}>
-            {upper(t("link.signIn"))}
+          <Button
+            testID="btn-link-submit"
+            variant="primary"
+            full
+            disabled={claim.isPending}
+            onPress={() => submit(code)}
+          >
+            {t("link.signIn")}
           </Button>
         ) : null}
         <Button
           testID="btn-link-toggle-manual"
-          variant="subtle"
+          variant="secondary"
           full
           onPress={() => {
             setManual((m) => !m);
             setError(null);
           }}
         >
-          {upper(manual ? t("link.scanInstead") : t("link.enterCode"))}
+          {manual ? t("link.scanInstead") : t("link.enterCode")}
         </Button>
       </BottomAction>
     </Screen>

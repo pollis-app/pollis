@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
-import { View, Text } from "react-native";
+import { View } from "react-native";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import {
   Screen,
-  Crumb,
+  Header,
   Body,
   SectionTitle,
   ListRow,
@@ -12,12 +12,14 @@ import {
   Field,
   Chip,
   Button,
+  Group,
+  Txt,
 } from "../../components/ui";
 import { SearchResultRow } from "../../components/search/SearchResultRow";
 import { CorpusFooter } from "../../components/search/CorpusFooter";
 import type { SearchSort } from "../../hooks/queries/useSearch";
 import { Icon } from "../../components/icons";
-import { semantic, type as ty } from "../../theme/tokens";
+import { semantic, space, layout } from "../../theme/tokens";
 import {
   useDMChannels,
   useSearchMessages,
@@ -25,22 +27,25 @@ import {
   useUserSearch,
 } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
-import { upper } from "../../i18n";
+import { useOpenConversation } from "../../hooks/useOpenConversation";
 
-// Search filter syntax, one per line. The operators are typed literally, so
-// they are not translated; only the label above them is.
-const SEARCH_FILTER_EXAMPLES = [
-  "from:@user",
-  "in:#channel",
-  "before:YYYY-MM-DD",
-  "after:YYYY-MM-DD",
-  "on:YYYY-MM-DD",
-  "has:attachment",
-  "has:link",
+// Search filter syntax, shown as pills. The operators are typed literally,
+// so they are not translated; only the label above them is. `token` is what a
+// tap adds to the query (the operator, ready for its value).
+const SEARCH_FILTERS = [
+  { example: "from:@user", token: "from:@" },
+  { example: "in:#channel", token: "in:#" },
+  { example: "before:YYYY-MM-DD", token: "before:" },
+  { example: "after:YYYY-MM-DD", token: "after:" },
+  { example: "on:YYYY-MM-DD", token: "on:" },
+  { example: "has:attachment", token: "has:attachment" },
+  { example: "has:link", token: "has:link" },
 ];
 
 export default function Search() {
   const router = useRouter();
+  // Phones push the conversation/group; iPad opens it in its tab's two-pane.
+  const { openConversation, openGroup } = useOpenConversation();
   const { t } = useTranslation("mobile");
   const [q, setQ] = useState("");
   const trimmed = q.trim();
@@ -133,11 +138,34 @@ export default function Search() {
     }
     const lower = trimmed.toLowerCase();
     return [
-      { id: "preferences", n: t("settings:preferences.title"), s: t("mobile:self.hub.preferencesSub"), to: "/self/preferences" as const },
-      { id: "user-settings", n: t("settings:user.title"), s: t("mobile:self.hub.userSettingsSub"), to: "/self/user-settings" as const },
-      { id: "security", n: t("settings:security.title"), s: t("mobile:self.hub.securitySub"), to: "/self/security" as const },
-      { id: "saved", n: t("saved:page.title"), s: t("mobile:self.hub.savedSub"), to: "/self/saved" as const },
-    ].filter((p) => p.n.toLowerCase().includes(lower) || p.s.toLowerCase().includes(lower));
+      {
+        id: "preferences",
+        n: t("settings:preferences.title"),
+        s: t("mobile:self.hub.preferencesSub"),
+        to: "/self/preferences" as const,
+      },
+      {
+        id: "user-settings",
+        n: t("settings:user.title"),
+        s: t("mobile:self.hub.userSettingsSub"),
+        to: "/self/user-settings" as const,
+      },
+      {
+        id: "security",
+        n: t("settings:security.title"),
+        s: t("mobile:self.hub.securitySub"),
+        to: "/self/security" as const,
+      },
+      {
+        id: "saved",
+        n: t("saved:page.title"),
+        s: t("mobile:self.hub.savedSub"),
+        to: "/self/saved" as const,
+      },
+    ].filter(
+      (p) =>
+        p.n.toLowerCase().includes(lower) || p.s.toLowerCase().includes(lower),
+    );
   }, [trimmed, t]);
 
   const totalResults =
@@ -153,63 +181,93 @@ export default function Search() {
     !user.isLoading &&
     totalResults === 0;
 
+  // Tapping a filter pill adds its operator to the query, ready to finish.
+  const addFilter = (token: string) => {
+    setQ((prev) => {
+      const base = prev.trimEnd();
+      return base ? `${base} ${token}` : token;
+    });
+  };
+
   return (
     <Screen testID="screen-search" aboveTabBar>
-      <Crumb
-        segs={[{ label: upper(t("tabs.search")), leaf: true }]}
-        end={upper(
-          trimmed.length >= 2
-            ? t("search.resultCount", { count: totalResults })
-            : t("search.typePrompt"),
-        )}
-      />
-      <Body>
+      <Header variant="large" title={t("tabs.search")} />
+      <View
+        style={{
+          paddingHorizontal: space.xxl,
+          paddingBottom: space.sm,
+          gap: space.sm,
+        }}
+      >
+        <Field
+          testID="input-search"
+          accessibilityLabel={t("search:page.title")}
+          value={q}
+          onChangeText={setQ}
+          onSubmitEditing={() => {
+            if (trimmed.length >= 2) {
+              setUserQuery(trimmed);
+            }
+          }}
+          returnKeyType="search"
+          autoCorrect={false}
+          placeholder={t("search.placeholder")}
+          icon={<Icon.search size={18} color={semantic.muted} />}
+        />
+      </View>
+      <Body
+        contentContainerStyle={{ paddingHorizontal: space.xxl, gap: space.xs }}
+      >
         {trimmed.length < 2 ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.mute,
-              paddingHorizontal: 18,
-              paddingTop: 14,
-            }}
+          <Txt
+            variant="secondary"
+            style={{ paddingTop: space.sm }}
           >
             {t("search.hint")}
-          </Text>
+          </Txt>
         ) : null}
         {trimmed.length < 2 ? (
-          <Text
-            testID="search-filter-hint"
-            style={{
-              fontFamily: ty.mono.fontFamily,
-              fontSize: 11,
-              lineHeight: 18,
-              color: semantic.mute2,
-              paddingHorizontal: 18,
-              paddingTop: 12,
-            }}
-          >
-            {[t("search.filtersLabel"), ...SEARCH_FILTER_EXAMPLES].join("\n")}
-          </Text>
+          <View>
+            <SectionTitle testID="search-filter-hint" style={sectionStyle}>
+              {t("search.filtersLabel")}
+            </SectionTitle>
+            <View
+              style={{
+                flexDirection: "row",
+                flexWrap: "wrap",
+                columnGap: space.sm,
+              }}
+            >
+              {SEARCH_FILTERS.map((f) => (
+                <Chip
+                  key={f.example}
+                  testID={`search-filter-${f.token.replace(/[^a-z]/g, "")}`}
+                  variant="outline"
+                  onPress={() => addFilter(f.token)}
+                >
+                  {f.example}
+                </Chip>
+              ))}
+            </View>
+          </View>
         ) : null}
         {showEmpty ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.mute,
-              paddingHorizontal: 18,
-              paddingTop: 14,
-            }}
+          <Txt
+            variant="body"
+            style={{ paddingTop: space.lg }}
           >
             {t("search:panel.noMatches")}
-          </Text>
+          </Txt>
         ) : null}
         {showEmpty ? (
-          <View testID="search-no-results-why" style={{ paddingHorizontal: 18, paddingTop: 10, gap: 4 }}>
-            <Text style={{ fontFamily: ty.body.fontFamily, fontSize: 12, color: semantic.mute }}>
-              {ts("view.noResultsWhy")}
-            </Text>
+          <View
+            testID="search-no-results-why"
+            style={{
+              paddingTop: space.sm,
+              gap: space.xs,
+            }}
+          >
+            <Txt variant="secondary">{ts("view.noResultsWhy")}</Txt>
             {[
               "view.reasonNotIngested",
               "view.reasonBeforeJoin",
@@ -217,189 +275,212 @@ export default function Search() {
               "view.reasonRetention",
               "view.reasonDeleted",
             ].map((k) => (
-              <Text key={k} style={{ fontFamily: ty.body.fontFamily, fontSize: 12, color: semantic.mute }}>
+              <Txt key={k} variant="secondary">
                 {`· ${ts(k)}`}
-              </Text>
+              </Txt>
             ))}
           </View>
         ) : null}
 
         {pages.length > 0 ? (
           <View>
-            <SectionTitle>{upper(t("tabs.self"))}</SectionTitle>
-            {pages.map((p) => (
-              <ListRow
-                key={p.id}
-                testID={`row-page-${p.id}`}
-                minHeight={48}
-                glyph={<Icon.gear color={semantic.mute} />}
-                name={p.n}
-                sub={p.s}
-                onPress={() => router.push(p.to)}
-              />
-            ))}
+            <SectionTitle style={sectionStyle}>{t("tabs.self")}</SectionTitle>
+            <Group>
+              {pages.map((p) => (
+                <ListRow
+                  key={p.id}
+                  testID={`row-page-${p.id}`}
+                  glyph={<Icon.gear size={20} color={semantic.dim} />}
+                  name={p.n}
+                  sub={p.s}
+                  chevron
+                  onPress={() => router.push(p.to)}
+                />
+              ))}
+            </Group>
           </View>
         ) : null}
 
         {filtered.groups.length > 0 ? (
           <View>
-            <SectionTitle>{upper(t("tabs.groups"))}</SectionTitle>
-            {filtered.groups.map((g) => (
-              <ListRow
-                key={g.id}
-                testID={`row-group-${g.id}`}
-                minHeight={46}
-                glyph={<Icon.diamond size={14} color={semantic.mute} />}
-                name={g.name}
-                nameStyle={{ fontSize: 14, fontFamily: ty.rowN.fontFamily }}
-                onPress={() =>
-                  router.push({
-                    pathname: "/group/[id]",
-                    params: { id: g.id },
-                  })
-                }
-              />
-            ))}
+            <SectionTitle style={sectionStyle}>{t("tabs.groups")}</SectionTitle>
+            <Group>
+              {filtered.groups.map((g) => (
+                <ListRow
+                  key={g.id}
+                  testID={`row-group-${g.id}`}
+                  glyph={<Avatar label={g.name} size={30} shape="rounded" />}
+                  name={g.name}
+                  chevron
+                  onPress={() => openGroup(g.id)}
+                />
+              ))}
+            </Group>
           </View>
         ) : null}
 
         {filtered.channels.length > 0 ? (
           <View>
-            <SectionTitle>{upper(t("search.channels"))}</SectionTitle>
-            {filtered.channels.map((c) => (
-              <ListRow
-                key={c.id}
-                testID={`row-channel-${c.id}`}
-                minHeight={48}
-                glyph={<Icon.hash color={semantic.mute} />}
-                name={c.name}
-                sub={c.groupName}
-                onPress={() => {
-                  // Mirror the groups-tab rows: select + clear unread on open.
-                  appStore.setSelectedGroupId(c.groupId);
-                  appStore.setSelectedChannelId(c.id);
-                  appStore.markRead(c.id);
-                  router.push({
-                    pathname: "/chat/[id]",
-                    params: { id: c.id, kind: "channel", name: c.name },
-                  });
-                }}
-              />
-            ))}
+            <SectionTitle style={sectionStyle}>
+              {t("search.channels")}
+            </SectionTitle>
+            <Group>
+              {filtered.channels.map((c) => (
+                <ListRow
+                  key={c.id}
+                  testID={`row-channel-${c.id}`}
+                  glyph={<Icon.hash size={20} color={semantic.dim} />}
+                  name={c.name}
+                  sub={c.groupName}
+                  onPress={() => {
+                    // Mirror the groups-tab rows: select + clear unread on open.
+                    appStore.setSelectedGroupId(c.groupId);
+                    appStore.setSelectedChannelId(c.id);
+                    appStore.markRead(c.id);
+                    openConversation({
+                      id: c.id,
+                      kind: "channel",
+                      name: c.name,
+                      groupId: c.groupId,
+                    });
+                  }}
+                />
+              ))}
+            </Group>
           </View>
         ) : null}
 
         {userShown && user.data ? (
           <View>
-            <SectionTitle>{upper(t("tabs.direct"))}</SectionTitle>
-            <ListRow
-              testID={`row-user-${user.data.id}`}
-              minHeight={48}
-              glyph={
-                <Avatar
-                  label={(user.data.username || "us").slice(0, 2)}
-                  size="sm"
-                />
-              }
-              name={`@${user.data.username}`}
-              sub={user.data.preferred_name || user.data.email || undefined}
-              onPress={() =>
-                router.push({
-                  pathname: "/user/[id]",
-                  params: { id: user.data!.id },
-                })
-              }
-            />
+            <SectionTitle style={sectionStyle}>{t("tabs.direct")}</SectionTitle>
+            <Group>
+              <ListRow
+                testID={`row-user-${user.data.id}`}
+                glyph={
+                  <Avatar
+                    label={user.data.username || undefined}
+                    size={layout.touchMin - 8}
+                  />
+                }
+                name={`@${user.data.username}`}
+                sub={user.data.preferred_name || user.data.email || undefined}
+                chevron
+                onPress={() =>
+                  router.push({
+                    pathname: "/user/[id]",
+                    params: { id: user.data!.id },
+                  })
+                }
+              />
+            </Group>
           </View>
         ) : null}
 
         {messageResults.length > 0 ? (
           <View>
-            <SectionTitle>{upper(t("search.messages"))}</SectionTitle>
+            <SectionTitle style={sectionStyle}>
+              {t("search.messages")}
+            </SectionTitle>
             <View
               style={{
                 flexDirection: "row",
+                flexWrap: "wrap",
                 alignItems: "center",
-                justifyContent: "flex-end",
-                paddingHorizontal: 18,
-                paddingBottom: 8,
-                gap: 8,
+                justifyContent: "space-between",
+                columnGap: space.sm,
               }}
             >
-              <View style={{ flexDirection: "row", gap: 6 }}>
+              {/* The one result count (desktop's "About N results"); a second
+                  total under the field only repeated it. Announced as it
+                  changes while typing. */}
+              <Txt
+                variant="meta"
+                testID="search-about-results"
+                accessibilityLiveRegion="polite"
+              >
+                {ts("view.aboutResults", { count: messageTotal })}
+              </Txt>
+              <View
+                style={{ flexDirection: "row", gap: space.sm }}
+                accessibilityRole="radiogroup"
+              >
                 <Chip
                   testID="search-sort-relevant"
-                  variant={activeSort === "relevant" ? "on" : "default"}
+                  selected={activeSort === "relevant"}
+                  variant="outline"
                   onPress={() => setSort("relevant")}
                 >
                   {ts("view.sortRelevant")}
                 </Chip>
                 <Chip
                   testID="search-sort-recent"
-                  variant={activeSort === "recent" ? "on" : "default"}
+                  selected={activeSort === "recent"}
+                  variant="outline"
                   onPress={() => setSort("recent")}
                 >
                   {ts("view.sortRecent")}
                 </Chip>
               </View>
             </View>
-            {messageResults.map((m) => {
-              const info = conversationKinds.get(m.conversation_id);
-              const label =
-                m.conversation_kind === "dm"
-                  ? (m.conversation_name ?? info?.name ?? null)
-                  : m.conversation_name
-                    ? `#${m.conversation_name}${m.group_name ? ` · ${m.group_name}` : ""}`
-                    : (info?.name ? `#${info.name}` : null);
-              return (
-                <SearchResultRow
-                  key={m.message_id}
-                  result={m}
-                  conversationLabel={label}
-                  onPress={() => {
-                    // The row carries its kind now; the cached lists are the
-                    // fallback for rows indexed before it did. Unknown (a
-                    // conversation since left): channel, the old behaviour.
-                    const kind = m.conversation_kind ?? info?.kind ?? "channel";
-                    // Mirror the list rows: opening a conversation selects it
-                    // (suppresses its realtime unread) and clears its count.
-                    if (kind === "dm") {
-                      appStore.setSelectedConversationId(m.conversation_id);
-                    } else {
-                      const groupId = m.group_id ?? info?.groupId;
-                      if (groupId) {
-                        appStore.setSelectedGroupId(groupId);
+            <Group style={{ marginTop: space.xs }}>
+              {messageResults.map((m) => {
+                const info = conversationKinds.get(m.conversation_id);
+                const label =
+                  m.conversation_kind === "dm"
+                    ? (m.conversation_name ?? info?.name ?? null)
+                    : m.conversation_name
+                      ? `#${m.conversation_name}${m.group_name ? ` · ${m.group_name}` : ""}`
+                      : info?.name
+                        ? `#${info.name}`
+                        : null;
+                return (
+                  <SearchResultRow
+                    key={m.message_id}
+                    result={m}
+                    isSelf={m.sender_id === appStore.currentUser?.id}
+                    conversationLabel={label}
+                    onPress={() => {
+                      // The row carries its kind now; the cached lists are the
+                      // fallback for rows indexed before it did. Unknown (a
+                      // conversation since left): channel, the old behaviour.
+                      const kind =
+                        m.conversation_kind ?? info?.kind ?? "channel";
+                      // Mirror the list rows: opening a conversation selects it
+                      // (suppresses its realtime unread) and clears its count.
+                      if (kind === "dm") {
+                        appStore.setSelectedConversationId(m.conversation_id);
+                      } else {
+                        const groupId = m.group_id ?? info?.groupId;
+                        if (groupId) {
+                          appStore.setSelectedGroupId(groupId);
+                        }
+                        appStore.setSelectedChannelId(m.conversation_id);
                       }
-                      appStore.setSelectedChannelId(m.conversation_id);
-                    }
-                    appStore.markRead(m.conversation_id);
-                    const name = m.conversation_name ?? info?.name;
-                    router.push({
-                      pathname: "/chat/[id]",
-                      params: {
+                      appStore.markRead(m.conversation_id);
+                      const name = m.conversation_name ?? info?.name;
+                      openConversation({
                         id: m.conversation_id,
                         kind,
-                        ...(name ? { name } : {}),
-                      },
-                    });
-                  }}
-                />
-              );
-            })}
+                        name: name ?? undefined,
+                        groupId: m.group_id ?? info?.groupId ?? undefined,
+                      });
+                    }}
+                  />
+                );
+              })}
+            </Group>
             {messages.hasNextPage ? (
-              <View style={{ padding: 14 }}>
+              <View style={{ paddingTop: space.lg }}>
                 <Button
                   testID="search-load-more"
-                  variant="subtle"
+                  variant="secondary"
                   full
                   disabled={messages.isFetchingNextPage}
                   onPress={() => void messages.fetchNextPage()}
                 >
-                  {upper(
-                    messages.isFetchingNextPage
-                      ? ts("view.searching")
-                      : ts("view.loadMore"),
-                  )}
+                  {messages.isFetchingNextPage
+                    ? ts("view.searching")
+                    : ts("view.loadMore")}
                 </Button>
               </View>
             ) : null}
@@ -409,31 +490,9 @@ export default function Search() {
           <CorpusFooter corpus={firstPage.corpus} />
         ) : null}
       </Body>
-
-      <View
-        style={{
-          paddingVertical: 10,
-          paddingHorizontal: 14,
-          borderTopWidth: 1,
-          borderTopColor: semantic.hairSoft,
-        }}
-      >
-        <Field
-          testID="input-search"
-          accessibilityLabel={t("search:page.title")}
-          amber
-          value={q}
-          onChangeText={setQ}
-          onSubmitEditing={() => {
-            if (trimmed.length >= 2) {
-              setUserQuery(trimmed);
-            }
-          }}
-          returnKeyType="search"
-          placeholder={t("search.placeholder")}
-          icon={<Icon.search color={semantic.mute} />}
-        />
-      </View>
     </Screen>
   );
 }
+
+// Section headings inside the padded results column.
+const sectionStyle = { paddingHorizontal: 0, paddingTop: space.xxl };

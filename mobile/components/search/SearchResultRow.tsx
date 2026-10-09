@@ -1,7 +1,7 @@
 import { Pressable, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { Avatar } from "../ui";
-import { semantic, type as ty } from "../../theme/tokens";
+import { semantic, type as ty, fonts, space } from "../../theme/tokens";
 import { activeLocale } from "../../i18n";
 import type { SearchMessageResult } from "../../hooks/queries/useSearch";
 import { HighlightedSnippet } from "./HighlightedSnippet";
@@ -9,14 +9,18 @@ import { HighlightedSnippet } from "./HighlightedSnippet";
 /**
  * One message hit: who and when, where it lives (channel · group or DM, plus
  * "in a thread" / "attachment"), and the highlighted snippet. The same three
- * lines desktop's SearchView shows, in the mobile row idiom.
+ * lines desktop's SearchView shows, in the mobile row idiom. Sits inside a
+ * <Group>, which draws the separators; one control, one spoken label.
  */
 export function SearchResultRow({
   result,
+  isSelf = false,
   conversationLabel,
   onPress,
 }: {
   result: SearchMessageResult;
+  // The reader's own message: the amber "self" avatar, as in the chat.
+  isSelf?: boolean;
   conversationLabel: string | null;
   onPress: () => void;
 }) {
@@ -36,39 +40,58 @@ export function SearchResultRow({
     minute: "2-digit",
   });
 
+  const snippet = result.snippet.text
+    ? result.snippet
+    : { text: result.content, highlights: [] };
+
   return (
     <Pressable
       testID={`row-message-${result.message_id}`}
       accessibilityRole="button"
-      accessibilityLabel={`${sender}: ${result.snippet.text || result.content}`}
+      accessibilityLabel={[sender, snippet.text, where, when]
+        .filter(Boolean)
+        .join(", ")}
       onPress={onPress}
       style={({ pressed }) => ({
         flexDirection: "row",
-        gap: 12,
-        paddingHorizontal: 18,
-        paddingVertical: 12,
-        borderBottomWidth: 1,
-        borderBottomColor: semantic.hairSoft,
-        backgroundColor: pressed ? semantic.fieldBg : "transparent",
+        gap: space.lg,
+        minHeight: 64,
+        paddingVertical: space.lg,
+        paddingStart: space.xxl,
+        paddingEnd: space.xl,
+        backgroundColor: pressed ? semantic.high : "transparent",
       })}
     >
-      <Avatar label={sender.slice(0, 2)} size="sm" />
-      <View style={{ flex: 1, gap: 3 }}>
-        <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
+      {/* The chat timeline's avatar: 40pt, amber for the reader's own. */}
+      <Avatar label={sender} size="md" variant={isSelf ? "self" : "default"} />
+      <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "baseline",
+            gap: space.sm,
+          }}
+        >
+          {/* The sender as the chat's MessageRow sets it: bold, accent. */}
           <Text
             numberOfLines={1}
-            style={{ flex: 1, fontFamily: ty.rowN.fontFamily, fontSize: 13, color: semantic.accent }}
+            style={{
+              flex: 1,
+              fontFamily: fonts.bold,
+              fontSize: 16,
+              color: semantic.accent,
+            }}
           >
             {sender}
           </Text>
-          <Text style={[ty.label, { letterSpacing: 0.6 }]}>{when}</Text>
+          <Text style={ty.meta}>{when}</Text>
         </View>
         {where ? (
-          <Text numberOfLines={1} style={[ty.rowSub, { marginBottom: 6 }]}>
+          <Text numberOfLines={1} style={[ty.meta, { marginBottom: 4 }]}>
             {where}
           </Text>
         ) : null}
-        <HighlightedSnippet snippet={result.snippet.text ? result.snippet : { text: result.content, highlights: [] }} />
+        <HighlightedSnippet snippet={snippet} />
       </View>
     </Pressable>
   );

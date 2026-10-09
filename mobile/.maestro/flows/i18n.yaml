@@ -9,6 +9,12 @@ tags:
 # Asserts on real translated copy (settings:language.heading in es / ar) rather
 # than a synthetic locale: mobile has no test-locale injection, and the shipped
 # catalogues carry this key in every language, so the assertion is stable.
+# Headings are sentence case since the 2026-10 redesign ("Language" / "Idioma",
+# no uppercasing), and Maestro's text match is a full, case-sensitive regex, so
+# the strings below must match the catalogue exactly. Each assertion pins the
+# heading element itself (pref-language-heading) AND its text, so it cannot be
+# satisfied by the chip row's accessibility label (settings:language.ariaLabel,
+# which is the same word) or by the Self hub's Language row.
 
 - runFlow: ../subflows/sign-in.yaml
 
@@ -23,14 +29,16 @@ tags:
       id: "pref-language"
     direction: DOWN
 - assertVisible:
-    text: "LANGUAGE"
+    id: "pref-language-heading"
+    text: "Language"
 - takeScreenshot: i18n-01-english
 
 # Switch to Spanish: the heading re-renders in Spanish without a restart.
 - tapOn:
     id: "chip-language-es"
 - assertVisible:
-    text: "IDIOMA"
+    id: "pref-language-heading"
+    text: "Idioma"
 - takeScreenshot: i18n-02-spanish
 
 # The choice is device-local and survives a relaunch (no clearState here).
@@ -55,7 +63,8 @@ tags:
       id: "pref-language"
     direction: DOWN
 - assertVisible:
-    text: "IDIOMA"
+    id: "pref-language-heading"
+    text: "Idioma"
 - takeScreenshot: i18n-03-spanish-persisted
 
 # Arabic: copy flips immediately; the layout direction needs a relaunch, and
@@ -95,4 +104,5 @@ tags:
 - tapOn:
     id: "chip-language-en"
 - assertVisible:
-    text: "LANGUAGE"
+    id: "pref-language-heading"
+    text: "Language"

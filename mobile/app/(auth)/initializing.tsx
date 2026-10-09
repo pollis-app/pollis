@@ -1,44 +1,24 @@
 import { useEffect, useRef, useState } from "react";
-import { View, Text, Pressable } from "react-native";
-import Svg, { Rect } from "react-native-svg";
+import { View, Text } from "react-native";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
-import { Screen, Crumb, Card } from "../../components/ui";
-import { palette, semantic, type as ty } from "../../theme/tokens";
+import { Screen, Card, Button } from "../../components/ui";
+import { Icon } from "../../components/icons";
+import { AuthError } from "../../components/auth/AuthError";
+import { DotField } from "../../components/auth/DotField";
+import { ProgressBar } from "../../components/auth/ProgressBar";
+import { StepRow, type StepState } from "../../components/auth/StepRow";
+import { semantic, type as ty } from "../../theme/tokens";
 import { useQuery } from "@tanstack/react-query";
 import { useInitializeIdentity } from "../../hooks/queries/useAuth";
 import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
-import { upper } from "../../i18n";
 
 interface Step {
   n: string;
   s: string;
-  done: boolean;
-  muted?: boolean;
-}
-
-function Corner({ pos }: { pos: "tl" | "tr" | "bl" | "br" }) {
-  const top = pos[0] === "t";
-  const left = pos[1] === "l";
-  return (
-    <View
-      style={{
-        position: "absolute",
-        width: 14,
-        height: 14,
-        opacity: 0.75,
-        [top ? "top" : "bottom"]: 10,
-        [left ? "left" : "right"]: 10,
-        borderColor: semantic.ink,
-        borderTopWidth: top ? 1 : 0,
-        borderBottomWidth: top ? 0 : 1,
-        borderLeftWidth: left ? 1 : 0,
-        borderRightWidth: left ? 0 : 1,
-      }}
-    />
-  );
+  state: StepState;
 }
 
 function Initializing() {
@@ -93,82 +73,43 @@ function Initializing() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.id]);
 
-  const progress = upper(
-    initIdentity.isPending
-      ? t("auth.initializing.working")
-      : initIdentity.isSuccess
-        ? t("settings:changePin.doneButton")
-        : t("auth.initializing.ready"),
-  );
-  const ok = upper(t("auth.initializing.statusOk"));
+  const progress = initIdentity.isPending
+    ? t("auth.initializing.working")
+    : initIdentity.isSuccess
+      ? t("settings:changePin.doneButton")
+      : t("auth.initializing.ready");
+  const ok = t("auth.initializing.statusOk");
   const steps: Step[] = [
-    { n: upper(t("auth.initializing.stepKeysLoaded")), s: ok, done: true },
-    { n: upper(t("auth.initializing.stepDevicePaired")), s: ok, done: true },
+    { n: t("auth.initializing.stepKeysLoaded"), s: ok, state: "done" },
+    { n: t("auth.initializing.stepDevicePaired"), s: ok, state: "done" },
     {
-      n: upper(t("auth.initializing.stepInitializeIdentity")),
+      n: t("auth.initializing.stepInitializeIdentity"),
       s: initIdentity.isPending
         ? "…"
         : initIdentity.isSuccess
           ? ok
           : initIdentity.isError
-            ? upper(t("auth.initializing.statusError"))
+            ? t("auth.initializing.statusError")
             : "—",
-      done: initIdentity.isSuccess,
+      state: initIdentity.isSuccess
+        ? "done"
+        : initIdentity.isError
+          ? "error"
+          : initIdentity.isPending
+            ? "active"
+            : "todo",
     },
-    {
-      n: upper(t("auth.initializing.stepResolvePeers")),
-      s: "—",
-      done: false,
-      muted: true,
-    },
+    { n: t("auth.initializing.stepResolvePeers"), s: "—", state: "todo" },
   ];
+  const percent = initIdentity.isSuccess ? 100 : initIdentity.isPending ? 62 : 30;
 
   return (
     <Screen testID="screen-auth-initializing" centered>
-      <Corner pos="tl" />
-      <Corner pos="tr" />
-      <Corner pos="bl" />
-      <Corner pos="br" />
-      <Crumb
-        segs={[{ label: upper(t("auth.crumb.initializing")), leaf: true }]}
-        end={progress}
-      />
-
-      <View
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          opacity: 0.4,
-        }}
-        pointerEvents="none"
-      >
-        <Svg width="100%" height="100%" viewBox="0 0 390 844">
-          {Array.from({ length: 180 }).map((_, i) => {
-            const x = (i * 37) % 390;
-            const y = (i * 53) % 844;
-            const w = (i * 7) % 5 < 2 ? 3 : 2;
-            return (
-              <Rect
-                key={i}
-                x={x}
-                y={y}
-                width={w}
-                height={w}
-                fill="rgb(230,182,90)"
-                opacity={((i % 9) + 3) / 24}
-              />
-            );
-          })}
-        </Svg>
-      </View>
+      <DotField />
 
       <View
         style={{
           flex: 1,
-          alignItems: "center",
           justifyContent: "center",
           paddingHorizontal: 24,
         }}
@@ -176,93 +117,35 @@ function Initializing() {
         <Card
           style={{
             width: "100%",
-            borderColor: semantic.accent,
-            backgroundColor: "rgba(10,9,7,.85)",
-            padding: 22,
+            padding: 20,
+            gap: 20,
           }}
         >
-          <Text
-            style={{
-              fontFamily: ty.h1.fontFamily,
-              fontSize: 22,
-              color: semantic.ink,
-              marginBottom: 6,
-            }}
-          >
-            {t("auth.initializing.title")}
-          </Text>
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.mute,
-              marginBottom: 20,
-            }}
-          >
-            {t("auth.initializing.intro")}
-          </Text>
-          <View
-            style={{
-              height: 2,
-              backgroundColor: semantic.hair,
-              marginBottom: 20,
-            }}
-          >
-            <View
-              style={{
-                height: 2,
-                width: initIdentity.isSuccess
-                  ? "100%"
-                  : initIdentity.isPending
-                    ? "62%"
-                    : "30%",
-                backgroundColor: semantic.accent,
-              }}
+          <View style={{ gap: 6 }}>
+            <Text accessibilityRole="header" style={ty.title}>
+              {t("auth.initializing.title")}
+            </Text>
+            <Text style={ty.secondary}>{t("auth.initializing.intro")}</Text>
+          </View>
+
+          <View style={{ gap: 8 }}>
+            <Text accessibilityLiveRegion="polite" style={ty.section}>
+              {progress}
+            </Text>
+            <ProgressBar
+              percent={percent}
+              indeterminate={initIdentity.isPending}
+              label={progress}
             />
           </View>
-          {steps.map((r2, i) => (
-            <View
-              key={i}
-              style={{
-                flexDirection: "row",
-                justifyContent: "space-between",
-                paddingVertical: 4,
-                opacity: r2.muted ? 0.5 : 1,
-              }}
-            >
-              <Text style={[ty.label, { fontSize: 10 }]}>
-                <Text
-                  style={{ color: r2.done ? semantic.accent : semantic.mute }}
-                >
-                  {r2.done ? "◆" : "◇"}
-                </Text>{" "}
-                {r2.n}
-              </Text>
-              <Text
-                style={[
-                  ty.label,
-                  {
-                    fontSize: 10,
-                    color: r2.done ? semantic.accent : semantic.ink2,
-                  },
-                ]}
-              >
-                {r2.s}
-              </Text>
-            </View>
-          ))}
-          {error ? (
-            <Text
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 12,
-                color: semantic.danger,
-                marginTop: 14,
-              }}
-            >
-              {error}
-            </Text>
-          ) : null}
+
+          <View style={{ gap: 4 }}>
+            {steps.map((step, i) => (
+              <StepRow key={i} name={step.n} status={step.s} state={step.state} />
+            ))}
+          </View>
+
+          {error ? <AuthError message={error} /> : null}
         </Card>
       </View>
 
@@ -271,21 +154,20 @@ function Initializing() {
           flexDirection: "row",
           justifyContent: "space-between",
           alignItems: "center",
-          paddingHorizontal: 24,
-          paddingVertical: 14,
+          paddingStart: 24,
+          paddingEnd: 8,
+          paddingVertical: 8,
         }}
       >
-        <Text style={ty.label}>{coreVersion ? `v${coreVersion}` : ""}</Text>
-        <Pressable
-          onPress={() => router.replace("/(tabs)/groups")}
+        <Text style={ty.meta}>{coreVersion ? `v${coreVersion}` : ""}</Text>
+        <Button
           testID="btn-continue"
-          accessibilityRole="button"
-          accessibilityLabel={t("auth.initializing.skip")}
+          variant="subtle"
+          onPress={() => router.replace("/(tabs)/groups")}
+          iconRight={<Icon.arrowRight size={16} color={semantic.text} />}
         >
-          <Text style={[ty.label, { color: semantic.accent }]}>
-            {upper(t("auth.initializing.skip"))} →
-          </Text>
-        </Pressable>
+          {t("auth.initializing.skip")}
+        </Button>
       </View>
     </Screen>
   );

@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { View } from "react-native";
 import Svg, { Path, Rect } from "react-native-svg";
 import QRCode from "qrcode";
 
@@ -19,12 +20,19 @@ export function QrCode({
   testID,
   dark = DARK,
   light = LIGHT,
+  frame = 0,
+  radius = 0,
 }: {
   value: string;
   size: number;
   testID?: string;
   dark?: string;
   light?: string;
+  // Extra margin of the light field around the code, in points, drawn as a
+  // rounded tile (`radius`) — keeps the scanner-safe polarity at the edge
+  // instead of the screen colour.
+  frame?: number;
+  radius?: number;
 }) {
   const { path, cells } = useMemo(() => {
     const qr = QRCode.create(value, { errorCorrectionLevel: "M" });
@@ -40,10 +48,16 @@ export function QrCode({
     return { path: d, cells: n + QUIET * 2 };
   }, [value]);
 
-  return (
+  const svg = (
     <Svg testID={testID} width={size} height={size} viewBox={`0 0 ${cells} ${cells}`}>
       <Rect x={0} y={0} width={cells} height={cells} fill={light} />
       <Path d={path} fill={dark} />
     </Svg>
+  );
+  if (frame <= 0 && radius <= 0) {
+    return svg;
+  }
+  return (
+    <View style={{ padding: frame, borderRadius: radius, backgroundColor: light }}>{svg}</View>
   );
 }

@@ -1,19 +1,10 @@
 import { useMemo, useState } from "react";
-import { View, Text } from "react-native";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { View } from "react-native";
+import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { useTranslation } from "react-i18next";
-import {
-  Screen,
-  Crumb,
-  Body,
-  SectionTitle,
-  ListRow,
-  Avatar,
-  Chip,
-  Ctx,
-} from "../../components/ui";
-import { Icon } from "../../components/icons";
-import { semantic, type as ty } from "../../theme/tokens";
+import { Screen, Header, Body, ListRow, Group, Avatar, Chip } from "../../components/ui";
+import { Hint, ErrorText } from "../../components/groups/FormBits";
+import { space } from "../../theme/tokens";
 import {
   useGroupMembers,
   useRemoveMember,
@@ -21,14 +12,14 @@ import {
   useUserGroupsWithChannels,
   sortMembersByRole,
 } from "../../hooks/queries";
-import { activeLocale, upper } from "../../i18n";
+import { activeLocale } from "../../i18n";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 
 function Members() {
   const { t } = useTranslation("channels");
-  const router = useRouter();
-  const { groupId } = useLocalSearchParams<{ groupId?: string }>();
+  const router = useNav();
+  const { groupId } = useRouteParams<{ groupId?: string }>();
   const id = groupId ?? null;
   const currentUser = appStore.currentUser;
 
@@ -69,128 +60,112 @@ function Members() {
   };
 
   return (
-    <Screen testID="screen-group-members">
-      <Crumb
-        segs={[
-          { label: upper(t("nav:breadcrumb.groups")) },
-          { label: group?.name ?? t("mobile:group.common.fallbackName") },
-          { label: t("group.members"), leaf: true },
-        ]}
-        end={String(members.length || 0)}
+    <Screen testID="screen-group-members" aboveTabBar={router.inPane}>
+      <Header onBack={router.onBack}
+        title={t("mobile:group.panel.members")}
+        subtitle={
+          group
+            ? `${group.name} · ${t("mobile:group.detail.memberCount", { count: members.length })}`
+            : t("mobile:group.detail.memberCount", { count: members.length })
+        }
       />
-      <Body>
-        <SectionTitle>{upper(t("group.members"))}</SectionTitle>
-        {isLoading ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.mute,
-              paddingHorizontal: 18,
-              paddingVertical: 12,
-            }}
-          >
-            {t("common:states.loading")}
-          </Text>
+      <Body contentContainerStyle={{ padding: space.xxl, gap: space.lg }}>
+        {isLoading ? <Hint>{t("common:states.loading")}</Hint> : null}
+        {sortedMembers.length > 0 ? (
+          <Group>
+            {sortedMembers.map((m) => {
+              const isMe = m.user_id === currentUser?.id;
+              const isOwner = m.role === "owner";
+              const isAdmin = m.role === "admin";
+              const armed = confirmRemove === m.user_id;
+              const handle = `@${m.username ?? m.user_id.slice(0, 8)}`;
+              const name = isMe ? `${handle} ${t("members.self")}` : handle;
+              const role = isOwner
+                ? t("mobile:group.members.roleOwner")
+                : isAdmin
+                  ? t("mobile:group.members.roleAdmin")
+                  : t("mobile:group.members.joined", {
+                      date: new Date(m.joined_at).toLocaleDateString(activeLocale()),
+                    });
+              return (
+                <View key={m.user_id}>
+                  <ListRow
+                    testID={`row-member-${m.user_id}`}
+                    minHeight={64}
+                    glyph={<Avatar label={m.username || m.user_id} variant={isMe ? "self" : "default"} />}
+                    name={name}
+                    sub={role}
+                    chevron={!isMe}
+                    onPress={
+                      isMe
+                        ? undefined
+                        : () =>
+                            router.push({
+                              pathname: "/user/[id]",
+                              params: { id: m.user_id },
+                            })
+                    }
+                  />
+                  {/* Admin actions sit under the member, not inside the
+                      row, so the row stays one control with one label. */}
+                  {iAmAdmin && !isMe && !isOwner ? (
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        flexWrap: "wrap",
+                        gap: space.sm,
+                        paddingStart: 70,
+                        paddingEnd: space.xl,
+                        paddingBottom: space.sm,
+                      }}
+                    >
+                      <Chip
+                        variant="outline"
+                        selected={isAdmin}
+                        testID={`btn-toggle-role-${m.user_id}`}
+                        accessibilityLabel={`${
+                          isAdmin
+                            ? t("mobile:group.members.removeAdmin")
+                            : t("mobile:group.members.makeAdmin")
+                        }, ${handle}`}
+                        onPress={() => onToggleRole(m.user_id, m.role)}
+                      >
+                        {setRole.isPending
+                          ? "…"
+                          : isAdmin
+                            ? t("mobile:group.members.removeAdmin")
+                            : t("mobile:group.members.makeAdmin")}
+                      </Chip>
+                      <Chip
+                        variant="outline"
+                        selected={armed}
+                        testID={`btn-remove-member-${m.user_id}`}
+                        accessibilityLabel={
+                          armed
+                            ? t("mobile:group.settings.tapAgainToConfirm")
+                            : t("mobile:group.members.removeLabel", { name: handle })
+                        }
+                        onPress={() => onRemove(m.user_id)}
+                      >
+                        {removeMember.isPending && armed
+                          ? "…"
+                          : armed
+                            ? t("mobile:group.common.confirm")
+                            : t("mobile:group.common.remove")}
+                      </Chip>
+                    </View>
+                  ) : null}
+                </View>
+              );
+            })}
+          </Group>
         ) : null}
-        {sortedMembers.map((m) => {
-          const isMe = m.user_id === currentUser?.id;
-          const isOwner = m.role === "owner";
-          const isAdmin = m.role === "admin";
-          const armed = confirmRemove === m.user_id;
-          return (
-            <ListRow
-              key={m.user_id}
-              testID={`row-member-${m.user_id}`}
-              minHeight={54}
-              glyph={
-                <Avatar label={(m.username || m.user_id).slice(0, 2)} />
-              }
-              name={
-                <Text
-                  style={{
-                    fontFamily: ty.rowN.fontFamily,
-                    fontSize: 14,
-                    color: semantic.ink,
-                  }}
-                >
-                  @{m.username ?? m.user_id.slice(0, 8)}
-                  {isMe ? ` ${t("members.self")}` : ""}
-                </Text>
-              }
-              sub={
-                isOwner
-                  ? t("mobile:group.members.roleOwner")
-                  : isAdmin
-                    ? t("members.role.admin")
-                    : t("mobile:group.members.joined", {
-                        date: new Date(m.joined_at).toLocaleDateString(activeLocale()),
-                      })
-              }
-              onPress={
-                isMe
-                  ? undefined
-                  : () =>
-                      router.push({
-                        pathname: "/user/[id]",
-                        params: { id: m.user_id },
-                      })
-              }
-              end={
-                iAmAdmin && !isMe && !isOwner ? (
-                  <View style={{ flexDirection: "row", gap: 6 }}>
-                    <Chip
-                      variant={isAdmin ? "on" : "default"}
-                      testID={`btn-toggle-role-${m.user_id}`}
-                      accessibilityLabel={
-                        isAdmin
-                          ? t("mobile:group.members.removeAdmin")
-                          : t("mobile:group.members.makeAdmin")
-                      }
-                      onPress={() => onToggleRole(m.user_id, m.role)}
-                    >
-                      {setRole.isPending
-                        ? "…"
-                        : isAdmin
-                          ? t("members.adminToggle")
-                          : t("mobile:group.members.makeAdmin")}
-                    </Chip>
-                    <Chip
-                      variant={armed ? "on" : "default"}
-                      testID={`btn-remove-member-${m.user_id}`}
-                      accessibilityLabel={t("kickMember.pageTitle")}
-                      onPress={() => onRemove(m.user_id)}
-                    >
-                      {removeMember.isPending && armed
-                        ? "…"
-                        : armed
-                          ? t("mobile:group.common.confirm")
-                          : t("mobile:group.common.remove")}
-                    </Chip>
-                  </View>
-                ) : null
-              }
-            />
-          );
-        })}
         {removeMember.isError ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 12,
-              color: semantic.danger,
-              paddingHorizontal: 18,
-              paddingTop: 6,
-            }}
-          >
+          <ErrorText>
             {(removeMember.error as Error).message || t("kickMember.removeFailed")}
-          </Text>
+          </ErrorText>
         ) : null}
       </Body>
-      <Ctx
-        cr={group?.name ?? upper(t("mobile:group.common.fallbackName"))}
-        name={t("group.members")}
-      />
     </Screen>
   );
 }

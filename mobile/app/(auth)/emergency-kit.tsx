@@ -1,21 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { View, Text, Pressable, ScrollView, Share } from "react-native";
+import { View, Text, Share } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
-import {
-  Screen,
-  Crumb,
-  Body,
-  Card,
-  Button,
-  BottomAction,
-} from "../../components/ui";
+import { Screen, Body, Card, Button, BottomAction, CheckRow } from "../../components/ui";
 import { Icon } from "../../components/icons";
-import { semantic, type as ty, fonts, r } from "../../theme/tokens";
+import { Heading } from "../../components/auth/Heading";
+import { semantic, type as ty, fonts } from "../../theme/tokens";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
-import i18n, { upper } from "../../i18n";
+import i18n from "../../i18n";
 
 /**
  * Emergency Kit — shown once, right after a brand-new account's PIN is set.
@@ -31,7 +25,7 @@ import i18n, { upper } from "../../i18n";
  * real ways OFF this screen. `selectable` text alone was not one: it is an
  * undiscoverable long-press, it selects a 40-odd character mono string by
  * hand, and it is the single worst string in the product to mis-transcribe.
- * COPY and SAVE below mirror the desktop `SaveSecretKeyScreen` affordances.
+ * Copy and Save below mirror the desktop `SaveSecretKeyScreen` affordances.
  */
 
 // How long a copy outcome stays on the button before returning to idle.
@@ -84,6 +78,8 @@ function EmergencyKit() {
     return null;
   }
 
+  const keyGroups = pendingSecretKey.split("-");
+
   const onContinue = () => {
     setPendingSecretKey(null);
     router.replace("/(auth)/initializing");
@@ -118,45 +114,45 @@ function EmergencyKit() {
     );
   };
 
+  const copyLabel =
+    copyState === "copied"
+      ? t("secretKey.copied")
+      : copyState === "failed"
+        ? t("mobile:auth.emergencyKit.copyFailed")
+        : t("common:actions.copy");
+
   return (
     <Screen testID="screen-auth-emergency-kit" centered>
-      <Crumb
-        segs={[
-          { label: upper(t("mobile:auth.crumb.auth")) },
-          { label: t("mobile:auth.crumb.emergencyKit"), leaf: true },
-        ]}
-      />
-      <Body>
-        <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 18, gap: 18, paddingBottom: 24 }}>
-          <View style={{ gap: 8 }}>
-            <Text style={[ty.h1, { color: semantic.ink }]}>
-              {t("mobile:auth.emergencyKit.title")}
-            </Text>
-            <Text
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 13,
-                lineHeight: 19,
-                color: semantic.mute,
-              }}
-            >
-              {t("mobile:auth.emergencyKit.intro")}
-            </Text>
-          </View>
+      <Body contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 52, gap: 24 }}>
+        <Heading
+          title={t("mobile:auth.emergencyKit.title")}
+          subtitle={t("mobile:auth.emergencyKit.intro")}
+        />
 
-          <Card style={{ borderColor: semantic.accent }}>
-            <Text
-              selectable
-              style={{
-                fontFamily: fonts.mono400,
-                fontSize: 14,
-                lineHeight: 22,
-                color: semantic.accent,
-                letterSpacing: 0.4,
-              }}
+        <View style={{ gap: 12 }}>
+          <Card>
+            {/* One Text per hyphen group so a line only ever breaks between
+                groups — Android's breaker otherwise strands a lone "-86394".
+                Copy and Save below carry the exact string. */}
+            <View
+              accessible
+              accessibilityLabel={pendingSecretKey}
+              style={{ flexDirection: "row", flexWrap: "wrap" }}
             >
-              {pendingSecretKey}
-            </Text>
+              {keyGroups.map((g, i) => (
+                <Text
+                  key={i}
+                  style={{
+                    fontFamily: fonts.mono400,
+                    fontSize: 17,
+                    lineHeight: 26,
+                    color: semantic.text,
+                  }}
+                >
+                  {i < keyGroups.length - 1 ? `${g}-` : g}
+                </Text>
+              ))}
+            </View>
           </Card>
 
           <View style={{ flexDirection: "row", gap: 8 }}>
@@ -164,99 +160,63 @@ function EmergencyKit() {
               <Button
                 full
                 testID="btn-copy-recovery-key"
-                variant={copyState === "failed" ? "danger" : "primary"}
+                variant="secondary"
                 onPress={onCopy}
                 icon={
                   copyState === "copied" ? (
-                    <Icon.check color="#0a0907" />
+                    <Icon.check size={18} color={semantic.text} />
                   ) : copyState === "failed" ? (
-                    <Icon.alert color={semantic.danger} />
+                    <Icon.alert size={18} color={semantic.danger} />
                   ) : (
-                    <Icon.copy color="#0a0907" />
+                    <Icon.copy size={18} color={semantic.text} />
                   )
                 }
               >
-                {upper(
-                  copyState === "copied"
-                    ? t("secretKey.copied")
-                    : copyState === "failed"
-                      ? t("mobile:auth.emergencyKit.copyFailed")
-                      : t("common:actions.copy"),
-                )}
+                {copyLabel}
               </Button>
             </View>
             <View style={{ flex: 1 }}>
               <Button
                 full
                 testID="btn-share-recovery-key"
+                variant="secondary"
                 onPress={onShare}
-                icon={<Icon.share color={semantic.ink} />}
+                icon={<Icon.share size={18} color={semantic.text} />}
               >
-                {upper(t("common:actions.save"))}
+                {t("common:actions.save")}
               </Button>
             </View>
           </View>
-
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
-            <Icon.shield color={semantic.mute} />
+          {/* The copy outcome, announced: the button label alone changes
+              silently for a screen reader. */}
+          {copyState !== "idle" ? (
             <Text
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 11,
-                color: semantic.mute,
-                flex: 1,
-                lineHeight: 16,
-              }}
+              accessibilityLiveRegion="polite"
+              style={[ty.secondary, { textAlign: "center" }]}
             >
-              {t("mobile:auth.emergencyKit.warning")}
+              {copyLabel}
             </Text>
+          ) : null}
+        </View>
+
+        <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
+          <View style={{ paddingTop: 2 }}>
+            <Icon.shield size={18} color={semantic.dim} />
           </View>
+          <Text style={[ty.secondary, { flex: 1 }]}>
+            {t("mobile:auth.emergencyKit.warning")}
+          </Text>
+        </View>
 
-          <Pressable
-            onPress={() => setAcknowledged((v) => !v)}
-            testID="toggle-recovery-ack"
-            accessibilityRole="checkbox"
-            accessibilityLabel={t("mobile:auth.emergencyKit.ackLabel")}
-            accessibilityState={{ checked: acknowledged }}
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 10,
-              paddingVertical: 8,
-            }}
-          >
-            <View
-              style={{
-                width: 18,
-                height: 18,
-                borderWidth: 1,
-                borderColor: acknowledged ? semantic.accent : semantic.hairStrong,
-                backgroundColor: acknowledged ? semantic.accent : "transparent",
-                borderRadius: r.sm,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              {acknowledged ? <Icon.check color="#0a0907" /> : null}
-            </View>
-            <Text
-              style={{
-                flex: 1,
-                fontFamily: ty.body.fontFamily,
-                fontSize: 13,
-                color: semantic.ink,
-              }}
-            >
-              {t("mobile:auth.emergencyKit.ackText")}
-            </Text>
-          </Pressable>
-        </ScrollView>
+        {/* The acknowledgement: one full-width checkbox row (the shared
+            CheckRow — a clearly visible box, accent with a check when on). */}
+        <CheckRow
+          testID="toggle-recovery-ack"
+          checked={acknowledged}
+          onPress={() => setAcknowledged((v) => !v)}
+          label={t("mobile:auth.emergencyKit.ackText")}
+          accessibilityLabel={t("mobile:auth.emergencyKit.ackLabel")}
+        />
       </Body>
       <BottomAction>
         <Button
@@ -265,9 +225,9 @@ function EmergencyKit() {
           variant="primary"
           onPress={onContinue}
           disabled={!acknowledged}
-          iconRight={<Icon.arrowRight color="#0a0907" />}
+          iconRight={<Icon.arrowRight size={18} color={semantic.onAccent} />}
         >
-          {upper(t("pinCreate.continue"))}
+          {t("pinCreate.continue")}
         </Button>
       </BottomAction>
     </Screen>

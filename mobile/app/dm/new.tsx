@@ -1,25 +1,24 @@
 import { useState } from "react";
-import { View, Text, Pressable } from "react-native";
-import { useRouter } from "expo-router";
+import { View } from "react-native";
+import { useOpenConversation } from "../../hooks/useOpenConversation";
 import { useTranslation } from "react-i18next";
 import {
   Screen,
-  Crumb,
+  Header,
   Body,
   Field,
   ListRow,
   Avatar,
-  Ctx,
-  CtxAct,
   Button,
+  Group,
+  Txt,
 } from "../../components/ui";
 import { Icon } from "../../components/icons";
-import { semantic, type as ty } from "../../theme/tokens";
+import { semantic, space, layout } from "../../theme/tokens";
 import { useUserSearch, useCreateDM } from "../../hooks/queries";
-import { upper } from "../../i18n";
 
 export default function NewDM() {
-  const router = useRouter();
+  const { openConversation } = useOpenConversation();
   const { t } = useTranslation("mobile");
   const [query, setQuery] = useState("");
   // Exact-match lookup on Find / return only, never while typing: per-key
@@ -40,10 +39,9 @@ export default function NewDM() {
       { memberIds: [userId] },
       {
         onSuccess: (channel) => {
-          router.replace({
-            pathname: "/chat/[id]",
-            params: { id: channel.id, kind: "dm" },
-          });
+          // Phones: replace this form with the DM. iPad: the DM opens in the
+          // Direct tab's two-pane.
+          openConversation({ id: channel.id, kind: "dm" }, { replace: true });
         },
       },
     );
@@ -52,154 +50,85 @@ export default function NewDM() {
   const found = search.data;
   const showEmpty =
     !search.isFetching && !search.isError && submitted.length >= 2 && !found;
-  const directLabel = upper(t("tabs.direct"));
 
   return (
-    <Screen testID="screen-dm-new" centered>
-      <Crumb
-        segs={[{ label: directLabel }, { label: t("dm.new"), leaf: true }]}
-      />
-      <Body>
-        <View style={{ paddingHorizontal: 18, paddingTop: 12, gap: 8 }}>
-          <Text style={ty.label}>
-            {upper(t("dms:start.identifierLabel"))}
-          </Text>
+    <Screen testID="screen-dm-new">
+      <Header title={t("direct.newMessage")} backTo={t("tabs.direct")} />
+      <Body contentContainerStyle={{ padding: space.xxl, gap: space.lg }}>
+        <View style={{ gap: space.sm }}>
+          <Txt variant="section">
+            {t("dm.identifierLabel")}
+          </Txt>
           <Field
-            amber
             value={query}
             onChangeText={setQuery}
             onSubmitEditing={submit}
             returnKeyType="search"
+            autoCorrect={false}
             testID="input-user-search"
-            accessibilityLabel={t("dms:start.identifierLabel")}
-            icon={<Icon.search color={semantic.mute} />}
+            accessibilityLabel={t("dm.identifierLabel")}
+            placeholder={t("dms:start.identifierPlaceholder")}
+            icon={<Icon.search size={18} color={semantic.muted} />}
           />
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 11,
-              color: semantic.mute,
-            }}
-          >
+          <Txt variant="meta">
             {t("dm.exactMatchHint")}
-          </Text>
-          <Button
-            testID="btn-user-search"
-            variant="subtle"
-            full
-            disabled={query.trim().length < 2 || search.isFetching}
-            onPress={submit}
-          >
-            {upper(search.isFetching ? t("search:view.searching") : t("search:group.submit"))}
-          </Button>
+          </Txt>
         </View>
+        <Button
+          testID="btn-user-search"
+          variant="secondary"
+          full
+          disabled={query.trim().length < 2 || search.isFetching}
+          onPress={submit}
+        >
+          {search.isFetching
+            ? t("search:view.searching")
+            : t("search:group.submit")}
+        </Button>
 
-        <View style={{ paddingTop: 8 }}>
-          {search.isLoading && submitted.length >= 2 ? (
-            <Text
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 13,
-                color: semantic.mute,
-                paddingHorizontal: 18,
-                paddingVertical: 12,
-              }}
-            >
-              {t("search:view.searching")}
-            </Text>
-          ) : null}
-          {search.isError ? (
-            <Text
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 13,
-                color: semantic.danger,
-                paddingHorizontal: 18,
-                paddingVertical: 12,
-              }}
-            >
-              {t("dm.searchFailed")}
-            </Text>
-          ) : null}
-          {showEmpty ? (
-            <Text
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 13,
-                color: semantic.mute,
-                paddingHorizontal: 18,
-                paddingVertical: 12,
-              }}
-            >
-              {t("dms:start.userNotFound")}
-            </Text>
-          ) : null}
-          {found ? (
+        {search.isLoading && submitted.length >= 2 ? (
+          <Txt variant="secondary">
+            {t("search:view.searching")}
+          </Txt>
+        ) : null}
+        {search.isError ? (
+          <Txt variant="secondary">
+            {t("dm.searchFailed")}
+          </Txt>
+        ) : null}
+        {showEmpty ? (
+          <Txt variant="secondary">
+            {t("dms:start.userNotFound")}
+          </Txt>
+        ) : null}
+        {found ? (
+          <Group>
             <ListRow
               testID={`row-user-${found.id}`}
               accessibilityLabel={t("dm.startWith", { name: found.username })}
               minHeight={64}
               glyph={
                 <Avatar
-                  label={(found.username || found.email || "us").slice(0, 2)}
+                  label={found.username || found.email || undefined}
+                  size={layout.touchMin}
                 />
               }
-              name={
-                <Text
-                  style={{
-                    fontFamily: ty.rowN.fontFamily,
-                    fontSize: 15,
-                    color: semantic.ink,
-                  }}
-                >
-                  @{found.username}
-                </Text>
-              }
-              sub={
-                found.preferred_name || found.email || undefined
-              }
+              name={`@${found.username}`}
+              sub={found.preferred_name || found.email || undefined}
               onPress={() => onStartDM(found.id)}
-              end={<Icon.fwd color={semantic.mute} />}
+              chevron
             />
-          ) : null}
-          {createDM.isError ? (
-            <Text
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 12,
-                color: semantic.danger,
-                paddingHorizontal: 18,
-                paddingTop: 8,
-              }}
-            >
-              {(createDM.error as Error).message ||
-                t("dms:start.startFailed")}
-            </Text>
-          ) : null}
-        </View>
+          </Group>
+        ) : null}
+        {createDM.isError ? (
+          <Txt
+            variant="secondary"
+            style={{ color: semantic.accent }}
+          >
+            {(createDM.error as Error).message || t("dms:start.startFailed")}
+          </Txt>
+        ) : null}
       </Body>
-      <Ctx
-        cr={directLabel}
-        name={
-          <Pressable onPress={() => router.back()}>
-            <Text
-              style={{
-                fontFamily: ty.rowN.fontFamily,
-                fontSize: 13,
-                color: semantic.ink,
-              }}
-            >
-              ← {t("dm.backToInbox")}
-            </Text>
-          </Pressable>
-        }
-        actions={
-          <CtxAct
-            icon={<Icon.exit color={semantic.ink2} />}
-            onPress={() => router.back()}
-          />
-        }
-      />
     </Screen>
   );
 }

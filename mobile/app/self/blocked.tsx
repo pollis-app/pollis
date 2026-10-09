@@ -1,17 +1,9 @@
-import { View, Text } from "react-native";
+import { Text } from "react-native";
 import { useTranslation } from "react-i18next";
-import {
-  Screen,
-  Crumb,
-  Body,
-  SectionTitle,
-  ListRow,
-  Avatar,
-  Chip,
-  Ctx,
-} from "../../components/ui";
-import { semantic, type as ty } from "../../theme/tokens";
-import { activeLocale, upper } from "../../i18n";
+import { Screen, Header, Body, Group, Avatar, Chip, ActionRow } from "../../components/ui";
+import { ErrorText } from "../../components/self/SettingsField";
+import { type as ty, space } from "../../theme/tokens";
+import { activeLocale } from "../../i18n";
 import { useBlockedUsers, useUnblockUser } from "../../hooks/queries";
 
 export default function Blocked() {
@@ -20,86 +12,53 @@ export default function Blocked() {
   const unblock = useUnblockUser();
 
   return (
-    <Screen testID="screen-self-blocked" centered>
-      <Crumb
-        segs={[
-          { label: upper(t("mobile:self.title")) },
-          { label: t("mobile:self.blocked.title"), leaf: true },
-        ]}
-        end={String(blocked.length)}
+    <Screen testID="screen-self-blocked">
+      <Header
+        title={t("mobile:self.security.blockedUsers")}
+        subtitle={isLoading ? undefined : String(blocked.length)}
+        backTo={t("settings:security.title")}
       />
-      <Body>
-        <SectionTitle>{upper(t("blocked.pageTitle"))}</SectionTitle>
-        {isLoading ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.mute,
-              paddingHorizontal: 18,
-              paddingVertical: 12,
-            }}
-          >
-            {t("common:states.loading")}
-          </Text>
-        ) : null}
+      <Body contentContainerStyle={{ paddingHorizontal: space.xxl, paddingTop: space.xxl, gap: space.lg }}>
+        {isLoading ? <Text style={ty.secondary}>{t("common:states.loading")}</Text> : null}
         {!isLoading && blocked.length === 0 ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.mute,
-              paddingHorizontal: 18,
-              paddingVertical: 12,
-            }}
-          >
-            {t("blocked.empty")}
-          </Text>
+          <Text style={ty.secondary}>{t("blocked.empty")}</Text>
         ) : null}
-        {blocked.map((b) => {
-          const handle = b.username ?? b.user_id.slice(0, 8);
-          return (
-            <ListRow
-              key={b.user_id}
-              testID={`row-blocked-${b.user_id}`}
-              minHeight={54}
-              glyph={<Avatar label={handle.slice(0, 2)} />}
-              name={`@${handle}`}
-              nameStyle={{ fontSize: 14 }}
-              sub={t("mobile:self.blocked.blockedOn", {
+        {blocked.length > 0 ? (
+          <Group>
+            {blocked.map((b) => {
+              const handle = b.username ?? b.user_id.slice(0, 8);
+              const sub = t("mobile:self.blocked.blockedOn", {
                 date: new Date(b.blocked_at).toLocaleDateString(activeLocale()),
-              })}
-              end={
-                <Chip
-                  testID={`btn-unblock-${b.user_id}`}
-                  accessibilityLabel={t("mobile:self.blocked.unblock")}
-                  onPress={() => unblock.mutate(b.user_id)}
-                >
-                  {unblock.isPending ? "…" : t("mobile:self.blocked.unblock")}
-                </Chip>
-              }
-            />
-          );
-        })}
+              });
+              return (
+                <ActionRow
+                  key={b.user_id}
+                  testID={`row-blocked-${b.user_id}`}
+                  glyph={<Avatar label={handle} />}
+                  name={`@${handle}`}
+                  sub={sub}
+                  action={
+                    <Chip
+                      variant="outline"
+                      testID={`btn-unblock-${b.user_id}`}
+                      accessibilityLabel={`${t("mobile:self.blocked.unblock")} @${handle}`}
+                      disabled={unblock.isPending}
+                      onPress={() => unblock.mutate(b.user_id)}
+                    >
+                      {t("mobile:self.blocked.unblock")}
+                    </Chip>
+                  }
+                />
+              );
+            })}
+          </Group>
+        ) : null}
         {unblock.isError ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 12,
-              color: semantic.danger,
-              paddingHorizontal: 18,
-              paddingTop: 6,
-            }}
-          >
-            {(unblock.error as Error).message ||
-              t("mobile:self.blocked.unblockFailed")}
-          </Text>
+          <ErrorText>
+            {(unblock.error as Error).message || t("mobile:self.blocked.unblockFailed")}
+          </ErrorText>
         ) : null}
       </Body>
-      <Ctx
-        cr={upper(t("mobile:self.title"))}
-        name={t("mobile:self.blocked.title")}
-      />
     </Screen>
   );
 }

@@ -91,7 +91,12 @@ function applyLayoutDirection(language: string): void {
   I18nManager.forceRTL(wantRtl);
 }
 
-applyLayoutDirection(i18n.language);
+// No `applyLayoutDirection` at module load: `i18n.language` is still the
+// device-locale guess here, not the stored choice, and Android's Fabric
+// re-reads the persisted direction on every root measure, so writing the
+// guess (e.g. `forceRTL(false)` for an Arabic pick on an English phone)
+// during the async `hydrateLanguage` window un-mirrors the whole launch.
+// `hydrateLanguage` applies the direction once the real language is known.
 
 /**
  * Apply the stored device choice, if any. Resolves once the language on

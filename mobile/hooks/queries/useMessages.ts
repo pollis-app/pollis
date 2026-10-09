@@ -1,7 +1,8 @@
 // Message read + send + ingest hooks. Mirrors the read paths of
-// `frontend/src/hooks/queries/useMessages.ts` — `get_channel_messages` and
-// `get_dm_messages` both invoke envelope-ingest internally before reading
-// the local DB, so a single call gives a fresh page.
+// `frontend/src/hooks/queries/useMessages.ts` — pages are LOCAL reads
+// (`read_channel_messages` / `read_dm_messages`), so a conversation renders
+// at once; envelope ingest (`useIngestConversation`, on chat focus, realtime
+// and push) runs off the render path and invalidates the page when it lands.
 //
 // Pagination: `useMessages` is an infinite query over cursor pages. The
 // cursor for each older page is derived from the PREVIOUS PAGE'S DATA
@@ -20,9 +21,11 @@ import {
   type InfiniteData,
 } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
+import i18n from "../../i18n";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
 import type { MessageAttachment } from "../../types";
+import { searchQueryKeys } from "./useSearch";
 import {
   buildMessageContent,
   type PickedAttachment,
@@ -227,12 +230,18 @@ export function useMessages(
       if (!conversationId || !kind || !currentUser) {
         return { messages: [], nextCursor: null };
       }
+      // Local-only reads, like desktop's useMessages. The `get_*` commands
+      // ingest from the DS before reading, so the first page waited on the
+      // network — and on a just-created channel, on MLS setup — leaving an
+      // empty conversation on "Loading messages…" instead of "No messages
+      // yet". Ingest runs separately (the chat's focus ingest, realtime,
+      // push) and invalidates this query when new envelopes land.
       const cmd =
-        kind === "channel" ? "get_channel_messages" : "get_dm_messages";
+        kind === "channel" ? "read_channel_messages" : "read_dm_messages";
       const args: Record<string, unknown> =
         kind === "channel"
-          ? { userId: currentUser.id, channelId: conversationId, limit }
-          : { userId: currentUser.id, dmChannelId: conversationId, limit };
+          ? { channelId: conversationId, limit }
+          : { dmChannelId: conversationId, limit };
       if (pageParam) {
         args.cursor = pageParam;
       }
@@ -359,6 +368,10 @@ export function useSendMessage(
       return { previous, optimisticId, key, threadId: vars.threadId };
     },
     onSuccess: (confirmed, _vars, ctx) => {
+      // The row reaches the local store (and its FTS index) only when
+      // send_message resolves — after the optimistic stub is already on
+      // screen. A search that ran in between cached "no matches"; drop it.
+      queryClient.invalidateQueries({ queryKey: searchQueryKeys.all });
       if (!ctx) {
         return;
       }
@@ -493,6 +506,10 @@ export function useEditMessage(
       );
       return { previous, key };
     },
+    onSuccess: () => {
+      // The local store (and its search index) changed; cached hits are stale.
+      queryClient.invalidateQueries({ queryKey: searchQueryKeys.all });
+    },
     onError: (_e, _vars, ctx) => {
       if (ctx?.previous) {
         queryClient.setQueryData(ctx.key, ctx.previous);
@@ -529,6 +546,10 @@ export function useDeleteMessage(
         mapPages(cache, (msgs) => msgs.filter((m) => m.id !== messageId)),
       );
       return { previous, key };
+    },
+    onSuccess: () => {
+      // The local store (and its search index) changed; cached hits are stale.
+      queryClient.invalidateQueries({ queryKey: searchQueryKeys.all });
     },
     onError: (_e, _vars, ctx) => {
       if (ctx?.previous) {
@@ -581,6 +602,8 @@ export function useIngestConversation() {
         queryClient.invalidateQueries({
           queryKey: messageQueryKeys.threadSummaries(conversationId),
         });
+        // Newly decrypted rows are newly searchable.
+        queryClient.invalidateQueries({ queryKey: searchQueryKeys.all });
       } catch (e) {
         // Best-effort — ingest is advisory. The next refetch will retry.
         console.warn("[useIngestConversation] ingest failed:", e);
@@ -646,13 +669,13 @@ export function previewText(message: Message | undefined): string | null {
     return null;
   }
   if (message.deleted_at) {
-    return "Message deleted";
+    return i18n.t("mobile:direct.previewDeleted");
   }
   if (message.content) {
     return message.content;
   }
   if (message.attachments && message.attachments.length > 0) {
-    return "Attachment";
+    return i18n.t("mobile:direct.previewAttachment");
   }
   return null;
 }

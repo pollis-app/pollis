@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, FlatList } from "react-native";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { useTranslation } from "react-i18next";
-import { Screen, Crumb, Ctx, CtxAct } from "../../components/ui";
+import { Screen, Header, IconButton } from "../../components/ui";
 import { Icon } from "../../components/icons";
-import { palette, semantic, type as ty } from "../../theme/tokens";
-import { dayKey, dayLabel, timeLabel } from "../../components/chat/dates";
+import { semantic, type as ty } from "../../theme/tokens";
+import {
+  GROUP_WINDOW_MS,
+  dayKey,
+  dayLabel,
+  timeLabel,
+} from "../../components/chat/dates";
 import { DaySeparator } from "../../components/chat/DaySeparator";
 import { MessageRow } from "../../components/chat/MessageRow";
 import { Composer } from "../../components/chat/Composer";
@@ -14,6 +19,7 @@ import { EditBar } from "../../components/chat/EditBar";
 import { MessageActionsSheet } from "../../components/chat/MessageActionsSheet";
 import { ChannelMenuSheet } from "../../components/chat/ChannelMenuSheet";
 import { EmojiPickerSheet } from "../../components/emoji/EmojiPickerSheet";
+import { afterSheetClose } from "../../components/chat/SheetOverlay";
 import {
   useMessages,
   useSendMessage,
@@ -27,6 +33,8 @@ import {
   useThreadSummaries,
   useSavedMessageIds,
   useToggleSavedMessage,
+  useUserGroupsWithChannels,
+  useGroupMembers,
   flattenPages,
   type ConversationKind,
   type Message,
@@ -42,7 +50,9 @@ import type { PickedAttachment } from "../../lib/attachments";
 import { ensurePushRegistration } from "../../lib/push";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
-import { upper } from "../../i18n";
+import { useNav } from "../../components/pane/paneContext";
+import { useIsRegular } from "../../hooks/useLayoutClass";
+import { selectConversation } from "../../hooks/useOpenConversation";
 
 // Props let this screen double as an embedded right-pane conversation on the
 // two-pane (regular/iPad) layout. Route usage passes NO props, so every value
@@ -59,10 +69,12 @@ type ChatViewProps = {
 // separators, newest first.
 type ChatListItem =
   | { type: "sep"; key: string; label: string }
-  | { type: "msg"; key: string; message: Message };
+  | { type: "msg"; key: string; message: Message; continued: boolean };
 
 function TextChat(props: ChatViewProps = {}) {
-  const router = useRouter();
+  // Embedded in the iPad two-pane, pushes of info / thread / profile pages
+  // land in the detail pane (useNav); on phones it is the router.
+  const router = useNav();
   const { t } = useTranslation("mobile");
   const params = useLocalSearchParams<{
     id?: string;
@@ -278,13 +290,22 @@ function TextChat(props: ChatViewProps = {}) {
       .filter((m) => !m.thread_id || m.thread_id === m.id);
     const out: ChatListItem[] = [];
     let lastKey = "";
+    let prev: Message | null = null;
     for (const m of chrono) {
       const k = dayKey(m.created_at);
       if (k !== lastKey) {
         out.push({ type: "sep", key: `sep-${k}`, label: dayLabel(m.created_at) });
         lastKey = k;
+        prev = null;
       }
-      out.push({ type: "msg", key: m.id, message: m });
+      // Discord-style grouping: the same sender again within the window
+      // (and on the same day) hangs under the previous header.
+      const continued =
+        prev !== null &&
+        prev.sender_id === m.sender_id &&
+        m.created_at - prev.created_at < GROUP_WINDOW_MS;
+      out.push({ type: "msg", key: m.id, message: m, continued });
+      prev = m;
     }
     out.reverse();
     return out;
@@ -315,8 +336,23 @@ function TextChat(props: ChatViewProps = {}) {
     [reactionsByMessage, currentUser, toggleReaction],
   );
 
-  const ctxLabel = upper(
-    kind === "dm" ? t("tabs.direct") : t("channels:channel.fallbackTitle"),
+  // Header context for a channel: its group's name (subtitle + "Back to"),
+  // the member count, and the channel's own name when the opener passed none
+  // (the two-pane groups layout embeds this view without a name).
+  const { data: groupsWithChannels } = useUserGroupsWithChannels();
+  const group = useMemo(
+    () =>
+      kind === "channel" && groupId
+        ? groupsWithChannels?.find((g) => g.id === groupId) ?? null
+        : null,
+    [kind, groupId, groupsWithChannels],
+  );
+  const channelName = useMemo(
+    () => group?.channels.find((c) => c.id === conversationId)?.name ?? null,
+    [group, conversationId],
+  );
+  const { data: groupMembers } = useGroupMembers(
+    kind === "channel" ? groupId ?? null : null,
   );
 
   // Header title: prefer the human name passed in by the opener (channel name
@@ -333,10 +369,22 @@ function TextChat(props: ChatViewProps = {}) {
 
   const title =
     (displayName && displayName.trim()) ||
+    channelName ||
     peerName ||
     (kind === "dm"
       ? t("dms:conversation.fallbackTitle")
       : t("channels:channel.fallbackTitle"));
+
+  const subtitle =
+    kind === "channel" && group
+      ? groupMembers && groupMembers.length > 0
+        ? `${group.name} · ${t("group.detail.memberCount", {
+            count: groupMembers.length,
+          })}`
+        : group.name
+      : undefined;
+  const backTo =
+    kind === "dm" ? t("tabs.direct") : group?.name ?? undefined;
 
   const openThread = useCallback(
     (rootId: string) => {
@@ -363,6 +411,7 @@ function TextChat(props: ChatViewProps = {}) {
       }
       const m = item.message;
       const mine = currentUser?.id === m.sender_id;
+      const summary = threadSummaries?.get(m.id);
       const name =
         authorName(m.sender_id, m.sender_username, currentUser) ??
         t("chat:list.unknownAuthor");
@@ -384,7 +433,13 @@ function TextChat(props: ChatViewProps = {}) {
           receipt={receiptsByMessage?.get(m.id)}
           peerCount={peerCount}
           showReceipt={mine && isDm}
-          threadCount={threadSummaries?.get(m.id)?.reply_count ?? 0}
+          continued={item.continued}
+          threadCount={summary?.reply_count ?? 0}
+          threadLastReply={
+            summary?.last_reply_at
+              ? timeLabel(new Date(summary.last_reply_at).getTime())
+              : undefined
+          }
           onOpenThread={() => openThread(m.id)}
           mentionNames={mentionNames}
           selfName={selfName}
@@ -426,42 +481,87 @@ function TextChat(props: ChatViewProps = {}) {
 
   const content = (
     <>
-      <Crumb segs={[{ label: ctxLabel, leaf: true }]} />
+      <Header
+        hideBack={embedded}
+        backTo={backTo}
+        title={title}
+        subtitle={subtitle}
+        titleIcon={
+          kind === "channel" ? (
+            <Icon.hash size={15} color={semantic.dim} />
+          ) : undefined
+        }
+        actions={
+          <>
+            <IconButton
+              testID="btn-members"
+              accessibilityLabel={t("nav:panel.ariaLabel")}
+              icon={<Icon.users size={22} color={semantic.text} />}
+              onPress={
+                conversationId && kind
+                  ? () =>
+                      router.push({
+                        pathname: "/conversation/info",
+                        params: {
+                          id: conversationId,
+                          kind,
+                          name: title,
+                          ...(groupId ? { groupId } : {}),
+                        },
+                      })
+                  : undefined
+              }
+            />
+            <IconButton
+              testID="btn-chat-menu"
+              accessibilityLabel={t("common:actions.moreOptions")}
+              icon={<Icon.more size={22} color={semantic.text} />}
+              onPress={() => {
+                if (!conversationId) {
+                  return;
+                }
+                if (kind === "dm") {
+                  router.push({
+                    pathname: "/dm/info",
+                    params: { id: conversationId },
+                  });
+                  return;
+                }
+                if (kind === "channel") {
+                  setMenuOpen(true);
+                }
+              }}
+            />
+          </>
+        }
+      />
       {isLoading && messages.length === 0 ? (
         <Text
-          style={{
-            fontFamily: ty.body.fontFamily,
-            fontSize: 13,
-            color: semantic.mute,
-            paddingHorizontal: 18,
-            paddingTop: 12,
-          }}
+          style={[
+            ty.secondary,
+            { color: semantic.muted, paddingHorizontal: 16, paddingTop: 12 },
+          ]}
         >
           {t("chat.loading")}
         </Text>
       ) : null}
       {isError ? (
         <Text
-          style={{
-            fontFamily: ty.body.fontFamily,
-            fontSize: 13,
-            color: semantic.danger,
-            paddingHorizontal: 18,
-            paddingTop: 12,
-          }}
+          accessibilityRole="alert"
+          style={[
+            ty.secondary,
+            { color: semantic.danger, paddingHorizontal: 16, paddingTop: 12 },
+          ]}
         >
           {t("chat.loadFailed")}
         </Text>
       ) : null}
       {!isLoading && !isError && items.length === 0 ? (
         <Text
-          style={{
-            fontFamily: ty.body.fontFamily,
-            fontSize: 13,
-            color: semantic.mute,
-            paddingHorizontal: 18,
-            paddingTop: 12,
-          }}
+          style={[
+            ty.secondary,
+            { color: semantic.muted, paddingHorizontal: 16, paddingTop: 12 },
+          ]}
         >
           {t("chat:list.empty")}
         </Text>
@@ -483,7 +583,8 @@ function TextChat(props: ChatViewProps = {}) {
         // A thread taller than the viewport is unaffected — `flexGrow` only
         // does anything while the content is shorter than the list.
         contentContainerStyle={{
-          paddingVertical: 4,
+          paddingTop: 4,
+          paddingBottom: 12,
           flexGrow: 1,
           justifyContent: "flex-end",
         }}
@@ -497,13 +598,7 @@ function TextChat(props: ChatViewProps = {}) {
         ListFooterComponent={
           isFetchingNextPage ? (
             <Text
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 12,
-                color: semantic.mute,
-                paddingHorizontal: 18,
-                paddingVertical: 10,
-              }}
+              style={[ty.meta, { paddingHorizontal: 16, paddingVertical: 10 }]}
             >
               {t("chat.loadingOlder")}
             </Text>
@@ -512,86 +607,21 @@ function TextChat(props: ChatViewProps = {}) {
       />
       {sendMessage.isError ? (
         <Text
-          style={{
-            fontFamily: ty.body.fontFamily,
-            fontSize: 12,
-            color: semantic.danger,
-            paddingHorizontal: 18,
-            paddingTop: 8,
-            paddingBottom: 4,
-          }}
+          accessibilityRole="alert"
+          style={[
+            ty.meta,
+            {
+              color: semantic.danger,
+              paddingHorizontal: 16,
+              paddingTop: 8,
+              paddingBottom: 4,
+            },
+          ]}
         >
           {(sendMessage.error as Error).message || t("chat.sendFailed")}
         </Text>
       ) : null}
 
-      <Ctx
-        hideBack={embedded}
-        cr={ctxLabel}
-        name={
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 6,
-              flex: 1,
-              minWidth: 0,
-            }}
-          >
-            {kind === "channel" ? <Icon.hash color={semantic.ink} /> : null}
-            <Text
-              numberOfLines={1}
-              ellipsizeMode="tail"
-              style={{
-                flex: 1,
-                fontFamily: ty.rowN.fontFamily,
-                fontSize: 15,
-                color: semantic.ink,
-              }}
-            >
-              {title}
-            </Text>
-          </View>
-        }
-        actions={
-          <>
-            <CtxAct
-              testID="btn-members"
-              accessibilityLabel={t("channels:group.members")}
-              icon={<Icon.people color={semantic.ink2} />}
-              onPress={
-                kind === "channel" && groupId
-                  ? () =>
-                      router.push({
-                        pathname: "/group/members",
-                        params: { groupId },
-                      })
-                  : undefined
-              }
-            />
-            <CtxAct
-              testID="btn-chat-menu"
-              accessibilityLabel={t("common:actions.moreOptions")}
-              icon={<Icon.kebab color={semantic.ink2} />}
-              onPress={() => {
-                if (!conversationId) {
-                  return;
-                }
-                if (kind === "dm") {
-                  router.push({
-                    pathname: "/dm/info",
-                    params: { id: conversationId },
-                  });
-                  return;
-                }
-                if (kind === "channel") {
-                  setMenuOpen(true);
-                }
-              }}
-            />
-          </>
-        }
-      />
       {editTarget ? (
         <EditBar
           draft={editDraft}
@@ -624,6 +654,14 @@ function TextChat(props: ChatViewProps = {}) {
       {actionTarget ? (
         <MessageActionsSheet
           target={actionTarget}
+          quoteName={
+            authorName(
+              actionTarget.sender_id,
+              actionTarget.sender_username,
+              currentUser,
+            ) ?? t("chat:list.unknownAuthor")
+          }
+          quoteTime={timeLabel(actionTarget.created_at)}
           isOwn={actionTarget.sender_id === currentUser?.id}
           isSaved={savedIds.has(actionTarget.id)}
           onToggleSave={() => {
@@ -644,13 +682,16 @@ function TextChat(props: ChatViewProps = {}) {
             setActionTarget(null);
           }}
           onOpenPicker={() => {
-            setPickerTarget(actionTarget);
+            const m = actionTarget;
             setActionTarget(null);
+            // A second sheet (Modal) only after the first is dismissed — iOS
+            // refuses to present over a modal that is still going away.
+            afterSheetClose(() => setPickerTarget(m));
           }}
           onReplyInThread={() => {
             const rootId = actionTarget.id;
             setActionTarget(null);
-            openThread(rootId);
+            afterSheetClose(() => openThread(rootId));
           }}
           onEdit={() => {
             setEditTarget(actionTarget);
@@ -664,10 +705,12 @@ function TextChat(props: ChatViewProps = {}) {
           onReport={() => {
             const m = actionTarget;
             setActionTarget(null);
-            router.push({
-              pathname: "/report",
-              params: { userId: m.sender_id, conversationId: m.conversation_id, messageId: m.id },
-            });
+            afterSheetClose(() =>
+              router.push({
+                pathname: "/report",
+                params: { userId: m.sender_id, conversationId: m.conversation_id, messageId: m.id },
+              }),
+            );
           }}
           onClose={() => setActionTarget(null)}
         />
@@ -685,21 +728,27 @@ function TextChat(props: ChatViewProps = {}) {
 
       {menuOpen && conversationId ? (
         <ChannelMenuSheet
+          title={title}
           onInfo={() => {
             setMenuOpen(false);
-            router.push({
-              pathname: "/conversation/info",
-              params: { id: conversationId, kind: "channel" },
-            });
+            // Navigate once the sheet's Modal is dismissed (see afterSheetClose).
+            afterSheetClose(() =>
+              router.push({
+                pathname: "/conversation/info",
+                params: { id: conversationId, kind: "channel" },
+              }),
+            );
           }}
           onGroupSettings={
             groupId
               ? () => {
                   setMenuOpen(false);
-                  router.push({
-                    pathname: "/group/settings",
-                    params: { groupId },
-                  });
+                  afterSheetClose(() =>
+                    router.push({
+                      pathname: "/group/settings",
+                      params: { groupId },
+                    }),
+                  );
                 }
               : undefined
           }
@@ -712,13 +761,56 @@ function TextChat(props: ChatViewProps = {}) {
   // Embedded (two-pane right column) sits inside the list screen's own
   // <Screen>/SafeAreaView, so wrap in a plain View to avoid double-insetting.
   // Route usage renders the full <Screen> exactly as before.
+  // The embedded view keeps the route's `screen-chat` id so e2e flows find
+  // the conversation on both layouts.
   return embedded ? (
-    <View style={{ flex: 1, backgroundColor: palette.bg }}>{content}</View>
+    <View testID="screen-chat" style={{ flex: 1, backgroundColor: semantic.bg }}>
+      {content}
+    </View>
   ) : (
-    <Screen testID="screen-chat">{content}</Screen>
+    <Screen testID="screen-chat" wide>
+      {content}
+    </Screen>
   );
 }
 
 export const ChatView = observer(TextChat);
 
-export default observer(TextChat);
+// Regular width (iPad) never shows a conversation full screen: whoever pushed
+// this route (a notification, a permalink, an older call site), the
+// conversation is selected in its tab and drawn in the two-pane's right pane.
+// Call sites use useOpenConversation to go there directly; this is the net
+// for anything that still lands here.
+function ChatRedirect() {
+  const router = useRouter();
+  const params = useLocalSearchParams<{ id?: string; kind?: string; name?: string }>();
+  const { data: groups, isLoading } = useUserGroupsWithChannels();
+  const id = typeof params.id === "string" ? params.id : null;
+  const kind = params.kind === "dm" ? "dm" : "channel";
+  useEffect(() => {
+    if (!id) {
+      router.dismissTo("/(tabs)/groups" as Href);
+      return;
+    }
+    // A channel needs its group, which the groups list knows.
+    if (kind === "channel" && isLoading) {
+      return;
+    }
+    const groupId =
+      kind === "channel"
+        ? groups?.find((g) => g.channels.some((c) => c.id === id))?.id ??
+          appStore.selectedGroupId
+        : null;
+    router.dismissTo(selectConversation({ id, kind }, groupId) as Href);
+    // Once per opened conversation; the router object is stable enough.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, kind, isLoading]);
+  return <Screen testID="screen-chat-redirect" wide>{null}</Screen>;
+}
+
+function ChatRoute() {
+  const regular = useIsRegular();
+  return regular ? <ChatRedirect /> : <ChatView />;
+}
+
+export default observer(ChatRoute);

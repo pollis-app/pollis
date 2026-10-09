@@ -7,7 +7,11 @@ state a simulator can't easily fake. Author/verify these on the Mac:
 
 - **dms.yaml** — the initiator side IS authored; the peer runs `subflows/sign-in.yaml`
   (with `-e MAESTRO_EMAIL=$MAESTRO_PEER_EMAIL`) on a second simulator, accepts the
-  DM request (`btn-accept-request-<id>`), and replies. Assert convergence on both.
+  DM request, and replies. Assert convergence on both. Requests are no longer
+  inline on the Direct tab: `tab-direct` → `row-dm-requests` (shown only while
+  there is at least one pending request; it carries the count) →
+  `screen-dm-requests` → `btn-accept-request-<id>` (or
+  `btn-block-request-<id>`) on that request's `row-request-<id>`.
 - **enrollment** — device A (signed in) approves device B's enrollment. Scaffolded
   as `enrollment-approval.yaml`; it needs the second device, so run it with the
   two-device harness.

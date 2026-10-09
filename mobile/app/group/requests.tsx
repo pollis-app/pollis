@@ -1,28 +1,21 @@
-import { View, Text } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { View } from "react-native";
+import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { useTranslation } from "react-i18next";
-import {
-  Screen,
-  Crumb,
-  Body,
-  SectionTitle,
-  ListRow,
-  Avatar,
-  Chip,
-  Ctx,
-} from "../../components/ui";
-import { semantic, type as ty } from "../../theme/tokens";
+import { Screen, Header, Body, ListRow, Group, Avatar, Chip, SectionTitle } from "../../components/ui";
+import { Hint, ErrorText } from "../../components/groups/FormBits";
+import { space } from "../../theme/tokens";
 import {
   useGroupJoinRequests,
   useApproveJoinRequest,
   useRejectJoinRequest,
   useUserGroupsWithChannels,
 } from "../../hooks/queries";
-import { activeLocale, upper } from "../../i18n";
+import { activeLocale } from "../../i18n";
 
 export default function JoinRequests() {
   const { t } = useTranslation("channels");
-  const { groupId } = useLocalSearchParams<{ groupId?: string }>();
+  const { groupId } = useRouteParams<{ groupId?: string }>();
+  const router = useNav();
   const id = groupId ?? null;
   const { data: groups = [] } = useUserGroupsWithChannels();
   const group = groups.find((g) => g.id === id);
@@ -31,97 +24,69 @@ export default function JoinRequests() {
   const reject = useRejectJoinRequest(id);
 
   return (
-    <Screen testID="screen-group-requests">
-      <Crumb
-        segs={[
-          { label: upper(t("nav:breadcrumb.groups")) },
-          { label: group?.name ?? t("mobile:group.common.fallbackName") },
-          { label: t("nav:breadcrumb.requests"), leaf: true },
-        ]}
-        end={String(requests.length)}
-      />
-      <Body>
-        <SectionTitle>{upper(t("mobile:group.requests.pendingSection"))}</SectionTitle>
-        {isLoading ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.mute,
-              paddingHorizontal: 18,
-              paddingVertical: 12,
-            }}
-          >
-            {t("common:states.loading")}
-          </Text>
-        ) : null}
-        {!isLoading && requests.length === 0 ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.mute,
-              paddingHorizontal: 18,
-              paddingVertical: 12,
-            }}
-          >
-            {t("joinRequests.empty")}
-          </Text>
-        ) : null}
-        {requests.map((r) => {
-          const handle = r.requester_username ?? r.requester_id.slice(0, 8);
-          return (
-            <ListRow
-              key={r.id}
-              testID={`row-request-${r.id}`}
-              minHeight={54}
-              glyph={<Avatar label={handle.slice(0, 2)} />}
-              name={`@${handle}`}
-              nameStyle={{ fontSize: 14 }}
-              sub={t("mobile:group.requests.requested", {
-                date: new Date(r.created_at).toLocaleDateString(activeLocale()),
-              })}
-              end={
-                <View style={{ flexDirection: "row", gap: 6 }}>
-                  <Chip
-                    testID={`btn-reject-${r.id}`}
-                    accessibilityLabel={t("mobile:group.requests.declineLabel")}
-                    onPress={() => reject.mutate(r.id)}
+    <Screen testID="screen-group-requests" aboveTabBar={router.inPane}>
+      <Header onBack={router.onBack} title={t("mobile:group.panel.joinRequests")} subtitle={group?.name} />
+      <Body contentContainerStyle={{ paddingHorizontal: space.xxl }}>
+        <SectionTitle style={{ paddingHorizontal: 0 }}>
+          {t("mobile:group.requests.pendingSection")}
+        </SectionTitle>
+        {isLoading ? <Hint>{t("common:states.loading")}</Hint> : null}
+        {!isLoading && requests.length === 0 ? <Hint>{t("joinRequests.empty")}</Hint> : null}
+        {requests.length > 0 ? (
+          <Group>
+            {requests.map((r) => {
+              const handle = `@${r.requester_username ?? r.requester_id.slice(0, 8)}`;
+              return (
+                <View key={r.id}>
+                  <ListRow
+                    testID={`row-request-${r.id}`}
+                    minHeight={64}
+                    glyph={<Avatar label={r.requester_username ?? r.requester_id} />}
+                    name={handle}
+                    sub={t("mobile:group.requests.requested", {
+                      date: new Date(r.created_at).toLocaleDateString(activeLocale()),
+                    })}
+                  />
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      gap: space.sm,
+                      paddingStart: 70,
+                      paddingEnd: space.xl,
+                      paddingBottom: space.sm,
+                    }}
                   >
-                    {t("joinRequests.reject")}
-                  </Chip>
-                  <Chip
-                    variant="on"
-                    testID={`btn-approve-${r.id}`}
-                    accessibilityLabel={t("mobile:group.requests.approveLabel")}
-                    onPress={() => approve.mutate(r.id)}
-                  >
-                    {approve.isPending ? "…" : t("joinRequests.approve")}
-                  </Chip>
+                    <Chip
+                      selected
+                      testID={`btn-approve-${r.id}`}
+                      accessibilityLabel={`${t("mobile:group.requests.approveLabel")}, ${handle}`}
+                      onPress={() => approve.mutate(r.id)}
+                    >
+                      {approve.isPending ? "…" : t("mobile:group.requests.approve")}
+                    </Chip>
+                    <Chip
+                      variant="outline"
+                      testID={`btn-reject-${r.id}`}
+                      accessibilityLabel={`${t("mobile:group.requests.declineLabel")}, ${handle}`}
+                      onPress={() => reject.mutate(r.id)}
+                    >
+                      {t("mobile:group.requests.decline")}
+                    </Chip>
+                  </View>
                 </View>
-              }
-            />
-          );
-        })}
-        {(approve.isError || reject.isError) ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 12,
-              color: semantic.danger,
-              paddingHorizontal: 18,
-              paddingTop: 6,
-            }}
-          >
-            {((approve.error ?? reject.error) as Error).message ||
-              t("mobile:group.requests.processFailed")}
-          </Text>
+              );
+            })}
+          </Group>
+        ) : null}
+        {approve.isError || reject.isError ? (
+          <View style={{ paddingTop: space.md }}>
+            <ErrorText>
+              {((approve.error ?? reject.error) as Error).message ||
+                t("mobile:group.requests.processFailed")}
+            </ErrorText>
+          </View>
         ) : null}
       </Body>
-      <Ctx
-        cr={group?.name ?? upper(t("mobile:group.common.fallbackName"))}
-        name={t("group.joinRequests")}
-      />
     </Screen>
   );
 }

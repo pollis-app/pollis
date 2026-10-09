@@ -115,13 +115,56 @@ takes one numbered screenshot of every reachable screen (`tour-01-…` to
 `tour-34-…`), so a layout or copy change can be compared before and after. It
 asserts nothing; collect the shots with `--debug-output <dir>`.
 
+## Visual before/after comparison
+
+For a re-skin or any layout change, shoot the tour on the old build and the new
+one, then pair them up:
+
+```bash
+# 1. "before": the tour on the pre-change Release build (kept, gitignored, at
+#    artifacts/baseline-before/{ios,android}/ — 34 shots each, 2026-10-04/05)
+# 2. build + install the working tree, then shoot "after"
+mobile/scripts/build-release-sims.sh both            # or ios | android
+mobile/scripts/maestro-run.sh tour ios               # -> artifacts/<date>/ios/tour-*.png
+mobile/scripts/maestro-run.sh tour android
+# 3. compare
+NAME=ios mobile/scripts/visual-compare.sh \
+  mobile/.maestro/artifacts/baseline-before/ios mobile/.maestro/artifacts/<date>/ios
+open mobile/.maestro/artifacts/compare/<run>/index.html
+```
+
+`visual-compare.sh` pairs `tour-NN-*.png` by name (falling back to the `NN`
+number when a slug was renamed) and writes, under the gitignored
+`artifacts/compare/<timestamp>[-NAME]/`: `side/<name>.png` — one labelled
+BEFORE | AFTER image per pair (composited by a small Swift helper, so nothing
+to install; one image per screen is also what a reviewing agent can open);
+`index.html` — the contact sheet, every pair side by side with a
+changed / identical / only-before / only-after tag and a "hide identical"
+toggle; `summary.txt`. The tag is a byte comparison, not a perceptual diff:
+the status-bar clock and each run's fresh signup handle make practically every
+shot "changed" even between two runs of the same build, so the review is by
+eye. Set `PREFIX=` to compare a gallery other than the tour.
+Screenshots are never committed — `artifacts/` is gitignored.
+
+## iOS driver under Xcode 27
+
+Maestro 2.11.0's iOS driver never comes up under Xcode 27 ("iOS driver not
+ready in time", on every simulator, whatever `MAESTRO_DRIVER_STARTUP_TIMEOUT`
+is): its bundle runs a unit-test class before the HTTP-server test, and Xcode
+27's XCTest then blocks after the first test in
+`XCTCrashLogTracker.waitForPendingCrashlogs()`, so the server never starts.
+`mobile/scripts/maestro-ios-driver-fix.sh` skips that class in the driver's
+`.xctestrun` inside `~/.maestro/lib/maestro-ios-driver.jar` (backup kept as
+`.orig`, `--revert` restores it). `maestro-run.sh` applies it on every iOS run,
+so a Maestro reinstall heals itself; drop both once Maestro ships the fix.
+
 ## Two-client flows
 
 **Join requests (automated):** `mobile/scripts/maestro-join-request.sh <admin-device> <peer-device>`
-— the admin creates a group and opens it from its Groups-tab header; the peer
-finds it by slug (one lookup, on Search) and requests access; the admin sees
-the request on the Groups tab (row + header badge) and approves it; the peer
-then lists the group.
+— the admin creates a group and opens it from the Groups tab's group pill
+strip; the peer finds it by slug (Groups "+" → Find group, one lookup) and
+requests access; the admin sees the request on the Groups tab (pending row +
+badge, above the channels) and approves it; the peer then lists the group.
 
 **Report (automated, #1213):** `mobile/scripts/maestro-report.sh <reporter-device> <peer-device>`
 — a fresh peer signs up, its handle is read off the screen, and the reporter
@@ -154,16 +197,40 @@ maestro --device <peer-udid> test -e MAESTRO_EMAIL=$MAESTRO_PEER_EMAIL \
 ```
 Then assert convergence on both devices (peer sends → primary sees it live).
 
-## Known `testID` gaps (small #620 follow-up)
+## Selecting by text, and the 2026-10 redesign
 
-Authoring these flows surfaced a few load-bearing actions that lack a `testID`,
-so the flows tap them by visible TEXT (works for stable labels, but a `testID`
-is more robust):
-- `group/new` — the **CREATE GROUP** / **Cancel** buttons.
-- Channel/group rows are opened by their name text where the dynamic
-  `row-channel-<id>` isn't known ahead of time.
-Add these in a #620 follow-up and switch the `tapOn: "TEXT"` calls to
-`tapOn: id:`.
+Every action the flows tap has a `testID` (`group/new`'s submit is
+`btn-submit-group`; the redesign removed its Cancel). The flows still match
+TEXT in only a few places: the "General" channel row (its dynamic
+`row-channel-<id>` isn't known ahead of time), message/search-hit regexes
+(`.*hello from maestro.*`), group names in a peer's list, and the iOS
+"Open" system prompt. The redesign made all copy sentence case — there are no
+uppercased labels any more — and Maestro's text match is a full,
+case-sensitive regex, so any new text selector must match the catalogue string
+exactly (`frontend/src/i18n/locales/en/*.json`) or use a regex.
+
+Layout changes that flows depend on (see `SELECTORS.md` for the ids):
+- **Groups tab:** with no groups it shows an empty state with
+  `btn-create-group` / `btn-join-group`; with groups, those two live in the
+  "+" sheet (`btn-add-group`) at the end of the group pill strip. Flows tap
+  `btn-add-group` with `optional: true` first. A pill (`row-group-<id>`)
+  switches the in-place `panel-group`; it does not push `screen-group`.
+  Creating a group (`btn-submit-group`) also lands here, with the new group
+  selected: wait for `btn-group-menu` with text `"<name>, .*"` (its label is
+  "<name>, group menu…") and `panel-group` — there is no back step.
+- **iPad (regular width):** Groups/Direct are two-pane; a conversation opens
+  in the right pane (`screen-chat`, no `btn-back`) and the pages it opens
+  (info, members, settings, thread, profile) push inside that pane. Flows that
+  tap `btn-back` to leave a conversation mark it `optional: true`.
+- **Direct tab:** DM requests are accepted on `dm/requests`, via
+  `row-dm-requests`.
+- **Sign out** asks first, in a native Alert with no testID: after
+  `btn-sign-out`, tap the label `"Sign out"` (`auth:shell.signOutTitle`; es
+  `"Cerrar sesión"`). No flow signs out today.
+- **Search** puts its field at the top with the hits right under it, so a
+  point tap to dismiss the keyboard can open a hit; `hideKeyboard` works there
+  (normal keyboard with a return key). The number pad (OTP / change-email
+  codes) has no return key, so `hideKeyboard` cannot close it.
 
 ## Known issues found by the first real run (2026-08-22)
 

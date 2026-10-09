@@ -1,16 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { View, Text } from "react-native";
+import { ActivityIndicator, View, Text } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
-import {
-  Screen,
-  Crumb,
-  Body,
-  Field,
-  Button,
-  BottomAction,
-} from "../../components/ui";
+import { Screen, Body, Card, Field, Button, BottomAction } from "../../components/ui";
 import { Icon } from "../../components/icons";
+import { Heading } from "../../components/auth/Heading";
+import { AuthError } from "../../components/auth/AuthError";
 import { semantic, type as ty, fonts } from "../../theme/tokens";
 import {
   useStartEnrollment,
@@ -18,7 +13,6 @@ import {
   useRecoverWithSecretKey,
   type EnrollmentHandle,
 } from "../../hooks/queries";
-import { upper } from "../../i18n";
 
 type Mode = "chooser" | "polling" | "recovery";
 
@@ -94,149 +88,117 @@ export default function Enrollment() {
     });
   };
 
+  const title =
+    mode === "polling" && isLinked
+      ? t("auth:link.awaitingTitle")
+      : mode === "polling"
+        ? t("auth.enrollment.pollingTitle")
+        : mode === "recovery"
+          ? t("auth.enrollment.recoveryTitle")
+          : t("auth.enrollment.chooserTitle");
+  const intro =
+    mode === "polling" && isLinked
+      ? t("auth:link.awaitingIntro")
+      : mode === "polling"
+        ? t("auth.enrollment.pollingIntro")
+        : mode === "recovery"
+          ? t("auth.enrollment.recoveryIntro")
+          : t("auth.enrollment.chooserIntro");
+
+  // "Waiting for approval…" with a spinner. The text stays one element: the
+  // two-client device-link flow waits for it by its text.
+  const waiting = (testID?: string) => (
+    <View
+      style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10 }}
+      accessibilityLiveRegion="polite"
+    >
+      <ActivityIndicator color={semantic.accent} />
+      <Text testID={testID} style={ty.secondary}>
+        {t("auth.enrollment.waiting")}
+      </Text>
+    </View>
+  );
+
   return (
     <Screen testID="screen-auth-enrollment" centered>
-      <Crumb
-        segs={[
-          { label: upper(t("auth.crumb.auth")) },
-          { label: t("auth.crumb.pairDevice"), leaf: true },
-        ]}
-      />
-      <Body>
-        <View style={{ paddingHorizontal: 24, paddingTop: 24, gap: 18 }}>
-          <View style={{ gap: 8 }}>
-            <Text style={[ty.h1, { color: semantic.ink }]}>
-              {mode === "polling" && isLinked
-                ? t("auth:link.awaitingTitle")
-                : mode === "polling"
-                ? t("auth.enrollment.pollingTitle")
-                : mode === "recovery"
-                  ? t("auth.enrollment.recoveryTitle")
-                  : t("auth.enrollment.chooserTitle")}
-            </Text>
-            <Text
+      <Body contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 52, gap: 24 }}>
+        <Heading title={title} subtitle={intro} />
+
+        {mode === "chooser" ? (
+          <View style={{ gap: 10 }}>
+            <Button
+              testID="btn-enroll-approve-device"
+              full
+              variant="primary"
+              onPress={onStart}
+              disabled={start.isPending}
+              icon={<Icon.device size={18} color={semantic.onAccent} />}
+            >
+              {start.isPending
+                ? t("auth.enrollment.starting")
+                : t("auth:enroll.approveFromDevice")}
+            </Button>
+            <Button
+              testID="btn-enroll-recovery"
+              full
+              variant="secondary"
+              onPress={() => setMode("recovery")}
+              icon={<Icon.key size={18} color={semantic.text} />}
+            >
+              {t("auth.enrollment.useRecoveryKey")}
+            </Button>
+          </View>
+        ) : null}
+
+        {mode === "polling" && handle && isLinked ? waiting("linked-awaiting-approval") : null}
+
+        {mode === "polling" && handle && !isLinked ? (
+          <View style={{ gap: 20 }}>
+            <Card
               style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 13,
-                lineHeight: 19,
-                color: semantic.mute,
+                alignItems: "center",
+                gap: 10,
+                paddingVertical: 24,
               }}
             >
-              {mode === "polling" && isLinked
-                ? t("auth:link.awaitingIntro")
-                : mode === "polling"
-                ? t("auth.enrollment.pollingIntro")
-                : mode === "recovery"
-                  ? t("auth.enrollment.recoveryIntro")
-                  : t("auth.enrollment.chooserIntro")}
-            </Text>
-          </View>
-
-          {mode === "chooser" ? (
-            <View style={{ gap: 10, paddingTop: 6 }}>
-              <Button
-                testID="btn-enroll-approve-device"
-                full
-                align="left"
-                variant="primary"
-                onPress={onStart}
-                disabled={start.isPending}
-                icon={<Icon.device color="#0a0907" />}
-              >
-                {upper(
-                  start.isPending
-                    ? t("auth.enrollment.starting")
-                    : t("auth:enroll.approveFromDevice"),
-                )}
-              </Button>
-              <Button
-                testID="btn-enroll-recovery"
-                full
-                align="left"
-                onPress={() => setMode("recovery")}
-                icon={<Icon.key color={semantic.ink} />}
-              >
-                {upper(t("auth.enrollment.useRecoveryKey"))}
-              </Button>
-            </View>
-          ) : null}
-
-          {mode === "polling" && handle && isLinked ? (
-            <Text
-              testID="linked-awaiting-approval"
-              style={{ fontFamily: ty.body.fontFamily, fontSize: 12, color: semantic.mute, textAlign: "center" }}
-            >
-              {t("auth.enrollment.waiting")}
-            </Text>
-          ) : null}
-
-          {mode === "polling" && handle && !isLinked ? (
-            <View style={{ gap: 14, paddingTop: 6 }}>
-              <View
-                style={{
-                  borderWidth: 1,
-                  borderColor: semantic.accent,
-                  backgroundColor: semantic.accentSoft,
-                  paddingVertical: 18,
-                  paddingHorizontal: 14,
-                  alignItems: "center",
-                }}
-              >
-                <Text style={[ty.label, { marginBottom: 6 }]}>
-                  {upper(t("auth.enrollment.verificationCode"))}
-                </Text>
-                <Text
-                  style={{
-                    fontFamily: fonts.mono400,
-                    fontSize: 28,
-                    letterSpacing: 4,
-                    color: semantic.ink,
-                  }}
-                >
-                  {handle.verification_code}
-                </Text>
-              </View>
+              <Text style={ty.section}>{t("auth.enrollment.verificationCode")}</Text>
+              {/* Exactly the 8 code characters in ONE Text, with no
+                  accessibilityLabel of its own: the two-client device-link
+                  script reads it off the accessibility tree. */}
               <Text
+                selectable
                 style={{
-                  fontFamily: ty.body.fontFamily,
-                  fontSize: 12,
-                  color: semantic.mute,
+                  fontFamily: fonts.mono500,
+                  fontSize: 34,
+                  lineHeight: 42,
+                  letterSpacing: 4,
+                  color: semantic.text,
                   textAlign: "center",
                 }}
               >
-                {t("auth.enrollment.waiting")}
+                {handle.verification_code}
               </Text>
-            </View>
-          ) : null}
+            </Card>
+            {waiting()}
+          </View>
+        ) : null}
 
-          {mode === "recovery" ? (
-            <View style={{ gap: 10, paddingTop: 6 }}>
-              <Text style={ty.label}>
-                {upper(t("auth.enrollment.recoveryKeyLabel"))}
-              </Text>
-              <Field
-                testID="input-recovery-key"
-                accessibilityLabel={t("auth.enrollment.recoveryKeyLabel")}
-                amber
-                value={secretKey}
-                onChangeText={setSecretKey}
-                icon={<Icon.key color={semantic.mute} />}
-              />
-            </View>
-          ) : null}
+        {mode === "recovery" ? (
+          <View style={{ gap: 8 }}>
+            <Text style={ty.section}>{t("auth.enrollment.recoveryKeyLabel")}</Text>
+            <Field
+              testID="input-recovery-key"
+              accessibilityLabel={t("auth.enrollment.recoveryKeyLabel")}
+              value={secretKey}
+              onChangeText={setSecretKey}
+              autoCorrect={false}
+              icon={<Icon.key size={18} color={semantic.muted} />}
+              style={{ fontFamily: fonts.mono400 }}
+            />
+          </View>
+        ) : null}
 
-          {error ? (
-            <Text
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 12,
-                color: semantic.danger,
-              }}
-            >
-              {error}
-            </Text>
-          ) : null}
-        </View>
+        {error ? <AuthError message={error} /> : null}
       </Body>
       {mode === "recovery" ? (
         <BottomAction>
@@ -246,13 +208,11 @@ export default function Enrollment() {
             variant="primary"
             onPress={onRecover}
             disabled={!secretKey.trim() || recover.isPending}
-            iconRight={<Icon.arrowRight color="#0a0907" />}
+            iconRight={<Icon.arrowRight size={18} color={semantic.onAccent} />}
           >
-            {upper(
-              recover.isPending
-                ? t("auth:recover.recovering")
-                : t("auth.enrollment.recover"),
-            )}
+            {recover.isPending
+              ? t("auth:recover.recovering")
+              : t("auth.enrollment.recover")}
           </Button>
           <Button
             testID="btn-enroll-back"

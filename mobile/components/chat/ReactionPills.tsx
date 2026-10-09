@@ -1,6 +1,6 @@
 import { View, Text, Pressable } from "react-native";
 import { useTranslation } from "react-i18next";
-import { semantic, type as ty, r, t as tint } from "../../theme/tokens";
+import { fonts, semantic, type as ty, r } from "../../theme/tokens";
 import type { Reaction } from "../../hooks/queries/useReactions";
 import { splitEmojiSegments } from "../emoji/emojiTokens";
 import { CustomEmojiImage } from "../emoji/CustomEmojiImage";
@@ -17,11 +17,11 @@ function ReactionFace({ emoji }: { emoji: string }) {
       <CustomEmojiImage
         shortcode={first.shortcode}
         contentHash={first.contentHash}
-        size={16}
+        size={18}
       />
     );
   }
-  return <Text style={{ fontSize: 14 }}>{emoji}</Text>;
+  return <Text style={{ fontSize: 16 }}>{emoji}</Text>;
 }
 
 /**
@@ -49,7 +49,7 @@ export function ReactionPills({
         flexDirection: "row",
         flexWrap: "wrap",
         gap: 6,
-        marginTop: 6,
+        marginTop: 8,
       }}
     >
       {reactions.map((reaction) => {
@@ -74,25 +74,34 @@ export function ReactionPills({
                   })
             }
             onPress={() => onToggle(reaction.emoji, reacted)}
-            style={{
+            // 32pt visual pill; the slop brings the target to 44pt.
+            hitSlop={6}
+            style={({ pressed }) => ({
               flexDirection: "row",
               alignItems: "center",
-              gap: 5,
-              paddingHorizontal: 8,
-              paddingVertical: 3,
-              borderWidth: 1,
-              borderColor: reacted ? semantic.accent : semantic.hair,
-              borderRadius: r.lg,
-              backgroundColor: reacted ? tint(0.12) : "transparent",
-            }}
+              gap: 6,
+              minHeight: 32,
+              paddingHorizontal: 10,
+              borderRadius: r.pill,
+              backgroundColor: reacted
+                ? semantic.accent
+                : pressed
+                  ? semantic.high
+                  : semantic.raised,
+            })}
           >
             <ReactionFace emoji={reaction.emoji} />
+            {/* Reacted = accent fill + dark bold count (the inverse of the
+                others' dark fill + accent count), never colour alone. */}
             <Text
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 12,
-                color: reacted ? semantic.accent : semantic.ink2,
-              }}
+              style={[
+                ty.meta,
+                {
+                  fontFamily: reacted ? fonts.bold : fonts.medium,
+                  fontSize: 13,
+                  color: reacted ? semantic.onAccent : semantic.accent,
+                },
+              ]}
             >
               {reaction.count}
             </Text>

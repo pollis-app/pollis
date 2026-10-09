@@ -1,11 +1,12 @@
 import { Text } from "react-native";
-import { palette, semantic, t } from "../../theme/tokens";
+import { fonts, semantic } from "../../theme/tokens";
 
 /**
  * One resolved `@username` in a message body (port of desktop's
- * MentionToken). Self-mentions (including `@all`, which speaks to the
- * reader too) are the loud state — accent background, dark text; other
- * people's mentions are the quiet accent-on-tint state.
+ * MentionToken). Accent text on an accent-tint pill. Self-mentions
+ * (including `@all`, which speaks to the reader too) take the stronger tint
+ * and weight; the whole row is also tinted by MessageRow, so the state is
+ * never carried by colour alone.
  */
 export function MentionToken({
   name,
@@ -17,18 +18,11 @@ export function MentionToken({
   return (
     <Text
       testID={isSelf ? "mention-self" : "mention-other"}
-      style={
-        isSelf
-          ? {
-              backgroundColor: semantic.accent,
-              color: palette.bg,
-              fontWeight: "600",
-            }
-          : {
-              backgroundColor: t(0.12),
-              color: semantic.accent,
-            }
-      }
+      style={{
+        fontFamily: isSelf ? fonts.semibold : fonts.medium,
+        backgroundColor: isSelf ? semantic.accentMid : semantic.accentSoft,
+        color: semantic.accent,
+      }}
     >
       @{name}
     </Text>

@@ -1,15 +1,5 @@
 {
   "auth": {
-    "crumb": {
-      "auth": "Вход",
-      "emergencyKit": "Аварийный комплект",
-      "identify": "Идентификация",
-      "initializing": "Инициализация",
-      "pairDevice": "Подключение устройства",
-      "setDevicePin": "PIN-код устройства",
-      "unlockDevice": "Разблокировка",
-      "verifyEmail": "Подтверждение почты"
-    },
     "email": {
       "intro": "Введите почту, и мы пришлём код.",
       "sendFailed": "Не удалось отправить код. Проверьте подключение и попробуйте ещё раз.",
@@ -19,7 +9,7 @@
       "ackLabel": "Я сохранил секретный ключ",
       "ackText": "Я сохранил секретный ключ в надёжном месте.",
       "copyFailed": "Не удалось скопировать",
-      "intro": "Если вы потеряете этот телефон, с этим ключом вы войдёте на новом. Мы не сможем его восстановить, поэтому запишите его или сохраните в менеджере паролей.",
+      "intro": "Если вы потеряете это устройство, с этим ключом вы войдёте на новом. Мы не сможем его восстановить, поэтому запишите его или сохраните в менеджере паролей.",
       "title": "Сохраните секретный ключ",
       "warning": "Любой, у кого есть этот ключ, может войти от вашего имени."
     },
@@ -63,10 +53,11 @@
       "yourEmail": "вашу почту"
     },
     "pin": {
-      "createIntro": "Этим PIN-кодом вы будете открывать Pollis на этом телефоне. Он никогда не покидает телефон.",
+      "createIntro": "Этим PIN-кодом вы будете открывать Pollis на этом устройстве. Он никогда не покидает устройство.",
       "createTitle": "Новый PIN-код устройства",
       "invalidPin": "Неверный PIN-код.",
       "noActiveUser": "Нет активного пользователя. Войдите снова.",
+      "progress": "Введено цифр: {{entered}} из {{total}}",
       "saveFailed": "Не удалось сохранить PIN-код.",
       "stepConfirm": "Шаг 2 из 2 · Подтвердите PIN-код",
       "stepEnter": "Шаг 1 из 2 · Введите PIN-код",
@@ -82,27 +73,28 @@
     "editPlaceholder": "Изменить сообщение…",
     "emojiSuggestionLabel": "Эмодзи :{{shortcode}}:",
     "groupSettings": "Настройки группы",
+    "lastReply": "последний {{time}}",
     "loadFailed": "Не удалось загрузить сообщения.",
     "loading": "Загрузка сообщений…",
     "loadingOlder": "Загрузка более ранних сообщений…",
     "mentionLabel": "Упомянуть @{{name}}",
-    "openThread_one": "Открыть тред, {{count}} ответ",
+    "messageSheetTitle": "Сообщение",
     "openThread_few": "Открыть тред, {{count}} ответа",
     "openThread_many": "Открыть тред, {{count}} ответов",
+    "openThread_one": "Открыть тред, {{count}} ответ",
     "openThread_other": "Открыть тред, {{count}} ответа",
     "reactWith": "Отреагировать {{emoji}}",
-    "reactionPillReacted_one": "{{emoji}} {{count}} реакция, вы отреагировали",
     "reactionPillReacted_few": "{{emoji}} {{count}} реакции, вы отреагировали",
     "reactionPillReacted_many": "{{emoji}} {{count}} реакций, вы отреагировали",
+    "reactionPillReacted_one": "{{emoji}} {{count}} реакция, вы отреагировали",
     "reactionPillReacted_other": "{{emoji}} {{count}} реакции, вы отреагировали",
-    "sendFailed": "Не удалось отправить сообщение."
+    "sendFailed": "Не удалось отправить сообщение.",
+    "viewProfile": "Открыть профиль"
   },
   "common": {
     "working": "Выполняется…"
   },
   "conversationInfo": {
-    "backToConversation": "Назад к переписке",
-    "ctxName": "{{title}} · Сведения",
     "fallbackTitle": "Переписка",
     "info": "Сведения",
     "memberSelf": "@{{handle}} · вы",
@@ -112,10 +104,22 @@
   "direct": {
     "acceptRequest": "Принять запрос",
     "blockSender": "Заблокировать отправителя",
-    "empty": "Личных сообщений пока нет.",
+    "empty": "Личных сообщений пока нет",
     "loadFailed": "Не удалось загрузить переписки.",
     "loading": "Загрузка переписок…",
-    "wantsToMessage": "хочет вам написать"
+    "wantsToMessage": "хочет вам написать",
+    "newMessage": "Новое сообщение",
+    "searchLabel": "Поиск по перепискам",
+    "requests": "Запросы на переписку",
+    "requestsWaiting_one": "Запросы на переписку, {{count}} ожидает",
+    "requestsWaiting_few": "Запросы на переписку, {{count}} ожидают",
+    "requestsWaiting_many": "Запросы на переписку, {{count}} ожидают",
+    "requestsWaiting_other": "Запросы на переписку, {{count}} ожидают",
+    "ownPreview": "Вы: {{text}}",
+    "noMatches": "Нет подходящих переписок.",
+    "emptyHint": "Начните переписку с человеком по его имени пользователя или почте.",
+    "previewDeleted": "Сообщение удалено",
+    "previewAttachment": "Вложение"
   },
   "dm": {
     "backToInbox": "Назад к входящим",
@@ -129,7 +133,8 @@
     "participantsCount_other": "Участники · {{count}}",
     "searchFailed": "Не удалось выполнить поиск.",
     "startWith": "Написать @{{name}}",
-    "tapAgainToConfirm": "Нажмите ещё раз для подтверждения"
+    "tapAgainToConfirm": "Нажмите ещё раз для подтверждения",
+    "identifierLabel": "Имя пользователя или почта"
   },
   "emoji": {
     "groupFallback": "Группа"
@@ -149,18 +154,12 @@
       "adminCount_few": "{{count}} администратора",
       "adminCount_many": "{{count}} администраторов",
       "adminCount_other": "{{count}} администратора",
-      "adminSection": "Администрирование",
       "loadingChannels": "Загрузка каналов…",
       "memberCount_one": "{{count}} участник",
       "memberCount_few": "{{count}} участника",
       "memberCount_many": "{{count}} участников",
       "memberCount_other": "{{count}} участника",
       "menuLabel": "Меню группы",
-      "moreMembers_one": "+{{count}}",
-      "moreMembers_few": "+{{count}}",
-      "moreMembers_many": "+{{count}}",
-      "moreMembers_other": "+{{count}}",
-      "settingsSub": "Переименование, каналы, опасная зона",
       "textChannels": "Текстовые каналы"
     },
     "discover": {
@@ -168,11 +167,13 @@
       "blurb": "Спросите идентификатор у владельца группы. Публичного списка групп нет.",
       "requestDeclined": "Запрос отклонён",
       "requestPending": "Запрос ожидает",
-      "title": "Найти группу"
+      "title": "Найти группу",
+      "slugLabel": "Адрес группы",
+      "requestAccess": "Запросить доступ"
     },
     "emoji": {
       "adminsOnly": "Добавлять и удалять эмодзи могут только администраторы группы.",
-      "ctxTitle": "Эмодзи {{name}}",
+      "loadFailed": "Не удалось загрузить эмодзи этой группы.",
       "empty": "Своих эмодзи пока нет.",
       "pickAndUpload": "Выбрать изображение и загрузить",
       "sizeKb_one": "{{count}} КБ",
@@ -184,7 +185,6 @@
     "invite": {
       "blurb": "Приглашение появится, когда человек в следующий раз откроет Pollis.",
       "createLinkFailed": "Не удалось создать ссылку-приглашение.",
-      "crumb": "Приглашение",
       "linkBlurb": "По ссылке может вступить любой. Показать её можно только один раз.",
       "linkCreated": "Ссылка создана. Скопируйте её сейчас.",
       "linkOnce": "Больше вы эту ссылку не увидите. Чтобы поделиться позже, создайте новую.",
@@ -192,7 +192,9 @@
       "manageLinksSub": "Просмотр и отзыв существующих ссылок",
       "share": "Поделиться",
       "shareableLink": "Ссылка-приглашение",
-      "thisGroup": "этой группы"
+      "thisGroup": "этой группы",
+      "identifierLabel": "Имя пользователя или почта",
+      "submit": "Отправить приглашение"
     },
     "inviteLinks": {
       "blurb": "Ссылки нельзя показать повторно. Отзыв ссылки сразу её отключает.",
@@ -205,20 +207,26 @@
       "joined": "в группе с {{date}}",
       "makeAdmin": "Назначить администратором",
       "removeAdmin": "Лишить прав администратора",
-      "roleOwner": "Владелец"
+      "roleOwner": "Владелец",
+      "roleAdmin": "Администратор",
+      "removeLabel": "Удалить {{name}} из группы"
     },
     "new": {
       "blurb": "Подробности группы видят только участники.",
-      "crumb": "Новая",
       "descriptionLabel": "Описание (необязательно)",
-      "descriptionPlaceholder": "Для чего эта группа?"
+      "descriptionPlaceholder": "Для чего эта группа?",
+      "title": "Новая группа",
+      "nameLabel": "Название группы",
+      "submit": "Создать группу"
     },
     "requests": {
       "approveLabel": "Одобрить запрос",
       "declineLabel": "Отклонить запрос",
       "pendingSection": "Ожидающие запросы",
       "processFailed": "Не удалось обработать запрос.",
-      "requested": "запрос от {{date}}"
+      "requested": "запрос от {{date}}",
+      "approve": "Одобрить",
+      "decline": "Отклонить"
     },
     "settings": {
       "channelsSection": "Каналы",
@@ -228,15 +236,57 @@
       "deleting": "Удаление…",
       "identitySection": "Основное",
       "notAdmin": "У вас нет прав администратора в этой группе.",
-      "tapAgainToConfirm": "Нажмите ещё раз для подтверждения"
+      "tapAgainToConfirm": "Нажмите ещё раз для подтверждения",
+      "title": "Настройки группы",
+      "nameLabel": "Название группы",
+      "deleteChannel": "Удалить #{{name}}"
+    },
+    "panel": {
+      "menuLabel": "{{name}}, меню группы",
+      "invite": "Пригласить людей",
+      "search": "Поиск в {{name}}",
+      "createChannel": "Создать канал",
+      "thisGroup": "Эта группа",
+      "members": "Участники",
+      "settings": "Настройки группы",
+      "joinRequests": "Заявки на вступление",
+      "customEmoji": "Свои эмодзи",
+      "leave": "Покинуть группу",
+      "leaveConfirm": "Нажмите ещё раз, чтобы покинуть {{name}}",
+      "leaveHint": "Чтобы вернуться, понадобится новое приглашение.",
+      "leaving": "Выход…",
+      "channelSelected": "{{name}}, выбран",
+      "channelUnread_one": "{{name}}, {{count}} непрочитанное",
+      "channelUnread_few": "{{name}}, {{count}} непрочитанных",
+      "channelUnread_many": "{{name}}, {{count}} непрочитанных",
+      "channelUnread_other": "{{name}}, {{count}} непрочитанного"
+    },
+    "newChannel": {
+      "title": "Новый канал",
+      "nameLabel": "Название канала",
+      "submit": "Создать канал"
     }
   },
   "groups": {
     "acceptInviteLabel": "Принять приглашение",
     "declineInviteLabel": "Отклонить приглашение",
-    "empty": "Групп пока нет. Создайте первую, чтобы начать.",
     "loading": "Загрузка групп…",
-    "pendingInvites": "Ожидающие приглашения"
+    "pendingInvites": "Ожидающие приглашения",
+    "title": "Группы",
+    "stripLabel": "Ваши группы",
+    "addGroup": "Создать или найти группу",
+    "create": "Создать группу",
+    "createSub": "Начните новую группу и пригласите людей",
+    "find": "Найти группу",
+    "findSub": "Попросите вступить в группу по её адресу",
+    "emptyTitle": "Пока нет групп",
+    "emptyBody": "Создайте группу для своих людей или найдите ту, о которой вам рассказали.",
+    "pillSelected": "{{name}}, выбрано",
+    "pillUnread": "{{name}}, есть непрочитанные",
+    "pillSelectedUnread": "{{name}}, выбрано, есть непрочитанные",
+    "joinRequestsSection": "Заявки на вступление",
+    "accept": "Принять",
+    "decline": "Отклонить"
   },
   "invite": {
     "backToPollis": "Назад в Pollis",
@@ -252,7 +302,6 @@
     "restartRequired": "Перезапустите Pollis, чтобы изменить направление интерфейса."
   },
   "permalink": {
-    "context": "Ссылка",
     "opening": "Открываем сообщение…",
     "title": "Ссылка на сообщение"
   },
@@ -283,10 +332,11 @@
       "enterCodeIntro": "Введите код, отправленный на {{email}}.",
       "enterEmailIntro": "Введите новую эл. почту. Мы отправим 6-значный код, чтобы подтвердить, что она ваша.",
       "title": "Сменить почту",
-      "useDifferentEmail": "Использовать другую почту"
+      "useDifferentEmail": "Использовать другую почту",
+      "sendCode": "Отправить код"
     },
     "deleteAccount": {
-      "consequences": "Ваш аккаунт Pollis будет удалён навсегда. Вы будете исключены из всех групп и переписок, ваши устройства — отвязаны, а зашифрованные данные на этом телефоне — стёрты. У других участников останутся их копии прошлых сообщений, но ничего отправленного после удаления уже нельзя будет прочитать вашими ключами.",
+      "consequences": "Ваш аккаунт Pollis будет удалён навсегда. Вы будете исключены из всех групп и переписок, ваши устройства — отвязаны, а зашифрованные данные на этом устройстве — стёрты. У других участников останутся их копии прошлых сообщений, но ничего отправленного после удаления уже нельзя будет прочитать вашими ключами.",
       "contextPath": "{{parent}} · {{child}}",
       "failed": "Не удалось удалить аккаунт. Ничего не изменилось. Попробуйте ещё раз.",
       "irreversible": "Это действие нельзя отменить. Ни отсрочки, ни восстановления не будет.",
@@ -306,9 +356,28 @@
       "savedSub": "Сообщения в закладках",
       "securitySub": "Ключи, устройства, выход",
       "signingOut": "Выход…",
-      "userSettingsSub": "Отображаемое имя, имя пользователя, почта"
+      "userSettingsSub": "Отображаемое имя, имя пользователя, почта",
+      "customAccent": "Свой",
+      "off": "Выкл.",
+      "profileSub": "@{{handle}} · это устройство",
+      "editProfile": "Изменить профиль",
+      "accountSection": "Аккаунт",
+      "appSection": "Приложение",
+      "accountDetails": "Данные аккаунта",
+      "securityDevices": "Безопасность и устройства",
+      "deviceCount_one": "{{count}} устройство",
+      "deviceCount_few": "{{count}} устройства",
+      "deviceCount_many": "{{count}} устройств",
+      "deviceCount_other": "{{count}} устройства",
+      "savedMessages": "Сохранённые сообщения",
+      "appearance": "Оформление",
+      "signOut": "Выйти…",
+      "signOutConfirmTitle": "Выйти из Pollis на этом устройстве?"
     },
     "identityHeading": "Идентификация",
+    "linkDevice": {
+      "codeTitle": "Вход по коду"
+    },
     "preferences": {
       "accentA11y": "Акцент {{name}}",
       "accentHeading": "Акцентный цвет",
@@ -341,14 +410,14 @@
       "approve": "Подтвердить",
       "approveA11y": "Подтвердить подключение",
       "autoLockA11y": "Автоблокировка {{label}}",
-      "autoLockDescription": "Блокировать Pollis, если вы какое-то время им не пользуетесь. Только на этом телефоне.",
+      "autoLockDescription": "Блокировать Pollis, если вы какое-то время им не пользуетесь. Только на этом устройстве.",
       "current": "Текущее",
       "daysAgo_one": "{{count}} дн. назад",
       "daysAgo_few": "{{count}} дн. назад",
       "daysAgo_many": "{{count}} дн. назад",
       "daysAgo_other": "{{count}} дн. назад",
       "deleteAccountSub": "Удалить аккаунт навсегда и стереть данные с этого устройства",
-      "deviceSub": "подключено {{paired}} · активность {{lastSeen}}",
+      "deviceSub": "Подключено {{paired}} · активность {{lastSeen}}",
       "enrollmentFailed": "Не удалось обработать запрос на подключение.",
       "eventsEmpty": "Событий безопасности пока нет.",
       "hoursAgo_one": "{{count}} ч назад",
@@ -373,21 +442,27 @@
       "rejectA11y": "Отклонить подключение",
       "safetyHeading": "Защита",
       "showOlderA11y": "Показать более ранние события",
-      "thisDevice": "{{name}} · это устройство"
+      "thisDevice": "{{name}} · это устройство",
+      "blockedUsers": "Заблокированные пользователи"
     },
     "title": "Профиль",
     "userSettings": {
       "displayName": "Отображаемое имя",
       "handle": "Имя пользователя",
       "handleHint": "Другие участники смогут найти вас и написать вам по @handle.",
-      "handleInvalid": "Имя пользователя — от 3 до 32 символов: строчные латинские буквы, цифры, '_', '.' или '-'."
+      "handleInvalid": "Имя пользователя — от 3 до 32 символов: строчные латинские буквы, цифры, '_', '.' или '-'.",
+      "save": "Сохранить изменения"
     }
   },
   "tabs": {
     "direct": "Личные",
     "groups": "Группы",
     "search": "Поиск",
-    "self": "Профиль"
+    "self": "Профиль",
+    "withUnread_few": "{{label}}, {{count}} непрочитанных",
+    "withUnread_many": "{{label}}, {{count}} непрочитанных",
+    "withUnread_one": "{{label}}, {{count}} непрочитанное",
+    "withUnread_other": "{{label}}, {{count}} непрочитанных"
   },
   "thread": {
     "sendFailed": "Не удалось отправить ответ."
@@ -396,6 +471,7 @@
     "now": "сейчас"
   },
   "ui": {
+    "backTo": "Назад: {{name}}",
     "imageUnavailable": "Изображение недоступно",
     "selectConversation": "Выберите переписку"
   },

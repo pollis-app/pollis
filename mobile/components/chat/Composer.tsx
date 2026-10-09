@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
-import { View, Text, TextInput, Pressable, ScrollView } from "react-native";
+import { View, Text, Pressable, ScrollView } from "react-native";
 import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
-import { Avatar } from "../ui";
-import { semantic, type as ty, r } from "../../theme/tokens";
+import { Avatar, Field } from "../ui";
+import { layout, semantic, type as ty, r } from "../../theme/tokens";
 import {
   applyMention,
   mentionQueryAt,
@@ -21,11 +21,14 @@ import {
   type ShortcodeEntry,
 } from "../../lib/emojiShortcodes";
 import { CustomEmojiImage } from "../emoji/CustomEmojiImage";
+import { EmojiPickerSheet } from "../emoji/EmojiPickerSheet";
 import type { CustomEmoji } from "../../hooks/queries/useEmoji";
 import type { PickedAttachment } from "../../lib/attachments";
 
 /**
- * Bottom composer bar: attach button, text input, send button. When
+ * Bottom composer bar (Chat.dc.html): a 44pt round attach button, a raised
+ * pill field that grows with its text (emoji button inside at the end), and
+ * a 44pt round accent send button. When
  * `mentionCandidates` is provided, typing `@…` opens a suggestion list
  * above the input (#886) — candidates come from the visible roster only,
  * ranked like desktop (prefix beats substring, alphabetical within rank).
@@ -71,6 +74,7 @@ export function Composer({
 }) {
   const { t } = useTranslation("common");
   const [caret, setCaret] = useState(0);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const mentionQuery =
     mentionCandidates && mentionCandidates.length > 0
@@ -146,23 +150,26 @@ export function Composer({
     onChangeDraft(next);
   };
 
+  // The in-field emoji button inserts the picked emoji (or custom token) at
+  // the caret.
+  const insertEmoji = (insert: string) => {
+    const at = Math.min(caret, draft.length);
+    onChangeDraft(draft.slice(0, at) + insert + draft.slice(at));
+    setCaret(at + insert.length);
+    setPickerOpen(false);
+  };
+
+  const sendDisabled = (!draft.trim() && !canSendEmptyText) || sendPending;
+
   return (
     <View>
       {suggestions.length > 0 ? (
         <View
           testID="list-mention-suggestions"
-          style={{
-            marginHorizontal: 12,
-            marginBottom: 4,
-            borderWidth: 1,
-            borderColor: semantic.hairStrong,
-            borderRadius: r.sm,
-            backgroundColor: semantic.cardBg,
-            maxHeight: 220,
-          }}
+          style={suggestionBox()}
         >
           <ScrollView keyboardShouldPersistTaps="always">
-            {suggestions.map((candidate) => (
+            {suggestions.map((candidate, i) => (
               <Pressable
                 key={candidate.userId}
                 testID={`row-mention-${candidate.username}`}
@@ -171,22 +178,10 @@ export function Composer({
                   name: candidate.username,
                 })}
                 onPress={() => acceptMention(candidate)}
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 10,
-                  paddingHorizontal: 12,
-                  paddingVertical: 9,
-                }}
+                style={({ pressed }) => suggestionRow(pressed, i)}
               >
-                <Avatar label={candidate.username.slice(0, 2)} />
-                <Text
-                  style={{
-                    fontFamily: ty.body.fontFamily,
-                    fontSize: 14,
-                    color: semantic.ink,
-                  }}
-                >
+                <Avatar label={candidate.username} size="sm" />
+                <Text style={[ty.body, { color: semantic.text }]}>
                   @{candidate.username}
                 </Text>
               </Pressable>
@@ -197,18 +192,10 @@ export function Composer({
       {emojiSuggestions.length > 0 ? (
         <View
           testID="list-emoji-suggestions"
-          style={{
-            marginHorizontal: 12,
-            marginBottom: 4,
-            borderWidth: 1,
-            borderColor: semantic.hairStrong,
-            borderRadius: r.sm,
-            backgroundColor: semantic.cardBg,
-            maxHeight: 220,
-          }}
+          style={suggestionBox()}
         >
           <ScrollView keyboardShouldPersistTaps="always">
-            {emojiSuggestions.map((entry) => (
+            {emojiSuggestions.map((entry, i) => (
               <Pressable
                 key={`${entry.custom ? "c" : "s"}:${entry.shortcode}`}
                 testID={`row-emoji-${entry.shortcode}`}
@@ -217,40 +204,23 @@ export function Composer({
                   shortcode: entry.shortcode,
                 })}
                 onPress={() => acceptEmoji(entry)}
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 10,
-                  paddingHorizontal: 12,
-                  paddingVertical: 9,
-                }}
+                style={({ pressed }) => suggestionRow(pressed, i)}
               >
                 {entry.custom && entry.contentHash ? (
                   <CustomEmojiImage
                     shortcode={entry.shortcode}
                     contentHash={entry.contentHash}
-                    size={20}
+                    size={22}
                   />
                 ) : (
-                  <Text style={{ fontSize: 18 }}>{entry.char}</Text>
+                  <Text style={{ fontSize: 20 }}>{entry.char}</Text>
                 )}
-                <Text
-                  style={{
-                    fontFamily: ty.body.fontFamily,
-                    fontSize: 14,
-                    color: semantic.ink,
-                  }}
-                >
+                <Text style={[ty.body, { color: semantic.text }]}>
                   :{entry.shortcode}:
                 </Text>
                 <Text
                   numberOfLines={1}
-                  style={{
-                    fontFamily: ty.body.fontFamily,
-                    fontSize: 12,
-                    color: semantic.mute,
-                    flexShrink: 1,
-                  }}
+                  style={[ty.meta, { flexShrink: 1 }]}
                 >
                   {entry.label}
                 </Text>
@@ -265,9 +235,12 @@ export function Composer({
           style={{
             flexDirection: "row",
             flexWrap: "wrap",
-            gap: 6,
+            gap: 8,
             paddingHorizontal: 12,
-            paddingBottom: 4,
+            paddingTop: 8,
+            paddingBottom: 2,
+            borderTopWidth: 1,
+            borderTopColor: semantic.hairSoft,
           }}
         >
           {pendingAttachments.map((att) => (
@@ -279,29 +252,26 @@ export function Composer({
                 name: att.name,
               })}
               onPress={() => onRemoveAttachment?.(att.id)}
+              // 32pt chip; the slop brings the target to 44pt.
+              hitSlop={6}
               style={{
                 flexDirection: "row",
                 alignItems: "center",
                 gap: 6,
-                paddingHorizontal: 8,
-                paddingVertical: 5,
-                borderWidth: 1,
-                borderColor: semantic.hairStrong,
-                borderRadius: r.sm,
+                minHeight: 32,
+                paddingStart: 12,
+                paddingEnd: 8,
+                borderRadius: r.pill,
+                backgroundColor: semantic.raised,
               }}
             >
               <Text
                 numberOfLines={1}
-                style={{
-                  fontFamily: ty.body.fontFamily,
-                  fontSize: 12,
-                  color: semantic.ink,
-                  maxWidth: 160,
-                }}
+                style={[ty.secondary, { color: semantic.text, maxWidth: 160 }]}
               >
                 {att.name}
               </Text>
-              <Icon.exit color={semantic.mute} size={12} />
+              <Icon.close color={semantic.muted} size={16} />
             </Pressable>
           ))}
         </View>
@@ -309,12 +279,15 @@ export function Composer({
       <View
         style={{
           flexDirection: "row",
-          alignItems: "center",
-          gap: 10,
-          paddingVertical: 10,
-          paddingHorizontal: 12,
-          borderTopWidth: 1,
+          alignItems: "flex-end",
+          gap: 8,
+          paddingTop: 8,
+          paddingBottom: 8,
+          paddingStart: 8,
+          paddingEnd: 12,
+          borderTopWidth: pendingAttachments && pendingAttachments.length > 0 ? 0 : 1,
           borderTopColor: semantic.hairSoft,
+          backgroundColor: semantic.bg,
         }}
       >
         <Pressable
@@ -322,62 +295,127 @@ export function Composer({
           accessibilityRole="button"
           accessibilityLabel={t("composer.addAttachment")}
           onPress={onAttach}
-          style={{
-            width: 38,
-            height: 38,
+          disabled={!onAttach}
+          accessibilityState={{ disabled: !onAttach }}
+          style={({ pressed }) => ({
+            width: layout.touchMin,
+            height: layout.touchMin,
+            borderRadius: layout.touchMin / 2,
             alignItems: "center",
             justifyContent: "center",
-            borderWidth: 1,
-            borderColor: semantic.hairStrong,
-            borderRadius: r.sm,
-          }}
+            // No border. Unavailable: the solid raised disc + a dim glyph
+            // (accent when available), never a fade.
+            backgroundColor: pressed && onAttach ? semantic.high : semantic.raised,
+          })}
         >
-          <Icon.plus color={semantic.ink} />
+          <Icon.plus size={22} color={onAttach ? semantic.accent : semantic.dim} />
         </Pressable>
-        <TextInput
+        <Field
           testID="input-composer"
           accessibilityLabel={t("composer.inputLabel")}
           value={draft}
           onChangeText={handleChangeText}
           onSelectionChange={(e) => setCaret(e.nativeEvent.selection.end)}
           placeholder={t("composer.placeholder")}
-          placeholderTextColor={semantic.mute}
           onSubmitEditing={onSend}
           returnKeyType="send"
+          // Multiline so long drafts wrap and the field grows; Return still
+          // sends (the submit behaviour the single-line field had).
+          multiline
+          submitBehavior="submit"
+          autoCapitalize="sentences"
           editable={editable}
-          style={{
+          containerStyle={{
             flex: 1,
-            borderWidth: 1,
-            borderColor: semantic.hairStrong,
-            borderRadius: r.sm,
-            paddingVertical: 10,
-            paddingHorizontal: 12,
-            fontFamily: ty.body.fontFamily,
-            fontSize: 14,
-            color: semantic.ink,
-            backgroundColor: semantic.fieldBg,
+            minWidth: 0,
+            alignItems: "flex-end",
+            borderRadius: layout.touchMin / 2,
+            paddingVertical: 0,
+            paddingStart: 16,
+            paddingEnd: 4,
+            gap: 4,
           }}
+          style={{
+            maxHeight: 140,
+            paddingTop: 11,
+            paddingBottom: 11,
+            textAlignVertical: "center",
+          }}
+          trailing={
+            <Pressable
+              testID="btn-composer-emoji"
+              accessibilityRole="button"
+              accessibilityLabel={t("emoji:picker.triggerLabel")}
+              onPress={() => setPickerOpen(true)}
+              disabled={!editable}
+              hitSlop={4}
+              style={{
+                width: 36,
+                height: 42,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Icon.smile size={22} color={semantic.dim} />
+            </Pressable>
+          }
         />
+        {/* Always the accent fill with a dark glyph and no border (user's
+            call). With nothing to send it is announced as disabled and leaves
+            the focus order; a tap then does nothing. */}
         <Pressable
           onPress={onSend}
-          disabled={(!draft.trim() && !canSendEmptyText) || sendPending}
+          disabled={sendDisabled}
+          focusable={!sendDisabled}
           testID="btn-send"
           accessibilityRole="button"
           accessibilityLabel={t("composer.send")}
+          accessibilityState={{ disabled: sendDisabled }}
           style={{
-            width: 38,
-            height: 38,
+            width: layout.touchMin,
+            height: layout.touchMin,
+            borderRadius: layout.touchMin / 2,
             alignItems: "center",
             justifyContent: "center",
             backgroundColor: semantic.accent,
-            borderRadius: r.sm,
-            opacity:
-              (!draft.trim() && !canSendEmptyText) || sendPending ? 0.4 : 1,
           }}
         >
-          <Icon.send color="#0a0907" />
+          <Icon.arrowUp size={22} color={semantic.onAccent} />
         </Pressable>
       </View>
+      {pickerOpen ? (
+        <EmojiPickerSheet
+          title={t("emoji:picker.triggerLabel")}
+          onSelect={insertEmoji}
+          onClose={() => setPickerOpen(false)}
+        />
+      ) : null}
     </View>
   );
+}
+
+// The suggestion popover above the composer (mentions / emoji shortcodes).
+function suggestionBox() {
+  return {
+    marginHorizontal: 12,
+    marginBottom: 6,
+    borderRadius: r.lg,
+    backgroundColor: semantic.raised,
+    maxHeight: 240,
+    overflow: "hidden" as const,
+  };
+}
+
+function suggestionRow(pressed: boolean, index: number) {
+  return {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 12,
+    minHeight: layout.touchMin,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderTopWidth: index > 0 ? 1 : 0,
+    borderTopColor: semantic.hairSoft,
+    backgroundColor: pressed ? semantic.high : "transparent",
+  };
 }

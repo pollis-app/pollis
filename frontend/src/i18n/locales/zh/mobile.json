@@ -1,15 +1,5 @@
 {
   "auth": {
-    "crumb": {
-      "auth": "认证",
-      "emergencyKit": "应急工具包",
-      "identify": "身份验证",
-      "initializing": "初始化",
-      "pairDevice": "配对设备",
-      "setDevicePin": "设置设备 PIN 码",
-      "unlockDevice": "解锁设备",
-      "verifyEmail": "验证邮箱"
-    },
     "email": {
       "intro": "输入你的邮箱，我们会发送一个验证码。",
       "sendFailed": "无法发送验证码。请检查网络连接后重试。",
@@ -19,7 +9,7 @@
       "ackLabel": "我已保存安全密钥",
       "ackText": "我已把安全密钥保存在安全的地方。",
       "copyFailed": "复制失败",
-      "intro": "如果丢失这部手机，你需要用这个密钥在新设备上登录。我们无法替你找回，请把它写下来或存进密码管理器。",
+      "intro": "如果丢失这台设备，你需要用这个密钥在新设备上登录。我们无法替你找回，请把它写下来或存进密码管理器。",
       "title": "保存你的安全密钥",
       "warning": "任何拿到这个密钥的人都能以你的身份登录。"
     },
@@ -63,10 +53,11 @@
       "yourEmail": "你的邮箱"
     },
     "pin": {
-      "createIntro": "你将用这个 PIN 码在这部手机上解锁 Pollis。它不会离开这部手机。",
+      "createIntro": "你将用这个 PIN 码在这台设备上解锁 Pollis。它不会离开这台设备。",
       "createTitle": "新设备 PIN 码",
       "invalidPin": "PIN 码无效。",
       "noActiveUser": "没有当前用户。请重新登录。",
+      "progress": "已输入 {{entered}}/{{total}} 位数字",
       "saveFailed": "无法保存 PIN 码。",
       "stepConfirm": "第 2 步，共 2 步 · 确认 PIN 码",
       "stepEnter": "第 1 步，共 2 步 · 输入 PIN 码",
@@ -82,21 +73,22 @@
     "editPlaceholder": "编辑消息…",
     "emojiSuggestionLabel": "表情 :{{shortcode}}:",
     "groupSettings": "群组设置",
+    "lastReply": "最后回复 {{time}}",
     "loadFailed": "无法加载消息。",
     "loading": "正在加载消息…",
     "loadingOlder": "正在加载更早的消息…",
     "mentionLabel": "提及 @{{name}}",
+    "messageSheetTitle": "消息",
     "openThread_other": "打开话题，{{count}} 条回复",
     "reactWith": "用 {{emoji}} 回应",
     "reactionPillReacted_other": "{{emoji}} {{count}} 个回应，包括你",
-    "sendFailed": "无法发送消息。"
+    "sendFailed": "无法发送消息。",
+    "viewProfile": "查看个人资料"
   },
   "common": {
     "working": "处理中…"
   },
   "conversationInfo": {
-    "backToConversation": "返回对话",
-    "ctxName": "{{title}} · 信息",
     "fallbackTitle": "对话",
     "info": "信息",
     "memberSelf": "@{{handle}} · 你",
@@ -106,10 +98,19 @@
   "direct": {
     "acceptRequest": "接受请求",
     "blockSender": "屏蔽发送者",
-    "empty": "还没有私信。",
+    "empty": "还没有私信",
     "loadFailed": "无法加载对话。",
     "loading": "正在加载对话…",
-    "wantsToMessage": "想给你发消息"
+    "wantsToMessage": "想给你发消息",
+    "newMessage": "新消息",
+    "searchLabel": "搜索对话",
+    "requests": "消息请求",
+    "requestsWaiting_other": "消息请求，{{count}} 条待处理",
+    "ownPreview": "你：{{text}}",
+    "noMatches": "没有匹配的对话。",
+    "emptyHint": "通过用户名或邮箱与他人开始对话。",
+    "previewDeleted": "消息已删除",
+    "previewAttachment": "附件"
   },
   "dm": {
     "backToInbox": "返回收件箱",
@@ -120,7 +121,8 @@
     "participantsCount_other": "参与者 · {{count}}",
     "searchFailed": "搜索失败。",
     "startWith": "与 @{{name}} 开始私信",
-    "tapAgainToConfirm": "再次点击以确认"
+    "tapAgainToConfirm": "再次点击以确认",
+    "identifierLabel": "用户名或邮箱"
   },
   "emoji": {
     "groupFallback": "群组"
@@ -137,12 +139,9 @@
     },
     "detail": {
       "adminCount_other": "{{count}} 位管理员",
-      "adminSection": "管理",
       "loadingChannels": "正在加载频道…",
       "memberCount_other": "{{count}} 位成员",
       "menuLabel": "群组菜单",
-      "moreMembers_other": "+{{count}}",
-      "settingsSub": "重命名、频道、危险区域",
       "textChannels": "文字频道"
     },
     "discover": {
@@ -150,11 +149,13 @@
       "blurb": "请向群主索要群组标识。没有公开的群组列表。",
       "requestDeclined": "申请已被拒绝",
       "requestPending": "申请待处理",
-      "title": "查找群组"
+      "title": "查找群组",
+      "slugLabel": "群组标识",
+      "requestAccess": "申请加入"
     },
     "emoji": {
       "adminsOnly": "只有群组管理员才能添加或移除表情。",
-      "ctxTitle": "{{name}} 的表情",
+      "loadFailed": "无法加载此群组的表情。",
       "empty": "还没有自定义表情。",
       "pickAndUpload": "选择图片并上传",
       "sizeKb_other": "{{count}} KB",
@@ -163,7 +164,6 @@
     "invite": {
       "blurb": "对方下次打开 Pollis 时会看到邀请。",
       "createLinkFailed": "无法创建邀请链接。",
-      "crumb": "邀请",
       "linkBlurb": "任何拿到链接的人都能加入。链接只显示一次。",
       "linkCreated": "链接已创建，请立即复制。",
       "linkOnce": "之后无法再查看此链接。如需稍后分享，请新建一个。",
@@ -171,7 +171,9 @@
       "manageLinksSub": "查看并撤销现有链接",
       "share": "分享",
       "shareableLink": "可分享的链接",
-      "thisGroup": "此群组"
+      "thisGroup": "此群组",
+      "identifierLabel": "用户名或邮箱",
+      "submit": "发送邀请"
     },
     "inviteLinks": {
       "blurb": "链接无法再次显示。撤销后立即失效。",
@@ -184,20 +186,26 @@
       "joined": "加入于 {{date}}",
       "makeAdmin": "设为管理员",
       "removeAdmin": "取消管理员",
-      "roleOwner": "所有者"
+      "roleOwner": "所有者",
+      "roleAdmin": "管理员",
+      "removeLabel": "将 {{name}} 移出群组"
     },
     "new": {
       "blurb": "只有成员能看到群组详情。",
-      "crumb": "新建",
       "descriptionLabel": "描述（可选）",
-      "descriptionPlaceholder": "这个群组是做什么的？"
+      "descriptionPlaceholder": "这个群组是做什么的？",
+      "title": "新群组",
+      "nameLabel": "群组名称",
+      "submit": "创建群组"
     },
     "requests": {
       "approveLabel": "批准申请",
       "declineLabel": "拒绝申请",
       "pendingSection": "待处理的申请",
       "processFailed": "无法处理该申请。",
-      "requested": "申请于 {{date}}"
+      "requested": "申请于 {{date}}",
+      "approve": "批准",
+      "decline": "拒绝"
     },
     "settings": {
       "channelsSection": "频道",
@@ -207,15 +215,54 @@
       "deleting": "正在删除…",
       "identitySection": "身份",
       "notAdmin": "你没有此群组的管理员权限。",
-      "tapAgainToConfirm": "再次点击以确认"
+      "tapAgainToConfirm": "再次点击以确认",
+      "title": "群组设置",
+      "nameLabel": "群组名称",
+      "deleteChannel": "删除 #{{name}}"
+    },
+    "panel": {
+      "menuLabel": "{{name}}，群组菜单",
+      "invite": "邀请成员",
+      "search": "搜索 {{name}}",
+      "createChannel": "创建频道",
+      "thisGroup": "此群组",
+      "members": "成员",
+      "settings": "群组设置",
+      "joinRequests": "加入申请",
+      "customEmoji": "自定义表情",
+      "leave": "退出群组",
+      "leaveConfirm": "再次轻点以退出 {{name}}",
+      "leaveHint": "重新加入需要新的邀请。",
+      "leaving": "正在退出…",
+      "channelSelected": "{{name}}，已选中",
+      "channelUnread_other": "{{name}}，{{count}} 条未读"
+    },
+    "newChannel": {
+      "title": "新频道",
+      "nameLabel": "频道名称",
+      "submit": "创建频道"
     }
   },
   "groups": {
     "acceptInviteLabel": "接受邀请",
     "declineInviteLabel": "拒绝邀请",
-    "empty": "还没有群组。创建一个开始吧。",
     "loading": "正在加载群组…",
-    "pendingInvites": "待处理的邀请"
+    "pendingInvites": "待处理的邀请",
+    "title": "群组",
+    "stripLabel": "你的群组",
+    "addGroup": "创建或查找群组",
+    "create": "创建群组",
+    "createSub": "新建群组并邀请成员",
+    "find": "查找群组",
+    "findSub": "通过标识申请加入群组",
+    "emptyTitle": "还没有群组",
+    "emptyBody": "为你的伙伴创建一个群组，或查找别人告诉你的群组。",
+    "pillSelected": "{{name}}，已选中",
+    "pillUnread": "{{name}}，有未读消息",
+    "pillSelectedUnread": "{{name}}，已选中，有未读消息",
+    "joinRequestsSection": "加入申请",
+    "accept": "接受",
+    "decline": "拒绝"
   },
   "invite": {
     "backToPollis": "返回 Pollis",
@@ -231,7 +278,6 @@
     "restartRequired": "重启 Pollis 以切换布局方向。"
   },
   "permalink": {
-    "context": "链接",
     "opening": "正在打开消息…",
     "title": "消息链接"
   },
@@ -259,10 +305,11 @@
       "enterCodeIntro": "输入我们发送到 {{email}} 的验证码。",
       "enterEmailIntro": "输入新邮箱。我们会发送 6 位验证码以确认它属于你。",
       "title": "更改邮箱",
-      "useDifferentEmail": "使用其他邮箱"
+      "useDifferentEmail": "使用其他邮箱",
+      "sendCode": "发送验证码"
     },
     "deleteAccount": {
-      "consequences": "这会永久删除你的 Pollis 账户。你将被移出所有群组和对话，你的设备会被注销，此手机上的加密数据也会被清除。其他成员会保留他们自己的历史消息副本，但删除后发送的任何内容都无法再用你的密钥读取。",
+      "consequences": "这会永久删除你的 Pollis 账户。你将被移出所有群组和对话，你的设备会被注销，此设备上的加密数据也会被清除。其他成员会保留他们自己的历史消息副本，但删除后发送的任何内容都无法再用你的密钥读取。",
       "contextPath": "{{parent}} · {{child}}",
       "failed": "无法删除账户。没有任何更改，请重试。",
       "irreversible": "此操作无法撤销。没有宽限期，也无法恢复。",
@@ -282,9 +329,25 @@
       "savedSub": "收藏的消息",
       "securitySub": "密钥、设备、退出登录",
       "signingOut": "正在退出登录…",
-      "userSettingsSub": "显示名称、用户名、邮箱"
+      "userSettingsSub": "显示名称、用户名、邮箱",
+      "customAccent": "自定义",
+      "off": "关闭",
+      "profileSub": "@{{handle}} · 此设备",
+      "editProfile": "编辑个人资料",
+      "accountSection": "账户",
+      "appSection": "应用",
+      "accountDetails": "账户详情",
+      "securityDevices": "安全与设备",
+      "deviceCount_other": "{{count}} 台设备",
+      "savedMessages": "已保存的消息",
+      "appearance": "外观",
+      "signOut": "退出登录…",
+      "signOutConfirmTitle": "要在此设备上退出 Pollis 吗？"
     },
     "identityHeading": "身份",
+    "linkDevice": {
+      "codeTitle": "使用代码登录"
+    },
     "preferences": {
       "accentA11y": "强调色 {{name}}",
       "accentHeading": "强调色",
@@ -317,7 +380,7 @@
       "approve": "批准",
       "approveA11y": "批准设备注册",
       "autoLockA11y": "自动锁定 {{label}}",
-      "autoLockDescription": "一段时间不用时锁定 Pollis。只影响这部手机。",
+      "autoLockDescription": "一段时间不用时锁定 Pollis。只影响这台设备。",
       "current": "当前",
       "daysAgo_other": "{{count}} 天前",
       "deleteAccountSub": "永久删除你的账户并清除此设备",
@@ -340,21 +403,24 @@
       "rejectA11y": "拒绝设备注册",
       "safetyHeading": "安全",
       "showOlderA11y": "显示更早的事件",
-      "thisDevice": "{{name}} · 此设备"
+      "thisDevice": "{{name}} · 此设备",
+      "blockedUsers": "已屏蔽的用户"
     },
     "title": "我的",
     "userSettings": {
       "displayName": "显示名称",
       "handle": "用户名",
       "handleHint": "其他成员可以通过 @handle 找到你并发私信。",
-      "handleInvalid": "用户名为 3–32 个字符：小写字母、数字、'_'、'.' 或 '-'。"
+      "handleInvalid": "用户名为 3–32 个字符：小写字母、数字、'_'、'.' 或 '-'。",
+      "save": "保存更改"
     }
   },
   "tabs": {
     "direct": "私信",
     "groups": "群组",
     "search": "搜索",
-    "self": "我的"
+    "self": "我的",
+    "withUnread_other": "{{label}}，{{count}} 条未读"
   },
   "thread": {
     "sendFailed": "无法发送回复。"
@@ -363,6 +429,7 @@
     "now": "刚刚"
   },
   "ui": {
+    "backTo": "返回{{name}}",
     "imageUnavailable": "图片不可用",
     "selectConversation": "选择一个对话"
   },

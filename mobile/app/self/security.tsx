@@ -1,21 +1,26 @@
 import { useState } from "react";
-import { View, Text } from "react-native";
-import { useRouter } from "expo-router";
+import { ScrollView, View, Text, useWindowDimensions } from "react-native";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import {
   Screen,
-  Crumb,
-  Body,
-  SectionTitle,
+  Header,
+  Group,
+  Card,
   ListRow,
   Chip,
   Button,
-  Ctx,
   Field,
+  ActionRow,
 } from "../../components/ui";
 import { Icon } from "../../components/icons";
-import { semantic, type as ty, fonts } from "../../theme/tokens";
-import i18n, { activeLocale, upper } from "../../i18n";
+import { ErrorText, Note } from "../../components/self/SettingsField";
+import { ChoiceGrid } from "../../components/self/ChoiceGrid";
+import { ChoiceChip } from "../../components/self/ChoiceChip";
+import { confirmSignOut } from "../../components/self/confirmSignOut";
+import { useSectionScroll } from "../../components/self/useSectionScroll";
+import { semantic, type as ty, fonts, space } from "../../theme/tokens";
+import i18n, { activeLocale } from "../../i18n";
 import {
   useUserDevices,
   useRevokeDevice,
@@ -199,6 +204,8 @@ function groupKey(key: string): string {
 export default function Security() {
   const { t } = useTranslation("settings");
   const router = useRouter();
+  const { section } = useLocalSearchParams<{ section?: string }>();
+  const { scrollRef, sectionLayout } = useSectionScroll(section);
   const { data: devices = [], isLoading, isError } = useUserDevices();
   const revoke = useRevokeDevice();
   const logout = useLogout();
@@ -213,6 +220,10 @@ export default function Security() {
   const [typedCodes, setTypedCodes] = useState<Record<string, string>>({});
   const { minutes: autoLockMinutes, setMinutes: setAutoLockMinutes } =
     useAutoLockMinutes();
+  // Auto-lock options sit in an even grid: three across at default text
+  // sizes, fewer as Dynamic Type grows, so labels never squeeze or strand.
+  const { fontScale } = useWindowDimensions();
+  const autoLockColumns = fontScale >= 1.6 ? 1 : fontScale >= 1.25 ? 2 : 3;
   const lockNow = useLockNow();
   const { data: identity } = useIdentity();
   const { data: events = [], isError: eventsError } = useSecurityEvents();
@@ -230,457 +241,323 @@ export default function Security() {
   };
 
   const onSignOut = () => {
-    logout.mutate(undefined, {
-      onSuccess: () => router.replace("/(auth)/email"),
-      onError: () => router.replace("/(auth)/email"),
+    if (logout.isPending) {
+      return;
+    }
+    confirmSignOut(() => {
+      logout.mutate(undefined, {
+        onSuccess: () => router.replace("/(auth)/email"),
+        onError: () => router.replace("/(auth)/email"),
+      });
     });
   };
 
+  const sectionGap = { gap: space.md };
+
   return (
-    <Screen testID="screen-self-security" centered>
-      <Crumb
-        segs={[
-          { label: upper(t("mobile:self.title")) },
-          { label: t("security.title"), leaf: true },
-        ]}
-      />
-      <Body>
+    <Screen testID="screen-self-security">
+      <Header title={t("security.title")} backTo={t("mobile:self.title")} />
+      <ScrollView
+        ref={scrollRef}
+        style={{ flex: 1 }}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{
+          paddingHorizontal: space.xxl,
+          paddingTop: space.xxl,
+          paddingBottom: space.xxxl,
+          gap: space.xxxl,
+        }}
+      >
+        {/* ── Part 1: this account's devices and keys ── */}
         {pendingEnrollments.length > 0 ? (
-          <View>
-            <SectionTitle>
-              {upper(t("mobile:self.security.pairHeading"))}
-            </SectionTitle>
-            {pendingEnrollments.map((req) => (
-              <View
-                key={req.request_id}
-                style={{
-                  paddingHorizontal: 18,
-                  paddingVertical: 12,
-                  gap: 8,
-                  borderBottomWidth: 1,
-                  borderBottomColor: semantic.hairSoft,
-                }}
-              >
-                <Text
-                  style={{
-                    fontFamily: ty.body.fontFamily,
-                    fontSize: 13,
-                    color: semantic.ink,
-                  }}
-                >
-                  {t("mobile:self.security.pairIntro")}
-                </Text>
-                <Field
-                  testID={`input-approval-code-${req.request_id}`}
-                  accessibilityLabel={t("auth:approval.codeLabel")}
-                  value={typedCodes[req.request_id] ?? ""}
-                  onChangeText={(next) =>
-                    setTypedCodes((prev) => ({
-                      ...prev,
-                      [req.request_id]: normalizeSasInput(next),
-                    }))
-                  }
-                  placeholder={"·".repeat(SAS_LENGTH)}
-                  editable={!approveEnrollment.isPending}
-                />
-                <Text
-                  style={{
-                    fontFamily: ty.body.fontFamily,
-                    fontSize: 11,
-                    color: semantic.mute,
-                  }}
-                >
-                  {t("mobile:self.security.pairHint")}
-                </Text>
-                <View style={{ flexDirection: "row", gap: 8, paddingTop: 6 }}>
-                  <Chip
-                    testID={`btn-reject-${req.request_id}`}
-                    accessibilityLabel={t("mobile:self.security.rejectA11y")}
-                    onPress={() => rejectEnrollment.mutate(req.request_id)}
-                  >
-                    {t("mobile:self.security.reject")}
-                  </Chip>
-                  <Chip
-                    variant="on"
-                    testID={`btn-approve-${req.request_id}`}
-                    accessibilityLabel={t("mobile:self.security.approveA11y")}
-                    disabled={
-                      (typedCodes[req.request_id] ?? "").length !== SAS_LENGTH
-                    }
-                    onPress={() =>
-                      approveEnrollment.mutate({
-                        requestId: req.request_id,
-                        verificationCode: typedCodes[req.request_id] ?? "",
-                      })
-                    }
-                  >
-                    {approveEnrollment.isPending
-                      ? t("auth:approval.approving")
-                      : t("mobile:self.security.approve")}
-                  </Chip>
-                </View>
-              </View>
-            ))}
-            {(approveEnrollment.isError || rejectEnrollment.isError) ? (
-              <Text
-                style={{
-                  fontFamily: ty.body.fontFamily,
-                  fontSize: 12,
-                  color: semantic.danger,
-                  paddingHorizontal: 18,
-                  paddingTop: 6,
-                }}
-              >
-                {((approveEnrollment.error ?? rejectEnrollment.error) as Error)
-                  .message || t("mobile:self.security.enrollmentFailed")}
-              </Text>
+          <View style={sectionGap}>
+            <Group title={t("mobile:self.security.pairHeading")}>
+              {pendingEnrollments.map((req) => {
+                const typed = typedCodes[req.request_id] ?? "";
+                return (
+                  <View key={req.request_id} style={{ padding: space.xxl, gap: space.md }}>
+                    <Text style={ty.body}>{t("mobile:self.security.pairIntro")}</Text>
+                    <Field
+                      testID={`input-approval-code-${req.request_id}`}
+                      surface="raised"
+                      accessibilityLabel={t("auth:approval.codeLabel")}
+                      value={typed}
+                      onChangeText={(next) =>
+                        setTypedCodes((prev) => ({
+                          ...prev,
+                          [req.request_id]: normalizeSasInput(next),
+                        }))
+                      }
+                      placeholder={"·".repeat(SAS_LENGTH)}
+                      editable={!approveEnrollment.isPending}
+                      style={{ fontFamily: fonts.mono400, letterSpacing: 2 }}
+                    />
+                    <Text style={ty.meta}>{t("mobile:self.security.pairHint")}</Text>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
+                      <Button
+                        testID={`btn-reject-${req.request_id}`}
+                        surface="raised"
+                        accessibilityLabel={t("mobile:self.security.rejectA11y")}
+                        onPress={() => rejectEnrollment.mutate(req.request_id)}
+                      >
+                        {t("mobile:self.security.reject")}
+                      </Button>
+                      <Button
+                        variant="primary"
+                        testID={`btn-approve-${req.request_id}`}
+                        surface="raised"
+                        accessibilityLabel={t("mobile:self.security.approveA11y")}
+                        disabled={typed.length !== SAS_LENGTH}
+                        onPress={() =>
+                          approveEnrollment.mutate({
+                            requestId: req.request_id,
+                            verificationCode: typed,
+                          })
+                        }
+                      >
+                        {approveEnrollment.isPending
+                          ? t("auth:approval.approving")
+                          : t("mobile:self.security.approve")}
+                      </Button>
+                    </View>
+                  </View>
+                );
+              })}
+            </Group>
+            {approveEnrollment.isError || rejectEnrollment.isError ? (
+              <ErrorText>
+                {((approveEnrollment.error ?? rejectEnrollment.error) as Error).message ||
+                  t("mobile:self.security.enrollmentFailed")}
+              </ErrorText>
             ) : null}
           </View>
         ) : null}
 
-        <SectionTitle>{upper(t("mobile:self.identityHeading"))}</SectionTitle>
-        <View style={{ paddingHorizontal: 18, paddingTop: 6, gap: 8 }}>
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 12,
-              color: semantic.mute,
-              lineHeight: 17,
-            }}
-          >
-            {t("mobile:self.security.identityDescription")}
-          </Text>
-          {identity && identity.public_key ? (
-            <Text
-              testID="text-identity-key"
-              selectable
-              style={{
-                fontFamily: fonts.mono400,
-                fontSize: 12,
-                lineHeight: 18,
-                color: semantic.ink,
-              }}
-            >
-              {groupKey(identity.public_key)}
-            </Text>
-          ) : (
-            <Text
-              style={{
-                fontFamily: fonts.mono400,
-                fontSize: 12,
-                color: semantic.mute2,
-              }}
-            >
-              {t("mobile:self.security.identityMissing")}
-            </Text>
-          )}
-        </View>
-
-
-        <SectionTitle>{upper(t("security.devicesHeading"))}</SectionTitle>
-        {/* Link a new device by QR (#1207): its own screen, one step at a time. */}
-        <ListRow
-          testID="row-link-device"
-          minHeight={58}
-          glyph={<Icon.plus color={semantic.mute} />}
-          name={t("linkDevice.heading")}
-          sub={t("linkDevice.rowSub")}
-          onPress={() => router.push("/self/link-device")}
-          end={<Icon.fwd color={semantic.mute} />}
-        />
-        {isLoading ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.mute,
-              paddingHorizontal: 18,
-              paddingVertical: 12,
-            }}
-          >
-            {t("security.devicesLoading")}
-          </Text>
-        ) : null}
-        {isError ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.danger,
-              paddingHorizontal: 18,
-              paddingVertical: 12,
-            }}
-          >
-            {t("security.devicesLoadFailed")}
-          </Text>
-        ) : null}
-        {devices.map((d) => {
-          const name =
-            (d.device_name && d.device_name.trim()) ||
-            d.device_id.slice(0, 8);
-          const sub = t("mobile:self.security.deviceSub", {
-            paired: formatRelative(d.created_at),
-            lastSeen: formatRelative(d.last_seen),
-          });
-          const armed = confirmRevoke === d.device_id;
-          return (
+        <View style={sectionGap} onLayout={sectionLayout("devices")}>
+          <Group title={t("security.devicesHeading")}>
+            {/* Link a new device by QR (#1207): its own screen, one step at a time. */}
             <ListRow
-              key={d.device_id}
-              testID={`row-device-${d.device_id}`}
-              minHeight={54}
-              glyph={<Icon.device color={semantic.mute} />}
-              name={
-                d.is_current
-                  ? t("mobile:self.security.thisDevice", { name })
-                  : name
-              }
-              nameStyle={{ fontSize: 14 }}
-              sub={sub}
-              end={
-                d.is_current ? (
-                  <Chip variant="on">
-                    {upper(t("mobile:self.security.current"))}
-                  </Chip>
-                ) : (
-                  <Chip
-                    variant={armed ? "on" : "default"}
-                    testID={`btn-revoke-device-${d.device_id}`}
-                    accessibilityLabel={t("security.revokeConfirmSubmit")}
-                    onPress={() => onRevoke(d.device_id)}
-                  >
-                    {revoke.isPending && armed
-                      ? t("security.revoking")
-                      : armed
-                        ? t("security.revokeNowConfirm")
-                        : t("security.revokeButton")}
-                  </Chip>
-                )
-              }
+              testID="row-link-device"
+              glyph={<Icon.plus size={22} color={semantic.text} />}
+              name={t("linkDevice.heading")}
+              sub={t("linkDevice.rowSub")}
+              chevron
+              onPress={() => router.push("/self/link-device")}
             />
-          );
-        })}
-        {revoke.isError ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 12,
-              color: semantic.danger,
-              paddingHorizontal: 18,
-              paddingTop: 6,
-            }}
-          >
-            {(revoke.error as Error).message || t("security.revokeFailed")}
-          </Text>
-        ) : null}
+            {devices.map((d) => {
+              const name =
+                (d.device_name && d.device_name.trim()) ||
+                d.device_id.slice(0, 8);
+              const sub = t("mobile:self.security.deviceSub", {
+                paired: formatRelative(d.created_at),
+                lastSeen: formatRelative(d.last_seen),
+              });
+              const armed = confirmRevoke === d.device_id;
+              const shownName = d.is_current
+                ? t("mobile:self.security.thisDevice", { name })
+                : name;
+              return (
+                <ActionRow
+                  key={d.device_id}
+                  testID={`row-device-${d.device_id}`}
+                  glyph={<Icon.device size={22} color={semantic.dim} />}
+                  name={shownName}
+                  sub={sub}
+                  action={
+                    d.is_current ? (
+                      // Status, not a control: plain accent text, so it can't
+                      // be mistaken for a primary button.
+                      <Text style={[ty.section, { color: semantic.accent }]}>
+                        {t("mobile:self.security.current")}
+                      </Text>
+                    ) : (
+                      <Chip
+                        variant={armed ? "solid" : "outline"}
+                        testID={`btn-revoke-device-${d.device_id}`}
+                        accessibilityLabel={
+                          armed
+                            ? `${t("security.revokeNowConfirm")}: ${t("security.revokeConfirmSubmit")} ${name}`
+                            : `${t("security.revokeConfirmSubmit")} ${name}`
+                        }
+                        onPress={() => onRevoke(d.device_id)}
+                      >
+                        {revoke.isPending && armed
+                          ? t("security.revoking")
+                          : armed
+                            ? t("security.revokeNowConfirm")
+                            : t("security.revokeButton")}
+                      </Chip>
+                    )
+                  }
+                />
+              );
+            })}
+          </Group>
+          {isLoading ? <Note>{t("security.devicesLoading")}</Note> : null}
+          {isError ? <ErrorText>{t("security.devicesLoadFailed")}</ErrorText> : null}
+          {revoke.isError ? (
+            <ErrorText>{(revoke.error as Error).message || t("security.revokeFailed")}</ErrorText>
+          ) : null}
+        </View>
 
-        <SectionTitle>{upper(t("security.eventsHeading"))}</SectionTitle>
-        {eventsError ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.danger,
-              paddingHorizontal: 18,
-              paddingVertical: 12,
-            }}
-          >
-            {t("security.eventsLoadFailed")}
-          </Text>
-        ) : null}
-        {!eventsError && events.length === 0 ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 12,
-              color: semantic.mute,
-              paddingHorizontal: 18,
-              paddingVertical: 12,
-            }}
-          >
-            {t("mobile:self.security.eventsEmpty")}
-          </Text>
-        ) : null}
-        {events.slice(0, visibleEvents).map((ev) => {
-          const { heading, detail } = describeEvent(ev);
-          return (
-            <View
-              key={ev.id}
-              testID={`row-security-event-${ev.id}`}
-              style={{
-                paddingHorizontal: 18,
-                paddingVertical: 10,
-                gap: 2,
-                borderBottomWidth: 1,
-                borderBottomColor: semantic.hairSoft,
-              }}
-            >
-              <View
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 8,
-                }}
-              >
+        <View onLayout={sectionLayout("identity")}>
+          <Group title={t("mobile:self.identityHeading")}>
+            <View style={{ padding: space.xxl, gap: space.md }}>
+              <Text style={ty.secondary}>{t("mobile:self.security.identityDescription")}</Text>
+              {identity && identity.public_key ? (
                 <Text
+                  testID="text-identity-key"
+                  selectable
                   style={{
-                    fontFamily: ty.rowN.fontFamily,
+                    fontFamily: fonts.mono400,
                     fontSize: 13,
-                    color: semantic.ink,
-                    flex: 1,
+                    lineHeight: 20,
+                    color: semantic.text,
                   }}
                 >
-                  {heading}
+                  {groupKey(identity.public_key)}
                 </Text>
-                <Text
-                  style={{
-                    fontFamily: ty.body.fontFamily,
-                    fontSize: 11,
-                    color: semantic.mute2,
-                  }}
-                >
-                  {formatRelative(ev.created_at)}
+              ) : (
+                <Text style={[ty.secondary, { color: semantic.muted }]}>
+                  {t("mobile:self.security.identityMissing")}
                 </Text>
-              </View>
-              {detail ? (
-                <Text
-                  style={{
-                    fontFamily: ty.body.fontFamily,
-                    fontSize: 12,
-                    lineHeight: 17,
-                    color: semantic.mute,
-                  }}
-                >
-                  {detail}
-                </Text>
-              ) : null}
+              )}
             </View>
-          );
-        })}
-        {events.length > visibleEvents ? (
-          <View
-            style={{
-              paddingHorizontal: 18,
-              paddingTop: 10,
-              flexDirection: "row",
-            }}
-          >
-            <Chip
-              testID="btn-show-older-events"
-              accessibilityLabel={t("mobile:self.security.showOlderA11y")}
-              onPress={() =>
-                setVisibleEvents((n) => n + SECURITY_EVENTS_PAGE_SIZE)
-              }
-            >
-              {t("security.eventsShowOlder", {
-                count: events.length - visibleEvents,
-              })}
-            </Chip>
-          </View>
-        ) : null}
+          </Group>
+        </View>
 
-        <SectionTitle>{upper(t("mobile:self.security.safetyHeading"))}</SectionTitle>
-        <ListRow
-          testID="row-blocked-users"
-          minHeight={48}
-          glyph={<Icon.exit color={semantic.mute} />}
-          name={t("nav:breadcrumb.blockedUsers")}
-          nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
-          onPress={() => router.push("/self/blocked")}
-          end={<Icon.fwd color={semantic.mute} />}
-        />
-
-        <SectionTitle>{upper(t("security.autoLockHeading"))}</SectionTitle>
-        <View style={{ paddingHorizontal: 18, paddingTop: 6, gap: 10 }}>
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 12,
-              color: semantic.mute,
-              lineHeight: 17,
-            }}
-          >
-            {t("mobile:self.security.autoLockDescription")}
-          </Text>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-            {AUTO_LOCK_OPTIONS_MINUTES.map((opt) => (
-              <Chip
-                key={opt === null ? "off" : String(opt)}
-                testID={`chip-autolock-${opt === null ? "off" : opt}`}
-                accessibilityLabel={t("mobile:self.security.autoLockA11y", {
-                  label: autoLockLabel(opt),
-                })}
-                variant={autoLockMinutes === opt ? "on" : "default"}
-                onPress={() => setAutoLockMinutes(opt)}
+        {/* ── Part 2: what has happened to the account ── */}
+        <View style={sectionGap} onLayout={sectionLayout("events")}>
+          <Group title={t("security.eventsHeading")}>
+            {events.slice(0, visibleEvents).map((ev) => {
+              const { heading, detail } = describeEvent(ev);
+              const when = formatRelative(ev.created_at);
+              return (
+                <View
+                  key={ev.id}
+                  testID={`row-security-event-${ev.id}`}
+                  accessible
+                  accessibilityLabel={[heading, when, detail].filter(Boolean).join(", ")}
+                  style={{
+                    paddingHorizontal: space.xxl,
+                    paddingVertical: space.md,
+                    gap: 2,
+                    minHeight: 52,
+                    justifyContent: "center",
+                  }}
+                >
+                  <View style={{ flexDirection: "row", alignItems: "baseline", gap: space.sm }}>
+                    <Text style={{ flex: 1, fontFamily: fonts.medium, fontSize: 16, color: semantic.text }}>
+                      {heading}
+                    </Text>
+                    <Text style={ty.meta}>{when}</Text>
+                  </View>
+                  {detail ? <Text style={ty.secondary}>{detail}</Text> : null}
+                </View>
+              );
+            })}
+          </Group>
+          {eventsError ? <ErrorText>{t("security.eventsLoadFailed")}</ErrorText> : null}
+          {!eventsError && events.length === 0 ? (
+            <Note>{t("mobile:self.security.eventsEmpty")}</Note>
+          ) : null}
+          {events.length > visibleEvents ? (
+            <View style={{ alignItems: "flex-start" }}>
+              <Button
+                testID="btn-show-older-events"
+                accessibilityLabel={t("mobile:self.security.showOlderA11y")}
+                onPress={() => setVisibleEvents((n) => n + SECURITY_EVENTS_PAGE_SIZE)}
               >
-                {autoLockLabel(opt)}
-              </Chip>
-            ))}
-          </View>
-        </View>
-        <ListRow
-          testID="row-lock-now"
-          minHeight={48}
-          glyph={<Icon.lock color={semantic.mute} />}
-          name={t("mobile:self.security.lockNow")}
-          nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
-          sub={t("mobile:self.security.lockNowSub")}
-          onPress={() => void lockNow()}
-          end={<Icon.fwd color={semantic.mute} />}
-        />
-
-        <SectionTitle>{upper(t("mobile:self.security.recoveryHeading"))}</SectionTitle>
-        <View style={{ paddingHorizontal: 18, paddingTop: 6 }}>
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 12,
-              color: semantic.mute,
-              lineHeight: 17,
-            }}
-          >
-            {t("mobile:self.security.recoveryDescription")}
-          </Text>
+                {t("security.eventsShowOlder", {
+                  count: events.length - visibleEvents,
+                })}
+              </Button>
+            </View>
+          ) : null}
         </View>
 
-        <ExportArchive />
-
-        <SectionTitle>{upper(t("user.accountHeading"))}</SectionTitle>
-        <ListRow
-          testID="row-delete-account"
-          minHeight={48}
-          glyph={<Icon.shield color={semantic.danger} />}
-          name={
-            <Text
-              style={{
-                fontFamily: ty.body.fontFamily,
-                fontSize: 14,
-                color: semantic.danger,
-              }}
-            >
-              {t("mobile:self.deleteAccount.title")}
-            </Text>
-          }
-          sub={t("mobile:self.security.deleteAccountSub")}
-          onPress={() => router.push("/self/delete-account")}
-          end={<Icon.fwd color={semantic.mute} />}
-        />
-
-        <View style={{ paddingHorizontal: 18, paddingTop: 18 }}>
-          <Button
-            full
-            testID="btn-sign-out"
-            variant="danger"
-            icon={<Icon.exit color={semantic.danger} />}
-            onPress={onSignOut}
-            disabled={logout.isPending}
-          >
-            {logout.isPending
-              ? upper(t("mobile:self.hub.signingOut"))
-              : upper(t("auth:shell.signOutTitle"))}
-          </Button>
+        {/* ── Part 3: protecting and leaving the account ── */}
+        <View onLayout={sectionLayout("safety")}>
+          <Group title={t("mobile:self.security.safetyHeading")}>
+            <ListRow
+              testID="row-blocked-users"
+              glyph={<Icon.ban size={22} color={semantic.text} />}
+              name={t("mobile:self.security.blockedUsers")}
+              chevron
+              onPress={() => router.push("/self/blocked")}
+            />
+          </Group>
         </View>
-      </Body>
-      <Ctx cr={upper(t("mobile:self.title"))} name={t("security.title")} />
+
+        <View style={sectionGap} onLayout={sectionLayout("autolock")}>
+          <Group title={t("security.autoLockHeading")}>
+            <View style={{ padding: space.xxl, gap: space.md }}>
+              <Text style={ty.secondary}>{t("mobile:self.security.autoLockDescription")}</Text>
+              <ChoiceGrid
+                columns={autoLockColumns}
+                accessibilityRole="radiogroup"
+                accessibilityLabel={t("security.autoLockAriaLabel")}
+              >
+                {AUTO_LOCK_OPTIONS_MINUTES.map((opt) => (
+                  <ChoiceChip
+                    key={opt === null ? "off" : String(opt)}
+                    testID={`chip-autolock-${opt === null ? "off" : opt}`}
+                    label={autoLockLabel(opt)}
+                    accessibilityLabel={t("mobile:self.security.autoLockA11y", {
+                      label: autoLockLabel(opt),
+                    })}
+                    selected={autoLockMinutes === opt}
+                    onPress={() => setAutoLockMinutes(opt)}
+                  />
+                ))}
+              </ChoiceGrid>
+            </View>
+            <ListRow
+              testID="row-lock-now"
+              glyph={<Icon.lockKeyhole size={22} color={semantic.text} />}
+              name={t("mobile:self.security.lockNow")}
+              sub={t("mobile:self.security.lockNowSub")}
+              onPress={() => void lockNow()}
+            />
+          </Group>
+        </View>
+
+        <View style={sectionGap} onLayout={sectionLayout("data")}>
+          <Group title={t("mobile:self.security.recoveryHeading")}>
+            <View style={{ padding: space.xxl }}>
+              <Text style={ty.secondary}>{t("mobile:self.security.recoveryDescription")}</Text>
+            </View>
+          </Group>
+        </View>
+
+        <ExportArchive padded={false} />
+
+        <View onLayout={sectionLayout("account")}>
+          <Group title={t("mobile:self.hub.accountSection")}>
+            <ListRow
+              testID="btn-sign-out"
+              glyph={<Icon.logOut size={22} color={semantic.text} />}
+              name={
+                logout.isPending
+                  ? t("mobile:self.hub.signingOut")
+                  : t("mobile:self.hub.signOut")
+              }
+              nameStyle={{ fontFamily: fonts.semibold }}
+              disabled={logout.isPending}
+              onPress={onSignOut}
+            />
+            <ListRow
+              testID="row-delete-account"
+              glyph={<Icon.trash size={22} color={semantic.text} />}
+              name={t("mobile:self.deleteAccount.title")}
+              nameStyle={{ fontFamily: fonts.semibold }}
+              sub={t("mobile:self.security.deleteAccountSub")}
+              chevron
+              onPress={() => router.push("/self/delete-account")}
+            />
+          </Group>
+        </View>
+      </ScrollView>
     </Screen>
   );
 }
