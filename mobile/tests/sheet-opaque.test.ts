@@ -65,12 +65,15 @@ test("SheetOverlay paints with sheetBg, and no sheet repaints itself translucent
   const overlay = read("components/chat/SheetOverlay.tsx");
   assert.match(overlay, /backgroundColor:\s*semantic\.sheetBg/);
   assert.doesNotMatch(overlay, /semantic\.cardBg/);
-  // The three sheets built on SheetOverlay. Inner fields may be tinted (they
-  // sit ON the opaque card); the sheet surface itself must not be cardBg.
+  // Every sheet built on SheetOverlay. Inner fields may be tinted (they sit
+  // ON the opaque card); the sheet surface itself must not be cardBg.
   for (const sheet of [
     "components/chat/ChannelMenuSheet.tsx",
     "components/chat/MessageActionsSheet.tsx",
     "components/emoji/EmojiPickerSheet.tsx",
+    "components/groups/AddGroupSheet.tsx",
+    "components/groups/CreateChannelSheet.tsx",
+    "components/groups/GroupMenuSheet.tsx",
   ]) {
     const src = read(sheet);
     assert.match(src, /SheetOverlay/, `${sheet} must be built on SheetOverlay`);

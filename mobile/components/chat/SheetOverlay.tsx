@@ -1,14 +1,22 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Animated,
-  Easing,
   Modal,
   Pressable,
   Text,
   View,
   AccessibilityInfo,
   Platform,
+  useWindowDimensions,
 } from "react-native";
+import Animated, {
+  Easing,
+  cancelAnimation,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
+import { scheduleOnRN } from "react-native-worklets";
 import { useTranslation } from "react-i18next";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { semantic, type as ty, r, space, layout } from "../../theme/tokens";
@@ -22,6 +30,13 @@ import { useIsRegular } from "../../hooks/useLayoutClass";
 const ENTER_MS = 180;
 // Upper bound on the entrance: past this the sheet is shown statically.
 const SETTLE_FALLBACK_MS = 600;
+
+// The end state, applied as plain React styles AFTER the animated ones once
+// the entrance settles. If Reanimated never wrote the view (its UI-thread
+// update was dropped), these are what the view shows. The animated styles
+// stay attached, because detaching one does not revert what it already wrote.
+const SETTLED_BACKDROP = { opacity: 1 };
+const SETTLED_CARD = { transform: [{ translateY: 0 }] };
 
 /**
  * Runs `fn` once a sheet that was just closed (its SheetOverlay unmounted in
@@ -86,45 +101,83 @@ export function SheetOverlay({
   // measurement, delaying the sheet.) Android gets the nav-bar floor.
   const bottomInset = useBottomInset();
   const regular = useIsRegular();
-  const progress = useRef(new Animated.Value(0)).current;
-  // The card's own height, so it starts exactly below the screen edge
-  // whatever its content. Until measured it is held fully off-screen.
-  const [cardHeight, setCardHeight] = useState(0);
-  const [reduceMotion, setReduceMotion] = useState(false);
-  // The Modal's window is on screen (onShow). On iOS the content mounts
-  // before the modal view controller is presented; a native-driven animation
-  // started then can be lost, leaving the sheet present (its Close button
-  // findable) but fully transparent — review #1. So the entrance waits for
-  // onShow as well as the measurement.
-  const [shown, setShown] = useState(false);
+  // Off-screen start for the card: the window height is below the screen
+  // edge whatever the card's size, so the slide needs no measurement and can
+  // start the moment the Modal is shown (#1249). Read once: a rotation
+  // mid-entrance only changes where an already-running slide began.
+  const { height: windowHeight } = useWindowDimensions();
+  const offscreen = useRef(windowHeight).current;
+  // 0 → 1 over the entrance, on the UI thread (Reanimated). Backdrop opacity
+  // and card translateY both derive from it in useAnimatedStyle, so once the
+  // timing starts no frame waits on the JS thread.
+  const progress = useSharedValue(0);
+  // Reanimated reads the system setting at app start; the AccessibilityInfo
+  // query below catches a change made since. A ref, not state: it is only
+  // read when the entrance would start, and must not cost a re-render.
+  const reduceMotionAtLaunch = useReducedMotion();
+  const reduceMotion = useRef(reduceMotionAtLaunch);
   // The entrance is over (or was skipped): render plain static styles from
-  // here on, so no later re-render can leave the sheet at an animated 0.
-  const [settled, setSettled] = useState(false);
+  // here on, so the sheet's visibility no longer depends on Reanimated at
+  // all. Reduced motion starts settled, so no animation ever runs.
+  const [settled, setSettled] = useState(reduceMotionAtLaunch);
+  const markSettled = useCallback(() => setSettled(true), []);
 
   useEffect(() => {
     AccessibilityInfo.isReduceMotionEnabled()
-      .then(setReduceMotion)
+      .then((enabled) => {
+        reduceMotion.current = enabled;
+      })
       .catch(() => {});
   }, []);
 
-  useEffect(() => {
-    if (cardHeight === 0 || !shown || settled) {
+  // The Modal's window is on screen. On iOS the content mounts before the
+  // modal view controller is presented; an animation started then can be
+  // lost, leaving the sheet present (its Close button findable) but invisible
+  // — review #1. So the entrance starts here, straight from the event: no
+  // state round-trip, no layout measurement.
+  const onShow = () => {
+    if (settled) {
       return;
     }
-    Animated.timing(progress, {
-      toValue: 1,
-      duration: reduceMotion ? 0 : ENTER_MS,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start(() => setSettled(true));
-  }, [cardHeight, shown, settled, progress, reduceMotion]);
+    if (reduceMotion.current) {
+      setSettled(true);
+      return;
+    }
+    progress.value = withTiming(
+      1,
+      { duration: ENTER_MS, easing: Easing.out(Easing.cubic) },
+      (finished) => {
+        "worklet";
+        if (finished) {
+          scheduleOnRN(markSettled);
+        }
+      },
+    );
+  };
 
-  // Belt and braces: whatever happens to onShow, onLayout or the animation,
-  // the sheet is fully visible shortly after it mounts.
+  // Belt and braces: whatever happens to onShow or the animation, the sheet
+  // is fully visible shortly after it mounts.
   useEffect(() => {
     const timer = setTimeout(() => setSettled(true), SETTLE_FALLBACK_MS);
     return () => clearTimeout(timer);
   }, []);
+
+  // On settling, pin the shared value to its end too: a timing that stalled
+  // part-way (Reanimated 4.4+ can drop UI-thread work for a view mounted
+  // under JS-thread load — gorhom #2721) would otherwise hold the props it
+  // last wrote, which override the static SETTLED_* styles.
+  useEffect(() => {
+    if (!settled) {
+      return;
+    }
+    cancelAnimation(progress);
+    progress.value = 1;
+  }, [settled, progress]);
+
+  const backdropStyle = useAnimatedStyle(() => ({ opacity: progress.value }));
+  const cardStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: (1 - progress.value) * offscreen }],
+  }));
 
   return (
     <Modal
@@ -134,19 +187,22 @@ export function SheetOverlay({
       statusBarTranslucent
       navigationBarTranslucent
       onRequestClose={onClose}
-      onShow={() => setShown(true)}
+      onShow={onShow}
     >
       <View style={{ flex: 1 }}>
         <Animated.View
-          style={{
-            position: "absolute",
-            top: 0,
-            bottom: 0,
-            start: 0,
-            end: 0,
-            backgroundColor: semantic.backdrop,
-            opacity: settled ? 1 : progress,
-          }}
+          style={[
+            {
+              position: "absolute",
+              top: 0,
+              bottom: 0,
+              start: 0,
+              end: 0,
+              backgroundColor: semantic.backdrop,
+            },
+            backdropStyle,
+            settled ? SETTLED_BACKDROP : null,
+          ]}
         >
           {/* The backdrop is a plain tap target, hidden from screen readers:
               the Close button is the accessible way out. */}
@@ -171,38 +227,26 @@ export function SheetOverlay({
           <Animated.View
             testID={testID}
             accessibilityViewIsModal
-            onLayout={(e) => {
-              if (cardHeight === 0) {
-                setCardHeight(e.nativeEvent.layout.height);
-              }
-            }}
-            style={{
-              opacity: settled || cardHeight > 0 ? 1 : 0,
-              transform: settled
-                ? []
-                : [
-                    {
-                      translateY: progress.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [cardHeight, 0],
-                      }),
-                    },
-                  ],
-              // Opaque: the sheet floats over the header and composer, and a
-              // translucent card let them show through its buttons (#1193).
-              backgroundColor: semantic.sheetBg,
-              width: "100%",
-              maxWidth: regular ? layout.sheetMaxWidth : undefined,
-              alignSelf: "center",
-              borderTopStartRadius: r.sheet,
-              borderTopEndRadius: r.sheet,
-              borderTopWidth: 1,
-              borderTopColor: semantic.hair,
-              paddingHorizontal: space.xxl,
-              paddingTop: space.xl,
-              paddingBottom: bottomInset + space.lg,
-              gap: space.lg,
-            }}
+            style={[
+              {
+                // Opaque: the sheet floats over the header and composer, and a
+                // translucent card let them show through its buttons (#1193).
+                backgroundColor: semantic.sheetBg,
+                width: "100%",
+                maxWidth: regular ? layout.sheetMaxWidth : undefined,
+                alignSelf: "center",
+                borderTopStartRadius: r.sheet,
+                borderTopEndRadius: r.sheet,
+                borderTopWidth: 1,
+                borderTopColor: semantic.hair,
+                paddingHorizontal: space.xxl,
+                paddingTop: space.xl,
+                paddingBottom: bottomInset + space.lg,
+                gap: space.lg,
+              },
+              cardStyle,
+              settled ? SETTLED_CARD : null,
+            ]}
           >
             <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
               <Text

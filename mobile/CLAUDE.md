@@ -1043,3 +1043,10 @@ Titles and back live at the TOP (`<Header>`). Bottom sheets are
 `SheetOverlay` (Modal, full-screen backdrop, title + 44×44 Close —
 `btn-sheet-close`, or the sheet's `closeTestID` — no drag handle, no extra
 Cancel button): rows in `Group surface="high"`.
+The entrance (#1249) runs on Reanimated on the UI thread: one shared value
+drives backdrop opacity and the card's translateY, starting from the window
+height on the Modal's `onShow` (no layout measurement), with a 600 ms
+fallback that settles to static styles — `tests/sheet-entrance.test.ts` pins
+that net. `@gorhom/bottom-sheet` was evaluated and rejected: on Reanimated
+4.4+ its sheets can mount invisible (gorhom #2721, #2696) and its modal can
+wedge after an interrupted dismiss (#2762); upstream had no fix as of 2026-10.
