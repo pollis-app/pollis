@@ -66,10 +66,9 @@ export function EditBar({
           autoFocus
           amber
           placeholder={t("mobile:chat.editPlaceholder")}
-          onSubmitEditing={onSave}
-          returnKeyType="send"
+          // Return inserts a newline, as in the composer (#1247); only the
+          // save button saves.
           multiline
-          submitBehavior="submit"
           autoCapitalize="sentences"
           containerStyle={{
             flex: 1,
@@ -79,7 +78,7 @@ export function EditBar({
             paddingHorizontal: 16,
           }}
           style={{
-            maxHeight: 140,
+            maxHeight: layout.composerInputMax,
             paddingTop: 11,
             paddingBottom: 11,
             textAlignVertical: "center",

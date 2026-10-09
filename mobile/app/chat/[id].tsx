@@ -15,6 +15,7 @@ import { DaySeparator } from "../../components/chat/DaySeparator";
 import { MessageRow } from "../../components/chat/MessageRow";
 import { Composer } from "../../components/chat/Composer";
 import { authorName } from "../../lib/authorName";
+import { outgoingText } from "../../lib/messageText";
 import { EditBar } from "../../components/chat/EditBar";
 import { MessageActionsSheet } from "../../components/chat/MessageActionsSheet";
 import { ChannelMenuSheet } from "../../components/chat/ChannelMenuSheet";
@@ -192,7 +193,7 @@ function TextChat(props: ChatViewProps = {}) {
   }, [newestId]);
 
   const onSend = () => {
-    const text = draft.trim();
+    const text = outgoingText(draft);
     if ((!text && pendingAttachments.length === 0) || sendMessage.isPending) {
       return;
     }
@@ -224,7 +225,7 @@ function TextChat(props: ChatViewProps = {}) {
   }, []);
 
   const onSaveEdit = () => {
-    const text = editDraft.trim();
+    const text = outgoingText(editDraft);
     if (!text || !editTarget) {
       return;
     }

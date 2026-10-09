@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { View, Text, Pressable, ScrollView } from "react-native";
+import { View, Text, Pressable, Platform, ScrollView } from "react-native";
 import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
 import { Avatar, Field } from "../ui";
@@ -74,6 +74,13 @@ export function Composer({
 }) {
   const { t } = useTranslation("common");
   const [caret, setCaret] = useState(0);
+  // iOS: a multiline field grows with its lines but keeps that height when its
+  // `value` is reset to "" (the send clears the draft), so after a two-line
+  // message the empty composer stayed two lines tall (Android re-measures on
+  // its own). Record the field's natural one-line height the first time it
+  // lays out empty, and cap an empty field at it. Measured at runtime, so it
+  // follows the system text size instead of hard-coding one.
+  const [emptyHeight, setEmptyHeight] = useState<number | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const mentionQuery =
@@ -317,12 +324,10 @@ export function Composer({
           onChangeText={handleChangeText}
           onSelectionChange={(e) => setCaret(e.nativeEvent.selection.end)}
           placeholder={t("composer.placeholder")}
-          onSubmitEditing={onSend}
-          returnKeyType="send"
-          // Multiline so long drafts wrap and the field grows; Return still
-          // sends (the submit behaviour the single-line field had).
+          // Return inserts a newline (the Slack/Discord mobile convention,
+          // #1247); only the send button sends. The field grows with its
+          // lines up to `layout.composerInputMax`, then scrolls inside.
           multiline
-          submitBehavior="submit"
           autoCapitalize="sentences"
           editable={editable}
           containerStyle={{
@@ -335,8 +340,16 @@ export function Composer({
             paddingEnd: 4,
             gap: 4,
           }}
+          onLayout={(e) => {
+            if (emptyHeight === null && draft === "") {
+              setEmptyHeight(e.nativeEvent.layout.height);
+            }
+          }}
           style={{
-            maxHeight: 140,
+            maxHeight:
+              Platform.OS === "ios" && draft === "" && emptyHeight !== null
+                ? emptyHeight
+                : layout.composerInputMax,
             paddingTop: 11,
             paddingBottom: 11,
             textAlignVertical: "center",
