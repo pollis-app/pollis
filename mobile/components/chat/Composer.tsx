@@ -317,12 +317,10 @@ export function Composer({
           onChangeText={handleChangeText}
           onSelectionChange={(e) => setCaret(e.nativeEvent.selection.end)}
           placeholder={t("composer.placeholder")}
-          onSubmitEditing={onSend}
-          returnKeyType="send"
-          // Multiline so long drafts wrap and the field grows; Return still
-          // sends (the submit behaviour the single-line field had).
+          // Return inserts a newline (the Slack/Discord mobile convention,
+          // #1247); only the send button sends. The field grows with its
+          // lines up to `layout.composerInputMax`, then scrolls inside.
           multiline
-          submitBehavior="submit"
           autoCapitalize="sentences"
           editable={editable}
           containerStyle={{
@@ -336,7 +334,7 @@ export function Composer({
             gap: 4,
           }}
           style={{
-            maxHeight: 140,
+            maxHeight: layout.composerInputMax,
             paddingTop: 11,
             paddingBottom: 11,
             textAlignVertical: "center",

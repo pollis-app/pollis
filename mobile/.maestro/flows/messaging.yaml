@@ -115,3 +115,21 @@ tags:
 - tapOn:
     id: "btn-delete"
 - takeScreenshot: messaging-06-deleted
+
+# Multi-line (#1247): Return in the composer inserts a newline instead of
+# sending, so only btn-send sends. Typed as two inputText calls around a
+# pressKey (adb cannot type a literal newline). The assertion needs BOTH lines
+# inside ONE row's compound label, in order — had Return sent, "line one"
+# would be its own message and nothing would match. `[\s\S]` spans the
+# newline whatever Maestro's dot-matches-newline setting is.
+- tapOn:
+    id: "input-composer"
+- inputText: "maestro line one"
+- pressKey: Enter
+- inputText: "maestro line two"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*maestro line one\\nmaestro line two[\\s\\S]*"
+    timeout: 15000
+- takeScreenshot: messaging-07-multiline

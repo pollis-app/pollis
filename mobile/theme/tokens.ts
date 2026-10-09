@@ -340,6 +340,9 @@ export const layout = {
   // 12pt label and a little air below.
   tabBar: 56,
   composer: 58,
+  // Tallest the composer / edit-bar text field grows (about five lines of
+  // 16pt body plus its padding); past it the field scrolls inside.
+  composerInputMax: 140,
   // Deprecated: the old bottom context strip.
   ctx: 52,
   statusBar: 38,

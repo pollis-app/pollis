@@ -9,6 +9,7 @@ import { GROUP_WINDOW_MS, timeLabel } from "../../components/chat/dates";
 import { MessageRow } from "../../components/chat/MessageRow";
 import { Composer } from "../../components/chat/Composer";
 import { authorName } from "../../lib/authorName";
+import { outgoingText } from "../../lib/messageText";
 import {
   useMessages,
   useSendMessage,
@@ -80,7 +81,7 @@ function ThreadScreen() {
   }, [mentionCandidates, selfName]);
 
   const onSend = () => {
-    const text = draft.trim();
+    const text = outgoingText(draft);
     if (!text || !threadId || sendMessage.isPending) {
       return;
     }
