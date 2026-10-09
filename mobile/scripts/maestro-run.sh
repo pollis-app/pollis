@@ -141,12 +141,11 @@ echo "==> running ${#FLOW_FILES[@]} flow(s)  (platform=$PLATFORM)"
 DEBUG="$OUT/.debug"
 mkdir -p "$DEBUG"
 FAILED=()
-# Every flow signs up a fresh account, i.e. one OTP request, and the dev DS
-# allows 10 per 10 minutes per IP (pollis-delivery/src/ratelimit.rs). Starting
-# flows at least SIGNUP_SPACING seconds apart keeps one run under that; two
-# platforms run in parallel from one machine still share the budget, so run
-# them one after the other. 0 disables the spacing.
-SIGNUP_SPACING="${SIGNUP_SPACING:-62}"
+# Every flow signs up a fresh account, i.e. one OTP request. The dev DS runs
+# its OTP tiers unlimited (`off` in pollis-delivery/wrangler.dev.jsonc), so
+# flows start back to back. Against a DS that keeps the default 10 per 10
+# minutes per client, set SIGNUP_SPACING=62 to start flows that far apart.
+SIGNUP_SPACING="${SIGNUP_SPACING:-0}"
 LAST_START=0
 for f in "${FLOW_FILES[@]}"; do
   fname="$(basename "$f" .yaml)"

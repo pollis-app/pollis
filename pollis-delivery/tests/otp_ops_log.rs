@@ -268,4 +268,13 @@ fn only_dev_turns_the_ops_log_on() {
 
     let dev = wrangler_vars("dev");
     assert_eq!(dev.get("POLLIS_DS_OPS_LOG").and_then(|v| v.as_str()), Some("true"));
+    // Dev runs request-otp unlimited for the parallel e2e suites, but never
+    // verify-otp: `DEV_OTP` is one code for every mailbox, so that tier is the
+    // only bound on guessing it across rotated addresses.
+    assert_eq!(dev.get("RL_REQUEST_OTP_MAX").and_then(|v| v.as_str()), Some("off"));
+    let verify = dev.get("RL_VERIFY_OTP_MAX").and_then(|v| v.as_str());
+    assert!(
+        verify.is_some_and(|v| v.parse::<u32>().is_ok()),
+        "dev must keep a numeric verify-otp limit, found {verify:?}"
+    );
 }

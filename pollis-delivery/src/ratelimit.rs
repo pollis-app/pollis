@@ -141,49 +141,53 @@ impl Default for RateLimitConfig {
     }
 }
 
+/// A tier max that never limits: [`RateLimiter::check`] saturates its counter
+/// at `u32::MAX` and limits only when the count EXCEEDS the max.
+pub const UNLIMITED: u32 = u32::MAX;
+
 impl RateLimitConfig {
     /// Build from DS environment, falling back to [`Default`] per field. Every
     /// tier is tunable: `RL_{REQUEST_OTP,VERIFY_OTP,WRITE,READ,PROBE,GET,
     /// INVITE_REDEEM}_{MAX,WINDOW_SECS}`.
     pub fn from_env() -> Self {
         let mut cfg = Self::default();
-        if let Some(v) = env_parse::<u32>("RL_REQUEST_OTP_MAX") {
+        if let Some(v) = env_max("RL_REQUEST_OTP_MAX") {
             cfg.request_otp_max = v;
         }
         if let Some(v) = env_parse::<u64>("RL_REQUEST_OTP_WINDOW_SECS") {
             cfg.request_otp_window_secs = v;
         }
-        if let Some(v) = env_parse::<u32>("RL_VERIFY_OTP_MAX") {
+        if let Some(v) = env_max("RL_VERIFY_OTP_MAX") {
             cfg.verify_otp_max = v;
         }
         if let Some(v) = env_parse::<u64>("RL_VERIFY_OTP_WINDOW_SECS") {
             cfg.verify_otp_window_secs = v;
         }
-        if let Some(v) = env_parse::<u32>("RL_GET_MAX") {
+        if let Some(v) = env_max("RL_GET_MAX") {
             cfg.get_max = v;
         }
         if let Some(v) = env_parse::<u64>("RL_GET_WINDOW_SECS") {
             cfg.get_window_secs = v;
         }
-        if let Some(v) = env_parse::<u32>("RL_WRITE_MAX") {
+        if let Some(v) = env_max("RL_WRITE_MAX") {
             cfg.write_max = v;
         }
         if let Some(v) = env_parse::<u64>("RL_WRITE_WINDOW_SECS") {
             cfg.write_window_secs = v;
         }
-        if let Some(v) = env_parse::<u32>("RL_READ_MAX") {
+        if let Some(v) = env_max("RL_READ_MAX") {
             cfg.read_max = v;
         }
         if let Some(v) = env_parse::<u64>("RL_READ_WINDOW_SECS") {
             cfg.read_window_secs = v;
         }
-        if let Some(v) = env_parse::<u32>("RL_PROBE_MAX") {
+        if let Some(v) = env_max("RL_PROBE_MAX") {
             cfg.probe_max = v;
         }
         if let Some(v) = env_parse::<u64>("RL_PROBE_WINDOW_SECS") {
             cfg.probe_window_secs = v;
         }
-        if let Some(v) = env_parse::<u32>("RL_INVITE_REDEEM_MAX") {
+        if let Some(v) = env_max("RL_INVITE_REDEEM_MAX") {
             cfg.invite_redeem_max = v;
         }
         if let Some(v) = env_parse::<u64>("RL_INVITE_REDEEM_WINDOW_SECS") {
@@ -195,6 +199,31 @@ impl RateLimitConfig {
 
 fn env_parse<T: std::str::FromStr>(key: &str) -> Option<T> {
     std::env::var(key).ok().and_then(|s| s.parse().ok())
+}
+
+/// A tier's `RL_*_MAX`: a number, or `off` for [`UNLIMITED`]. Dev sets the OTP
+/// tiers `off` (the e2e suites sign up a fresh account per flow from one
+/// machine); prod sets no `RL_*` at all, so it keeps the [`Default`] limits.
+fn env_max(key: &str) -> Option<u32> {
+    let raw = std::env::var(key).ok()?;
+    parse_max(&raw)
+}
+
+/// A tier max for operator JSON: the number, or `"off"` for [`UNLIMITED`].
+pub fn max_json(max: u32) -> serde_json::Value {
+    if max == UNLIMITED {
+        serde_json::Value::from("off")
+    } else {
+        serde_json::Value::from(max)
+    }
+}
+
+fn parse_max(raw: &str) -> Option<u32> {
+    let raw = raw.trim();
+    if raw.eq_ignore_ascii_case("off") {
+        return Some(UNLIMITED);
+    }
+    raw.parse().ok()
 }
 
 /// The outcome of a rate-limit check.
@@ -546,6 +575,32 @@ pub async fn rate_limit(State(state): State<AppState>, req: Request, next: Next)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tier_max_parses_as_a_number_or_off() {
+        assert_eq!(parse_max("10"), Some(10));
+        assert_eq!(parse_max(" off "), Some(UNLIMITED));
+        assert_eq!(parse_max("OFF"), Some(UNLIMITED));
+        assert_eq!(parse_max("unlimited"), None, "an unknown word falls back to the default, never to off");
+        assert_eq!(parse_max(""), None);
+        assert_eq!(max_json(UNLIMITED), serde_json::json!("off"));
+        assert_eq!(max_json(10), serde_json::json!(10));
+    }
+
+    /// `off` never limits, while the same traffic against a numeric max does.
+    #[test]
+    fn an_unlimited_tier_never_limits() {
+        let limiter = RateLimiter::default();
+        let open = limiter.key_for_ip("otp_request", "198.51.100.7");
+        let capped = limiter.key_for_ip("otp_request", "198.51.100.8");
+        for _ in 0..10_000 {
+            assert_eq!(limiter.check(&open, UNLIMITED, 600, 1), RateLimitOutcome::Allowed);
+        }
+        for _ in 0..10 {
+            limiter.check(&capped, 10, 600, 1);
+        }
+        assert_eq!(limiter.check(&capped, 10, 600, 1), RateLimitOutcome::Limited);
+    }
 
     /// The pruner must judge each entry by its OWN window.
     ///

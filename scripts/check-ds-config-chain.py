@@ -125,8 +125,10 @@ def ds_read_vars() -> set[str]:
     for rs in DS_SRC.rglob("*.rs"):
         text = rs.read_text()
         found |= set(re.findall(r'(?:env::)?var\("([A-Z_0-9]+)"\)', text))
-        # ratelimit.rs reads its tiers through a typed helper, `env_parse::<T>("KEY")`.
+        # ratelimit.rs reads its tiers through typed helpers: `env_parse::<T>("KEY")`
+        # for windows, `env_max("KEY")` for maxima (a number or `off`).
         found |= set(re.findall(r'env_parse::<[^>]+>\("([A-Z_0-9]+)"\)', text))
+        found |= set(re.findall(r'env_max\("([A-Z_0-9]+)"\)', text))
     return found
 
 

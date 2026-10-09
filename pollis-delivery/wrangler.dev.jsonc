@@ -78,13 +78,15 @@
     // `locationHint` did not move a container-backed durable object. The cause of
     // the dev/prod gap is therefore still UNKNOWN — see the spike on #658.
     "DS_SINGLETON_NAME": "pollis-delivery-singleton-enam",
-    // Per-IP OTP budgets for DEV only (ratelimit.rs `RateLimitConfig::from_env`).
-    // The mobile e2e suites run iPhone, iPad and Android in parallel from ONE
-    // machine — one IP — and every flow signs up a fresh account, so the prod
-    // defaults (10 request-otp / 30 verify-otp per 10 min) throttle the suite
-    // itself. Prod sets none of these and keeps the compiled-in defaults.
-    "RL_REQUEST_OTP_MAX": "200",
-    "RL_REQUEST_OTP_WINDOW_SECS": "600",
+    // request-otp is OFF on dev (ratelimit.rs `RateLimitConfig::from_env`, `off`
+    // = never limits): the mobile e2e suites run iPhone, iPad and Android in
+    // parallel from ONE machine and every flow signs up a fresh account, and dev
+    // sends no mail (`DEV_OTP`), so the tier guards nothing here.
+    // verify-otp stays LIMITED: dev's `DEV_OTP` is one code for every mailbox,
+    // so the per-mailbox lockout is bypassed by rotating addresses, and this
+    // per-client tier is the only bound on guessing that shared code.
+    // Prod sets no RL_* and keeps the compiled-in defaults (10 / 30 per 10 min).
+    "RL_REQUEST_OTP_MAX": "off",
     "RL_VERIFY_OTP_MAX": "600",
     "RL_VERIFY_OTP_WINDOW_SECS": "600",
     // Dev-only ops log (src/ops_log.rs): every request-otp and every 429 is

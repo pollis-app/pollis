@@ -1,8 +1,8 @@
 //! Dev-only observability for `request-otp` and for every rate-limited request.
 //!
-//! **Why:** the dev DS raises the `request-otp` budget to 200 per 10 minutes per
-//! client (`wrangler.dev.jsonc`), and on 2026-10-08 that budget still ran out
-//! during a mobile e2e run. The limiter could say THAT a client was over budget
+//! **Why:** on 2026-10-08 the dev DS's raised `request-otp` budget (then 200
+//! per 10 minutes per client; the OTP tiers are now `off` on dev,
+//! `wrangler.dev.jsonc`) still ran out during a mobile e2e run. The limiter could say THAT a client was over budget
 //! but nothing could say WHO had spent it: the counters are anonymous by design,
 //! Workers Logs are off, and container stdout is not retained. This module
 //! records enough to tell the callers apart — never enough to identify one.

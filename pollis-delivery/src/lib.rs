@@ -606,12 +606,12 @@ async fn effective_config(State(state): State<AppState>, headers: HeaderMap) -> 
             // and defend nothing.
             "invite_redeem_max": state.ratelimit_config.invite_redeem_max,
             "invite_redeem_window_secs": state.ratelimit_config.invite_redeem_window_secs,
-            // The OTP tiers dev raises (`RL_*_OTP_*` in wrangler.dev.jsonc), so
-            // "is the e2e budget really in force?" has an answer from outside the
-            // container instead of an inference from a 429.
-            "request_otp_max": state.ratelimit_config.request_otp_max,
+            // The OTP tiers dev turns off (`RL_*_OTP_MAX` in wrangler.dev.jsonc),
+            // so "which budget is really in force?" has an answer from outside
+            // the container instead of an inference from a 429. `"off"` = none.
+            "request_otp_max": ratelimit::max_json(state.ratelimit_config.request_otp_max),
             "request_otp_window_secs": state.ratelimit_config.request_otp_window_secs,
-            "verify_otp_max": state.ratelimit_config.verify_otp_max,
+            "verify_otp_max": ratelimit::max_json(state.ratelimit_config.verify_otp_max),
             "verify_otp_window_secs": state.ratelimit_config.verify_otp_window_secs,
             // Whether the dev ops log is recording (`POLLIS_DS_OPS_LOG`).
             "ops_log": state.ops_log.is_some(),
