@@ -115,3 +115,25 @@ test("both codes complete the change", async ({ page }) => {
   await expect(page.getByTestId("settings-email-change-button")).toBeVisible();
   await expect(page.getByTestId("settings-email-input")).toHaveValue(NEW_EMAIL);
 });
+
+test("typing into the new-address field stays there when the page's initial focus fires", async ({
+  page,
+}) => {
+  // The settings page focuses its first control (Username) on a short timer
+  // after mount. When that timer landed between a fill's focus and its
+  // keystrokes, the new address was typed onto the end of the username and
+  // the send was refused as empty (#1258). Freeze the clock so it fires in
+  // exactly that gap.
+  await page.clock.install();
+  await boot(page);
+  await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1_000);
+
+  await openUserSettings(page);
+  await page.getByTestId("settings-email-change-button").click();
+  await page.getByLabel("New email").focus();
+  await page.clock.runFor(1_000);
+  await page.keyboard.type(NEW_EMAIL);
+
+  await expect(page.getByLabel("New email")).toHaveValue(NEW_EMAIL);
+  await expect(page.getByLabel("Username")).toHaveValue(USER.username);
+});

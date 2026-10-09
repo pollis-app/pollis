@@ -58,9 +58,10 @@ async function enterPin(page: Page, pin: string) {
   for (let i = 0; i < pin.length; i++) {
     await cells.nth(i).fill(pin[i]);
     // InputOtp rebuilds the PIN from its last-rendered value on each change,
-    // so the next digit must wait for this one to render — otherwise a fill
-    // that outruns the re-render drops the previous digit (seen in CI). The
-    // last digit submits, after which the cells may unmount.
+    // so the next digit waits for this one to render. (The digits CI used to
+    // drop were PageShell's initial focus stealing the caret mid-fill, #1258;
+    // see the test below.) The last digit submits, after which the cells may
+    // unmount.
     if (i < pin.length - 1) {
       await expect(cells.nth(i)).not.toHaveValue("");
     }
@@ -123,6 +124,28 @@ test("a tampered request offers no Approve", async ({ page }) => {
   await expect(page.getByTestId("link-device-tampered")).toBeVisible();
   await expect(page.getByTestId("link-device-approve")).toHaveCount(0);
   expect(await approvals(page)).toEqual([]);
+});
+
+test("the page's initial focus never moves a caret the user already placed", async ({ page }) => {
+  // PageShell focuses the page's first control on a short timer after mount.
+  // When that timer landed between a fill's focus and its keystroke (a slow
+  // CI runner), the second digit went into the FIRST box, over the first
+  // digit (#1258). Freeze the clock so the timer fires exactly in that gap.
+  await page.clock.install();
+  await boot(page, signedIn());
+  await gotoSecurity(page);
+  await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1_000);
+
+  await page.getByTestId("link-device-button").click();
+  await expect(page.getByTestId("link-device-page")).toBeVisible();
+  const cells = page.getByTestId("link-device-pin-input").locator("input");
+  await cells.nth(0).fill("1");
+  await expect(cells.nth(1)).toBeFocused();
+  await page.clock.runFor(1_000);
+  await page.keyboard.type("2");
+
+  await expect(cells.nth(0)).toHaveValue("1");
+  await expect(cells.nth(1)).toHaveValue("2");
 });
 
 test("a pasted code signs in and waits for approval without showing a code", async ({ page }) => {

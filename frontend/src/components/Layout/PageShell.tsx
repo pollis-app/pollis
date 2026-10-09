@@ -13,7 +13,9 @@ const FOCUSABLE_SELECTOR =
  * Thin chrome wrapper used by router-driven page components.
  * Renders a title header and a scrollable (or hidden-overflow) body.
  * Navigation "back" lives in the global BreadcrumbNav, so no back button here.
- * On mount, focuses the first interactive element inside the content area.
+ * On mount, focuses the first interactive element inside the content area —
+ * unless focus is already inside it (a child's `autoFocus`, or the user got
+ * there first).
  */
 export const PageShell: React.FC<PageShellProps> = ({ title, children, scrollable = false }) => {
   const contentRef = useRef<HTMLDivElement>(null);
@@ -21,7 +23,14 @@ export const PageShell: React.FC<PageShellProps> = ({ title, children, scrollabl
   useEffect(() => {
     // Small delay so child components have mounted and rendered their inputs
     const timer = setTimeout(() => {
-      const el = contentRef.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
+      const content = contentRef.current;
+      // Never move a caret that is already in the page: by now the user may
+      // be typing into a field, and stealing focus mid-word sends the rest of
+      // their keystrokes into the first field instead (#1258).
+      if (!content || content.contains(document.activeElement)) {
+        return;
+      }
+      const el = content.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
       if (el) {
         el.focus();
       }
