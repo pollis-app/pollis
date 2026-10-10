@@ -100,13 +100,15 @@ workflow's checks.
    ```bash
    ufw logging off                                   # UFW logs every blocked packet's source IP
    truncate -s 0 /var/lib/docker/containers/*/*-json.log   # any container log left behind
-   ls -la /var/log/ufw.log* /var/log/kern.log* /var/log/syslog* /var/log/nginx 2>/dev/null
+   ls -la /var/log/ufw.log* /var/log/kern.log* /var/log/syslog* /var/log/dmesg* /var/log/nginx 2>/dev/null
+   dmesg -C                                          # the live kernel ring buffer holds UFW lines too
    journalctl --disk-usage                           # journald keeps kernel/UFW lines too
    journalctl --vacuum-time=1s                       # drop what is already there
    ```
    and set a short retention for anything that must stay (e.g.
    `SystemMaxRetentionSec=1d` in `/etc/systemd/journald.conf`), removing rotated
-   `ufw.log*` / `kern.log*` files that predate `ufw logging off`.
+   `ufw.log*` / `kern.log*` / `dmesg.*` files that predate `ufw logging off`
+   (and stripping `[UFW ` lines from the live `kern.log`, `syslog` and `dmesg`).
 
 ## Workflow requirements (one-time)
 

@@ -271,6 +271,13 @@ jobs:
               fi
             done
             rm -f /var/log/kern.log.* /var/log/syslog.* 2>/dev/null || true
+            # The boot-time kernel dumps and the live kernel ring buffer hold
+            # the same lines.
+            if [ -f /var/log/dmesg ]; then
+              sed -i '/\[UFW /d' /var/log/dmesg
+            fi
+            rm -f /var/log/dmesg.* 2>/dev/null || true
+            dmesg -C
             # journald keeps the same kernel lines: keep at most a day, and drop
             # what is already there.
             mkdir -p /etc/systemd/journald.conf.d
