@@ -86,6 +86,15 @@ function updatesConfigFor(env, certExists) {
   // loads mobile/.env; the native build phase that re-reads this file does not).
   // When it IS visible it must be prod: an api-dev bundle taking prod updates is
   // exactly the cross-over this switch exists to prevent.
+  // The dev DS gate key (#1242) is inlined wherever the app reads it, so a prod
+  // build must not be able to see one at all. Rust would never send it to prod,
+  // but a key in a store bundle is a key handed to everyone.
+  if (env.EXPO_PUBLIC_POLLIS_DEV_ACCESS_KEY) {
+    throw new Error(
+      `POLLIS_OTA=${OTA_CHANNEL} with EXPO_PUBLIC_POLLIS_DEV_ACCESS_KEY set: a prod build must not carry the dev DS key. ` +
+        "Clear it (mobile/.env and the environment) and build again.",
+    );
+  }
   const ds = env.EXPO_PUBLIC_POLLIS_DELIVERY_URL;
   if (ds !== undefined && ds !== OTA_PROD_DS) {
     throw new Error(

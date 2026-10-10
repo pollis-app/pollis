@@ -8,6 +8,8 @@
 #   STORE_ID               Secrets Store id (account has a single store)
 #   SECRET_PREFIX          DS_DEV_ or DS_PROD_ (namespaces dev/prod in one store)
 #   INCLUDE_DEV_OTP        "true" to also sync DEV_OTP (dev only)
+#   INCLUDE_DEV_GATE       "true" to also sync POLLIS_DEV_ACCESS_KEY (dev only;
+#                          the dev gate's key, read by the Worker, #1242)
 #   CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID   for wrangler
 set -euo pipefail
 
@@ -33,6 +35,9 @@ KEYS=(
 # and would read a comment's words as key names.)
 if [ "${INCLUDE_DEV_OTP:-false}" = "true" ]; then
   KEYS+=(DEV_OTP)
+fi
+if [ "${INCLUDE_DEV_GATE:-false}" = "true" ]; then
+  KEYS+=(POLLIS_DEV_ACCESS_KEY)
 fi
 
 SECRETS_JSON="$(doppler secrets download --no-file --format json)"

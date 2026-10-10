@@ -79,6 +79,16 @@
     "keys": ["DS_SINGLETON_NAME", "OTA_CHANNEL"]
   },
 
+  "dev_only_worker_vars": {
+    "$comment": "Read by the WORKER only, set in wrangler.dev.jsonc and FORBIDDEN in wrangler.prod.jsonc. DEV_GATE_MODE switches the dev gate (#1242, worker/dev-gate.ts); unset on prod is what makes the gate inert there.",
+    "keys": ["DEV_GATE_MODE"]
+  },
+
+  "dev_only_worker_secrets": {
+    "$comment": "Secrets Store -> WORKER only, dev only. Synced by the sync script (dev flag), bound in wrangler.dev.jsonc only, and NOT in SECRET_KEYS: the Worker checks it and the container never sees it. POLLIS_DEV_ACCESS_KEY is the dev gate's key (#1242).",
+    "keys": ["POLLIS_DEV_ACCESS_KEY"]
+  },
+
   "aliases": {
     "$comment": "Alternate names the DS accepts, each falling back to a delivered key (broker.rs). Never delivered under this name; nothing to wire.",
     "keys": {

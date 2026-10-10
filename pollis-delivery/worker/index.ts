@@ -17,6 +17,15 @@ import {
   type ContainerStartConfigOptions,
 } from "@cloudflare/containers";
 import { handleUpdates, isUpdatesPath } from "./updates";
+import {
+  DEV_KEY_HEADER,
+  GateCounts,
+  acceptedKeys,
+  gate,
+  gateModeFrom,
+  type GateInputs,
+  type GateMode,
+} from "./dev-gate";
 
 // WHERE the DS container physically runs (#658).
 //
@@ -70,8 +79,8 @@ const DS_LOCATION_HINT: DurableObjectLocationHint = "enam";
 // A rename creates a SECOND durable object while `max_instances: 1` permits only
 // one container instance. The outgoing object still held it, so the incoming one
 // could never start and every request 500'd until traffic was routed back. The DO
-// is stateless (no `ctx.storage` in this file; all DS state is in Turso) — the
-// blocker is the instance cap, not data. Hence: raise the cap, switch the name,
+// holds no DS state (all of it is in Turso; the only `ctx.storage` use is dev's
+// disposable gate counts, dev-gate.ts) — the blocker is the instance cap, not data. Hence: raise the cap, switch the name,
 // let the orphan idle past `sleepAfter` and release, then lower the cap again.
 const DS_SINGLETON_NAME_FALLBACK = "pollis-delivery-singleton";
 
@@ -160,6 +169,23 @@ const CLIENT_BUCKET_HEADER = "x-pollis-client-bucket";
 // truncation; 128 bits makes two clients sharing a budget negligible.
 const CLIENT_BUCKET_BYTES = 16;
 
+// How long a resolved dev-gate secret is reused before the Secrets Store is
+// asked again: a rotated key is honoured within this window, and an ordinary
+// request does not pay a store round trip.
+const GATE_SECRET_TTL_MS = 5 * 60 * 1000;
+
+// A Secrets Store value, or undefined when unbound, unset or unreadable.
+async function readSecret(binding: SecretStoreBinding | undefined): Promise<string | undefined> {
+  if (!binding) {
+    return undefined;
+  }
+  try {
+    return (await binding.get()) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 interface SecretStoreBinding {
   get(): Promise<string>;
 }
@@ -182,6 +208,11 @@ type Env = {
   // neither, so its /updates/ routes answer 404.
   UPDATES?: R2Bucket;
   OTA_CHANNEL?: string;
+  // The dev gate (#1242, dev-gate.ts). Dev only: wrangler.dev.jsonc sets the
+  // mode and binds the key, read by the Worker and never forwarded to the
+  // container. Prod sets neither, so the gate does not exist there.
+  DEV_GATE_MODE?: string;
+  POLLIS_DEV_ACCESS_KEY?: SecretStoreBinding;
 } & Record<(typeof SECRET_KEYS)[number], SecretStoreBinding | undefined> &
   Partial<Record<(typeof TUNABLE_VAR_KEYS)[number], string>>;
 
@@ -243,6 +274,29 @@ export class PollisDelivery extends Container<Env> {
   // a container restart already does.
   private bucketKey?: Promise<CryptoKey>;
 
+  // Dev gate state (dev-gate.ts): the resolved secrets, re-read every
+  // GATE_SECRET_TTL_MS, and the verdict counts behind GET /__gate.
+  private gateSecrets?: { at: number; keys: string[]; statsToken?: string };
+  private gateCounts?: GateCounts;
+
+  private async gateInputs(mode: GateMode): Promise<GateInputs> {
+    const now = Date.now();
+    if (!this.gateSecrets || now - this.gateSecrets.at > GATE_SECRET_TTL_MS) {
+      const [key, statsToken] = await Promise.all([
+        readSecret(this.env.POLLIS_DEV_ACCESS_KEY),
+        readSecret(this.env.POLLIS_DS_METRICS_TOKEN),
+      ]);
+      this.gateSecrets = { at: now, keys: acceptedKeys(key), statsToken };
+    }
+    this.gateCounts ??= new GateCounts(this.ctx.storage);
+    return {
+      mode,
+      keys: this.gateSecrets.keys,
+      statsToken: this.gateSecrets.statsToken,
+      counts: this.gateCounts,
+    };
+  }
+
   // hex(HMAC-SHA256(bucketKey, ip)[..CLIENT_BUCKET_BYTES]).
   private async clientBucket(ip: string): Promise<string> {
     this.bucketKey ??= crypto.subtle.generateKey(
@@ -260,12 +314,23 @@ export class PollisDelivery extends Container<Env> {
       .join("");
   }
 
-  // Replace every client-IP header with the keyed bucket before the request
-  // reaches the container. `CF-Connecting-IP` is set by Cloudflare's edge and
-  // cannot be forged through it; the first `X-Forwarded-For` hop is a fallback
-  // that never applies in practice behind Cloudflare.
+  // The dev gate first (dev only; see dev-gate.ts), so a refused request never
+  // wakes the container. Then replace every client-IP header with the keyed
+  // bucket before the request reaches the container. `CF-Connecting-IP` is set
+  // by Cloudflare's edge and cannot be forged through it; the first
+  // `X-Forwarded-For` hop is a fallback that never applies in practice behind
+  // Cloudflare.
   override async fetch(request: Request): Promise<Response> {
+    const gateMode = gateModeFrom(this.env.DEV_GATE_MODE);
+    if (gateMode !== undefined) {
+      const refused = await gate(request, await this.gateInputs(gateMode));
+      if (refused) {
+        return refused;
+      }
+    }
     const headers = new Headers(request.headers);
+    // The container has no use for the dev key; it stops at the gate.
+    headers.delete(DEV_KEY_HEADER);
     const ip =
       headers.get("cf-connecting-ip")?.trim() ||
       headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||

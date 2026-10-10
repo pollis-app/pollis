@@ -152,8 +152,7 @@ async fn ds_post_bytes(
     let url = format!("{base}{path}");
     // First-party DS write — route through the overlay when it is on (§14.2).
     let overlay = state.overlay_handle();
-    let resp = crate::net::overlay::http_client(overlay.as_deref())
-        .post(&url)
+    let resp = with_dev_key(state, crate::net::overlay::http_client(overlay.as_deref()).post(&url))
         .header("X-Pollis-User", &user_id)
         .header("X-Pollis-Device", &device_id)
         .header("X-Pollis-Timestamp", timestamp.to_string())
@@ -666,6 +665,20 @@ fn delivery_base(state: &Arc<AppState>) -> Result<&str> {
         .ok_or_else(|| Error::Other(anyhow::anyhow!("pollis_delivery_url not configured")))
 }
 
+/// Checked by the dev Worker (`pollis-delivery/worker/dev-gate.ts`).
+pub(crate) const DEV_KEY_HEADER: &str = "X-Pollis-Dev-Key";
+
+/// Attach the dev DS gate key (#1242) when the configured DS is not prod.
+/// Every DS request goes through one of the three builders in this file, and
+/// each calls this, so desktop, CLI and mobile all send it from one place; see
+/// [`crate::config::Config::dev_access_key_for_ds`] for the host scoping.
+fn with_dev_key(state: &AppState, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    match state.config.dev_access_key_for_ds() {
+        Some(key) => request.header(DEV_KEY_HEADER, key),
+        None => request,
+    }
+}
+
 /// POST `body` (JSON) to `{pollis_delivery_url}{path}` with NO auth headers — the
 /// pre-identity OTP endpoints (`request-otp` / `verify-otp`), which the DS gates
 /// by the OTP itself, not a device signature or a session. Returns the raw
@@ -687,8 +700,7 @@ async fn ds_post_plain_bytes(
 ) -> Result<reqwest::Response> {
     let url = format!("{}{}", delivery_base(state)?, path);
     let overlay = state.overlay_handle();
-    crate::net::overlay::http_client(overlay.as_deref())
-        .post(&url)
+    with_dev_key(state, crate::net::overlay::http_client(overlay.as_deref()).post(&url))
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .body(body_bytes)
         .send()
@@ -720,8 +732,7 @@ async fn ds_post_session_bytes(
 ) -> Result<reqwest::Response> {
     let url = format!("{}{}", delivery_base(state)?, path);
     let overlay = state.overlay_handle();
-    crate::net::overlay::http_client(overlay.as_deref())
-        .post(&url)
+    with_dev_key(state, crate::net::overlay::http_client(overlay.as_deref()).post(&url))
         .header("X-Pollis-Session", session_token)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .body(body_bytes)
@@ -747,6 +758,85 @@ pub async fn ds_post_session_ok<B: ClientRequest>(
         )));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod dev_key_tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::keystore::{InMemoryKeystore, Keystore};
+    use std::sync::Mutex as StdMutex;
+
+    /// A DS that records the `X-Pollis-Dev-Key` of every request it gets
+    /// (`None` when the header is absent) and answers 200.
+    async fn recording_ds() -> (String, Arc<StdMutex<Vec<Option<String>>>>) {
+        use axum::{http::HeaderMap, routing::post, Router};
+        let seen: Arc<StdMutex<Vec<Option<String>>>> = Arc::default();
+        let log = seen.clone();
+        let app = Router::new().fallback(post(move |headers: HeaderMap| {
+            let log = log.clone();
+            async move {
+                log.lock().unwrap().push(
+                    headers
+                        .get(DEV_KEY_HEADER)
+                        .and_then(|v| v.to_str().ok())
+                        .map(str::to_string),
+                );
+                "{}"
+            }
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (format!("http://127.0.0.1:{port}"), seen)
+    }
+
+    fn state(ds: String, key: Option<&str>) -> Arc<AppState> {
+        let mut config = Config::for_test().unwrap();
+        config.pollis_delivery_url = Some(ds);
+        config.dev_access_key = key.map(str::to_string);
+        let keystore: Arc<dyn Keystore> = Arc::new(InMemoryKeystore::new());
+        Arc::new(AppState::new_with_parts(config, keystore))
+    }
+
+    /// The pre-credential and the session builders both carry the key to a
+    /// non-prod DS, and send no header at all when no key is configured. (The
+    /// prod-host refusal is `Config::dev_access_key_for_ds`'s own test.)
+    #[tokio::test]
+    async fn the_ds_builders_send_the_dev_key_only_when_configured() {
+        let (ds, seen) = recording_ds().await;
+        let body = pollis_api::otp::RequestOtpBody { email: "a@example.com".into() };
+
+        let keyed = state(ds.clone(), Some("dev-key"));
+        ds_post_plain(&keyed, &body).await.unwrap();
+        ds_post_session(&keyed, "session", &body).await.unwrap();
+
+        let unkeyed = state(ds, None);
+        ds_post_plain(&unkeyed, &body).await.unwrap();
+
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec![Some("dev-key".to_string()), Some("dev-key".to_string()), None]
+        );
+    }
+
+    /// Every DS request is built in this file, and every builder here goes
+    /// through `with_dev_key`. A new builder that calls `http_client` directly
+    /// would silently skip the dev gate; this makes it a test failure.
+    #[test]
+    fn every_ds_request_builder_attaches_the_dev_key() {
+        // Built with concat! so these needles do not match this test's own
+        // source. A DS builder passes the live overlay; tests pass `None`.
+        let src = include_str!("ds_client.rs");
+        let calls = src.matches(concat!("http_client", "(overlay")).count();
+        let wrapped = src
+            .matches(concat!("with_dev_key(state, crate::net::overlay::http_client", "(overlay"))
+            .count();
+        assert_eq!(calls, wrapped, "a DS request builder skips with_dev_key");
+        assert_eq!(wrapped, 3);
+    }
 }
 
 #[cfg(test)]

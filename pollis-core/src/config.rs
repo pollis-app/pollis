@@ -76,7 +76,22 @@ pub struct Config {
     /// rolled-back or forged directory fails closed. Required alongside the URL —
     /// a URL without a key is treated as "directory not configured" (fail-safe).
     pub overlay_directory_key: Option<String>,
+    /// The dev Delivery Service gate key (`POLLIS_DEV_ACCESS_KEY`, #1242), sent
+    /// as `X-Pollis-Dev-Key` so `api-dev.pollis.com` serves only our own
+    /// clients (`pollis-delivery/worker/dev-gate.ts`).
+    ///
+    /// **Runtime env only — never `option_env!`.** A release binary therefore
+    /// cannot bake it in, whatever the build environment holds, and
+    /// `scripts/check-build-recipe.py` has nothing to track. Mobile passes it in
+    /// `InitConfig.dev_access_key` instead (dev builds only; the store and APK
+    /// builds refuse to configure with it set). Attach it only through
+    /// [`Config::dev_access_key_for_ds`], which never sends it to prod.
+    pub dev_access_key: Option<String>,
 }
+
+/// The production Delivery Service host. The dev gate key is never sent here,
+/// however the client was configured.
+pub const PROD_DS_HOST: &str = "api.pollis.com";
 
 impl Config {
     /// True when BOTH the directory URL and pinned key are set — the DYNAMIC pool
@@ -100,6 +115,22 @@ impl Config {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// The dev gate key to attach to a request to the configured Delivery
+    /// Service, or `None`. Host-scoped: `None` when no DS is configured, when
+    /// the DS is prod ([`PROD_DS_HOST`]) or has no parseable host, and when no
+    /// key is set. Only the DS request builders (`ds_client.rs`) call this, so
+    /// the key never reaches R2, LiveKit or any other host.
+    pub fn dev_access_key_for_ds(&self) -> Option<&str> {
+        let key = self.dev_access_key.as_deref().map(str::trim).filter(|k| !k.is_empty())?;
+        let ds = self.pollis_delivery_url.as_deref()?;
+        let url = reqwest::Url::parse(ds.trim()).ok()?;
+        let host = url.host_str()?.trim_end_matches('.').to_ascii_lowercase();
+        if host == PROD_DS_HOST {
+            return None;
+        }
+        Some(key)
     }
 }
 
@@ -142,6 +173,10 @@ impl Config {
                 .map(|s| s.to_string())
                 .or_else(|| std::env::var("POLLIS_OVERLAY_DIRECTORY_KEY").ok())
                 .filter(|s| !s.is_empty()),
+            // Runtime only, deliberately (see the field): no option_env! here.
+            dev_access_key: std::env::var("POLLIS_DEV_ACCESS_KEY")
+                .ok()
+                .filter(|s| !s.trim().is_empty()),
         })
     }
 }
@@ -195,7 +230,50 @@ impl Config {
             overlay_relay_cert: None,
             overlay_directory_url: None,
             overlay_directory_key: None,
+            dev_access_key: None,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn with(ds: Option<&str>, key: Option<&str>) -> Config {
+        let mut c = Config::for_test().unwrap();
+        c.pollis_delivery_url = ds.map(str::to_string);
+        c.dev_access_key = key.map(str::to_string);
+        c
+    }
+
+    /// The key reaches the dev DS (and a local one) and nothing else.
+    #[test]
+    fn dev_key_is_sent_to_a_non_prod_ds_only() {
+        assert_eq!(with(Some("https://api-dev.pollis.com"), Some("k")).dev_access_key_for_ds(), Some("k"));
+        assert_eq!(with(Some("http://127.0.0.1:8788/"), Some("k")).dev_access_key_for_ds(), Some("k"));
+        for prod in [
+            "https://api.pollis.com",
+            "https://api.pollis.com/",
+            "https://API.Pollis.com",
+            "https://api.pollis.com.:443",
+            " https://api.pollis.com ",
+        ] {
+            assert_eq!(with(Some(prod), Some("k")).dev_access_key_for_ds(), None, "{prod}");
+        }
+        assert_eq!(with(None, Some("k")).dev_access_key_for_ds(), None);
+        assert_eq!(with(Some("not a url"), Some("k")).dev_access_key_for_ds(), None);
+        assert_eq!(with(Some("https://api-dev.pollis.com"), None).dev_access_key_for_ds(), None);
+        assert_eq!(with(Some("https://api-dev.pollis.com"), Some("  ")).dev_access_key_for_ds(), None);
+    }
+
+    /// The key is read from the RUNTIME environment only. An `option_env!`
+    /// would bake whatever the build machine held into a release binary.
+    #[test]
+    fn dev_key_is_never_compiled_in() {
+        let src = include_str!("config.rs");
+        let needle = ["option_env!(\"", "POLLIS_DEV_ACCESS_KEY"].concat();
+        assert!(!src.contains(&needle), "POLLIS_DEV_ACCESS_KEY must not be read with option_env!");
+        assert!(src.contains("std::env::var(\"POLLIS_DEV_ACCESS_KEY\")"));
     }
 }
 

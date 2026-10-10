@@ -97,7 +97,15 @@
     // the user agent and the email's domain + a keyed tag, so an exhausted OTP
     // budget can be attributed. Read it on GET /v1/ops/otp-requests with the
     // operator token. Prod must never set this (tests/otp_ops_log.rs).
-    "POLLIS_DS_OPS_LOG": "true"
+    "POLLIS_DS_OPS_LOG": "true",
+    // #1242: only our own clients reach dev (worker/dev-gate.ts). Every dev
+    // client sends `X-Pollis-Dev-Key`, checked here in the Worker against the
+    // POLLIS_DEV_ACCESS_KEY binding below before anything reaches the container.
+    // `report` lets everything through and counts verdicts (no IPs) on
+    // GET /__gate; `enforce` 404s a missing or wrong key; `off` checks nothing.
+    // A worker var that prod must never set (ds-config-manifest.json
+    // `dev_only_worker_vars`; worker-tests/dev-gate.test.ts).
+    "DEV_GATE_MODE": "report"
   },
   // Doppler is the source of truth; the deploy workflow syncs each key into the
   // account's single Secrets Store under a DS_DEV_ prefix. Binding name == the
@@ -118,7 +126,10 @@
     { "binding": "R2_BUCKET", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_R2_BUCKET" },
     { "binding": "POLLIS_DS_METRICS_TOKEN", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_POLLIS_DS_METRICS_TOKEN" },
     { "binding": "EXPO_TOKEN", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_EXPO_TOKEN" },
-    { "binding": "DEV_OTP", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_DEV_OTP" }
+    { "binding": "DEV_OTP", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_DEV_OTP" },
+    // Read by the Worker for the dev gate, never forwarded to the container
+    // (not in SECRET_KEYS). May hold "old,new" during a rotation.
+    { "binding": "POLLIS_DEV_ACCESS_KEY", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_POLLIS_DEV_ACCESS_KEY" }
   ],
   // Custom-domain cutover (route, not NS — zone already on CF). Attached only
   // once the container is smoke-tested; rollback = flip this DNS back to the VPS.

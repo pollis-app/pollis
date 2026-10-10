@@ -101,6 +101,17 @@ test("a prod build refuses an api-dev Delivery Service", () => {
   );
 });
 
+test("a prod build refuses to see the dev DS gate key (#1242); an empty one is fine", () => {
+  const prod = { POLLIS_OTA: "production", EXPO_PUBLIC_POLLIS_DELIVERY_URL: "https://api.pollis.com" };
+  assert.throws(
+    () => updatesConfigFor({ ...prod, EXPO_PUBLIC_POLLIS_DEV_ACCESS_KEY: "k" }, true),
+    /must not carry the dev DS key/,
+  );
+  assert.doesNotThrow(() => updatesConfigFor({ ...prod, EXPO_PUBLIC_POLLIS_DEV_ACCESS_KEY: "" }, true));
+  // A dev build carries it freely: expo-updates is off and no prod URL is set.
+  assert.deepEqual(updatesConfigFor({ EXPO_PUBLIC_POLLIS_DEV_ACCESS_KEY: "k" }, true), { enabled: false });
+});
+
 test("a prod build is code-signed, checks on load in the background, and names the prod channel", () => {
   const u = updatesConfigFor({ POLLIS_OTA: "production", EXPO_PUBLIC_POLLIS_DELIVERY_URL: "https://api.pollis.com" }, true);
   assert.deepEqual(u, {

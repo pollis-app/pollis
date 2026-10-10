@@ -265,6 +265,10 @@ The harness embeds `remote_schema.sql` + every numbered migration via `include_s
 
 Known prod schema drift is applied in `apply_drift_fixups` (currently: `group_invite.status` column). Keep this list short; drift should be fixed in a real migration, not codified here.
 
+## The dev DS gate (#1242)
+
+`api-dev.pollis.com` serves only clients that send `X-Pollis-Dev-Key` (`pollis-delivery/worker/dev-gate.ts`). Desktop `pnpm dev` and the CLI read `POLLIS_DEV_ACCESS_KEY` from `.env.development`; mobile dev builds read `EXPO_PUBLIC_POLLIS_DEV_ACCESS_KEY` from `mobile/.env` (Doppler `dev_personal`). Every Maestro and Release sim/emulator build against dev needs it; `build-release-sims.sh` warns when it is missing. The in-process DS the flows, TUI and Playwright suites run has no gate, so they need nothing. While dev is in `report` mode a missing key changes nothing; under `enforce` it is a bare 404 on every route but `/health` and `/version`. Details, the `/__gate` counts and rotation: `docs/deployments.md` → "Dev gate".
+
 ## DEV_OTP
 
 `DEV_OTP` is the fixed code `000000`: `verify_otp` short-circuits the email send and accepts it, so no real emails are sent and no OTP storage round-trips through Resend.

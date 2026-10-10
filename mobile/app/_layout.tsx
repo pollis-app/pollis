@@ -78,6 +78,9 @@ export default function RootLayout() {
       r2PublicUrl: process.env.EXPO_PUBLIC_R2_PUBLIC_URL,
       livekitUrl: process.env.EXPO_PUBLIC_LIVEKIT_URL,
       pollisDeliveryUrl: process.env.EXPO_PUBLIC_POLLIS_DELIVERY_URL,
+      // Dev builds only (#1242); undefined in every prod bundle, which
+      // app.config.js and the OTA publish check both enforce.
+      devAccessKey: process.env.EXPO_PUBLIC_POLLIS_DEV_ACCESS_KEY,
     })
       .then(() => setBridgeReady(true))
       .catch((e) => {

@@ -167,11 +167,15 @@ test("only the four public EXPO_PUBLIC_* names may be set, and the DS must be pr
   assert.throws(() => assertPublicEnv({ ...ok, EXPO_PUBLIC_LIVEKIT_API_SECRET: "s" }), /not a public variable/);
   assert.throws(() => assertPublicEnv({ EXPO_PUBLIC_POLLIS_DELIVERY_URL: "https://api-dev.pollis.com" }), /api-dev/);
   assert.throws(() => assertPublicEnv({}), /must be exactly/);
+  // The dev DS gate key (#1242): the app may read it, an OTA may not carry it.
+  assert.throws(() => assertPublicEnv({ ...ok, EXPO_PUBLIC_POLLIS_DEV_ACCESS_KEY: "k" }), /dev-only/);
+  assert.doesNotThrow(() => assertPublicEnv({ ...ok, EXPO_PUBLIC_POLLIS_DEV_ACCESS_KEY: "" }));
 });
 
 test("the app's own sources read only public EXPO_PUBLIC_* names", () => {
   const files = ["app/_layout.tsx", "lib/realtime/client.ts"].map((p) => ({ path: p, text: readFileSync(join(here, "..", p), "utf8") }));
-  assert.ok(findEnvReads(files).length >= 4, "the env reads are still where this test expects them");
+  assert.ok(findEnvReads(files).length >= 5, "the env reads are still where this test expects them");
+  assert.ok(findEnvReads(files).some((r) => r.name === "EXPO_PUBLIC_POLLIS_DEV_ACCESS_KEY"));
   assert.doesNotThrow(() => assertOnlyPublicEnvReads(files));
   assert.throws(
     () => assertOnlyPublicEnvReads([{ path: "x.ts", text: "const k = process.env.EXPO_PUBLIC_RESEND_API_KEY;" }]),

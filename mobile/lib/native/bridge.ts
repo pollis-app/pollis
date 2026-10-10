@@ -112,6 +112,9 @@ export interface InitConfig {
   // write go through it. Optional in the type only because the Rust side
   // defaults it; an app without it can open its local database and nothing else.
   pollisDeliveryUrl?: string;
+  // The dev DS gate key (#1242): dev builds only, sent by Rust only to a
+  // non-prod DS. A store, APK or OTA build refuses to configure with it set.
+  devAccessKey?: string;
 }
 
 let initialized = false;
@@ -143,6 +146,7 @@ export async function initializeNativeBridge(config: InitConfig): Promise<void> 
     r2_public_url: config.r2PublicUrl ?? "",
     livekit_url: config.livekitUrl ?? "",
     pollis_delivery_url: config.pollisDeliveryUrl ?? "",
+    dev_access_key: config.devAccessKey ?? "",
   });
   await pollisNative.initPollis(configJson);
   setNativeBridge(pollisNativeBridge);

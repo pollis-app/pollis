@@ -61,16 +61,15 @@ def load_manifest() -> dict:
 
 
 def sync_keys() -> set[str]:
-    """KEYS=( ... ) plus the conditional DEV_OTP append (link 2)."""
+    """KEYS=( ... ) plus every conditional dev-only `KEYS+=( ... )` append (link 2)."""
     text = SYNC.read_text()
     m = re.search(r"^KEYS=\((.*?)\)", text, re.DOTALL | re.MULTILINE)
     if not m:
         fail(f"{SYNC.name}: could not find a `KEYS=( ... )` block to read")
         return set()
     keys = set(m.group(1).split())
-    keys |= set(re.findall(r"KEYS\+=\(([A-Z_0-9 ]+)\)", text)[0].split()) if re.findall(
-        r"KEYS\+=\(([A-Z_0-9 ]+)\)", text
-    ) else set()
+    for appended in re.findall(r"KEYS\+=\(([A-Z_0-9 ]+)\)", text):
+        keys |= set(appended.split())
     return keys
 
 
@@ -140,22 +139,26 @@ def main() -> int:
     container_vars = set(man["container_vars"]["keys"])
     optional_vars = set(man["optional_container_vars"]["keys"])
     worker_vars = set(man["worker_vars"]["keys"])
+    dev_worker_vars = set(man["dev_only_worker_vars"]["keys"])
+    dev_worker_secrets = set(man["dev_only_worker_secrets"]["keys"])
     aliases = man["aliases"]["keys"]
     code_defaults = set(man["code_default_only"]["keys"])
 
     declared = all_secrets | container_vars | optional_vars | worker_vars | set(aliases) | code_defaults
+    # Read by the Worker alone; the DS never reads them, so link 5 skips them.
+    worker_only = worker_vars | dev_worker_vars | dev_worker_secrets
 
     # ── Link 2: the sync script pushes every declared secret ────────────────
     sk = sync_keys()
-    for k in sorted(all_secrets - sk):
+    for k in sorted((all_secrets | dev_worker_secrets) - sk):
         fail(f"link 2: {k} is declared a secret but is NOT in KEYS in {SYNC.name} — it will never be pushed to the Secrets Store")
-    for k in sorted(sk - all_secrets):
+    for k in sorted(sk - all_secrets - dev_worker_secrets):
         fail(f"link 2: {SYNC.name} pushes {k}, which the manifest does not declare — add it to the manifest or stop syncing it")
 
     # ── Link 3: each environment binds what it should ───────────────────────
     for env in ("dev", "prod"):
         bound, variables = wrangler_bindings(env)
-        expected = sec_both | (sec_dev if env == "dev" else set())
+        expected = sec_both | (sec_dev | dev_worker_secrets if env == "dev" else set())
         for k in sorted(expected - bound):
             fail(f"link 3 [{env}]: {k} has no `secrets_store_secrets` binding in wrangler.{env}.jsonc — the Worker cannot see it")
         for k in sorted(bound - expected):
@@ -164,7 +167,13 @@ def main() -> int:
             fail(f"link 3 [{env}]: container var {k} is missing from `vars` in wrangler.{env}.jsonc")
         for k in sorted(worker_vars - variables):
             fail(f"link 3 [{env}]: worker var {k} is missing from `vars` in wrangler.{env}.jsonc")
-        undeclared = variables - container_vars - optional_vars - worker_vars
+        if env == "dev":
+            for k in sorted(dev_worker_vars - variables):
+                fail(f"link 3 [dev]: dev-only worker var {k} is missing from `vars` in wrangler.dev.jsonc")
+        else:
+            for k in sorted(dev_worker_vars & variables):
+                fail(f"link 3 [{env}]: wrangler.{env}.jsonc sets {k}, which is dev-only — prod must never carry it")
+        undeclared = variables - container_vars - optional_vars - worker_vars - (dev_worker_vars if env == "dev" else set())
         for k in sorted(undeclared):
             fail(f"link 3 [{env}]: wrangler.{env}.jsonc sets var {k}, which the manifest does not declare")
 
@@ -183,14 +192,16 @@ def main() -> int:
         fail(f"link 4: optional var {k} is not in TUNABLE_VAR_KEYS in {WORKER.name} — setting it in wrangler `vars` would never reach the container")
     for k in sorted(tun - optional_vars):
         fail(f"link 4: {WORKER.name} lists {k} in TUNABLE_VAR_KEYS, which the manifest does not declare as an optional container var")
-    for k in sorted(worker_vars & (fwd | tun)):
+    for k in sorted((worker_vars | dev_worker_vars) & (fwd | tun)):
         fail(f"link 4: {k} is declared worker-only but IS forwarded to the container in {WORKER.name} — declare it a container var or stop forwarding it")
+    for k in sorted(dev_worker_secrets & wsk):
+        fail(f"link 4: {k} is a Worker-only secret but is in SECRET_KEYS in {WORKER.name} — the container must never be given it")
 
     # ── Link 5: the DS reads what we deliver, and we declare what it reads ──
     read = ds_read_vars()
     for k in sorted(read - declared):
         fail(f"link 5: the DS reads {k} but nothing declares it — add it to ds-config-manifest.json (as a container var if it must be settable, or code_default_only if the default is the policy)")
-    for k in sorted(declared - read - worker_vars):
+    for k in sorted(declared - read - worker_only):
         fail(f"link 5: {k} is declared and delivered but the DS never reads it — dead config; remove it or start reading it")
 
     for alias, target in sorted(aliases.items()):
@@ -207,6 +218,7 @@ def main() -> int:
     print(
         f"DS config chain OK — {len(all_secrets)} secret(s), {len(container_vars)} container var(s), "
         f"{len(optional_vars)} optional container var(s), {len(worker_vars)} worker var(s), "
+        f"{len(dev_worker_vars)} dev-only worker var(s), {len(dev_worker_secrets)} dev-only worker secret(s), "
         f"{len(code_defaults)} code-default-only, "
         f"{len(aliases)} alias(es) verified across links 2-5."
     )

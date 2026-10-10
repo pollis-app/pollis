@@ -1274,6 +1274,7 @@ mod tests {
             overlay_relay_cert: None,
             overlay_directory_url: None,
             overlay_directory_key: None,
+            dev_access_key: None,
         }
     }
 
