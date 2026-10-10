@@ -101,11 +101,12 @@
     // #1242: only our own clients reach dev (worker/dev-gate.ts). Every dev
     // client sends `X-Pollis-Dev-Key`, checked here in the Worker against the
     // POLLIS_DEV_ACCESS_KEY binding below before anything reaches the container.
-    // `report` lets everything through and counts verdicts (no IPs) on
-    // GET /__gate; `enforce` 404s a missing or wrong key; `off` checks nothing.
+    // `enforce` 404s a missing or wrong key (soaked in `report` first, which
+    // lets everything through and counts verdicts, no IPs, on GET /__gate);
+    // `off` checks nothing. Rollback: set `report` and deploy dev.
     // A worker var that prod must never set (ds-config-manifest.json
     // `dev_only_worker_vars`; worker-tests/dev-gate.test.ts).
-    "DEV_GATE_MODE": "report"
+    "DEV_GATE_MODE": "enforce"
   },
   // Doppler is the source of truth; the deploy workflow syncs each key into the
   // account's single Secrets Store under a DS_DEV_ prefix. Binding name == the

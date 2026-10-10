@@ -182,12 +182,12 @@ function jsonc(path: string): Record<string, unknown> {
 
 type Binding = { binding: string; secret_name: string };
 
-test("prod binds neither the gate mode nor the key; dev binds both, in report", () => {
+test("prod binds neither the gate mode nor the key; dev binds both, enforced", () => {
   const prod = jsonc(join(root, "wrangler.prod.jsonc"));
   assert.equal((prod.vars as Record<string, string>).DEV_GATE_MODE, undefined);
   assert.ok(!(prod.secrets_store_secrets as Binding[]).some((b) => b.binding === "POLLIS_DEV_ACCESS_KEY"));
   const dev = jsonc(join(root, "wrangler.dev.jsonc"));
-  assert.equal((dev.vars as Record<string, string>).DEV_GATE_MODE, "report");
+  assert.equal((dev.vars as Record<string, string>).DEV_GATE_MODE, "enforce");
   const key = (dev.secrets_store_secrets as Binding[]).find((b) => b.binding === "POLLIS_DEV_ACCESS_KEY");
   assert.equal(key?.secret_name, "DS_DEV_POLLIS_DEV_ACCESS_KEY");
 });
