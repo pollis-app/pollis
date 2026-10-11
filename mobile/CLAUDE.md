@@ -996,7 +996,10 @@ Current state:
   is threaded through `initializeNativeBridge` as `pollis_delivery_url`
   (`EXPO_PUBLIC_POLLIS_DELIVERY_URL`, dev → api-dev.pollis.com) — required, and
   since #987 the ONLY backend: OTP bootstrap, every remote write and every remote
-  read go through the DS. Full
+  read go through the DS. Dev builds also pass `EXPO_PUBLIC_POLLIS_DEV_ACCESS_KEY`
+  (#1242: api-dev serves only clients that send its gate key; Rust sends it only
+  to a non-prod DS); a store, APK or OTA build refuses to configure while it is
+  set, so clear it in `mobile/.env` first (`docs/deployments.md`, "Dev gate"). Full
   sign-in verified end-to-end on an Android emulator against the live dev DS.
 - **Keystore-at-rest (Android + iOS):** the file-backed keystore (the only
   backend on mobile) envelope-encrypts its contents with an AES-256-GCM master

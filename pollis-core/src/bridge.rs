@@ -125,6 +125,10 @@ struct InitConfig {
     /// Optional Delivery Service base URL. Absent → direct Turso writes.
     #[serde(default)]
     pollis_delivery_url: Option<String>,
+    /// The dev DS gate key (#1242, `Config::dev_access_key`). Dev builds only;
+    /// sent only to a non-prod DS whatever is passed here.
+    #[serde(default)]
+    dev_access_key: Option<String>,
 }
 
 /// Initialize the process-global `AppState`. Safe to call multiple times —
@@ -156,6 +160,7 @@ async fn init_pollis_inner(config_json: String) -> Result<(), BridgeError> {
                 overlay_relay_cert: None,
                 overlay_directory_url: None,
                 overlay_directory_key: None,
+                dev_access_key: parsed.dev_access_key.filter(|s| !s.trim().is_empty()),
             };
             let state = AppState::new(config).await?;
             Ok::<Arc<AppState>, BridgeError>(Arc::new(state))

@@ -167,6 +167,24 @@ jobs:
         working-directory: mobile/modules/pollis-native
         run: uniffi-bindgen-react-native build android --config ubrn.config.yaml --and-generate --release
 
+      # The dev DS gate key (#1242) is inlined wherever the app reads it, so a
+      # prod build must not be able to see one: not in the job env, not in any
+      # mobile/.env* file Expo would load. app.config.js refuses it too
+      # (POLLIS_OTA=production); this fails first, with a clearer message.
+      - name: Refuse the dev DS key
+        working-directory: mobile
+        run: |
+          if [ -n "${EXPO_PUBLIC_POLLIS_DEV_ACCESS_KEY:-}" ]; then
+            echo "::error::EXPO_PUBLIC_POLLIS_DEV_ACCESS_KEY is set; a prod APK must not carry the dev DS key"
+            exit 1
+          fi
+          for f in .env .env.local .env.production .env.production.local; do
+            if [ -f "$f" ] && grep -Eq '^EXPO_PUBLIC_POLLIS_DEV_ACCESS_KEY=.+' "$f"; then
+              echo "::error::$f sets EXPO_PUBLIC_POLLIS_DEV_ACCESS_KEY; a prod APK must not carry the dev DS key"
+              exit 1
+            fi
+          done
+
       # POLLIS_BUILD is read by app.config.js here (versionCode lands in the
       # generated build.gradle) and again when Gradle's bundle step evaluates
       # the config, so it is set on both steps. POLLIS_OTA=production likewise:

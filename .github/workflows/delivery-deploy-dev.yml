@@ -116,6 +116,9 @@ jobs:
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
           INCLUDE_DEV_OTP: "true"
+          # The dev gate's key (#1242). Must exist in Doppler before the deploy:
+          # wrangler.dev.jsonc binds it.
+          INCLUDE_DEV_GATE: "true"
         run: bash ../.github/scripts/sync-ds-secrets.sh
 
       - name: Set up Docker Buildx

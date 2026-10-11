@@ -41,6 +41,15 @@ EXPO="$MOBILE/node_modules/.bin/expo"
 DS_URL="$(sed -n 's/^EXPO_PUBLIC_POLLIS_DELIVERY_URL=//p' .env 2>/dev/null | head -1)"
 echo "==> DS baked into the bundle: ${DS_URL:-<unset in mobile/.env>}"
 case "$DS_URL" in *api-dev*) ;; *) echo "WARN: Maestro flows expect the dev DS (api-dev.pollis.com)" >&2;; esac
+# The dev DS only serves clients that send its gate key (#1242). Without it the
+# build still runs, but the app gets 404s once dev enforces the gate.
+case "$DS_URL" in
+  *api-dev*)
+    if ! grep -q '^EXPO_PUBLIC_POLLIS_DEV_ACCESS_KEY=..*' .env 2>/dev/null; then
+      echo "WARN: no EXPO_PUBLIC_POLLIS_DEV_ACCESS_KEY in mobile/.env; the dev DS will refuse this build (see mobile/.env.example)" >&2
+    fi
+    ;;
+esac
 
 build_ios() {
   local udid="${IOS_UDID:-}"

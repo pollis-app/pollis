@@ -42,6 +42,11 @@ export const PUBLIC_EXPO_VARS = [
   "EXPO_PUBLIC_R2_PUBLIC_URL",
 ] as const;
 
+// Read by the app in DEV builds only (#1242: the dev DS gate key). The read is
+// allowed, but an OTA must never be built with one set: assertPublicEnv refuses
+// any of these in the environment, so the bundle inlines `undefined`.
+export const DEV_ONLY_EXPO_VARS = ["EXPO_PUBLIC_POLLIS_DEV_ACCESS_KEY"] as const;
+
 export function sha256Hex(bytes: Buffer | string): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
@@ -66,6 +71,12 @@ export function assertPublicEnv(env: Record<string, string | undefined>): void {
   const problems: string[] = [];
   for (const [name, value] of Object.entries(env)) {
     if (!name.startsWith("EXPO_PUBLIC_") || value === undefined) {
+      continue;
+    }
+    if ((DEV_ONLY_EXPO_VARS as readonly string[]).includes(name)) {
+      if (value !== "") {
+        problems.push(`${name} is dev-only and must not be set for an OTA; unset it`);
+      }
       continue;
     }
     if (!(PUBLIC_EXPO_VARS as readonly string[]).includes(name)) {
@@ -99,7 +110,8 @@ export function findEnvReads(files: { path: string; text: string }[]): { name: s
 }
 
 export function assertOnlyPublicEnvReads(files: { path: string; text: string }[]): void {
-  const bad = findEnvReads(files).filter((r) => !(PUBLIC_EXPO_VARS as readonly string[]).includes(r.name));
+  const allowed: readonly string[] = [...PUBLIC_EXPO_VARS, ...DEV_ONLY_EXPO_VARS];
+  const bad = findEnvReads(files).filter((r) => !allowed.includes(r.name));
   if (bad.length > 0) {
     throw new Error(
       `the app reads EXPO_PUBLIC_* names that are not on the public allowlist:\n  - ${bad
