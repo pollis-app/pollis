@@ -2071,7 +2071,7 @@ criteria = "safe-to-deploy"
 notes = """No independent review performed. Direct dependency of pollis-core and pollis-relay (`quinn = { version = "0.11", features = ["ring", "runtime-tokio", "rustls"] }` in both Cargo.tomls) — QUIC transport for the relay hydra (#616), so it parses untrusted network input directly, unlike most of this file's transitive TLS-stack entries. Maintained by the same team as the rustls project; exempted on that provenance, not a source read — a stronger candidate for an actual first-party audit than most crates here given it is a direct, untrusted-input-facing dependency."""
 
 [[exemptions.quinn-proto]]
-version = "0.11.16"
+version = "0.11.19"
 criteria = "safe-to-deploy"
 notes = "No independent review performed. quinn's protocol-state-machine crate (the part that actually decodes QUIC packets from the wire) — same untrusted-input exposure and provenance rationale as [[exemptions.quinn]] above."
 
