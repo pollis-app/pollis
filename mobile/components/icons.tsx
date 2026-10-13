@@ -126,7 +126,7 @@ export const Icon = {
   /* ── Actions ── */
   plus: wrap(Plus, 14),
   send: wrap(SendHorizontal, 16),
-  reply: wrap(Reply),
+  reply: mirrored(Reply),
   smile: wrap(Smile),
   smilePlus: wrap(SmilePlus),
   pencil: wrap(Pencil),

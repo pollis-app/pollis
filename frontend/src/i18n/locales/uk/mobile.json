@@ -88,6 +88,9 @@
     "reactionPillReacted_many": "{{emoji}} {{count}} реакцій, ви відреагували",
     "reactionPillReacted_one": "{{emoji}} {{count}} реакція, ви відреагували",
     "reactionPillReacted_other": "{{emoji}} {{count}} реакції, ви відреагували",
+    "replyQuoteLabel": "Відповідь {{name}}: {{text}}",
+    "replyingTo": "Відповідь <name>{{name}}</name>",
+    "replyingToLabel": "Відповідь {{name}}",
     "sendFailed": "Не вдалося надіслати повідомлення.",
     "viewProfile": "Переглянути профіль"
   },

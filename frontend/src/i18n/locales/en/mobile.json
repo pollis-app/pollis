@@ -84,6 +84,9 @@
     "reactWith": "React with {{emoji}}",
     "reactionPillReacted_one": "{{emoji}} {{count}} reaction, you reacted",
     "reactionPillReacted_other": "{{emoji}} {{count}} reactions, you reacted",
+    "replyQuoteLabel": "Reply to {{name}}: {{text}}",
+    "replyingTo": "Replying to <name>{{name}}</name>",
+    "replyingToLabel": "Replying to {{name}}",
     "sendFailed": "Couldn't send message.",
     "viewProfile": "View profile"
   },

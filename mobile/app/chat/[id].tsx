@@ -17,6 +17,8 @@ import { Composer } from "../../components/chat/Composer";
 import { authorName } from "../../lib/authorName";
 import { outgoingText } from "../../lib/messageText";
 import { EditBar } from "../../components/chat/EditBar";
+import { ReplyBar } from "../../components/chat/ReplyBar";
+import { replySnippet, replyTargets } from "../../lib/replyPreview";
 import { MessageActionsSheet } from "../../components/chat/MessageActionsSheet";
 import { ChannelMenuSheet } from "../../components/chat/ChannelMenuSheet";
 import { EmojiPickerSheet } from "../../components/emoji/EmojiPickerSheet";
@@ -100,6 +102,14 @@ function TextChat(props: ChatViewProps = {}) {
   const [pickerTarget, setPickerTarget] = useState<Message | null>(null);
   const [editTarget, setEditTarget] = useState<Message | null>(null);
   const [editDraft, setEditDraft] = useState("");
+  // The message the composer is replying to (#1270). Swipe, double tap, or
+  // the message sheet sets it; sending, dismissing or starting an edit
+  // clears it.
+  const [replyTarget, setReplyTarget] = useState<Message | null>(null);
+  // Bumped to focus the composer when a reply starts.
+  const [composerFocus, setComposerFocus] = useState(0);
+  // The row a tapped reply quote jumped to, tinted for a moment.
+  const [highlightId, setHighlightId] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const currentUser = appStore.currentUser;
 
@@ -194,6 +204,20 @@ function TextChat(props: ChatViewProps = {}) {
     });
   }, [newestId]);
 
+  // The embedded (iPad) pane keeps this component mounted across
+  // conversations, so a reply must never outlive the one it was started in.
+  useEffect(() => {
+    setReplyTarget(null);
+    setHighlightId(null);
+  }, [conversationId]);
+
+  const startReply = useCallback((m: Message) => {
+    setEditTarget(null);
+    setEditDraft("");
+    setReplyTarget(m);
+    setComposerFocus((n) => n + 1);
+  }, []);
+
   const onSend = () => {
     const text = outgoingText(draft);
     if ((!text && pendingAttachments.length === 0) || sendMessage.isPending) {
@@ -201,7 +225,12 @@ function TextChat(props: ChatViewProps = {}) {
     }
     setDraft("");
     setPendingAttachments([]);
-    sendMessage.mutate({ content: text, attachments: pendingAttachments });
+    setReplyTarget(null);
+    sendMessage.mutate({
+      content: text,
+      attachments: pendingAttachments,
+      replyToId: replyTarget?.id,
+    });
   };
 
   // Attach images from the library (#894-adjacent; same upload flow as
@@ -302,9 +331,11 @@ function TextChat(props: ChatViewProps = {}) {
         prev = null;
       }
       // Discord-style grouping: the same sender again within the window
-      // (and on the same day) hangs under the previous header.
+      // (and on the same day) hangs under the previous header. A reply
+      // always starts its own group, so its quote sits over a header.
       const continued =
         prev !== null &&
+        !m.reply_to_id &&
         prev.sender_id === m.sender_id &&
         m.created_at - prev.created_at < GROUP_WINDOW_MS;
       out.push({ type: "msg", key: m.id, message: m, continued });
@@ -313,6 +344,54 @@ function TextChat(props: ChatViewProps = {}) {
     out.reverse();
     return out;
   }, [messages]);
+
+  // The loaded originals of every reply, in one pass (desktop's #874 shape).
+  const repliedTo = useMemo(() => replyTargets(messages), [messages]);
+
+  // Jump to a replied-to message and tint it briefly. Only loaded messages
+  // are reachable; the quote of an unloaded one is not pressable.
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (highlightTimer.current) {
+        clearTimeout(highlightTimer.current);
+      }
+    },
+    [],
+  );
+  const scrollToMessage = useCallback(
+    (messageId: string) => {
+      const index = items.findIndex((i) => i.type === "msg" && i.key === messageId);
+      if (index < 0) {
+        return;
+      }
+      listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+      setHighlightId(messageId);
+      if (highlightTimer.current) {
+        clearTimeout(highlightTimer.current);
+      }
+      highlightTimer.current = setTimeout(() => setHighlightId(null), 1400);
+    },
+    [items],
+  );
+  // Rows far off screen have no measured position yet: get near by the
+  // average row height, then aim again once those rows have laid out.
+  const onScrollToIndexFailed = useCallback(
+    (info: { index: number; averageItemLength: number }) => {
+      listRef.current?.scrollToOffset({
+        offset: info.averageItemLength * info.index,
+        animated: false,
+      });
+      setTimeout(() => {
+        listRef.current?.scrollToIndex({
+          index: info.index,
+          animated: true,
+          viewPosition: 0.5,
+        });
+      }, 120);
+    },
+    [],
+  );
 
   const onEndReached = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) {
@@ -418,6 +497,18 @@ function TextChat(props: ChatViewProps = {}) {
       const name =
         authorName(m.sender_id, m.sender_username, currentUser) ??
         t("chat:list.unknownAuthor");
+      const original = m.reply_to_id ? repliedTo.get(m.reply_to_id) : undefined;
+      const replyTo = m.reply_to_id
+        ? original
+          ? {
+              name:
+                authorName(original.sender_id, original.sender_username, currentUser) ??
+                t("chat:list.unknownAuthor"),
+              snippet: replySnippet(original),
+            }
+          : null
+        : undefined;
+      const settled = !m.pending && !m.failed;
       return (
         <MessageRow
           testID={`row-message-${m.id}`}
@@ -463,7 +554,11 @@ function TextChat(props: ChatViewProps = {}) {
                     params: { id: m.sender_id },
                   })
           }
-          onLongPress={m.pending || m.failed ? undefined : () => setActionTarget(m)}
+          onLongPress={settled ? () => setActionTarget(m) : undefined}
+          onReply={settled ? () => startReply(m) : undefined}
+          replyTo={replyTo}
+          onPressReplyQuote={original ? () => scrollToMessage(original.id) : undefined}
+          highlighted={highlightId === m.id}
         />
       );
     },
@@ -480,6 +575,10 @@ function TextChat(props: ChatViewProps = {}) {
       openMedia,
       mentionNames,
       selfName,
+      repliedTo,
+      startReply,
+      scrollToMessage,
+      highlightId,
       t,
     ],
   );
@@ -599,6 +698,7 @@ function TextChat(props: ChatViewProps = {}) {
         // advances (desktop PR #958's dead-end shape).
         onEndReached={onEndReached}
         onEndReachedThreshold={0.4}
+        onScrollToIndexFailed={onScrollToIndexFailed}
         viewabilityConfigCallbackPairs={viewabilityConfigCallbackPairs}
         ListFooterComponent={
           isFetchingNextPage ? (
@@ -639,21 +739,35 @@ function TextChat(props: ChatViewProps = {}) {
           savePending={editMessage.isPending}
         />
       ) : (
-        <Composer
-          draft={draft}
-          onChangeDraft={setDraft}
-          onSend={onSend}
-          sendPending={sendMessage.isPending}
-          editable={!!kind && !!conversationId}
-          mentionCandidates={mentionCandidates}
-          customEmoji={usableEmoji}
-          onAttach={() => void onAttach()}
-          pendingAttachments={pendingAttachments}
-          onRemoveAttachment={(id) =>
-            setPendingAttachments((prev) => prev.filter((a) => a.id !== id))
-          }
-          canSendEmptyText={pendingAttachments.length > 0}
-        />
+        <>
+          {replyTarget ? (
+            <ReplyBar
+              name={
+                authorName(replyTarget.sender_id, replyTarget.sender_username, currentUser) ??
+                t("chat:list.unknownAuthor")
+              }
+              snippet={replySnippet(replyTarget) || t("chat:message.encrypted")}
+              onPressQuote={() => scrollToMessage(replyTarget.id)}
+              onDismiss={() => setReplyTarget(null)}
+            />
+          ) : null}
+          <Composer
+            focusRequest={composerFocus}
+            draft={draft}
+            onChangeDraft={setDraft}
+            onSend={onSend}
+            sendPending={sendMessage.isPending}
+            editable={!!kind && !!conversationId}
+            mentionCandidates={mentionCandidates}
+            customEmoji={usableEmoji}
+            onAttach={() => void onAttach()}
+            pendingAttachments={pendingAttachments}
+            onRemoveAttachment={(id) =>
+              setPendingAttachments((prev) => prev.filter((a) => a.id !== id))
+            }
+            canSendEmptyText={pendingAttachments.length > 0}
+          />
+        </>
       )}
 
       {actionTarget ? (
@@ -693,12 +807,19 @@ function TextChat(props: ChatViewProps = {}) {
             // refuses to present over a modal that is still going away.
             afterSheetClose(() => setPickerTarget(m));
           }}
+          onReply={() => {
+            const m = actionTarget;
+            setActionTarget(null);
+            // Focus only after the sheet's Modal is gone, or iOS drops it.
+            afterSheetClose(() => startReply(m));
+          }}
           onReplyInThread={() => {
             const rootId = actionTarget.id;
             setActionTarget(null);
             afterSheetClose(() => openThread(rootId));
           }}
           onEdit={() => {
+            setReplyTarget(null);
             setEditTarget(actionTarget);
             setEditDraft(actionTarget.content);
             setActionTarget(null);

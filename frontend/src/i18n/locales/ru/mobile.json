@@ -88,6 +88,9 @@
     "reactionPillReacted_many": "{{emoji}} {{count}} реакций, вы отреагировали",
     "reactionPillReacted_one": "{{emoji}} {{count}} реакция, вы отреагировали",
     "reactionPillReacted_other": "{{emoji}} {{count}} реакции, вы отреагировали",
+    "replyQuoteLabel": "Ответ {{name}}: {{text}}",
+    "replyingTo": "Ответ <name>{{name}}</name>",
+    "replyingToLabel": "Ответ {{name}}",
     "sendFailed": "Не удалось отправить сообщение.",
     "viewProfile": "Открыть профиль"
   },

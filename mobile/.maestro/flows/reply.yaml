@@ -1,0 +1,131 @@
+appId: com.pollis.mobile
+tags:
+  - parity
+---
+# REPLY (#1270) — swipe a message toward the start edge to reply, Discord's
+# gesture, and the double-tap fallback. Self-contained: creates a group (→
+# #General) so there is a conversation without a peer.
+#
+# What it proves on a device: the swipe opens the reply bar and NOT the
+# message sheet; the reply is sent with reply_to_id and its row renders the
+# quote of the original ("Reply to <name>: <text>. …" leads the row's one
+# accessibility label, components/chat/MessageRow.tsx); a double tap does
+# the same; the bar's dismiss cancels a reply.
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-groups"
+- assertVisible:
+    id: "screen-groups"
+
+- tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Reply Group"
+- tapOn:
+    id: "btn-submit-group"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "E2E Reply Group, .*"
+    timeout: 15000
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"
+
+# The message to reply to. Keyboard stays up for the send tap (see
+# messaging.yaml, #1194).
+- tapOn:
+    id: "input-composer"
+- inputText: "reply target"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*: reply target, .*"
+    timeout: 10000
+- hideKeyboard
+# A row can be replied to only once it is no longer pending, and the first
+# message of a fresh group pays for MLS group setup (messaging.yaml has the
+# numbers). No queryable "settled" signal, so a deliberate flat wait.
+- extendedWaitUntil:
+    visible:
+      id: "__never_matches__"
+    timeout: 30000
+    optional: true
+
+# ── Swipe ───────────────────────────────────────────────────────────────
+- swipe:
+    from:
+      text: ".*: reply target, .*"
+    direction: LEFT
+    duration: 450
+- extendedWaitUntil:
+    visible:
+      id: "bar-reply"
+    timeout: 4000
+# The swipe is not a long press: the message sheet stays shut.
+- assertNotVisible:
+    id: "btn-edit"
+- takeScreenshot: reply-01-swiped
+- inputText: "swipe reply"
+- tapOn:
+    id: "btn-send"
+- assertNotVisible:
+    id: "bar-reply"
+- extendedWaitUntil:
+    visible: "Reply to .*: reply target\\. .*: swipe reply, .*"
+    timeout: 15000
+- assertVisible:
+    id: "reply-quote-.*"
+- takeScreenshot: reply-02-sent
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "__never_matches__"
+    timeout: 8000
+    optional: true
+
+# ── Double tap, then dismiss ────────────────────────────────────────────
+- doubleTapOn:
+    text: "Reply to .*: reply target\\. .*: swipe reply, .*"
+- extendedWaitUntil:
+    visible:
+      id: "bar-reply"
+    timeout: 4000
+- assertNotVisible:
+    id: "btn-edit"
+- takeScreenshot: reply-03-double-tapped
+- tapOn:
+    id: "btn-reply-dismiss"
+- assertNotVisible:
+    id: "bar-reply"
+
+# ── Double tap, then send ───────────────────────────────────────────────
+- doubleTapOn:
+    text: "Reply to .*: reply target\\. .*: swipe reply, .*"
+- extendedWaitUntil:
+    visible:
+      id: "bar-reply"
+    timeout: 4000
+- inputText: "double tap reply"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: "Reply to .*: swipe reply\\. .*: double tap reply, .*"
+    timeout: 15000
+- takeScreenshot: reply-04-double-tap-sent
+
+# ── Tapping a quote jumps to the original ───────────────────────────────
+- hideKeyboard
+- tapOn:
+    id: "reply-quote-.*"
+    index: 0
+- assertVisible: ".*: reply target, .*"

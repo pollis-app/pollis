@@ -92,6 +92,9 @@
     "reactionPillReacted_other": "{{emoji}} {{count}} تفاعل، وقد تفاعلت",
     "reactionPillReacted_two": "{{emoji}} {{count}} تفاعلان، وقد تفاعلت",
     "reactionPillReacted_zero": "{{emoji}} {{count}} تفاعل، وقد تفاعلت",
+    "replyQuoteLabel": "رد على {{name}}: {{text}}",
+    "replyingTo": "الرد على <name>{{name}}</name>",
+    "replyingToLabel": "الرد على {{name}}",
     "sendFailed": "تعذّر إرسال الرسالة.",
     "viewProfile": "عرض الملف الشخصي"
   },
