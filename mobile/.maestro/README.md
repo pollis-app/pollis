@@ -93,6 +93,7 @@ IOS_DEVICE="iPhone 17 Pro" mobile/scripts/maestro-run.sh auth ios   # an Xcode 2
 | `auth` | email→OTP→PIN→inbox (also the smoke test: bridge + dev DS + keystore live) | no |
 | `groups` | create group, open, channel visible | no |
 | `messaging` | send / edit / delete / react in a self-owned channel | no |
+| `reply` | #1270 swipe a message toward the start edge → reply bar (not the message sheet), send, the row quotes the original; double tap does the same; dismiss cancels; tapping a quote jumps to the original | no |
 | `channel-menu` | #1193 the channel kebab sheet: every item tapped by `testID`, plus `channel-menu-01-open` — the gallery shot that must show an OPAQUE sheet (no header/composer through its buttons; the invariant itself is pinned in `tests/sheet-opaque.test.ts`) | no |
 | `profile-prefs` | accent re-theme, behavior toggle, display-name save | no |
 | `search` | #1202 desktop parity: a seeded message hit with highlighted snippet + "About N results", sort toggle, corpus footer, opening a hit, settings-page quick-jump, and the "why no results" explanation | no |

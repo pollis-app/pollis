@@ -992,7 +992,17 @@ Current state:
   clipboard copy via expo-clipboard); attachments (picker → `upload_media`
   path arg → desktop's exact `_att`/`_txt` envelope from `lib/attachments.ts`;
   inbound images render via `components/Media.tsx` + `get_media_path`; tapping any
-  attachment opens the full-screen viewer `app/media.tsx`, #1248). The DS base URL
+  attachment opens the full-screen viewer `app/media.tsx`, #1248); quote replies
+  (#1270, desktop's Reply: `send_message` with `replyToId`, a `ReplyBar` over the
+  composer, a quote line on the replying row via `lib/replyPreview.ts`, tap jumps
+  to the original). A reply starts from a Discord-style **swipe toward the start
+  edge** (`components/chat/SwipeToReply.tsx`: a Gesture Handler pan + Reanimated
+  on the UI thread, JS called only when the reply fires; it claims only travel
+  toward the start edge, so the back gestures and the list's scroll are never
+  taken; numbers and curve in `lib/swipeReply.ts`), a **double tap** (a short
+  spring nudge, then the same), the message sheet's Reply row, or the row's
+  Reply accessibility action. No haptic: expo-haptics is not installed, and
+  adding a native module would stop this shipping over the air. The DS base URL
   is threaded through `initializeNativeBridge` as `pollis_delivery_url`
   (`EXPO_PUBLIC_POLLIS_DELIVERY_URL`, dev → api-dev.pollis.com) — required, and
   since #987 the ONLY backend: OTP bootstrap, every remote write and every remote

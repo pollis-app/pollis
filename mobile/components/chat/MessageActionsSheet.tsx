@@ -38,6 +38,7 @@ export function MessageActionsSheet({
   isSaved,
   onReact,
   onOpenPicker,
+  onReply,
   onReplyInThread,
   onToggleSave,
   onCopyText,
@@ -55,6 +56,8 @@ export function MessageActionsSheet({
   isSaved: boolean;
   onReact: (emoji: string) => void;
   onOpenPicker: () => void;
+  // Quote reply in the composer (#1270), desktop's "Reply".
+  onReply: () => void;
   onReplyInThread: () => void;
   onToggleSave: () => void;
   onCopyText: () => Promise<boolean>;
@@ -178,6 +181,12 @@ export function MessageActionsSheet({
         </View>
 
         <Group surface="high">
+          <ListRow
+            testID="btn-reply"
+            glyph={<Icon.reply size={GLYPH} color={semantic.text} />}
+            name={t("actions.reply")}
+            onPress={onReply}
+          />
           <ListRow
             testID="btn-reply-thread"
             glyph={<Icon.thread size={GLYPH} color={semantic.text} />}

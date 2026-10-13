@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { View, Text, Pressable, Platform, ScrollView } from "react-native";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { View, Text, Pressable, Platform, ScrollView, type TextInput } from "react-native";
 import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
 import { Avatar, Field } from "../ui";
@@ -57,6 +57,7 @@ export function Composer({
   pendingAttachments,
   onRemoveAttachment,
   canSendEmptyText = false,
+  focusRequest = 0,
 }: {
   draft: string;
   onChangeDraft: (text: string) => void;
@@ -71,6 +72,8 @@ export function Composer({
   onRemoveAttachment?: (id: string) => void;
   /** True when attachments alone make the message sendable. */
   canSendEmptyText?: boolean;
+  // Each increase focuses the field (a reply starting, #1270). 0 never does.
+  focusRequest?: number;
 }) {
   const { t } = useTranslation("common");
   const [caret, setCaret] = useState(0);
@@ -82,6 +85,12 @@ export function Composer({
   // follows the system text size instead of hard-coding one.
   const [emptyHeight, setEmptyHeight] = useState<number | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const inputRef = useRef<TextInput>(null);
+  useEffect(() => {
+    if (focusRequest > 0) {
+      inputRef.current?.focus();
+    }
+  }, [focusRequest]);
 
   const mentionQuery =
     mentionCandidates && mentionCandidates.length > 0
@@ -318,6 +327,7 @@ export function Composer({
           <Icon.plus size={22} color={onAttach ? semantic.accent : semantic.dim} />
         </Pressable>
         <Field
+          ref={inputRef}
           testID="input-composer"
           accessibilityLabel={t("composer.inputLabel")}
           value={draft}
