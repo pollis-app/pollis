@@ -113,7 +113,7 @@ delete/remove/revoke), the record id is appended to keep the selector unique
 | `group/members` | `screen-group-members` | `row-member-<userId>`, `btn-toggle-role-<userId>` (make/remove admin), `btn-remove-member-<userId>` |
 | `group/requests` | `screen-group-requests` | `row-request-<id>`, `btn-approve-<id>`, `btn-reject-<id>` |
 | `group/settings` | `screen-group-settings` | `input-group-name`, `input-group-description`, `row-channel-<id>`, `btn-delete-channel-<id>`, `row-group-emoji` (→ `group/emoji`), `btn-settings-leave-group` (everyone, two taps), `btn-delete-group` (admins, two taps), `btn-save` |
-| `group/emoji` | `screen-group-emoji` | `input-emoji-shortcode`, `btn-upload-emoji`, `row-emoji-<shortcode>`, `btn-remove-emoji-<shortcode>` |
+| `group/emoji` | `screen-group-emoji` | `input-emoji-shortcode`, `btn-upload-emoji` (every member, #1280), `row-emoji-<shortcode>`, `btn-remove-emoji-<shortcode>` (admins only; two taps), `hint-emoji-admins-remove` (non-admins, when the group has emoji) |
 | `group/invite` | `screen-group-invite` | `input-user-search`, `btn-send-invite`; invite links: `chip-expiry-<id>`, `chip-uses-<id>`, `btn-create-invite-link`, then `created-invite-link-url`, `btn-copy-invite-link`, `btn-share-invite-link`; `row-manage-invite-links` (→ `group/invite-links`). No Cancel button (`btn-cancel` was removed) — leave with `btn-back`. |
 | `group/invite-links` | `screen-group-invite-links` | `row-invite-link-<id>`, `btn-revoke-invite-link-<id>` |
 | `group/discover` | `screen-group-discover` | `input-group-search` (return runs the lookup), `btn-group-search` (Find, in the body under the field), `btn-request-access` (join), `discover-request-error`, `btn-back` |

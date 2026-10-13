@@ -55,6 +55,7 @@
     "stored_other": "{{count}} émojis · {{size}} en stockage",
     "empty": "Aucun émoji personnalisé pour l'instant. N'importe quel membre du groupe peut en ajouter un.",
     "sizeAnimated": "animé · {{size}}",
-    "remove": "Retirer :{{shortcode}}:"
+    "remove": "Retirer :{{shortcode}}:",
+    "removeAdminsOnly": "Seuls les administrateurs du groupe peuvent retirer des émojis."
   }
 }

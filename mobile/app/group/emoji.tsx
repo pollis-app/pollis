@@ -65,6 +65,8 @@ function GroupEmoji() {
   const upload = useUploadGroupEmoji(id);
   const remove = useRemoveGroupEmoji(id);
 
+  // Any member may add (#848); only admins may remove (#1280). The DS enforces
+  // both — this only decides which controls are drawn.
   const myRole = members.find((m) => m.user_id === currentUser?.id)?.role;
   const iAmAdmin = myRole === "admin" || myRole === "owner";
 
@@ -178,52 +180,52 @@ function GroupEmoji() {
           </View>
         ) : null}
 
-        {iAmAdmin ? (
-          <View>
-            <SectionTitle style={{ paddingHorizontal: 0, paddingBottom: space.xxl }}>{t("manage.add")}</SectionTitle>
-            <View style={{ gap: space.lg }}>
-              <LabeledField
-                label={t("manage.shortcodeLabel")}
-                error={
-                  shortcode.length > 0 && !shortcodeValid
-                    ? t("manage.shortcodeInvalid")
-                    : shortcodeTaken
-                      ? t("manage.shortcodeTaken", { shortcode })
-                      : null
-                }
-              >
-                <Field
-                  value={shortcode}
-                  onChangeText={(v) => setShortcode(v.toLowerCase())}
-                  placeholder={t("manage.shortcodePlaceholder")}
-                  autoCorrect={false}
-                  testID="input-emoji-shortcode"
-                  accessibilityLabel={t("manage.shortcodeLabel")}
-                />
-              </LabeledField>
-              <Button
-                full
-                testID="btn-upload-emoji"
-                variant="secondary"
-                icon={<Icon.plus size={18} color={semantic.accent} />}
-                onPress={() => void onPickAndUpload()}
-                disabled={upload.isPending}
-              >
-                {upload.isPending
-                  ? t("mobile:group.emoji.uploading")
-                  : t("mobile:group.emoji.pickAndUpload")}
-              </Button>
-              {upload.isError ? (
-                <ErrorText>{(upload.error as Error).message || t("manage.addFailed")}</ErrorText>
-              ) : null}
-              {pickError ? <ErrorText>{pickError}</ErrorText> : null}
-            </View>
-          </View>
-        ) : (
-          <View style={{ paddingTop: space.xxl }}>
-            <Hint>{t("mobile:group.emoji.adminsOnly")}</Hint>
+        {iAmAdmin || emoji.length === 0 ? null : (
+          <View testID="hint-emoji-admins-remove" style={{ paddingTop: space.md }}>
+            <Hint>{t("manage.removeAdminsOnly")}</Hint>
           </View>
         )}
+
+        <View>
+          <SectionTitle style={{ paddingHorizontal: 0, paddingBottom: space.xxl }}>{t("manage.add")}</SectionTitle>
+          <View style={{ gap: space.lg }}>
+            <LabeledField
+              label={t("manage.shortcodeLabel")}
+              error={
+                shortcode.length > 0 && !shortcodeValid
+                  ? t("manage.shortcodeInvalid")
+                  : shortcodeTaken
+                    ? t("manage.shortcodeTaken", { shortcode })
+                    : null
+              }
+            >
+              <Field
+                value={shortcode}
+                onChangeText={(v) => setShortcode(v.toLowerCase())}
+                placeholder={t("manage.shortcodePlaceholder")}
+                autoCorrect={false}
+                testID="input-emoji-shortcode"
+                accessibilityLabel={t("manage.shortcodeLabel")}
+              />
+            </LabeledField>
+            <Button
+              full
+              testID="btn-upload-emoji"
+              variant="secondary"
+              icon={<Icon.plus size={18} color={semantic.accent} />}
+              onPress={() => void onPickAndUpload()}
+              disabled={upload.isPending}
+            >
+              {upload.isPending
+                ? t("mobile:group.emoji.uploading")
+                : t("mobile:group.emoji.pickAndUpload")}
+            </Button>
+            {upload.isError ? (
+              <ErrorText>{(upload.error as Error).message || t("manage.addFailed")}</ErrorText>
+            ) : null}
+            {pickError ? <ErrorText>{pickError}</ErrorText> : null}
+          </View>
+        </View>
       </Body>
     </Screen>
   );

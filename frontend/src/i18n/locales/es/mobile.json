@@ -163,7 +163,6 @@
       "requestAccess": "Solicitar acceso"
     },
     "emoji": {
-      "adminsOnly": "Solo los admins del grupo pueden añadir o quitar emoji.",
       "loadFailed": "No se pudieron cargar los emoji de este grupo.",
       "empty": "Todavía no hay emoji personalizados.",
       "pickAndUpload": "Elegir imagen y subir",

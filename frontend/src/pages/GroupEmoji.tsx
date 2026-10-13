@@ -55,7 +55,7 @@ function formatBytes(bytes: number): string {
 }
 
 /**
- * A group's custom emoji: add, list, remove.
+ * A group's custom emoji: add (any member), list, remove (admins only, #1280).
  *
  * Adding follows Discord's order — **image first, name derived**. Drop a file
  * anywhere on the window (or click the zone to browse), and the shortcode is
@@ -85,6 +85,8 @@ export const GroupEmoji: React.FC<GroupEmojiProps> = observer(({ groupId }) => {
   const removeEmoji = useRemoveGroupEmoji();
 
   const group = groupsWithChannels?.find((g) => g.id === groupId);
+  // Any member may add (#848); only admins may remove (#1280) — the creator
+  // gets no exemption. The DS enforces both; this only decides what is drawn.
   const isAdmin = group?.current_user_role === "admin";
 
   const [shortcode, setShortcode] = useState("");
@@ -313,9 +315,14 @@ export const GroupEmoji: React.FC<GroupEmojiProps> = observer(({ groupId }) => {
             </p>
           )}
 
+          {!isAdmin && emoji.length > 0 && (
+            <p data-testid="group-emoji-admins-remove" className="text-xs font-mono text-muted">
+              {t("manage.removeAdminsOnly")}
+            </p>
+          )}
+
           <ul className="flex flex-col gap-1">
             {emoji.map((item) => {
-              const canRemove = isAdmin || item.created_by === currentUser.id;
               return (
                 <li
                   key={item.shortcode}
@@ -336,7 +343,7 @@ export const GroupEmoji: React.FC<GroupEmojiProps> = observer(({ groupId }) => {
                       ? t("manage.sizeAnimated", { size: formatBytes(item.size_bytes) })
                       : formatBytes(item.size_bytes)}
                   </span>
-                  {canRemove && (
+                  {isAdmin && (
                     <button
                       type="button"
                       onClick={() => handleRemove(item.shortcode)}

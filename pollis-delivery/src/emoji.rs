@@ -165,7 +165,7 @@ pub fn content_hash_from_emoji_key(key: &str) -> Option<&str> {
 #[derive(Debug)]
 pub enum EmojiOutcome {
     Ok,
-    /// The actor may not do this — not a member, or not the owner/admin.
+    /// The actor may not do this — not a member (add), or not an admin (remove).
     Forbidden,
     /// The body is malformed. The `&'static str` is safe to return verbatim (no
     /// user input is interpolated into it).
@@ -312,8 +312,8 @@ pub async fn create_emoji(
 ///
 /// Authz: the actor is a current MEMBER of the group. Not admin — #848 wants
 /// members to be able to add emoji, and the cost is bounded per-person by
-/// [`EMOJI_MAX_PER_USER`] rather than by gatekeeping. Removal is where the
-/// admin/owner distinction lives.
+/// [`EMOJI_MAX_PER_USER`] rather than by gatekeeping. Removal is admin-only
+/// (#1280); see [`apply_remove_emoji`].
 ///
 /// The object INSERT is `OR IGNORE`: it is content-addressed and byte-identical
 /// for every uploader, so the second person to add party-parrot writes no object
@@ -421,20 +421,23 @@ pub async fn remove_emoji(
 /// Remove `(group_id, shortcode)` and collect the shared object if that was its
 /// last reference.
 ///
-/// Authz: the row's creator, or an admin of the group. A plain member cannot
-/// delete someone else's emoji — that asymmetry with `create` is deliberate:
-/// adding costs the adder (quota), removing costs everyone who was using it.
+/// Authz: an ADMIN of the group, and nobody else — not even the emoji's
+/// creator (#1280). Adding is open to every member because its cost lands on
+/// the adder (quota); removing costs everyone who was using the emoji, so it is
+/// a moderation action and sits with the people who moderate. There is no
+/// rename/edit endpoint: a shortcode change is a remove plus an add, so gating
+/// remove is what gates "edit" too.
 ///
-/// ## Membership comes FIRST, and that is not cosmetic (L3)
+/// ## The admin check comes FIRST, and that is not cosmetic (L3)
 ///
-/// A missing row answers `Ok` (a retried remove is idempotent, not a 404) and an
-/// existing one the caller may not touch answers `Forbidden`. Run in that order
-/// with no membership gate, the pair is an EXISTENCE ORACLE: a stranger could
-/// probe `(group_id, shortcode)` and read a group's whole emoji set — and with
-/// it a slice of its culture and membership — off the difference between 200 and
-/// 403. Checking membership before the row is read collapses both answers to
-/// `Forbidden` for anyone outside the group, so the oracle only ever answers
-/// people who can already enumerate the set through `/v1/read/emoji`.
+/// A missing row answers `Ok` (an admin's retried remove is idempotent, not a
+/// 404) and an existing one the caller may not touch answers `Forbidden`. Run
+/// in that order with no up-front gate, the pair is an EXISTENCE ORACLE: a
+/// stranger could probe `(group_id, shortcode)` and read a group's whole emoji
+/// set off the difference between 200 and 403. Checking the role before the
+/// row is read collapses every answer to `Forbidden` for anyone who is not an
+/// admin, so the oracle only ever answers people who can already enumerate the
+/// set through `/v1/read/emoji`.
 pub async fn apply_remove_emoji(
     conn: &Connection,
     authed: Option<&str>,
@@ -450,17 +453,17 @@ pub async fn apply_remove_emoji(
         ));
     }
 
-    // Membership BEFORE the row read, so a non-member's answer never depends on
-    // whether the shortcode exists.
-    if authed.is_some() && !is_group_member(conn, &body.group_id, &actor).await? {
+    // Admin BEFORE the row read, so a non-admin's answer never depends on
+    // whether the shortcode exists. A non-member has no role, so this is also
+    // the membership gate.
+    if authed.is_some() && !is_group_admin(conn, &body.group_id, &actor).await? {
         return Ok(EmojiOutcome::Forbidden);
     }
 
-    // Read the row: we need its hash to run the conditional collect, and its
-    // creator to authorize the delete.
+    // Read the row: we need its hash to run the conditional collect.
     let mut rows = conn
         .query(
-            "SELECT content_hash, created_by FROM group_emoji \
+            "SELECT content_hash FROM group_emoji \
              WHERE group_id = ?1 AND shortcode = ?2",
             libsql::params![body.group_id.clone(), body.shortcode.clone()],
         )
@@ -470,14 +473,6 @@ pub async fn apply_remove_emoji(
         return Ok(EmojiOutcome::Ok);
     };
     let content_hash: String = row.get(0)?;
-    let created_by: String = row.get(1)?;
-
-    if authed.is_some()
-        && created_by != actor
-        && !is_group_admin(conn, &body.group_id, &actor).await?
-    {
-        return Ok(EmojiOutcome::Forbidden);
-    }
 
     let tx = conn.transaction().await?;
     tx.execute(

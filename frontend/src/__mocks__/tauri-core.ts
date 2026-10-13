@@ -1580,6 +1580,20 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return store.customEmoji.filter((e) => e.group_id === groupId);
     }
 
+    // The DS rule (#1280): any member may add, only an ADMIN may remove —
+    // the creator gets no exemption. Mirrored here so the browser tests see
+    // the same refusal a non-admin gets from `/v1/emoji/remove`.
+    case 'remove_group_emoji': {
+      const { groupId, shortcode } = args as { groupId: string; shortcode: string };
+      if (roleInGroup(groupId) !== 'admin') {
+        throw new Error('forbidden');
+      }
+      store.customEmoji = store.customEmoji.filter(
+        (e) => !(e.group_id === groupId && e.shortcode === shortcode),
+      );
+      return null;
+    }
+
     case 'get_emoji_url': {
       const { contentHash } = args as { contentHash: string };
       const emoji = store.customEmoji.find((e) => e.content_hash === contentHash);

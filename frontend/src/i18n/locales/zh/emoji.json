@@ -54,6 +54,7 @@
     "stored_other": "{{count}} 个表情 · 已占用 {{size}}",
     "empty": "还没有自定义表情。群组中的任何人都可以添加。",
     "sizeAnimated": "动图 · {{size}}",
-    "remove": "移除 :{{shortcode}}:"
+    "remove": "移除 :{{shortcode}}:",
+    "removeAdminsOnly": "只有群组管理员才能移除表情。"
   }
 }

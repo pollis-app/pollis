@@ -249,17 +249,48 @@ async fn a_non_member_cannot_add_an_emoji_to_a_group() {
     );
 }
 
-/// Removal is asymmetric with creation on purpose: adding costs the adder
-/// (quota), removing costs everyone who was using it. So the creator or an
-/// admin may remove; a plain member may not remove someone else's.
+/// #1280: ANY member may add. The role a member holds is irrelevant to the add
+/// path — a plain `member` gets the same `Ok` and the same two rows an admin
+/// would.
 #[tokio::test]
-async fn removal_is_creator_or_admin_only() {
+async fn a_plain_member_can_add_an_emoji() {
+    let db = fresh().await;
+    add_member(&db, "g", "boss", "admin").await;
+    add_member(&db, "g", "pleb", "member").await;
+
+    assert!(
+        matches!(
+            create_as(&db, "pleb", "g", "parrot", &hash('a')).await,
+            EmojiOutcome::Ok
+        ),
+        "a non-admin member must be able to add an emoji"
+    );
+    assert_eq!(
+        count(
+            &db,
+            "SELECT COUNT(*) FROM group_emoji WHERE group_id = 'g' AND shortcode = 'parrot' \
+             AND created_by = 'pleb'"
+        )
+        .await,
+        1
+    );
+    assert!(object_exists(&db, &hash('a')).await);
+}
+
+/// #1280: removal is ADMIN-ONLY. Adding costs the adder (quota); removing costs
+/// everyone who was using it, so it is a moderation action. The creator gets no
+/// exemption — a plain member cannot remove even their OWN emoji, and a refused
+/// remove leaves both the binding and the shared object exactly as they were.
+/// There is no edit/rename endpoint, so this is also what keeps a non-admin from
+/// "editing" an emoji by removing and re-adding it.
+#[tokio::test]
+async fn removal_is_admin_only_even_for_the_creator() {
     let db = fresh().await;
     add_member(&db, "g", "creator", "member").await;
     add_member(&db, "g", "bystander", "member").await;
     add_member(&db, "g", "boss", "admin").await;
     create_as(&db, "creator", "g", "parrot", &hash('a')).await;
-    create_as(&db, "creator", "g", "shrug", &hash('b')).await;
+    create_as(&db, "boss", "g", "shrug", &hash('b')).await;
 
     assert!(
         matches!(
@@ -268,14 +299,65 @@ async fn removal_is_creator_or_admin_only() {
         ),
         "a plain member cannot delete another member's emoji"
     );
-    assert!(matches!(
-        remove_as(&db, "creator", "g", "parrot").await,
-        EmojiOutcome::Ok
-    ));
+    assert!(
+        matches!(
+            remove_as(&db, "creator", "g", "parrot").await,
+            EmojiOutcome::Forbidden
+        ),
+        "a plain member cannot delete their own emoji either"
+    );
+    assert!(
+        matches!(
+            remove_as(&db, "creator", "g", "shrug").await,
+            EmojiOutcome::Forbidden
+        ),
+        "nor an admin's"
+    );
+    assert_eq!(
+        count(&db, "SELECT COUNT(*) FROM group_emoji WHERE group_id = 'g'").await,
+        2,
+        "refused removes must change nothing"
+    );
+    assert!(object_exists(&db, &hash('a')).await);
+    assert!(object_exists(&db, &hash('b')).await);
+
+    assert!(
+        matches!(remove_as(&db, "boss", "g", "parrot").await, EmojiOutcome::Ok),
+        "an admin may remove a member's emoji"
+    );
     assert!(
         matches!(remove_as(&db, "boss", "g", "shrug").await, EmojiOutcome::Ok),
-        "an admin may remove anyone's"
+        "and their own"
     );
+    assert_eq!(count(&db, "SELECT COUNT(*) FROM group_emoji").await, 0);
+    assert!(
+        !object_exists(&db, &hash('a')).await,
+        "the admin's remove of the last reference collects the object"
+    );
+}
+
+/// A member who LOSES admin loses removal with it — the role is re-derived per
+/// request, never cached from when the emoji was added.
+#[tokio::test]
+async fn a_demoted_admin_can_no_longer_remove() {
+    let db = fresh().await;
+    add_member(&db, "g", "ex_boss", "admin").await;
+    create_as(&db, "ex_boss", "g", "parrot", &hash('a')).await;
+    db.conn()
+        .await
+        .unwrap()
+        .execute(
+            "UPDATE group_member SET role = 'member' WHERE group_id = 'g' AND user_id = 'ex_boss'",
+            (),
+        )
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        remove_as(&db, "ex_boss", "g", "parrot").await,
+        EmojiOutcome::Forbidden
+    ));
+    assert_eq!(count(&db, "SELECT COUNT(*) FROM group_emoji").await, 1);
 }
 
 /// **L3 — the existence oracle.** A missing shortcode answers `Ok` (a retried
@@ -307,16 +389,22 @@ async fn a_non_member_cannot_tell_an_existing_emoji_from_a_missing_one() {
     assert_eq!(count(&db, "SELECT COUNT(*) FROM group_emoji").await, 1);
 }
 
-/// The control: for a MEMBER the idempotent-`Ok`-on-missing behaviour is
-/// unchanged — they can already enumerate the set through `/v1/read/emoji`, and
-/// a retried remove must not start failing.
+/// The control: for an ADMIN the idempotent-`Ok`-on-missing behaviour is
+/// unchanged — a retried remove must not start failing. A plain member gets
+/// `Forbidden` whether or not the shortcode exists (#1280), because the admin
+/// check runs before the row is read.
 #[tokio::test]
-async fn a_member_still_gets_an_idempotent_ok_for_a_missing_shortcode() {
+async fn an_admin_still_gets_an_idempotent_ok_for_a_missing_shortcode() {
     let db = fresh().await;
+    add_member(&db, "g", "boss", "admin").await;
     add_member(&db, "g", "bystander", "member").await;
     assert!(matches!(
-        remove_as(&db, "bystander", "g", "no_such_code").await,
+        remove_as(&db, "boss", "g", "no_such_code").await,
         EmojiOutcome::Ok
+    ));
+    assert!(matches!(
+        remove_as(&db, "bystander", "g", "no_such_code").await,
+        EmojiOutcome::Forbidden
     ));
 }
 

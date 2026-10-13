@@ -229,6 +229,89 @@ async fn a_non_member_cannot_add_an_emoji_to_someone_elses_group() {
     drop((alice, mallory));
 }
 
+/// #1280 through the real signed dispatch path: a plain MEMBER may add an
+/// emoji, may NOT remove it — not even their own — and an admin may. 403 rather
+/// than 401 on the refused remove is what makes this an authz assertion.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_member_can_add_an_emoji_but_only_an_admin_can_remove_it() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+
+    let group_id = alice.create_group("Emoji Commons").await;
+    alice.invite(&group_id, &bob_profile.username).await;
+    let invite = bob.first_pending_invite().await.expect("bob's invite");
+    bob.accept_invite(invite["id"].as_str().expect("invite id")).await;
+    bob.poll().await;
+
+    let create = pollis_api::emoji::CreateEmojiBody {
+        group_id: group_id.clone(),
+        shortcode: "bobs_parrot".into(),
+        content_hash: "c".repeat(64),
+        content_type: "image/webp".into(),
+        size_bytes: 1024,
+        animated: false,
+        created_by: Some(bob.user_id().to_string()),
+    };
+    let status = signed_post_status(
+        &bob,
+        pollis_api::emoji::CreateEmojiBody::PATH,
+        &serde_json::to_vec(&create).expect("serialize create"),
+    )
+    .await;
+    assert_eq!(status, 200, "a plain member must be able to add an emoji");
+
+    let remove_as = |actor: &TestClient| pollis_api::emoji::RemoveEmojiBody {
+        group_id: group_id.clone(),
+        shortcode: "bobs_parrot".into(),
+        actor_id: Some(actor.user_id().to_string()),
+    };
+    let status = signed_post_status(
+        &bob,
+        pollis_api::emoji::RemoveEmojiBody::PATH,
+        &serde_json::to_vec(&remove_as(&bob)).expect("serialize remove"),
+    )
+    .await;
+    assert_eq!(
+        status, 403,
+        "a plain member must not be able to remove an emoji, even one they added"
+    );
+
+    let remote = writable_remote().await;
+    let conn = remote.conn().await.expect("remote conn");
+    let bindings = || {
+        let conn = conn.clone();
+        let group_id = group_id.clone();
+        async move {
+            let mut rows = conn
+                .query(
+                    "SELECT COUNT(*) FROM group_emoji WHERE group_id = ?1 AND shortcode = 'bobs_parrot'",
+                    libsql::params![group_id],
+                )
+                .await
+                .expect("query");
+            let row = rows.next().await.expect("rows").expect("one row");
+            row.get::<i64>(0).expect("count")
+        }
+    };
+    assert_eq!(bindings().await, 1, "the refused remove must leave the binding");
+
+    let status = signed_post_status(
+        &alice,
+        pollis_api::emoji::RemoveEmojiBody::PATH,
+        &serde_json::to_vec(&remove_as(&alice)).expect("serialize remove"),
+    )
+    .await;
+    assert_eq!(status, 200, "the admin may remove a member's emoji");
+    assert_eq!(bindings().await, 0, "the admin's remove must delete the binding");
+
+    drop((alice, bob));
+}
+
 /// `/v1/invite-links/redeem` — the third route #918 left off the harness, and the
 /// only one of the three invite-link endpoints that a joining (non-member) user
 /// calls, so its absence was invisible to every member-side test.

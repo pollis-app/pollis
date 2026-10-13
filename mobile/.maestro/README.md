@@ -168,6 +168,12 @@ strip; the peer finds it by slug (Groups "+" → Find group, one lookup) and
 requests access; the admin sees the request on the Groups tab (pending row +
 badge, above the channels) and approves it; the peer then lists the group.
 
+**Group emoji permissions (automated, #1280):** `mobile/scripts/maestro-group-emoji.sh <admin-device> <peer-device>`
+— the join-request steps make the peer a plain member of the admin's group; the
+peer then adds a custom emoji (system photo picker, seeded by `addMedia`) and
+must see no remove control for it, not even as its creator; the admin then sees
+the remove control and removes it.
+
 **Report (automated, #1213):** `mobile/scripts/maestro-report.sh <reporter-device> <peer-device>`
 — a fresh peer signs up, its handle is read off the screen, and the reporter
 reports it with "Report and block", then unblocks.

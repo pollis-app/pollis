@@ -104,7 +104,11 @@ type Skin = (typeof SKINS)[number];
 
 type SeededReaction = { emoji: string; user_ids: string[]; count: number };
 
-function preloadFor(skin: Skin, reactions: Record<string, SeededReaction[]> = {}) {
+function preloadFor(
+  skin: Skin,
+  reactions: Record<string, SeededReaction[]> = {},
+  role: "admin" | "member" = "admin",
+) {
   return {
     session: ME,
     profile: { id: ME.id, username: ME.username },
@@ -114,13 +118,13 @@ function preloadFor(skin: Skin, reactions: Record<string, SeededReaction[]> = {}
         name: "emoji",
         owner_id: ME.id,
         created_at: "2026-01-01T00:00:00Z",
-        current_user_role: "admin",
+        current_user_role: role,
       },
     ],
     channels: { [GROUP_ID]: [{ id: CHANNEL_ID, group_id: GROUP_ID, name: "general" }] },
     groupMembers: {
       [GROUP_ID]: [
-        { user_id: ME.id, username: "mia", role: "admin", joined_at: "2026-01-01T00:00:00Z" },
+        { user_id: ME.id, username: "mia", role, joined_at: "2026-01-01T00:00:00Z" },
         { user_id: "u_dana", username: "dana", role: "member", joined_at: "2026-01-01T00:00:00Z" },
       ],
     },
@@ -388,6 +392,42 @@ for (const skin of SKINS) {
       await expect(second.getByTestId("custom-emoji-fallback")).toHaveText(":ghost:");
 
       await page.screenshot({ path: `artifacts/emoji-message-${skin}.png` });
+    });
+  });
+
+  // #1280: any member adds, only admins remove. Every seeded emoji was created
+  // by ME, so the member case also proves the creator gets no remove control.
+  test.describe(`group emoji management — ${skin} skin`, () => {
+    async function openGroupEmoji(page: Page, role: "admin" | "member") {
+      await page.addInitScript((data) => {
+        (window as unknown as Record<string, unknown>).__POLLIS_PRELOAD__ = data;
+      }, preloadFor(skin, {}, role));
+      await page.goto("/");
+      await expect(page.getByTestId("app-ready")).toBeAttached();
+      await page.getByTestId("menu-item-groups").click();
+      await page.getByTestId(`group-option-${GROUP_ID}`).click();
+      await page.getByTestId("menu-item-group-emoji").click();
+      await expect(page.getByTestId("group-emoji-page")).toBeVisible();
+      await expect(page.getByTestId("group-emoji-row")).toHaveCount(CUSTOM_EMOJI.length);
+    }
+
+    agnosticTest("a plain member can add but sees no remove control, even on their own emoji", async ({
+      page,
+    }) => {
+      await openGroupEmoji(page, "member");
+      await expect(page.getByTestId("group-emoji-add")).toBeVisible();
+      await expect(page.getByTestId("group-emoji-shortcode")).toBeVisible();
+      await expect(page.locator('[data-testid^="group-emoji-remove-"]')).toHaveCount(0);
+      await expect(page.getByTestId("group-emoji-admins-remove")).toBeVisible();
+    });
+
+    agnosticTest("an admin can add and remove", async ({ page }) => {
+      await openGroupEmoji(page, "admin");
+      await expect(page.getByTestId("group-emoji-add")).toBeVisible();
+      await expect(page.getByTestId("group-emoji-admins-remove")).toHaveCount(0);
+      await page.getByTestId("group-emoji-remove-shipit").click();
+      await expect(page.getByTestId("group-emoji-row")).toHaveCount(CUSTOM_EMOJI.length - 1);
+      await expect(page.locator('[data-shortcode="shipit"]')).toHaveCount(0);
     });
   });
 

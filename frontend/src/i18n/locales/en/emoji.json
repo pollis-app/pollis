@@ -55,6 +55,7 @@
     "stored_other": "{{count}} emoji · {{size}} stored",
     "empty": "No custom emoji yet. Anyone in the group can add one.",
     "sizeAnimated": "animated · {{size}}",
-    "remove": "Remove :{{shortcode}}:"
+    "remove": "Remove :{{shortcode}}:",
+    "removeAdminsOnly": "Only group admins can remove emoji."
   }
 }

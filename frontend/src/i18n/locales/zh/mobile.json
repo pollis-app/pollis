@@ -157,7 +157,6 @@
       "requestAccess": "申请加入"
     },
     "emoji": {
-      "adminsOnly": "只有群组管理员才能添加或移除表情。",
       "loadFailed": "无法加载此群组的表情。",
       "empty": "还没有自定义表情。",
       "pickAndUpload": "选择图片并上传",
