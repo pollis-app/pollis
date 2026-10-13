@@ -76,6 +76,12 @@ export function useConversationRealtime(
         void qcRef.current.invalidateQueries({ queryKey: dmQueryKeys.all });
         return;
       }
+      if (event.type === "realtime_reconnected") {
+        // Wake-ups published while the connection was down are lost; catch
+        // the open conversation up (a group ingest covers every channel).
+        void ingestRef.current(conversationIdRef.current ?? conversationId, kind);
+        return;
+      }
       if (
         event.type !== "new_message" &&
         event.type !== "edited_message" &&

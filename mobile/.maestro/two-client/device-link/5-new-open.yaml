@@ -1,0 +1,18 @@
+appId: com.pollis.mobile
+---
+# #1291: one account on two devices. The NEW device opens #General of the
+# group the existing device made, and stays there.
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    text: "General"
+# Messages lead with the stamp: Android's keyboard capitalises a leading word.
+# The first conversation opened asks for notification permission (iOS, and
+# Android 13+); on a fresh install that prompt covers the composer.
+- tapOn:
+    text: "Allow"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: "input-composer"
+    timeout: 30000

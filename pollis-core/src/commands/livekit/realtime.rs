@@ -202,6 +202,35 @@ pub async fn connect_rooms(
                                             }
                                         }
                                     }
+                                    // The SDK healed the connection on its own (a
+                                    // signal resume or ICE restart — a laptop
+                                    // waking, a network change) WITHOUT closing
+                                    // the event stream, so the full-reconnect
+                                    // path below never runs. Any wake-up
+                                    // published while we were away is gone, and
+                                    // the typical one is a message sent from
+                                    // this user's OTHER device, which raises no
+                                    // push and no later hint. Tell the renderer,
+                                    // exactly as a full reconnect does, so it
+                                    // catches the room up from the DS.
+                                    RoomEvent::Reconnected => {
+                                        eprintln!("[realtime] resumed room {room_id}");
+                                        let (channel, room) = {
+                                            let lk = lk_arc.lock().await;
+                                            (lk.channel.clone(), lk.rooms.get(room_id).map(|(r, _)| Arc::clone(r)))
+                                        };
+                                        if let Some(ch) = channel {
+                                            let _ = ch.send(RealtimeEvent::RealtimeReconnected {
+                                                room_id: room_id.to_owned(),
+                                            });
+                                        }
+                                        // The renderer wipes the room's presence
+                                        // on that event; re-seed it the way the
+                                        // full reconnect does.
+                                        if let Some(room) = room {
+                                            emit_room_initial_presence(&room, room_id, app_state, user_id).await;
+                                        }
+                                    }
                                     _ => {}
                                 }
                             }

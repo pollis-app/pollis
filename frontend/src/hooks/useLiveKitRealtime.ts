@@ -17,6 +17,7 @@ import { groupQueryKeys, useUserGroupsWithChannels } from './queries/useGroups';
 import { blocksQueryKeys } from './queries/useBlocks';
 import { notify, setNotifyPrefs, loadDeviceCallRingtone } from '../utils/notify';
 import { logIgnored } from '../utils/log';
+import { shouldAlertForWake, type WakeLatest } from '../utils/messageWake';
 import { typingStore, typingRoomKey } from '../stores/typingStore';
 import { presenceStore } from '../stores/presenceStore';
 import { keyChangeStore } from '../stores/keyChangeStore';
@@ -33,11 +34,10 @@ import i18n from '../i18n';
 // trigger is different.)
 type RealtimeEvent =
   | {
+    // Routing only (§5): no sender. Who wrote it is read back after ingest.
     type: 'new_message';
     channel_id: string | null;
     conversation_id: string | null;
-    sender_id: string;
-    sender_username: string | null;
   }
   | {
     type: 'all_mention';
@@ -337,17 +337,17 @@ export function useLiveKitRealtime() {
     const ingestAndInvalidate = (
       channelId: string | null,
       conversationId: string | null,
-    ) => {
+    ): Promise<void> => {
       const targetId = channelId ?? conversationId;
       if (!targetId) {
-        return;
+        return Promise.resolve();
       }
       const command = channelId ? 'ingest_channel_envelopes' : 'ingest_dm_envelopes';
       const args = channelId
         ? { userId: currentUser.id, channelId }
         : { userId: currentUser.id, dmChannelId: conversationId };
       markIngested(targetId);
-      invoke(command, args)
+      return invoke<void>(command, args)
         .catch((err) => {
           console.warn(`[realtime] ${command} failed:`, err);
         })
@@ -582,6 +582,17 @@ export function useLiveKitRealtime() {
           } catch (err) {
             console.warn('[realtime] reconnect: process_pending_commits failed:', err);
           }
+          // That catch-up also ingested every envelope posted while we were
+          // away (the replay is interleaved with decryption) — but the
+          // wake-ups for them were lost with the connection, so nothing told
+          // the open conversation or the sidebar previews. The common case is
+          // a message this user sent from their OTHER device: it raises no
+          // push either, so without this it stayed invisible until the
+          // conversation was re-opened. A group room covers all its channels,
+          // hence the whole `messages` prefix.
+          queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.all });
+          queryClientRef.current.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
+          queryClientRef.current.invalidateQueries({ queryKey: receiptQueryKeys.conversation(event.room_id) });
         }
         return;
       }
@@ -817,24 +828,43 @@ export function useLiveKitRealtime() {
 
       const channelId = event.channel_id;
       const conversationId = event.conversation_id;
-      const senderUsername = event.sender_username ?? i18n.t('nav:statusBar.someone');
       const incomingId = channelId ?? conversationId;
-
-      // Messages from the same user on another device should update the
-      // conversation data but never trigger notifications or unread badges.
-      const isOwnMessage = event.sender_id === currentUserIdRef.current;
 
       // Ingest the new envelope, then invalidate the affected room's
       // query and last-message preview so they pick the new message up.
-      ingestAndInvalidate(channelId, conversationId);
+      // A message from this user's OTHER device takes exactly this path too.
+      const ingested = ingestAndInvalidate(channelId, conversationId);
 
       const isSelected =
         (channelId && channelId === selectedChannelIdRef.current) ||
         (conversationId && conversationId === selectedConversationIdRef.current);
-      if (isOwnMessage || isSelected || !incomingId) {
+      if (isSelected || !incomingId) {
         return;
       }
 
+      // The wake-up names no sender (§5), so who wrote it is only known once
+      // the envelope is decrypted: read the newest local row back. Our own
+      // message (sent from another device) is shown, but never alerts or
+      // counts as unread.
+      await ingested;
+      let latest: WakeLatest | null = null;
+      try {
+        const rows = await invoke<WakeLatest[]>('read_last_messages', {
+          conversationIds: [incomingId],
+        });
+        latest = rows?.[0] ?? null;
+      } catch (err) {
+        console.warn('[realtime] read_last_messages failed:', err);
+      }
+      if (!shouldAlertForWake({
+        latest,
+        selfId: currentUserIdRef.current,
+        isSelected: false,
+      })) {
+        return;
+      }
+
+      const senderUsername = latest?.sender_username ?? i18n.t('nav:statusBar.someone');
       const title = roomNameMapRef.current.get(incomingId) ?? i18n.t('chat:notify.newMessageTitle');
       const body = i18n.t('chat:notify.newMessageBody', { name: senderUsername });
       notify(conversationId ? 'direct_message' : 'channel_message', {

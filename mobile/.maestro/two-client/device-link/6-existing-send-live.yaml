@@ -1,0 +1,29 @@
+appId: com.pollis.mobile
+---
+# #1291: the existing device sends while the other device of the SAME user
+# sits in the conversation, foregrounded. Step 3 left it on Security (pushed
+# over the tabs): back out first.
+- tapOn:
+    id: "btn-back"
+    optional: true
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    text: "General"
+# The first conversation opened asks for notification permission (iOS, and
+# Android 13+); on a fresh install that prompt covers the composer.
+- tapOn:
+    text: "Allow"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: "input-composer"
+    timeout: 30000
+- tapOn:
+    id: "input-composer"
+- inputText: "${STAMP} from one"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*${STAMP} from one.*"
+    timeout: 15000

@@ -51,7 +51,9 @@ appId: com.pollis.mobile
 - extendedWaitUntil:
     visible:
       id: "screen-auth-emergency-kit"
-    timeout: 15000
+    # Key generation can outlast 15 s on a loaded machine; a late kit screen
+    # then slipped past the `when` below and failed the sign-in.
+    timeout: 40000
     optional: true
 - runFlow:
     when:

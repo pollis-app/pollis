@@ -75,6 +75,13 @@ export type RealtimeEvent =
       // re-checks registration authoritatively — so the ids were pure leakage
       // on a cleartext channel.
       type: "device_revoked";
+    }
+  | {
+      // LOCAL, never on the wire (`decodeRealtimeEvent` refuses it): the room's
+      // LiveKit connection healed after a drop. Wake-ups published meanwhile
+      // are lost, so listeners catch the room up from the Delivery Service.
+      type: "realtime_reconnected";
+      room: string;
     };
 
 // The set of `type` discriminants this client understands. An event whose

@@ -137,6 +137,13 @@ async function openRoom(roomName: string, entry: RoomEntry): Promise<void> {
         listener(event);
       }
     });
+    // A healed connection drops every wake-up published while it was down —
+    // and nothing re-sends them. Tell the listeners so they catch up.
+    room.on(RoomEvent.Reconnected, () => {
+      for (const listener of entry.listeners) {
+        listener({ type: "realtime_reconnected", room: roomName });
+      }
+    });
     // Data-only: never call setMicrophoneEnabled / publish tracks.
     await room.connect(url, token);
     // Every subscriber closed while the connect was in flight — tear down.

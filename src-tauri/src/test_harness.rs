@@ -146,6 +146,10 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::messages::send_message,
             crate::commands::messages::get_channel_messages,
             crate::commands::messages::get_dm_messages,
+            // The realtime-hint ingest the renderer fires on a `new_message`
+            // wake-up, so flows can drive exactly the live receive path.
+            crate::commands::messages::ingest_channel_envelopes,
+            crate::commands::messages::ingest_dm_envelopes,
             crate::commands::messages::read_channel_messages,
             crate::commands::messages::read_dm_messages,
             crate::commands::messages::read_last_messages,

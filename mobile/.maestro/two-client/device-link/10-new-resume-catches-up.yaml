@@ -1,0 +1,10 @@
+appId: com.pollis.mobile
+---
+# #1291: back to the foreground WITHOUT a relaunch (stopApp: false), so only
+# the resume catch-up can bring in the message sent while it was away.
+- launchApp:
+    stopApp: false
+- extendedWaitUntil:
+    visible: ".*${STAMP} while away.*"
+    timeout: 45000
+- takeScreenshot: link-05-caught-up-on-resume

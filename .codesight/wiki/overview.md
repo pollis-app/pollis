@@ -259,6 +259,13 @@ LiveKit rooms carry realtime events (new_message, membership_changed, voice_join
 
 Events are a **convenience for speed**, not a correctness requirement. All MLS state is also read from the DB on every message send/receive, so offline devices catch up when they next interact.
 
+**A missed wake-up must be caught up by the client, not waited out.** A LiveKit wake-up published while a device is disconnected is gone, and the typical one is a message the user sent from their OTHER device — the DS never pushes a sender's own message to their own account (`push.rs` `conversation_recipients`), so nothing else ever arrives for it. Hence:
+
+- desktop: the Rust room loop turns the SDK's own `RoomEvent::Reconnected` (a resume that never closes the event stream — a laptop waking) into the same `realtime_reconnected` a full reconnect emits; the renderer's handler runs `process_pending_commits` (an interleaved catch-up, which ingests) and then invalidates `messages` / `last-message` / receipts, so the open conversation and the sidebar show what arrived;
+- mobile: `useInboxRealtime` re-ingests every listed conversation (one ingest per group, one per DM — `catchUpTargets`) when the app returns to the foreground, and `lib/realtime/client` forwards LiveKit's `Reconnected` as a local `realtime_reconnected` that re-ingests that room.
+
+A message from the user's other device is otherwise handled exactly like anyone else's: same wake-up, same ingest; only the alert/badge is suppressed (see `notifications.md`). `flows/messages.rs` `a_users_own_message_reaches_their_other_device_live` pins the receive path for channels (both enrollment orders) and DMs.
+
 ## Voice
 
 Voice channels run entirely in Rust by design — cross-platform parity with mobile (same uniffi-exposed `pollis-core`) and predictable allocation under heavy media buffers. The capture pipeline is `cpal mic → optional RNNoise → WebRTC APM (AGC2 + NS + HPF + AEC) → LiveKit publish`; remote playback is `NativeAudioStream → per-track buffers → mixer task (10 ms tick) → single cpal output stream`, which is also where the AEC render reference is tapped. Settings (mic boost, AGC target, NS level, AEC, click suppression) live in user preferences and apply mid-call via `set_voice_audio_processing` without rejoining. See [audio-processing.md](./audio-processing.md) for the full pipeline, framing constraints, and tuning surface.

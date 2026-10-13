@@ -1,0 +1,6 @@
+appId: com.pollis.mobile
+---
+# #1291: the reverse direction (new device → existing) arrives live too.
+- extendedWaitUntil:
+    visible: ".*${STAMP} from two.*"
+    timeout: 45000

@@ -31,6 +31,7 @@ import {
   buildMessageContent,
   type PickedAttachment,
 } from "../../lib/attachments";
+import { carryStubs, settleSend } from "./pendingMessages";
 
 export type ConversationKind = "channel" | "dm";
 
@@ -222,6 +223,7 @@ export function useMessages(
   opts?: { limit?: number },
 ) {
   const currentUser = useObserver(() => appStore.currentUser);
+  const queryClient = useQueryClient();
   const limit = opts?.limit ?? 50;
 
   return useInfiniteQuery({
@@ -247,8 +249,19 @@ export function useMessages(
         args.cursor = pageParam;
       }
       const page = await invoke<MessagePage>(cmd, args);
+      const messages = (page.messages ?? []).map(transform);
+      // A refetch of the newest page while a send is in flight must not drop
+      // its optimistic stub, which is never in the store (pendingMessages.ts).
+      const newest = pageParam
+        ? messages
+        : carryStubs(
+            messages,
+            queryClient.getQueryData<MessagesData>(
+              messageQueryKeys.conversation(conversationId, kind),
+            )?.pages[0]?.messages,
+          );
       return {
-        messages: (page.messages ?? []).map(transform),
+        messages: newest,
         nextCursor: page.next_cursor ?? null,
       };
     },
@@ -393,18 +406,28 @@ export function useSendMessage(
           aliasAttachment(att.id, to);
         }
       });
+      // Swap the stub for the confirmed row — or, if a refetch raced the
+      // send and the stub is gone, put the confirmed row back in front.
       queryClient.setQueryData<MessagesData>(ctx.key, (cache) =>
-        mapPages(cache, (msgs) =>
-          msgs.map((m) => (m.id === ctx.optimisticId ? settled : m)),
-        ),
+        cache
+          ? {
+              ...cache,
+              pages: cache.pages.map((p, i) =>
+                i === 0
+                  ? { ...p, messages: settleSend(p.messages, ctx.optimisticId, settled) }
+                  : p,
+              ),
+            }
+          : cache,
       );
+      // A refetch that read the store before this row was written, and lands
+      // after this swap, would drop it again: cancel any such in-flight read
+      // (invalidate's default) and read once more now that the row is stored.
+      queryClient.invalidateQueries({ queryKey: ctx.key });
       if (ctx.threadId) {
         queryClient.setQueryData<Message[]>(
           messageQueryKeys.thread(ctx.threadId),
-          (cache) =>
-            (cache ?? []).map((m) =>
-              m.id === ctx.optimisticId ? settled : m,
-            ),
+          (cache) => settleSend(cache ?? [], ctx.optimisticId, settled, "oldestFirst"),
         );
         // Reply-count chips on the parent rows.
         queryClient.invalidateQueries({
@@ -441,6 +464,7 @@ export function useSendMessage(
  * it from the conversation cache.
  */
 export function useThreadMessages(threadId: string | null) {
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: messageQueryKeys.thread(threadId),
     queryFn: async (): Promise<Message[]> => {
@@ -451,7 +475,12 @@ export function useThreadMessages(threadId: string | null) {
         (await invoke<RawChannelMessage[]>("read_thread_messages", {
           threadId,
         })) ?? [];
-      return raw.map(transform);
+      // Same race as the conversation pages: keep an in-flight reply's stub.
+      return carryStubs(
+        raw.map(transform),
+        queryClient.getQueryData<Message[]>(messageQueryKeys.thread(threadId)),
+        "oldestFirst",
+      );
     },
     enabled: !!threadId,
     staleTime: 1000 * 30,
@@ -620,6 +649,9 @@ export function useIngestConversation() {
         });
         // Newly decrypted rows are newly searchable.
         queryClient.invalidateQueries({ queryKey: searchQueryKeys.all });
+        // And may be the newest in their conversation: refresh the list
+        // previews, which read the same local store.
+        queryClient.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
       } catch (e) {
         // Best-effort — ingest is advisory. The next refetch will retry.
         console.warn("[useIngestConversation] ingest failed:", e);

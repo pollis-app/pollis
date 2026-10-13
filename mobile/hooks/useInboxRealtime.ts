@@ -20,6 +20,7 @@
 // refresh on their normal query lifecycle / screen focus.
 
 import { useEffect, useRef } from "react";
+import { AppState, type AppStateStatus } from "react-native";
 import { useObserver } from "mobx-react-lite";
 import { useQueryClient } from "@tanstack/react-query";
 import { appStore } from "../stores/appStore";
@@ -27,6 +28,12 @@ import { invoke } from "../lib/native";
 import { endSession } from "../lib/session";
 import { subscribeRealtime, type RealtimeSubscription } from "../lib/realtime/client";
 import type { RealtimeEvent } from "../lib/realtime/events";
+import {
+  catchUpTargets,
+  roomCatchUpTarget,
+  shouldCountUnread,
+  type WakeLatest,
+} from "../lib/messageWake";
 import { dmQueryKeys, useDMChannels } from "./queries/useDMChannels";
 import { groupQueryKeys, useUserGroupsWithChannels } from "./queries/useUserGroups";
 import { groupInviteQueryKeys } from "./queries/useGroupInvites";
@@ -53,6 +60,10 @@ export function useInboxRealtime() {
   qcRef.current = queryClient;
   const ingestRef = useRef(ingest);
   ingestRef.current = ingest;
+  const groupsRef = useRef(groups);
+  groupsRef.current = groups;
+  const dmsRef = useRef(dms);
+  dmsRef.current = dms;
 
   // One subscription per room, reconciled against the current room list —
   // rooms that persist across list changes keep their connection.
@@ -83,26 +94,48 @@ export function useInboxRealtime() {
         case "new_message": {
           // §5 signalling minimization: the payload carries conversation
           // routing only — no sender. LiveKit doesn't echo data to the
-          // publishing participant, so our own sends don't arrive here; a
-          // message from the same account's OTHER device does, and counts as
-          // unread — same behaviour as desktop, whose own-sender check reads
-          // a field this payload doesn't carry.
+          // publishing participant, so this device's own sends don't arrive
+          // here; a message from the same account's OTHER device does, and is
+          // shown like anyone else's — but is never counted as unread, which
+          // is only decidable once the envelope is decrypted.
           const id = event.channel_id ?? event.conversation_id;
           if (!id) {
             break;
           }
           const kind = event.channel_id ? "channel" : "dm";
-          // Land the envelope, then refresh the message cache + previews
-          // (ingest invalidates both).
-          void ingestRef.current(id, kind);
-          // Unread: increment unless the conversation is the one on screen.
-          // Selection is set on row press and cleared when a list screen
-          // regains focus on compact layouts, so "selected" tracks "open".
+          // Unread: never for the conversation on screen. Selection is set on
+          // row press and cleared when a list screen regains focus on compact
+          // layouts, so "selected" tracks "open".
           const isOpen =
             appStore.selectedChannelId === id ||
             appStore.selectedConversationId === id;
-          if (!isOpen) {
-            appStore.incrementUnread(id);
+          // Land the envelope (ingest refreshes the message cache + previews),
+          // then read the newest row back to see who wrote it.
+          void ingestRef.current(id, kind).then(async () => {
+            if (isOpen) {
+              return;
+            }
+            let latest: WakeLatest | null = null;
+            try {
+              const rows = await invoke<WakeLatest[]>("read_last_messages", {
+                conversationIds: [id],
+              });
+              latest = rows?.[0] ?? null;
+            } catch (e) {
+              console.warn("[realtime] read_last_messages failed:", e);
+            }
+            if (shouldCountUnread({ latest, selfId: userId, isOpen })) {
+              appStore.incrementUnread(id);
+            }
+          });
+          break;
+        }
+        case "realtime_reconnected": {
+          // The room's connection healed; whatever was published while it was
+          // down is gone. Catch that room up.
+          const target = roomCatchUpTarget(event.room, groupsRef.current, dmsRef.current);
+          if (target) {
+            void ingestRef.current(target.id, target.kind);
           }
           break;
         }
@@ -203,6 +236,32 @@ export function useInboxRealtime() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, roomsKey]);
+
+  // Resume catch-up. Every LiveKit wake-up that fired while the app was in
+  // the background is gone, and a message sent from this user's OTHER device
+  // has no push to fall back on (the DS never pushes your own message to your
+  // own account) — so switching from the desktop back to the phone used to
+  // show nothing new until each conversation was re-opened. Event-driven, not
+  // polling: one pass per return to the foreground.
+  useEffect(() => {
+    if (!userId) {
+      return;
+    }
+    let previous: AppStateStatus = AppState.currentState;
+    const sub = AppState.addEventListener("change", (next) => {
+      const resumed = previous !== "active" && next === "active";
+      previous = next;
+      if (!resumed) {
+        return;
+      }
+      for (const target of catchUpTargets(groupsRef.current, dmsRef.current)) {
+        void ingestRef.current(target.id, target.kind);
+      }
+    });
+    return () => {
+      sub.remove();
+    };
+  }, [userId]);
 
   // Full teardown on sign-out / unmount.
   useEffect(() => {

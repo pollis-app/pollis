@@ -199,6 +199,12 @@ must create its PIN, finalize, and list the group. Any pair works
 (iOS sim + Android emulator is the usual one). It exists because device
 linking shipped broken on mobile — finalize ran before `set_pin` opened the
 local DB — and no flow drove both halves.
+Steps 5-10 (#1291) then use the one account on both devices: a message from
+each device reaches the other live in the open #General, and one sent while
+the new device is backgrounded **and offline** (Android: airplane mode for
+~20 s, so its LiveKit wake-up is lost) must land when it returns — via the
+resume catch-up alone (`launchApp: stopApp: false`, no relaunch). On the
+pre-#1291 build step 10 fails exactly there.
 
 Run a second simulator/emulator with the peer account and drive it with a
 parallel Maestro invocation, reusing `subflows/sign-in.yaml` with the peer env:

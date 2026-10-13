@@ -1,0 +1,5 @@
+appId: com.pollis.mobile
+---
+# #1291: go to the background with the reply already delivered.
+- assertNotVisible: "failed"
+- pressKey: home

@@ -1,0 +1,12 @@
+appId: com.pollis.mobile
+---
+# #1291: send while the account's other device is offline in the
+# background, so its live wake-up is lost.
+- tapOn:
+    id: "input-composer"
+- inputText: "${STAMP} while away"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*${STAMP} while away.*"
+    timeout: 15000

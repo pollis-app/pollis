@@ -8,6 +8,9 @@ appId: com.pollis.mobile
     optional: true
 - tapOn:
     id: "btn-create-group"
+# #General is opt-in; steps 5-9 (#1291) message in it.
+- tapOn:
+    id: "toggle-general-channel"
 - tapOn:
     id: "input-group-name"
 - inputText: "Link Test Group"

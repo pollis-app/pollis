@@ -82,12 +82,15 @@ const CATEGORIES: Record<Category, CategoryConfig> = {
 
 ## Categorization (the call site)
 
-The "which category does this event belong to" decision lives at the call site, not in the table. This keeps the table flat and event-shaped predicates (`isOwnMessage`, `isSelected`, `isOwnVoiceChannel`) out of the config.
+The "which category does this event belong to" decision lives at the call site, not in the table. This keeps the table flat and event-shaped predicates (`isSelected`, `isOwnVoiceChannel`, own-message) out of the config.
 
-In `useLiveKitRealtime.ts`, the `new_message` handler categorizes:
+In `useLiveKitRealtime.ts`, the `new_message` handler categorizes. The wake-up names no sender (§5), so "is this my own message, sent from my other device?" is answered AFTER ingest: `read_last_messages` reads the newest local row back, and `shouldAlertForWake` (`frontend/src/utils/messageWake.ts`, tested in `frontend/tests/message-wake.test.ts`) suppresses the alert and the badge when its MLS-attributed `sender_id` is ours. The message itself is ingested and shown either way. (The old `isOwnMessage` read `event.sender_id`, which the payload stopped carrying, so it was always false: a message from your other device raised "New message from Someone" and bumped the badge.) Mobile applies the same rule to its unread count (`mobile/lib/messageWake.ts` `shouldCountUnread`).
 
 ```ts
-if (isOwnMessage || isSelected || !incomingId) return;
+if (isSelected || !incomingId) return;
+await ingested;
+const latest = (await invoke('read_last_messages', { conversationIds: [incomingId] }))[0];
+if (!shouldAlertForWake({ latest, selfId, isSelected: false })) return;
 // `title` / `body` fall back to `chat:notify.newMessageTitle` / `.newMessageBody`
 // when the room name or preview is unavailable — see the localization note below.
 notify(conversationId ? 'direct_message' : 'channel_message', { roomId, title, body, senderUsername });

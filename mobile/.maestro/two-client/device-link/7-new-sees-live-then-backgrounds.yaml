@@ -1,0 +1,17 @@
+appId: com.pollis.mobile
+---
+# #1291: the message from this user's OTHER device appears live in the open
+# conversation, no re-open. Then reply (the script backgrounds it once the
+# reply has had time to land).
+- extendedWaitUntil:
+    visible: ".*${STAMP} from one.*"
+    timeout: 45000
+- takeScreenshot: link-04-own-message-live
+- tapOn:
+    id: "input-composer"
+- inputText: "${STAMP} from two"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*${STAMP} from two.*"
+    timeout: 15000

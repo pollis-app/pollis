@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use crate::harness::{wipe, writable_remote, TestClient};
+use crate::harness::{enroll_second_device, wipe, writable_remote, TestClient};
+use serde_json::json;
 use pollis_lib::commands::auth::UserProfile;
 use serial_test::serial;
 
@@ -2279,5 +2280,108 @@ async fn a_real_send_assigns_a_delivery_sequence_and_advances_the_cursor() {
     );
 
     drop(alice);
+    drop(bob);
+}
+
+/// What a device shows after a realtime `new_message` wake-up: the renderer
+/// runs the conversation's ingest, then re-reads the LOCAL page. Not
+/// `get_*_messages` (which ingests inside the read) — this is the live path.
+async fn live_receive(client: &TestClient, conversation_id: &str, is_channel: bool) -> Vec<String> {
+    let (ingest, read, key) = if is_channel {
+        ("ingest_channel_envelopes", "read_channel_messages", "channelId")
+    } else {
+        ("ingest_dm_envelopes", "read_dm_messages", "dmChannelId")
+    };
+    let mut ingest_args = json!({ "userId": client.user_id() });
+    ingest_args[key] = json!(conversation_id);
+    client.invoke_json(ingest, ingest_args).await;
+    let mut read_args = json!({ "limit": 50 });
+    read_args[key] = json!(conversation_id);
+    let page = client.invoke_json(read, read_args).await;
+    page["messages"]
+        .as_array()
+        .expect("messages array")
+        .iter()
+        .filter_map(|m| m["content"].as_str().map(str::to_owned))
+        .collect()
+}
+
+/// One user, two devices: a message sent from one device must reach the
+/// other on the live path, in a group channel AND a DM, exactly as a message
+/// from someone else does. Any "own message, already have it" dedupe may only
+/// key on the message id — never on the sender's user id.
+///
+/// Covers both enrollment orders: one group exists BEFORE alice's second
+/// device does (the new leaf has to be added to an existing tree), and a group
+/// plus a DM are created AFTER it.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_users_own_message_reaches_their_other_device_live() {
+    wipe().await;
+
+    let mut alice_d1 = TestClient::new().await;
+    let alice_profile = alice_d1.sign_up("alice@test.local").await;
+    let mut bob = TestClient::new().await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+
+    // A group that exists before alice's second device does.
+    let early_group = alice_d1.create_group("Early").await;
+    let early_channel = alice_d1.general_channel_id(&early_group).await;
+    add_member_and_sync(&alice_d1, &early_group, &early_channel, &bob, &bob_profile, &[]).await;
+
+    let alice_d2 = enroll_second_device(&alice_d1, "alice@test.local").await;
+
+    // A group and a DM created after it.
+    let late_group = alice_d1.create_group("Late").await;
+    let late_channel = alice_d1.general_channel_id(&late_group).await;
+    add_member_and_sync(&alice_d1, &late_group, &late_channel, &bob, &bob_profile, &[&alice_d2])
+        .await;
+    let dm_id = alice_d1
+        .create_dm(&[alice_profile.id.as_str(), bob_profile.id.as_str()])
+        .await;
+    bob.accept_dm_request(&dm_id).await;
+
+    // Warm every device the way opening the app does.
+    for c in [&alice_d1, &alice_d2, &bob] {
+        c.poll().await;
+        c.sweep().await;
+    }
+
+    for (label, conversation_id, is_channel) in [
+        ("early channel", &early_channel, true),
+        ("late channel", &late_channel, true),
+        ("dm", &dm_id, false),
+    ] {
+        // d1 → d2, with bob as the control (a message from someone else).
+        let from_d1 = format!("{label}: from alice_d1");
+        alice_d1.send_channel_message(conversation_id, &from_d1).await;
+        let on_d2 = live_receive(&alice_d2, conversation_id, is_channel).await;
+        assert!(
+            on_d2.contains(&from_d1),
+            "{label}: alice_d2 must receive alice_d1's message live, got {on_d2:?}"
+        );
+        let on_bob = live_receive(&bob, conversation_id, is_channel).await;
+        assert!(on_bob.contains(&from_d1), "{label}: bob must receive it too, got {on_bob:?}");
+
+        // d2 → d1, the other direction.
+        let from_d2 = format!("{label}: from alice_d2");
+        alice_d2.send_channel_message(conversation_id, &from_d2).await;
+        let on_d1 = live_receive(&alice_d1, conversation_id, is_channel).await;
+        assert!(
+            on_d1.contains(&from_d2),
+            "{label}: alice_d1 must receive alice_d2's message live, got {on_d1:?}"
+        );
+
+        // Someone else's message still lands on both of alice's devices.
+        let from_bob = format!("{label}: from bob");
+        bob.send_channel_message(conversation_id, &from_bob).await;
+        for (client, who) in [(&alice_d1, "alice_d1"), (&alice_d2, "alice_d2")] {
+            let got = live_receive(client, conversation_id, is_channel).await;
+            assert!(got.contains(&from_bob), "{label}: {who} must receive bob's message, got {got:?}");
+        }
+    }
+
+    drop(alice_d1);
+    drop(alice_d2);
     drop(bob);
 }
