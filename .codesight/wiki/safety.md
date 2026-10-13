@@ -37,6 +37,15 @@ Alice asking about Bob and Bob asking about Alice produce the byte-identical
 string. QR payload is `hex(sorted_pubkeys).join(":")` so a scanner can verify
 without branching on "is this my key or theirs."
 
+The wire shape is `SafetyNumberInfo { safety_number, status, peer_identity_version,
+qr_payload }` (and `PeerVerificationEntry { peer_user_id, verified, key_changed }`
+for `list_peer_verifications`). Both clients type it by hand — desktop in
+`frontend/src/hooks/queries/useUserProfile.ts`, mobile in
+`mobile/hooks/queries/useSafety.ts` — so keep both in step with the Rust
+structs. Mobile once drifted (`combined` / `verification`): the profile showed
+a blank number and Mark verified never appeared to take (#1278). The Maestro
+`report` flow now asserts the 12 blocks and the verify toggle.
+
 ### TOFU pin store
 
 Local DB table `contact_verification`:

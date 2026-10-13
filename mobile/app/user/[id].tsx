@@ -97,7 +97,7 @@ function UserProfile() {
     }
     setVerified.mutate({
       peerUserId: peerId,
-      verified: safety.data.verification !== "verified",
+      verified: safety.data.status !== "verified",
     });
   };
 
@@ -112,7 +112,7 @@ function UserProfile() {
     }
   };
 
-  const verification = safety.data?.verification;
+  const verification = safety.data?.status;
   const blockPending = block.isPending || unblock.isPending;
 
   return (
@@ -193,7 +193,7 @@ function UserProfile() {
                       letterSpacing: 0.4,
                     }}
                   >
-                    {safety.data.combined}
+                    {safety.data.safety_number}
                   </Text>
                   <View
                     style={{

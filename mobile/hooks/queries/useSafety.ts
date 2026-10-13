@@ -3,9 +3,9 @@
 // desktop verification pattern: we never display the *own* user's
 // safety number, only peer-vs-self pairs.
 //
-// `get_safety_number` returns an info struct with both fingerprints and
-// the current verification state from the local pin store. Marking a
-// peer verified writes a row to the local `peer_verification` table; the
+// `get_safety_number` returns the 60-digit safety number and the current
+// verification status from the local pin store. Marking a peer verified
+// writes a row to the local `contact_verification` table; the
 // listing hook surfaces those for the contacts list / banners elsewhere.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -13,21 +13,22 @@ import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
 
+// Field names must match pollis-core `SafetyNumberInfo` (serde, snake_case).
 export interface SafetyNumberInfo {
-  my_fingerprint: string;
-  peer_fingerprint: string;
-  /** Concatenated fingerprint used for the QR / readable code display. */
-  combined: string;
+  /** 60 decimal digits, grouped into 5-digit blocks for display. */
+  safety_number: string;
   /** Verification status pinned locally. */
-  verification: "unverified" | "verified" | "changed";
+  status: "unverified" | "verified" | "changed";
   peer_identity_version: number;
+  /** Both pubkeys joined canonically; what a QR code would encode. */
+  qr_payload: string;
 }
 
+// Matches pollis-core `PeerVerificationEntry`.
 export interface PeerVerification {
   peer_user_id: string;
-  peer_username?: string;
-  status: "verified" | "changed";
-  verified_at: string;
+  verified: boolean;
+  key_changed: boolean;
 }
 
 export const safetyQueryKeys = {
