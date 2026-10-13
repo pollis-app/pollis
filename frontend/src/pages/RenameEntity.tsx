@@ -12,6 +12,7 @@ import { TextInput } from "../components/ui/TextInput";
 import { TextArea } from "../components/ui/TextArea";
 import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
+import { identityFieldMode } from "../utils/identityFields";
 
 type RenameEntityProps =
   | { kind: "group"; groupId: string; channelId?: undefined; onSuccess?: () => void }
@@ -49,6 +50,13 @@ export const RenameEntity: React.FC<RenameEntityProps> = observer((props) => {
     : group?.channels.find((c) => c.id === props.channelId);
   const entity = isGroup ? group : channel;
   const isPending = isGroup ? updateGroup.isPending : updateChannel.isPending;
+  // Every entry point here is admin-only, but the page stays open across a
+  // demotion (or is reached some other way): a non-admin then sees the name
+  // and description as text, no description at all when there is none, and
+  // no Save (#1281). Channel edits are a group-admin right too.
+  const isAdmin = group?.current_user_role === "admin";
+  const nameMode = identityFieldMode(isAdmin, entity?.name);
+  const descriptionMode = identityFieldMode(isAdmin, entity?.description);
 
   const copy = isGroup
     ? {
@@ -60,6 +68,7 @@ export const RenameEntity: React.FC<RenameEntityProps> = observer((props) => {
         submitting: t("renameGroup.submitting"),
         notFound: t("renameGroup.notFound"),
         renameFailed: t("renameGroup.renameFailed"),
+        notAdmin: t("renameGroup.notAdmin"),
       }
     : {
         nameLabel: t("renameChannel.nameLabel"),
@@ -70,6 +79,7 @@ export const RenameEntity: React.FC<RenameEntityProps> = observer((props) => {
         submitting: t("renameChannel.submitting"),
         notFound: t("renameChannel.notFound"),
         renameFailed: t("renameChannel.renameFailed"),
+        notAdmin: t("renameChannel.notAdmin"),
       };
 
   const [name, setName] = useState(entity?.name ?? "");
@@ -86,6 +96,9 @@ export const RenameEntity: React.FC<RenameEntityProps> = observer((props) => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (!isAdmin) {
+      return;
+    }
     if (!name.trim()) {
       setError(t("errors.nameRequired"));
       return;
@@ -138,6 +151,53 @@ export const RenameEntity: React.FC<RenameEntityProps> = observer((props) => {
   if (!entity) {
     return (
       <EmptyState testId={`${testId}-not-found`}>{copy.notFound}</EmptyState>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <div
+        data-testid={`${testId}-page`}
+        className="flex-1 flex flex-col overflow-auto bg-bg"
+      >
+        <div
+          data-testid={`${testId}-content`}
+          className="flex-1 flex justify-center overflow-auto px-6 py-8"
+        >
+          <div
+            data-testid={`${testId}-readonly`}
+            className="w-full max-w-md flex flex-col gap-5"
+          >
+            <p className="text-sm text-dim">{copy.notAdmin}</p>
+            {nameMode === "read" && (
+              <div>
+                <p className="text-xs font-sans font-medium mb-1.5 text-fg">
+                  {copy.nameLabel}
+                </p>
+                <p
+                  data-testid={`${testId}-name-value`}
+                  className="text-sm text-fg break-words"
+                >
+                  {entity.name}
+                </p>
+              </div>
+            )}
+            {descriptionMode === "read" && (
+              <div>
+                <p className="text-xs font-sans font-medium mb-1.5 text-fg">
+                  {copy.descriptionLabel}
+                </p>
+                <p
+                  data-testid={`${testId}-description-value`}
+                  className="text-sm text-fg whitespace-pre-wrap break-words"
+                >
+                  {entity.description}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     );
   }
 

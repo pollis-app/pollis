@@ -59,7 +59,8 @@
     "submit": "Enregistrer",
     "submitting": "Enregistrement…",
     "notFound": "Canal introuvable",
-    "renameFailed": "Échec du renommage du canal"
+    "renameFailed": "Échec du renommage du canal",
+    "notAdmin": "Vous n'avez pas les droits d'administration sur ce groupe."
   },
   "createGroup": {
     "pageTitle": "Créer un groupe",
@@ -88,7 +89,8 @@
     "submit": "Enregistrer",
     "submitting": "Enregistrement…",
     "notFound": "Groupe introuvable",
-    "renameFailed": "Échec du renommage du groupe"
+    "renameFailed": "Échec du renommage du groupe",
+    "notAdmin": "Vous n'avez pas les droits d'administration sur ce groupe."
   },
   "leaveGroup": {
     "pageTitle": "Quitter le groupe",

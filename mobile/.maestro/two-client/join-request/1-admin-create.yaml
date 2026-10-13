@@ -33,3 +33,20 @@ appId: com.pollis.mobile
 - assertVisible:
     id: "panel-group"
 - takeScreenshot: join-01-group-from-header
+# The admin's Group settings is the editable form, empty Description included
+# (#1281 hides it only from people who cannot edit; 5-peer-settings is that half).
+- tapOn:
+    id: "row-group-settings"
+- extendedWaitUntil:
+    visible:
+      id: "screen-group-settings"
+    timeout: 15000
+- assertVisible:
+    id: "input-group-name"
+- assertVisible:
+    id: "input-group-description"
+- assertNotVisible:
+    id: "value-group-name"
+- takeScreenshot: join-01b-admin-settings-editable
+- tapOn:
+    id: "btn-back"

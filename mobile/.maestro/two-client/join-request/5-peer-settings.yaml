@@ -1,0 +1,32 @@
+appId: com.pollis.mobile
+---
+# Peer (a plain member, not an admin): Group settings shows the name as text,
+# and — since the group was created with no description — no Description
+# field at all; no inputs and no Save (#1281). Runs straight after
+# 4-peer-joined, so the app is signed in on the Groups tab.
+- tapOn:
+    id: "tab-groups"
+- extendedWaitUntil:
+    visible: "(?i).*${GROUP_NAME}.*"
+    timeout: 30000
+# The peer's only group, so the tab's panel is already this group's.
+- tapOn:
+    id: "row-group-settings"
+- extendedWaitUntil:
+    visible:
+      id: "screen-group-settings"
+    timeout: 15000
+- assertVisible: "(?i)you don't have admin permissions for this group\\."
+- assertVisible:
+    id: "value-group-name"
+- assertNotVisible:
+    id: "input-group-name"
+- assertNotVisible:
+    id: "input-group-description"
+- assertNotVisible:
+    id: "value-group-description"
+- assertNotVisible: "Description"
+- assertNotVisible: "What's this group for?"
+- assertNotVisible:
+    id: "btn-save"
+- takeScreenshot: join-05-peer-settings-readonly

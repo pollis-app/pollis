@@ -805,7 +805,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **MembersPage** — `frontend/src/pages/MembersPage.tsx`
 - **PreferencesPage** — `frontend/src/pages/PreferencesPage.tsx`
 - **RenameChannelPage** — `frontend/src/pages/RenameChannelPage.tsx`
-- **RenameEntity** — props: kind — `frontend/src/pages/RenameEntity.tsx`. One form for both routes; `RenameGroup`/`RenameChannel` were eleven normalised lines apart and are gone (#874).
+- **RenameEntity** — props: kind — `frontend/src/pages/RenameEntity.tsx`. One form for both routes; `RenameGroup`/`RenameChannel` were eleven normalised lines apart and are gone (#874). A viewer who is not the group's admin (the page left open across a demotion — every entry point is admin-only) gets a read-only view instead of the form: name as text, the description as text only when there is one, no Save (#1281). The rule is `identityFieldMode` in `frontend/src/utils/identityFields.ts`, mirrored by `mobile/lib/identityFields.ts`, which mobile's `group/settings` uses the same way (`ReadOnlyField` for a non-admin, nothing for an empty description).
 - **RenameGroupPage** — `frontend/src/pages/RenameGroupPage.tsx`
 - **ReportPage** — `frontend/src/pages/ReportPage.tsx`
 - **RequestsPage** — `frontend/src/pages/RequestsPage.tsx`

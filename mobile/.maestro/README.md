@@ -167,6 +167,10 @@ so a Maestro reinstall heals itself; drop both once Maestro ships the fix.
 strip; the peer finds it by slug (Groups "+" → Find group, one lookup) and
 requests access; the admin sees the request on the Groups tab (pending row +
 badge, above the channels) and approves it; the peer then lists the group.
+Step 5 (`5-peer-settings.yaml`, #1281) opens Group settings as that plain
+member: the name is text (`value-group-name`), and with no description there
+is no Description field at all — no inputs, no Save. Step 1 checks the
+admin's own settings are still the editable form.
 
 **Group emoji permissions (automated, #1280):** `mobile/scripts/maestro-group-emoji.sh <admin-device> <peer-device>`
 — the join-request steps make the peer a plain member of the admin's group; the

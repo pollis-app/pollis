@@ -59,7 +59,8 @@
     "submit": "Guardar",
     "submitting": "Guardando…",
     "notFound": "Canal no encontrado",
-    "renameFailed": "No se pudo renombrar el canal"
+    "renameFailed": "No se pudo renombrar el canal",
+    "notAdmin": "No tienes permisos de admin en este grupo."
   },
   "createGroup": {
     "pageTitle": "Crear grupo",
@@ -88,7 +89,8 @@
     "submit": "Guardar",
     "submitting": "Guardando…",
     "notFound": "Grupo no encontrado",
-    "renameFailed": "No se pudo renombrar el grupo"
+    "renameFailed": "No se pudo renombrar el grupo",
+    "notAdmin": "No tienes permisos de admin en este grupo."
   },
   "leaveGroup": {
     "pageTitle": "Salir del grupo",

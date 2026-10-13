@@ -15,6 +15,8 @@ import {
   Chip,
 } from "../../components/ui";
 import { LabeledField, Hint, ErrorText } from "../../components/groups/FormBits";
+import { ReadOnlyField } from "../../components/self/SettingsField";
+import { identityFieldMode, isGroupAdmin } from "../../lib/identityFields";
 import { Icon } from "../../components/icons";
 import { semantic, space } from "../../theme/tokens";
 import {
@@ -45,9 +47,16 @@ function GroupSettings() {
   const deleteChannel = useDeleteChannel(id);
   const leaveGroup = useLeaveGroup();
 
-  const myRole = members.find((m) => m.user_id === currentUser?.id)?.role;
-  // Migration 000008 renamed 'owner' to 'admin'; the DS lets any admin delete.
-  const iAmAdmin = myRole === "admin" || myRole === "owner";
+  // The DS lets any admin edit and delete. The group row's role covers the
+  // moment before the roster loads (same as GroupPanel).
+  const iAmAdmin = isGroupAdmin(
+    members.find((m) => m.user_id === currentUser?.id)?.role,
+    group?.current_user_role,
+  );
+  // A non-admin sees the name and description as text, not inputs, and no
+  // description at all when there is none (#1281).
+  const nameMode = identityFieldMode(iAmAdmin, group?.name);
+  const descriptionMode = identityFieldMode(iAmAdmin, group?.description);
 
   const [name, setName] = useState(group?.name ?? "");
   const [description, setDescription] = useState(group?.description ?? "");
@@ -136,27 +145,48 @@ function GroupSettings() {
           {t("mobile:group.settings.identitySection")}
         </SectionTitle>
         <View style={{ gap: space.xxl }}>
-          <LabeledField label={t("mobile:group.settings.nameLabel")}>
-            <Field
-              value={name}
-              onChangeText={setName}
-              editable={iAmAdmin}
-              autoCapitalize="words"
-              testID="input-group-name"
-              accessibilityLabel={t("mobile:group.settings.nameLabel")}
-            />
-          </LabeledField>
-          <LabeledField label={t("renameGroup.descriptionLabel")}>
-            <Field
-              value={description}
-              onChangeText={setDescription}
-              editable={iAmAdmin}
-              autoCapitalize="sentences"
-              placeholder={t("mobile:group.new.descriptionPlaceholder")}
-              testID="input-group-description"
-              accessibilityLabel={t("mobile:group.common.descriptionLabel")}
-            />
-          </LabeledField>
+          {nameMode === "edit" ? (
+            <LabeledField label={t("mobile:group.settings.nameLabel")}>
+              <Field
+                value={name}
+                onChangeText={setName}
+                autoCapitalize="words"
+                testID="input-group-name"
+                accessibilityLabel={t("mobile:group.settings.nameLabel")}
+              />
+            </LabeledField>
+          ) : null}
+          {nameMode === "read" ? (
+            <LabeledField label={t("mobile:group.settings.nameLabel")}>
+              <ReadOnlyField
+                value={group?.name ?? ""}
+                testID="value-group-name"
+                accessibilityLabel={t("mobile:group.settings.nameLabel")}
+              />
+            </LabeledField>
+          ) : null}
+          {descriptionMode === "edit" ? (
+            <LabeledField label={t("renameGroup.descriptionLabel")}>
+              <Field
+                value={description}
+                onChangeText={setDescription}
+                autoCapitalize="sentences"
+                placeholder={t("mobile:group.new.descriptionPlaceholder")}
+                testID="input-group-description"
+                accessibilityLabel={t("mobile:group.common.descriptionLabel")}
+              />
+            </LabeledField>
+          ) : null}
+          {descriptionMode === "read" ? (
+            <LabeledField label={t("renameGroup.descriptionLabel")}>
+              <ReadOnlyField
+                multiline
+                value={group?.description ?? ""}
+                testID="value-group-description"
+                accessibilityLabel={t("mobile:group.common.descriptionLabel")}
+              />
+            </LabeledField>
+          ) : null}
           {updateGroup.isError ? (
             <ErrorText>
               {(updateGroup.error as Error).message || t("renameGroup.renameFailed")}

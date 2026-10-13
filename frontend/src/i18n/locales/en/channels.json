@@ -59,7 +59,8 @@
     "submit": "Save",
     "submitting": "Saving…",
     "notFound": "Channel not found",
-    "renameFailed": "Failed to rename channel"
+    "renameFailed": "Failed to rename channel",
+    "notAdmin": "You don't have admin permissions for this group."
   },
   "createGroup": {
     "pageTitle": "Create Group",
@@ -88,7 +89,8 @@
     "submit": "Save",
     "submitting": "Saving…",
     "notFound": "Group not found",
-    "renameFailed": "Failed to rename group"
+    "renameFailed": "Failed to rename group",
+    "notAdmin": "You don't have admin permissions for this group."
   },
   "leaveGroup": {
     "pageTitle": "Leave Group",

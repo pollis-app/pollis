@@ -953,6 +953,7 @@ traces upload per shard as the `playwright-artifacts-N` workflow artifacts.
 | `right-panel-persistence.spec.ts` | The right-hand panel's open/closed state is per user, per device, and survives navigation and a skin flip (#904), in BOTH skins |
 | `vault-search-style.spec.ts` | Vault + search + chrome style regressions in BOTH skins, every one asserted on a computed style or rendered node rather than a class string |
 | `voice-sidebar-parity.spec.ts` | The persistent voice strip (terminal `VoiceBar`, refined `SidebarProfilePanel` row 2) draws the same four mic states and offers a way out of deafen in BOTH skins (#849, #891) |
+| `non-admin-identity.spec.ts` | Group/channel identity for someone who cannot edit it, in BOTH skins (#1281): a member gets no rename entry point; an admin's form keeps its empty editable Description; a rename page open across a demotion turns read-only — name as text, description only when there is one, no Save. The demotion is driven by flipping the mock's role, jumping `page.clock` past the 60 s group-list staleness and firing a reconnect. Mobile's half is `join-request/5-peer-settings.yaml` |
 
 `.spec.ts` is as welcome as `.spec.js`; one config matches both.
 

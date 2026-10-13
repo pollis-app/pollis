@@ -70,17 +70,20 @@ export function Note({ children, testID }: { children: string; testID?: string }
  * same box as a Field. A Text rather than a non-editable TextInput: Android
  * scrolls a TextInput to the end of a long value, clipping its start, while a
  * Text always shows the start and ends in an ellipsis on both platforms.
+ * `multiline` lets a longer value (a group description) wrap in full instead.
  */
 export function ReadOnlyField({
   value,
   icon,
   testID,
   accessibilityLabel,
+  multiline = false,
 }: {
   value: string;
   icon?: React.ReactNode;
   testID?: string;
   accessibilityLabel: string;
+  multiline?: boolean;
 }) {
   return (
     <View
@@ -100,7 +103,7 @@ export function ReadOnlyField({
     >
       {icon}
       <Text
-        numberOfLines={1}
+        numberOfLines={multiline ? undefined : 1}
         ellipsizeMode="tail"
         style={{ flex: 1, fontFamily: fonts.regular, fontSize: 16, color: semantic.text }}
       >

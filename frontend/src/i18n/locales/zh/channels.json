@@ -57,7 +57,8 @@
     "submit": "保存",
     "submitting": "保存中…",
     "notFound": "未找到该频道",
-    "renameFailed": "重命名频道失败"
+    "renameFailed": "重命名频道失败",
+    "notAdmin": "你没有此群组的管理员权限。"
   },
   "createGroup": {
     "pageTitle": "创建群组",
@@ -86,7 +87,8 @@
     "submit": "保存",
     "submitting": "保存中…",
     "notFound": "未找到该群组",
-    "renameFailed": "重命名群组失败"
+    "renameFailed": "重命名群组失败",
+    "notAdmin": "你没有此群组的管理员权限。"
   },
   "leaveGroup": {
     "pageTitle": "退出群组",

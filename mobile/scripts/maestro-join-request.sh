@@ -2,7 +2,8 @@
 # Join requests on mobile, two devices (#1216): the ADMIN creates a group and
 # opens it from its Groups-tab header; the PEER asks to join by slug; the admin
 # sees the request on the Groups tab and approves it; the peer then has the
-# group.
+# group, and its Group settings is read-only with no empty Description (#1281;
+# the admin's own settings are checked editable in step 1).
 #
 #   mobile/scripts/maestro-join-request.sh <admin-device-id> <peer-device-id>
 #
@@ -30,12 +31,14 @@ GROUP_NAME="Join Test $STAMP"
 GROUP_SLUG="join-test-$STAMP"
 G=(-e GROUP_NAME="$GROUP_NAME" -e GROUP_SLUG="$GROUP_SLUG")
 
-echo "==> 1/4 admin creates \"$GROUP_NAME\" and opens it from the Groups tab"
+echo "==> 1/5 admin creates \"$GROUP_NAME\" and opens it from the Groups tab"
 maestro --device "$ADMIN" test "${ENV_ARGS[@]}" "${G[@]}" -e MAESTRO_EMAIL="$ADMIN_EMAIL" "$FLOWS/1-admin-create.yaml"
-echo "==> 2/4 peer asks to join $GROUP_SLUG"
+echo "==> 2/5 peer asks to join $GROUP_SLUG"
 maestro --device "$PEER" test "${ENV_ARGS[@]}" "${G[@]}" -e MAESTRO_EMAIL="$PEER_EMAIL" "$FLOWS/2-peer-request.yaml"
-echo "==> 3/4 admin approves from the Groups tab"
+echo "==> 3/5 admin approves from the Groups tab"
 maestro --device "$ADMIN" test "${ENV_ARGS[@]}" "${G[@]}" "$FLOWS/3-admin-approve.yaml"
-echo "==> 4/4 peer has the group"
+echo "==> 4/5 peer has the group"
 maestro --device "$PEER" test "${ENV_ARGS[@]}" "${G[@]}" "$FLOWS/4-peer-joined.yaml"
+echo "==> 5/5 peer's Group settings is read-only, no empty Description"
+maestro --device "$PEER" test "${ENV_ARGS[@]}" "${G[@]}" "$FLOWS/5-peer-settings.yaml"
 echo "==> join request passed"
