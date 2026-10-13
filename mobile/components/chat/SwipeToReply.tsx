@@ -2,6 +2,7 @@ import { useCallback, useMemo, useRef, type ReactNode } from "react";
 import { I18nManager, StyleSheet, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
+  type SharedValue,
   useAnimatedStyle,
   useSharedValue,
   withSequence,
@@ -36,13 +37,19 @@ const ARROW = 32;
  * travel toward the start edge, so the list's vertical scroll, the iOS back
  * swipe and Android's back gesture (both the other way) are never taken.
  *
+ * `pressFeedback` is the row's touch highlight (#1282): a drag that takes
+ * the touch clears it here, on the UI thread, in the same frame the row
+ * starts to move.
+ *
  * Without `onReply` the children render as they are, with no gesture.
  */
 export function SwipeToReply({
   onReply,
+  pressFeedback,
   children,
 }: {
   onReply?: () => void;
+  pressFeedback?: SharedValue<number>;
   children: ReactNode;
 }) {
   // The gestures are built once per row and call the latest handler through
@@ -65,6 +72,12 @@ export function SwipeToReply({
       .activeOffsetX(ranges.activeOffsetX)
       .failOffsetX(ranges.failOffsetX)
       .failOffsetY(ranges.failOffsetY)
+      // The pan has taken the touch: the row is being swiped, not pressed.
+      .onStart(() => {
+        if (pressFeedback) {
+          pressFeedback.value = 0;
+        }
+      })
       .onUpdate((e) => {
         const travel = towardStart(e.translationX, dir);
         offset.value = dragDistance(travel) * dir;
@@ -96,7 +109,7 @@ export function SwipeToReply({
         scheduleOnRN(fire);
       });
     return Gesture.Race(pan, doubleTap);
-  }, [dir, enabled, fire, offset, armed]);
+  }, [dir, enabled, fire, offset, armed, pressFeedback]);
 
   const rowStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: offset.value }],

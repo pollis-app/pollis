@@ -1002,7 +1002,13 @@ Current state:
   taken; numbers and curve in `lib/swipeReply.ts`), a **double tap** (a short
   spring nudge, then the same), the message sheet's Reply row, or the row's
   Reply accessibility action. No haptic: expo-haptics is not installed, and
-  adding a native module would stop this shipping over the air. The DS base URL
+  adding a native module would stop this shipping over the air. A finger
+  resting on a row that opens the message sheet fades it one surface up
+  (#1282: `bg` → `raised`, or `accentFaint` → `accentSoft` on a tinted row)
+  after a 100 ms delay so a scroll never flashes rows, held through the
+  350 ms long press, cleared on release, on the list taking the touch, or in
+  the swipe's own `onStart` worklet; one shared value, timings and surfaces in
+  `lib/pressFeedback.ts`. The DS base URL
   is threaded through `initializeNativeBridge` as `pollis_delivery_url`
   (`EXPO_PUBLIC_POLLIS_DELIVERY_URL`, dev → api-dev.pollis.com) — required, and
   since #987 the ONLY backend: OTP bootstrap, every remote write and every remote

@@ -130,7 +130,7 @@ test("the row moves on the UI thread; JS runs only when a reply fires", () => {
 });
 
 test("rows reply only once settled, and every reply path is wired", () => {
-  assert.match(row, /<SwipeToReply onReply=\{onReply\}>/);
+  assert.match(row, /<SwipeToReply onReply=\{onReply\}[ >]/);
   assert.match(row, /name: "reply", label: t\("actions\.reply"\)/);
   assert.match(chat, /onReply=\{settled \? \(\) => startReply\(m\) : undefined\}/);
   assert.match(chat, /replyToId: replyTarget\?\.id/);

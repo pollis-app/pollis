@@ -1,5 +1,12 @@
 import { useMemo } from "react";
 import { View, Text, Pressable } from "react-native";
+import Animated, {
+  interpolateColor,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withTiming,
+} from "react-native-reanimated";
 import { useTranslation } from "react-i18next";
 import { Avatar } from "../ui";
 import { Icon } from "../icons";
@@ -10,6 +17,12 @@ import { ReceiptIndicator } from "./ReceiptIndicator";
 import { AttachmentTile } from "./AttachmentTile";
 import { SwipeToReply } from "./SwipeToReply";
 import { findMentions } from "../../lib/mentions";
+import {
+  LONG_PRESS_MS,
+  PRESS_FEEDBACK,
+  pressedSurface,
+  restingSurface,
+} from "../../lib/pressFeedback";
 import type { Reaction } from "../../hooks/queries/useReactions";
 import type { MessageReceipts } from "../../hooks/queries/useReceipts";
 import type { MessageAttachment } from "../../types";
@@ -18,6 +31,8 @@ import type { MessageAttachment } from "../../types";
 // the header message's body.
 const AVATAR = 40;
 const AVATAR_GAP = 12;
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 /**
  * One timeline message (Chat.dc.html), Discord-style: 40pt avatar, the
@@ -33,6 +48,10 @@ const AVATAR_GAP = 12;
  * reply arrow, the original's author and one line of its text, or
  * "[redacted]" when the original is not loaded. Swiping the row toward the
  * start edge, or double-tapping it, starts a reply (`SwipeToReply`).
+ *
+ * A finger resting on the row fades it one surface step up (#1282), held
+ * through the long press and cleared on release, scroll or swipe. One shared
+ * value drives it on the UI thread; JS only sets it at touch down and up.
  */
 export function MessageRow({
   av,
@@ -120,6 +139,31 @@ export function MessageRow({
     );
   }, [text, mentionNames, selfName]);
 
+  // Touch feedback: 0 at rest, 1 pressed. Set from JS once at touch down
+  // and once at touch up; the fade itself runs on the UI thread. The swipe
+  // clears it from its own worklet the moment a drag takes the touch.
+  const press = useSharedValue(0);
+  const tinted = mentionsSelf || highlighted;
+  const restBg = semantic[restingSurface(tinted)];
+  const pressBg = semantic[pressedSurface(tinted)];
+  const pressStyle = useAnimatedStyle(() => ({
+    backgroundColor: interpolateColor(press.value, [0, 1], [restBg, pressBg]),
+  }));
+  // Only a row that opens the message sheet answers a press: a pending row
+  // or a thread reply has nothing to offer, so it stays still.
+  const onPressIn = () => {
+    if (!onLongPress) {
+      return;
+    }
+    press.value = withDelay(
+      PRESS_FEEDBACK.delayMs,
+      withTiming(1, { duration: PRESS_FEEDBACK.fadeInMs }),
+    );
+  };
+  const onPressOut = () => {
+    press.value = withTiming(0, { duration: PRESS_FEEDBACK.fadeOutMs });
+  };
+
   const showHeader = !continued;
   const statusLabel = failed ? t("status.failed") : null;
 
@@ -149,10 +193,12 @@ export function MessageRow({
     : "";
 
   return (
-    <SwipeToReply onReply={onReply}>
-      <Pressable
+    <SwipeToReply onReply={onReply} pressFeedback={press}>
+      <AnimatedPressable
         onLongPress={onLongPress}
-        delayLongPress={350}
+        delayLongPress={LONG_PRESS_MS}
+        onPressIn={onPressIn}
+        onPressOut={onPressOut}
         testID={testID}
         accessibilityLabel={`${quoteLabel}${text ? t("preview.withSender", { name, text }) : name}, ${
           statusLabel ?? time
@@ -175,15 +221,16 @@ export function MessageRow({
             onLongPress?.();
           }
         }}
-        style={{
-          paddingHorizontal: 16,
-          paddingTop: mentionsSelf ? 8 : showHeader ? 10 : 2,
-          paddingBottom: mentionsSelf ? 8 : 2,
-          marginTop: mentionsSelf && showHeader ? 4 : 0,
-          backgroundColor:
-            mentionsSelf || highlighted ? semantic.accentFaint : semantic.bg,
-          gap: 4,
-        }}
+        style={[
+          {
+            paddingHorizontal: 16,
+            paddingTop: mentionsSelf ? 8 : showHeader ? 10 : 2,
+            paddingBottom: mentionsSelf ? 8 : 2,
+            marginTop: mentionsSelf && showHeader ? 4 : 0,
+            gap: 4,
+          },
+          pressStyle,
+        ]}
       >
         {isReply ? (
           <Pressable
@@ -359,7 +406,7 @@ export function MessageRow({
             ) : null}
           </View>
         </View>
-      </Pressable>
+      </AnimatedPressable>
     </SwipeToReply>
   );
 }

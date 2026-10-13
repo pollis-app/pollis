@@ -10,7 +10,8 @@ tags:
 # message sheet; the reply is sent with reply_to_id and its row renders the
 # quote of the original ("Reply to <name>: <text>. …" leads the row's one
 # accessibility label, components/chat/MessageRow.tsx); a double tap does
-# the same; the bar's dismiss cancels a reply.
+# the same; the bar's dismiss cancels a reply; a long press still opens the
+# message sheet with its pressed-state fade (#1282) in place.
 
 - runFlow: ../subflows/sign-in.yaml
 - tapOn:
@@ -129,3 +130,16 @@ tags:
     id: "reply-quote-.*"
     index: 0
 - assertVisible: ".*: reply target, .*"
+
+# ── Long press still opens the message sheet (#1282) ────────────────────
+# The row fades to a pressed surface on touch down now. The press must still
+# reach the sheet after the swipe, double tap and quote tap above, and the
+# sheet's own Reply row is the third way in.
+- runFlow: ../subflows/long-press-message.yaml
+- assertVisible:
+    id: "btn-reply"
+- takeScreenshot: reply-05-long-press
+- tapOn:
+    id: "btn-action-cancel"
+- assertNotVisible:
+    id: "btn-edit"

@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next";
 import { MediaImage } from "../Media";
 import { Icon } from "../icons";
 import { mediaKind } from "../../lib/media/viewer";
+import { LONG_PRESS_MS } from "../../lib/pressFeedback";
 import { r, semantic, type as ty } from "../../theme/tokens";
 import type { MessageAttachment } from "../../types";
 
@@ -55,7 +56,7 @@ export function AttachmentTile({
     testID,
     onPress: openable ? () => onOpen?.(attachment) : undefined,
     onLongPress,
-    delayLongPress: 350,
+    delayLongPress: LONG_PRESS_MS,
     disabled: !openable && !onLongPress,
     accessibilityRole: "button" as const,
     accessibilityState: { disabled: !openable },
