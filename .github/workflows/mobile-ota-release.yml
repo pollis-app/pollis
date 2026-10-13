@@ -188,9 +188,22 @@ jobs:
         working-directory: mobile
         run: pnpm install --ignore-workspace --frozen-lockfile
 
+      # `--targets` makes ubrn rewrite the abiFilters in the TRACKED
+      # android/build.gradle, and the build step refuses a dirty tree (the
+      # transparency log records the commit). The bundle never reads that
+      # file, so restore it, then prove nothing else was touched.
       - name: Generate the uniffi bindings
         working-directory: mobile/modules/pollis-native
-        run: uniffi-bindgen-react-native build android --config ubrn.config.yaml --targets aarch64-linux-android --and-generate
+        run: |
+          set -euo pipefail
+          uniffi-bindgen-react-native build android --config ubrn.config.yaml --targets aarch64-linux-android --and-generate
+          git checkout -- android/build.gradle
+          dirty="$(git status --porcelain)"
+          if [ -n "$dirty" ]; then
+            echo "::error::the bindings step left tracked changes:"
+            echo "$dirty"
+            exit 1
+          fi
 
       # expo export + the store-build checks + unsigned manifests. The DS URL
       # is a literal: it is the one value this pipeline exists to get right,
