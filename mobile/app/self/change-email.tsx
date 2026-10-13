@@ -32,6 +32,8 @@ function ChangeEmail() {
   const currentCodeRef = useRef<TextInput>(null);
 
   const requestOtp = useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: {} },
     mutationFn: async (email: string) => {
       if (!currentUser) {
         throw new Error("No current user");
@@ -45,6 +47,8 @@ function ChangeEmail() {
   });
 
   const verify = useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "success" } },
     mutationFn: async () => {
       if (!currentUser) {
         throw new Error("No current user");

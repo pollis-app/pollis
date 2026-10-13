@@ -1,6 +1,7 @@
 import { Pressable, Text, View } from "react-native";
 import { Toggle } from "../ui";
 import { semantic, type as ty, fonts, space, layout } from "../../theme/tokens";
+import { haptic } from "../../lib/haptics";
 
 /**
  * A settings row that IS a switch: the whole row toggles and is one control
@@ -26,7 +27,16 @@ export function ToggleRow({
   return (
     <Pressable
       testID={testID}
-      onPress={disabled ? undefined : onToggle}
+      onPress={
+        disabled
+          ? undefined
+          : () => {
+              // The whole row flips the switch, so it ticks like the knob
+              // does (#1286; the knob's own press ticks inside Toggle).
+              haptic("toggle");
+              onToggle();
+            }
+      }
       disabled={disabled}
       accessibilityRole="switch"
       accessibilityLabel={sub ? `${label}, ${sub}` : label}

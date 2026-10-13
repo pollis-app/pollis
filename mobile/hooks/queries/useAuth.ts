@@ -44,6 +44,8 @@ export function profileToUser(p: RawUserProfile): User {
 
 export function useRequestOtp() {
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: {} },
     mutationFn: async (email: string) => {
       await invoke("request_otp", { email });
     },
@@ -56,6 +58,8 @@ export function useVerifyOtp() {
   const setPendingSecretKey = appStore.setPendingSecretKey;
 
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "success" } },
     mutationFn: async (vars: { email: string; code: string }) => {
       const profile = await invoke<RawUserProfile>("verify_otp", {
         email: vars.email,
@@ -86,6 +90,8 @@ export function useUnlockState() {
 
 export function useSetPin() {
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "success" } },
     mutationFn: async (vars: { oldPin?: string; newPin: string }) => {
       await invoke("set_pin", {
         oldPin: vars.oldPin ?? null,
@@ -97,6 +103,8 @@ export function useSetPin() {
 
 export function useUnlock() {
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "success" } },
     mutationFn: async (vars: { userId: string; pin: string }) => {
       return await invoke<UnlockOutcome>("unlock", {
         userId: vars.userId,

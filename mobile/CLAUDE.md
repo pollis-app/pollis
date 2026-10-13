@@ -1001,8 +1001,7 @@ Current state:
   toward the start edge, so the back gestures and the list's scroll are never
   taken; numbers and curve in `lib/swipeReply.ts`), a **double tap** (a short
   spring nudge, then the same), the message sheet's Reply row, or the row's
-  Reply accessibility action. No haptic: expo-haptics is not installed, and
-  adding a native module would stop this shipping over the air. A finger
+  Reply accessibility action. Haptics: see "Haptics" under Design tokens. A finger
   resting on a row that opens the message sheet fades it one surface up
   (#1282: `bg` → `raised`, or `accentFaint` → `accentSoft` on a tinted row)
   after a 100 ms delay so a scroll never flashes rows, held through the
@@ -1218,6 +1217,29 @@ no react-native) and the accent presets in `theme/accents.ts`.
 - Font: Geist via `fonts.regular/medium/semibold/bold` (one family per
   weight, never with `fontWeight`); spread a `type.*` step rather than
   hand-setting size + family.
+
+**Haptics (#1286, `expo-haptics`, 1.0.4+).** Every significant action that
+is not plain navigation gives tactile feedback; the event table is
+`lib/hapticEvents.ts` and `lib/haptics.ts` plays it (iOS impact / selection /
+notification generators; Android `performAndroidHapticsAsync`, i.e.
+View.performHapticFeedback, which follows the phone's touch-feedback setting —
+never the raw vibrator). Fire-and-forget, never throws into the interaction.
+
+- **Mutations — one chokepoint.** Tag the hook's `useMutation` with
+  `meta: { haptic: { success | mutate, error? } }`; the `MutationCache` in
+  `lib/queryClient.ts` plays it. `success` = constructive (verified, reported,
+  approved, saved, created, unlocked), `destructive` = a destructive action
+  landed (block, delete, remove, revoke, leave, reject), `toggle` = a mark
+  flipped (saved, unblock, role, verified off), `mutate` for optimistic
+  actions (send, react). Any tagged mutation that fails plays `error` (a
+  wrong PIN or code, a failed send). `tests/haptics.test.ts` fails on a new
+  mutation hook with no tag unless it joins the short `NO_HAPTIC` list.
+- **Gestures and controls:** swipe to reply ticks crossing the threshold
+  either way (the worklet hops to JS only on that frame), the double tap,
+  every long press (MessageRow and `ListRow`), every `Toggle` / `ToggleRow`,
+  the first tap of every two-tap confirm (`confirmArm`), and clipboard copies
+  (success, or error if the copy failed).
+- Never add one to plain navigation (opening a screen, back, tabs).
 
 UI rules: two base colours — use `semantic.*` / `type.*`, never a hex or
 rgba in `app/` or `components/` (QrCode's black/white is the one deliberate

@@ -114,6 +114,11 @@ export function useToggleReaction(
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: {
+      mutate: (vars: { mode: "add" | "remove" }) =>
+        vars.mode === "add" ? "reactionAdd" : "reactionRemove",
+    } },
     mutationFn: async (vars: {
       messageId: string;
       emoji: string;

@@ -13,6 +13,7 @@ import {
   type InviteLinkSummary,
 } from "../../hooks/queries";
 import { activeLocale } from "../../i18n";
+import { haptic } from "../../lib/haptics";
 
 // #847 (mobile) — review and revoke a group's shareable invite links.
 //
@@ -37,6 +38,8 @@ export default function GroupInviteLinks() {
 
   const onRevoke = (linkId: string) => {
     if (confirmRevoke !== linkId) {
+      // The first tap arms the confirm: warn by touch (#1286).
+      haptic("confirmArm");
       setConfirmRevoke(linkId);
       return;
     }

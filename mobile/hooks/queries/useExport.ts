@@ -24,6 +24,8 @@ export { EXPORT_DIR } from "../../lib/exportDir";
 
 export function useExportArchive() {
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "success" } },
     mutationFn: async (conversationId: string | null): Promise<ExportSummary> => {
       await FileSystem.makeDirectoryAsync(EXPORT_DIR, { intermediates: true });
       const path = `${EXPORT_DIR}${exportFileName(conversationId)}`;

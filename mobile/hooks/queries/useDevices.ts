@@ -44,6 +44,8 @@ export function useRevokeDevice() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "destructive" } },
     mutationFn: async (deviceId: string) => {
       if (!currentUser) {
         throw new Error("No current user");

@@ -22,6 +22,8 @@ import {
   replyDirection,
   towardStart,
 } from "../../lib/swipeReply";
+import { armHaptic, type HapticEvent } from "../../lib/hapticEvents";
+import { haptic } from "../../lib/haptics";
 
 const ARROW = 32;
 
@@ -33,7 +35,8 @@ const ARROW = 32;
  *
  * All of it runs on the UI thread: the pan and the tap are Gesture Handler
  * gestures, the row and the arrow are driven by one shared value, and JS is
- * called exactly once, when a reply fires. The pan claims only horizontal
+ * called only when a reply fires and when a haptic plays (#1286: a tick as
+ * the drag crosses the threshold either way, and one for the double tap). The pan claims only horizontal
  * travel toward the start edge, so the list's vertical scroll, the iOS back
  * swipe and Android's back gesture (both the other way) are never taken.
  *
@@ -59,6 +62,9 @@ export function SwipeToReply({
   const fire = useCallback(() => {
     onReplyRef.current?.();
   }, []);
+  const buzz = useCallback((event: HapticEvent) => {
+    haptic(event);
+  }, []);
 
   const offset = useSharedValue(0);
   const armed = useSharedValue(false);
@@ -81,7 +87,12 @@ export function SwipeToReply({
       .onUpdate((e) => {
         const travel = towardStart(e.translationX, dir);
         offset.value = dragDistance(travel) * dir;
-        armed.value = isArmed(travel);
+        const next = isArmed(travel);
+        const event = armHaptic(armed.value, next);
+        armed.value = next;
+        if (event) {
+          scheduleOnRN(buzz, event);
+        }
       })
       // onEnd, not onFinalize: it runs only for a pan that became active,
       // so a tap (which also begins the pan) never cancels the double tap's
@@ -106,10 +117,11 @@ export function SwipeToReply({
           withTiming(SWIPE_REPLY.nudge * dir, { duration: SWIPE_REPLY.nudgeMs }),
           withSpring(0, SWIPE_SPRING),
         );
+        scheduleOnRN(buzz, "doubleTapReply");
         scheduleOnRN(fire);
       });
     return Gesture.Race(pan, doubleTap);
-  }, [dir, enabled, fire, offset, armed, pressFeedback]);
+  }, [dir, enabled, fire, buzz, offset, armed, pressFeedback]);
 
   const rowStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: offset.value }],

@@ -74,6 +74,8 @@ export function useCreateGroup() {
   const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "success" } },
     mutationFn: async (vars: {
       name: string;
       description?: string;
@@ -128,6 +130,8 @@ export function useCreateChannel(groupId: string | null) {
   const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "success" } },
     mutationFn: async (vars: { name: string; description?: string }) => {
       if (!currentUser || !groupId) {
         throw new Error("No active group");

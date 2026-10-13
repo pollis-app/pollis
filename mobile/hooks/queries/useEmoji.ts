@@ -83,6 +83,8 @@ export function useGroupEmoji(groupId: string | null) {
 export function useUploadGroupEmoji(groupId: string | null) {
   const queryClient = useQueryClient();
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "success" } },
     mutationFn: async (vars: { shortcode: string; path: string }) => {
       if (!groupId) {
         throw new Error("No group");
@@ -102,6 +104,8 @@ export function useUploadGroupEmoji(groupId: string | null) {
 export function useRemoveGroupEmoji(groupId: string | null) {
   const queryClient = useQueryClient();
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "destructive" } },
     mutationFn: async (shortcode: string) => {
       if (!groupId) {
         throw new Error("No group");

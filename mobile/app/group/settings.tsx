@@ -30,6 +30,7 @@ import {
 } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
+import { haptic } from "../../lib/haptics";
 
 function GroupSettings() {
   const { t } = useTranslation("channels");
@@ -89,6 +90,8 @@ function GroupSettings() {
 
   const onDeleteGroup = () => {
     if (!confirmDeleteGroup) {
+      // The first tap arms the confirm: warn by touch (#1286).
+      haptic("confirmArm");
       setConfirmDeleteGroup(true);
       return;
     }
@@ -103,6 +106,8 @@ function GroupSettings() {
   // Same two-tap leave as the group menu sheet.
   const onLeaveGroup = () => {
     if (!confirmLeave) {
+      // The first tap arms the confirm: warn by touch (#1286).
+      haptic("confirmArm");
       setConfirmLeave(true);
       return;
     }
@@ -118,6 +123,8 @@ function GroupSettings() {
 
   const onDeleteChannel = (channelId: string) => {
     if (confirmDeleteChannel !== channelId) {
+      // The first tap arms the confirm: warn by touch (#1286).
+      haptic("confirmArm");
       setConfirmDeleteChannel(channelId);
       return;
     }

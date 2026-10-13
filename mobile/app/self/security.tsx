@@ -40,6 +40,7 @@ import {
 } from "../../lib/autolock";
 import { ExportArchive } from "../../components/ExportArchive";
 import { SAS_LENGTH, normalizeSasInput } from "../../lib/enrollmentSas";
+import { haptic } from "../../lib/haptics";
 
 function formatRelative(iso: string): string {
   const d = new Date(iso);
@@ -231,6 +232,8 @@ export default function Security() {
 
   const onRevoke = (deviceId: string) => {
     if (confirmRevoke !== deviceId) {
+      // The first tap arms the confirm: warn by touch (#1286).
+      haptic("confirmArm");
       setConfirmRevoke(deviceId);
       return;
     }

@@ -43,6 +43,8 @@ export function useBlockUser() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "destructive" } },
     mutationFn: async (blockedId: string) => {
       if (!currentUser) {
         throw new Error("No current user");
@@ -79,6 +81,8 @@ export function useReportUser() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "success" } },
     mutationFn: async (vars: {
       reportedId: string;
       reason: ReportReason;
@@ -108,6 +112,8 @@ export function useUnblockUser() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "toggle" } },
     mutationFn: async (blockedId: string) => {
       if (!currentUser) {
         throw new Error("No current user");

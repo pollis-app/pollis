@@ -24,6 +24,7 @@ import { useLayoutClass } from "../hooks/useLayoutClass";
 import { PaneEntryContext } from "./pane/paneContext";
 import { activeLocale } from "../i18n";
 import { Icon, isIconElement } from "./icons";
+import { haptic } from "../lib/haptics";
 
 // Primitives for the redesigned app (design: Main/Chat/Messages/Actions/You
 // .dc.html). Rules every primitive follows: 44pt minimum touch targets; one
@@ -905,7 +906,15 @@ export function ListRow({
   return (
     <Pressable
       onPress={disabled ? undefined : onPress}
-      onLongPress={disabled ? undefined : onLongPress}
+      onLongPress={
+        disabled || !onLongPress
+          ? undefined
+          : () => {
+              // Every long press confirms itself by touch (#1286).
+              haptic("longPress");
+              onLongPress();
+            }
+      }
       disabled={disabled || (!onPress && !onLongPress)}
       testID={testID}
       accessible
@@ -1218,7 +1227,15 @@ export function Toggle({
 }) {
   return (
     <Pressable
-      onPress={disabled ? undefined : onPress}
+      onPress={
+        disabled || !onPress
+          ? undefined
+          : () => {
+              // A switch ticks as it flips (#1286).
+              haptic("toggle");
+              onPress();
+            }
+      }
       disabled={disabled}
       testID={testID}
       accessibilityRole="switch"

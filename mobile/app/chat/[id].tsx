@@ -57,6 +57,7 @@ import { useNav } from "../../components/pane/paneContext";
 import { useOpenMediaViewer } from "../../hooks/useOpenMediaViewer";
 import { useIsRegular } from "../../hooks/useLayoutClass";
 import { selectConversation } from "../../hooks/useOpenConversation";
+import { haptic } from "../../lib/haptics";
 
 // Props let this screen double as an embedded right-pane conversation on the
 // two-pane (regular/iPad) layout. Route usage passes NO props, so every value
@@ -292,11 +293,15 @@ function TextChat(props: ChatViewProps = {}) {
   // #897: copy is VERIFIED — the boolean comes from the clipboard call, and
   // a thrown write reads as failure, never assumed success.
   const copyToClipboard = useCallback(async (text: string) => {
+    let copied = false;
     try {
-      return await Clipboard.setStringAsync(text);
+      copied = await Clipboard.setStringAsync(text);
     } catch {
-      return false;
+      copied = false;
     }
+    // A copy confirms by touch, and a failed one says so (#1286).
+    haptic(copied ? "success" : "error");
+    return copied;
   }, []);
 
   const selfName = currentUser?.username?.toLowerCase() ?? null;

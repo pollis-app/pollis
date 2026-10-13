@@ -29,6 +29,7 @@ import {
 import { CustomEmojiImage } from "../../components/emoji/CustomEmojiImage";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
+import { haptic } from "../../lib/haptics";
 
 /** `file://` URI → bare filesystem path for the Rust side. */
 function uriToPath(uri: string): string {
@@ -106,6 +107,8 @@ function GroupEmoji() {
 
   const onRemove = (code: string) => {
     if (confirmRemove !== code) {
+      // The first tap arms the confirm: warn by touch (#1286).
+      haptic("confirmArm");
       setConfirmRemove(code);
       return;
     }

@@ -23,6 +23,7 @@ import {
   type DeviceLinkHandle,
   type DeviceLinkStatus,
 } from "../../hooks/queries";
+import { haptic } from "../../lib/haptics";
 
 /**
  * Link a new device (#1207), one step per screen, laid out like sign-in:
@@ -281,6 +282,8 @@ function ShowCode({ handle, crumb, onCancel }: { handle: DeviceLinkHandle; crumb
 
   const copy = async () => {
     await Clipboard.setStringAsync(handle.qr_payload);
+    // A copy confirms by touch (#1286).
+    haptic("success");
     setCopied(true);
   };
 

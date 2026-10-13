@@ -285,6 +285,8 @@ export function useSendMessage(
   const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { mutate: "send" } },
     mutationFn: async (vars: {
       content: string;
       replyToId?: string;
@@ -486,6 +488,8 @@ export function useEditMessage(
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "success" } },
     mutationFn: async (vars: { messageId: string; newContent: string }) => {
       if (!currentUser || !conversationId) {
         throw new Error("No active conversation");
@@ -535,6 +539,8 @@ export function useDeleteMessage(
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "destructive" } },
     mutationFn: async (messageId: string) => {
       if (!currentUser) {
         throw new Error("No current user");

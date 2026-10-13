@@ -23,6 +23,7 @@ import {
   pressedSurface,
   restingSurface,
 } from "../../lib/pressFeedback";
+import { haptic } from "../../lib/haptics";
 import type { Reaction } from "../../hooks/queries/useReactions";
 import type { MessageReceipts } from "../../hooks/queries/useReceipts";
 import type { MessageAttachment } from "../../types";
@@ -164,6 +165,15 @@ export function MessageRow({
     press.value = withTiming(0, { duration: PRESS_FEEDBACK.fadeOutMs });
   };
 
+  // A long press by touch confirms itself with a haptic as the sheet opens
+  // (#1286); the accessibility action does not, the screen reader speaks it.
+  const onLongPressTouch = onLongPress
+    ? () => {
+        haptic("longPress");
+        onLongPress();
+      }
+    : undefined;
+
   const showHeader = !continued;
   const statusLabel = failed ? t("status.failed") : null;
 
@@ -195,7 +205,7 @@ export function MessageRow({
   return (
     <SwipeToReply onReply={onReply} pressFeedback={press}>
       <AnimatedPressable
-        onLongPress={onLongPress}
+        onLongPress={onLongPressTouch}
         delayLongPress={LONG_PRESS_MS}
         onPressIn={onPressIn}
         onPressOut={onPressOut}
@@ -360,7 +370,7 @@ export function MessageRow({
                     key={att.id}
                     attachment={att}
                     onOpen={onOpenAttachment}
-                    onLongPress={onLongPress}
+                    onLongPress={onLongPressTouch}
                   />
                 ))}
               </View>

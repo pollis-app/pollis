@@ -15,6 +15,7 @@ import {
 import { activeLocale } from "../../i18n";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
+import { haptic } from "../../lib/haptics";
 
 function Members() {
   const { t } = useTranslation("channels");
@@ -44,6 +45,8 @@ function Members() {
 
   const onRemove = (memberId: string) => {
     if (confirmRemove !== memberId) {
+      // The first tap arms the confirm: warn by touch (#1286).
+      haptic("confirmArm");
       setConfirmRemove(memberId);
       return;
     }

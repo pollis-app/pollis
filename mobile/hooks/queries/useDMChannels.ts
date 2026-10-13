@@ -91,6 +91,8 @@ export function useAcceptDMRequest() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "success" } },
     mutationFn: async (dmChannelId: string) => {
       if (!currentUser) {
         throw new Error("No current user");
@@ -123,6 +125,8 @@ export function useLeaveDM() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "destructive" } },
     mutationFn: async (dmChannelId: string) => {
       if (!currentUser) {
         throw new Error("No current user");
@@ -145,6 +149,8 @@ export function useCreateDM() {
   const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: {} },
     mutationFn: async (vars: { memberIds: string[] }) => {
       if (!currentUser) {
         throw new Error("No current user");

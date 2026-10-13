@@ -37,6 +37,8 @@ export function useIdentity() {
 
 export function useDeleteAccount() {
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "destructive" } },
     mutationFn: async (userId: string) => {
       // Remote + primary local wipe. Throws (and aborts) on server failure.
       await invoke("delete_account", { userId });

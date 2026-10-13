@@ -92,6 +92,8 @@ export function useEnrollmentStatus(requestId: string | null) {
 export function useFinalizeEnrollment() {
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "success" } },
     mutationFn: async () => {
       if (!currentUser) {
         throw new Error("No current user");
@@ -104,6 +106,8 @@ export function useFinalizeEnrollment() {
 export function useRecoverWithSecretKey() {
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "success" } },
     mutationFn: async (secretKey: string) => {
       if (!currentUser) {
         throw new Error("No current user");
@@ -138,6 +142,8 @@ export function useApproveEnrollment() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "success" } },
     mutationFn: async (vars: { requestId: string; verificationCode: string }) => {
       await invoke("approve_device_enrollment", vars);
     },
@@ -153,6 +159,8 @@ export function useRejectEnrollment() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "destructive" } },
     mutationFn: async (requestId: string) => {
       await invoke("reject_device_enrollment", { requestId });
     },

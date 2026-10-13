@@ -10,6 +10,7 @@ import { semantic, type as ty, fonts } from "../../theme/tokens";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import i18n from "../../i18n";
+import { haptic } from "../../lib/haptics";
 
 /**
  * Emergency Kit — shown once, right after a brand-new account's PIN is set.
@@ -97,6 +98,8 @@ function EmergencyKit() {
     const copied = await Clipboard.setStringAsync(pendingSecretKey).catch(
       () => false,
     );
+    // A copy confirms by touch, and a failed one says so (#1286).
+    haptic(copied ? "success" : "error");
     setCopyState(copied ? "copied" : "failed");
   };
 

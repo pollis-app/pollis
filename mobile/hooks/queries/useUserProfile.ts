@@ -60,6 +60,8 @@ export function useUpdateProfile() {
   const setUsername = appStore.setUsername;
 
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "success" } },
     mutationFn: async ({
       username,
       preferredName,

@@ -115,13 +115,17 @@ const swipe = read("components/chat/SwipeToReply.tsx");
 const row = read("components/chat/MessageRow.tsx");
 const chat = read("app/chat/[id].tsx");
 
-test("the row moves on the UI thread; JS runs only when a reply fires", () => {
+test("the row moves on the UI thread; JS runs only when a reply fires or the armed state flips", () => {
   assert.match(swipe, /from "react-native-gesture-handler"/);
   assert.match(swipe, /from "react-native-reanimated"/);
   assert.doesNotMatch(swipe, /Animated\.timing|new Animated\.Value|PanResponder/);
   const onUpdate = swipe.slice(swipe.indexOf(".onUpdate("), swipe.indexOf(".onEnd("));
   assert.ok(onUpdate.length > 0);
-  assert.doesNotMatch(onUpdate, /scheduleOnRN|runOnJS/, "no JS call per frame");
+  // No JS call per frame: the one hop is the haptic (#1286), and only on the
+  // frame the armed state flips.
+  assert.doesNotMatch(onUpdate, /runOnJS/, "no JS call per frame");
+  assert.equal(onUpdate.match(/scheduleOnRN/g)?.length ?? 0, 1);
+  assert.match(onUpdate, /if \(event\) \{\s*scheduleOnRN\(buzz, event\);/);
   // The reset is in onEnd, which only an ACTIVE pan reaches: a tap also
   // begins the pan, and resetting in onFinalize would cancel the nudge.
   assert.doesNotMatch(swipe, /\.onFinalize\(/);

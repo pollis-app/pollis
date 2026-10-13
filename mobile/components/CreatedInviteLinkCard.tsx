@@ -21,6 +21,7 @@ import { Icon } from "./icons";
 import { semantic, type as ty, fonts, r, space } from "../theme/tokens";
 import { activeLocale } from "../i18n";
 import type { CreatedInviteLink } from "../hooks/queries";
+import { haptic } from "../lib/haptics";
 
 type CopyState = "idle" | "copied" | "failed";
 
@@ -51,6 +52,8 @@ export function CreatedInviteLinkCard({ link }: { link: CreatedInviteLink }) {
     // visible state change, and so the feedback timer restarts.
     setCopyState("idle");
     const copied = await Clipboard.setStringAsync(link.url).catch(() => false);
+    // A copy confirms by touch, and a failed one says so (#1286).
+    haptic(copied ? "success" : "error");
     setCopyState(copied ? "copied" : "failed");
   };
 

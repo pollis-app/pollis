@@ -19,6 +19,7 @@ import { semantic, space, layout } from "../../theme/tokens";
 import { useDMChannel, useLeaveDM } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
+import { haptic } from "../../lib/haptics";
 
 function DMInfo() {
   const router = useNav();
@@ -37,6 +38,8 @@ function DMInfo() {
 
   const onLeave = () => {
     if (!confirmLeave) {
+      // The first tap arms the confirm: warn by touch (#1286).
+      haptic("confirmArm");
       setConfirmLeave(true);
       return;
     }

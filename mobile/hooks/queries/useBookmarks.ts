@@ -51,6 +51,8 @@ export function useSavedMessageIds(): Set<string> {
 export function useToggleSavedMessage() {
   const queryClient = useQueryClient();
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "toggle" } },
     mutationFn: async (messageId: string) =>
       await invoke<boolean>("toggle_saved_message", { messageId }),
     onSuccess: () => {
@@ -62,6 +64,8 @@ export function useToggleSavedMessage() {
 export function useUnsaveMessage() {
   const queryClient = useQueryClient();
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "toggle" } },
     mutationFn: async (messageId: string) =>
       await invoke<boolean>("unsave_message", { messageId }),
     onSuccess: () => {

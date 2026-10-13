@@ -62,6 +62,8 @@ export async function cancelDeviceLink(linkId: string): Promise<void> {
  */
 export function useClaimDeviceLink() {
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "success" } },
     mutationFn: async (vars: { payload: string; deviceName: string }) =>
       await invoke<RawUserProfile>("claim_device_link", vars),
     onSuccess: (profile) => {

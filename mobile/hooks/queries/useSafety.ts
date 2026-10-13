@@ -59,6 +59,10 @@ export function useSetContactVerified() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: {
+      success: (vars: { verified: boolean }) => (vars.verified ? "success" : "toggle"),
+    } },
     mutationFn: async (vars: { peerUserId: string; verified: boolean }) => {
       await invoke("set_contact_verified", {
         peerUserId: vars.peerUserId,

@@ -72,6 +72,8 @@ export function useAcceptGroupInvite() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "success" } },
     mutationFn: async (inviteId: string) => {
       if (!currentUser) {
         throw new Error("No current user");
@@ -105,6 +107,8 @@ export function useDeclineGroupInvite() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "destructive" } },
     mutationFn: async (inviteId: string) => {
       if (!currentUser) {
         throw new Error("No current user");
@@ -122,6 +126,8 @@ export function useDeclineGroupInvite() {
 export function useSendGroupInvite(groupId: string | null) {
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "success" } },
     mutationFn: async (inviteeIdentifier: string) => {
       if (!currentUser || !groupId) {
         throw new Error("No active group");
@@ -158,6 +164,8 @@ export function useUpdateGroup(groupId: string | null) {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "success" } },
     mutationFn: async (vars: {
       name?: string;
       description?: string;
@@ -189,6 +197,8 @@ export function useDeleteGroup() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "destructive" } },
     mutationFn: async (groupId: string) => {
       if (!currentUser) {
         throw new Error("No current user");
@@ -213,6 +223,8 @@ export function useUpdateChannel(groupId: string | null) {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "success" } },
     mutationFn: async (vars: {
       channelId: string;
       name?: string;
@@ -243,6 +255,8 @@ export function useDeleteChannel(groupId: string | null) {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "destructive" } },
     mutationFn: async (channelId: string) => {
       if (!currentUser) {
         throw new Error("No current user");
@@ -267,6 +281,8 @@ export function useRemoveMember(groupId: string | null) {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "destructive" } },
     mutationFn: async (userId: string) => {
       if (!currentUser || !groupId) {
         throw new Error("No active group");
@@ -289,6 +305,8 @@ export function useSetMemberRole(groupId: string | null) {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "toggle" } },
     mutationFn: async (vars: { userId: string; role: "admin" | "member" }) => {
       if (!currentUser || !groupId) {
         throw new Error("No active group");
@@ -393,6 +411,8 @@ export function useRequestGroupAccess() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "success" } },
     mutationFn: async (groupId: string) => {
       if (!currentUser) {
         throw new Error("No current user");
@@ -415,6 +435,8 @@ export function useApproveJoinRequest(groupId: string | null) {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "success" } },
     mutationFn: async (requestId: string) => {
       if (!currentUser) {
         throw new Error("No current user");
@@ -439,6 +461,8 @@ export function useRejectJoinRequest(groupId: string | null) {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "destructive" } },
     mutationFn: async (requestId: string) => {
       if (!currentUser) {
         throw new Error("No current user");
@@ -537,6 +561,8 @@ export function useCreateGroupInviteLink(groupId: string | null) {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "success" } },
     mutationFn: async (vars: {
       expiresInHours: number | null;
       maxUses: number | null;
@@ -563,6 +589,8 @@ export function useRevokeGroupInviteLink(groupId: string | null) {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "destructive" } },
     mutationFn: async (linkId: string) => {
       if (!currentUser) {
         throw new Error("No current user");
@@ -584,6 +612,8 @@ export function useRedeemGroupInviteLink() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "success" } },
     mutationFn: async (token: string): Promise<RedeemedInvite> => {
       if (!currentUser) {
         throw new Error("No current user");
@@ -605,6 +635,8 @@ export function useLeaveGroup() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "destructive" } },
     mutationFn: async (groupId: string) => {
       if (!currentUser) {
         throw new Error("No current user");

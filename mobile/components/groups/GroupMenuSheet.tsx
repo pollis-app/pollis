@@ -7,6 +7,7 @@ import { Icon } from "../icons";
 import { ErrorText } from "./FormBits";
 import { semantic } from "../../theme/tokens";
 import { useLeaveGroup } from "../../hooks/queries";
+import { haptic } from "../../lib/haptics";
 
 // The group header's menu (Main.dc.html: name + chevron-down): the group's
 // pages, then — on its own, after a separation — Leave group, which needs a
@@ -38,6 +39,8 @@ export function GroupMenuSheet({
 
   const onLeave = () => {
     if (!armed) {
+      // The first tap arms the confirm: warn by touch (#1286).
+      haptic("confirmArm");
       setArmed(true);
       return;
     }
