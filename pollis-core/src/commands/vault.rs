@@ -246,7 +246,7 @@ pub(crate) async fn sync_vault(state: &Arc<AppState>, user_id: &str) -> Result<u
             Err(e) => {
                 // Keep the row server-side; just don't render what we cannot
                 // read. Undecryptable ≠ deletable.
-                eprintln!("[vault] entry {} is unreadable on this build: {e}", m.id);
+                crate::diag!("[vault] entry {} is unreadable on this build: {e}", m.id);
                 keep_ids.push(m.id);
             }
         }
@@ -287,7 +287,7 @@ pub(crate) async fn sync_vault(state: &Arc<AppState>, user_id: &str) -> Result<u
 /// you cannot open on a plane is not storage.
 pub async fn get_vault_messages(user_id: String, state: &Arc<AppState>) -> Result<Vec<VaultMessage>> {
     if let Err(e) = sync_vault(state, &user_id).await {
-        eprintln!("[vault] sync failed, serving the local cache: {e}");
+        crate::diag!("[vault] sync failed, serving the local cache: {e}");
     }
     let guard = state.local_db.lock().await;
     let db = guard

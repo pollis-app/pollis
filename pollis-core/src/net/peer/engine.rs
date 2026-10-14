@@ -285,7 +285,7 @@ impl PeerEngine {
         let quic = self.quic_addr;
         let handle = tokio::spawn(async move {
             if let Err(e) = pump_link_to_quic(link, quic, counters).await {
-                eprintln!("[peer-relay] link ended: {e}");
+                crate::diag!("[peer-relay] link ended: {e}");
             }
         });
         let mut pumps = self.pumps.lock().unwrap();
@@ -375,7 +375,7 @@ pub async fn bridge_to_link(
     let addr = socket.local_addr()?;
     let handle = tokio::spawn(async move {
         if let Err(e) = pump_quic_to_link(socket, link, counters).await {
-            eprintln!("[peer-relay] client bridge ended: {e}");
+            crate::diag!("[peer-relay] client bridge ended: {e}");
         }
     });
     Ok((addr, handle))

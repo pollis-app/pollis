@@ -306,7 +306,7 @@ impl AppState {
             drop(guard);
             for (room_id, (room, handle)) in rooms {
                 if let Err(e) = room.close().await {
-                    eprintln!("[shutdown] livekit room {room_id} close failed: {e}");
+                    crate::diag!("[shutdown] livekit room {room_id} close failed: {e}");
                 }
                 handle.abort();
             }
@@ -372,7 +372,7 @@ impl AppState {
         // retention window now that the DB is ready. Best-effort — a failed
         // sweep must never block login.
         if let Err(e) = crate::db::local::evict_old_messages(db.conn()) {
-            eprintln!("[state] startup message eviction failed (non-fatal): {e}");
+            crate::diag!("[state] startup message eviction failed (non-fatal): {e}");
         }
 
         *self.local_db.lock().await = Some(db);
@@ -462,9 +462,9 @@ fn spawn_search_index_maintenance(local_db: Arc<Mutex<Option<LocalDb>>>) {
                 return;
             };
             if !crate::db::local::search_index_is_healthy(db.conn()) {
-                eprintln!("[search] FTS index failed integrity-check; rebuilding");
+                crate::diag!("[search] FTS index failed integrity-check; rebuilding");
                 if let Err(e) = crate::db::local::rebuild_search_index(db.conn()) {
-                    eprintln!("[search] index rebuild failed (non-fatal): {e}");
+                    crate::diag!("[search] index rebuild failed (non-fatal): {e}");
                 }
                 return;
             }
@@ -480,20 +480,20 @@ fn spawn_search_index_maintenance(local_db: Arc<Mutex<Option<LocalDb>>>) {
                     Ok(false) => return,
                     Ok(true) => {}
                     Err(e) => {
-                        eprintln!("[search] backfill state unreadable (non-fatal): {e}");
+                        crate::diag!("[search] backfill state unreadable (non-fatal): {e}");
                         return;
                     }
                 }
                 match crate::db::local::backfill_search_index_chunk(db.conn()) {
                     Ok(0) => {
                         if let Err(e) = crate::db::local::finish_search_backfill(db.conn()) {
-                            eprintln!("[search] backfill finalisation failed (non-fatal): {e}");
+                            crate::diag!("[search] backfill finalisation failed (non-fatal): {e}");
                         }
                         return;
                     }
                     Ok(n) => n,
                     Err(e) => {
-                        eprintln!("[search] backfill chunk failed (non-fatal): {e}");
+                        crate::diag!("[search] backfill chunk failed (non-fatal): {e}");
                         return;
                     }
                 }

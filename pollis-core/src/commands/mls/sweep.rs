@@ -49,7 +49,7 @@ pub async fn catch_up_all_mls_groups(state: &Arc<AppState>, user_id: &str) -> Re
         if let Err(e) =
             crate::commands::mls::poll_mls_welcomes_inner(state, user_id, did).await
         {
-            eprintln!("[mls-sweep] poll_mls_welcomes: {e}");
+            crate::diag!("[mls-sweep] poll_mls_welcomes: {e}");
         }
     }
 
@@ -59,7 +59,7 @@ pub async fn catch_up_all_mls_groups(state: &Arc<AppState>, user_id: &str) -> Re
     let group_ids: Vec<String> = dirs.group_ids;
     let dm_ids: Vec<String> = dirs.dm_ids;
 
-    eprintln!(
+    crate::diag!(
         "[mls-sweep] {user_id}: {} group(s), {} dm(s)",
         group_ids.len(),
         dm_ids.len()
@@ -119,10 +119,10 @@ async fn sweep_conversation(
         crate::commands::messages::catch_up_mls_group_interleaved(state, conversation_id, user_id)
             .await
     {
-        eprintln!("[mls-sweep] catch_up_mls_group for {kind} {conversation_id}: {e}");
+        crate::diag!("[mls-sweep] catch_up_mls_group for {kind} {conversation_id}: {e}");
     }
     if let Err(e) = reconcile_if_tree_has_stale_leaf(state, conversation_id, user_id).await {
-        eprintln!("[mls-sweep] reconcile backstop for {kind} {conversation_id}: {e}");
+        crate::diag!("[mls-sweep] reconcile backstop for {kind} {conversation_id}: {e}");
     }
     migrate_backstop(state, conversation_id, user_id, migrations).await;
     self_update_backstop(state, conversation_id, user_id, self_updates).await;
@@ -156,7 +156,7 @@ async fn migrate_backstop(
         }
         Ok(false) => {}
         Err(e) => {
-            eprintln!("[mls-sweep] suite migration for {conversation_id}: {e}");
+            crate::diag!("[mls-sweep] suite migration for {conversation_id}: {e}");
         }
     }
 }
@@ -192,11 +192,11 @@ async fn self_update_backstop(
         // lost race left the rotation due for the next sweep to retry.
         Ok(true) => {
             *budget += 1;
-            eprintln!("[mls-sweep] {conversation_id}: rotated own leaf");
+            crate::diag!("[mls-sweep] {conversation_id}: rotated own leaf");
         }
         Ok(false) => {}
         Err(e) => {
-            eprintln!("[mls-sweep] self-update for {conversation_id}: {e}");
+            crate::diag!("[mls-sweep] self-update for {conversation_id}: {e}");
         }
     }
 }
@@ -258,7 +258,7 @@ pub async fn apply_membership_wake(
         if let Err(e) =
             crate::commands::mls::poll_mls_welcomes_inner(state, user_id, device_id).await
         {
-            eprintln!("[mls] poll_welcomes for {conversation_id}: {e}");
+            crate::diag!("[mls] poll_welcomes for {conversation_id}: {e}");
         }
     }
 
@@ -269,12 +269,12 @@ pub async fn apply_membership_wake(
     )
     .await
     {
-        eprintln!("[mls] catch_up_mls_group for {conversation_id}: {e}");
+        crate::diag!("[mls] catch_up_mls_group for {conversation_id}: {e}");
     }
 
     if is_leave {
         if let Err(e) = reconcile_if_tree_has_stale_leaf(state, conversation_id, user_id).await {
-            eprintln!("[mls] leave reconcile for {conversation_id}: {e}");
+            crate::diag!("[mls] leave reconcile for {conversation_id}: {e}");
         }
     }
 }
@@ -301,7 +301,7 @@ async fn reconcile_if_tree_has_stale_leaf(
         return Ok(());
     }
 
-    eprintln!(
+    crate::diag!(
         "[mls-sweep] {conversation_id}: stale leaf in local tree — staging the remove/eviction reconcile"
     );
     crate::commands::mls::reconcile_group_mls_impl(state, conversation_id, user_id).await?;

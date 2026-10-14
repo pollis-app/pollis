@@ -152,14 +152,14 @@ async fn ds_post_bytes(
     let url = format!("{base}{path}");
     // First-party DS write — route through the overlay when it is on (§14.2).
     let overlay = state.overlay_handle();
-    let resp = with_dev_key(state, crate::net::overlay::http_client(overlay.as_deref()).post(&url))
+    let request = with_dev_key(state, crate::net::overlay::http_client(overlay.as_deref()).post(&url))
         .header("X-Pollis-User", &user_id)
         .header("X-Pollis-Device", &device_id)
         .header("X-Pollis-Timestamp", timestamp.to_string())
         .header("X-Pollis-Signature", signature_b64)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
-        .body(body_bytes)
-        .send()
+        .body(body_bytes);
+    let resp = send_ds(path, request)
         .await
         .map_err(|e| Error::Other(anyhow::anyhow!("ds_post {path}: {e}")))?;
     Ok(resp)
@@ -679,6 +679,34 @@ fn with_dev_key(state: &AppState, request: reqwest::RequestBuilder) -> reqwest::
     }
 }
 
+/// 16 hex characters from the OS RNG.
+fn new_request_id() -> String {
+    use rand::RngCore as _;
+    let mut bytes = [0u8; 8];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    hex::encode(bytes)
+}
+
+/// Send a DS request built by one of the three builders in this file, stamped
+/// with a fresh [`pollis_api::redact::REQUEST_ID_HEADER`] (#1305), so a line in
+/// the user's diagnostics log can be matched to the DS's failed-request log. A non-2xx answer or a transport failure is
+/// written to the diagnostics log with that id; success is not (it would bury
+/// the failures). Callers still map the status themselves.
+async fn send_ds(path: &str, request: reqwest::RequestBuilder) -> reqwest::Result<reqwest::Response> {
+    let request_id = new_request_id();
+    let result = request.header(pollis_api::redact::REQUEST_ID_HEADER, &request_id).send().await;
+    match &result {
+        Ok(resp) if !resp.status().is_success() => {
+            crate::diag!("[ds] {path} → {} req={request_id}", resp.status());
+        }
+        Err(e) => {
+            crate::diag!("[ds] {path} → transport error req={request_id}: {e}");
+        }
+        Ok(_) => {}
+    }
+    result
+}
+
 /// POST `body` (JSON) to `{pollis_delivery_url}{path}` with NO auth headers — the
 /// pre-identity OTP endpoints (`request-otp` / `verify-otp`), which the DS gates
 /// by the OTP itself, not a device signature or a session. Returns the raw
@@ -700,10 +728,10 @@ async fn ds_post_plain_bytes(
 ) -> Result<reqwest::Response> {
     let url = format!("{}{}", delivery_base(state)?, path);
     let overlay = state.overlay_handle();
-    with_dev_key(state, crate::net::overlay::http_client(overlay.as_deref()).post(&url))
+    let request = with_dev_key(state, crate::net::overlay::http_client(overlay.as_deref()).post(&url))
         .header(reqwest::header::CONTENT_TYPE, "application/json")
-        .body(body_bytes)
-        .send()
+        .body(body_bytes);
+    send_ds(path, request)
         .await
         .map_err(|e| Error::Other(anyhow::anyhow!("ds_post_plain {path}: {e}")))
 }
@@ -732,11 +760,11 @@ async fn ds_post_session_bytes(
 ) -> Result<reqwest::Response> {
     let url = format!("{}{}", delivery_base(state)?, path);
     let overlay = state.overlay_handle();
-    with_dev_key(state, crate::net::overlay::http_client(overlay.as_deref()).post(&url))
+    let request = with_dev_key(state, crate::net::overlay::http_client(overlay.as_deref()).post(&url))
         .header("X-Pollis-Session", session_token)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
-        .body(body_bytes)
-        .send()
+        .body(body_bytes);
+    send_ds(path, request)
         .await
         .map_err(|e| Error::Other(anyhow::anyhow!("ds_post_session {path}: {e}")))
 }
@@ -836,6 +864,9 @@ mod dev_key_tests {
             .count();
         assert_eq!(calls, wrapped, "a DS request builder skips with_dev_key");
         assert_eq!(wrapped, 3);
+        // ...and every one of them sends through `send_ds`, which stamps the
+        // request id (#1305).
+        assert_eq!(src.matches(concat!("send_ds", "(path, request)")).count(), 3);
     }
 }
 

@@ -79,14 +79,14 @@ pub async fn remove_member_from_group(
     if let Err(e) = crate::commands::messages::catch_up_mls_group_interleaved(
         state, &group_id, &requester_id,
     ).await {
-        eprintln!("[mls] remove_member_from_group: catch_up_mls_group for {group_id}: {e}");
+        crate::diag!("[mls] remove_member_from_group: catch_up_mls_group for {group_id}: {e}");
     }
 
     // Reconcile removes the member's leaves from the MLS tree.
     if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
         state, &group_id, &requester_id,
     ).await {
-        eprintln!("[mls] remove_member_from_group: reconcile for group {group_id}: {e}");
+        crate::diag!("[mls] remove_member_from_group: reconcile for group {group_id}: {e}");
     }
 
     // Notify group members so they refetch the member list.
@@ -94,7 +94,7 @@ pub async fn remove_member_from_group(
         &state.livekit,
         &group_id,
     ).await {
-        eprintln!("[realtime] remove_member_from_group: notify group {group_id}: {e}");
+        crate::diag!("[realtime] remove_member_from_group: notify group {group_id}: {e}");
     }
 
     Ok(())
@@ -127,7 +127,7 @@ pub async fn leave_group(
     // the next epoch advance.
     match crate::commands::mls::forget_local_mls_group(state, &group_id).await {
         Ok(()) => {}
-        Err(e) => eprintln!("[mls] leave_group: forget local group {group_id}: {e}"),
+        Err(e) => crate::diag!("[mls] leave_group: forget local group {group_id}: {e}"),
     }
 
     // Signal remaining members to reconcile (removes the leaver's stale leaf).
@@ -140,7 +140,7 @@ pub async fn leave_group(
         &group_id,
         crate::commands::livekit_signalling::member_left_group_payload(&group_id),
     ).await {
-        eprintln!("[realtime] leave_group: notify group {group_id}: {e}");
+        crate::diag!("[realtime] leave_group: notify group {group_id}: {e}");
     }
 
     // If no members remain, the group is deleted (cascades to channels, invites,
@@ -184,7 +184,7 @@ pub async fn set_member_role(
     )
     .await
     {
-        eprintln!("[role] publish MemberRoleChanged: {e}");
+        crate::diag!("[role] publish MemberRoleChanged: {e}");
     }
 
     Ok(())

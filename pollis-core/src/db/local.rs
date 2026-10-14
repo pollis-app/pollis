@@ -259,7 +259,7 @@ fn sqlcipher_is_linked(conn: &Connection) -> bool {
         // database on the disk on the strength of it, and the wipe that
         // eventually removes it has to be the one that takes the sidecars too.
         Err(e) => {
-            eprintln!(
+            crate::diag!(
                 "[db] could not ask whether SQLCipher is linked (`PRAGMA cipher_version`: {e}); \
                  assuming it is not, so a plaintext database at this path is left in place \
                  rather than destroyed."
@@ -315,7 +315,7 @@ fn destroy_plaintext_database(db_path: &std::path::Path) -> Result<bool> {
             // never unlink it either: nothing here has established that the
             // thing it points at is a plaintext database, and this function's
             // contract is to leave everything else exactly as found.
-            eprintln!(
+            crate::diag!(
                 "[db] {db_path:?} is not a regular file (a symlink, or something stranger), so \
                  the plaintext-database check is skipped rather than aimed at whatever it \
                  points to."
@@ -341,7 +341,7 @@ fn destroy_plaintext_database(db_path: &std::path::Path) -> Result<bool> {
         // Loud, because the only way to get here is a binary carrying a second
         // sqlite3 that won the symbols, and every database it writes is
         // plaintext regardless of what this function does about the old one.
-        eprintln!(
+        crate::diag!(
             "[db] {db_path:?} is an UNENCRYPTED database and this binary has no SQLCipher \
              (`PRAGMA cipher_version` answers nothing), so the file is left alone — replacing \
              it would only produce another plaintext one. Something in this link is shipping a \
@@ -384,7 +384,7 @@ fn destroy_unusable_database(db_path: &std::path::Path) -> Result<()> {
         // itself and never touches what it points at, and nothing is ever
         // written through it.
         Target::NotRegular => {
-            eprintln!(
+            crate::diag!(
                 "[db] {db_path:?} is not a regular file; removing the entry at that path \
                  (never following it) so a fresh encrypted database can take its place."
             );
@@ -414,7 +414,7 @@ fn restrict_database_files(db_path: &std::path::Path) {
     paths.extend(DB_SIDECAR_SUFFIXES.iter().map(|s| sidecar_path(db_path, s)));
     for path in paths {
         if let Err(e) = crate::private_fs::restrict_existing(&path) {
-            eprintln!("[db] could not restrict permissions on {path:?}: {e}");
+            crate::diag!("[db] could not restrict permissions on {path:?}: {e}");
         }
     }
 }
@@ -526,7 +526,7 @@ fn dispose_path(path: &std::path::Path, zero: Zero) -> Result<()> {
     match open_regular_no_follow(path)? {
         Target::Missing => Ok(()),
         Target::NotRegular => {
-            eprintln!("[db] {path:?} is not a regular file; leaving it alone.");
+            crate::diag!("[db] {path:?} is not a regular file; leaving it alone.");
             Ok(())
         }
         Target::Regular(file, meta) => dispose(path, file, &meta, zero),
@@ -587,7 +587,7 @@ fn dispose(
     match remove_if_unchanged(path, meta) {
         Ok(()) => Ok(()),
         Err(e) if zero == Zero::Yes => {
-            eprintln!(
+            crate::diag!(
                 "[db] {path:?} was overwritten and emptied but could not be unlinked ({e}); \
                  continuing — the bytes are gone and the empty file opens as a fresh database."
             );

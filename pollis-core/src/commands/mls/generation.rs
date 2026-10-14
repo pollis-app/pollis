@@ -114,7 +114,7 @@ pub(crate) fn set_local_generation(
          WHERE excluded.generation > mls_generation.generation",
         rusqlite::params![conversation_id, generation],
     ) {
-        eprintln!(
+        crate::diag!(
             "[mls] generation: recording generation {generation} for {conversation_id} failed: {e}"
         );
     }

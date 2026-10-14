@@ -6,6 +6,7 @@ import { isMac, isLinux, isWindows } from '../../utils/platform';
 import * as api from '../../services/api';
 import { Button } from '../ui/Button';
 import { InputOtp } from '../ui/InputOtp';
+import { AuthError } from './AuthError';
 import { TextInput } from '../ui/TextInput';
 import { shellOpen } from '../../bridge';
 
@@ -119,11 +120,22 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
     }
     setIsLoading(true);
     setError(null);
+    // Two steps, two failure messages. Only a failure of the verify itself can
+    // mean the code was wrong; once it is accepted, a failure in what follows
+    // (identity setup, device registration, the keystore) must not be shown as
+    // "Invalid code" — that is exactly how #1305's report read.
+    let result: api.AuthResult;
     try {
-      const result = await api.verifyOTP(email.trim(), otp.trim());
-      await onSuccess(result);
+      result = await api.verifyOTP(email.trim(), otp.trim());
     } catch (err) {
       setError(errorMessage(err, t('otp.invalidCode')));
+      setIsLoading(false);
+      return;
+    }
+    try {
+      await onSuccess(result);
+    } catch (err) {
+      setError(errorMessage(err, t('otp.signInFailed')));
     } finally {
       setIsLoading(false);
     }
@@ -140,11 +152,7 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
             components={{ address: <span className="text-accent" /> }}
           />
         </p>
-        {error && (
-          <p data-testid="auth-error" className="text-xs font-mono text-danger">
-            {error}
-          </p>
-        )}
+        {error && <AuthError message={error} />}
         <form data-testid="otp-form" onSubmit={handleVerifyOTP} className="flex flex-col gap-4">
           <div>
             <label className="block text-xs font-mono font-medium mb-2 text-dim">
@@ -188,11 +196,7 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
           <h2 className="text-base text-fg">{t('link.scanTitle')}</h2>
           <p className="text-sm text-muted leading-relaxed">{t('link.codeIntro')}</p>
         </div>
-        {error && (
-          <p data-testid="auth-error" className="text-xs font-mono text-danger">
-            {error}
-          </p>
-        )}
+        {error && <AuthError message={error} />}
         <form data-testid="link-form" onSubmit={handleClaimLink} className="flex flex-col gap-4">
           <TextInput
             id="link-code-input"
@@ -222,11 +226,7 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
 
   return (
     <div data-testid="email-form-container" className="flex flex-col gap-4">
-      {error && (
-        <p data-testid="auth-error" className="text-xs font-mono text-danger">
-          {error}
-        </p>
-      )}
+      {error && <AuthError message={error} />}
       <form data-testid="email-form" onSubmit={handleRequestOTP} className="flex flex-col gap-4">
         <TextInput
           id="email-input"

@@ -64,7 +64,7 @@ async fn run_drain_task(
     let mut analyzer = BandAnalyzer::new(sample_rate);
     let mut bands_ctr: u32 = 0;
 
-    eprintln!("[voice] remote drain task started for {track_key}");
+    crate::diag!("[voice] remote drain task started for {track_key}");
     while let Some(frame) = audio_stream.next().await {
         // Shared audio is mixed but never attributed: skip straight to
         // the buffer push, leaving the sharer's tile showing whether
@@ -128,7 +128,7 @@ async fn run_drain_task(
             buf.pop_front();
         }
     }
-    eprintln!("[voice] remote drain task ended for {track_key}");
+    crate::diag!("[voice] remote drain task ended for {track_key}");
 
     // Stream closed — clean up our buffer slot so the mixer doesn't keep
     // reading a dead entry.
@@ -314,9 +314,8 @@ pub(crate) async fn ensure_playback(
                     if !was_explicit {
                         return Err(e);
                     }
-                    eprintln!(
-                        "[voice] speaker open failed for '{:?}': {e} — falling back to OS default output",
-                        output_device_name_for_open
+                    crate::diag!(
+                        "[voice] speaker open failed for the selected device: {e} — falling back to OS default output"
                     );
                     let (s, sr, ch, ring) = try_open(None)?;
                     Ok((s, sr, ch, ring, None))
@@ -333,7 +332,7 @@ pub(crate) async fn ensure_playback(
     let apm_for_mixer = if sample_rate == apm_rate {
         apm_handle
     } else {
-        eprintln!(
+        crate::diag!(
             "[voice] speaker rate {sample_rate} Hz != APM rate {apm_rate} Hz; \
              AEC render reference disabled for this session"
         );

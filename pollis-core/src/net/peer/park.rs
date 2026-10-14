@@ -261,7 +261,7 @@ async fn park_forever(relay: ParkedRelay, state: Arc<ParkingState>) {
                 backoff.reset();
             }
             Err(e) => {
-                eprintln!("[peer-relay] parking at {} failed: {e}", relay.addr);
+                crate::diag!("[peer-relay] parking at {} failed: {e}", relay.addr);
             }
         }
         tokio::time::sleep(backoff.next_delay()).await;

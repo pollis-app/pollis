@@ -243,7 +243,7 @@ pub(crate) async fn emit_receipt(
     // turns away is re-emitted by the next read or ingest, and losing one loses
     // no message. Skip it here rather than spend the round trip.
     let Some(delete_token_hash) = delete_token_hash else {
-        eprintln!(
+        crate::diag!(
             "[receipts] {kind:?} receipt for {conversation_id} skipped — this device \
              cannot compute a delete capability (locked); the next ingest re-emits it"
         );
@@ -276,7 +276,7 @@ pub(crate) async fn emit_receipt(
             head_generation,
             head_epoch,
         } => {
-            eprintln!(
+            crate::diag!(
                 "[receipts] {kind:?} receipt for {conversation_id} sealed at ({}, {}) but the \
                  log head is ({head_generation}, {head_epoch}) — skipped",
                 sealed.generation, sealed.epoch
@@ -298,7 +298,7 @@ pub(crate) async fn emit_receipt(
     )
     .await
     {
-        eprintln!("[receipts] publish hint for {conversation_id}: {e}");
+        crate::diag!("[receipts] publish hint for {conversation_id}: {e}");
     }
 
     Ok(())

@@ -350,7 +350,7 @@ async fn resolve_sender(state: &Arc<AppState>, username: &str) -> Result<Option<
     match crate::commands::ds_reads::users(state, Vec::new(), Some(username.to_string())).await {
         Ok(users) => Ok(users.into_iter().next().map(|u| u.id)),
         Err(e) => {
-            eprintln!("[search] from: lookup fell back to remote and failed: {e}");
+            crate::diag!("[search] from: lookup fell back to remote and failed: {e}");
             Ok(None)
         }
     }
@@ -797,7 +797,7 @@ async fn enrich(
                 }
             }
             Err(e) => {
-                eprintln!("[search] sender name lookup failed (non-fatal): {e}");
+                crate::diag!("[search] sender name lookup failed (non-fatal): {e}");
             }
         }
     }

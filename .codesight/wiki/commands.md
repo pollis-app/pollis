@@ -162,6 +162,9 @@ on `pollis-core`.
 - `delete_account(user_id)` — delete account from Turso + local (user DB, keystore, that user's media cache, media-server token, staged attachments)
 - `wipe_local_data()` — delete all local databases and keystore entries
 
+## diagnostics (`commands/diagnostics.rs`, #1305)
+- `get_diagnostics(appVersion?)` → `string` — the on-device log (`pollis-core/src/diag.rs`, `<data dir>/logs/pollis.log` + the rotated `.1`) under a short header (app/core version, OS, time). Local only; the desktop shim passes the bundle version, mobile passes `appVersion` from `expo-constants`. Empty log when no host called `diag::init` (tests, CLI, TUI).
+
 ## pin (`commands/pin.rs`)
 PIN is cryptographically load-bearing — see `pin-design.md`.
 - `set_pin(old_pin?, new_pin)` — initial-set sources from `AppState.unlock` (canonical) or the legacy plaintext keystore slots (upgrade fallback). Wraps both keys, deletes the legacy slots, opens the local DB via `load_user_db_with_key`, publishes the device cert.

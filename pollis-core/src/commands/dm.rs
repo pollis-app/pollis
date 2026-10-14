@@ -131,10 +131,10 @@ pub async fn create_dm_channel(
                 if let Err(e) =
                     crate::commands::mls::reconcile_group_mls_impl(state, &id, &creator_id).await
                 {
-                    eprintln!("[mls] create_dm_channel: reconcile failed: {e}");
+                    crate::diag!("[mls] create_dm_channel: reconcile failed: {e}");
                 }
             }
-            Err(e) => eprintln!("[mls] create_dm_channel: mls group init failed (non-fatal): {e}"),
+            Err(e) => crate::diag!("[mls] create_dm_channel: mls group init failed (non-fatal): {e}"),
         }
     }
 
@@ -148,7 +148,7 @@ pub async fn create_dm_channel(
         .collect();
     if let Err(e) = crate::commands::safety::batch_check_and_pin_account_keys(state, &peer_ids).await
     {
-        eprintln!("[safety] create_dm_channel: batch pin failed: {e}");
+        crate::diag!("[safety] create_dm_channel: batch pin failed: {e}");
     }
 
     // Notify non-creator members via their personal inbox rooms so they see
@@ -167,7 +167,7 @@ pub async fn create_dm_channel(
         if let Err(e) = crate::commands::livekit::publish_to_user_inbox(
             state, &member.user_id, inbox_payload.clone(),
         ).await {
-            eprintln!("[inbox] create_dm_channel: notify {} failed: {e}", member.user_id);
+            crate::diag!("[inbox] create_dm_channel: notify {} failed: {e}", member.user_id);
         }
     }
 
@@ -295,7 +295,7 @@ pub async fn add_user_to_dm_channel(
     if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
         state, &dm_channel_id, &added_by,
     ).await {
-        eprintln!("[mls] add_user_to_dm_channel: reconcile: {e}");
+        crate::diag!("[mls] add_user_to_dm_channel: reconcile: {e}");
     }
 
     Ok(())
@@ -321,7 +321,7 @@ pub async fn remove_user_from_dm_channel(
     if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
         state, &dm_channel_id, &requester_id,
     ).await {
-        eprintln!("[mls] remove_user_from_dm_channel: reconcile: {e}");
+        crate::diag!("[mls] remove_user_from_dm_channel: reconcile: {e}");
     }
 
     Ok(())
@@ -346,7 +346,7 @@ pub async fn leave_dm_channel(
     // Wipe local MLS state so the leaver can't decrypt future messages.
     match crate::commands::mls::forget_local_mls_group(state, &dm_channel_id).await {
         Ok(()) => {}
-        Err(e) => eprintln!("[mls] leave_dm_channel: forget local group {dm_channel_id}: {e}"),
+        Err(e) => crate::diag!("[mls] leave_dm_channel: forget local group {dm_channel_id}: {e}"),
     }
 
     // Signal remaining members to reconcile (removes the leaver's stale leaf).
@@ -357,7 +357,7 @@ pub async fn leave_dm_channel(
         &dm_channel_id,
         crate::commands::livekit_signalling::member_left_conversation_payload(&dm_channel_id),
     ).await {
-        eprintln!("[realtime] leave_dm_channel: notify room {dm_channel_id}: {e}");
+        crate::diag!("[realtime] leave_dm_channel: notify room {dm_channel_id}: {e}");
     }
 
     Ok(())

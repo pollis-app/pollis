@@ -125,7 +125,7 @@ pub(super) fn run_loopback_capture(
             }
             // Failed once running — the caller has long moved on.
             None => {
-                eprintln!("[screenshare/audio] windows loopback ended: {msg}");
+                crate::diag!("[screenshare/audio] windows loopback ended: {msg}");
             }
         }
     }
@@ -228,7 +228,7 @@ unsafe fn run_inner(
     audio_client.SetEventHandle(ready)?;
     let capture: IAudioCaptureClient = audio_client.GetService()?;
     audio_client.Start()?;
-    eprintln!(
+    crate::diag!(
         "[screenshare/audio] WASAPI process loopback started \
          ({SHARED_AUDIO_RATE_HZ} Hz x{CAPTURE_CHANNELS}, own process tree excluded)"
     );

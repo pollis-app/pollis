@@ -4,7 +4,6 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use cpal::traits::DeviceTrait;
 use libwebrtc::{
     audio_source::native::NativeAudioSource,
     prelude::{AudioFrame, AudioSourceOptions, RtcAudioSource},
@@ -170,7 +169,7 @@ pub async fn prepare_voice_connection(
     let (token, ds_url) = match crate::commands::mls::ds_livekit_token(state, &channel_id, "voice").await {
         Ok(pair) => pair,
         Err(e) => {
-            eprintln!("[voice] warmup token error (non-fatal): {e}");
+            crate::diag!("[voice] warmup token error (non-fatal): {e}");
             return Ok(());
         }
     };
@@ -202,13 +201,13 @@ pub async fn prepare_voice_connection(
         let started = Instant::now();
         match client.get(&probe).timeout(Duration::from_secs(5)).send().await {
             Ok(_resp) => {
-                eprintln!(
+                crate::diag!(
                     "[voice] warmup probe to {twirp} completed in {:.0}ms",
                     started.elapsed().as_secs_f64() * 1000.0
                 );
             }
             Err(e) => {
-                eprintln!("[voice] warmup probe failed (non-fatal): {e}");
+                crate::diag!("[voice] warmup probe failed (non-fatal): {e}");
             }
         }
     });
@@ -406,13 +405,13 @@ pub async fn join_voice_channel(
     let e2ee_ms = e2ee_start.elapsed().as_millis() as u64;
     let e2ee_options = voice_e2ee::build_e2ee_options(voice_key, voice_key_index);
     let key_provider_for_state = e2ee_options.key_provider.clone();
-    eprintln!(
+    crate::diag!(
         "[voice] e2ee armed for {channel_id} (mls_group={voice_mls_group_id}, epoch={voice_epoch}, ring slot={voice_key_index})"
     );
 
     let connect_started = Instant::now();
     let mic_started = Instant::now();
-    eprintln!("[voice] connecting to room {channel_id} and opening mic in parallel…");
+    crate::diag!("[voice] connecting to room {channel_id} and opening mic in parallel…");
 
     // `RoomOptions` is #[non_exhaustive] so build it via Default + field
     // mutation rather than a struct literal.
@@ -433,7 +432,7 @@ pub async fn join_voice_channel(
             }
             let host = cpal::default_host();
             let dev = get_device(&host, input_device_clone.as_deref(), true)?;
-            eprintln!("[voice] mic device: {:?}", dev.name());
+            crate::diag!("[voice] mic device opened");
             let r = start_mic_stream(&dev, frame_tx, is_muted);
             let elapsed_ms = mic_started.elapsed().as_millis() as u64;
             r.map(|(stream, rate)| (stream, rate, elapsed_ms))
@@ -454,11 +453,11 @@ pub async fn join_voice_channel(
     let mic = match mic_res {
         Ok(Ok(v)) => Some(v),
         Ok(Err(e)) => {
-            eprintln!("[voice] mic unavailable — joining listen-only: {e}");
+            crate::diag!("[voice] mic unavailable — joining listen-only: {e}");
             None
         }
         Err(e) => {
-            eprintln!("[voice] mic init panicked — joining listen-only: {e}");
+            crate::diag!("[voice] mic init panicked — joining listen-only: {e}");
             None
         }
     };
@@ -469,9 +468,9 @@ pub async fn join_voice_channel(
     let mic_init_ms = mic.as_ref().map(|(_, _, ms)| *ms).unwrap_or(0);
     let mic_stream = mic.map(|(s, _, _)| s);
     if has_mic {
-        eprintln!("[voice] connected to room {channel_id}, mic at {mic_rate} Hz");
+        crate::diag!("[voice] connected to room {channel_id}, mic at {mic_rate} Hz");
     } else {
-        eprintln!("[voice] connected to room {channel_id}, listen-only (no mic)");
+        crate::diag!("[voice] connected to room {channel_id}, listen-only (no mic)");
     }
 
     let room = Arc::new(room);
@@ -486,7 +485,7 @@ pub async fn join_voice_channel(
         match voice_apm::ApmStage::new(mic_rate, audio_processing.clone()) {
             Ok(stage) => Some(stage),
             Err(e) => {
-                eprintln!("[voice] APM disabled: {e}");
+                crate::diag!("[voice] APM disabled: {e}");
                 None
             }
         }
@@ -506,11 +505,11 @@ pub async fn join_voice_channel(
     {
         let mut slot = denoiser_arc.lock().unwrap();
         *slot = if has_mic && audio_processing.click_suppression && mic_rate == voice_denoiser::REQUIRED_RATE_HZ {
-            eprintln!("[voice/rnnoise] engaged @ {mic_rate} Hz");
+            crate::diag!("[voice/rnnoise] engaged @ {mic_rate} Hz");
             Some(voice_denoiser::DenoiserStage::new())
         } else {
             if has_mic && audio_processing.click_suppression {
-                eprintln!(
+                crate::diag!(
                     "[voice/rnnoise] requested but mic rate is {mic_rate} Hz; \
                      RNNoise needs 48000 Hz — disabling for this session"
                 );
@@ -547,7 +546,7 @@ pub async fn join_voice_channel(
             RtcAudioSource::Native(audio_source.clone()),
         );
 
-        eprintln!("[voice] publishing track…");
+        crate::diag!("[voice] publishing track…");
         // ── Phase: first_publish ───────────────────────────────────────────────
         let publish_start = Instant::now();
         room.local_participant()
@@ -564,7 +563,7 @@ pub async fn join_voice_channel(
         // camera), but `voice.room` is not stored yet at this point, so the
         // first track is handled here directly.
         let moved = voice_e2ee::apply_sender_key_index(&room, voice_key_index);
-        eprintln!("[voice] track published ({moved} sender cryptor(s) on ring slot {voice_key_index})");
+        crate::diag!("[voice] track published ({moved} sender cryptor(s) on ring slot {voice_key_index})");
 
         // ── Mic frame task: rebuffer to exact 10ms, run APM, capture_frame ────
         // Speaking detection runs on the post-APM peak so the indicator follows
@@ -607,7 +606,7 @@ pub async fn join_voice_channel(
                     // APM mutates the chunk in place (AGC + NS + HPF + AEC capture).
                     if let Some(apm) = &apm_for_capture {
                         if let Err(e) = voice_apm::run_capture(apm, &mut chunk, chunk_size) {
-                            eprintln!("[voice] APM capture error (frame dropped): {e}");
+                            crate::diag!("[voice] APM capture error (frame dropped): {e}");
                             continue;
                         }
                     }
@@ -660,7 +659,7 @@ pub async fn join_voice_channel(
                         samples_per_channel: chunk_size as u32,
                     };
                     if let Err(e) = audio_source_task.capture_frame(&frame).await {
-                        eprintln!("[voice] capture_frame error: {e:?}");
+                        crate::diag!("[voice] capture_frame error: {e:?}");
                     }
                 }
             }
@@ -683,7 +682,7 @@ pub async fn join_voice_channel(
     )
     .await
     {
-        eprintln!("[voice] playback init failed (speaker disabled this session): {e}");
+        crate::diag!("[voice] playback init failed (speaker disabled this session): {e}");
     }
 
     // ── Seed participant list ─────────────────────────────────────────────────
@@ -758,7 +757,7 @@ pub async fn join_voice_channel(
                 avatar_url: local_avatar_url,
             });
             for (identity, name, is_muted, avatar_url) in existing_with_avatars {
-                eprintln!("[voice] existing participant: {} muted={}", identity, is_muted);
+                crate::diag!("[voice] existing participant: {} muted={}", identity, is_muted);
                 let _ = ch.send(VoiceEvent::ParticipantJoined {
                     identity,
                     name,
@@ -796,7 +795,7 @@ pub async fn join_voice_channel(
                     if is_view_identity(&identity) {
                         continue;
                     }
-                    eprintln!("[voice] participant joined: {identity}");
+                    crate::diag!("[voice] participant joined: {identity}");
                     let is_muted = p.track_publications().values().any(|pub_| pub_.is_muted());
                     let avatar_url =
                         lookup_avatar_url_for_identity(&state_for_room, &identity).await;
@@ -820,7 +819,7 @@ pub async fn join_voice_channel(
                     if is_view_identity(&identity) {
                         continue;
                     }
-                    eprintln!("[voice] participant left: {identity}");
+                    crate::diag!("[voice] participant left: {identity}");
                     // Clear any screenshare they were publishing so a stale
                     // black tile doesn't linger (esp. if they later rejoin).
                     crate::commands::screenshare::on_participant_left(
@@ -849,7 +848,7 @@ pub async fn join_voice_channel(
                             // don't route its mic back into our speakers, which
                             // would otherwise echo us to ourselves.
                             if user_id_from_voice_identity(&participant_identity) == local_user_id {
-                                eprintln!(
+                                crate::diag!(
                                     "[voice] skipping own-device audio track for self-hear mute: {participant_identity}"
                                 );
                                 continue;
@@ -864,7 +863,7 @@ pub async fn join_voice_channel(
                                 publication.source(),
                                 livekit::track::TrackSource::ScreenshareAudio
                             );
-                            eprintln!(
+                            crate::diag!(
                                 "[voice] track subscribed: {track_key} (shared_audio={is_shared_audio})"
                             );
                             register_remote_track(
@@ -889,7 +888,7 @@ pub async fn join_voice_channel(
                                 }
                                 _ => crate::commands::screenshare::RemoteVideoSource::Screen,
                             };
-                            eprintln!("[voice] video track subscribed: {track_key} (source={source:?})");
+                            crate::diag!("[voice] video track subscribed: {track_key} (source={source:?})");
                             crate::commands::screenshare::on_remote_video_subscribed(
                                 video_track,
                                 participant_identity,
@@ -910,7 +909,7 @@ pub async fn join_voice_channel(
                     match track {
                         RemoteTrack::Audio(audio_track) => {
                             let track_key = format!("{}-{}", participant_identity, audio_track.sid());
-                            eprintln!("[voice] track unsubscribed: {track_key}");
+                            crate::diag!("[voice] track unsubscribed: {track_key}");
                             let voice = voice_arc.lock().await;
                             let mut pb = voice.playback.lock().unwrap();
                             if let Some(t) = pb.drain_tasks.remove(&track_key) { t.abort(); }
@@ -958,7 +957,7 @@ pub async fn join_voice_channel(
                 }
 
                 RoomEvent::Disconnected { reason } => {
-                    eprintln!("[voice] disconnected: {reason:?}");
+                    crate::diag!("[voice] disconnected: {reason:?}");
                     {
                         let voice = voice_arc.lock().await;
                         if let Some(ch) = &voice.channel {
@@ -978,7 +977,7 @@ pub async fn join_voice_channel(
                     break;
                 }
                 RoomEvent::ConnectionStateChanged(conn_state) => {
-                    eprintln!("[voice] connection state: {conn_state:?}");
+                    crate::diag!("[voice] connection state: {conn_state:?}");
                 }
                 // #1097: the per-participant frame-cryptor verdict. livekit
                 // reports `EncryptionState::{Ok, EncryptionFailed,
@@ -1003,7 +1002,7 @@ pub async fn join_voice_channel(
                         &participant.identity().to_string(),
                     )
                     .await;
-                    eprintln!(
+                    crate::diag!(
                         "[voice-e2ee] frame state for {identity}: {state:?}"
                     );
                 }
@@ -1052,7 +1051,7 @@ pub async fn join_voice_channel(
         total_join_ms,
         join_started_at_ms,
     };
-    eprintln!(
+    crate::diag!(
         "[voice/timings] channel={} jwt={}ms e2ee={}ms connect={}ms mic={}ms publish={}ms roster={}ms total={}ms",
         channel_id,
         jwt_mint_ms,
@@ -1389,7 +1388,7 @@ pub async fn set_voice_input_device(
         ) {
             (_, Ok(s)) => Some(s),
             (_, Err(e)) => {
-                eprintln!("[voice] APM rebuild on mic switch failed: {e}");
+                crate::diag!("[voice] APM rebuild on mic switch failed: {e}");
                 None
             }
         }
@@ -1444,7 +1443,7 @@ pub async fn set_voice_input_device(
                 }
                 if let Some(apm) = &apm_for_capture {
                     if let Err(e) = voice_apm::run_capture(apm, &mut chunk, chunk_size) {
-                        eprintln!("[voice] APM capture error (frame dropped): {e}");
+                        crate::diag!("[voice] APM capture error (frame dropped): {e}");
                         continue;
                     }
                 }
@@ -1520,11 +1519,11 @@ pub async fn set_voice_audio_processing(
         let want = config.click_suppression && rate == voice_denoiser::REQUIRED_RATE_HZ;
         match (want, slot.is_some()) {
             (true, false) => {
-                eprintln!("[voice/rnnoise] enabled mid-call");
+                crate::diag!("[voice/rnnoise] enabled mid-call");
                 *slot = Some(voice_denoiser::DenoiserStage::new());
             }
             (false, true) => {
-                eprintln!("[voice/rnnoise] disabled mid-call");
+                crate::diag!("[voice/rnnoise] disabled mid-call");
                 *slot = None;
             }
             _ => { /* already in the desired state */ }

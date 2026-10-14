@@ -170,7 +170,7 @@ pub(super) async fn post_resealing<B: ClientRequest>(
                 head_generation,
                 head_epoch,
             } => {
-                eprintln!(
+                crate::diag!(
                     "[messages] {} for {conversation_id} sealed at ({}, {}) but the log head is \
                      ({head_generation}, {head_epoch}) — catching up and re-sealing (attempt {attempt})",
                     B::PATH,
@@ -186,7 +186,7 @@ pub(super) async fn post_resealing<B: ClientRequest>(
                 if let Err(e) =
                     super::catch_up_mls_group_interleaved(state, mls_group_id, user_id).await
                 {
-                    eprintln!(
+                    crate::diag!(
                         "[messages] re-seal catch-up for {mls_group_id} failed: {e}"
                     );
                 }

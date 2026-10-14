@@ -838,6 +838,27 @@ Honest scope + roadmap: `docs/machine-checked-correctness-design.md`.
 - Phases 2-5 of the same test prove that after a reject, alice can open a fresh DM with bob (new `dm_channel.id`), bob accepts on one device, and both bob devices re-enter the MLS tree — alice→bob and bob→alice round-trips both decrypt. Alice's side may still hold a ghost row for the rejected DM (leave_dm_channel only tears the channel down when zero members remain), but bob's side shows no trace, and the rejected id never carries fresh-DM plaintext.
 - **`user_block_lifecycle`** walks block → unblock across a DM: pre-block `search_user_by_username` resolves; `block_user` inserts a `user_block` row and hides the DM from the blocker's `list_dm_channels`/`list_dm_requests` but NOT from the blocked side (dm.rs:169-173 privacy property); `create_dm_channel` fails with BLOCK_ERR while the block is active; `unblock_user` drops the row and the DM resurfaces on alice's side; a subsequent `create_dm_channel` to a fresh peer succeeds.
 
+## Diagnostics guards (#1305)
+
+- `pollis-core/tests/diag_discipline.rs` — source scan: no `eprintln!` in
+  `pollis-core/src` outside `diag.rs` (it would skip the on-device log and its
+  scrubber), and no `diag!` interpolating a content/secret-named value
+  (`filename`, `username`, `token`, `email`, …). It refuses to pass if it finds
+  fewer than 300 call sites, so a broken scanner cannot pass everything.
+- `pollis-api/src/redact.rs` unit tests — the shared scrubber (emails, IPs,
+  token-shaped runs) both logs use.
+- `pollis-delivery/tests/error_log.rs` — the table's trigger keeps ≤ 500 rows
+  and drops > 72 h; its CHECKs refuse identifying/unbounded values; the real
+  router records a failure with its request id and serves it only behind the
+  operator token; a 5xx row carries the handler's scrubbed `error!` line.
+- `frontend/tests/error-message.test.ts` and `e2e/diagnostics.spec.ts` — a
+  Tauri string rejection is shown as itself, not as the "Invalid code"
+  fallback; the Tauri mock's `verify_otp` rejects with strings for codes
+  `111111` (wrong) and `500500` (accepted, then a later step failed).
+- `mobile/.maestro/flows/diagnostics.yaml` — on a real build: the copy button
+  under a sign-in error, and Self → Diagnostics showing the core's own masked
+  `verify_otp` line (proof the file log is written on the device).
+
 ## Known flakes
 
 - The basic invite → accept → send → decrypt round trip is `commit_welcome_groupinfo_land_atomically_via_delivery_service` (it absorbed the former `channel_message_round_trip`, a strict subset). That round trip once flaked with "stream not found" during `send_group_invite`'s MLS reconcile — a libsql hrana stream timeout, sensitive to connection state accumulation. If it flakes again, the first suspect is stream lifetime, not test logic.

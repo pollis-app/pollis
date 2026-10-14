@@ -185,7 +185,7 @@ pub async fn start_screen_share(
     // protocol message is sent without a Selection).
     if let Some(sel) = &selection {
         if let Err(e) = session.writer.write_all(&encode_select(sel)).await {
-            eprintln!("[screenshare] send Select: {e}");
+            crate::diag!("[screenshare] send Select: {e}");
             return Err(fail_capture(
                 state,
                 "Could not deliver the screen-share selection to the helper. Please try again.".into(),
@@ -227,7 +227,7 @@ pub async fn start_screen_share(
     // 5-min wall-clock deadline (covers the user staring at the portal
     // picker) plus a hard cap on skipped messages.
     let mut reader = session.reader;
-    eprintln!("[screenshare] awaiting video format from helper");
+    crate::diag!("[screenshare] awaiting video format from helper");
     use pollis_capture_proto::CaptureMsg;
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(300);
     // A misbehaving helper streaming junk shouldn't keep us looping forever;
@@ -260,7 +260,7 @@ pub async fn start_screen_share(
         };
         match msg {
             Ok(Some(CaptureMsg::Format { width, height })) => {
-                eprintln!("[screenshare] helper announced {}x{}", width, height);
+                crate::diag!("[screenshare] helper announced {}x{}", width, height);
                 break (width & !1, height & !1);
             }
             // The Linux pipewire helper can deliver a Frame ahead of (or
@@ -272,7 +272,7 @@ pub async fn start_screen_share(
             // (~1 refresh later) feeds the publish loop normally. (spike/
             // tauri-revival — this path went unexercised through the Electron era.)
             Ok(Some(CaptureMsg::Frame { width, height, .. })) => {
-                eprintln!(
+                crate::diag!(
                     "[screenshare] helper sent frame before format; deriving {}x{}",
                     width, height
                 );
@@ -295,7 +295,7 @@ pub async fn start_screen_share(
                 sample_rate,
                 channels,
             })) => {
-                eprintln!(
+                crate::diag!(
                     "[screenshare/audio] helper announced {sample_rate} Hz x{channels} \
                      before video format"
                 );
@@ -319,12 +319,12 @@ pub async fn start_screen_share(
                     CaptureMsg::Cameras(_) => "cameras",
                     _ => "select-camera",
                 };
-                eprintln!(
+                crate::diag!(
                     "[screenshare] skipping unexpected '{kind}' message before format \
                      (skipped {skipped}); still waiting for format"
                 );
                 if skipped > MAX_SKIPPED_BEFORE_FORMAT {
-                    eprintln!(
+                    crate::diag!(
                         "[screenshare] helper sent {skipped} non-format messages before any \
                          format — giving up"
                     );
@@ -343,7 +343,7 @@ pub async fn start_screen_share(
                 // The video share is untouched, so downgrade rather than
                 // tear down — the share the user asked for still works.
                 if let Some(reason) = audio_error_message(&message) {
-                    eprintln!("[screenshare/audio] unavailable: {reason}");
+                    crate::diag!("[screenshare/audio] unavailable: {reason}");
                     early_audio_format = None;
                     emit(
                         state,
@@ -365,7 +365,7 @@ pub async fn start_screen_share(
                 //     an error to surface as LocalError.
                 //   - everything else (portal errors, denied permission,
                 //     SCK failures) — a genuine capture failure.
-                eprintln!("[screenshare] helper error: {message}");
+                crate::diag!("[screenshare] helper error: {message}");
                 stop_screen_share(state).await.ok();
                 let lower = message.to_lowercase();
                 if lower.starts_with("unsupported:") || lower.contains("no screencast") {
@@ -404,7 +404,7 @@ pub async fn start_screen_share(
                 .await);
             }
             Ok(None) => {
-                eprintln!("[screenshare] helper closed socket before format");
+                crate::diag!("[screenshare] helper closed socket before format");
                 stop_screen_share(state).await.ok();
                 return Err(fail_capture(
                     state,
@@ -413,7 +413,7 @@ pub async fn start_screen_share(
                 .await);
             }
             Err(e) => {
-                eprintln!("[screenshare] helper read error: {e}");
+                crate::diag!("[screenshare] helper read error: {e}");
                 stop_screen_share(state).await.ok();
                 return Err(fail_capture(
                     state,
@@ -425,7 +425,7 @@ pub async fn start_screen_share(
     };
 
     if width == 0 || height == 0 {
-        eprintln!("[screenshare] helper announced zero-size format");
+        crate::diag!("[screenshare] helper announced zero-size format");
         stop_screen_share(state).await.ok();
         return Err(fail_capture(
             state,
@@ -443,7 +443,7 @@ pub async fn start_screen_share(
         "screenshare",
         RtcVideoSource::Native(source.clone()),
     );
-    eprintln!("[screenshare] publishing track {}x{}", width, height);
+    crate::diag!("[screenshare] publishing track {}x{}", width, height);
     // Pin the encoding explicitly. With `video_encoding: None` the SDK
     // auto-selects from its quality-optimized screenshare preset table, which
     // caps any surface ≤1280px wide at 15fps (`H1080_FPS15`) — "optimized for
@@ -468,7 +468,7 @@ pub async fn start_screen_share(
         )
         .await
     {
-        eprintln!("[screenshare] publish error: {e}");
+        crate::diag!("[screenshare] publish error: {e}");
         stop_screen_share(state).await.ok();
         return Err(fail_capture(
             state,
@@ -476,7 +476,7 @@ pub async fn start_screen_share(
         )
         .await);
     }
-    eprintln!("[screenshare] track published");
+    crate::diag!("[screenshare] track published");
 
     // 6. Spawn the supervising reader task. It owns the socket + the
     //    LiveKit source from here on; on EOF / error it just exits and
@@ -600,7 +600,7 @@ pub async fn start_screen_share(
                     // that is no longer true.
                     if let Some(r) = resampler.as_mut() {
                         if r.src_rate() != sample_rate {
-                            eprintln!(
+                            crate::diag!(
                                 "[screenshare/audio] source rate changed {} -> {sample_rate} Hz",
                                 r.src_rate()
                             );
@@ -635,7 +635,7 @@ pub async fn start_screen_share(
                     // matching `stop`'s ordering. A later `AudioFormat`
                     // (device came back) republishes from scratch.
                     if let Some(reason) = audio_error_message(&message) {
-                        eprintln!("[screenshare/audio] stopped mid-share: {reason}");
+                        crate::diag!("[screenshare/audio] stopped mid-share: {reason}");
                         resampler = None;
                         echo = None;
                         unpublish_shared_audio(&state_for_task, &room_for_task).await;
@@ -693,7 +693,7 @@ async fn start_shared_audio(
     resampler: &mut Option<SharedAudioResampler>,
     echo: &mut Option<SelfEchoCanceller>,
 ) {
-    eprintln!("[screenshare/audio] helper announced {sample_rate} Hz x{channels}");
+    crate::diag!("[screenshare/audio] helper announced {sample_rate} Hz x{channels}");
     if audio_source.is_some() {
         if let Some(r) = resampler.as_mut() {
             r.set_src_rate(sample_rate);
@@ -753,7 +753,7 @@ async fn push_shared_audio(
             samples_per_channel: SHARED_AUDIO_FRAME_SAMPLES as u32,
         };
         if let Err(e) = source.capture_frame(&frame).await {
-            eprintln!("[screenshare/audio] capture_frame error: {e:?}");
+            crate::diag!("[screenshare/audio] capture_frame error: {e:?}");
         }
     }
 }

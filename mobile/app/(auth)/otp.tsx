@@ -128,6 +128,8 @@ export default function AuthOTP() {
         {verifyOtp.isError ? (
           <AuthError
             center
+            testID="text-auth-error"
+            offerDiagnostics
             message={(verifyOtp.error as Error).message || t("mobile:auth.otp.invalidCode")}
           />
         ) : null}

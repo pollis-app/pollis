@@ -144,7 +144,7 @@ pub(super) fn record_self_update(conn: &rusqlite::Connection, conversation_id: &
          ON CONFLICT(conversation_id) DO UPDATE SET last_epoch = excluded.last_epoch, last_at = excluded.last_at",
         rusqlite::params![conversation_id, epoch as i64, now],
     ) {
-        eprintln!("[mls] self-update: recording rotation for {conversation_id} failed: {e}");
+        crate::diag!("[mls] self-update: recording rotation for {conversation_id} failed: {e}");
     }
 }
 
@@ -162,7 +162,7 @@ pub(super) fn clear_self_update(conn: &rusqlite::Connection, conversation_id: &s
         "DELETE FROM mls_self_update WHERE conversation_id = ?1",
         rusqlite::params![conversation_id],
     ) {
-        eprintln!("[mls] self-update: clearing rotation for {conversation_id} failed: {e}");
+        crate::diag!("[mls] self-update: clearing rotation for {conversation_id} failed: {e}");
     }
 }
 
@@ -232,7 +232,7 @@ pub async fn self_update_group(
                     record_self_update(db.conn(), conversation_id, epoch_before + 1);
                 }
             }
-            eprintln!(
+            crate::diag!(
                 "[mls] self-update: rotated own leaf in {conversation_id} at epoch {epoch_before} → {}",
                 epoch_before + 1
             );
@@ -259,7 +259,7 @@ pub async fn self_update_group(
             )
             .await
             {
-                eprintln!("[mls] self-update: converge-after-lost-race failed for {conversation_id}: {e}");
+                crate::diag!("[mls] self-update: converge-after-lost-race failed for {conversation_id}: {e}");
             }
             Ok(false)
         }
@@ -291,7 +291,7 @@ where
     let (mut group, signer) = match load_group_with_signer(provider, conversation_id, generation) {
         Ok(pair) => pair,
         Err(e) => {
-            eprintln!("[mls] self-update: no usable local group for {conversation_id}: {e}");
+            crate::diag!("[mls] self-update: no usable local group for {conversation_id}: {e}");
             return Ok(None);
         }
     };
@@ -305,7 +305,7 @@ where
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("self-update merge pending: {e}")))?;
     if group.epoch().as_u64() != epoch_before {
         // Merging advanced us; re-read so the CAS targets the real epoch.
-        eprintln!(
+        crate::diag!(
             "[mls] self-update: merged a dangling pending commit in {conversation_id} ({epoch_before} → {})",
             group.epoch().as_u64()
         );

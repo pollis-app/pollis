@@ -145,7 +145,7 @@ pub async fn ingest_channel_envelopes_inner(
     // group-level interleaved catch-up below, NOT here.
     if let Some(ref did) = device_id {
         if let Err(e) = crate::commands::mls::poll_mls_welcomes_inner(state, user_id, did).await {
-            eprintln!("[ingest] poll_mls_welcomes for {mls_group_id}: {e}");
+            crate::diag!("[ingest] poll_mls_welcomes for {mls_group_id}: {e}");
         }
     }
 
@@ -269,7 +269,7 @@ pub async fn catch_up_mls_group_interleaved(
             if let Err(e) =
                 crate::commands::mls::ds_post_ok(state, &body).await
             {
-                eprintln!("[watermark] catch_up_group: DS advance failed for {cid}: {e}");
+                crate::diag!("[watermark] catch_up_group: DS advance failed for {cid}: {e}");
             }
         }
     }
@@ -352,7 +352,7 @@ async fn emit_delivered_batches<'a>(
             continue;
         }
         if let Err(e) = super::receipts::emit_delivered(state, conversation_id, ids).await {
-            eprintln!("[receipts] delivered emit failed for {conversation_id}: {e}");
+            crate::diag!("[receipts] delivered emit failed for {conversation_id}: {e}");
         }
     }
 }
@@ -451,7 +451,7 @@ pub(crate) async fn sweep_current_epoch(
             }
         }
         if !delivered.is_empty() {
-            eprintln!(
+            crate::diag!(
                 "[mls] pre-merge sweep of {cid} decrypted {} envelope(s) sealed at ({}, {}) — \
                  the epoch this commit closes (#1041)",
                 delivered.len(),
@@ -606,7 +606,7 @@ async fn ingest_group_envelopes_interleaved(
         )
         .await
         {
-            eprintln!("[ingest] process_pending_commits for {mls_group_id}: {e}");
+            crate::diag!("[ingest] process_pending_commits for {mls_group_id}: {e}");
         }
     }
 
@@ -953,7 +953,7 @@ pub async fn ingest_dm_envelopes_inner(
 
     if let Some(ref did) = device_id {
         if let Err(e) = crate::commands::mls::poll_mls_welcomes_inner(state, user_id, did).await {
-            eprintln!("[ingest] poll_mls_welcomes for DM {dm_channel_id}: {e}");
+            crate::diag!("[ingest] poll_mls_welcomes for DM {dm_channel_id}: {e}");
         }
     }
 
@@ -980,7 +980,7 @@ pub async fn ingest_dm_envelopes_inner(
     // peer per realtime hint.
     if let Err(e) = crate::commands::safety::batch_check_and_pin_account_keys(state, &peer_ids).await
     {
-        eprintln!("[ingest] batch_check_and_pin_account_keys for {dm_channel_id}: {e}");
+        crate::diag!("[ingest] batch_check_and_pin_account_keys for {dm_channel_id}: {e}");
     }
 
     // A DM's MLS group backs exactly one conversation (mls_group_id ==

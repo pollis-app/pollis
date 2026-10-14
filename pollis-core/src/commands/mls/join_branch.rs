@@ -79,7 +79,7 @@ pub(super) fn clear(conn: &rusqlite::Connection, conversation_id: &str, generati
         "DELETE FROM mls_kv WHERE scope = ?1 AND key = ?2",
         rusqlite::params![UNCONFIRMED_JOIN_SCOPE, key(conversation_id, generation)],
     ) {
-        eprintln!(
+        crate::diag!(
             "[mls] could not clear the unconfirmed-join marker for {conversation_id} \
              generation {generation}: {e}"
         );

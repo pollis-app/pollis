@@ -107,12 +107,12 @@ pub fn read_accounts_index() -> Result<AccountsIndex> {
             let ts = chrono::Utc::now().timestamp_millis();
             let backup = path.with_file_name(format!("accounts.bad-{ts}.json"));
             if let Err(rename_err) = std::fs::rename(&path, &backup) {
-                eprintln!(
+                crate::diag!(
                     "[accounts] failed to rename corrupt index to {}: {rename_err}",
                     backup.display()
                 );
             }
-            eprintln!(
+            crate::diag!(
                 "[accounts] accounts.json was corrupt ({parse_err}); backed up to {}",
                 backup.display()
             );
@@ -195,7 +195,7 @@ fn prune_bad_index_backups(dir: &std::path::Path) {
     backups.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
     for stale in backups.iter().skip(MAX_BAD_INDEX_BACKUPS) {
         if let Err(e) = std::fs::remove_file(stale) {
-            eprintln!("[accounts] could not prune {}: {e}", stale.display());
+            crate::diag!("[accounts] could not prune {}: {e}", stale.display());
         }
     }
 }

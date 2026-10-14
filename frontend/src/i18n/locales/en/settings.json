@@ -17,7 +17,9 @@
     "securityLabel": "Security",
     "securityDescription": "Device enrollments, identity resets",
     "shortcutsLabel": "Key Bindings",
-    "shortcutsDescription": "Global keyboard shortcuts reference"
+    "shortcutsDescription": "Global keyboard shortcuts reference",
+    "diagnosticsLabel": "Diagnostics",
+    "diagnosticsDescription": "Copy this device's log to send to support"
   },
   "preferences": {
     "title": "Preferences"
@@ -405,5 +407,14 @@
     "newCode": "Get a new code",
     "failed": "Couldn't link the device. Try again.",
     "done": "Done"
+  },
+  "diagnostics": {
+    "title": "Diagnostics",
+    "intro": "Pollis keeps a short log of what the app did on this device — sign-in steps, connection failures, errors — so a problem can be traced after it happens. It stays on this device: nothing is sent anywhere unless you copy it and send it yourself.",
+    "privacy": "It never contains your messages, file names, keys or passwords. Email addresses are reduced to their domain and network addresses are removed. Below is exactly what would be copied.",
+    "copy": "Copy diagnostics",
+    "copied": "Copied to clipboard",
+    "copyFailed": "Could not copy — try again",
+    "loadFailed": "Could not read the diagnostics log"
   }
 }

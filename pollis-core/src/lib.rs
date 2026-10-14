@@ -7,6 +7,7 @@ pub mod bridge;
 pub mod commands;
 pub mod config;
 pub mod db;
+pub mod diag;
 pub mod error;
 pub mod keystore;
 pub mod media_server;

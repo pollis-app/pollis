@@ -239,7 +239,7 @@ pub async fn delete_message(
             None,
             &message_id,
         ).await {
-            eprintln!("[realtime] delete_message: publish to group {group_id}: {e}");
+            crate::diag!("[realtime] delete_message: publish to group {group_id}: {e}");
         }
 
         return Ok(());
@@ -345,7 +345,7 @@ pub async fn delete_message(
         dm_arg,
         &message_id,
     ).await {
-        eprintln!("[realtime] delete_message: publish to room {mls_group_id}: {e}");
+        crate::diag!("[realtime] delete_message: publish to room {mls_group_id}: {e}");
     }
 
     Ok(())
@@ -408,14 +408,14 @@ pub async fn edit_message_as(
             if let Err(e) =
                 crate::commands::mls::poll_mls_welcomes_inner(state, user_id, did).await
             {
-                eprintln!("[messages] edit_message_as: poll_mls_welcomes for {mls_group_id}: {e}");
+                crate::diag!("[messages] edit_message_as: poll_mls_welcomes for {mls_group_id}: {e}");
             }
         }
     }
     if let Err(e) =
         super::catch_up_mls_group_interleaved(state, &mls_group_id, user_id).await
     {
-        eprintln!("[messages] edit_message_as: catch_up_mls_group for {mls_group_id}: {e}");
+        crate::diag!("[messages] edit_message_as: catch_up_mls_group for {mls_group_id}: {e}");
     }
 
     // Repair the local group if it is missing. Asked as "is there a group?", not
@@ -506,14 +506,14 @@ async fn send_redaction_message(
             if let Err(e) =
                 crate::commands::mls::poll_mls_welcomes_inner(state, user_id, did).await
             {
-                eprintln!("[messages] send_redaction: poll_mls_welcomes for {mls_group_id}: {e}");
+                crate::diag!("[messages] send_redaction: poll_mls_welcomes for {mls_group_id}: {e}");
             }
         }
     }
     if let Err(e) =
         super::catch_up_mls_group_interleaved(state, &mls_group_id, user_id).await
     {
-        eprintln!("[messages] send_redaction: catch_up_mls_group for {mls_group_id}: {e}");
+        crate::diag!("[messages] send_redaction: catch_up_mls_group for {mls_group_id}: {e}");
     }
 
     // Encrypt the redaction frame. Repair the local group via external-join if
@@ -728,7 +728,7 @@ pub(crate) async fn register_attachment_refs(
             message_id: message_id.to_string(),
         };
         if let Err(e) = crate::commands::mls::ds_post_ok(state, &body).await {
-            eprintln!(
+            crate::diag!(
                 "[send_message] failed to register attachment ref for {} (msg {message_id}): {e}",
                 att.content_hash
             );
@@ -775,7 +775,7 @@ async fn cleanup_attachment(
     .await;
 
     if let Err(e) = remote_result {
-        eprintln!(
+        crate::diag!(
             "[delete_message] failed to release attachment ref for {} (msg {message_id}): {e}",
             att.content_hash
         );
@@ -788,7 +788,7 @@ async fn cleanup_attachment(
     }
 
     if let Err(e) = crate::commands::r2::delete_r2_object(state, &att.r2_key).await {
-        eprintln!(
+        crate::diag!(
             "[delete_message] failed to delete R2 object {} (hash {}): {e}",
             att.r2_key, att.content_hash
         );
@@ -825,7 +825,7 @@ pub async fn edit_message(
             if let Err(e) =
                 crate::commands::mls::poll_mls_welcomes_inner(state, &user_id, did).await
             {
-                eprintln!("[messages] edit_message: poll_mls_welcomes for {mls_group_id}: {e}");
+                crate::diag!("[messages] edit_message: poll_mls_welcomes for {mls_group_id}: {e}");
             }
         }
     }
@@ -838,7 +838,7 @@ pub async fn edit_message(
     if let Err(e) =
         super::catch_up_mls_group_interleaved(state, &mls_group_id, &user_id).await
     {
-        eprintln!("[messages] edit_message: catch_up_mls_group for {mls_group_id}: {e}");
+        crate::diag!("[messages] edit_message: catch_up_mls_group for {mls_group_id}: {e}");
     }
 
     // Encrypt the new content with MLS and update local cache atomically.
@@ -953,7 +953,7 @@ pub async fn edit_message(
             None,
             &message_id,
         ).await {
-            eprintln!("[realtime] edit_message: publish to group {room_id}: {e}");
+            crate::diag!("[realtime] edit_message: publish to group {room_id}: {e}");
         }
     } else {
         if let Err(e) = crate::commands::livekit::publish_edited_message_to_room(
@@ -963,7 +963,7 @@ pub async fn edit_message(
             Some(&conversation_id),
             &message_id,
         ).await {
-            eprintln!("[realtime] edit_message: publish to DM room {room_id}: {e}");
+            crate::diag!("[realtime] edit_message: publish to DM room {room_id}: {e}");
         }
     }
 

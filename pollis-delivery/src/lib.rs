@@ -38,6 +38,7 @@ pub mod directory;
 pub mod email_change;
 pub mod emoji;
 pub mod error;
+pub mod error_log;
 pub mod groups;
 pub mod links;
 pub mod headers;
@@ -135,6 +136,9 @@ pub struct AppState {
     /// sets; `None` everywhere else, so production has no recorder at all and
     /// `GET /v1/ops/otp-requests` 404s there.
     pub ops_log: Option<ops_log::OpsLog>,
+    /// Write budget for the failed-request log ([`error_log`], #1305). The rows
+    /// themselves live in `ds_error_log`, bounded by that table's trigger.
+    pub error_log: error_log::ErrorLog,
 }
 
 impl AppState {
@@ -169,6 +173,7 @@ impl AppState {
             metrics_token: None,
             // Default-off, like the metrics token: `main` opts in from env.
             ops_log: None,
+            error_log: error_log::ErrorLog::default(),
         }
     }
 
@@ -328,6 +333,7 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route("/v1/retention/metrics", get(retention_metrics))
         .route("/v1/config", get(effective_config))
         .route("/v1/ops/otp-requests", get(ops_log::otp_requests))
+        .route("/v1/ops/errors", get(error_log::list))
         .route(<SubmitBody as DsRequest>::PATH, post(submit))
         .route(<CommitSinceReport as DsRequest>::PATH, post(report_commit_since))
         .route(<writes::GroupInfoBody as DsRequest>::PATH, post(writes::group_info))
@@ -506,6 +512,10 @@ pub fn build_router_with_state(state: AppState) -> Router {
         // run (no session). Rate-limited on the tight `probe` tier. See #987
         // §6.5 and `account_reads::account_probe`.
         .route(<account_reads::AccountProbeBody as DsRequest>::PATH, post(account_reads::account_probe))
+        // Failed-request log (#1305). A ROUTE layer, so it runs only for requests
+        // the router matched (it needs the matched pattern, never the raw path)
+        // and sits inside the limiter, whose own 429s it never sees.
+        .route_layer(from_fn_with_state(state.clone(), error_log::record))
         // Hardening middleware (#345). Rate limiting runs first (inner); security
         // headers are added last so they wrap every response, including the
         // rate-limiter's own 429s and any error replies.

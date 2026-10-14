@@ -207,14 +207,14 @@ pub async fn start_screen_share(
         )
         .await
     {
-        eprintln!("[screenshare] publish error: {e}");
+        crate::diag!("[screenshare] publish error: {e}");
         return Err(fail_capture(
             state,
             "Could not publish the screen-share to the call. Check your connection and try again.".into(),
         )
         .await);
     }
-    eprintln!("[screenshare] track published");
+    crate::diag!("[screenshare] track published");
 
     // 2. Fresh per-session fence + the frames sink for the self-preview.
     let active_flag = std::sync::Arc::new(AtomicBool::new(true));
@@ -403,11 +403,11 @@ async fn start_windows_audio(
                     samples_per_channel: SHARED_AUDIO_FRAME_SAMPLES as u32,
                 };
                 if let Err(e) = source.capture_frame(&frame).await {
-                    eprintln!("[screenshare/audio] capture_frame error: {e:?}");
+                    crate::diag!("[screenshare/audio] capture_frame error: {e:?}");
                 }
             }
         }
-        eprintln!("[screenshare/audio] windows publish loop ended");
+        crate::diag!("[screenshare/audio] windows publish loop ended");
         // The capture thread hung up while the share is still running:
         // a mid-share audio failure (device removed, WASAPI error), not a
         // stop. Retire the track rather than leave it published with
@@ -489,7 +489,7 @@ fn run_capture_thread(
                     return;
                 }
                 Err(e) => {
-                    eprintln!("[screenshare] WGC picker error: {e}");
+                    crate::diag!("[screenshare] WGC picker error: {e}");
                     let _ = size_tx.send(WgcStart::Failed(
                         "Windows could not open the screen-share picker. Please try again.".into(),
                     ));
@@ -499,7 +499,7 @@ fn run_capture_thread(
             let (sw, sh) = match picked.size() {
                 Ok(s) => s,
                 Err(e) => {
-                    eprintln!("[screenshare] WGC picker size: {e}");
+                    crate::diag!("[screenshare] WGC picker size: {e}");
                     let _ = size_tx.send(WgcStart::Failed(
                         "Could not read the selected screen-share source. Please try again."
                             .into(),
@@ -515,11 +515,11 @@ fn run_capture_thread(
                 ));
                 return;
             }
-            eprintln!("[screenshare] windows picked {}x{}", width, height);
+            crate::diag!("[screenshare] windows picked {}x{}", width, height);
             let settings = settings_for!(picked);
             let _ = size_tx.send(WgcStart::Size(width, height));
             if let Err(e) = WindowsCaptureHandler::start(settings) {
-                eprintln!("[screenshare] WGC start/stop: {e}");
+                crate::diag!("[screenshare] WGC start/stop: {e}");
                 if let Some(ev) = &events_for_thread {
                     let _ = ev.send(ScreenShareEvent::LocalError { message: started_msg.into() });
                 }
@@ -541,11 +541,11 @@ fn run_capture_thread(
                 ));
                 return;
             }
-            eprintln!("[screenshare] in-app picker (display) {}x{}", width, height);
+            crate::diag!("[screenshare] in-app picker (display) {}x{}", width, height);
             let settings = settings_for!(monitor);
             let _ = size_tx.send(WgcStart::Size(width, height));
             if let Err(e) = WindowsCaptureHandler::start(settings) {
-                eprintln!("[screenshare] WGC start/stop: {e}");
+                crate::diag!("[screenshare] WGC start/stop: {e}");
                 if let Some(ev) = &events_for_thread {
                     let _ = ev.send(ScreenShareEvent::LocalError { message: started_msg.into() });
                 }
@@ -567,11 +567,11 @@ fn run_capture_thread(
                 ));
                 return;
             }
-            eprintln!("[screenshare] in-app picker (window) {}x{}", width, height);
+            crate::diag!("[screenshare] in-app picker (window) {}x{}", width, height);
             let settings = settings_for!(window);
             let _ = size_tx.send(WgcStart::Size(width, height));
             if let Err(e) = WindowsCaptureHandler::start(settings) {
-                eprintln!("[screenshare] WGC start/stop: {e}");
+                crate::diag!("[screenshare] WGC start/stop: {e}");
                 if let Some(ev) = &events_for_thread {
                     let _ = ev.send(ScreenShareEvent::LocalError { message: started_msg.into() });
                 }

@@ -42,7 +42,7 @@ async fn send_data_to_room(
     let state = Arc::clone(state);
     tokio::spawn(async move {
         if let Err(e) = crate::commands::mls::ds_livekit_send_data(&state, &room_name, payload).await {
-            eprintln!("[realtime] SendData -> {room_name} error (non-fatal): {e}");
+            crate::diag!("[realtime] SendData -> {room_name} error (non-fatal): {e}");
         }
     });
     Ok(())

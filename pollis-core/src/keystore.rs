@@ -687,11 +687,11 @@ mod file_backend {
             // misleading name — remove it, but never at the cost of failing.
             if old.exists() {
                 match std::fs::remove_file(&old) {
-                    Ok(()) => eprintln!(
+                    Ok(()) => crate::diag!(
                         "[keystore] removed the superseded {} (#950)",
                         old.display()
                     ),
-                    Err(e) => eprintln!(
+                    Err(e) => crate::diag!(
                         "[keystore] could not remove the superseded {}: {e}",
                         old.display()
                     ),
@@ -711,7 +711,7 @@ mod file_backend {
         let (map, _) = match read_map_at(&old, codec) {
             Ok(m) => m,
             Err(e) => {
-                eprintln!(
+                crate::diag!(
                     "[keystore] cannot read {} ({e}); leaving it exactly where it is",
                     old.display()
                 );
@@ -721,7 +721,7 @@ mod file_backend {
 
         // 2. Write the new file, then prove it reads back as the same map.
         if let Err(e) = write_map_at(&new, codec, &map) {
-            eprintln!(
+            crate::diag!(
                 "[keystore] could not write {} ({e}); staying on {}",
                 new.display(),
                 old.display()
@@ -735,7 +735,7 @@ mod file_backend {
                 // Deliberately not printing `other` — it can hold decrypted key
                 // material.
                 let _ = other;
-                eprintln!(
+                crate::diag!(
                     "[keystore] {} did not read back correctly; staying on {}",
                     new.display(),
                     old.display()
@@ -747,11 +747,11 @@ mod file_backend {
 
         // 3. The new file is real and complete. The old one may go.
         match std::fs::remove_file(&old) {
-            Ok(()) => eprintln!(
+            Ok(()) => crate::diag!(
                 "[keystore] renamed the keystore to {} (#950)",
                 new.display()
             ),
-            Err(e) => eprintln!(
+            Err(e) => crate::diag!(
                 "[keystore] wrote {} but could not remove {}: {e} — the next \
                  start will retry",
                 new.display(),
@@ -983,7 +983,7 @@ mod file_backend {
                 // Note this is only reachable AFTER a successful decrypt (#882),
                 // so it means genuinely malformed plaintext, never wrong-machine
                 // ciphertext.
-                eprintln!(
+                crate::diag!(
                     "[keystore] {} decrypted but did not parse ({parse_err}); \
                      leaving it untouched — it may still hold recoverable keys",
                     path.display()
@@ -1078,10 +1078,10 @@ mod file_backend {
         // keys at all.
         if legacy {
             match write_map_at(path, codec, &map) {
-                Ok(()) => eprintln!(
+                Ok(()) => crate::diag!(
                     "[keystore] re-wrote the plaintext keystore encrypted at rest (#882)"
                 ),
-                Err(e) => eprintln!(
+                Err(e) => crate::diag!(
                     "[keystore] could not re-encrypt the plaintext keystore ({e}); \
                      it is unchanged and still readable"
                 ),
@@ -1166,7 +1166,7 @@ mod file_backend {
         match read_map_at(&resolve_store(&codec), &codec) {
             Ok((map, _)) => map_holds_current_namespace_keys(&map),
             Err(e) => {
-                eprintln!(
+                crate::diag!(
                     "[keystore] could not inspect the file store while choosing a \
                      backend ({e}); treating it as empty"
                 );
@@ -1784,11 +1784,11 @@ mod keychain_backend {
         match Entry::new(SERVICE, &namespaced("backend-probe")).map(|e| e.get_password()) {
             Ok(Ok(_)) | Ok(Err(keyring::Error::NoEntry)) => true,
             Ok(Err(e)) => {
-                eprintln!("[keystore] OS keychain unavailable ({e})");
+                crate::diag!("[keystore] OS keychain unavailable ({e})");
                 false
             }
             Err(e) => {
-                eprintln!("[keystore] OS keychain unavailable ({e})");
+                crate::diag!("[keystore] OS keychain unavailable ({e})");
                 false
             }
         }
@@ -1914,7 +1914,7 @@ mod backend {
     #[cfg(feature = "os-keystore")]
     fn keychain_or_file() -> BackendKind {
         if !super::keychain_backend::available() {
-            eprintln!(
+            crate::diag!(
                 "[keystore] no usable OS keychain on this host; \
                  falling back to the machine-bound encrypted file store"
             );
@@ -1950,7 +1950,7 @@ mod backend {
         //   * The check is namespace-scoped, so a second dev instance's keys in
         //     the shared file never pin the first instance's backend.
         if super::file_backend::holds_current_namespace_keys() {
-            eprintln!(
+            crate::diag!(
                 "[keystore] an OS keychain is available, but this install's keys \
                  already live in the encrypted file store; staying there so the \
                  device is not treated as new (#950)"

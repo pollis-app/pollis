@@ -20,7 +20,7 @@ pub async fn on_remote_video_subscribed(
     state: &Arc<AppState>,
 ) {
     let track_key = format!("{}-{}", participant_identity, track.sid());
-    eprintln!("[screenshare] remote video subscribed: {track_key} (source={source:?})");
+    crate::diag!("[screenshare] remote video subscribed: {track_key} (source={source:?})");
 
     let (events, frames) = {
         let ss = state.screenshare.lock().await;

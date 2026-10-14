@@ -157,7 +157,7 @@ pub(super) async fn migrate_to_current_suite_if_due(
     //    closing a lineage we haven't finished reading would orphan the tail.
     let head = head_epoch_in(state, conversation_id, generation).await?;
     if head != local_epoch {
-        eprintln!(
+        crate::diag!(
             "[mls] migrate: {conversation_id} is at epoch {local_epoch} but generation \
              {generation} heads at {head} — deferring until drained"
         );
@@ -197,7 +197,7 @@ pub(super) async fn migrate_to_current_suite_if_due(
         actor_user_id,
         &actor_device_id,
     ) {
-        eprintln!(
+        crate::diag!(
             "[mls] migrate: refusing {conversation_id}: registered_devices snapshot \
              ({} device(s)) omits this device — deferring rather than migrating a subset",
             valid_devices.len()
@@ -216,7 +216,7 @@ pub(super) async fn migrate_to_current_suite_if_due(
         match super::ds_claim_key_package(state, uid, Some(did), current_suite()).await? {
             Some(kp) => kp_tuples.push((uid.clone(), did.clone(), kp)),
             None => {
-                eprintln!(
+                crate::diag!(
                     "[mls] migrate: {conversation_id} — no current-suite KeyPackage for {uid}:{did}; \
                      aborting so nobody is left behind on the old lineage"
                 );
@@ -292,7 +292,7 @@ pub(super) async fn migrate_to_current_suite_if_due(
             // Someone committed on the old lineage (or migrated it first) between
             // our read and our write. Our staged commit was rolled back; the
             // successor group itself is ours alone and now meaningless.
-            eprintln!(
+            crate::diag!(
                 "[mls] migrate: {conversation_id} lost the generation-{successor} race — \
                  discarding the successor and staying on {generation}"
             );
@@ -322,7 +322,7 @@ pub(super) async fn migrate_to_current_suite_if_due(
     }
     let _ = forget_local_mls_group_at(state, conversation_id, generation).await;
 
-    eprintln!(
+    crate::diag!(
         "[mls] migrate: {conversation_id} moved to the current suite — generation \
          {generation} (head {head}) closed, generation {successor} open at epoch 1"
     );
@@ -420,7 +420,7 @@ where
 /// until the lineage row moves) and the next attempt deletes it on create.
 async fn abandon_successor(state: &Arc<AppState>, conversation_id: &str, successor: i64) {
     if let Err(e) = forget_local_mls_group_at(state, conversation_id, successor).await {
-        eprintln!("[mls] migrate: discarding successor {successor} for {conversation_id}: {e}");
+        crate::diag!("[mls] migrate: discarding successor {successor} for {conversation_id}: {e}");
     }
 }
 

@@ -281,7 +281,7 @@ pub async fn generate_account_identity_material(
     // caller POSTs it to `establish-identity` next; recording it here is what
     // lets a LATER unwrap on this device be checked against something.
     if let Err(e) = remember_published_account_id_pub(state, user_id, &public_bytes).await {
-        eprintln!("[identity] could not record the published account_id_pub: {e}");
+        crate::diag!("[identity] could not record the published account_id_pub: {e}");
     }
 
     Ok((
@@ -543,10 +543,10 @@ pub(crate) async fn adopt_recovered_account_identity(
     // for. Drop it and the marker together, so a device that re-enrolls is not
     // left holding a key it can never use.
     if let Err(e) = wipe_local_account_identity(state, user_id).await {
-        eprintln!("[enrollment] clearing the superseded local key (non-fatal): {e}");
+        crate::diag!("[enrollment] clearing the superseded local key (non-fatal): {e}");
     }
     if let Err(e) = clear_account_identity_superseded(state, user_id).await {
-        eprintln!("[enrollment] clearing the superseded marker (non-fatal): {e}");
+        crate::diag!("[enrollment] clearing the superseded marker (non-fatal): {e}");
     }
 
     *state.unlock.lock().await = Some(unlock_state_with_fresh_db_key(user_id, seed));
@@ -687,10 +687,10 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
     //     is the one that rotated it. Re-pin, and drop any superseded marker —
     //     this device is the account's identity now, by construction.
     if let Err(e) = remember_published_account_id_pub(state, user_id, &public_bytes).await {
-        eprintln!("[reset] could not record the rotated account_id_pub: {e}");
+        crate::diag!("[reset] could not record the rotated account_id_pub: {e}");
     }
     if let Err(e) = clear_account_identity_superseded(state, user_id).await {
-        eprintln!("[reset] could not clear the superseded marker: {e}");
+        crate::diag!("[reset] could not clear the superseded marker: {e}");
     }
 
     // 5. Re-sign every existing `user_device` row for this user against
@@ -702,7 +702,7 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
     //    device next runs `ensure_device_cert` on its own. Best-effort
     //    — failure here doesn't block the reset, but is logged.
     if let Err(e) = crate::commands::mls::resign_stale_device_certs(state, user_id).await {
-        eprintln!(
+        crate::diag!(
             "[reset] resign_stale_device_certs failed (non-fatal): {e}"
         );
     }
@@ -710,7 +710,7 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
     // 6. The `identity_rotated` security event was appended by the DS inside
     //    the rotation transaction above (credential kind recorded server-side),
     //    so there is nothing for this client to write.
-    eprintln!("[reset] identity rotated to version {new_version} for {user_id}");
+    crate::diag!("[reset] identity rotated to version {new_version} for {user_id}");
 
     Ok(secret_key_display)
 }

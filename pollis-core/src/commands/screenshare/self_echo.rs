@@ -143,7 +143,7 @@ impl SelfEchoCanceller {
         let stage = match ApmStage::new(SHARED_AUDIO_RATE_HZ, config) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("[screenshare/audio] self-echo canceller unavailable: {e}");
+                crate::diag!("[screenshare/audio] self-echo canceller unavailable: {e}");
                 return None;
             }
         };
@@ -153,10 +153,10 @@ impl SelfEchoCanceller {
                 resampler: SharedAudioResampler::new(SHARED_AUDIO_RATE_HZ),
             });
         } else {
-            eprintln!("[screenshare/audio] render slot poisoned; self-echo cancellation off");
+            crate::diag!("[screenshare/audio] render slot poisoned; self-echo cancellation off");
             return None;
         }
-        eprintln!("[screenshare/audio] self-echo cancellation armed @ 48 kHz (AEC only)");
+        crate::diag!("[screenshare/audio] self-echo cancellation armed @ 48 kHz (AEC only)");
         Some(Self { stage })
     }
 
@@ -170,7 +170,7 @@ impl SelfEchoCanceller {
             frame,
             SHARED_AUDIO_FRAME_SAMPLES,
         ) {
-            eprintln!("[screenshare/audio] self-echo capture error: {e}");
+            crate::diag!("[screenshare/audio] self-echo capture error: {e}");
         }
     }
 }

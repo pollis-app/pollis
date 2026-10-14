@@ -231,7 +231,7 @@ pub(super) async fn publish_shared_audio_track(
         )
         .await
     {
-        eprintln!("[screenshare/audio] publish error: {e}");
+        crate::diag!("[screenshare/audio] publish error: {e}");
         emit(
             state,
             ScreenShareEvent::LocalAudioUnavailable {
@@ -243,7 +243,7 @@ pub(super) async fn publish_shared_audio_track(
         .await;
         return None;
     }
-    eprintln!("[screenshare/audio] shared-audio track published @ 48 kHz mono");
+    crate::diag!("[screenshare/audio] shared-audio track published @ 48 kHz mono");
     {
         let mut ss = state.screenshare.lock().await;
         ss.local_audio_source = Some(source.clone());
@@ -295,10 +295,10 @@ pub(super) async fn unpublish_shared_audio(state: &Arc<AppState>, room: &Arc<Roo
     };
     let sid = track.sid();
     if let Err(e) = room.local_participant().unpublish_track(&sid).await {
-        eprintln!("[screenshare/audio] unpublish error: {e}");
+        crate::diag!("[screenshare/audio] unpublish error: {e}");
     }
     drop(source);
-    eprintln!("[screenshare/audio] shared-audio track unpublished");
+    crate::diag!("[screenshare/audio] shared-audio track unpublished");
 }
 
 /// Send one screen-share event without holding the state lock across the

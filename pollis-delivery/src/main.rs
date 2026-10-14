@@ -41,14 +41,18 @@ use pollis_delivery::{build_app_state, build_router_with_state, db::Db};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
+    use tracing_subscriber::prelude::*;
+    tracing_subscriber::registry()
+        .with(
             // No `tower_http` target: the DS has no request-tracing layer, and one
             // must not be added — it would log request headers, client IP
             // included (tests/no_client_ip_exposure.rs).
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "pollis_delivery=info".into()),
         )
+        .with(tracing_subscriber::fmt::layer())
+        // Copies a request's warn!/error! lines into its ds_error_log row (#1305).
+        .with(pollis_delivery::error_log::CaptureLayer)
         .init();
 
     let url = std::env::var("TURSO_URL").context("TURSO_URL must be set")?;

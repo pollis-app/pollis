@@ -304,9 +304,9 @@ pub fn run() {
                 let prev = rl.rlim_cur;
                 rl.rlim_cur = target;
                 if libc::setrlimit(libc::RLIMIT_NOFILE, &rl) == 0 {
-                    eprintln!("[startup] raised RLIMIT_NOFILE soft limit {prev} -> {target}");
+                    pollis_core::diag!("[startup] raised RLIMIT_NOFILE soft limit {prev} -> {target}");
                 } else {
-                    eprintln!("[startup] setrlimit(RLIMIT_NOFILE, {target}) failed: {}", std::io::Error::last_os_error());
+                    pollis_core::diag!("[startup] setrlimit(RLIMIT_NOFILE, {target}) failed: {}", std::io::Error::last_os_error());
                 }
             }
         }
@@ -395,6 +395,13 @@ pub fn run() {
                 pollis_core::commands::r2::set_media_cache_dir(cache_dir);
             }
 
+            // On-device diagnostics log (#1305). Opened before AppState so the
+            // startup path is in it; a failure leaves logging on stderr only.
+            let log_dir = pollis_core::diag::log_dir(&pollis_core::db::local::dirs_path());
+            if let Err(e) = pollis_core::diag::init(&log_dir) {
+                pollis_core::diag!("[diag] could not open the diagnostics log: {e}");
+            }
+
             tauri::async_runtime::block_on(async move {
                 let state = AppState::new(config).await.map_err(|e| e.to_string())?;
                 let state = Arc::new(state);
@@ -407,7 +414,7 @@ pub fn run() {
                 if let Err(e) =
                     pollis_core::commands::overlay::apply_overlay_mode(&state, boot_mode).await
                 {
-                    eprintln!("[overlay] boot apply ({boot_mode:?}) failed, staying direct: {e}");
+                    pollis_core::diag!("[overlay] boot apply ({boot_mode:?}) failed, staying direct: {e}");
                 }
 
                 // Loopback HTTP server for cached media. The webview
@@ -420,7 +427,7 @@ pub fn run() {
                         *state.media_server_port.lock().await = Some(port);
                     }
                     Err(e) => {
-                        eprintln!("[setup] failed to spawn media server: {e}");
+                        pollis_core::diag!("[setup] failed to spawn media server: {e}");
                     }
                 }
 
@@ -490,6 +497,7 @@ pub fn run() {
             commands::media_permissions::revoke_media_permissions,
             commands::media_permissions::set_revoke_media_on_exit,
             commands::auth::initialize_identity,
+            commands::diagnostics::get_diagnostics,
             commands::auth::get_identity,
             commands::auth::request_otp,
             commands::auth::verify_otp,

@@ -223,6 +223,7 @@ const PAGE_RESULTS: PageResultSpec[] = [
   { id: "page-voice-settings", nameKey: "pages.voiceName", keywordsKey: "pages.voiceKeywords", breadcrumb: "/settings/voice", path: "/voice-settings" },
   { id: "page-security", nameKey: "pages.securityName", keywordsKey: "pages.securityKeywords", breadcrumb: "/security", path: "/security" },
   { id: "page-shortcuts", nameKey: "pages.shortcutsName", keywordsKey: "pages.shortcutsKeywords", breadcrumb: "/shortcuts", path: "/shortcuts" },
+  { id: "page-diagnostics", nameKey: "pages.diagnosticsName", keywordsKey: "pages.diagnosticsKeywords", breadcrumb: "/diagnostics", path: "/diagnostics" },
   { id: "page-update", nameKey: "pages.updateName", keywordsKey: "pages.updateKeywords", breadcrumb: "/update", path: "/update" },
   { id: "page-invites", nameKey: "pages.invitesName", keywordsKey: "pages.invitesKeywords", breadcrumb: "/invites", path: "/invites" },
   { id: "page-join", nameKey: "pages.joinName", keywordsKey: "pages.joinKeywords", breadcrumb: "/join", path: "/join" },

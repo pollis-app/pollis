@@ -186,6 +186,10 @@ export default function RootLayout() {
                 name="self/saved"
                 options={settingsPage}
               />
+              <Stack.Screen
+                name="self/diagnostics"
+                options={settingsPage}
+              />
               <Stack.Screen name="m/[...permalink]" />
               <Stack.Screen
                 name="self/delete-account"

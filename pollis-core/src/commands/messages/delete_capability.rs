@@ -120,7 +120,7 @@ pub(super) async fn envelope_delete_token_hash(
     match seed {
         Some(seed) => Some(delete_token_hash(&seed, envelope_id)),
         None => {
-            eprintln!(
+            crate::diag!(
                 "[messages] no delete capability for envelope {envelope_id} (locked); \
                  it falls back to the pre-#1086 membership check"
             );

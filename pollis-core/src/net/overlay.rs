@@ -687,7 +687,7 @@ fn load_relay_endpoints(config: &Config) -> Vec<RelayEndpoint> {
     let cert = match config.overlay_relay_cert.as_deref().and_then(load_pinned_cert) {
         Some(c) => c,
         None => {
-            eprintln!("[overlay] relay endpoint set but no valid pinned cert — staying fail-closed");
+            crate::diag!("[overlay] relay endpoint set but no valid pinned cert — staying fail-closed");
             return Vec::new();
         }
     };
@@ -927,7 +927,7 @@ async fn fetch_and_build_pool(
     // checks against is the one this directory commits to.
     admission.observe_directory(&dir);
     if let Err(e) = admission.refresh(url, &dir, now).await {
-        eprintln!("[overlay] revocation list unusable ({e}) — relays fail closed while the directory anchors one");
+        crate::diag!("[overlay] revocation list unusable ({e}) — relays fail closed while the directory anchors one");
     }
     let endpoints = directory_to_endpoints(&dir);
     if endpoints.is_empty() {
@@ -1001,7 +1001,7 @@ async fn directory_refresh_loop(
                 None => return,
             },
             Err(e) => {
-                eprintln!("[overlay] directory refresh failed, keeping current pool: {e}");
+                crate::diag!("[overlay] directory refresh failed, keeping current pool: {e}");
                 // Jittered: a directory outage fails every client at once, so a
                 // flat retry marches the whole fleet back onto the host in
                 // lockstep the moment it returns (#875).
@@ -1039,7 +1039,7 @@ async fn build_directory_factory(state: &Arc<AppState>) -> Arc<dyn CircuitFactor
     {
         Ok((factory, expires_at)) => (factory, until_refresh(expires_at)),
         Err(e) => {
-            eprintln!("[overlay] initial directory fetch failed, fail-closed until refresh: {e}");
+            crate::diag!("[overlay] initial directory fetch failed, fail-closed until refresh: {e}");
             let empty: Arc<dyn CircuitFactory> = Arc::new(RealRelayFactory::new(
                 weak_state.clone(),
                 Vec::new(),
@@ -1110,7 +1110,7 @@ pub(crate) async fn start_overlay_shim(
             .as_deref()
             .unwrap_or("<none configured>")
     };
-    eprintln!(
+    crate::diag!(
         "[overlay] shim on {} (mode={mode:?}, relay={relay})",
         handle.socks_addr()
     );

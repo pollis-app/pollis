@@ -294,7 +294,7 @@ impl AutoLockHost for AppStateHost {
 
     async fn lock(&self) {
         if let Err(e) = crate::commands::pin::lock(&self.0).await {
-            eprintln!("[autolock] lock failed: {e}");
+            crate::diag!("[autolock] lock failed: {e}");
         }
     }
 }

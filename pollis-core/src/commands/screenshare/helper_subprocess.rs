@@ -55,7 +55,7 @@ pub(super) async fn spawn_and_accept_helper(
     let listener = match UnixListener::bind(&socket_path) {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("[screenshare] bind unix socket: {e}");
+            crate::diag!("[screenshare] bind unix socket: {e}");
             return Err(fail_capture(
                 state,
                 "Could not set up the screen-capture channel. Please try again.".into(),
@@ -67,7 +67,7 @@ pub(super) async fn spawn_and_accept_helper(
     let helper_path = match locate_capture_helper() {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("[screenshare] locate helper: {e}");
+            crate::diag!("[screenshare] locate helper: {e}");
             return Err(fail_capture(
                 state,
                 "Screen-capture helper not found. Reinstall Pollis or rebuild the capture helper.".into(),
@@ -75,7 +75,7 @@ pub(super) async fn spawn_and_accept_helper(
             .await);
         }
     };
-    eprintln!(
+    crate::diag!(
         "[screenshare] spawning helper {} on socket {}",
         helper_path.display(),
         socket_path.display()
@@ -94,7 +94,7 @@ pub(super) async fn spawn_and_accept_helper(
     let mut helper = match helper {
         Ok(h) => h,
         Err(e) => {
-            eprintln!("[screenshare] spawn {}: {e}", helper_path.display());
+            crate::diag!("[screenshare] spawn {}: {e}", helper_path.display());
             return Err(fail_capture(
                 state,
                 "Could not launch the screen-capture helper. Please try again.".into(),
@@ -107,11 +107,11 @@ pub(super) async fn spawn_and_accept_helper(
     let (stream, _addr) = tokio::select! {
         res = accept_fut => match res {
             Ok(r) => {
-                eprintln!("[screenshare] helper connected");
+                crate::diag!("[screenshare] helper connected");
                 r
             }
             Err(e) => {
-                eprintln!("[screenshare] accept: {e}");
+                crate::diag!("[screenshare] accept: {e}");
                 let _ = std::fs::remove_file(&socket_path);
                 return Err(fail_capture(
                     state,
@@ -121,7 +121,7 @@ pub(super) async fn spawn_and_accept_helper(
             }
         },
         status = helper.wait() => {
-            eprintln!("[screenshare] helper exited before connecting: {status:?}");
+            crate::diag!("[screenshare] helper exited before connecting: {status:?}");
             let _ = std::fs::remove_file(&socket_path);
             return Err(fail_capture(
                 state,

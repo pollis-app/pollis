@@ -371,7 +371,7 @@ pub async fn maybe_rewrap_pin_key(state: &Arc<AppState>, mls_conversation_id: &s
         let cached = match read_cache(db.conn(), mls_conversation_id) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("[pins] key cache read failed for {mls_conversation_id}: {e}");
+                crate::diag!("[pins] key cache read failed for {mls_conversation_id}: {e}");
                 return;
             }
         };
@@ -405,11 +405,11 @@ pub async fn maybe_rewrap_pin_key(state: &Arc<AppState>, mls_conversation_id: &s
             if let Err(e) =
                 conn_update_markers(db.conn(), mls_conversation_id, kek.generation, kek.epoch)
             {
-                eprintln!("[pins] cache marker update failed for {mls_conversation_id}: {e}");
+                crate::diag!("[pins] cache marker update failed for {mls_conversation_id}: {e}");
             }
         }
         Err(e) => {
-            eprintln!("[pins] re-wrap failed for {mls_conversation_id} (will retry on the next pass): {e}");
+            crate::diag!("[pins] re-wrap failed for {mls_conversation_id} (will retry on the next pass): {e}");
         }
     }
 }
@@ -444,7 +444,7 @@ pub async fn try_adopt_pin_key(state: &Arc<AppState>, mls_conversation_id: &str)
         Ok(Some(_)) => {}
         Ok(None) => {}
         Err(e) => {
-            eprintln!("[pins] pin-key adopt failed for {mls_conversation_id} (will retry lazily): {e}");
+            crate::diag!("[pins] pin-key adopt failed for {mls_conversation_id} (will retry lazily): {e}");
         }
     }
 }
@@ -458,7 +458,7 @@ pub async fn mint_pin_key_for_new_group(state: &Arc<AppState>, conversation_id: 
         Err(_) => return,
     };
     if let Err(e) = ensure_kpin(state, conversation_id, &user_id, true).await {
-        eprintln!("[pins] create-time key mint failed for {conversation_id} (first pin will mint): {e}");
+        crate::diag!("[pins] create-time key mint failed for {conversation_id} (first pin will mint): {e}");
     }
 }
 
@@ -597,7 +597,7 @@ pub async fn list_pinned_messages(
         let padded = match open(&kpin, &nonce, &ct) {
             Ok(p) => p,
             Err(e) => {
-                eprintln!("[pins] undecryptable pin {} skipped: {e}", pin.id);
+                crate::diag!("[pins] undecryptable pin {} skipped: {e}", pin.id);
                 continue;
             }
         };
@@ -605,12 +605,12 @@ pub async fn list_pinned_messages(
         let snapshot: PinSnapshot = match serde_json::from_slice(&json) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("[pins] unparseable pin {} skipped: {e}", pin.id);
+                crate::diag!("[pins] unparseable pin {} skipped: {e}", pin.id);
                 continue;
             }
         };
         if snapshot.message_id != pin.message_id || snapshot.conversation_id != conversation_id {
-            eprintln!(
+            crate::diag!(
                 "[pins] pin {} names a different message/conversation inside its \
                  ciphertext — skipped (possible row splice)",
                 pin.id

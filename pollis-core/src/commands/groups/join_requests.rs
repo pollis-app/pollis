@@ -63,7 +63,7 @@ pub async fn request_group_access(
         state,
         &group_id,
     ).await {
-        eprintln!("[realtime] request_group_access: notify group {group_id}: {e}");
+        crate::diag!("[realtime] request_group_access: notify group {group_id}: {e}");
     }
 
     Ok(())
@@ -166,7 +166,7 @@ pub async fn approve_join_request(
     if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
         state, &group_id, &approver_id,
     ).await {
-        eprintln!("[mls] approve_join_request: reconcile for group {group_id}: {e}");
+        crate::diag!("[mls] approve_join_request: reconcile for group {group_id}: {e}");
     }
 
     // Notify requester their join request was approved so they see the group immediately.
@@ -177,7 +177,7 @@ pub async fn approve_join_request(
         &requester_id,
         serde_json::json!({"type": "membership_changed", "group_id": group_id, "kind": "approval"}),
     ).await {
-        eprintln!("[inbox] approve_join_request: notify {requester_id} failed: {e}");
+        crate::diag!("[inbox] approve_join_request: notify {requester_id} failed: {e}");
     }
 
     // Notify existing group members so they refetch the member list.
@@ -185,7 +185,7 @@ pub async fn approve_join_request(
         &state.livekit,
         &group_id,
     ).await {
-        eprintln!("[realtime] approve_join_request: notify group {group_id}: {e}");
+        crate::diag!("[realtime] approve_join_request: notify group {group_id}: {e}");
     }
 
     Ok(())

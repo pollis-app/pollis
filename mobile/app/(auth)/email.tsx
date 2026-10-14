@@ -53,6 +53,7 @@ export default function AuthEmail() {
         </View>
         {requestOtp.isError ? (
           <AuthError
+            offerDiagnostics
             message={(requestOtp.error as Error).message || t("mobile:auth.email.sendFailed")}
           />
         ) : null}

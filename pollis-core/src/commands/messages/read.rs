@@ -246,7 +246,7 @@ async fn attach_sender_usernames_local(
             Err(e) => {
                 // Offline or transient — leave the missing names as None.
                 // Next ingest / read while online will fill them in.
-                eprintln!("[messages] attach_sender_usernames_local: remote fallback failed: {e}");
+                crate::diag!("[messages] attach_sender_usernames_local: remote fallback failed: {e}");
             }
         }
     }

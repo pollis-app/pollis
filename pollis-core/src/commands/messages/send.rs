@@ -102,7 +102,7 @@ pub async fn send_message(
         let device_id = state.device_id.lock().await.clone();
         if let Some(ref did) = device_id {
             if let Err(e) = crate::commands::mls::poll_mls_welcomes_inner(state, &sender_id, did).await {
-                eprintln!("[messages] send_message: poll_mls_welcomes for {mls_group_id}: {e}");
+                crate::diag!("[messages] send_message: poll_mls_welcomes for {mls_group_id}: {e}");
             }
         }
     }
@@ -120,7 +120,7 @@ pub async fn send_message(
     // send_message holds no MLS group lock, so re-acquiring it inside the
     // catch-up cannot deadlock.
     if let Err(e) = super::catch_up_mls_group_interleaved(state, &mls_group_id, &sender_id).await {
-        eprintln!("[messages] send_message: catch_up_mls_group for {mls_group_id}: {e}");
+        crate::diag!("[messages] send_message: catch_up_mls_group for {mls_group_id}: {e}");
     }
 
     // Size padding (issue #331 v2, `docs/metadata-minimization-design.md`
@@ -310,7 +310,7 @@ pub async fn send_message(
             Some(&conversation_id),
             None,
         ).await {
-            eprintln!("[realtime] send_message: publish to group {mls_group_id}: {e}");
+            crate::diag!("[realtime] send_message: publish to group {mls_group_id}: {e}");
         }
     } else {
         // DM: publish directly to the shared DM room (conversation_id is the room name).
@@ -321,7 +321,7 @@ pub async fn send_message(
             None,
             Some(&conversation_id),
         ).await {
-            eprintln!("[realtime] send_message: publish to DM room {conversation_id}: {e}");
+            crate::diag!("[realtime] send_message: publish to DM room {conversation_id}: {e}");
         }
     }
 
@@ -342,7 +342,7 @@ pub async fn send_message(
                     crate::commands::livekit::publish_to_user_inbox(state, uid, payload.clone())
                         .await
                 {
-                    eprintln!("[realtime] send_message: @all inbox publish to {uid}: {e}");
+                    crate::diag!("[realtime] send_message: @all inbox publish to {uid}: {e}");
                 }
             }
         } else if let MentionAudience::Only(ref ids) = audience {
@@ -358,7 +358,7 @@ pub async fn send_message(
                     crate::commands::livekit::publish_to_user_inbox(state, uid, payload.clone())
                         .await
                 {
-                    eprintln!("[realtime] send_message: @mention inbox publish to {uid}: {e}");
+                    crate::diag!("[realtime] send_message: @mention inbox publish to {uid}: {e}");
                 }
             }
         }

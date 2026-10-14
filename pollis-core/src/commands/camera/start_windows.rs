@@ -98,7 +98,7 @@ pub async fn list_video_devices(
         .map_err(|e| anyhow!("camera enumerate join: {e}"));
     match joined {
         Ok(Ok(list)) => {
-            eprintln!("[camera] enumerated {} camera(s)", list.cameras.len());
+            crate::diag!("[camera] enumerated {} camera(s)", list.cameras.len());
             Ok(list)
         }
         Ok(Err(e)) => Err(fail_capture(state, format!("Could not list cameras: {e}")).await),
@@ -274,7 +274,7 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
     let track =
         LocalVideoTrack::create_video_track("camera", RtcVideoSource::Native(source.clone()));
     let (max_framerate, max_bitrate) = resolve_camera_encoding(width, height);
-    eprintln!("[camera] publishing camera track {width}x{height} @ {max_framerate}fps");
+    crate::diag!("[camera] publishing camera track {width}x{height} @ {max_framerate}fps");
     if let Err(e) = room
         .local_participant()
         .publish_track(
@@ -291,7 +291,7 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
         )
         .await
     {
-        eprintln!("[camera] publish error: {e}");
+        crate::diag!("[camera] publish error: {e}");
         active.store(false, Ordering::Release);
         drop(capture_thread);
         return Err(fail_capture(
@@ -352,19 +352,19 @@ fn run_capture_thread(
             return;
         }
     };
-    eprintln!("[camera] MF negotiated {width}x{height} RGB32 stride={stride}");
+    crate::diag!("[camera] MF negotiated {width}x{height} RGB32 stride={stride}");
     let _ = size_tx.send(CamStart::Size(width, height));
 
     // Streaming phase.
     if let Err(e) = unsafe { stream_frames(&reader, width, height, stride, &source, &active, &frame_tx) } {
-        eprintln!("[camera] MF capture error: {e}");
+        crate::diag!("[camera] MF capture error: {e}");
         if let Some(ev) = &events {
             let _ = ev.send(CameraEvent::LocalError {
                 message: friendly_mf_error(&e),
             });
         }
     }
-    eprintln!("[camera] MF capture thread exiting");
+    crate::diag!("[camera] MF capture thread exiting");
 }
 
 /// Re-resolve the device by its symbolic link and build a source reader whose
@@ -604,7 +604,7 @@ pub async fn stop_camera(state: &Arc<AppState>) -> Result<()> {
     if let (Some(room), Some(track)) = (room, track) {
         let sid = track.sid();
         if let Err(e) = room.local_participant().unpublish_track(&sid).await {
-            eprintln!("[camera] unpublish error: {e}");
+            crate::diag!("[camera] unpublish error: {e}");
         }
     }
     drop(source_to_drop);

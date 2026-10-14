@@ -481,7 +481,7 @@ fn schedule_read_cursor_push(state: &Arc<AppState>, user_id: &str) {
         // during the upload schedules the next one instead of being swallowed.
         PUSH_SCHEDULED.store(false, Ordering::SeqCst);
         if let Err(e) = push_read_cursors(&state, &user_id).await {
-            eprintln!("[read-cursor] push failed (will retry on the next advance): {e}");
+            crate::diag!("[read-cursor] push failed (will retry on the next advance): {e}");
         }
     });
 }

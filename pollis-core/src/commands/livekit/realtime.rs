@@ -73,7 +73,7 @@ pub async fn connect_rooms(
         };
         if let Some((_room, handle)) = removed {
             handle.abort();
-            eprintln!("[realtime] disconnected room {room_id}");
+            crate::diag!("[realtime] disconnected room {room_id}");
         }
     }
 
@@ -90,7 +90,7 @@ pub async fn connect_rooms(
             match crate::commands::mls::ds_livekit_token(state, &room_id, "realtime").await {
                 Ok(pair) => pair,
                 Err(e) => {
-                    eprintln!("[realtime] token error for room {room_id}: {e}");
+                    crate::diag!("[realtime] token error for room {room_id}: {e}");
                     let mut lk = livekit_arc.lock().await;
                     lk.connecting.remove(&room_id);
                     continue;
@@ -102,7 +102,7 @@ pub async fn connect_rooms(
         let user_id_owned = user_id.clone();
         let app_state_connect = Arc::clone(state);
 
-        eprintln!("[realtime] connecting room {room_id}");
+        crate::diag!("[realtime] connecting room {room_id}");
 
         tokio::spawn(async move {
             match Room::connect(&url_owned, &token, RoomOptions::default()).await {
@@ -214,7 +214,7 @@ pub async fn connect_rooms(
                                     // exactly as a full reconnect does, so it
                                     // catches the room up from the DS.
                                     RoomEvent::Reconnected => {
-                                        eprintln!("[realtime] resumed room {room_id}");
+                                        crate::diag!("[realtime] resumed room {room_id}");
                                         let (channel, room) = {
                                             let lk = lk_arc.lock().await;
                                             (lk.channel.clone(), lk.rooms.get(room_id).map(|(r, _)| Arc::clone(r)))
@@ -238,7 +238,7 @@ pub async fn connect_rooms(
                         }
 
                         let alive_dur = run_event_loop(&mut events, &lk_arc_task, &app_state_task, &user_id_task, &room_id_owned).await;
-                        eprintln!(
+                        crate::diag!(
                             "[realtime] event stream closed for room {room_id_owned} (was alive {:.0}s), reconnecting…",
                             alive_dur.as_secs_f64()
                         );
@@ -252,7 +252,7 @@ pub async fn connect_rooms(
                             {
                                 let lk = lk_arc_task.lock().await;
                                 if !lk.rooms.contains_key(&room_id_owned) {
-                                    eprintln!("[realtime] room {room_id_owned} removed, stopping reconnect");
+                                    crate::diag!("[realtime] room {room_id_owned} removed, stopping reconnect");
                                     return;
                                 }
                             }
@@ -274,7 +274,7 @@ pub async fn connect_rooms(
                             let (token, reconnect_url) = match crate::commands::mls::ds_livekit_token(&app_state_task, &room_id_owned, "realtime").await {
                                 Ok(pair) => pair,
                                 Err(e) => {
-                                    eprintln!("[realtime] reconnect token error for room {room_id_owned}: {e}");
+                                    crate::diag!("[realtime] reconnect token error for room {room_id_owned}: {e}");
                                     backoff = (backoff * 2).min(300);
                                     continue;
                                 }
@@ -283,7 +283,7 @@ pub async fn connect_rooms(
                             match Room::connect(&reconnect_url, &token, RoomOptions::default()).await {
                                 Ok((new_room, mut new_events)) => {
                                     let new_room = Arc::new(new_room);
-                                    eprintln!("[realtime] reconnected room {room_id_owned}");
+                                    crate::diag!("[realtime] reconnected room {room_id_owned}");
 
                                     // Notify frontend so it can resync state that
                                     // may have drifted during the outage.
@@ -315,27 +315,27 @@ pub async fn connect_rooms(
                                     .await;
 
                                     let alive_dur = run_event_loop(&mut new_events, &lk_arc_task, &app_state_task, &user_id_task, &room_id_owned).await;
-                                    eprintln!(
+                                    crate::diag!(
                                         "[realtime] event stream closed again for room {room_id_owned} (was alive {:.0}s), reconnecting…",
                                         alive_dur.as_secs_f64()
                                     );
                                     backoff = if alive_dur.as_secs() < 10 { (backoff * 2).min(300) } else { 5 };
                                 }
                                 Err(e) => {
-                                    eprintln!("[realtime] reconnect failed for room {room_id_owned}: {e}");
+                                    crate::diag!("[realtime] reconnect failed for room {room_id_owned}: {e}");
                                     backoff = (backoff * 2).min(300);
                                 }
                             }
                         }
                     });
 
-                    eprintln!("[realtime] connected room {room_id}");
+                    crate::diag!("[realtime] connected room {room_id}");
                     let mut lk = lk_arc_connect.lock().await;
                     lk.connecting.remove(&room_id);
                     lk.rooms.insert(room_id, (room, handle));
                 }
                 Err(e) => {
-                    eprintln!("[realtime] failed to connect room {room_id}: {e}");
+                    crate::diag!("[realtime] failed to connect room {room_id}: {e}");
                     let mut lk = lk_arc_connect.lock().await;
                     lk.connecting.remove(&room_id);
                 }

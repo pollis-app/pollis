@@ -196,7 +196,7 @@ pub(super) const PREVIEW_MIN_INTERVAL: std::time::Duration = std::time::Duration
 /// Plain user cancellation does NOT go through here — that's a normal flow,
 /// not an error the UI must react to.
 pub(super) async fn fail_capture(state: &Arc<AppState>, human: String) -> crate::error::Error {
-    eprintln!("[screenshare] capture failed: {human}");
+    crate::diag!("[screenshare] capture failed: {human}");
     let ev = {
         let ss = state.screenshare.lock().await;
         ss.events.clone()

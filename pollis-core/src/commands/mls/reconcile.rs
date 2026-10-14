@@ -223,7 +223,7 @@ pub(super) async fn publish_staged_commit(
         Ok(SubmitOutcome::LostRace) => {
             if our_commit_is_canonical(state, conversation_id, generation, epoch, commit_bytes).await
             {
-                eprintln!(
+                crate::diag!(
                     "[mls] {what}: LostRace at epoch {epoch} for {conversation_id} but our commit is canonical — adopting (lost success-response)"
                 );
                 Resolution::Won
@@ -234,7 +234,7 @@ pub(super) async fn publish_staged_commit(
         Err(e) => {
             if our_commit_is_canonical(state, conversation_id, generation, epoch, commit_bytes).await
             {
-                eprintln!(
+                crate::diag!(
                     "[mls] {what}: submit errored but our commit is canonical at epoch {epoch} for {conversation_id} — adopting (lost response): {e}"
                 );
                 Resolution::Won
@@ -265,14 +265,14 @@ pub(super) async fn publish_staged_commit(
             Ok(PublishOutcome::Won)
         }
         Resolution::LostRace => {
-            eprintln!(
+            crate::diag!(
                 "[mls] {what}: lost epoch {epoch} race for {conversation_id} — rolling back local pending commit and converging on the winner"
             );
             clear_pending_best_effort(state, conversation_id, generation).await;
             Ok(PublishOutcome::LostRace)
         }
         Resolution::Failed(e) => {
-            eprintln!(
+            crate::diag!(
                 "[mls] {what}: remote persist failed for {conversation_id}, clearing local pending commit: {e}"
             );
             clear_pending_best_effort(state, conversation_id, generation).await;
@@ -312,7 +312,7 @@ async fn sweep_before_merge(
         {
             Ok(swept) => return Ok(Some(swept)),
             Err(e) => {
-                eprintln!(
+                crate::diag!(
                     "[mls] {what}: pre-merge envelope sweep for {conversation_id} failed: {e}"
                 );
                 last_err = Some(e);
@@ -321,14 +321,14 @@ async fn sweep_before_merge(
     }
     let e = last_err.expect("two attempts, both failed");
     if is_migration {
-        eprintln!(
+        crate::diag!(
             "[mls] {what}: merging the migration of {conversation_id} without its pre-merge \
              sweep — envelopes sealed at the closed epoch since the last catch-up may be lost \
              to this device"
         );
         return Ok(None);
     }
-    eprintln!(
+    crate::diag!(
         "[mls] {what}: leaving the won commit for {conversation_id} staged — the next catch-up \
          drains its epoch and adopts it from the log"
     );
@@ -347,11 +347,11 @@ async fn clear_pending_best_effort(state: &Arc<AppState>, conversation_id: &str,
         match MlsGroup::load(&store, &group_id) {
             Ok(Some(mut group)) => {
                 if let Err(e) = group.clear_pending_commit(&store) {
-                    eprintln!("[mls] reconcile: clear_pending_commit failed: {e}");
+                    crate::diag!("[mls] reconcile: clear_pending_commit failed: {e}");
                 }
             }
-            Ok(None) => eprintln!("[mls] reconcile: group vanished during rollback"),
-            Err(e) => eprintln!("[mls] reconcile: group load failed during rollback: {e}"),
+            Ok(None) => crate::diag!("[mls] reconcile: group vanished during rollback"),
+            Err(e) => crate::diag!("[mls] reconcile: group load failed during rollback: {e}"),
         }
     }
 }
@@ -586,7 +586,7 @@ where
     if !actor_device_id.is_empty() {
         if let Some((key, _, _)) = leaves.iter().find(|(_, index, _)| *index == own_index) {
             if key.0 != actor_user_id || key.1 != actor_device_id {
-                eprintln!(
+                crate::diag!(
                     "[mls] reconcile: our own leaf {own_index:?} carries {}:{} but we are acting \
                      as {actor_user_id}:{actor_device_id}",
                     key.0, key.1
@@ -648,7 +648,7 @@ where
         .map(|(key, &idx)| (key.clone(), idx))
         .collect();
     for (key, idx, reason) in &to_evict {
-        eprintln!(
+        crate::diag!(
             "[mls] reconcile: evicting leaf {:?} for {}:{} — {reason}",
             idx, key.0, key.1
         );
@@ -695,7 +695,7 @@ where
     // 6. Log the diff.
     let removed_desc: Vec<String> = to_remove.iter().map(|((u, d), _)| format!("{u}:{d}")).collect();
     let added_desc: Vec<String> = add_kps.iter().map(|(u, d, _)| format!("{u}:{d}")).collect();
-    eprintln!(
+    crate::diag!(
         "[mls] reconcile: removing [{}], adding [{}]",
         removed_desc.join(", "),
         added_desc.join(", "),
@@ -754,7 +754,7 @@ where
     let removed: Vec<(String, String)> = to_remove.into_iter().map(|(key, _)| key).collect();
     let added: Vec<(String, String)> = add_kps.into_iter().map(|(u, d, _)| (u, d)).collect();
 
-    eprintln!(
+    crate::diag!(
         "[mls] reconcile: staged epoch {epoch_before} → {epoch_after}, removed {}, added {} (pending merge)",
         removed.len(),
         added.len(),
@@ -921,14 +921,14 @@ where
         let kp_in = match KeyPackageIn::tls_deserialize(&mut reader) {
             Ok(k) => k,
             Err(e) => {
-                eprintln!("[mls] reconcile: kp deserialize failed for {uid}:{did}: {e}");
+                crate::diag!("[mls] reconcile: kp deserialize failed for {uid}:{did}: {e}");
                 continue;
             }
         };
         let kp = match kp_in.validate(provider.crypto(), ProtocolVersion::Mls10) {
             Ok(k) => k,
             Err(e) => {
-                eprintln!("[mls] reconcile: kp validate failed for {uid}:{did}: {e}");
+                crate::diag!("[mls] reconcile: kp validate failed for {uid}:{did}: {e}");
                 continue;
             }
         };
@@ -937,7 +937,7 @@ where
         // reach `propose_adds`. A cross-suite KP would otherwise be a
         // server-driven downgrade of an entire group.
         if kp.ciphersuite() != group.ciphersuite() {
-            eprintln!(
+            crate::diag!(
                 "[mls] reconcile: kp suite {:?} != group suite {:?} for {uid}:{did} — refusing",
                 kp.ciphersuite(),
                 group.ciphersuite(),
@@ -946,12 +946,12 @@ where
         }
         let cred_user = parse_credential_user_id(kp.leaf_node().credential());
         if cred_user != *uid {
-            eprintln!("[mls] reconcile: credential user '{cred_user}' != '{uid}' for device {did}");
+            crate::diag!("[mls] reconcile: credential user '{cred_user}' != '{uid}' for device {did}");
             continue;
         }
         let cred_device = parse_credential_device_id(kp.leaf_node().credential()).unwrap_or_default();
         if cred_device != *did {
-            eprintln!(
+            crate::diag!(
                 "[mls] reconcile: credential device '{cred_device}' != '{did}' for user {uid} — refusing"
             );
             continue;
@@ -980,13 +980,13 @@ where
             // shipping build.
             #[cfg(feature = "test-harness")]
             if committer_leaf_check_skipped() {
-                eprintln!(
+                crate::diag!(
                     "[mls] reconcile: TEST HOOK — adding uncertified leaf {uid}:{did} ({reason})"
                 );
                 available_kps.push((uid.clone(), did.clone(), kp));
                 continue;
             }
-            eprintln!(
+            crate::diag!(
                 "[mls] reconcile: REFUSING to add {uid}:{did} — leaf not cross-signed by the \
                  claimed account: {reason}"
             );
@@ -1083,7 +1083,7 @@ pub(super) async fn pin_identities(
         match dir.account_key(&peer) {
             Some(reported) if reported == pinned => {}
             Some(_) => {
-                eprintln!(
+                crate::diag!(
                     "[mls] reconcile: account_id_pub for {peer} differs from the local pin — \
                      treating every leaf of theirs as unverifiable this pass"
                 );
@@ -1215,7 +1215,7 @@ pub async fn reconcile_group_mls_impl(
         )
         .await
         {
-            eprintln!("[reconcile] batch_check_and_pin_account_keys failed: {e}");
+            crate::diag!("[reconcile] batch_check_and_pin_account_keys failed: {e}");
         }
     }
 
@@ -1269,7 +1269,7 @@ pub async fn reconcile_group_mls_impl(
     // 2d. #1082: refuse the pass if the snapshot that decides evictions does not
     //     even contain us. See `snapshot_includes_actor`.
     if !snapshot_includes_actor(&roster_user_ids, &valid_devices, &actor_user_id, &actor_device_id) {
-        eprintln!(
+        crate::diag!(
             "[reconcile] refusing pass for {conversation_id}: registered_devices snapshot \
              ({} device(s)) omits this device — not evicting a {}-member roster on it",
             valid_devices.len(),
@@ -1350,7 +1350,7 @@ pub async fn reconcile_group_mls_impl(
         match claimed {
             Some(kp) => kp_tuples.push((uid.clone(), did.clone(), kp)),
             None => {
-                eprintln!(
+                crate::diag!(
                     "[mls] reconcile: no KeyPackage in suite 0x{:04x} for {uid}:{did} — \
                      skipping (never downgrading)",
                     u16::from(group_suite),
@@ -1500,7 +1500,7 @@ pub async fn reconcile_group_mls_impl(
                 )
                 .await
                 {
-                    eprintln!(
+                    crate::diag!(
                         "[mls] reconcile: converge-after-lost-race failed for {conversation_id}: {e}"
                     );
                 }
@@ -1576,7 +1576,7 @@ pub async fn reconcile_group_mls_impl(
             })
         };
         let Some(post_tree) = post_tree else {
-            eprintln!(
+            crate::diag!(
                 "[reconcile] {conversation_id}: no post-commit tree walk available — \
                  skipping the roster banner rather than reporting a guessed diff"
             );
@@ -1646,7 +1646,7 @@ pub async fn reconcile_group_mls_impl(
         )
         .await
         {
-            eprintln!(
+            crate::diag!(
                 "[realtime] reconcile: publish roster_changed for {conversation_id}: {e}"
             );
         }

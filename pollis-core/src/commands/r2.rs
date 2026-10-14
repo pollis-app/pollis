@@ -806,7 +806,7 @@ async fn upload_plaintext(
         match compute_image_meta(data.as_slice()) {
             Ok((bh, w, h)) => (Some(bh), Some(w), Some(h)),
             Err(e) => {
-                eprintln!("[upload_media] image meta failed for {filename}: {e}");
+                crate::diag!("[upload_media] image meta failed ({content_type}): {e}");
                 (None, None, None)
             }
         }

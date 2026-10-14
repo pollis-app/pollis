@@ -49,7 +49,7 @@ pub(crate) async fn resolve_participants(
                 }
             }
             Err(e) => {
-                eprintln!("[livekit] identity resolve for {logical_room} failed: {e}");
+                crate::diag!("[livekit] identity resolve for {logical_room} failed: {e}");
             }
         }
     }
@@ -178,7 +178,7 @@ pub(crate) async fn lookup_avatar_urls_for_identities(
                 .filter_map(|u| u.avatar_url.map(|url| (u.id, url)))
                 .collect(),
             Err(e) => {
-                eprintln!("[voice] batched avatar lookup failed: {e}");
+                crate::diag!("[voice] batched avatar lookup failed: {e}");
                 return HashMap::new();
             }
         };
@@ -214,7 +214,7 @@ pub(super) async fn enrich_participants_with_avatars(
         match crate::commands::ds_reads::users(state, user_ids, None).await {
             Ok(users) => users.into_iter().map(|u| (u.id, u.avatar_url)).collect(),
             Err(e) => {
-                eprintln!("[voice] avatar enrich: lookup failed: {e}");
+                crate::diag!("[voice] avatar enrich: lookup failed: {e}");
                 return participants;
             }
         };

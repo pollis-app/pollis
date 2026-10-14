@@ -227,7 +227,7 @@ impl ApmStage {
         let processor = Processor::new(sample_rate_hz)
             .map_err(|e| format!("APM init failed: {e}"))?;
         processor.set_config(config.to_processor_config());
-        eprintln!(
+        crate::diag!(
             "[voice/apm] engaged @ {sample_rate_hz} Hz: boost={} dB, AGC2={} (headroom={} dB), \
              NS={:?}, AEC={}, RNNoise={}",
             config.mic_boost_db,
@@ -251,7 +251,7 @@ impl ApmStage {
                 "APM only supports 8/16/32/48 kHz, got {sample_rate_hz} Hz"
             ));
         }
-        eprintln!(
+        crate::diag!(
             "[voice/apm] disabled on Windows (webrtc-audio-processing-sys has no MSVC \
              support upstream); requested config is stored but not applied: \
              boost={} dB, AGC2={} (headroom={} dB), NS={:?}, AEC={}, RNNoise={}",
@@ -291,7 +291,7 @@ impl ApmStage {
     #[cfg(not(target_os = "windows"))]
     pub fn set_config(&mut self, config: ApmConfig) {
         self.processor.set_config(config.to_processor_config());
-        eprintln!(
+        crate::diag!(
             "[voice/apm] reconfigured: boost={} dB, AGC2={} (headroom={} dB), NS={:?}, AEC={}, RNNoise={}",
             config.mic_boost_db,
             config.agc_enabled,

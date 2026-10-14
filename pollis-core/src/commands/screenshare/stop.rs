@@ -135,13 +135,13 @@ pub async fn stop_screen_share(state: &Arc<AppState>) -> Result<()> {
         if let Some(track) = track {
             let sid = track.sid();
             if let Err(e) = room.local_participant().unpublish_track(&sid).await {
-                eprintln!("[screenshare] unpublish error: {e}");
+                crate::diag!("[screenshare] unpublish error: {e}");
             }
         }
         if let Some(track) = audio_track {
             let sid = track.sid();
             if let Err(e) = room.local_participant().unpublish_track(&sid).await {
-                eprintln!("[screenshare/audio] unpublish error: {e}");
+                crate::diag!("[screenshare/audio] unpublish error: {e}");
             }
         }
     }

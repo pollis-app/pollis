@@ -55,8 +55,8 @@ pub async fn initialize_identity(
         .ok_or_else(|| anyhow::anyhow!("device_id not set — login incomplete"))?;
 
     match crate::commands::mls::ensure_mls_key_package(state, &user_id, &device_id).await {
-        Ok(()) => eprintln!("[identity] MLS key package ensured for {user_id} device {device_id}"),
-        Err(e) => eprintln!("[identity] MLS key package error (non-fatal): {e}"),
+        Ok(()) => crate::diag!("[identity] MLS key package ensured for {user_id} device {device_id}"),
+        Err(e) => crate::diag!("[identity] MLS key package error (non-fatal): {e}"),
     }
 
     // Re-process any pending MLS Welcome messages. This is a no-op when the
@@ -65,7 +65,7 @@ pub async fn initialize_identity(
     // delivered = 0 for this user's welcomes in that case.
     match crate::commands::mls::poll_mls_welcomes_inner(state, &user_id, &device_id).await {
         Ok(()) => {}
-        Err(e) => eprintln!("[identity] poll_mls_welcomes (non-fatal): {e}"),
+        Err(e) => crate::diag!("[identity] poll_mls_welcomes (non-fatal): {e}"),
     }
 
     Ok(IdentityInfo { user_id, public_key: String::new(), is_new: false })
@@ -85,7 +85,7 @@ pub async fn request_otp(
     state: &Arc<AppState>,
     email: String,
 ) -> Result<()> {
-    eprintln!(
+    crate::diag!(
         "[auth] request_otp: email={} → delivery_url={:?}",
         crate::util::mask_email(&email),
         state.config.pollis_delivery_url
@@ -98,7 +98,7 @@ pub async fn request_otp(
     )
     .await?;
     let status = resp.status();
-    eprintln!("[auth] request_otp: DS responded HTTP {status}");
+    crate::diag!("[auth] request_otp: DS responded HTTP {status}");
     if !status.is_success() {
         let txt = resp.text().await.unwrap_or_default();
         return Err(anyhow::anyhow!("request-otp failed ({status}): {txt}").into());
@@ -169,7 +169,7 @@ async fn verify_otp_ds(
 
     // 1. verify-otp: DS validates the OTP, creates/loads the account, mints a
     //    session. Unauthenticated (the OTP itself is the proof).
-    eprintln!(
+    crate::diag!(
         "[auth] verify_otp: email={} → delivery_url={:?}",
         crate::util::mask_email(&email),
         state.config.pollis_delivery_url
@@ -187,7 +187,7 @@ async fn verify_otp_ds(
     )
     .await?;
     let status = resp.status();
-    eprintln!("[auth] verify_otp: DS responded HTTP {status}");
+    crate::diag!("[auth] verify_otp: DS responded HTTP {status}");
     if status.as_u16() == 401 {
         return Err(anyhow::anyhow!("Invalid code. Please check and try again.").into());
     }
@@ -220,7 +220,7 @@ async fn verify_otp_ds(
     }
 
     let new_secret_key = if !has_identity {
-        eprintln!("[auth] verify_otp: first-device path (has_identity=false) user_id={user_id}");
+        crate::diag!("[auth] verify_otp: first-device path (has_identity=false) user_id={user_id}");
         // FORCE this device's id to the session-bound candidate — do NOT preserve
         // whatever the keystore holds. On a genuine first signup the slot is empty,
         // so this is identical to `ensure_device_id`. But on a RETRY after a
@@ -246,10 +246,10 @@ async fn verify_otp_ds(
             crate::commands::account_identity::generate_account_identity_material(state, &user_id)
                 .await
                 .map_err(|e| {
-                    eprintln!("[auth] verify_otp: generate_account_identity_material FAILED: {e}");
+                    crate::diag!("[auth] verify_otp: generate_account_identity_material FAILED: {e}");
                     e
                 })?;
-        eprintln!("[auth] verify_otp: identity material ready (device_id={device_id}) → establish-identity");
+        crate::diag!("[auth] verify_otp: identity material ready (device_id={device_id}) → establish-identity");
 
         // 2. establish-identity (session-gated): the DS does the CAS UPDATE +
         //    account_key_log v1 + account_recovery insert.
@@ -267,10 +267,10 @@ async fn verify_otp_ds(
         )
         .await
         .map_err(|e| {
-            eprintln!("[auth] verify_otp: establish-identity FAILED: {e}");
+            crate::diag!("[auth] verify_otp: establish-identity FAILED: {e}");
             e
         })?;
-        eprintln!("[auth] verify_otp: establish-identity OK → register-device");
+        crate::diag!("[auth] verify_otp: establish-identity OK → register-device");
 
         // 3. register-device (session-gated): the DS inserts the user_device row
         //    + seeds watermarks.
@@ -286,10 +286,10 @@ async fn verify_otp_ds(
         )
         .await
         .map_err(|e| {
-            eprintln!("[auth] verify_otp: register-device FAILED: {e}");
+            crate::diag!("[auth] verify_otp: register-device FAILED: {e}");
             e
         })?;
-        eprintln!("[auth] verify_otp: register-device OK (first-device bootstrap complete)");
+        crate::diag!("[auth] verify_otp: register-device OK (first-device bootstrap complete)");
 
         // Stash the session so the pivot — the first publish-device-cert, run by
         // set_pin → ensure_device_cert — can present it.
@@ -516,7 +516,7 @@ async fn reconcile_account_identity(
         return;
     };
     let Ok(pub_bytes) = base64::engine::general_purpose::STANDARD.decode(encoded) else {
-        eprintln!("[auth] verify-otp returned an undecodable account_id_pub; leaving local key");
+        crate::diag!("[auth] verify-otp returned an undecodable account_id_pub; leaving local key");
         return;
     };
 
@@ -528,7 +528,7 @@ async fn reconcile_account_identity(
     )
     .await
     {
-        eprintln!("[auth] could not record the published account_id_pub: {e}");
+        crate::diag!("[auth] could not record the published account_id_pub: {e}");
     }
 
     let matches = crate::commands::account_identity::has_matching_local_account_identity(
@@ -541,12 +541,12 @@ async fn reconcile_account_identity(
             crate::commands::account_identity::clear_account_identity_superseded(state, user_id)
                 .await
         {
-            eprintln!("[auth] could not clear the superseded marker (non-fatal): {e}");
+            crate::diag!("[auth] could not clear the superseded marker (non-fatal): {e}");
         }
         return;
     }
 
-    eprintln!(
+    crate::diag!(
         "[auth] the server reports a different account identity for {user_id}; \
          marking this device for re-enrollment and KEEPING the local key"
     );
@@ -555,7 +555,7 @@ async fn reconcile_account_identity(
     )
     .await
     {
-        eprintln!("[auth] could not mark the identity superseded (non-fatal): {e}");
+        crate::diag!("[auth] could not mark the identity superseded (non-fatal): {e}");
     }
 }
 
@@ -644,7 +644,7 @@ async fn store_login_email(state: &Arc<AppState>, user_id: &str, email: &str) ->
     {
         Ok(()) => true,
         Err(e) => {
-            eprintln!("[auth] could not persist the login address for {user_id}: {e}");
+            crate::diag!("[auth] could not persist the login address for {user_id}: {e}");
             false
         }
     }
@@ -672,7 +672,7 @@ async fn read_accounts_index_migrated(
 
     if adopt_legacy_login_emails(state, &index.accounts).await {
         if let Err(e) = crate::accounts::forget_legacy_emails() {
-            eprintln!("[auth] could not erase legacy login addresses from accounts.json: {e}");
+            crate::diag!("[auth] could not erase legacy login addresses from accounts.json: {e}");
         }
     }
 
@@ -908,7 +908,7 @@ pub async fn verify_email_change(
     // and username this flow can also have changed.
     if let Some(username) = username {
         if let Err(e) = crate::accounts::upsert_account(&user_id, &username, None) {
-            eprintln!("[auth] email-change accounts.json mirror failed: {e}");
+            crate::diag!("[auth] email-change accounts.json mirror failed: {e}");
         }
         store_login_email(state, &user_id, &trimmed).await;
     }
@@ -931,7 +931,7 @@ pub async fn dev_login(
     #[cfg(debug_assertions)]
     {
         let profile = dev_login_dispatch(_state, _email).await?;
-        eprintln!("[auth] dev_login: logged in as {}", profile.username);
+        crate::diag!("[auth] dev_login: logged in as {}", profile.id);
         Ok(profile)
     }
 }
@@ -959,7 +959,8 @@ pub async fn get_session(state: &Arc<AppState>) -> Result<Option<UserProfile>> {
     if let Ok(dev_email) = std::env::var("DEV_EMAIL") {
         let dev_email = dev_email.trim().to_string();
         if !dev_email.is_empty() {
-            eprintln!("[auth] DEV_EMAIL active — auto-logging in as {dev_email}");
+            crate::diag!("[auth] DEV_EMAIL active — auto-logging in as {}",
+                crate::util::mask_email(&dev_email));
             let profile = dev_login_dispatch(state, dev_email).await?;
             return Ok(Some(profile));
         }
@@ -973,7 +974,7 @@ pub async fn get_session(state: &Arc<AppState>) -> Result<Option<UserProfile>> {
     {
         Some(a) => a,
         None => {
-            eprintln!("[session] no last_active_user in accounts index — showing login");
+            crate::diag!("[session] no last_active_user in accounts index — showing login");
             return Ok(None);
         }
     };
@@ -1011,7 +1012,7 @@ pub async fn get_session(state: &Arc<AppState>) -> Result<Option<UserProfile>> {
     let probe = match crate::commands::ds_reads::account_probe(state, &profile.id).await {
         Ok(p) => Some(p),
         Err(e) => {
-            eprintln!("[session] account probe failed ({e}); proceeding from accounts.json");
+            crate::diag!("[session] account probe failed ({e}); proceeding from accounts.json");
             None
         }
     };
@@ -1032,7 +1033,7 @@ pub async fn get_session(state: &Arc<AppState>) -> Result<Option<UserProfile>> {
     // row re-registers on the next reachable launch. This mirrors the
     // network-tolerant user-existence check above.
     if let Err(e) = register_device(state, &profile.id).await {
-        eprintln!("[session] register_device failed for user {} ({e}); proceeding from accounts.json", profile.id);
+        crate::diag!("[session] register_device failed for user {} ({e}); proceeding from accounts.json", profile.id);
     }
 
     // Conservative: if the wrapped slot is absent AND no plaintext
@@ -1150,8 +1151,9 @@ async fn dev_login_ds(state: &Arc<AppState>, email: String) -> Result<UserProfil
     let user_id = match local_user_id_for_email(state, &email).await {
         Some(uid) => uid,
         None => {
-            eprintln!(
-                "[auth] DEV_EMAIL: no local account for {email}; first-device DS bootstrap"
+            crate::diag!(
+                "[auth] DEV_EMAIL: no local account for {}; first-device DS bootstrap",
+                crate::util::mask_email(&email)
             );
             request_otp(state, email.clone()).await?;
             return verify_otp(state, email, dev_otp_code()).await;
@@ -1226,7 +1228,7 @@ async fn dev_login_ds(state: &Arc<AppState>, email: String) -> Result<UserProfil
     crate::accounts::upsert_account(&user_id, &username, None)?;
     store_login_email(state, &user_id, &email).await;
 
-    eprintln!("[auth] DEV_EMAIL: DS-enrolled device {device_id} for {user_id}");
+    crate::diag!("[auth] DEV_EMAIL: DS-enrolled device {device_id} for {user_id}");
     Ok(UserProfile {
         id: user_id,
         email,
@@ -1271,7 +1273,7 @@ async fn register_device(state: &Arc<AppState>, user_id: &str) -> Result<String>
     // neither be device-signed nor performed under a read-only Turso token, so it
     // is dropped. `ensure_device_id` above already set `state.device_id`, so the
     // rest of the flow (and later DS calls) still have it.
-    eprintln!("[auth] device registered: {device_id}");
+    crate::diag!("[auth] device registered: {device_id}");
 
     // Device-cert publish moved out of register_device. It needs the
     // unwrapped account_id_key, which post-#194 lives in AppState.unlock
@@ -1311,7 +1313,7 @@ pub async fn logout(state: &Arc<AppState>, delete_data: bool) -> Result<()> {
                 user_id: Some(uid.clone()),
             };
             if let Err(e) = crate::commands::mls::ds_post_ok(state, &body).await {
-                eprintln!("[auth] logout device removal via DS failed (non-fatal): {e}");
+                crate::diag!("[auth] logout device removal via DS failed (non-fatal): {e}");
             }
         }
     }
@@ -1407,7 +1409,7 @@ pub async fn delete_account(
                 gid,
                 crate::commands::livekit_signalling::member_left_group_payload(gid),
             ).await {
-                eprintln!("[account] membership_changed for group {gid} failed (non-fatal): {e}");
+                crate::diag!("[account] membership_changed for group {gid} failed (non-fatal): {e}");
             }
         }
     }
@@ -1421,7 +1423,7 @@ pub async fn delete_account(
                 dm_id,
                 crate::commands::livekit_signalling::member_left_conversation_payload(dm_id),
             ).await {
-                eprintln!("[account] membership_changed for DM {dm_id} failed (non-fatal): {e}");
+                crate::diag!("[account] membership_changed for DM {dm_id} failed (non-fatal): {e}");
             }
         }
     }
@@ -1479,7 +1481,7 @@ pub async fn delete_account(
     // Remove from local accounts index
     let _ = crate::accounts::remove_account(&user_id);
 
-    eprintln!("[account] deleted account for user {user_id}");
+    crate::diag!("[account] deleted account for user {user_id}");
     Ok(())
 }
 
@@ -1568,7 +1570,7 @@ pub async fn wipe_local_data(state: &Arc<AppState>) -> Result<()> {
     // ending is exactly when they stop being anyone's business.
     crate::commands::staging::discard_all_staged();
 
-    eprintln!("[wipe] local data wiped for {} account(s)", index.accounts.len());
+    crate::diag!("[wipe] local data wiped for {} account(s)", index.accounts.len());
     Ok(())
 }
 
@@ -1680,7 +1682,7 @@ pub async fn revoke_device(
         user_id: Some(user_id.clone()),
     };
     if let Err(e) = crate::commands::mls::ds_post_ok(state, &ev).await {
-        eprintln!("[revoke_device] DS security-event failed (non-fatal): {e}");
+        crate::diag!("[revoke_device] DS security-event failed (non-fatal): {e}");
     }
 
     // Collect every conversation the user belongs to (groups + DMs) so
@@ -1701,7 +1703,7 @@ pub async fn revoke_device(
         )
         .await
         {
-            eprintln!("[revoke_device] reconcile {cid} failed: {e}");
+            crate::diag!("[revoke_device] reconcile {cid} failed: {e}");
         }
     }
 
@@ -1714,7 +1716,7 @@ pub async fn revoke_device(
     if let Err(e) =
         crate::commands::livekit::publish_to_user_inbox(state, &user_id, payload).await
     {
-        eprintln!("[revoke_device] inbox nudge failed (non-fatal): {e}");
+        crate::diag!("[revoke_device] inbox nudge failed (non-fatal): {e}");
     }
 
     Ok(())

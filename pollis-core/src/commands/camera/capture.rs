@@ -53,7 +53,7 @@ async fn spawn_camera_helper(state: &Arc<AppState>) -> Result<HelperSession> {
     let listener = match UnixListener::bind(&socket_path) {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("[camera] bind unix socket: {e}");
+            crate::diag!("[camera] bind unix socket: {e}");
             return Err(fail_capture(
                 state,
                 "Could not set up the camera-capture channel. Please try again.".into(),
@@ -65,7 +65,7 @@ async fn spawn_camera_helper(state: &Arc<AppState>) -> Result<HelperSession> {
     let helper_path = match locate_capture_helper() {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("[camera] locate helper: {e}");
+            crate::diag!("[camera] locate helper: {e}");
             return Err(fail_capture(
                 state,
                 "Camera-capture helper not found. Reinstall Pollis or rebuild the capture helper."
@@ -74,7 +74,7 @@ async fn spawn_camera_helper(state: &Arc<AppState>) -> Result<HelperSession> {
             .await);
         }
     };
-    eprintln!(
+    crate::diag!(
         "[camera] spawning helper {} (camera mode) on socket {}",
         helper_path.display(),
         socket_path.display()
@@ -95,7 +95,7 @@ async fn spawn_camera_helper(state: &Arc<AppState>) -> Result<HelperSession> {
     let mut helper = match helper {
         Ok(h) => h,
         Err(e) => {
-            eprintln!("[camera] spawn {}: {e}", helper_path.display());
+            crate::diag!("[camera] spawn {}: {e}", helper_path.display());
             let _ = std::fs::remove_file(&socket_path);
             return Err(fail_capture(
                 state,
@@ -116,7 +116,7 @@ async fn spawn_camera_helper(state: &Arc<AppState>) -> Result<HelperSession> {
             use tokio::io::{AsyncBufReadExt, BufReader};
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                eprintln!("[camera-helper] {line}");
+                crate::diag!("[camera-helper] {line}");
                 let mut b = buf.lock().await;
                 b.push_str(&line);
                 b.push('\n');
@@ -127,11 +127,11 @@ async fn spawn_camera_helper(state: &Arc<AppState>) -> Result<HelperSession> {
     let (stream, _addr) = tokio::select! {
         res = listener.accept() => match res {
             Ok(r) => {
-                eprintln!("[camera] helper connected");
+                crate::diag!("[camera] helper connected");
                 r
             }
             Err(e) => {
-                eprintln!("[camera] accept: {e}");
+                crate::diag!("[camera] accept: {e}");
                 let _ = std::fs::remove_file(&socket_path);
                 return Err(fail_capture(
                     state,
@@ -141,7 +141,7 @@ async fn spawn_camera_helper(state: &Arc<AppState>) -> Result<HelperSession> {
             }
         },
         status = helper.wait() => {
-            eprintln!("[camera] helper exited before connecting: {status:?}");
+            crate::diag!("[camera] helper exited before connecting: {status:?}");
             let _ = std::fs::remove_file(&socket_path);
             // Give the drain a beat to flush, then surface the helper's real reason.
             if let Some(t) = stderr_task {
@@ -234,7 +234,7 @@ pub async fn list_video_devices(
         }
     };
 
-    eprintln!("[camera] enumerated {} camera(s)", list.cameras.len());
+    crate::diag!("[camera] enumerated {} camera(s)", list.cameras.len());
     {
         let mut cam = state.camera.lock().await;
         cam.picker_session = Some(session);
@@ -307,7 +307,7 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
         }))
         .await
     {
-        eprintln!("[camera] send SelectCamera: {e}");
+        crate::diag!("[camera] send SelectCamera: {e}");
         let _ = session.child.kill().await;
         return Err(fail_capture(
             state,
@@ -393,7 +393,7 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
     let track =
         LocalVideoTrack::create_video_track("camera", RtcVideoSource::Native(source.clone()));
     let (max_framerate, max_bitrate) = resolve_camera_encoding(width, height);
-    eprintln!("[camera] publishing camera track {width}x{height} @ {max_framerate}fps");
+    crate::diag!("[camera] publishing camera track {width}x{height} @ {max_framerate}fps");
     if let Err(e) = room
         .local_participant()
         .publish_track(
@@ -410,7 +410,7 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
         )
         .await
     {
-        eprintln!("[camera] publish error: {e}");
+        crate::diag!("[camera] publish error: {e}");
         stop_camera(state).await.ok();
         return Err(fail_capture(
             state,
@@ -470,12 +470,12 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
                 Ok(Some(CaptureMsg::AudioFormat { .. }))
                 | Ok(Some(CaptureMsg::AudioFrame { .. })) => {}
                 Ok(Some(CaptureMsg::Error { message })) => {
-                    eprintln!("[camera] helper error mid-stream: {message}");
+                    crate::diag!("[camera] helper error mid-stream: {message}");
                     break;
                 }
                 Ok(None) => break,
                 Err(e) => {
-                    eprintln!("[camera] reader error: {e}");
+                    crate::diag!("[camera] reader error: {e}");
                     break;
                 }
             }
@@ -547,7 +547,7 @@ pub async fn stop_camera(state: &Arc<AppState>) -> Result<()> {
     if let (Some(room), Some(track)) = (room, track) {
         let sid = track.sid();
         if let Err(e) = room.local_participant().unpublish_track(&sid).await {
-            eprintln!("[camera] unpublish error: {e}");
+            crate::diag!("[camera] unpublish error: {e}");
         }
     }
     drop(source_to_drop);
@@ -603,7 +603,7 @@ pub async fn start_camera_preview(state: &Arc<AppState>, device_id: String) -> R
         .write_all(&encode_select_camera(&CameraSelection { id: device_id.clone() }))
         .await
     {
-        eprintln!("[camera] preview send SelectCamera: {e}");
+        crate::diag!("[camera] preview send SelectCamera: {e}");
         let _ = session.child.kill().await;
         return Err(fail_capture(
             state,
@@ -672,12 +672,12 @@ pub async fn start_camera_preview(state: &Arc<AppState>, device_id: String) -> R
                 }
                 Ok(Some(CaptureMsg::Format { .. })) => {}
                 Ok(Some(CaptureMsg::Error { message })) => {
-                    eprintln!("[camera] preview helper error mid-stream: {message}");
+                    crate::diag!("[camera] preview helper error mid-stream: {message}");
                     break;
                 }
                 Ok(None) => break,
                 Err(e) => {
-                    eprintln!("[camera] preview reader error: {e}");
+                    crate::diag!("[camera] preview reader error: {e}");
                     break;
                 }
                 _ => {}

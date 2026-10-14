@@ -161,6 +161,13 @@ function Self() {
               })
             }
           />
+          <ListRow
+            testID="row-self-diagnostics"
+            glyph={<Icon.diagnostics size={GLYPH} color={semantic.text} />}
+            name={t("settings:diagnostics.title")}
+            chevron
+            onPress={() => router.push("/self/diagnostics")}
+          />
         </Group>
 
         <Group>

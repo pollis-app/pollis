@@ -105,6 +105,7 @@ pub mod otp;
 pub mod pins;
 pub mod profile;
 pub mod reads;
+pub mod redact;
 pub mod reports;
 pub mod vault;
 pub mod writes;

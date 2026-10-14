@@ -611,7 +611,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**159 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**162 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -629,8 +629,9 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **TypingIndicator** — props: channelId, conversationId — `frontend/src/components/TypingIndicator.tsx`
 - **UpdateScreen** — `frontend/src/components/UpdateScreen.tsx`
 
-### `components/Auth` (7)
+### `components/Auth` (8)
 
+- **AuthError** — props: message — `frontend/src/components/Auth/AuthError.tsx`
 - **EmailOTPAuth** — props: onSuccess, prefillEmail, prefillNonce, onStepChange — `frontend/src/components/Auth/EmailOTPAuth.tsx`
 - **EnrollmentApprovalPrompt** — props: requestId, newDeviceId, onResolved — `frontend/src/components/Auth/EnrollmentApprovalPrompt.tsx`
 - **EnrollmentGateScreen** — props: linked, userId, userEmail, onEnrolled, onCancel, onResetComplete — `frontend/src/components/Auth/EnrollmentGateScreen.tsx`
@@ -638,6 +639,10 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **PinCreateScreen** — props: oldPin, onCreated, onCancel, headline, subline — `frontend/src/components/Auth/PinCreateScreen.tsx`
 - **PinEntryScreen** — props: userId, username, onUnlocked, onForgotPin, onSwitchAccount — `frontend/src/components/Auth/PinEntryScreen.tsx`
 - **SaveSecretKeyScreen** — props: secretKey, email, onConfirmed — `frontend/src/components/Auth/SaveSecretKeyScreen.tsx`
+
+### `components/Diagnostics` (1)
+
+- **CopyDiagnosticsButton** — props: size, variant, className — `frontend/src/components/Diagnostics/CopyDiagnosticsButton.tsx`
 
 ### `components/Emoji` (9)
 
@@ -770,7 +775,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **StageTile** — `frontend/src/components/Voice/stage/StageTile.tsx`
 - **VoiceStage** — props: channelName, isInCall, onJoin, onLeave, onBack, onOpenSettings, observerParticipants, headerActions, footer, callMode — `frontend/src/components/Voice/stage/VoiceStage.tsx`
 
-### `pages` (51)
+### `pages` (52)
 
 - **AllJoinRequestsPage** — `frontend/src/pages/AllJoinRequestsPage.tsx`
 - **ArcadePage** — `frontend/src/pages/ArcadePage.tsx`
@@ -782,6 +787,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **CreateChannelPage** — `frontend/src/pages/CreateChannelPage.tsx`
 - **CreateGroup** — props: onSuccess — `frontend/src/pages/CreateGroup.tsx`
 - **CreateGroupPage** — `frontend/src/pages/CreateGroupPage.tsx`
+- **DiagnosticsPage** — `frontend/src/pages/DiagnosticsPage.tsx`
 - **DMPage** — `frontend/src/pages/DM.tsx`
 - **DMSettingsPage** — `frontend/src/pages/DMSettings.tsx`
 - **DMsPage** — `frontend/src/pages/DMs.tsx`

@@ -345,7 +345,7 @@ impl RelayServingManager {
                     // Failing to stand the node up is not a reason to claim we
                     // are serving. Leave it down; the status below reports the
                     // truth and the UI says we cannot confirm what is happening.
-                    eprintln!("[peer-relay] could not start the peer node: {e}");
+                    crate::diag!("[peer-relay] could not start the peer node: {e}");
                 }
             }
         } else if !engine_wanted && inner.engine.is_some() {
@@ -415,7 +415,7 @@ impl RelayServingManager {
         let sink = self.sink.lock().unwrap().clone();
         if let Some(sink) = sink {
             if let Err(e) = sink.send(status) {
-                eprintln!("[peer-relay] status event dropped: {e}");
+                crate::diag!("[peer-relay] status event dropped: {e}");
             }
         }
     }

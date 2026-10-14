@@ -84,7 +84,7 @@ pub async fn send_group_invite(
     if let Err(e) = crate::commands::messages::catch_up_mls_group_interleaved(
         state, &group_id, &inviter_id,
     ).await {
-        eprintln!("[mls] send_group_invite: catch_up_mls_group for {group_id}: {e}");
+        crate::diag!("[mls] send_group_invite: catch_up_mls_group for {group_id}: {e}");
     }
 
     // Reconcile adds the invitee's devices to the MLS tree now so their
@@ -93,7 +93,7 @@ pub async fn send_group_invite(
     if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
         state, &group_id, &inviter_id,
     ).await {
-        eprintln!("[mls] send_group_invite: reconcile for group {group_id}: {e}");
+        crate::diag!("[mls] send_group_invite: reconcile for group {group_id}: {e}");
     }
 
     // `inviter_username` / `group_name` came back with the invite (#396, #987):
@@ -114,7 +114,7 @@ pub async fn send_group_invite(
             group_name.as_deref(),
         ),
     ).await {
-        eprintln!("[inbox] send_group_invite: notify {invitee_id} failed: {e}");
+        crate::diag!("[inbox] send_group_invite: notify {invitee_id} failed: {e}");
     }
 
     Ok(())
@@ -167,7 +167,7 @@ pub async fn accept_group_invite(
         &group_id,
         serde_json::json!({"type": "membership_changed", "group_id": group_id}),
     ).await {
-        eprintln!("[realtime] accept_group_invite: notify group {group_id}: {e}");
+        crate::diag!("[realtime] accept_group_invite: notify group {group_id}: {e}");
     }
 
     Ok(())
@@ -404,7 +404,7 @@ pub async fn redeem_group_invite_link(
             // failed external join self-heals on the next pass (device
             // enrollment, message catch-up) rather than rolling back a join the
             // DS has committed.
-            eprintln!("[mls] redeem_group_invite_link: external_join {group_id}: {e}");
+            crate::diag!("[mls] redeem_group_invite_link: external_join {group_id}: {e}");
         }
     }
 
@@ -423,7 +423,7 @@ pub async fn redeem_group_invite_link(
     )
     .await
     {
-        eprintln!("[realtime] redeem_group_invite_link: notify group {group_id}: {e}");
+        crate::diag!("[realtime] redeem_group_invite_link: notify group {group_id}: {e}");
     }
 
     Ok(RedeemedInvite {

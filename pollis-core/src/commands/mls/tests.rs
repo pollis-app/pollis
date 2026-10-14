@@ -2150,7 +2150,7 @@ fn a_group_cannot_admit_a_key_package_from_another_suite() {
     let err = alice_group
         .add_members(&alice, &alice_sig, &[bob_kp])
         .expect_err("adding an off-suite leaf to a PQ group must be impossible");
-    eprintln!("[test] PQ group rejected the off-suite KeyPackage: {err}");
+    crate::diag!("[test] PQ group rejected the off-suite KeyPackage: {err}");
 
     // The rejected add must leave nothing staged — a failed downgrade attempt
     // cannot wedge the group.
@@ -2191,7 +2191,7 @@ fn self_update_turns_linear_commit_growth_into_logarithmic() {
 
         let unmerged_delta = large_unmerged as i64 - small_unmerged as i64;
         let merged_delta = large_merged as i64 - small_merged as i64;
-        eprintln!(
+        crate::diag!(
             "[test] {suite:?}: 8→16 members costs +{unmerged_delta} B unmerged, +{merged_delta} B merged \
              (8: {small_unmerged}→{small_merged} B, 16: {large_unmerged}→{large_merged} B)"
         );
@@ -2433,7 +2433,7 @@ fn pq_payloads_stay_under_their_ceilings() {
     let (_, legacy_kp) =
         build_key_package_in_suite(&PollisProvider::new(&legacy_db), "alice", "alice_dev", CS_LEGACY)
             .unwrap();
-    eprintln!(
+    crate::diag!(
         "[test] KeyPackage: classical {} B, post-quantum {} B",
         legacy_kp.len(),
         hybrid_kp.len()
@@ -2449,14 +2449,14 @@ fn pq_payloads_stay_under_their_ceilings() {
         CS_PQ,
         "01JT454CEILINGWELCOME00000",
     );
-    eprintln!("[test] hybrid Welcome (2 members): {} B", welcome.len());
+    crate::diag!("[test] hybrid Welcome (2 members): {} B", welcome.len());
     assert!(welcome.len() < 21_504, "hybrid Welcome: {} B", welcome.len());
 
     // The commit is the payload that scales, so it is the one with a real
     // ceiling. Measured in the state the fleet actually runs in — every leaf
     // merged, because every member self-updates on join (#666).
     let (unmerged, merged) = commit_growth_probe(CS_PQ, 8, "01JT454CEILINGCOMMIT000000");
-    eprintln!("[test] hybrid commit at 8 members: {unmerged} B unmerged, {merged} B merged");
+    crate::diag!("[test] hybrid commit at 8 members: {unmerged} B unmerged, {merged} B merged");
     assert!(merged < 20_480, "hybrid commit at 8 members: {merged} B");
 }
 

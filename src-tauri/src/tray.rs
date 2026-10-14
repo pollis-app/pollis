@@ -119,7 +119,7 @@ fn create_tray(app: &AppHandle) {
     let menu = match build_menu(app, in_call, muted) {
         Ok(m) => m,
         Err(err) => {
-            eprintln!("[tray] menu build failed: {err}");
+            pollis_core::diag!("[tray] menu build failed: {err}");
             return;
         }
     };
@@ -164,7 +164,7 @@ fn create_tray(app: &AppHandle) {
             *state.tray.lock().unwrap() = Some(tray);
         }
         Err(err) => {
-            eprintln!("[tray] init failed — close-to-tray will be disabled: {err}");
+            pollis_core::diag!("[tray] init failed — close-to-tray will be disabled: {err}");
         }
     }
 }

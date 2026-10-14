@@ -224,7 +224,7 @@ pub(super) async fn replenish_key_packages(
         return Ok(());
     }
 
-    eprintln!("[mls] replenish: {remaining} unclaimed KPs, publishing {needed} more");
+    crate::diag!("[mls] replenish: {remaining} unclaimed KPs, publishing {needed} more");
 
     // Build the top-up packages locally before any remote write.
     let mut pairs: Vec<(String, Vec<u8>)> = Vec::with_capacity(needed as usize);

@@ -150,7 +150,7 @@ where
         }
         // Pub bytes stashed but the private side is gone (e.g. mls_kv
         // got partially wiped). Fall through to regenerate.
-        eprintln!(
+        crate::diag!(
             "[mls] stable device signer pub present but private missing for {user_id}:{device_id} \
              ({scheme:?}) — regenerating"
         );
@@ -363,7 +363,7 @@ pub async fn ensure_device_cert(
         }
     }
 
-    eprintln!(
+    crate::diag!(
         "[mls] device cert published for {user_id}:{device_id} (identity_version={identity_version})"
     );
 
@@ -534,7 +534,7 @@ pub async fn resign_stale_device_certs(
         crate::commands::mls::ds_post_ok(state, &body).await?;
     }
 
-    eprintln!(
+    crate::diag!(
         "[mls] re-signed {count} device cert(s) for {user_id} at identity_version={identity_version}"
     );
 

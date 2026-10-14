@@ -140,7 +140,7 @@ pub async fn derive_voice_key(
         published_group_epoch(state, &mls_group_id),
     );
     let (mut key, mut idx, mut epoch) = derive_voice_key_for_group(state, &mls_group_id).await?;
-    eprintln!("[voice-e2ee] catch-up: {mls_group_id} now at epoch {epoch}");
+    crate::diag!("[voice-e2ee] catch-up: {mls_group_id} now at epoch {epoch}");
 
     // If the catch-up couldn't bring us level with the published GroupInfo,
     // we're stranded behind commits that are no longer in `mls_commit_log`
@@ -156,13 +156,13 @@ pub async fn derive_voice_key(
     // the commits that would advance this group are gone from the log.
     if let Some(remote_epoch) = remote_epoch {
         if epoch < remote_epoch {
-            eprintln!(
+            crate::diag!(
                 "[voice-e2ee] catch-up: local epoch {epoch} < published {remote_epoch} for {mls_group_id} — external-join recovery"
             );
             if let Err(e) =
                 crate::commands::mls::forget_local_mls_group(state, &mls_group_id).await
             {
-                eprintln!(
+                crate::diag!(
                     "[voice-e2ee] external-join recovery: could not drop stranded group {mls_group_id}: {e}"
                 );
             }
@@ -176,7 +176,7 @@ pub async fn derive_voice_key(
                 Ok(()) => {
                     let (k2, i2, e2) =
                         derive_voice_key_for_group(state, &mls_group_id).await?;
-                    eprintln!(
+                    crate::diag!(
                         "[voice-e2ee] external-join recovery: {mls_group_id} epoch {epoch} → {e2}"
                     );
                     key = k2;
@@ -184,7 +184,7 @@ pub async fn derive_voice_key(
                     epoch = e2;
                 }
                 Err(e) => {
-                    eprintln!(
+                    crate::diag!(
                         "[voice-e2ee] external-join recovery failed for {mls_group_id}: {e}"
                     );
                 }
@@ -238,7 +238,7 @@ async fn catch_up_mls_group(state: &Arc<AppState>, mls_group_id: &str, user_id: 
         crate::commands::messages::catch_up_mls_group_interleaved(state, mls_group_id, user_id)
             .await
     {
-        eprintln!("[voice-e2ee] catch-up for {mls_group_id}: {e}");
+        crate::diag!("[voice-e2ee] catch-up for {mls_group_id}: {e}");
     }
 }
 
@@ -364,7 +364,7 @@ fn install_shared_key(kp: &KeyProvider, key: Vec<u8>, key_index: i32) -> bool {
     kp.set_shared_key(key, key_index);
     let landed = kp.get_shared_key(key_index).is_some();
     if !landed {
-        eprintln!(
+        crate::diag!(
             "[voice-e2ee] key install at ring slot {key_index} was rejected (ring size {VOICE_KEY_RING_SIZE}) — frames at this index will not decrypt"
         );
     }
@@ -424,7 +424,7 @@ pub async fn sync_local_sender_key_index(state: &Arc<AppState>) {
         return;
     }
     let n = apply_sender_key_index(room, voice.e2ee_key_index);
-    eprintln!(
+    crate::diag!(
         "[voice-e2ee] local track published: {n} sender cryptor(s) on ring slot {}",
         voice.e2ee_key_index
     );
@@ -453,7 +453,7 @@ pub async fn on_mls_epoch_changed(state: &Arc<AppState>, mls_group_id: &str) {
     let (key, key_index, epoch) = match derive_voice_key_for_group(state, mls_group_id).await {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("[voice-e2ee] re-derive failed for {mls_group_id}: {e}");
+            crate::diag!("[voice-e2ee] re-derive failed for {mls_group_id}: {e}");
             return;
         }
     };
@@ -502,7 +502,7 @@ pub async fn on_mls_epoch_changed(state: &Arc<AppState>, mls_group_id: &str) {
                 return;
             }
             scrub_slot(&provider, prev_index);
-            eprintln!(
+            crate::diag!(
                 "[voice-e2ee] retired ring slot {prev_index} (epoch {prev_epoch}) after grace period"
             );
         });
@@ -521,7 +521,7 @@ pub async fn on_mls_epoch_changed(state: &Arc<AppState>, mls_group_id: &str) {
         });
     }
 
-    eprintln!(
+    crate::diag!(
         "[voice-e2ee] rotated key for {mls_group_id} to epoch {epoch} (ring slot {key_index}, {senders_moved} sender cryptor(s) moved)"
     );
 }

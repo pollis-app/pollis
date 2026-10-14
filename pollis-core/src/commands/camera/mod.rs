@@ -123,7 +123,7 @@ pub async fn subscribe_camera_events(
     allow(dead_code)
 )]
 pub(super) async fn fail_capture(state: &Arc<AppState>, human: String) -> crate::error::Error {
-    eprintln!("[camera] capture failed: {human}");
+    crate::diag!("[camera] capture failed: {human}");
     let ev = {
         let cam = state.camera.lock().await;
         cam.events.clone()

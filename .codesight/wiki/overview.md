@@ -214,6 +214,24 @@ full detail: `docs/metadata-retention-policy.md` §3.
   `GET /v1/ops/otp-requests` (operator token, 404 when off).
   `tests/otp_ops_log.rs` proves that every response is the same with the log on,
   that no IP or address is in the view, and that prod never sets the gate.
+- **Diagnostics (#1305).** Two halves, matched by a random per-request id the
+  client sends as `X-Pollis-Request-Id` (`pollis_api::redact::REQUEST_ID_HEADER`,
+  minted per call in `ds_client.rs` `send_ds`, never derived from the user or
+  device). **Client:** `pollis-core/src/diag.rs` — every core log line is a
+  `diag!` (no `eprintln!`; `tests/diag_discipline.rs`), written to stderr and,
+  once the host calls `diag::init` (src-tauri setup, mobile `init_pollis`), to
+  `<data dir>/logs/pollis.log` (owner-only, rotated at 512 KB to `.1`), scrubbed
+  at write time (home dir, email local parts, IPs, 40+ char token runs). A failed
+  DS call logs its path, status and request id. Nothing leaves the device; the
+  `get_diagnostics` command feeds Diagnostics (desktop `/diagnostics`, mobile
+  Self → Diagnostics) and the "Copy diagnostics" button under sign-in errors.
+  **DS:** `error_log.rs`, a route layer recording every matched 4xx/5xx (not
+  the limiter's 429s) to `ds_error_log` with the response's `error` and the
+  request's own `warn!`/`error!` lines (captured by `error_log::CaptureLayer`,
+  installed in `main.rs`) — the cause behind a bare "internal error". Bounded by
+  the table's trigger (72 h / 500 rows) and a 30-writes-a-minute budget; read
+  with `curl -H "Authorization: Bearer $POLLIS_DS_METRICS_TOKEN"
+  https://api.pollis.com/v1/ops/errors` (404 without a token configured).
 - **Relay.** `pollis-relay/src/ratelimit.rs` `IpKey::of(ip)` (HMAC under a
   per-boot key) is computed in the accept loop; the per-IP connection and
   circuit maps hold only `IpKey`s.

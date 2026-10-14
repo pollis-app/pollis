@@ -286,6 +286,12 @@ const searchRoute = createRoute({
   component: SearchPage,
 });
 
+const diagnosticsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/diagnostics",
+  component: lazyRouteComponent(() => import("./pages/DiagnosticsPage"), "DiagnosticsPage"),
+});
+
 const keyboardShortcutsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/shortcuts",
@@ -372,6 +378,7 @@ const routeTree = rootRoute.addChildren([
   allJoinRequestsRoute,
   searchRoute,
   keyboardShortcutsRoute,
+  diagnosticsRoute,
   updateRoute,
   callRoute,
   savedRoute,

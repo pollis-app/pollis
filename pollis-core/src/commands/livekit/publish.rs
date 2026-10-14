@@ -19,7 +19,7 @@ pub async fn publish_to_user_inbox(
     let state = Arc::clone(state);
     tokio::spawn(async move {
         if let Err(e) = crate::commands::mls::ds_livekit_send_data(&state, &room_name, payload).await {
-            eprintln!("[inbox] SendData error (non-fatal): {e}");
+            crate::diag!("[inbox] SendData error (non-fatal): {e}");
         }
     });
     Ok(())
@@ -38,7 +38,7 @@ pub async fn publish_to_room_server(
     let state = Arc::clone(state);
     tokio::spawn(async move {
         if let Err(e) = crate::commands::mls::ds_livekit_send_data(&state, &room_name, payload).await {
-            eprintln!("[room-server] SendData to {room_name} error (non-fatal): {e}");
+            crate::diag!("[room-server] SendData to {room_name} error (non-fatal): {e}");
         }
     });
     Ok(())

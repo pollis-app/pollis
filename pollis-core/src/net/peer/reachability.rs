@@ -124,7 +124,7 @@ async fn maintain(config: ReachabilityConfig) {
         // No signed directory ⇒ no relays to park at, and no key to evaluate
         // revocation with. Report once and stop rather than retry a thing that
         // cannot change without a rebuild.
-        eprintln!(
+        crate::diag!(
             "[peer-relay] no signed relay directory configured — this device runs its node but \
              nothing can reach it"
         );
@@ -139,7 +139,7 @@ async fn maintain(config: ReachabilityConfig) {
         let sleep_for = match refresh(&url, &key, &config, &mut supervisor).await {
             Ok(sleep_for) => sleep_for,
             Err(e) => {
-                eprintln!("[peer-relay] reachability refresh failed: {e}");
+                crate::diag!("[peer-relay] reachability refresh failed: {e}");
                 pollis_relay::backoff::jittered(RETRY_BACKOFF)
             }
         };
@@ -165,7 +165,7 @@ async fn refresh(
     // would park somewhere it would not forward to. A failure here is not fatal
     // to parking: the engine simply keeps refusing to extend.
     if let Err(e) = config.next_hops.install(&bytes, now) {
-        eprintln!(
+        crate::diag!(
             "[peer-relay] next-hop directory unusable ({e}) — this device stays parked but \
              forwards nothing until it recovers"
         );
@@ -175,7 +175,7 @@ async fn refresh(
     // here leaves the engine unable to admit a next hop, which is the safe
     // outcome, so it must not abort the parking it is refreshing alongside.
     if let Err(e) = renew_revocations(url, &dir, &config.revocations, now).await {
-        eprintln!(
+        crate::diag!(
             "[peer-relay] revocation evidence unusable ({e}) — this device stays parked but \
              forwards nothing until it recovers"
         );

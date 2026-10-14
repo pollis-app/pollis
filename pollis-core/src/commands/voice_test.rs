@@ -141,8 +141,8 @@ async fn ensure_output(
                 if !was_explicit {
                     return Err(e);
                 }
-                eprintln!(
-                    "[voice-test] speaker open failed for '{dev_name}': {e} — falling back to OS default"
+                crate::diag!(
+                    "[voice-test] speaker open failed for the selected device: {e} — falling back to OS default"
                 );
                 let (s, sr, ch, buf) = try_open(None)?;
                 Ok((s, sr, ch, buf, String::from("default")))
@@ -472,7 +472,7 @@ pub async fn record_and_play_back(
         let output = match ensure_output(&state_task, &output_device_id).await {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("[voice-test] record-playback output init failed: {e}");
+                crate::diag!("[voice-test] record-playback output init failed: {e}");
                 return;
             }
         };

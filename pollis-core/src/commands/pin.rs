@@ -436,7 +436,7 @@ pub async fn set_pin(
         if let Err(e) =
             crate::commands::mls::ensure_device_cert(state, &user_id, &device_id).await
         {
-            eprintln!("[pin] set_pin: ensure_device_cert failed (non-fatal): {e}");
+            crate::diag!("[pin] set_pin: ensure_device_cert failed (non-fatal): {e}");
         }
     }
 
@@ -446,7 +446,7 @@ pub async fn set_pin(
     // reset authenticates against the just-published device key. Best-effort.
     if mls_was_empty {
         if let Err(e) = crate::commands::mls::reset_welcome_delivery(state, &user_id).await {
-            eprintln!("[pin] set_pin: reset_welcome_delivery failed (non-fatal): {e}");
+            crate::diag!("[pin] set_pin: reset_welcome_delivery failed (non-fatal): {e}");
         }
     }
 
@@ -694,7 +694,7 @@ pub async fn unlock(
         if let Err(e) =
             crate::commands::mls::ensure_device_cert(state, &user_id, &device_id).await
         {
-            eprintln!("[pin] unlock: ensure_device_cert failed (non-fatal): {e}");
+            crate::diag!("[pin] unlock: ensure_device_cert failed (non-fatal): {e}");
         }
     }
 
@@ -703,7 +703,7 @@ pub async fn unlock(
     // `ensure_device_cert` so the signed DS reset authenticates. Best-effort.
     if mls_was_empty {
         if let Err(e) = crate::commands::mls::reset_welcome_delivery(state, &user_id).await {
-            eprintln!("[pin] unlock: reset_welcome_delivery failed (non-fatal): {e}");
+            crate::diag!("[pin] unlock: reset_welcome_delivery failed (non-fatal): {e}");
         }
     }
 
@@ -717,7 +717,7 @@ pub async fn unlock(
     if let Err(e) =
         crate::commands::mls::resign_stale_device_certs(state, &user_id).await
     {
-        eprintln!("[pin] unlock: resign_stale_device_certs failed (non-fatal): {e}");
+        crate::diag!("[pin] unlock: resign_stale_device_certs failed (non-fatal): {e}");
     }
 
     Ok(UnlockOutcome {

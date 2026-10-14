@@ -185,7 +185,7 @@ where
     let msg = match group.export_group_info(provider.crypto(), &signer, true) {
         Ok(m) => m,
         Err(e) => {
-            eprintln!("[mls] publish_group_info: export failed for {conversation_id}: {e}");
+            crate::diag!("[mls] publish_group_info: export failed for {conversation_id}: {e}");
             return Ok(None);
         }
     };
@@ -247,7 +247,7 @@ fn parse_stored_group_info(group_info_bytes: &[u8]) -> Result<VerifiableGroupInf
     let mut bare_reader: &[u8] = group_info_bytes;
     match VerifiableGroupInfo::tls_deserialize(&mut bare_reader) {
         Ok(gi) => {
-            eprintln!(
+            crate::diag!(
                 "[mls] stored group_info is the legacy bare-GroupInfo form; accepted. \
                  It will be republished in the envelope form on the next publish."
             );
@@ -366,7 +366,7 @@ async fn ensure_group_info_published(state: &Arc<AppState>, conversation_id: &st
         // unjoinable forever. Falling through to `group_info_is_stale(None, …)`
         // preserves that exactly.
         if let Err(e) = publish_group_info(state, conversation_id).await {
-            eprintln!(
+            crate::diag!(
                 "[mls] ensure_group_info_published: republish for {conversation_id} failed: {e}"
             );
         }
@@ -381,7 +381,7 @@ async fn ensure_group_info_published(state: &Arc<AppState>, conversation_id: &st
     }
 
     if let Err(e) = publish_group_info(state, conversation_id).await {
-        eprintln!(
+        crate::diag!(
             "[mls] ensure_group_info_published: republish for {conversation_id} \
              (local head {local_head:?}, published {published:?}) failed: {e}"
         );
@@ -461,7 +461,7 @@ pub(crate) async fn external_join_group_inner(
             ExternalJoinResult::DeferredToWelcome => return Ok(()),
             // Already in, by another path (#1220). Success: nothing to join.
             ExternalJoinResult::AlreadyMember => {
-                eprintln!(
+                crate::diag!(
                     "[mls] external_join_group: {conversation_id} already has a confirmed local \
                      group (attempt {}/{MAX_JOIN_ATTEMPTS}) — standing down instead of replacing it",
                     attempt + 1
@@ -471,7 +471,7 @@ pub(crate) async fn external_join_group_inner(
             ExternalJoinResult::LostRace {
                 generation: join_generation,
             } => {
-                eprintln!(
+                crate::diag!(
                     "[mls] external_join_group: lost epoch race for {conversation_id} \
                      (attempt {}/{MAX_JOIN_ATTEMPTS}) — discarding local branch and retrying",
                     attempt + 1
@@ -576,7 +576,7 @@ async fn external_join_attempt(
     // property is proved over the pure gate, so feeding it two snapshots does
     // not fail the proof, it makes it vacuous.
     if snap.welcome_pending {
-        eprintln!(
+        crate::diag!(
             "[mls] external_join: a Welcome for {conversation_id} is available — deferring to it \
              instead of external-joining (avoids racing our own Welcome)"
         );
@@ -609,7 +609,7 @@ async fn external_join_attempt(
             }
             Ok(_) => None,
             Err(e) => {
-                eprintln!(
+                crate::diag!(
                     "[mls] external_join: roster read for {conversation_id} failed ({e}) — the \
                      GroupInfo signer's membership cannot be checked this pass"
                 );
@@ -622,7 +622,7 @@ async fn external_join_attempt(
     {
         Ok(dir) => dir,
         Err(e) => {
-            eprintln!(
+            crate::diag!(
                 "[mls] external_join: cross-signing material for {conversation_id} could not be \
                  loaded ({e}) — the GroupInfo signer stays unverifiable this pass"
             );
@@ -710,7 +710,7 @@ async fn external_join_attempt(
             )
             .await
             {
-                eprintln!(
+                crate::diag!(
                     "[mls] external_join: LostRace at epoch {stored_epoch} for {conversation_id} but our commit is canonical — adopting (lost success-response)"
                 );
             } else {
@@ -729,7 +729,7 @@ async fn external_join_attempt(
             )
             .await
             {
-                eprintln!(
+                crate::diag!(
                     "[mls] external_join: submit errored but our commit is canonical at epoch {stored_epoch} for {conversation_id} — adopting (lost response): {e}"
                 );
             } else {
@@ -769,7 +769,7 @@ async fn external_join_attempt(
     //    new device joining via this same path sees the up-to-date
     //    tree.
     if let Err(e) = publish_group_info(state, conversation_id).await {
-        eprintln!(
+        crate::diag!(
             "[mls] external_join_group: publish_group_info failed (non-fatal): {e}"
         );
     }
@@ -781,7 +781,7 @@ async fn external_join_attempt(
     // quiet group), this picks it up now.
     crate::commands::pinned_messages::try_adopt_pin_key(state, conversation_id).await;
 
-    eprintln!(
+    crate::diag!(
         "[mls] external_join_group: {user_id}:{device_id} joined {conversation_id} from epoch {stored_epoch}"
     );
 
@@ -962,7 +962,7 @@ where
                 // not strand a legitimate migration — but it is the one case
                 // where the gate let something through it could not prove, so
                 // it is never silent.
-                eprintln!(
+                crate::diag!(
                     "[mls] external join for {conversation_id} generation {generation}: adopting a \
                      GroupInfo signed by {signer_user}:{signer_device} whose cross-signing could \
                      not be evaluated ({verdict:?}) — not positive evidence, so not a refusal"
@@ -1218,7 +1218,7 @@ pub async fn init_mls_group(
     // Publish the epoch-0 GroupInfo so a future device enrolling via the
     // Secret Key path can join this group via external commit.
     if let Err(e) = publish_group_info(state, conversation_id).await {
-        eprintln!("[mls] init_mls_group: publish_group_info failed (non-fatal): {e}");
+        crate::diag!("[mls] init_mls_group: publish_group_info failed (non-fatal): {e}");
     }
 
     // Mint the conversation's pin master key while the creator is the sole
@@ -1357,7 +1357,7 @@ pub(super) async fn forget_unconfirmed_branch(
         return;
     };
     if !super::join_branch::is_unconfirmed(db.conn(), conversation_id, generation) {
-        eprintln!(
+        crate::diag!(
             "[mls] {conversation_id} generation {generation}: the stored group is no longer this \
              device's unconfirmed branch (a Welcome replaced it) — keeping it"
         );
@@ -1365,7 +1365,7 @@ pub(super) async fn forget_unconfirmed_branch(
     }
     if let Some(mut group) = load_stored_group_at(db.conn(), conversation_id, generation) {
         if let Err(e) = group.delete(&store_only(db.conn())) {
-            eprintln!(
+            crate::diag!(
                 "[mls] could not delete the doomed external-join branch for {conversation_id}: {e}"
             );
             return;
@@ -1513,7 +1513,7 @@ fn may_rejoin_via_external_join(
     // in (fuzzer finding #2).
     let registered = local_device_registered(snap);
     if !registered {
-        eprintln!(
+        crate::diag!(
             "[mls] external-join recovery for {mls_group_id}: device for {user_id} is no longer \
              registered (revoked) — staying out"
         );
@@ -1521,7 +1521,7 @@ fn may_rejoin_via_external_join(
     }
     let is_member = local_user_is_member(snap);
     if !is_member {
-        eprintln!(
+        crate::diag!(
             "[mls] external-join recovery for {mls_group_id}: {user_id} is no longer a group \
              member (removed) — staying out"
         );
@@ -1721,7 +1721,7 @@ async fn process_one_generation<'h>(
             )
             .await
             .map_err(|e| {
-                eprintln!(
+                crate::diag!(
                     "[mls] process_pending_commits: conversation-state for {mls_group_id} failed: {e}"
                 );
                 e
@@ -1746,7 +1746,7 @@ async fn process_one_generation<'h>(
             ) {
                 super::invariants::JoinRecovery::AwaitWelcome => {
                     if welcome_pending {
-                        eprintln!(
+                        crate::diag!(
                             "[mls] process_pending_commits: no local group for {mls_group_id} but an \
                              undelivered Welcome targets this device — deferring to the Welcome path \
                              (not external-joining) to avoid racing our own Welcome"
@@ -1756,7 +1756,7 @@ async fn process_one_generation<'h>(
                         // view, so a Welcome is the only way in. Poll for it NOW
                         // rather than waiting for the next sweep — idempotent, and
                         // it is the step that actually converges this state (#832).
-                        eprintln!(
+                        crate::diag!(
                             "[mls] process_pending_commits: no local group for {mls_group_id} and no \
                              published GroupInfo — awaiting a Welcome (external-join would have \
                              nothing to join onto); polling welcomes now"
@@ -1767,7 +1767,7 @@ async fn process_one_generation<'h>(
                         if let Err(e) =
                             Box::pin(super::poll_mls_welcomes(state, user_id.to_string())).await
                         {
-                            eprintln!(
+                            crate::diag!(
                                 "[mls] process_pending_commits: welcome poll for {mls_group_id} failed: {e}"
                             );
                         }
@@ -1776,7 +1776,7 @@ async fn process_one_generation<'h>(
                 super::invariants::JoinRecovery::ExternalJoin => {
                     // Lock already held by the wrapper, so call the unlocked inner variant.
                     if let Err(e) = external_join_group_inner(state, mls_group_id, user_id).await {
-                        eprintln!("[mls] process_pending_commits: no local group for {mls_group_id}, external-join failed: {e}");
+                        crate::diag!("[mls] process_pending_commits: no local group for {mls_group_id}, external-join failed: {e}");
                     }
                 }
                 super::invariants::JoinRecovery::StayOut => {
@@ -1831,7 +1831,7 @@ async fn process_one_generation<'h>(
         // whether to climb back, and it answers `false` for exactly this case.
         // Replaying commits we are no longer entitled to read is not an option
         // the DS leaves open, so this pass simply ends.
-        eprintln!(
+        crate::diag!(
             "[mls] process_pending_commits: {user_id} is not a member of {mls_group_id} — nothing to replay"
         );
         return Ok(false);
@@ -1858,7 +1858,7 @@ async fn process_one_generation<'h>(
     //     live group recovering from a gap the log never had.
     if let Some(floor) = snapshot.pruned_below {
         if floor > initial_epoch as i64 {
-            eprintln!(
+            crate::diag!(
                 "[mls] process_pending_commits: {mls_group_id} generation {generation} is pruned \
                  below epoch {floor} but we are at {initial_epoch} — the missing commits are \
                  retention-collected, not lost; recovering via external join"
@@ -1866,7 +1866,7 @@ async fn process_one_generation<'h>(
         }
     }
     if let Some(hole) = snapshot.hole {
-        eprintln!(
+        crate::diag!(
             "[mls] process_pending_commits: {mls_group_id} generation {generation} has a HOLE — \
              expected epoch {}, found {}. This is damage in the log, not a prune and not a torn \
              read (the DS checked contiguity in the same transaction as the head); recovering \
@@ -1914,7 +1914,7 @@ async fn process_one_generation<'h>(
     {
         Ok(dir) => dir,
         Err(e) => {
-            eprintln!(
+            crate::diag!(
                 "[mls] process_pending_commits: cannot pin the identity directory for \
                  {mls_group_id} ({e}) — treating every added leaf as unverifiable this pass"
             );
@@ -1945,7 +1945,7 @@ async fn process_one_generation<'h>(
         // it — and everything after it — to the next pass. See `ReplayBound`.
         if let Some(b) = bound {
             if !b.admits(generation, commit.epoch as u64) {
-                eprintln!(
+                crate::diag!(
                     "[mls] process_pending_commits: {mls_group_id} holding at epoch {current_epoch} — \
                      commit at epoch {} landed after this pass fetched its envelopes (bound {b:?}); \
                      the next pass applies it",
@@ -1982,7 +1982,7 @@ async fn process_one_generation<'h>(
             // response cannot spend this device's crypto state.
             match super::invariants::gap_recovery(current_epoch, hole_expected, pruned_floor) {
                 super::invariants::GapRecovery::Rebuild => {
-                    eprintln!(
+                    crate::diag!(
                         "[mls] process_pending_commits: epoch gap for {mls_group_id}: expected \
                          {current_epoch}, got {} (hole={hole_expected:?} pruned_below={pruned_floor:?}) \
                          — dropping local group to recover via external join",
@@ -1991,7 +1991,7 @@ async fn process_one_generation<'h>(
                     let _ = forget_local_mls_group_at(state, mls_group_id, generation).await;
                 }
                 super::invariants::GapRecovery::HoldPosition => {
-                    eprintln!(
+                    crate::diag!(
                         "[mls] process_pending_commits: epoch gap for {mls_group_id}: expected \
                          {current_epoch}, got {} — but the DS declared no prune or hole covering \
                          it (hole={hole_expected:?} pruned_below={pruned_floor:?}). Holding at \
@@ -2048,7 +2048,7 @@ async fn process_one_generation<'h>(
                             FlagKind::Uncertified => "is NOT cross-signed by that account",
                             FlagKind::Unverifiable => "could not be verified against that account (yet)",
                         };
-                        eprintln!(
+                        crate::diag!(
                             "[mls] process_pending_commits: commit seq {} epoch {} in {mls_group_id} \
                              added a leaf for {}:{} that {verdict_phrase} ({reason}) \
                              — applied to stay on the canonical branch; flagging for eviction",
@@ -2064,7 +2064,7 @@ async fn process_one_generation<'h>(
                     // silent divergence here mis-buckets every later envelope,
                     // and `watermark.rs` then marks each one permanently handled.
                     if epoch_after != commit.epoch as u64 + 1 {
-                        eprintln!(
+                        crate::diag!(
                             "[mls] process_pending_commits: {mls_group_id} applied the commit at \
                              epoch {} but the group is at epoch {epoch_after}, not {} — refusing \
                              to replay against a desynchronised counter",
@@ -2078,7 +2078,7 @@ async fn process_one_generation<'h>(
                     }
                 }
                 CommitApply::Recover(reason) => {
-                    eprintln!(
+                    crate::diag!(
                         "[mls] process_pending_commits: {mls_group_id} cannot advance past epoch {} ({reason:?}) — recovering rather than wedging (#680)",
                         commit.epoch
                     );
@@ -2130,7 +2130,7 @@ async fn process_one_generation<'h>(
             // Clearing a pending commit is storage-only — no suite dispatch.
             if let Some(mut group) = load_stored_group_at(db.conn(), mls_group_id, generation) {
                 if group.pending_commit().is_some() {
-                    eprintln!(
+                    crate::diag!(
                         "[mls] process_pending_commits: clearing a dangling pending commit for {mls_group_id} (never landed) to avoid a phantom-epoch merge"
                     );
                     let _ = group.clear_pending_commit(&store_only(db.conn()));
@@ -2164,7 +2164,7 @@ async fn process_one_generation<'h>(
         if let Some(new_generation) =
             maybe_advance_generation(state, mls_group_id, user_id, generation).await
         {
-            eprintln!(
+            crate::diag!(
                 "[mls] process_pending_commits: {mls_group_id} advanced generation \
                  {generation} -> {new_generation} — replaying the new lineage"
             );
@@ -2247,10 +2247,10 @@ async fn process_one_generation<'h>(
             if group_exists {
                 let _ = forget_local_mls_group_at(state, mls_group_id, generation).await;
             }
-            eprintln!("[mls] process_pending_commits: group {mls_group_id} was deleted during processing — external-joining to recover");
+            crate::diag!("[mls] process_pending_commits: group {mls_group_id} was deleted during processing — external-joining to recover");
             // Lock already held by the wrapper, so call the unlocked inner variant.
             if let Err(e) = external_join_group_inner(state, mls_group_id, user_id).await {
-                eprintln!("[mls] process_pending_commits: recovery external-join failed for {mls_group_id}: {e}");
+                crate::diag!("[mls] process_pending_commits: recovery external-join failed for {mls_group_id}: {e}");
             }
         }
     }
@@ -2315,7 +2315,7 @@ async fn maybe_advance_generation(
                 return Some(successor);
             }
             _ => {
-                eprintln!(
+                crate::diag!(
                     "[mls] process_pending_commits: {mls_group_id} holds a group at generation \
                      {successor} that the log does not know about — ignoring it (an abandoned \
                      migration) and staying on {generation}"
@@ -2342,14 +2342,14 @@ async fn maybe_advance_generation(
     if !may_rejoin_via_external_join(snap, mls_group_id, user_id) {
         return None;
     }
-    eprintln!(
+    crate::diag!(
         "[mls] process_pending_commits: {mls_group_id} was migrated to generation \
          {head_generation} but no Welcome reached this device — external-joining the successor"
     );
     // The caller holds the MLS lock, so use the unlocked inner variant. On
     // success it records the new lineage itself; re-read rather than assume.
     if let Err(e) = external_join_group_inner(state, mls_group_id, user_id).await {
-        eprintln!(
+        crate::diag!(
             "[mls] process_pending_commits: successor external-join failed for {mls_group_id}: {e}"
         );
         return None;
@@ -2519,11 +2519,11 @@ where
         // The group is simply absent (never built, or already deleted by an
         // earlier recovery). Nothing to delete; the caller's rejoin path rebuilds.
         Ok(None) => {
-            eprintln!("[mls] process_pending_commits: no local group for {mls_group_id} gen {generation} at epoch {commit_epoch} — recovering via external-join");
+            crate::diag!("[mls] process_pending_commits: no local group for {mls_group_id} gen {generation} at epoch {commit_epoch} — recovering via external-join");
             return CommitApply::Recover(RecoverReason::GroupMissing);
         }
         Err(e) => {
-            eprintln!("[mls] process_pending_commits: mls load failed for {mls_group_id}: {e} — recovering via external-join");
+            crate::diag!("[mls] process_pending_commits: mls load failed for {mls_group_id}: {e} — recovering via external-join");
             return CommitApply::Recover(RecoverReason::GroupLoadFailed);
         }
     };
@@ -2532,7 +2532,7 @@ where
     let msg_in = match MlsMessageIn::tls_deserialize(&mut reader) {
         Ok(m) => m,
         Err(e) => {
-            eprintln!("[mls] process_pending_commits: deserialize failed for {mls_group_id} at epoch {commit_epoch}: {e} — recovering via external-join");
+            crate::diag!("[mls] process_pending_commits: deserialize failed for {mls_group_id} at epoch {commit_epoch}: {e} — recovering via external-join");
             let _ = group.delete(provider.storage());
             return CommitApply::Recover(RecoverReason::MalformedCommit);
         }
@@ -2540,7 +2540,7 @@ where
     let protocol_msg = match msg_in.try_into_protocol_message() {
         Ok(m) => m,
         Err(e) => {
-            eprintln!("[mls] process_pending_commits: protocol msg failed for {mls_group_id} at epoch {commit_epoch}: {e} — recovering via external-join");
+            crate::diag!("[mls] process_pending_commits: protocol msg failed for {mls_group_id} at epoch {commit_epoch}: {e} — recovering via external-join");
             let _ = group.delete(provider.storage());
             return CommitApply::Recover(RecoverReason::NotAProtocolMessage);
         }
@@ -2568,7 +2568,7 @@ where
     // marked permanently handled by `watermark.rs` — a fourth message-loss mode,
     // where CLAUDE.md sanctions exactly three.
     if protocol_msg.group_id() != &group_id {
-        eprintln!(
+        crate::diag!(
             "[mls] process_pending_commits: commit-log row at epoch {commit_epoch} for \
              {mls_group_id} names a different group id ({:?}) — recovering via external-join",
             protocol_msg.group_id()
@@ -2577,7 +2577,7 @@ where
         return CommitApply::Recover(RecoverReason::WrongGroup);
     }
     if protocol_msg.content_type() != ContentType::Commit {
-        eprintln!(
+        crate::diag!(
             "[mls] process_pending_commits: commit-log row at epoch {commit_epoch} for \
              {mls_group_id} is a {:?}, not a Commit — recovering via external-join rather than \
              advancing the replay counter past a row that cannot advance the group",
@@ -2596,7 +2596,7 @@ where
         Ok(processed) => match processed.into_content() {
             ProcessedMessageContent::StagedCommitMessage(staged) => {
                 if let Err(e) = group.merge_staged_commit(provider, *staged) {
-                    eprintln!("[mls] process_pending_commits: merge failed for {mls_group_id} at epoch {commit_epoch}: {e} — recovering via external-join");
+                    crate::diag!("[mls] process_pending_commits: merge failed for {mls_group_id} at epoch {commit_epoch}: {e} — recovering via external-join");
                     let _ = group.delete(provider.storage());
                     return CommitApply::Recover(RecoverReason::MergeFailed);
                 }
@@ -2635,20 +2635,20 @@ where
                 // it) we cannot advance from it locally — rebuild from the
                 // published GroupInfo rather than wedge.
                 if group.pending_commit().is_none() {
-                    eprintln!(
+                    crate::diag!(
                         "[mls] process_pending_commits: own commit at epoch {commit_epoch} for {mls_group_id} but no pending commit to adopt — recovering via external-join"
                     );
                     let _ = group.delete(provider.storage());
                     return CommitApply::Recover(RecoverReason::OwnCommitMergeFailed);
                 }
                 if let Err(merge_err) = group.merge_pending_commit(provider) {
-                    eprintln!(
+                    crate::diag!(
                         "[mls] process_pending_commits: own commit at epoch {commit_epoch} for {mls_group_id} but merge_pending failed ({merge_err}) — recovering via external-join"
                     );
                     let _ = group.delete(provider.storage());
                     return CommitApply::Recover(RecoverReason::OwnCommitMergeFailed);
                 }
-                eprintln!(
+                crate::diag!(
                     "[mls] process_pending_commits: adopted our own commit at epoch {commit_epoch} for {mls_group_id}"
                 );
                 // Fall through so this counts as applied and the epoch advances.
@@ -2660,7 +2660,7 @@ where
             // arm below it advanced the replay counter without advancing the
             // group (#1161 C2).
             _ => {
-                eprintln!(
+                crate::diag!(
                     "[mls] process_pending_commits: unexpected non-commit content at epoch {commit_epoch} for {mls_group_id} — recovering via external-join"
                 );
                 let _ = group.delete(provider.storage());
@@ -2676,7 +2676,7 @@ where
             // pass filters `epoch >= new_epoch` and can't re-fail on the same
             // commit — no recovery loop.
             let reason = classify_process_message_error(&e);
-            eprintln!(
+            crate::diag!(
                 "[mls] process_pending_commits: commit at epoch {commit_epoch} for {mls_group_id} failed to apply ({e}) — classified {reason:?}, deleting local group to re-join"
             );
             let _ = group.delete(provider.storage());
@@ -2839,7 +2839,7 @@ async fn report_uncertified_leaves(
             user_id: Some(user_id.to_string()),
         };
         if let Err(e) = super::ds_client::ds_post_ok(state, &ev).await {
-            eprintln!(
+            crate::diag!(
                 "[mls] process_pending_commits: DS security-event for uncertified leaf failed (non-fatal): {e}"
             );
         }
@@ -2869,7 +2869,7 @@ fn eviction_reconcile(
         if let Err(e) =
             super::reconcile::reconcile_group_mls_impl(&state, &conversation_id, &user_id).await
         {
-            eprintln!(
+            crate::diag!(
                 "[mls] process_pending_commits: eviction reconcile for {conversation_id} failed: {e}"
             );
         }

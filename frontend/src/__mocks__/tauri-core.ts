@@ -67,6 +67,11 @@ interface MockProfile {
 /// The only code the mocked email-change flow accepts, for BOTH of its codes.
 /// Mirrors the real `DEV_OTP` the Delivery Service honours in dev.
 const MOCK_OTP_CODE = '000000';
+/// `verify_otp` rejects this code as the DS's 401 does (#1305).
+const MOCK_WRONG_OTP_CODE = '111111';
+/// `verify_otp` accepts this code and then fails a later bootstrap step — the
+/// shape of #1305's report, where the code was right and the UI said otherwise.
+const MOCK_POST_VERIFY_FAILURE_CODE = '500500';
 
 interface MockGroupMember {
   user_id: string;
@@ -1806,6 +1811,11 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return null;
     }
 
+    // The on-device diagnostics log (#1305). A fixed report in the shape
+    // `pollis_core::commands::diagnostics` produces.
+    case 'get_diagnostics':
+      return 'Pollis diagnostics\napp: mock\ncore: mock\nos: browser\ngenerated: 2026-01-01T00:00:00Z\n----\n2026-01-01T00:00:00.000Z [auth] verify_otp: email=***@example.com\n';
+
     case 'write_clipboard_text': {
       // A preload may set `failClipboard` to model an OS clipboard write that
       // fails — the Rust command returns false rather than throwing, and that
@@ -1827,7 +1837,17 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return null;
 
     case 'verify_otp': {
-      const { email } = args as { email: string; code: string };
+      const { email, code } = args as { email: string; code: string };
+      // Real Tauri rejects with the Rust error's TEXT — a string, never an
+      // `Error` — and that difference is what hid #1305: the UI only read
+      // `Error`s, so every failure rendered as "Invalid code". These two codes
+      // reject exactly as the shell does, with pollis-core's own messages.
+      if (code === MOCK_WRONG_OTP_CODE) {
+        throw 'Invalid code. Please check and try again.';
+      }
+      if (code === MOCK_POST_VERIFY_FAILURE_CODE) {
+        throw 'ds_post_session /v1/auth/establish-identity 500 Internal Server Error: {"error":"internal error"}';
+      }
       const user: MockUser = {
         id: generateId(),
         email,

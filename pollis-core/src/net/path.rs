@@ -786,7 +786,7 @@ impl GuardBook {
         // Owner-only: the guard book records which relays this device has
         // pinned, i.e. where its owner connects from.
         if let Err(e) = crate::private_fs::write(path, bytes) {
-            eprintln!("[overlay] could not persist guard pins: {e}");
+            crate::diag!("[overlay] could not persist guard pins: {e}");
         }
     }
 }

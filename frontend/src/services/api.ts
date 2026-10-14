@@ -49,6 +49,12 @@ function rawProfileToAuthResult(profile: RawUserProfile, isResume: boolean): Aut
   };
 }
 
+/// The on-device diagnostics log with a short header (#1305) — local only;
+/// nothing is sent anywhere unless the user copies it out and sends it.
+export async function getDiagnostics(): Promise<string> {
+  return invoke<string>('get_diagnostics');
+}
+
 export async function verifyOTP(email: string, code: string): Promise<AuthResult> {
   const profile = await invoke<RawUserProfile>('verify_otp', { email, code });
   return rawProfileToAuthResult(profile, false);

@@ -1,0 +1,66 @@
+appId: com.pollis.mobile
+tags:
+  - parity
+---
+# DIAGNOSTICS (#1305) — the on-device log, end to end on a real build.
+#
+# 1. A failed sign-in offers "Copy diagnostics" under the error, before any
+#    session exists (the screen the tester was stuck on).
+# 2. Self → Diagnostics shows the log, and it holds the core's own sign-in
+#    lines: proof that pollis-core opened its log file under the app's data
+#    directory and wrote to it on this device — not merely that the screen
+#    renders.
+# Self-contained: part 2 signs up the disposable account via the subflow.
+
+# --- 1. Wrong code: the error offers the log ---
+- clearState
+- launchApp
+- assertVisible:
+    id: "screen-auth-email"
+- tapOn:
+    id: "input-email"
+- inputText: "${MAESTRO_EMAIL}"
+- tapOn:
+    id: "btn-submit-email"
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-otp"
+    timeout: 20000
+# Any code but the dev DS's DEV_OTP (env.example: 000000) is wrong.
+- inputText: "111111"
+- tapOn:
+    id: "btn-submit-otp"
+- extendedWaitUntil:
+    visible:
+      id: "text-auth-error"
+    timeout: 15000
+- assertVisible:
+    id: "btn-copy-diagnostics"
+- takeScreenshot: diagnostics-01-auth-error
+- tapOn:
+    id: "btn-copy-diagnostics"
+- assertVisible: "Copied to clipboard"
+
+# --- 2. Signed in: the Diagnostics screen shows the core's log ---
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-self"
+- scrollUntilVisible:
+    element:
+      id: "row-self-diagnostics"
+    direction: DOWN
+- tapOn:
+    id: "row-self-diagnostics"
+- assertVisible:
+    id: "screen-self-diagnostics"
+# The core's own sign-in line, with the address already masked at write time
+# (`***@<domain>`): the log never holds the local part.
+- extendedWaitUntil:
+    visible:
+      id: "text-diagnostics-preview"
+      text: "(?s).*Pollis diagnostics.*\\[auth\\] verify_otp: email=\\*\\*\\*@.*"
+    timeout: 10000
+- takeScreenshot: diagnostics-02-screen
+- tapOn:
+    id: "btn-copy-diagnostics"
+- assertVisible: "Copied to clipboard"

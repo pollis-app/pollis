@@ -65,6 +65,7 @@ import {
   ImageDown,
   RotateCcw,
   RotateCw,
+  Stethoscope,
   type LucideIcon,
 } from "lucide-react-native";
 import { I18nManager, View } from "react-native";
@@ -173,6 +174,7 @@ export const Icon = {
   flag: wrap(Flag, 14),
   info: wrap(Info, 16),
   alert: wrap(AlertCircle, 14),
+  diagnostics: wrap(Stethoscope, 14),
 
   /* ── Media (#1248) ── */
   play: wrap(Play),

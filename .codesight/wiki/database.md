@@ -578,6 +578,13 @@ anonymous-membership (not shipped — tracked in #489).
 - `user_id` TEXT PK FK users, `reason` TEXT NOT NULL (non-blank), `suspended_at` TEXT NOT NULL DEFAULT now
 - While a row exists the DS's device-key lookup (`auth.rs` `lookup_device_pubkey`) treats every device of the account as revoked → 401 on every device-signed request (a cached key keeps working up to `DEVICE_KEY_CACHE_TTL_SECS`, 30s). Written only by the operator script `scripts/suspend-account.sh`; no endpoint touches it. Purged on account deletion.
 
+### ds_error_log _(migration 35, #1305)_
+- `id` INTEGER PK AUTOINCREMENT, `at` INTEGER NOT NULL (unix seconds)
+- `request_id` TEXT NULL — `CHECK` 1–32 alphanumeric chars (the client's random `X-Pollis-Request-Id`)
+- `method` TEXT `CHECK IN (GET, POST, PUT, PATCH, DELETE)`, `route` TEXT (matched pattern, `CHECK` starts with `/`, ≤ 128), `status` INTEGER `CHECK 400–599`
+- `error` TEXT NULL (≤ 200), `detail` TEXT NULL (≤ 1000) — scrubbed by the DS before insert
+- **No user, device, email or IP column, by design.** Trigger `ds_error_log_bound` (AFTER INSERT) deletes rows older than 72 h and all but the newest 500, so the table cannot grow past that whatever writes to it. Written only by `pollis-delivery/src/error_log.rs`; read by `GET /v1/ops/errors` (operator token).
+
 ### group_invite
 - `id` TEXT PK
 - `group_id` TEXT NOT NULL FK groups

@@ -147,7 +147,7 @@ where
                  log has already carried past it"
             )));
         }
-        eprintln!(
+        crate::diag!(
             "[mls] apply_welcome: replacing group {raw_group_id} at epoch {local_epoch} with the \
              Welcome's epoch {welcome_epoch}"
         );
@@ -199,7 +199,7 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
         // then the corroboration below is what stands in for it.
         match apply_welcome(state, &bytes, None).await {
             Ok((conversation_id, generation)) => {
-                eprintln!("[mls] poll_mls_welcomes: applied welcome {id}");
+                crate::diag!("[mls] poll_mls_welcomes: applied welcome {id}");
                 if welcome_is_corroborated(state, &conversation_id, generation).await {
                     match joined.iter_mut().find(|(c, _)| c == &conversation_id) {
                         Some(entry) => entry.1 = entry.1.max(generation),
@@ -208,7 +208,7 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
                 }
             }
             Err(e) => {
-                eprintln!("[mls] poll_mls_welcomes: failed to apply welcome {id}: {e}");
+                crate::diag!("[mls] poll_mls_welcomes: failed to apply welcome {id}: {e}");
             }
         }
         processed_ids.push(id);
@@ -230,10 +230,10 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
             Ok(resp) => {
                 let s = resp.status();
                 let txt = resp.text().await.unwrap_or_default();
-                eprintln!("[mls] poll_mls_welcomes: DS ack {s}: {txt}");
+                crate::diag!("[mls] poll_mls_welcomes: DS ack {s}: {txt}");
             }
             Err(e) => {
-                eprintln!("[mls] poll_mls_welcomes: DS ack failed: {e}");
+                crate::diag!("[mls] poll_mls_welcomes: DS ack failed: {e}");
             }
         }
     }
@@ -241,7 +241,7 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
     // Each processed welcome consumed a KP — top back up to TARGET.
     if had_welcomes {
         if let Err(e) = replenish_key_packages(state, user_id, device_id).await {
-            eprintln!("[mls] KP replenishment failed (non-fatal): {e}");
+            crate::diag!("[mls] KP replenishment failed (non-fatal): {e}");
         }
     }
 
@@ -301,7 +301,7 @@ async fn welcome_is_corroborated(
     {
         Ok(snap) => snap,
         Err(e) => {
-            eprintln!(
+            crate::diag!(
                 "[mls] poll_mls_welcomes: cannot corroborate the welcome for {conversation_id} \
                  ({e}) — keeping the join"
             );
@@ -323,7 +323,7 @@ async fn welcome_is_corroborated(
     if snap.authorized && snap.is_member != Some(false) && epoch_is_in_the_log {
         return true;
     }
-    eprintln!(
+    crate::diag!(
         "[mls] poll_mls_welcomes: a welcome admitted this device to {conversation_id} generation \
          {generation} at epoch {joined_epoch:?}, but the conversation does not corroborate it \
          (authorized={}, is_member={:?}, log head={}) — discarding the group it created",
@@ -332,7 +332,7 @@ async fn welcome_is_corroborated(
     if let Err(e) =
         super::group_state::forget_local_mls_group_at(state, conversation_id, generation).await
     {
-        eprintln!(
+        crate::diag!(
             "[mls] poll_mls_welcomes: could not discard the uncorroborated group for \
              {conversation_id}: {e}"
         );
@@ -379,7 +379,7 @@ async fn adopt_undrainable_joins(state: &Arc<AppState>, joined: &[(String, i64)]
             }
         };
         if let Some(predecessor) = predecessor {
-            eprintln!(
+            crate::diag!(
                 "[mls] poll_mls_welcomes: {conversation_id} joined at generation {generation} \
                  with no group on {predecessor} — adopting immediately"
             );
@@ -420,21 +420,21 @@ async fn self_update_joined_groups(state: &Arc<AppState>, user_id: &str, joined:
             crate::commands::messages::catch_up_mls_group_interleaved(state, conversation_id, user_id)
                 .await
         {
-            eprintln!("[mls] post-join self-update: catch-up for {conversation_id} failed: {e}");
+            crate::diag!("[mls] post-join self-update: catch-up for {conversation_id} failed: {e}");
             continue;
         }
         match super::self_update::self_update_if_due(state, conversation_id, user_id).await {
             Ok(true) => {
-                eprintln!("[mls] post-join self-update: merged own leaf in {conversation_id}");
+                crate::diag!("[mls] post-join self-update: merged own leaf in {conversation_id}");
             }
             Ok(false) => {}
             Err(e) => {
-                eprintln!("[mls] post-join self-update for {conversation_id} failed: {e}");
+                crate::diag!("[mls] post-join self-update for {conversation_id} failed: {e}");
             }
         }
     }
     if joined.len() > super::self_update::MAX_SELF_UPDATES_PER_SWEEP {
-        eprintln!(
+        crate::diag!(
             "[mls] post-join self-update: {} of {} groups deferred to the next sweep",
             joined.len() - super::self_update::MAX_SELF_UPDATES_PER_SWEEP,
             joined.len()
@@ -480,10 +480,10 @@ pub async fn reset_welcome_delivery(state: &Arc<AppState>, user_id: &str) -> Res
         Ok(resp) => {
             let s = resp.status();
             let txt = resp.text().await.unwrap_or_default();
-            eprintln!("[mls] reset_welcome_delivery: DS reset {s}: {txt}");
+            crate::diag!("[mls] reset_welcome_delivery: DS reset {s}: {txt}");
         }
         Err(e) => {
-            eprintln!("[mls] reset_welcome_delivery: DS reset failed: {e}");
+            crate::diag!("[mls] reset_welcome_delivery: DS reset failed: {e}");
         }
     }
 

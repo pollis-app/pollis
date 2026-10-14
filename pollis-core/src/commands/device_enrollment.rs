@@ -485,7 +485,7 @@ pub async fn start_device_enrollment(
     // secret, sends it instead. A sibling that was offline at request time
     // still catches it via its login-time `list_pending_enrollment_requests`
     // poll.
-    eprintln!(
+    crate::diag!(
         "[enrollment] requested enrollment for user {user_id} device {device_id} (request {request_id})"
     );
 
@@ -913,7 +913,7 @@ pub(crate) async fn wrap_and_approve(
             user_id: Some(user_id.clone()),
         };
         if let Err(e) = crate::commands::mls::ds_post_ok(state, &ev).await {
-            eprintln!("[enrollment] DS security-event failed (non-fatal): {e}");
+            crate::diag!("[enrollment] DS security-event failed (non-fatal): {e}");
         }
     }
 
@@ -923,7 +923,7 @@ pub(crate) async fn wrap_and_approve(
     //    event. The approver (or any sibling) picks that up, reconciles all
     //    groups, and the new device receives Welcomes.
 
-    eprintln!(
+    crate::diag!(
         "[enrollment] approved request {request_id} for new device {new_device_id} of user {user_id}"
     );
 
@@ -1084,10 +1084,10 @@ pub async fn reset_identity_and_recover(
                 Ok(resp) => {
                     let s = resp.status();
                     let txt = resp.text().await.unwrap_or_default();
-                    eprintln!("[reset] DS welcomes purge {s}: {txt}");
+                    crate::diag!("[reset] DS welcomes purge {s}: {txt}");
                 }
                 Err(e) => {
-                    eprintln!("[reset] DS welcomes purge failed: {e}");
+                    crate::diag!("[reset] DS welcomes purge failed: {e}");
                 }
             }
         }
@@ -1113,7 +1113,7 @@ pub async fn reset_identity_and_recover(
         // wraps and opens the new DB, finalize_device_enrollment
         // publishes the device cert + key packages.
 
-        eprintln!(
+        crate::diag!(
             "[reset] cleaned up memberships, key packages, welcomes, devices, and local DB for {user_id}"
         );
     }
@@ -1196,7 +1196,7 @@ pub async fn reject_device_enrollment(
         user_id: Some(_user_id.clone()),
     };
     if let Err(e) = crate::commands::mls::ds_post_ok(state, &ev).await {
-        eprintln!("[enrollment] DS security-event (reject) failed (non-fatal): {e}");
+        crate::diag!("[enrollment] DS security-event (reject) failed (non-fatal): {e}");
     }
 
     Ok(())
@@ -1243,7 +1243,7 @@ async fn finalize_enrollment(state: &Arc<AppState>, user_id: &str) -> Result<()>
     // Publish this device's cross-signing cert now that account_id_key is
     // in the keystore. No-op if already present.
     if let Err(e) = crate::commands::mls::ensure_device_cert(state, user_id, &device_id).await {
-        eprintln!("[enrollment] finalize: ensure_device_cert failed: {e}");
+        crate::diag!("[enrollment] finalize: ensure_device_cert failed: {e}");
     }
 
     // Publish fresh key packages so other devices can claim them for
@@ -1251,7 +1251,7 @@ async fn finalize_enrollment(state: &Arc<AppState>, user_id: &str) -> Result<()>
     if let Err(e) =
         crate::commands::mls::ensure_mls_key_package(state, user_id, &device_id).await
     {
-        eprintln!("[enrollment] finalize: ensure_mls_key_package failed: {e}");
+        crate::diag!("[enrollment] finalize: ensure_mls_key_package failed: {e}");
     }
 
     // External-join every group/DM this user belongs to. The new device
@@ -1276,7 +1276,7 @@ async fn finalize_enrollment(state: &Arc<AppState>, user_id: &str) -> Result<()>
         }
 
         if let Err(e) = crate::commands::mls::external_join_group(state, &conv_id, user_id).await {
-            eprintln!(
+            crate::diag!(
                 "[enrollment] finalize: external_join_group({conv_id}) failed: {e}"
             );
         }

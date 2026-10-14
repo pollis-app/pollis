@@ -68,7 +68,7 @@ pub async fn create_channel(
         &state.livekit,
         &group_id,
     ).await {
-        eprintln!("[realtime] create_channel: notify group {group_id}: {e}");
+        crate::diag!("[realtime] create_channel: notify group {group_id}: {e}");
     }
 
     Ok(Channel { id, group_id, name, description, channel_type })
@@ -121,7 +121,7 @@ pub async fn update_channel(
         &state.livekit,
         &group_id,
     ).await {
-        eprintln!("[realtime] update_channel: notify group {group_id}: {e}");
+        crate::diag!("[realtime] update_channel: notify group {group_id}: {e}");
     }
 
     Ok(Channel {
@@ -161,7 +161,7 @@ pub async fn delete_channel(
         &state.livekit,
         &group_id,
     ).await {
-        eprintln!("[realtime] delete_channel: notify group {group_id}: {e}");
+        crate::diag!("[realtime] delete_channel: notify group {group_id}: {e}");
     }
 
     Ok(())

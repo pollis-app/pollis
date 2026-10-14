@@ -77,7 +77,7 @@ pub(crate) fn start_mic_stream(
                     };
                     let _ = frame_tx.send((mono, sample_rate));
                 },
-                |e| eprintln!("[voice] mic error: {e}"),
+                |e| crate::diag!("[voice] mic error: {e}"),
                 None,
             )
         }};
@@ -154,7 +154,7 @@ pub(crate) fn start_speaker_stream(
                         *s = $from_f32(b.pop_front().unwrap_or(0.0));
                     }
                 },
-                |e| eprintln!("[voice] speaker error: {e}"),
+                |e| crate::diag!("[voice] speaker error: {e}"),
                 None,
             )
         }};

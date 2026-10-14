@@ -38,9 +38,8 @@ pub(crate) fn get_device(host: &cpal::Host, name: Option<&str>, is_input: bool) 
                     })
                     .collect();
 
-                let names: Vec<String> = devices.iter().filter_map(|d| d.name().ok()).collect();
-                eprintln!("[voice] available {} devices (blocked filtered): {:?}",
-                    if is_input { "input" } else { "output" }, names);
+                crate::diag!("[voice] available {} devices (blocked filtered): {}",
+                    if is_input { "input" } else { "output" }, devices.len());
 
                 // 1. Preferred by name
                 let found = preferred.iter().find_map(|&pref| {
@@ -67,7 +66,7 @@ pub(crate) fn get_device(host: &cpal::Host, name: Option<&str>, is_input: bool) 
                     host.default_output_device()
                 };
                 if default_dev.is_none() {
-                    eprintln!(
+                    crate::diag!(
                         "[voice] macOS default {} device is None — falling back to first enumerated",
                         if is_input { "input" } else { "output" }
                     );
@@ -86,7 +85,7 @@ pub(crate) fn get_device(host: &cpal::Host, name: Option<&str>, is_input: bool) 
             {
                 let blocked: &[&str] = &["vdownmix", "upmix", "speex", "speexrate"];
                 if blocked.contains(&n) {
-                    eprintln!("[voice] device '{n}' is blocked on Linux — auto-selecting");
+                    crate::diag!("[voice] device '{n}' is blocked on Linux — auto-selecting");
                     return get_device(host, None, is_input);
                 }
             }
@@ -151,8 +150,8 @@ fn macos_lookup_any_scope(host: &cpal::Host, name: &str, is_input: bool) -> Opti
     if let Ok(all) = host.devices() {
         for d in all {
             if d.name().ok().as_deref() == Some(name) && supports(&d) {
-                eprintln!(
-                    "[voice] macOS: found '{name}' via host.devices() fallback ({} validated)",
+                crate::diag!(
+                    "[voice] macOS: found the device via host.devices() fallback ({} validated)",
                     if is_input { "input" } else { "output" }
                 );
                 return Some(d);
@@ -166,8 +165,8 @@ fn macos_lookup_any_scope(host: &cpal::Host, name: &str, is_input: bool) -> Opti
     if let Some(it) = opposite {
         for d in it {
             if d.name().ok().as_deref() == Some(name) && supports(&d) {
-                eprintln!(
-                    "[voice] macOS: found '{name}' via opposite-scope enumeration ({} validated)",
+                crate::diag!(
+                    "[voice] macOS: found the device via opposite-scope enumeration ({} validated)",
                     if is_input { "input" } else { "output" }
                 );
                 return Some(d);
@@ -188,7 +187,7 @@ fn macos_log_enumeration(host: &cpal::Host, wanted: Option<&str>, is_input: bool
     let all: Vec<String> = host.devices().ok()
         .map(|it| it.filter_map(|d| d.name().ok()).collect())
         .unwrap_or_default();
-    eprintln!(
+    crate::diag!(
         "[voice] macOS get_device failed — wanted={wanted:?} kind={kind} scoped={scoped:?} all={all:?}"
     );
 }
@@ -249,7 +248,7 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
                     }
                 }
             }
-            Err(e) => eprintln!("[voice] list_audio_devices: input enumeration failed: {e}"),
+            Err(e) => crate::diag!("[voice] list_audio_devices: input enumeration failed: {e}"),
         }
         match host.output_devices() {
             Ok(outputs) => {
@@ -261,7 +260,7 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
                     }
                 }
             }
-            Err(e) => eprintln!("[voice] list_audio_devices: output enumeration failed: {e}"),
+            Err(e) => crate::diag!("[voice] list_audio_devices: output enumeration failed: {e}"),
         }
         // On macOS, a duplex device (AirPods, USB headset) in HFP mode can
         // get dropped from output_devices() while still listed by devices().
@@ -281,7 +280,7 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
                     .map(|mut c| c.next().is_some())
                     .unwrap_or(false);
                 if supports_output {
-                    eprintln!("[voice] macOS: '{name}' missing from output_devices() — adding via devices() fallback");
+                    crate::diag!("[voice] macOS: an output device missing from output_devices() — adding via devices() fallback");
                     devices.push(AudioDevice { id: name.clone(), name: display_name(&name), kind: "output".into() });
                 }
             }
@@ -290,7 +289,7 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
         {
             let inputs: Vec<&str> = devices.iter().filter(|d| d.kind == "input").map(|d| d.id.as_str()).collect();
             let outputs: Vec<&str> = devices.iter().filter(|d| d.kind == "output").map(|d| d.id.as_str()).collect();
-            eprintln!("[voice] macOS list_audio_devices — inputs={inputs:?} outputs={outputs:?}");
+            crate::diag!("[voice] macOS list_audio_devices — inputs={inputs:?} outputs={outputs:?}");
         }
         devices
     })

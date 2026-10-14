@@ -48,12 +48,12 @@ fn ensure_audio() -> Option<&'static OutputStreamHandle> {
                         }
                     }
                     Err(e) => {
-                        eprintln!("[sfx] OutputStream::try_default failed: {e}");
+                        crate::diag!("[sfx] OutputStream::try_default failed: {e}");
                         let _ = tx.send(None);
                     }
                 });
             if let Err(e) = spawn_result {
-                eprintln!("[sfx] failed to spawn audio thread: {e}");
+                crate::diag!("[sfx] failed to spawn audio thread: {e}");
                 return None;
             }
             rx.recv().ok().flatten()
@@ -91,14 +91,14 @@ pub fn play_sfx(sound: &str) {
     let sink = match rodio::Sink::try_new(handle) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("[sfx] play_sfx Sink::try_new failed for {sound}: {e}");
+            crate::diag!("[sfx] play_sfx Sink::try_new failed for {sound}: {e}");
             return;
         }
     };
     let source = match rodio::Decoder::new(Cursor::new(bytes)) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("[sfx] play_sfx Decoder failed for {sound}: {e}");
+            crate::diag!("[sfx] play_sfx Decoder failed for {sound}: {e}");
             return;
         }
     };
@@ -134,7 +134,7 @@ pub fn start_ring() {
         let sink = match rodio::Sink::try_new(&handle) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("[sfx] start_ring Sink::try_new failed: {e}");
+                crate::diag!("[sfx] start_ring Sink::try_new failed: {e}");
                 return;
             }
         };
@@ -142,7 +142,7 @@ pub fn start_ring() {
             let source = match rodio::Decoder::new(Cursor::new(CALL)) {
                 Ok(s) => s,
                 Err(e) => {
-                    eprintln!("[sfx] start_ring Decoder failed: {e}");
+                    crate::diag!("[sfx] start_ring Decoder failed: {e}");
                     return;
                 }
             };

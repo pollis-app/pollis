@@ -619,7 +619,7 @@ mod tests {
             .unwrap()
             .as_secs() as i64;
         let dir = verify_directory(&bytes, &key, now).expect("live directory must verify");
-        eprintln!(
+        crate::diag!(
             "live directory OK: version={} relays={} expires_at={}",
             dir.version,
             dir.relays.len(),

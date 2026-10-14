@@ -305,7 +305,7 @@ pub async fn check_and_pin_account_key(
     match pinned {
         Some(p) if p == peer_pub => {}
         Some(_) => {
-            eprintln!(
+            crate::diag!(
                 "[safety] account_id_pub for {peer_user_id} changed — clearing verified status"
             );
             db.conn().execute(
@@ -426,7 +426,7 @@ pub async fn batch_check_and_pin_account_keys(
                          WHERE peer_user_id = ?1",
                         rusqlite::params![peer_id, server_pub, *server_version],
                     )?;
-                    eprintln!(
+                    crate::diag!(
                         "[safety] group-reconcile: account_id_pub for {peer_id} changed — cleared verified"
                     );
                     changed.push((peer_id.clone(), *server_version));

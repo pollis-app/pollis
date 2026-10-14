@@ -89,7 +89,7 @@ pub async fn spawn(state: Arc<AppState>) -> std::io::Result<u16> {
             })
             .await;
         if let Err(e) = result {
-            eprintln!("[media_server] axum::serve exited: {e}");
+            crate::diag!("[media_server] axum::serve exited: {e}");
         }
     });
 

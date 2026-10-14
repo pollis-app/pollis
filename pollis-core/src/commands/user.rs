@@ -69,7 +69,7 @@ pub async fn update_user_profile(
     // enrollment-time name until something happened to refill them.
     if let Some(username) = username {
         if let Err(e) = crate::accounts::rename_account(&user_id, &username) {
-            eprintln!("[profile] accounts index not updated after rename: {e}");
+            crate::diag!("[profile] accounts index not updated after rename: {e}");
         }
         let guard = state.local_db.lock().await;
         if let Some(db) = guard.as_ref() {
@@ -78,7 +78,7 @@ pub async fn update_user_profile(
                  ON CONFLICT(id) DO UPDATE SET username = ?2, updated_at = datetime('now')",
                 rusqlite::params![user_id, username],
             ) {
-                eprintln!("[profile] user_cache not updated after rename: {e}");
+                crate::diag!("[profile] user_cache not updated after rename: {e}");
             }
         }
     }
@@ -100,7 +100,7 @@ pub async fn get_preferences(
         }
         Ok(None) => Ok("{}".to_string()),
         Err(e) => {
-            eprintln!("[preferences] remote fetch failed ({e}); falling back to local cache");
+            crate::diag!("[preferences] remote fetch failed ({e}); falling back to local cache");
             let guard = state.local_db.lock().await;
             if let Some(db) = guard.as_ref() {
                 let prefs: Option<String> = db

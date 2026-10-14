@@ -807,7 +807,7 @@ pub async fn collect_orphaned_emoji(state: &Arc<AppState>) -> Result<()> {
     futures_util::stream::iter(parsed.r2_keys)
         .for_each_concurrent(EMOJI_GC_DELETE_CONCURRENCY, |key| async move {
             if let Err(e) = r2::delete_r2_object(state, &key).await {
-                eprintln!("[emoji] could not delete collected object {key}: {e}");
+                crate::diag!("[emoji] could not delete collected object {key}: {e}");
             }
         })
         .await;

@@ -136,6 +136,7 @@ DB, split out in #420 Goal A).
 | Security events | `security_event` (`id`, `user_id`, `kind`, `device_id`, `created_at`, `metadata`) | **90 days** since #762 (`POLLIS_DS_SECURITY_EVENT_RETENTION_DAYS`, §9); also **explicitly deleted** on account deletion | `messages.rs` `sweep_aged_records`; `teardown.rs` `purge_user_rows` |
 | Attachment dedup index | `attachment_object` (`content_hash` → `r2_key`) | **Reference-counted (#690):** collected only when no still-existing message references the hash — the same predicate for every caller, with no uploader identity in it. Migration `000031` briefly recorded `uploaded_by` (and `attachment_ref.registered_by`) to grant the uploader an exemption; both columns are dead and their values cleared since `000032`, so the DS holds no "which account stored this object" linkage. | `messages.rs` `apply_delete_attachment` (conditional `NOT EXISTS (attachment_ref ⋈ message_envelope)`), `000032_attachment_ownership_retired.sql` |
 | Attachment references | `attachment_ref` (`content_hash`, `message_id`) | One declaration per (message that carries a file). The count is **derived** — a declaration counts only while its `message_envelope` exists — so a reference is released by deleting the message envelope (self/admin delete, envelope GC #689, retention #720, teardown), never by a dedicated call, and cannot outlive its message. Orphaned/forged declarations are reaped by `sweep_envelope_gc`. **New at-rest linkage — see the note below.** | `messages.rs` (`object_is_referenced`, `sweep_envelope_gc`), `000012_attachment_ref.sql` |
+| Failed DS requests (#1305) | `ds_error_log` (time, method, matched route pattern, status, the response's `error` text, the `warn!`/`error!` lines the request raised, and a random per-request id the client generated) — **no user, device, email or IP column**; text is scrubbed (`pollis_api::redact::scrub`) before the insert | **72 hours and at most 500 rows**, whichever is smaller; written at most 30 rows a minute | The table's own `AFTER INSERT` trigger (`000035_ds_error_log.sql`) on every insert — no sweep and no code path can skip it; `pollis-delivery/tests/error_log.rs` |
 | Push tokens | `push_token` | Until the device re-registers (upsert on `token`), **180 days** since last refresh (#762, `POLLIS_DS_PUSH_TOKEN_RETENTION_DAYS`, §9), or account deletion — the last of which is now an explicit delete rather than a cascade that never fired | `000006_push_token.sql`; `sweep_aged_records`; `teardown.rs` |
 
 ### 2.1 Deletion is explicit, because the cascades never fired
@@ -241,6 +242,12 @@ either, operators included.** IPs are used for rate limiting only, and only as k
   keyed per-process tag of the address (never the address), the endpoint, the outcome and a
   timestamp. It is readable only with the operator token and is gone at restart. Production never
   enables it (`pollis-delivery/tests/otp_ops_log.rs`).
+- **DS failed-request log (#1305, every environment).** `ds_error_log` (§2) has no IP column,
+  and the text it stores — the response's `error` and the request's own `warn!`/`error!` lines —
+  passes `redact_ip_literals` and the email/token scrubber first. The request id it keys on is 16
+  random hex characters the client mints per request; it identifies one request, never a user or
+  device. The client's on-device diagnostics log (`pollis-core/src/diag.rs`) applies the same
+  scrubber and never leaves the device unless the user copies it out.
 - **Relay.** The relay reads the QUIC peer address for admission limits
   (`pollis-relay/src/server.rs`, accept loop and `handle_connection`) and immediately reduces it to an
   `IpKey` — 16 bytes of HMAC-SHA256 under a per-boot random key (`pollis-relay/src/ratelimit.rs`). Its

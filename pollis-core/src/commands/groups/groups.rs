@@ -133,10 +133,10 @@ pub async fn create_group(
             if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
                 state, &id, &owner_id,
             ).await {
-                eprintln!("[mls] create_group: reconcile failed: {e}");
+                crate::diag!("[mls] create_group: reconcile failed: {e}");
             }
         }
-        Err(e) => eprintln!("[mls] create_group: mls group init failed (non-fatal): {e}"),
+        Err(e) => crate::diag!("[mls] create_group: mls group init failed (non-fatal): {e}"),
     }
 
     Ok(Group { id, name, description, owner_id, created_at: now })
@@ -178,7 +178,7 @@ pub async fn update_group(
         &state.livekit,
         &group_id,
     ).await {
-        eprintln!("[realtime] update_group: notify group {group_id}: {e}");
+        crate::diag!("[realtime] update_group: notify group {group_id}: {e}");
     }
 
     Ok(Group {

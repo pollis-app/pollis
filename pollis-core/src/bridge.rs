@@ -147,6 +147,12 @@ async fn init_pollis_inner(config_json: String) -> Result<(), BridgeError> {
             let parsed: InitConfig = serde_json::from_str(&config_json)?;
             #[cfg(target_os = "android")]
             android_bootstrap(parsed.data_dir.as_deref())?;
+            // On-device diagnostics log (#1305), under the same data directory
+            // the local DB uses. A failure leaves logging on stderr only.
+            let log_dir = crate::diag::log_dir(&crate::db::local::dirs_path());
+            if let Err(e) = crate::diag::init(&log_dir) {
+                crate::diag!("[diag] could not open the diagnostics log: {e}");
+            }
             let config = Config {
                 r2_endpoint: parsed.r2_endpoint,
                 r2_public_url: parsed.r2_public_url,
@@ -251,6 +257,10 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
 
     match cmd.as_str() {
         "version" => ok(env!("CARGO_PKG_VERSION")),
+        "get_diagnostics" => {
+            let app_version: Option<String> = arg_opt(&args, "appVersion")?;
+            ok(crate::commands::diagnostics::get_diagnostics(app_version))
+        }
 
         // ----- auth -----
         "get_identity" => ok(auth::get_identity().await?),
