@@ -1,0 +1,3 @@
+
+# src-tauri is a workspace member: the root Cargo.lock is the only lockfile (#1301).
+/Cargo.lock
