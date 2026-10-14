@@ -18,7 +18,7 @@ rtc:
 # UDP route (corporate/hotel/carrier NAT, UDP-blocking VPNs).
 #
 # THE PORT IS NOT CONFIGURABLE. LiveKit hardcodes the URL it hands to clients as
-# `turns:<domain>:443?transport=tcp` (pkg/service/roommanager.go, v1.10.0) — it
+# `turns:<domain>:443?transport=tcp` (pkg/service/roommanager.go; unchanged through v1.13.9) — it
 # does NOT interpolate tls_port. `tls_port` below only decides which port the
 # server LISTENS on. So while this said `tls_port: 5349`, every client was told
 # to reach TURNS at rtc.pollis.com:443, where nginx answered with HTTP and the

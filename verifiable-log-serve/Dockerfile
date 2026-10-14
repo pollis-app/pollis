@@ -20,7 +20,11 @@ RUN cargo build --release -p verifiable-log-serve -p verifiable-log-builder \
 
 FROM debian:bookworm-slim AS runtime
 # ca-certificates so the builder can TLS to Turso.
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+# `apt-get upgrade` pulls the security point releases the floating
+# bookworm-slim tag lags behind (e.g. perl-base deb12u4), so a fresh deploy
+# never ships a base layer with already-fixed CVEs.
+RUN apt-get update && apt-get upgrade -y --no-install-recommends \
+    && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /src/target/release/serve   /usr/local/bin/serve
 COPY --from=build /src/target/release/builder /usr/local/bin/builder

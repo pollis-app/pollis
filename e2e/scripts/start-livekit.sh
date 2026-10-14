@@ -27,7 +27,7 @@
 set -euo pipefail
 
 # Pinned by tag to match the production stack (livekit/docker-compose.yml).
-LIVEKIT_IMAGE="${LIVEKIT_IMAGE:-livekit/livekit-server:v1.10.0}"
+LIVEKIT_IMAGE="${LIVEKIT_IMAGE:-livekit/livekit-server:v1.13.9}"
 LIVEKIT_CONTAINER="${LIVEKIT_CONTAINER:-pollis-e2e-livekit}"
 LIVEKIT_PORT="${LIVEKIT_PORT:-7880}"
 # `--dev` mode's fixed credentials — LiveKit hard-codes these when run with the

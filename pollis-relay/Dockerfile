@@ -43,6 +43,11 @@ RUN cargo build --release -p pollis-relay \
     && strip target/release/pollis-relay
 
 FROM debian:bookworm-slim AS runtime
+# `apt-get upgrade` pulls the security point releases the floating
+# bookworm-slim tag lags behind (e.g. perl-base deb12u4), so a fresh deploy
+# never ships a base layer with already-fixed CVEs.
+RUN apt-get update && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=build /src/target/release/pollis-relay /usr/local/bin/pollis-relay
 # UDP relay port (QUIC) + TCP health port. Documentation only — `docker run -p`
 # still has to publish them.

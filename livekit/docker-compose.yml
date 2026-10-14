@@ -17,7 +17,7 @@
 # hand-edit on the box — `main` carries the canonical config.
 services:
   livekit:
-    image: livekit/livekit-server:v1.10.0@sha256:6ff9c33d21ae1b92b7f5a86bc55890a3e5b8ebe7b8a847349c5ee326e90ac965
+    image: livekit/livekit-server:v1.13.9@sha256:d0c04791bf63ca8dcea123571827d56ba9504bd57c8d5de60ee03b5408cc3154
     ports:
       - "7881:7881"             # ICE TCP candidates
       - "7882:7882/udp"         # ICE UDP (single-port mux)
@@ -56,7 +56,7 @@ services:
       driver: none
 
   nginx:
-    image: nginx:1.29-alpine@sha256:e7257f1ef28ba17cf7c248cb8ccf6f0c6e0228ab9c315c152f9c203cd34cf6d1
+    image: nginx:1.30-alpine@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94
     ports:
       - "80:80"
       - "443:443"

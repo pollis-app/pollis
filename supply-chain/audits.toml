@@ -1,4 +1,8 @@
 
 # cargo-vet audits file
 
-[audits]
+[[audits.chacha20]]
+who = "Pollis maintainers"
+criteria = "safe-to-deploy"
+delta = "0.10.1 -> 0.10.2"
+notes = "Only src/backends/sse2.rs changes: the SSE4.1 _mm_extract_epi32 in the SSE2 backend is replaced by an _mm_storeu_si128 of state row 3 (words 12..16, in bounds of [u32; 16], unaligned store). Row 3 lanes other than the counter are unchanged nonce words, so the write-back is value-preserving. 0.10.1 was yanked for SIGILL on SSE2-only x86 CPUs."

@@ -16,6 +16,7 @@ The `mobile/` directory is **NOT** a pnpm workspace member. It is a standalone E
 - `mobile/pnpm-lock.yaml` is independent of the root lock.
 - **Use pnpm 10.25.0 here, the version CI uses.** The root `packageManager: pnpm@10.25.0` does not apply under `--ignore-workspace`, so a bare `pnpm` in `mobile/` runs whatever is on `PATH` — Homebrew's is 12.x, which rewrites the lockfile differently from CI and makes `--frozen-lockfile` fail there. Install with `npx -y pnpm@10.25.0 install --ignore-workspace` (or a corepack-pinned pnpm).
 - If Expo complains about missing packages, first check that `node_modules` is inside `mobile/` and not at the repo root.
+- `patches/` holds pnpm patches, registered in `package.json` → `pnpm.patchedDependencies` (not a `mobile/pnpm-workspace.yaml`, which would make `mobile/` look like a workspace root). Today there is one: `decode-uri-component@0.2.2`, which backports 0.5.0's linear decoder because every `pollis://` link runs through it and 0.5.0 is ESM-only (#1296; `tests/deep-link-decode.test.ts`). Drop it once expo-router stops pulling query-string 7.
 - Mobile imports **no frontend TypeScript**. Generated data is copied across by its generator (`emojiData.ts`, `emoji/annotations/`). The ONE shared directory is the translation catalogues, `frontend/src/i18n/locales/`, reached through a `watchFolders` entry in `metro.config.js` — see [Localization](#localization-i18n-1074). Do not widen that list.
 
 ## Stack

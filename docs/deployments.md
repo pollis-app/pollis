@@ -225,6 +225,7 @@ stop someone moving the tag that fires it.
 
 ### LiveKit + nginx — media SFU (voice / video / screenshare)
 - **From:** `livekit/` (compose + nginx ingress; runs **upstream** LiveKit images, not our build)
+- **Versions:** `livekit/livekit-server:v1.13.9` + `nginx:1.30-alpine`, digest-pinned in `livekit/docker-compose.yml`; `e2e/scripts/start-livekit.sh` pins the same LiveKit tag so the two-client e2e runs exercise it. Before a bump, `trivy image --severity HIGH,CRITICAL <image>` the candidate (the 2026-10 scan, `docs/security/dependency-scan-2026-10.md`, found 1.10.0 carrying a critical OpenSSL).
 - **Pipeline:** `.github/workflows/livekit-deploy.yml` — `workflow_dispatch` (env choice prod/dev). SSH + compose on the VPS.
 - **Runs at:** VPS. Frames are E2EE (the SFU forwards ciphertext).
 - **Ingress:** everything on **443**, split by TLS SNI in nginx's `stream` block —

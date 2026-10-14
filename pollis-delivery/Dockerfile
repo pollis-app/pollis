@@ -51,7 +51,11 @@ RUN cargo build --release -p pollis-delivery \
 
 FROM debian:bookworm-slim AS runtime
 # ca-certificates so libsql can TLS to Turso.
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+# `apt-get upgrade` pulls the security point releases the floating
+# bookworm-slim tag lags behind (e.g. perl-base deb12u4), so a fresh deploy
+# never ships a base layer with already-fixed CVEs.
+RUN apt-get update && apt-get upgrade -y --no-install-recommends \
+    && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /src/target/release/pollis-delivery /usr/local/bin/pollis-delivery
 # Cache-bust arg: bumping it yields a new image digest with no code change, which

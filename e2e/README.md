@@ -303,7 +303,7 @@ down by `stop-backend.sh`:
   virtual devices. Without it `join_voice_channel` fails opening the mic. It
   exports `PULSE_SERVER` / `PULSE_SINK` / `PULSE_SOURCE`. Needs `pulseaudio`,
   `pulseaudio-utils`, `libasound2-plugins` (in `install-system-deps.sh`).
-- **`start-livekit.sh`** — an ephemeral `livekit/livekit-server:v1.10.0` in
+- **`start-livekit.sh`** — an ephemeral `livekit/livekit-server:v1.13.9` in
   `--dev` mode (dev key `devkey` / secret `secret`) on loopback under Docker
   `--network host`. It exports `LIVEKIT_URL` (the app dials it —
   `pollis-core/src/config.rs`) and `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET`

@@ -16,8 +16,8 @@ graceful nginx reload. No manual SSH. See "Workflow requirements" below.
 
 | Service | Image (pinned) | Managed by |
 |---------|----------------|------------|
-| `livekit` | `livekit/livekit-server:v1.10.0` | this compose |
-| `nginx` (shared ingress) | `nginx:1.29-alpine` | this compose |
+| `livekit` | `livekit/livekit-server:v1.13.9` | this compose |
+| `nginx` (shared ingress) | `nginx:1.30-alpine` | this compose |
 | `delivery` / `delivery-dev` | `ghcr.io/actuallydan/pollis-delivery:{prod,dev}` | **#407** (Watchtower) — standalone |
 | `watchtower` | `containrrr/watchtower` | **#407** — standalone |
 
@@ -244,7 +244,7 @@ calls in progress at the moment of the switch drop. Rooms are re-keyed (see
 ```bash
 # 1. Generate (canonical format, from the pinned image)
 docker run --rm --entrypoint /livekit-server \
-  livekit/livekit-server:v1.10.0 generate-keys
+  livekit/livekit-server:v1.13.9 generate-keys
 ```
 
 2. Write the new values to Doppler (`pollis/prd_prod`, `pollis/dev_personal`),

@@ -1,0 +1,133 @@
+diff --git a/index.js b/index.js
+index 24e7db0cc55aa22d0f98358b73298067deb33b52..0ed4cba8f3ebf3b43d3cca0eb21910968eca79a9 100644
+--- a/index.js
++++ b/index.js
+@@ -3,40 +3,110 @@ var token = '%[a-f0-9]{2}';
+ var singleMatcher = new RegExp('(' + token + ')|([^%]+?)', 'gi');
+ var multiMatcher = new RegExp('(' + token + ')+', 'gi');
+ 
+-function decodeComponents(components, split) {
+-	try {
+-		// Try to decode the entire string first
+-		return [decodeURIComponent(components.join(''))];
+-	} catch (err) {
+-		// Do nothing
++// Backport of decode-uri-component@0.5.0's linear-time fallback decoder
++// (GHSA-vcc3-ghjq-m6fr). 0.2.2 re-split the token list once per token, which
++// is super-linear: a ~2.4KB run of malformed `%XX` bytes in a deep link froze
++// the JS thread for seconds. This scans left to right once, decoding valid
++// UTF-8 runs and leaving everything else literal.
++var hexPair = /^[a-f0-9]{2}$/i;
++
++function parsePercentByte(input, position) {
++	if (input.charCodeAt(position) !== 37 || position + 3 > input.length) {
++		return null;
+ 	}
+ 
+-	if (components.length === 1) {
+-		return components;
++	var digits = input.slice(position + 1, position + 3);
++
++	if (!hexPair.test(digits)) {
++		return null;
+ 	}
+ 
+-	split = split || 1;
++	return {byte: parseInt(digits, 16), next: position + 3};
++}
+ 
+-	// Split the array in 2 parts
+-	var left = components.slice(0, split);
+-	var right = components.slice(split);
++function utf8SequenceLength(byte) {
++	if (byte <= 0x7F) {
++		return 1;
++	}
++
++	if (byte >= 0xC2 && byte <= 0xDF) {
++		return 2;
++	}
++
++	if (byte >= 0xE0 && byte <= 0xEF) {
++		return 3;
++	}
++
++	if (byte >= 0xF0 && byte <= 0xF4) {
++		return 4;
++	}
++
++	return 0;
++}
+ 
+-	return Array.prototype.concat.call([], decodeComponents(left), decodeComponents(right));
++function isContinuationByte(byte) {
++	return byte >= 0x80 && byte <= 0xBF;
+ }
+ 
+ function decode(input) {
+ 	try {
+ 		return decodeURIComponent(input);
+ 	} catch (err) {
+-		var tokens = input.match(singleMatcher) || [];
++		var output = '';
++		var position = 0;
++
++		while (position < input.length) {
++			if (input.charCodeAt(position) !== 37) {
++				output += input.charAt(position);
++				position++;
++				continue;
++			}
++
++			var firstByte = parsePercentByte(input, position);
++
++			if (!firstByte) {
++				output += input.charAt(position);
++				position++;
++				continue;
++			}
++
++			var sequenceLength = utf8SequenceLength(firstByte.byte);
++
++			if (sequenceLength === 0) {
++				output += input.slice(position, position + 3);
++				position += 3;
++				continue;
++			}
+ 
+-		for (var i = 1; i < tokens.length; i++) {
+-			input = decodeComponents(tokens, i).join('');
++			var end = firstByte.next;
++			var validSequence = true;
++
++			for (var index = 1; index < sequenceLength; index++) {
++				var nextByte = parsePercentByte(input, end);
++
++				if (!nextByte || !isContinuationByte(nextByte.byte)) {
++					validSequence = false;
++					break;
++				}
++
++				end = nextByte.next;
++			}
++
++			if (validSequence) {
++				try {
++					output += decodeURIComponent(input.slice(position, end));
++					position = end;
++					continue;
++				} catch (err2) {
++					// Structurally valid but not decodable; emit the lead byte literally.
++				}
++			}
+ 
+-			tokens = input.match(singleMatcher) || [];
++			output += input.slice(position, position + 3);
++			position += 3;
+ 		}
+ 
+-		return input;
++		return output;
+ 	}
+ }
+ 
