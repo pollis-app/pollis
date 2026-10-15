@@ -187,6 +187,15 @@ ignored); only a match goes on to `SetPin`. Esc shows the key again.
 
 ## Build & run (headless, in-box)
 
+**Hands-on against the dev DS (#1337).** `cargo run -p pollis-tui --example
+message_shapes_peer -- <email>` (with `POLLIS_DATA_DIR` set to a fresh dir and the
+dev env sourced) signs up a second account, prints its handle, waits for a DM
+request from the client under test (`d` + the handle), accepts it and sends one of
+every message shape the other clients produce — multi-line, long, a captioned photo
+(`_att` envelope), a mention of the requester, a thread reply and a quote reply to
+the first message, and a reaction. Use a DEBUG build of `pollis` for this (debug
+builds use the encrypted-file keystore and never touch the OS keychain).
+
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"
 cargo build  -p pollis-tui                    # media/keyring off via the crate's default-features = false
