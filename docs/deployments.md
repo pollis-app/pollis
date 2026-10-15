@@ -71,10 +71,18 @@ stop someone moving the tag that fires it.
   download's SHA-256 is looked up in GitHub's attestation store
   (`api.github.com/repos/actuallydan/pollis/attestations/sha256:<hex>`, also a different origin
   from the CDN, writable only by a workflow in this repo) and must match a SLSA statement naming
-  that file name, that digest and `cli-release.yml` as the builder. A contradicted download (bad
-  signature, attestation for some other build) aborts and is deleted; one that cannot be checked
-  (no attestation, GitHub unreachable or rate-limited) aborts unless `POLLIS_SKIP_VERIFY=1`, the
-  documented opt-out. `scripts/test-cli-install-verify.sh` runs the real matcher in CI.
+  this platform's file name, that digest and `cli-release.yml` run from the tag `v<version>` as the
+  builder; the cosign identity is likewise pinned to `…/cli-release.yml@refs/tags/v<version>`, so an
+  older genuine release or a branch build cannot pass as the current one. A cosign failure alone
+  falls through to the attestation check (Rekor/TUF can be unreachable); a download GitHub's
+  attestations contradict aborts and is deleted; one that cannot be checked (no attestation, an
+  unreadable answer, GitHub unreachable or rate-limited) aborts unless `POLLIS_SKIP_VERIFY=1`, the
+  documented opt-out. Any existing `pollis` is replaced only after verification. This guards against
+  a wrong *binary*; the script itself comes from the same CDN, so it is no defence against a
+  malicious script. Because the installer now refuses what it cannot verify, `cli-release.yml`
+  announces a release (`latest.json` + `cli-install.sh`, job `announce-cli`) only after
+  `provenance-cli` has published the attestation and signatures.
+  `scripts/test-cli-install-verify.sh` runs the real matcher in CI.
 - **R2 retention:** the release job keeps only the **latest 3** `releases/v*/` version directories on R2 — **installers only, since #877**: the prune now retains `*.intoto.jsonl`, `*.sig`, `*.pem`, `*.cdx.json`, `*.toolchain.json` and `*.payload-sha256` forever, because each binary-transparency leaf permanently records a `provenance_uri` under that prefix and deleting it made an append-only record point at nothing. It prunes older versions **at release time** (count-based, not an R2 lifecycle/age rule — an age rule would delete the *current* release if releases went quiet). It never prunes the version it just published, the top-level `install.sh`/`latest.json`/`update-*.json`, the `releases/latest/` alias, or `cli/`. **GitHub Releases remain the permanent archive** of every version's installers, and the transparency log retains every binary hash — so R2 only needs a small rolling window (the updater/install.sh/AUR/website reference only the latest, plus a couple for rollback headroom). The no-JS website download links point at the stable `releases/latest/pollis-latest-*` alias (overwritten each release, never pruned).
 - **AUR (`pollis`) is best-effort, and a green release run does not prove it landed.** The AUR step is `continue-on-error` on purpose, so an AUR outage cannot fail a release whose installers are already published. It annotates every failure with `::error::` — check the run page, or just ask the AUR: `curl -s 'https://aur.archlinux.org/rpc/v5/info?arg[]=pollis' | jq -r '.results[0].Version'`. If it lags the latest tag, run `aur-republish.yml` (below); no rebuild needed.
 - **The AUR PKGBUILD lives *only* in the `scripts/publish-aur.sh` heredoc** — that script is the sole writer of `aur/pollis.git`, and it regenerates the whole file every release rather than patching what is there. There is deliberately no checked-in `aur/PKGBUILD` to edit: one used to exist, went stale at the Electron-era `1.0.43`, and was pure trap — editing it changed nothing about what the AUR served. Package changes (deps, layout, `package()`) go in the heredoc.
