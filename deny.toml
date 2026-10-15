@@ -50,6 +50,21 @@ ignore = [
     { id = "RUSTSEC-2026-0099", reason = "rustls-webpki 0.101/0.102 pinned via livekit/libsql; fix only on 0.103 line (already used directly); awaiting upstream rustls bump" },
     { id = "RUSTSEC-2026-0104", reason = "rustls-webpki 0.101 pinned via livekit rustls 0.21; fix only on 0.103 line (already used directly); awaiting upstream rustls bump" },
 
+    # rustls advisories of 2026-10-14 (#1308). Our direct rustls is 0.23.46,
+    # which patches all four (-0346..-0349); -0347/-0348 never touched the old
+    # lines. -0346 and -0349 also flag the SAME old copies as above: rustls 0.21
+    # (livekit) and 0.22 (libsql), with no backport — patched is >= 0.23.46
+    # only. Neither is reachable on those lines:
+    #   -0346: Debug on ClientSessionValue leaks resumption secrets, but only
+    #          through a custom ClientSessionStore that logs them; we define none.
+    #   -0349: a forged ServerHello downgrades later handshakes from
+    #          X25519MLKEM768 to X25519. 0.21/0.22 never offer the hybrid group,
+    #          so they are classical-only already; there is nothing to downgrade.
+    # The ignore is per id, so it also covers 0.23; that stays safe only while
+    # the lockfile holds rustls >= 0.23.46. Drop both with #1303.
+    { id = "RUSTSEC-2026-0346", reason = "rustls 0.21/0.22 (livekit/libsql, #1303); patched only >= 0.23.46, which our direct rustls uses; needs a custom ClientSessionStore that Debug-logs values, and we define none" },
+    { id = "RUSTSEC-2026-0349", reason = "rustls 0.21/0.22 (livekit/libsql, #1303); patched only >= 0.23.46, which our direct rustls uses; old lines never offer X25519MLKEM768, so no PQ exchange to downgrade" },
+
     # h2 0.3 accepts and queues empty DATA frames without limit (unbounded
     # memory, or a panic on length overflow). Low severity. The fix is h2
     # 0.4.16; there is no 0.3 backport, and 0.3.27 is the last 0.3 release.

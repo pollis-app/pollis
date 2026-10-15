@@ -2243,7 +2243,7 @@ criteria = "safe-to-deploy"
 notes = "No independent review performed. Pinned transitively via libsql's TLS stack to Turso (see RUSTSEC-2026-0098/-0099 [advisories] notes above — same stale-rustls-webpki situation as the 0.21 line, different upstream). Same trust rationale as the other rustls entries in this file."
 
 [[exemptions.rustls]]
-version = "0.23.45"
+version = "0.23.46"
 criteria = "safe-to-deploy"
 notes = "No independent review performed. This is the current, non-stale line this app uses directly via reqwest/hyper-rustls for outbound HTTPS to the DS and LiveKit (and via tokio-rustls elsewhere) — already on the fixed rustls-webpki 0.103.15 line, unlike the 0.21/0.22 entries above. Exempted on rustls's maintenance and design track record (memory-safe by construction, ISRG-affiliated); note this exact version/criteria pair is NOT satisfied by the isrg/mozilla imports above even though those bring in real third-party audits for other crates in this tree, so no claim is being borrowed from them here."
 
