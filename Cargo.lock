@@ -6626,6 +6626,7 @@ dependencies = [
  "anyhow",
  "axum 0.7.9",
  "base64 0.22.1",
+ "chrono",
  "crossterm",
  "libc",
  "libsql",
@@ -6633,9 +6634,12 @@ dependencies = [
  "pollis-core",
  "pollis-delivery",
  "ratatui",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",
+ "unicode-width 0.1.14",
+ "zeroize",
 ]
 
 [[package]]

@@ -28,6 +28,9 @@ desktop app, and it builds/tests headlessly in-box (`--no-default-features`).
 **Non-goals (v1)**
 - Voice, screenshare, webcam (require the `media` feature + a GUI surface).
 - Attachments / file upload-download (R2) — fast-follow, not blocked by `media`.
+  Since #1337 the client *reads* the `_att`/`_txt` envelope other clients write
+  (caption + an `[image: photo.png, 2 KB]` line); it still neither downloads nor
+  uploads.
 - Multi-device *enrollment* onboarding UX — see §7 for the decision point; v1
   targets first-device signup + Secret-Key recovery, enrollment as a milestone.
 - Realtime push (LiveKit inbox). v1 **polls** on a timer (§6). Realtime is a
@@ -219,6 +222,7 @@ Call order (verified against `auth.rs` + `TestClient::sign_up`, `harness.rs:2387
 ```
 request_otp(&state, email)                     // auth.rs:74  — sends OTP (Resend), or DEV_OTP in dev
 verify_otp(&state, email, code) -> UserProfile // auth.rs:104 — authenticates; LEAVES LOCAL DB CLOSED
+  ↳ UserProfile.new_secret_key                 // shown ONCE on the Secret Key screen and typed back (#1337)
 set_pin(newPin, oldPin=None, &state)           // commands::pin — opens the per-user SQLCipher DB
 initialize_identity(&state, user_id)           // auth.rs:40  — publishes MLS key package + initial poll
 ```
@@ -350,7 +354,12 @@ The box is a headless Rust rig for exactly this surface.
   full MLS round-trip both directions in-box.
 - **M4 — Multi-device enrollment** (decision-gated, §7): interactive second-device
   enrollment approval + Secret-Key recovery UX.
-- **v1.1 — Attachments** (R2), reactions/edits/threads polish.
+- **v1.1 — Attachments** (R2), reactions/edits/threads polish. #1337 landed the
+  reading half and the message actions: attachment envelopes, newlines, wrapping,
+  thread replies filed under their root (`t` opens a thread), quote-reply context,
+  reactions, timestamps + date separators, mention highlighting, and reply / edit /
+  delete / react keys; plus the first-device Secret Key screen (§7), visible pane
+  focus, and `--help` / `--version`. Attachment upload/download remains open.
 - **Later — Realtime** (replace polling when non-stub LiveKit is available), and a
   scriptable non-interactive CLI mode.
 

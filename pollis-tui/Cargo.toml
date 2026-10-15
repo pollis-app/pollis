@@ -43,6 +43,18 @@ crossterm = "0.28"
 anyhow = "1"
 # fd-level stderr redirect (pollis-core's eprintln! must not scroll the TUI).
 libc = "0.2"
+# #1337: reading the `_att`/`_txt` content envelope other clients write, and the
+# vendored gemoji shortcode table for `:shortcode:` reactions.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# #1337: message timestamps + date separators in the viewer's local time.
+chrono = "0.4"
+# #1337: display width for wrapping message lines and ellipsizing the sidebar
+# (the same major ratatui 0.28 itself uses).
+unicode-width = "0.1"
+# #1337: the sign-up Secret Key is held only for the Emergency Kit screen and
+# wiped when it is dropped.
+zeroize = "1"
 
 [dev-dependencies]
 # Re-declare pollis-core with `test-harness` so the smoke tests get the

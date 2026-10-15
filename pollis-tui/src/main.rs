@@ -248,11 +248,11 @@ async fn run(guard: &mut TerminalGuard, state: Arc<AppState>) -> Result<()> {
     Ok(())
 }
 
-/// Draw one frame, first recording the message-pane height so the key handler can
-/// page-scroll by the right amount.
+/// Draw one frame, first recording the message pane's size so the key handler
+/// can page-scroll by the right amount and keep the selected message on screen.
 fn draw(guard: &mut TerminalGuard, app: &mut App) -> Result<()> {
-    let msg_height = ui::message_viewport_height(guard.terminal.get_frame().area());
-    app.set_msg_height(msg_height);
+    let (width, height) = ui::message_viewport(guard.terminal.get_frame().area(), app);
+    app.set_msg_viewport(width, height);
     guard
         .terminal
         .draw(|frame| ui::render(frame, app))

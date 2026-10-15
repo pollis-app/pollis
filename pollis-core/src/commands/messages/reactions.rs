@@ -101,15 +101,36 @@ pub async fn get_reactions(
     Ok(batched
         .into_iter()
         .next()
-        .map(|m| {
-            m.reactions
-                .into_iter()
-                .map(|r| Reaction {
-                    count: r.user_ids.len() as u32,
-                    emoji: r.emoji,
-                    user_ids: r.user_ids,
-                })
-                .collect()
-        })
+        .map(|m| group_wire(m.reactions))
         .unwrap_or_default())
+}
+
+/// Reactions on several messages in ONE Delivery Service round trip (#1337).
+///
+/// The wire read (`POST /v1/messages/lookup`, `reactions_for`) was always
+/// batched; only the per-message [`get_reactions`] was exposed, which suits a
+/// renderer that asks per visible row and is invalidated by realtime events.
+/// The terminal client has no realtime path — it re-reads on each sync round —
+/// so one request for the whole visible page is the difference between one
+/// lookup per round and one per message. Same membership gate per message on
+/// the DS; a message the caller may not see, or with no reactions, is absent.
+pub async fn get_reactions_for_messages(
+    message_ids: Vec<String>,
+    state: &Arc<AppState>,
+) -> Result<Vec<(String, Vec<Reaction>)>> {
+    let batched = crate::commands::ds_reads::message_reactions(state, message_ids).await?;
+    Ok(batched
+        .into_iter()
+        .map(|m| (m.message_id, group_wire(m.reactions)))
+        .collect())
+}
+
+fn group_wire(wire: Vec<pollis_api::directory::ReactionWire>) -> Vec<Reaction> {
+    wire.into_iter()
+        .map(|r| Reaction {
+            count: r.user_ids.len() as u32,
+            emoji: r.emoji,
+            user_ids: r.user_ids,
+        })
+        .collect()
 }

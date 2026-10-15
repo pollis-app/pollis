@@ -32,7 +32,10 @@ where
     let args: Vec<S> = args.into_iter().collect();
     // Help wins over everything, the way most tools behave: `pollis --bogus -h`
     // is someone asking how to use it.
-    if args.iter().any(|a| matches!(a.as_ref(), "-h" | "--help" | "help")) {
+    if args
+        .iter()
+        .any(|a| matches!(a.as_ref(), "-h" | "--help" | "help"))
+    {
         return Command::Help;
     }
     match args.first().map(|a| a.as_ref()) {
@@ -131,7 +134,10 @@ mod tests {
 
     #[test]
     fn version_is_the_crate_version() {
-        assert_eq!(version_text(), format!("pollis {}", env!("CARGO_PKG_VERSION")));
+        assert_eq!(
+            version_text(),
+            format!("pollis {}", env!("CARGO_PKG_VERSION"))
+        );
     }
 
     #[test]

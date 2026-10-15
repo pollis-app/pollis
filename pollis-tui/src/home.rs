@@ -9,9 +9,9 @@
 //! immediate-mode projection and the tricky bits — tree flattening, selection
 //! movement, scroll windowing, page merging — are unit-tested in isolation.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use pollis_core::commands::messages::{ChannelMessage, MessageCursor};
+use pollis_core::commands::messages::{ChannelMessage, MessageCursor, Reaction};
 
 use crate::data::ConversationTree;
 
@@ -43,6 +43,8 @@ pub enum PromptKind {
     StartDm,
     /// Invite a user to a group; the buffer is the invitee's username/email.
     Invite { group_id: String, group_name: String },
+    /// React to a message; the buffer is an emoji or a `:shortcode:`.
+    React { message_id: String },
 }
 
 impl PromptKind {
@@ -56,6 +58,9 @@ impl PromptKind {
             PromptKind::StartDm => "Start DM — username or email".to_string(),
             PromptKind::Invite { group_name, .. } => {
                 format!("Invite to {group_name} — username or email")
+            }
+            PromptKind::React { .. } => {
+                "React — an emoji or :shortcode: (:+1: :heart: :joy: :tada:)".to_string()
             }
         }
     }
@@ -73,6 +78,34 @@ pub enum HomeMode {
     Compose,
     /// Filling a create/invite prompt (bottom input bar).
     Prompt(PromptKind),
+    /// Confirming the deletion of one of the user's own messages, in the input
+    /// bar (`y` deletes, `n`/Esc keeps it) — the desktop "replace the input
+    /// bar" pattern, never a modal.
+    ConfirmDelete { message_id: String, preview: String },
+}
+
+/// What the compose bar's Enter does with the buffer.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub enum ComposeTarget {
+    /// A new message (into the open thread, when one is open).
+    #[default]
+    New,
+    /// A quote reply to `message_id` (`reply_to_id`).
+    Reply {
+        message_id: String,
+        sender: String,
+        preview: String,
+    },
+    /// Replace the body of the user's own `message_id`.
+    Edit { message_id: String },
+}
+
+/// The open thread, when the message pane shows one instead of the channel.
+#[derive(Debug, Default)]
+pub struct ThreadView {
+    pub root_id: String,
+    /// Replies, oldest first (`read_thread_messages`).
+    pub replies: Vec<ChannelMessage>,
 }
 
 /// Whether a collected buffer is worth submitting: non-empty after trimming.
@@ -144,6 +177,75 @@ pub struct OpenConversation {
     pub scroll: usize,
     /// True while the first page is still loading (drives the empty state).
     pub loading: bool,
+    /// Reactions per message id, for the messages on screen.
+    pub reactions: HashMap<String, Vec<Reaction>>,
+    /// Thread root id → reply count this device holds.
+    pub thread_counts: HashMap<String, i64>,
+    /// The highlighted message, by id (ids survive a page merge; indices do
+    /// not). `None` = nothing selected, view follows the newest message.
+    pub selected: Option<String>,
+    /// `Some` while a thread is open in the pane.
+    pub thread: Option<ThreadView>,
+}
+
+impl OpenConversation {
+    /// The messages the pane shows, in display order. The channel view hides
+    /// thread replies — other clients file them under their thread, and the
+    /// root shows a reply count instead. A thread view is the root followed by
+    /// its replies.
+    pub fn displayed(&self) -> Vec<&ChannelMessage> {
+        match &self.thread {
+            Some(t) => self
+                .messages
+                .iter()
+                .filter(|m| m.id == t.root_id)
+                .chain(t.replies.iter())
+                .collect(),
+            None => self.messages.iter().filter(|m| m.thread_id.is_none()).collect(),
+        }
+    }
+
+    /// A loaded message by id, from the channel buffer or the open thread.
+    pub fn find(&self, id: &str) -> Option<&ChannelMessage> {
+        self.messages
+            .iter()
+            .chain(self.thread.iter().flat_map(|t| t.replies.iter()))
+            .find(|m| m.id == id)
+    }
+
+    /// The selected message, if it is still loaded.
+    pub fn selected_message(&self) -> Option<&ChannelMessage> {
+        self.selected.as_deref().and_then(|id| self.find(id))
+    }
+
+    /// Move the message selection by `dir` (+1 newer, -1 older) over what is
+    /// displayed. Up from nothing selects the newest; down past the newest
+    /// clears the selection (back to following new messages). Lost-message
+    /// placeholders are skipped — there is nothing to act on.
+    pub fn step_selection(&mut self, dir: i32) {
+        let ids: Vec<String> = self
+            .displayed()
+            .into_iter()
+            .filter(|m| !m.undecryptable)
+            .map(|m| m.id.clone())
+            .collect();
+        self.selected = step_message(&ids, self.selected.as_deref(), dir);
+    }
+}
+
+/// Pure core of [`OpenConversation::step_selection`].
+pub fn step_message(ids: &[String], selected: Option<&str>, dir: i32) -> Option<String> {
+    if ids.is_empty() {
+        return None;
+    }
+    let current = selected.and_then(|s| ids.iter().position(|id| id == s));
+    match (current, dir < 0) {
+        (None, true) => ids.last().cloned(),
+        (None, false) => None,
+        (Some(0), true) => ids.first().cloned(),
+        (Some(i), true) => ids.get(i - 1).cloned(),
+        (Some(i), false) => ids.get(i + 1).cloned(),
+    }
 }
 
 /// The whole Home screen model.
@@ -163,6 +265,8 @@ pub struct HomeState {
     pub refreshes: u64,
     /// How the screen is currently consuming keystrokes (nav / compose / prompt).
     pub mode: HomeMode,
+    /// What the compose bar is for (new / reply / edit) while composing.
+    pub compose: ComposeTarget,
 }
 
 impl HomeState {
@@ -205,6 +309,18 @@ impl HomeState {
     /// Move the sidebar highlight by `dir` (+1 down, -1 up), skipping headers.
     pub fn move_selection(&mut self, dir: i32) {
         self.selected = step_selection(&self.rows, self.selected, dir);
+    }
+
+    /// Highlight the sidebar row that opens conversation `conv_id`, returning
+    /// it. Used to land on a just-created group / channel / DM, which used to
+    /// leave the highlight wherever it was (#1337).
+    pub fn select_conversation(&mut self, conv_id: &str) -> Option<ConvRef> {
+        let (i, conv) = self.rows.iter().enumerate().find_map(|(i, r)| match &r.target {
+            RowTarget::Open(c) if c.id == conv_id => Some((i, c.clone())),
+            _ => None,
+        })?;
+        self.selected = i;
+        Some(conv)
     }
 
     /// The id of the selected sidebar row iff it's a **pending DM request** —
@@ -681,6 +797,54 @@ mod tests {
         // A pending request row likewise.
         home.selected = 6;
         assert_eq!(home.context_group(), None);
+    }
+
+    #[test]
+    fn the_channel_view_hides_thread_replies_and_a_thread_view_shows_them() {
+        let mut reply = msg("r1", "2", "in thread");
+        reply.thread_id = Some("root".into());
+        let mut open = OpenConversation {
+            messages: vec![msg("root", "1", "root"), reply, msg("x", "3", "after")],
+            ..Default::default()
+        };
+        let ids = |o: &OpenConversation| -> Vec<String> {
+            o.displayed().iter().map(|m| m.id.clone()).collect()
+        };
+        assert_eq!(ids(&open), vec!["root", "x"]);
+
+        let mut thread_reply = msg("r1", "2", "in thread");
+        thread_reply.thread_id = Some("root".into());
+        open.thread = Some(ThreadView {
+            root_id: "root".into(),
+            replies: vec![thread_reply],
+        });
+        assert_eq!(ids(&open), vec!["root", "r1"]);
+    }
+
+    #[test]
+    fn message_selection_steps_from_the_newest_and_releases_past_it() {
+        let ids: Vec<String> = ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(step_message(&ids, None, -1).as_deref(), Some("c"));
+        assert_eq!(step_message(&ids, Some("c"), -1).as_deref(), Some("b"));
+        assert_eq!(step_message(&ids, Some("a"), -1).as_deref(), Some("a"));
+        assert_eq!(step_message(&ids, Some("b"), 1).as_deref(), Some("c"));
+        assert_eq!(step_message(&ids, Some("c"), 1), None);
+        assert_eq!(step_message(&ids, None, 1), None);
+        // A selection that is no longer loaded restarts from the newest.
+        assert_eq!(step_message(&ids, Some("gone"), -1).as_deref(), Some("c"));
+        assert_eq!(step_message(&[], None, -1), None);
+    }
+
+    #[test]
+    fn select_conversation_lands_on_the_new_row() {
+        let mut home = HomeState::new();
+        home.set_tree(tree(), "me");
+        home.selected = 0;
+        let conv = home.select_conversation("d1").expect("dm row");
+        assert_eq!(conv.kind, ConvKind::Dm);
+        assert_eq!(home.selected, 4);
+        assert!(home.select_conversation("nope").is_none());
+        assert_eq!(home.selected, 4);
     }
 
     #[test]

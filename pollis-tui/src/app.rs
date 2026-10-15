@@ -10,16 +10,19 @@ use std::time::Duration;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use pollis_core::commands::auth::UserProfile;
 use pollis_core::state::AppState;
+use zeroize::Zeroizing;
 
 use crate::auth::{self, Boot};
 use crate::enroll::{self, EnrollmentHandle};
 use crate::{data, send, sync};
 
 use crate::enroll_flow::{poll_outcome, ApprovalState, EnrollChoice, PinFlow, PollOutcome};
+use crate::content;
 use crate::home::{
-    is_blank, should_load_older, ConvKind, ConvRef, Focus, HomeMode, HomeState, OpenConversation,
-    PromptKind, RowTarget,
+    is_blank, should_load_older, ComposeTarget, ConvKind, ConvRef, Focus, HomeMode, HomeState,
+    OpenConversation, PromptKind, RowTarget, ThreadView, PREFETCH_MARGIN,
 };
+use crate::timeline;
 
 /// Background-sync cadence (spec §6: ~3–5 s while foregrounded). The loop polls
 /// the Delivery Service and advances local MLS state; the UI re-reads on its own
@@ -36,6 +39,11 @@ pub enum Screen {
     Email,
     /// First-device signup: enter the OTP code.
     Otp,
+    /// First-device signup: show the account's Secret Key (the Emergency Kit)
+    /// and have the user type it back before going on (#1337). Desktop and
+    /// mobile have always shown it; the CLI skipped it, so a CLI-only account
+    /// had no recovery path at all. Phase in [`App::secret_confirming`].
+    SaveSecretKey,
     /// Set a PIN for THIS device — shared by first-device signup and a second
     /// device's enroll/recover tail (the flow is tracked by [`App::pin_flow`]).
     SetPin,
@@ -92,6 +100,10 @@ pub enum Action {
     /// Submit the active create/invite prompt (new group/channel, start DM,
     /// invite), dispatching on the current [`HomeMode::Prompt`] kind.
     SubmitPrompt,
+    /// Delete one of the user's own messages (after the `y` confirmation).
+    DeleteMessage(String),
+    /// Open the thread rooted at this message in the message pane.
+    OpenThread(String),
 
     // ── M4b: multi-device enrollment / recovery ──────────────────────────────
     /// New device: kick off a sibling-approval enrollment request.
@@ -136,8 +148,16 @@ pub struct App {
     /// Email captured on the [`Screen::Email`] step, reused by `verify_otp`.
     email: String,
     /// Profile from `verify_otp` / `get_session` — carries the `user_id` needed
-    /// by `set_pin`/`initialize_identity`/`unlock`.
+    /// by `set_pin`/`initialize_identity`/`unlock`. Its `new_secret_key` is
+    /// always taken out (into [`Self::pending_secret`]) the moment it arrives.
     profile: Option<UserProfile>,
+    /// The first-device Secret Key, held only while [`Screen::SaveSecretKey`]
+    /// is up and wiped on drop. Never written anywhere unless the user asks for
+    /// the Emergency Kit file.
+    pending_secret: Option<Zeroizing<String>>,
+    /// On [`Screen::SaveSecretKey`]: false = showing the key, true = the user
+    /// is typing it back to confirm they saved it.
+    pub secret_confirming: bool,
 
     /// The three-pane client model (populated once [`Screen::Home`] is reached).
     pub home: HomeState,
@@ -163,8 +183,11 @@ pub struct App {
     /// must never issue remote queries (that's the sync loop's job).
     last_sync_round: u64,
     /// Last-rendered height (in rows) of the message pane, so the key handler can
-    /// scroll by whole pages. Updated by the renderer via [`Self::set_msg_height`].
+    /// scroll by whole pages. Updated each frame via [`Self::set_msg_viewport`].
     msg_height: usize,
+    /// Last-rendered width (in columns) of the message pane — the layout the
+    /// key handler measures to keep the selected message on screen.
+    msg_width: u16,
     /// Cadence the background sync loop is spawned at on [`Action::EnterHome`].
     /// Defaults to [`SYNC_CADENCE`] (the 4s production value); the e2e driver
     /// overrides it via [`Self::with_sync_cadence`] so a headless test doesn't
@@ -191,6 +214,8 @@ impl App {
             should_quit: false,
             email: String::new(),
             profile: None,
+            pending_secret: None,
+            secret_confirming: false,
             home: HomeState::new(),
             pin_flow: PinFlow::FirstDevice,
             enroll_choice: EnrollChoice::Approval,
@@ -200,6 +225,7 @@ impl App {
             sync_loop: None,
             last_sync_round: 0,
             msg_height: 0,
+            msg_width: 80,
             sync_cadence,
         }
     }
@@ -217,10 +243,32 @@ impl App {
         self.profile.as_ref().map(|p| p.id.as_str())
     }
 
-    /// Record the message pane's rendered height so page-scroll keys know how far
-    /// to jump. Called by the renderer each frame.
-    pub fn set_msg_height(&mut self, h: usize) {
-        self.msg_height = h;
+    /// Record the message pane's inner size (see [`crate::ui::message_viewport`])
+    /// so page keys jump a screen and selection keeps the highlighted message on
+    /// screen. Called before each frame is drawn.
+    pub fn set_msg_viewport(&mut self, width: u16, height: usize) {
+        self.msg_width = width;
+        self.msg_height = height;
+    }
+
+    /// The Secret Key on screen, while [`Screen::SaveSecretKey`] shows it.
+    pub fn pending_secret(&self) -> Option<&str> {
+        self.pending_secret.as_ref().map(|s| s.as_str())
+    }
+
+    /// The open conversation laid out at the pane's current width — the same
+    /// layout the renderer draws, so selection scrolling measures what is on
+    /// screen.
+    pub fn open_layout(&self) -> Vec<timeline::Block> {
+        match &self.home.open {
+            Some(open) => timeline::layout_open(
+                open,
+                self.signed_in_user_id().unwrap_or(""),
+                self.identity().unwrap_or(""),
+                self.msg_width,
+            ),
+            None => Vec::new(),
+        }
     }
 
     /// The first action to run once the terminal is up: probe for a session.
@@ -247,6 +295,7 @@ impl App {
             Screen::Home => self.on_home_key(key),
             Screen::Email => self.on_text_key(key, InputKind::Email, Action::RequestOtp),
             Screen::Otp => self.on_text_key(key, InputKind::Digits(6), Action::VerifyOtp),
+            Screen::SaveSecretKey => self.on_save_secret_key(key),
             Screen::SetPin => self.on_text_key(key, InputKind::Digits(4), Action::SetPinAndInit),
             Screen::Unlock => self.on_text_key(key, InputKind::Digits(4), Action::Unlock),
             Screen::EnrollChoice => self.on_enroll_choice_key(key),
@@ -255,6 +304,68 @@ impl App {
             Screen::PendingEnrollments => self.on_pending_enrollments_key(key),
             Screen::ApproveEnrollment => self.on_approve_enrollment_key(key),
         }
+    }
+
+    /// The Secret Key screen (#1337). Two phases, like desktop's
+    /// SaveSecretKeyScreen: first the key is shown (`s` writes the Emergency
+    /// Kit file, Enter continues), then the user types or pastes it back, and
+    /// only a match moves on to the PIN. Esc from the second phase shows the
+    /// key again.
+    fn on_save_secret_key(&mut self, key: KeyEvent) -> Option<Action> {
+        if !self.secret_confirming {
+            match key.code {
+                KeyCode::Char('s') | KeyCode::Char('S') => {
+                    let secret = self.pending_secret.as_ref()?;
+                    self.status = Some(match write_emergency_kit(secret, &self.email) {
+                        Ok(path) => format!(
+                            "Emergency Kit saved to {} — move it somewhere safe.",
+                            path.display()
+                        ),
+                        Err(e) => format!("Couldn't save the Emergency Kit: {e}"),
+                    });
+                }
+                KeyCode::Enter => {
+                    self.secret_confirming = true;
+                    self.input.clear();
+                    self.status = Some(
+                        "Type or paste your Secret Key to confirm you saved it.".to_string(),
+                    );
+                }
+                _ => {}
+            }
+            return None;
+        }
+        match key.code {
+            KeyCode::Esc => {
+                self.secret_confirming = false;
+                self.input.clear();
+                self.status = Some("Here it is again — save it, then press Enter.".to_string());
+            }
+            KeyCode::Enter => {
+                let matches = self
+                    .pending_secret
+                    .as_ref()
+                    .is_some_and(|secret| secret_keys_match(secret, &self.input));
+                if matches {
+                    // Done with it: drop (and so wipe) the only copy we held.
+                    self.pending_secret = None;
+                    self.secret_confirming = false;
+                    self.goto(Screen::SetPin, "Saved. Now choose a 4-digit PIN for this device.");
+                } else {
+                    self.status = Some(
+                        "That doesn't match — try again (Esc shows the key again).".to_string(),
+                    );
+                }
+            }
+            KeyCode::Backspace => {
+                self.input.pop();
+            }
+            KeyCode::Char(c) if !c.is_control() => {
+                self.input.push(c);
+            }
+            _ => {}
+        }
+        None
     }
 
     /// Enroll-choice screen (second device): pick between sibling-approval and
@@ -502,22 +613,25 @@ impl App {
         }
     }
 
-    /// Handle a key on the three-pane Home screen. The screen has three input
-    /// modes — navigate, compose (typing a message), and prompt (a create/invite
-    /// bottom bar) — each with its own handler. Compose/prompt keystrokes edit
-    /// [`Self::input`]; the write-triggering keys return an [`Action`].
+    /// Handle a key on the three-pane Home screen. The screen has four input
+    /// modes — navigate, compose (typing a message), prompt (a create/invite/
+    /// react bottom bar) and confirm-delete — each with its own handler.
+    /// Compose/prompt keystrokes edit [`Self::input`]; the write-triggering
+    /// keys return an [`Action`].
     fn on_home_key(&mut self, key: KeyEvent) -> Option<Action> {
         match self.home.mode {
             HomeMode::Navigate => self.on_home_nav_key(key),
             HomeMode::Compose => self.on_compose_key(key),
             HomeMode::Prompt(_) => self.on_prompt_key(key),
+            HomeMode::ConfirmDelete { .. } => self.on_confirm_delete_key(key),
         }
     }
 
     /// Navigate mode: tree movement + the command keys that open compose or a
     /// create/invite prompt. The two async reads (open a conversation, page
     /// history) return an [`Action`]; the write-triggering keys hand off to the
-    /// `begin_*` helpers.
+    /// `begin_*` helpers. The message keys (`r` reply, `e` edit, `x` delete,
+    /// `+` react, `t` thread) act on the message selected in the message pane.
     fn on_home_nav_key(&mut self, key: KeyEvent) -> Option<Action> {
         match key.code {
             KeyCode::Char('q') => {
@@ -530,12 +644,17 @@ impl App {
                     Focus::Sidebar => Focus::Messages,
                     Focus::Messages => Focus::Sidebar,
                 };
+                self.status = None;
+                None
+            }
+            KeyCode::Esc => {
+                self.on_home_escape();
                 None
             }
             KeyCode::Up | KeyCode::Char('k') => self.on_home_up(1),
             KeyCode::Down | KeyCode::Char('j') => self.on_home_down(1),
-            KeyCode::PageUp => self.on_home_up(self.msg_height.max(1)),
-            KeyCode::PageDown => self.on_home_down(self.msg_height.max(1)),
+            KeyCode::PageUp => self.on_page(true),
+            KeyCode::PageDown => self.on_page(false),
             // `i` (or Enter on the message pane) enters compose for the open conv.
             KeyCode::Char('i') => self.begin_compose(),
             // `a` accepts the selected pending DM request.
@@ -545,6 +664,12 @@ impl App {
             KeyCode::Char('c') => self.begin_new_channel_prompt(),
             KeyCode::Char('d') => self.begin_prompt(PromptKind::StartDm),
             KeyCode::Char('v') => self.begin_invite_prompt(),
+            // Message actions on the selected message (#1337).
+            KeyCode::Char('r') => self.begin_reply(),
+            KeyCode::Char('e') => self.begin_edit(),
+            KeyCode::Char('x') | KeyCode::Delete => self.begin_delete(),
+            KeyCode::Char('+') => self.begin_react(),
+            KeyCode::Char('t') => self.begin_open_thread(),
             // `E` opens the pending device-enrollments list (approve/reject a
             // second device requesting to join this account).
             KeyCode::Char('E') => {
@@ -563,20 +688,55 @@ impl App {
         }
     }
 
-    /// Compose mode: type into the buffer; Enter sends (empty is a no-op); Esc
-    /// leaves so navigation keys work again.
+    /// Esc in navigation backs out one level: close the open thread, else drop
+    /// the message selection, else hand focus back to the sidebar.
+    fn on_home_escape(&mut self) {
+        self.status = None;
+        if self.home.focus == Focus::Sidebar {
+            return;
+        }
+        let Some(open) = self.home.open.as_mut() else {
+            self.home.focus = Focus::Sidebar;
+            return;
+        };
+        if let Some(thread) = open.thread.take() {
+            open.selected = Some(thread.root_id);
+            open.scroll = 0;
+            self.keep_selection_visible();
+            return;
+        }
+        if open.selected.take().is_some() {
+            open.scroll = 0;
+            return;
+        }
+        self.home.focus = Focus::Sidebar;
+    }
+
+    /// Compose mode: type into the buffer; Enter sends (empty is a no-op);
+    /// Alt-Enter or Ctrl-J adds a line break; Esc leaves so navigation keys
+    /// work again.
     fn on_compose_key(&mut self, key: KeyEvent) -> Option<Action> {
+        let newline = (key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::ALT))
+            || (key.code == KeyCode::Char('j') && key.modifiers.contains(KeyModifiers::CONTROL));
+        if newline {
+            self.input.push('\n');
+            return None;
+        }
         match key.code {
             KeyCode::Esc => {
                 self.leave_input_mode();
                 None
             }
             KeyCode::Enter => {
-                if is_blank(&self.input) {
+                let attachment_edit = self.editing_attachment_message();
+                if is_blank(&self.input) && !attachment_edit {
                     // Empty/whitespace-only input does not send.
                     None
                 } else {
-                    self.status = Some("Sending…".to_string());
+                    self.status = Some(match self.home.compose {
+                        ComposeTarget::Edit { .. } => "Saving edit…".to_string(),
+                        _ => "Sending…".to_string(),
+                    });
                     Some(Action::SendMessage)
                 }
             }
@@ -590,6 +750,20 @@ impl App {
             }
             _ => None,
         }
+    }
+
+    /// Whether the compose bar is editing a message that carries attachments —
+    /// the one case an empty buffer is a real edit (it clears the caption).
+    fn editing_attachment_message(&self) -> bool {
+        let ComposeTarget::Edit { message_id } = &self.home.compose else {
+            return false;
+        };
+        self.home
+            .open
+            .as_ref()
+            .and_then(|o| o.find(message_id))
+            .and_then(|m| m.content.as_deref())
+            .is_some_and(|raw| !content::parse_content(raw).attachments.is_empty())
     }
 
     /// Prompt mode: type into the buffer; Enter submits (empty is rejected with a
@@ -620,27 +794,161 @@ impl App {
         }
     }
 
+    /// The delete confirmation in the input bar: `y` deletes, `n` or Esc keeps
+    /// the message. Nothing else does anything, so a stray key cannot delete.
+    fn on_confirm_delete_key(&mut self, key: KeyEvent) -> Option<Action> {
+        let HomeMode::ConfirmDelete { message_id, .. } = self.home.mode.clone() else {
+            return None;
+        };
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                self.home.mode = HomeMode::Navigate;
+                self.status = Some("Deleting…".to_string());
+                Some(Action::DeleteMessage(message_id))
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                self.leave_input_mode();
+                self.status = Some("Kept.".to_string());
+                None
+            }
+            _ => None,
+        }
+    }
+
     /// Enter compose mode for the open conversation. Guards: nothing open →
     /// guidance; an un-accepted DM request → tell the user to accept it first
     /// (its MLS tree has no send path until accepted).
     fn begin_compose(&mut self) -> Option<Action> {
+        if self.compose_guard() {
+            self.home.compose = ComposeTarget::New;
+            self.home.mode = HomeMode::Compose;
+            self.home.focus = Focus::Messages;
+            self.input.clear();
+            let in_thread = self.home.open.as_ref().is_some_and(|o| o.thread.is_some());
+            self.status = Some(if in_thread {
+                "Replying in thread — Enter to send, Alt-Enter for a new line, Esc to cancel."
+                    .to_string()
+            } else {
+                "Composing — Enter to send, Alt-Enter for a new line, Esc to cancel.".to_string()
+            });
+        }
+        None
+    }
+
+    /// Whether the open conversation can be written to, explaining why not.
+    fn compose_guard(&mut self) -> bool {
         match self.home.open.as_ref().map(|o| o.kind) {
             None => {
                 self.status = Some("Open a conversation first (Enter on the sidebar).".to_string());
+                false
             }
             Some(Some(ConvKind::DmRequest)) => {
                 self.status =
                     Some("Accept this request first (press a) before sending.".to_string());
+                false
             }
-            Some(_) => {
-                self.home.mode = HomeMode::Compose;
-                self.home.focus = Focus::Messages;
-                self.input.clear();
-                self.status =
-                    Some("Composing — type a message, Enter to send, Esc to cancel.".to_string());
-            }
+            Some(_) => true,
         }
+    }
+
+    /// The selected message, or a hint saying how to select one.
+    fn selected_message_or_hint(&mut self) -> Option<(String, String, String, Option<String>)> {
+        let picked = self.home.open.as_ref().and_then(|o| o.selected_message()).map(|m| {
+            (
+                m.id.clone(),
+                m.sender_id.clone(),
+                m.sender_username.clone().unwrap_or_else(|| m.sender_id.clone()),
+                if m.deleted_at.is_some() || m.undecryptable {
+                    None
+                } else {
+                    m.content.clone()
+                },
+            )
+        });
+        if picked.is_none() {
+            self.status = Some(
+                "Select a message first: Tab to the message pane, then ↑/↓.".to_string(),
+            );
+        }
+        picked
+    }
+
+    /// `r`: quote-reply to the selected message.
+    fn begin_reply(&mut self) -> Option<Action> {
+        let (id, _, sender, body) = self.selected_message_or_hint()?;
+        if !self.compose_guard() {
+            return None;
+        }
+        let preview = content::preview(body.as_deref().unwrap_or(""), 40);
+        self.home.compose = ComposeTarget::Reply {
+            message_id: id,
+            sender: sender.clone(),
+            preview,
+        };
+        self.home.mode = HomeMode::Compose;
+        self.home.focus = Focus::Messages;
+        self.input.clear();
+        self.status = Some(format!("Replying to {sender} — Enter to send, Esc to cancel."));
         None
+    }
+
+    /// `e`: edit the selected message, if it is the user's own.
+    fn begin_edit(&mut self) -> Option<Action> {
+        let (id, sender_id, _, body) = self.selected_message_or_hint()?;
+        if sender_id != self.user_id() {
+            self.status = Some("You can only edit your own messages.".to_string());
+            return None;
+        }
+        let Some(raw) = body else {
+            self.status = Some("That message can't be edited.".to_string());
+            return None;
+        };
+        self.home.compose = ComposeTarget::Edit { message_id: id };
+        self.home.mode = HomeMode::Compose;
+        self.home.focus = Focus::Messages;
+        self.input = content::parse_content(&raw).text;
+        self.status = Some("Editing — Enter to save, Esc to cancel.".to_string());
+        None
+    }
+
+    /// `x` / Delete: ask to delete the selected message, if it is the user's own.
+    fn begin_delete(&mut self) -> Option<Action> {
+        let (id, sender_id, _, body) = self.selected_message_or_hint()?;
+        if sender_id != self.user_id() {
+            self.status = Some("You can only delete your own messages.".to_string());
+            return None;
+        }
+        let preview = content::preview(body.as_deref().unwrap_or(""), 40);
+        self.status = None;
+        self.home.mode = HomeMode::ConfirmDelete {
+            message_id: id,
+            preview,
+        };
+        None
+    }
+
+    /// `+`: react to the selected message (emoji or `:shortcode:` prompt).
+    fn begin_react(&mut self) -> Option<Action> {
+        let (id, _, _, body) = self.selected_message_or_hint()?;
+        if body.is_none() {
+            self.status = Some("That message can't be reacted to.".to_string());
+            return None;
+        }
+        self.begin_prompt(PromptKind::React { message_id: id })
+    }
+
+    /// `t`: open the thread rooted at the selected message.
+    fn begin_open_thread(&mut self) -> Option<Action> {
+        if self.home.open.as_ref().is_some_and(|o| o.thread.is_some()) {
+            self.status = Some("Already in a thread — Esc to go back.".to_string());
+            return None;
+        }
+        let (id, _, _, body) = self.selected_message_or_hint()?;
+        if body.is_none() {
+            self.status = Some("That message has no thread.".to_string());
+            return None;
+        }
+        Some(Action::OpenThread(id))
     }
 
     /// Accept the selected pending DM request, if the highlighted row is one.
@@ -699,12 +1007,14 @@ impl App {
     /// Leave compose/prompt back to navigation, clearing the shared buffer.
     fn leave_input_mode(&mut self) {
         self.home.mode = HomeMode::Navigate;
+        self.home.compose = ComposeTarget::New;
         self.input.clear();
         self.status = None;
     }
 
-    /// Up/`k` (or PageUp): in the sidebar move the highlight, in the message pane
-    /// scroll toward older messages, prefetching the next page near the top.
+    /// Up/`k`: in the sidebar move the highlight; in the message pane select
+    /// the next older message, keeping it on screen and prefetching history as
+    /// the selection nears the top of what is loaded.
     fn on_home_up(&mut self, amount: usize) -> Option<Action> {
         match self.home.focus {
             Focus::Sidebar => {
@@ -713,14 +1023,21 @@ impl App {
             }
             Focus::Messages => {
                 let open = self.home.open.as_mut()?;
-                open.scroll = (open.scroll + amount).min(open.messages.len());
-                if should_load_older(
-                    open.scroll,
-                    open.messages.len(),
-                    open.older_cursor.is_some(),
-                    open.loading,
-                ) {
+                open.step_selection(-1);
+                let index = open
+                    .selected
+                    .as_deref()
+                    .and_then(|id| open.displayed().iter().position(|m| m.id == id));
+                let near_top = index.is_some_and(|i| i < PREFETCH_MARGIN);
+                let load = near_top
+                    && open.thread.is_none()
+                    && open.older_cursor.is_some()
+                    && !open.loading;
+                if load {
                     open.loading = true;
+                }
+                self.keep_selection_visible();
+                if load {
                     return Some(Action::LoadOlder);
                 }
                 None
@@ -728,18 +1045,61 @@ impl App {
         }
     }
 
-    /// Down/`j` (or PageDown): in the sidebar move the highlight, in the message
-    /// pane scroll back toward the newest message.
+    /// Down/`j`: in the sidebar move the highlight; in the message pane select
+    /// the next newer message (past the newest, back to following new ones).
     fn on_home_down(&mut self, amount: usize) -> Option<Action> {
         match self.home.focus {
             Focus::Sidebar => self.home.move_selection(amount as i32),
             Focus::Messages => {
                 if let Some(open) = self.home.open.as_mut() {
-                    open.scroll = open.scroll.saturating_sub(amount);
+                    open.step_selection(1);
+                    if open.selected.is_none() {
+                        open.scroll = 0;
+                    }
                 }
+                self.keep_selection_visible();
             }
         }
         None
+    }
+
+    /// PageUp / PageDown: scroll the message pane a screen at a time (the
+    /// sidebar is short enough to need no paging), prefetching older history
+    /// near the top.
+    fn on_page(&mut self, up: bool) -> Option<Action> {
+        let page = self.msg_height.max(1);
+        let total = timeline::line_count(&self.open_layout());
+        let open = self.home.open.as_mut()?;
+        let max_scroll = total.saturating_sub(page);
+        if up {
+            open.scroll = (open.scroll + page).min(max_scroll);
+            if open.thread.is_none()
+                && should_load_older(
+                    open.scroll + page,
+                    total,
+                    open.older_cursor.is_some(),
+                    open.loading,
+                )
+            {
+                open.loading = true;
+                return Some(Action::LoadOlder);
+            }
+        } else {
+            open.scroll = open.scroll.saturating_sub(page);
+        }
+        None
+    }
+
+    /// Adjust the message pane's scroll so the selected message is on screen.
+    fn keep_selection_visible(&mut self) {
+        let Some(selected) = self.home.open.as_ref().and_then(|o| o.selected.clone()) else {
+            return;
+        };
+        let blocks = self.open_layout();
+        let height = self.msg_height.max(1);
+        if let Some(open) = self.home.open.as_mut() {
+            open.scroll = timeline::scroll_to_show(&blocks, &selected, height, open.scroll);
+        }
     }
 
     /// Enter on the sidebar: toggle a group's expansion (inline) or queue opening
@@ -818,13 +1178,26 @@ impl App {
             Action::VerifyOtp => {
                 let code = self.input.trim().to_string();
                 match auth::verify_otp(&self.state, &self.email, &code).await {
-                    Ok(profile) => {
+                    Ok(mut profile) => {
                         // The branch point (spec §7): a fresh device for an account
                         // that already exists elsewhere must enroll/recover, not
                         // run first-device signup.
                         let enrollment_required = profile.enrollment_required;
+                        let secret = profile.new_secret_key.take().map(Zeroizing::new);
                         self.profile = Some(profile);
-                        if enrollment_required {
+                        if let (false, Some(secret)) = (enrollment_required, secret) {
+                            // First device: the account's Secret Key exists only
+                            // in this response. Show it before anything else, as
+                            // desktop's SaveSecretKeyScreen and mobile's
+                            // emergency-kit screen do.
+                            self.pin_flow = PinFlow::FirstDevice;
+                            self.pending_secret = Some(secret);
+                            self.secret_confirming = false;
+                            self.goto(
+                                Screen::SaveSecretKey,
+                                "Save your Secret Key — it is shown once and never stored.",
+                            );
+                        } else if enrollment_required {
                             self.pin_flow = PinFlow::NewDevice;
                             self.enroll_choice = EnrollChoice::Approval;
                             self.goto(
@@ -909,7 +1282,9 @@ impl App {
             Action::LoadOlder => self.load_open_older().await,
             Action::SendMessage => self.do_send().await,
             Action::AcceptDm(id) => self.do_accept_dm(&id).await,
-            Action::SubmitPrompt => self.do_submit_prompt().await,
+            Action::SubmitPrompt => return self.do_submit_prompt().await,
+            Action::DeleteMessage(id) => self.do_delete(&id).await,
+            Action::OpenThread(id) => self.do_open_thread(&id).await,
             Action::RequestEnrollment => self.do_request_enrollment().await,
             Action::PollEnrollment(request_id) => return self.do_poll_enrollment(&request_id).await,
             Action::Recover => self.do_recover().await,
@@ -1033,32 +1408,136 @@ impl App {
         }
     }
 
-    /// Send the compose buffer to the open conversation, then re-read its newest
-    /// page so the sent message appears immediately (the core stores it locally
-    /// on send). Stays in compose mode on success so the user can keep typing; a
-    /// failure surfaces on the status line and the text is preserved for a retry.
+    /// Send the compose buffer to the open conversation — as a new message, a
+    /// quote reply, a thread reply, or an edit of the user's own message,
+    /// per [`HomeState::compose`] — then re-read its newest page so the result
+    /// appears immediately (the core stores it locally on send). A new message
+    /// stays in compose so the user can keep typing; a reply or edit returns to
+    /// navigation. A failure surfaces on the status line and the text is kept
+    /// for a retry.
     async fn do_send(&mut self) {
-        let Some(conv_id) = self.home.open.as_ref().map(|o| o.conv_id.clone()) else {
+        let Some((conv_id, thread_root)) = self
+            .home
+            .open
+            .as_ref()
+            .map(|o| (o.conv_id.clone(), o.thread.as_ref().map(|t| t.root_id.clone())))
+        else {
             self.leave_input_mode();
             return;
         };
-        let text = self.input.trim().to_string();
-        if text.is_empty() {
-            return;
-        }
+        // Trailing whitespace and blank lines go; the user's line breaks stay.
+        let text = self.input.trim_end().trim_start_matches('\n').to_string();
         let user_id = self.user_id();
         let username = self.identity().map(|s| s.to_string());
-        match send::send_text(&self.state, &user_id, username, &conv_id, &text).await {
-            Ok(_) => {
+        let target = self.home.compose.clone();
+        let result: anyhow::Result<&'static str> = match &target {
+            ComposeTarget::New | ComposeTarget::Reply { .. } => {
+                if text.trim().is_empty() {
+                    return;
+                }
+                let reply_to = match &target {
+                    ComposeTarget::Reply { message_id, .. } => Some(message_id.clone()),
+                    _ => None,
+                };
+                send::send_text_with(
+                    &self.state,
+                    &user_id,
+                    username,
+                    &conv_id,
+                    &text,
+                    reply_to,
+                    thread_root,
+                )
+                .await
+                .map(|_| "")
+            }
+            ComposeTarget::Edit { message_id } => {
+                // Keep the attachments of a captioned message; replace the text.
+                let raw = self
+                    .home
+                    .open
+                    .as_ref()
+                    .and_then(|o| o.find(message_id))
+                    .and_then(|m| m.content.clone())
+                    .unwrap_or_default();
+                let body = content::replace_caption(&raw, &text);
+                send::edit(&self.state, &conv_id, message_id, &user_id, &body)
+                    .await
+                    .map(|_| "Edited.")
+            }
+        };
+        match result {
+            Ok(done) => {
                 self.input.clear();
-                self.status = None;
-                // Pin to newest and surface the just-sent message.
+                self.status = if done.is_empty() {
+                    None
+                } else {
+                    Some(done.to_string())
+                };
+                if !matches!(target, ComposeTarget::New) {
+                    self.home.mode = HomeMode::Navigate;
+                    self.home.compose = ComposeTarget::New;
+                }
+                // Pin to newest and surface the result.
                 if let Some(open) = self.home.open.as_mut() {
-                    open.scroll = 0;
+                    if matches!(target, ComposeTarget::New | ComposeTarget::Reply { .. }) {
+                        open.selected = None;
+                        open.scroll = 0;
+                    }
                 }
                 self.refresh_open().await;
             }
-            Err(e) => self.status = Some(format!("Send failed: {e}")),
+            Err(e) => {
+                self.status = Some(match target {
+                    ComposeTarget::Edit { .. } => format!("Edit failed: {e}"),
+                    _ => format!("Send failed: {e}"),
+                })
+            }
+        }
+    }
+
+    /// Delete one of the user's own messages, then re-read so it disappears.
+    async fn do_delete(&mut self, message_id: &str) {
+        let user_id = self.user_id();
+        match send::delete(&self.state, message_id, &user_id).await {
+            Ok(()) => {
+                self.status = Some("Deleted.".to_string());
+                if let Some(open) = self.home.open.as_mut() {
+                    if open.selected.as_deref() == Some(message_id) {
+                        open.selected = None;
+                    }
+                }
+                self.refresh_open().await;
+            }
+            Err(e) => self.status = Some(format!("Delete failed: {e}")),
+        }
+    }
+
+    /// Open the thread rooted at `root_id` in the message pane.
+    async fn do_open_thread(&mut self, root_id: &str) {
+        match data::thread_replies(&self.state, root_id).await {
+            Ok(replies) => {
+                let count = replies.len();
+                if let Some(open) = self.home.open.as_mut() {
+                    open.thread = Some(ThreadView {
+                        root_id: root_id.to_string(),
+                        replies,
+                    });
+                    open.selected = None;
+                    open.scroll = 0;
+                }
+                self.home.focus = Focus::Messages;
+                self.status = Some(if count == 0 {
+                    "Thread — no replies yet. i to reply, Esc to go back.".to_string()
+                } else {
+                    format!(
+                        "Thread — {count} repl{}. i to reply, Esc to go back.",
+                        if count == 1 { "y" } else { "ies" }
+                    )
+                });
+                self.refresh_extras().await;
+            }
+            Err(e) => self.status = Some(format!("Couldn't open thread: {e}")),
         }
     }
 
@@ -1075,53 +1554,115 @@ impl App {
         }
     }
 
-    /// Dispatch the active create/invite prompt on its [`HomeMode::Prompt`] kind,
-    /// then refresh the tree so a new group/channel/DM appears. Any failure (user
-    /// not found, not an admin, …) lands on the status line — never a panic. The
-    /// buffer is consumed and the screen returns to navigation on success.
-    async fn do_submit_prompt(&mut self) {
+    /// Dispatch the active prompt on its [`HomeMode::Prompt`] kind, then
+    /// refresh the tree so a new group/channel/DM appears — and land on it:
+    /// the new conversation is highlighted and opened with the message pane
+    /// focused, rather than leaving the user wherever they were (#1337). Any
+    /// failure (user not found, not an admin, …) lands on the status line —
+    /// never a panic — and the prompt stays open, buffer intact, for a retry.
+    async fn do_submit_prompt(&mut self) -> Option<Action> {
         let HomeMode::Prompt(kind) = self.home.mode.clone() else {
-            return;
+            return None;
         };
         let value = self.input.trim().to_string();
         if value.is_empty() {
-            return;
+            return None;
+        }
+        if let PromptKind::React { message_id } = &kind {
+            return self.do_react(message_id, &value).await;
         }
         let user_id = self.user_id();
-        let result: anyhow::Result<&'static str> = match kind {
+        // (status, conversation to land on)
+        let result: anyhow::Result<(&'static str, Option<String>)> = match kind {
             PromptKind::NewGroup => send::new_group(&self.state, &user_id, &value)
                 .await
-                .map(|_| "Group created."),
+                .map(|g| ("Group created.", Some(g.id))),
             PromptKind::NewChannel { group_id, .. } => {
                 send::new_channel(&self.state, &group_id, &user_id, &value)
                     .await
-                    .map(|_| "Channel created.")
+                    .map(|c| ("Channel created.", Some(c.id)))
             }
-            PromptKind::StartDm => self.resolve_and_start_dm(&user_id, &value).await,
+            PromptKind::StartDm => self
+                .resolve_and_start_dm(&user_id, &value)
+                .await
+                .map(|id| ("DM started.", Some(id))),
             PromptKind::Invite { group_id, .. } => {
                 send::invite(&self.state, &group_id, &user_id, &value)
                     .await
-                    .map(|_| "Invite sent.")
+                    .map(|_| ("Invite sent.", None))
             }
+            PromptKind::React { .. } => unreachable!("handled above"),
         };
         match result {
-            Ok(done) => {
+            Ok((done, land_on)) => {
                 self.leave_input_mode();
                 self.status = Some(done.to_string());
                 self.refresh_tree().await;
+                if let Some(id) = land_on {
+                    return self.land_on(&id);
+                }
+                None
             }
-            // Stay in the prompt (buffer intact) so the user can correct + retry.
-            Err(e) => self.status = Some(format!("{e}")),
+            Err(e) => {
+                self.status = Some(format!("{e}"));
+                None
+            }
         }
     }
 
-    /// Look a user up by username/email, then open a DM to them. A miss is a
-    /// clean error, not a panic — the prompt stays open for a corrected try.
-    async fn resolve_and_start_dm(
-        &self,
-        user_id: &str,
-        identifier: &str,
-    ) -> anyhow::Result<&'static str> {
+    /// Highlight and open the conversation `id` names — a channel or DM id, or
+    /// a group id, which lands on that group's first channel.
+    fn land_on(&mut self, id: &str) -> Option<Action> {
+        let conv_id = self
+            .home
+            .tree
+            .as_ref()
+            .and_then(|t| t.groups.iter().find(|g| g.id == id))
+            .and_then(|g| g.channels.first().map(|c| c.id.clone()))
+            .unwrap_or_else(|| id.to_string());
+        let conv = self.home.select_conversation(&conv_id)?;
+        let action = self.begin_open(conv);
+        self.home.focus = Focus::Messages;
+        Some(action)
+    }
+
+    /// Toggle a reaction on `message_id` from what was typed at the prompt.
+    async fn do_react(&mut self, message_id: &str, typed: &str) -> Option<Action> {
+        let Some(emoji) = content::resolve_reaction(typed) else {
+            self.status = Some(format!(
+                "“{typed}” isn't an emoji or a known :shortcode: — try :+1: or paste one."
+            ));
+            return None;
+        };
+        let user_id = self.user_id();
+        let already_mine = self
+            .home
+            .open
+            .as_ref()
+            .and_then(|o| o.reactions.get(message_id))
+            .is_some_and(|rs| {
+                rs.iter()
+                    .any(|r| r.emoji == emoji && r.user_ids.contains(&user_id))
+            });
+        match send::toggle_reaction(&self.state, message_id, &user_id, &emoji, already_mine).await {
+            Ok(added) => {
+                self.leave_input_mode();
+                self.status = Some(if added {
+                    format!("Reacted {emoji}.")
+                } else {
+                    format!("Removed {emoji}.")
+                });
+                self.refresh_extras().await;
+            }
+            Err(e) => self.status = Some(format!("Couldn't react: {e}")),
+        }
+        None
+    }
+
+    /// Look a user up by username/email, then open a DM to them, returning its
+    /// id. A miss is a clean error, not a panic — the prompt stays open for a
+    /// corrected try.
+    async fn resolve_and_start_dm(&self, user_id: &str, identifier: &str) -> anyhow::Result<String> {
         let found =
             pollis_core::commands::user::search_user_by_username(identifier.to_string(), &self.state)
                 .await?;
@@ -1131,8 +1672,8 @@ impl App {
         if other.id == user_id {
             anyhow::bail!("That's you — pick someone else.");
         }
-        send::start_dm(&self.state, user_id, &other.id).await?;
-        Ok("DM started.")
+        let dm = send::start_dm(&self.state, user_id, &other.id).await?;
+        Ok(dm.id)
     }
 
     /// Re-read the conversation tree from the local DB (populated by the sync
@@ -1164,9 +1705,61 @@ impl App {
                         open.at_beginning = open.older_cursor.is_none();
                     }
                 }
+                self.refresh_extras().await;
             }
             Err(e) => self.status = Some(format!("Read failed: {e}")),
         }
+    }
+
+    /// What the pane shows beside the messages themselves: the reactions on
+    /// the newest displayed messages (one batched DS read), the thread reply
+    /// counts and, with a thread open, its replies (both local). Best effort —
+    /// a failure leaves the last-known values up rather than blanking them.
+    async fn refresh_extras(&mut self) {
+        /// The newest this many displayed messages get their reactions read.
+        const REACTION_WINDOW: usize = 60;
+        let Some((conv_id, root, ids)) = self.home.open.as_ref().map(|o| {
+            let ids: Vec<String> = o
+                .displayed()
+                .iter()
+                .rev()
+                .filter(|m| !m.undecryptable && m.deleted_at.is_none())
+                .take(REACTION_WINDOW)
+                .map(|m| m.id.clone())
+                .collect();
+            (
+                o.conv_id.clone(),
+                o.thread.as_ref().map(|t| t.root_id.clone()),
+                ids,
+            )
+        }) else {
+            return;
+        };
+        let replies = match &root {
+            Some(root_id) => data::thread_replies(&self.state, root_id).await.ok(),
+            None => None,
+        };
+        let counts = data::thread_counts(&self.state, &conv_id).await.ok();
+        let reactions = data::reactions(&self.state, ids).await;
+        let Some(open) = self.home.open.as_mut() else {
+            return;
+        };
+        if open.conv_id != conv_id {
+            return;
+        }
+        if let (Some(replies), Some(thread)) = (replies, open.thread.as_mut()) {
+            thread.replies = replies;
+        }
+        if let Some(counts) = counts {
+            open.thread_counts = counts;
+        }
+        match reactions {
+            Ok(reactions) => open.reactions = reactions,
+            Err(e) => {
+                pollis_core::diag!("[tui] reactions read failed: {e}");
+            }
+        }
+        self.keep_selection_visible();
     }
 
     /// Fetch and install the first (newest) page of the just-opened conversation.
@@ -1185,6 +1778,7 @@ impl App {
                     open.scroll = 0;
                     open.loading = false;
                 }
+                self.refresh_extras().await;
             }
             Err(e) => {
                 if let Some(open) = self.home.open.as_mut() {
@@ -1213,6 +1807,7 @@ impl App {
                     open.at_beginning = open.older_cursor.is_none();
                     open.loading = false;
                 }
+                self.refresh_extras().await;
             }
             Err(e) => {
                 if let Some(open) = self.home.open.as_mut() {
@@ -1286,6 +1881,104 @@ impl App {
         self.screen = Screen::Fatal;
         self.status = Some(msg);
     }
+}
+
+/// Compare a typed Secret Key with the real one the way desktop's
+/// SaveSecretKeyScreen does: whitespace, dashes and the `A3-` version prefix
+/// ignored, case-insensitive — so a key pasted with or without its grouping
+/// still counts.
+pub(crate) fn secret_keys_match(secret: &str, typed: &str) -> bool {
+    fn normalize(s: &str) -> Zeroizing<String> {
+        let compact = Zeroizing::new(s.chars().filter(|c| !c.is_whitespace()).collect::<String>());
+        let upper = Zeroizing::new(compact.to_uppercase());
+        let body = upper
+            .strip_prefix("A3-")
+            .or_else(|| upper.strip_prefix("A3"))
+            .unwrap_or(&upper);
+        Zeroizing::new(body.chars().filter(|&c| c != '-').collect())
+    }
+    let want = normalize(secret);
+    !want.is_empty() && *want == *normalize(typed)
+}
+
+/// The Emergency Kit document, word for word the one desktop downloads and
+/// mobile shares (`auth:emergencyKit.document` in
+/// `frontend/src/i18n/locales/en/auth.json`) — a kit that reads differently
+/// per platform is a support problem the day someone compares them.
+fn emergency_kit_document(secret: &str, generated: &str) -> String {
+    let lines = [
+        "POLLIS — EMERGENCY KIT",
+        "======================",
+        "",
+        "Your Secret Key is the only way to recover access to your account",
+        "from a new device when you don't have any other Pollis device with",
+        "you. Treat it like a master password.",
+        "",
+        "If you lose this key AND lose access to all of your devices,",
+        "your account is unrecoverable. Pollis cannot reset it for you.",
+        "",
+        "  SECRET KEY:",
+        "",
+    ];
+    let tail = [
+        "",
+        "Store this file somewhere safe (a password manager, encrypted",
+        "backup, or printed and locked away). Anyone with this key + your",
+        "email address can sign in as you on a new device.",
+        "",
+    ];
+    let mut doc = lines.join("\n");
+    doc.push('\n');
+    doc.push_str(&format!("    {secret}\n"));
+    doc.push_str(&tail.join("\n"));
+    doc.push('\n');
+    doc.push_str(&format!("Generated: {generated}\n"));
+    doc
+}
+
+/// Write the Emergency Kit to the current directory — the terminal's
+/// equivalent of desktop's download — as
+/// `pollis-emergency-kit-<email>-<time>.txt`, owner-only and never overwriting
+/// an existing file. Deliberately NOT the data dir: a recovery key kept beside
+/// the keystore it recovers is no backup.
+fn write_emergency_kit(secret: &str, email: &str) -> std::io::Result<std::path::PathBuf> {
+    use std::io::Write as _;
+    let now = chrono::Local::now();
+    let safe_email: String = email
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('_')
+        .to_string();
+    let mut name = String::from("pollis-emergency-kit");
+    if cfg!(debug_assertions) {
+        name.push_str("-DEV");
+    }
+    if !safe_email.is_empty() {
+        name.push('-');
+        name.push_str(&safe_email);
+    }
+    name.push_str(&format!("-{}.txt", now.format("%Y%m%d-%H%M%S")));
+    let dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let path = dir.join(name);
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(pollis_core::private_fs::FILE_MODE);
+    }
+    let mut file = options.open(&path)?;
+    let doc = Zeroizing::new(emergency_kit_document(secret, &now.to_rfc3339()));
+    file.write_all(doc.as_bytes())?;
+    file.sync_all()?;
+    Ok(path)
 }
 
 /// Per-screen input validation, kept out of the key handler.
@@ -1406,6 +2099,39 @@ mod tests {
         // Anything else is inert rather than accidentally submitting.
         assert_eq!(classify_code_entry(KeyCode::Tab, 8), CodeEntry::Ignore);
         assert_eq!(classify_code_entry(KeyCode::Delete, 8), CodeEntry::Ignore);
+    }
+
+    /// The Secret Key confirmation accepts the key however it was pasted —
+    /// grouped or not, any case, with or without the version prefix — and
+    /// nothing else, the same rule as desktop's SaveSecretKeyScreen.
+    #[test]
+    fn a_typed_secret_key_matches_however_it_was_pasted() {
+        let key = "A3-ABCDE-FGHJK-MNPQR-STVWX-YZ012-34567";
+        assert!(secret_keys_match(key, key));
+        assert!(secret_keys_match(key, "a3-abcde-fghjk-mnpqr-stvwx-yz012-34567"));
+        assert!(secret_keys_match(key, " ABCDEFGHJKMNPQRSTVWXYZ01234567 "));
+        assert!(secret_keys_match(key, "A3 ABCDE FGHJK MNPQR STVWX YZ012 34567"));
+        assert!(!secret_keys_match(key, "A3-ABCDE-FGHJK-MNPQR-STVWX-YZ012-3456"));
+        assert!(!secret_keys_match(key, ""));
+        assert!(!secret_keys_match("", ""));
+    }
+
+    /// The kit the CLI writes is byte-for-byte the document desktop downloads
+    /// and mobile shares — read from desktop's own catalogue, so a wording
+    /// change there fails here instead of drifting.
+    #[test]
+    fn the_emergency_kit_is_the_desktop_document() {
+        let catalogue: serde_json::Value = serde_json::from_str(include_str!(
+            "../../frontend/src/i18n/locales/en/auth.json"
+        ))
+        .expect("auth.json");
+        let template = catalogue["emergencyKit"]["document"]
+            .as_str()
+            .expect("emergencyKit.document");
+        let expected = template
+            .replace("{{secretKey}}", "A3-KEY")
+            .replace("{{generated}}", "2026-10-15T00:00:00Z");
+        assert_eq!(emergency_kit_document("A3-KEY", "2026-10-15T00:00:00Z"), expected);
     }
 
     #[test]
