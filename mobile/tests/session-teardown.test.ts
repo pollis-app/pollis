@@ -162,10 +162,14 @@ test("every sign-out path goes through endSession", () => {
   for (const rel of [
     "hooks/queries/useAuth.ts",
     "app/self/delete-account.tsx",
-    "hooks/useInboxRealtime.ts",
+    // The revoked-device sign-out (#1338), whichever way it is learned.
+    "app/_layout.tsx",
   ]) {
     assert.match(read(rel), /endSession\(\)/, `${rel} no longer calls endSession()`);
   }
+  // The live nudge hands off to that same handler rather than signing out on
+  // its own (#1338).
+  assert.match(read("hooks/useInboxRealtime.ts"), /deviceWasRevoked\(\)/);
 });
 
 test("nothing but endSession resets the store on sign-out", () => {

@@ -635,7 +635,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **EmailOTPAuth** — props: onSuccess, prefillEmail, prefillNonce, onStepChange — `frontend/src/components/Auth/EmailOTPAuth.tsx`
 - **EnrollmentApprovalPrompt** — props: requestId, newDeviceId, onResolved — `frontend/src/components/Auth/EnrollmentApprovalPrompt.tsx`
 - **EnrollmentGateScreen** — props: linked, userId, userEmail, onEnrolled, onCancel, onResetComplete — `frontend/src/components/Auth/EnrollmentGateScreen.tsx`
-- **LoginScreen** — props: knownAccounts, onAuthSuccess, onWipeComplete — `frontend/src/components/Auth/LoginScreen.tsx`
+- **LoginScreen** — props: knownAccounts, onAuthSuccess, onWipeComplete, notice — `frontend/src/components/Auth/LoginScreen.tsx`
 - **PinCreateScreen** — props: oldPin, onCreated, onCancel, headline, subline — `frontend/src/components/Auth/PinCreateScreen.tsx`
 - **PinEntryScreen** — props: userId, username, onUnlocked, onForgotPin, onSwitchAccount — `frontend/src/components/Auth/PinEntryScreen.tsx`
 - **SaveSecretKeyScreen** — props: secretKey, email, onConfirmed — `frontend/src/components/Auth/SaveSecretKeyScreen.tsx`

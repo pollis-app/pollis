@@ -5,7 +5,7 @@ import React, {
   useRef,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke, listen } from "./bridge";
+import { invoke, listen, onDeviceRevoked, deviceWasRevoked } from "./bridge";
 import { observer } from "mobx-react-lite";
 import { appStore } from "./stores/appStore";
 import { LoginScreen } from "./components/Auth/LoginScreen";
@@ -86,6 +86,8 @@ function MainApp() {
   // session) or PIN entry (returning user whose PIN is set but has not
   // been entered this boot).
   const [pendingPinUser, setPendingPinUser] = useState<User | null>(null);
+  // Why the last session ended when the user did not end it (#1338).
+  const [sessionNotice, setSessionNotice] = useState<string | null>(null);
 
 
   /// Final phase of any successful sign-in (resume or fresh OTP). Loads
@@ -162,8 +164,9 @@ function MainApp() {
           .isCurrentDeviceRegistered(session.user.id)
           .catch(() => true);
         if (!stillRegistered) {
-          await api.logout(false).catch((e) => console.warn("logout failed", e));
-          appStore.logout();
+          // Revoked while this app was closed (#1338): the same sign-out, with
+          // the same notice, as any other way of learning it.
+          deviceWasRevoked();
           return;
         }
 
@@ -509,6 +512,35 @@ function MainApp() {
     setAppState("email-auth");
   }, []);
 
+  // #1338: this device was revoked from another device on the account. The
+  // core has already refused the command that found out; end the session here
+  // (the core wipes a revoked device's keys and id whatever `deleteData` says)
+  // and say why on the sign-in screen, instead of leaving every page empty.
+  useEffect(
+    () =>
+      onDeviceRevoked(async () => {
+        console.warn("[App] this device was removed from the account — signing out");
+        try {
+          await api.logout(true);
+        } catch (error) {
+          console.error("Failed to logout a revoked device:", error);
+        }
+        appStore.logout();
+        setPendingPinUser(null);
+        setPendingEnrollmentUser(null);
+        setPendingSecretKey(null);
+        try {
+          const index = await api.listKnownAccounts();
+          setKnownAccounts(index.accounts);
+        } catch {
+          // Non-critical
+        }
+        setSessionNotice(t("login.deviceRemoved"));
+        setAppState("email-auth");
+      }),
+    [t],
+  );
+
   if (appState === "update-required" || updateRequired) {
     return (
       <div style={{ height: "100%", width: "100%", display: "flex", flexDirection: "column" }}>
@@ -538,8 +570,12 @@ function MainApp() {
     return (
       <LoginScreen
         knownAccounts={knownAccounts}
-        onAuthSuccess={handleAuthSuccess}
+        onAuthSuccess={(result) => {
+          setSessionNotice(null);
+          return handleAuthSuccess(result);
+        }}
         onWipeComplete={() => setKnownAccounts([])}
+        notice={sessionNotice}
       />
     );
   }

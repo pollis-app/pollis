@@ -1,6 +1,7 @@
 import { useEffect, useRef, useMemo } from 'react';
 import {
   Channel,
+  deviceWasRevoked,
   invoke,
   isPermissionGranted,
   requestPermission,
@@ -771,11 +772,9 @@ export function useLiveKitRealtime() {
               return;
             }
             console.warn('[realtime] this device was revoked — signing out');
-            return invoke('logout', { deleteData: false })
-              .catch((e) => console.warn('logout failed', e))
-              .then(() => {
-                appStore.logout();
-              });
+            // The same sign-out as a command refused with `device_revoked`
+            // (#1338): wipes the device and says why on sign-in.
+            deviceWasRevoked();
           })
           // Offline / transient error — never sign out on a blip.
           .catch(logIgnored);

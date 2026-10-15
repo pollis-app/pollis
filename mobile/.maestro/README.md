@@ -194,6 +194,13 @@ couldn't be decrypted" placeholder between them, whose link opens Diagnostics
 (`2-see-placeholder.yaml`). The dev gate
 key is read from Doppler `dev_personal` when `POLLIS_DEV_ACCESS_KEY` is unset.
 
+**Device revoked while closed (automated, #1338):** `mobile/scripts/maestro-device-revoked.sh <device>`
+— the `revoke_peer` example signs up a fresh account as its first device and
+prints the recovery key; `two-client/device-revoked/1-enroll.yaml` joins that
+account on the device with the key and closes the app; the peer revokes the
+device; `2-revoked.yaml` reopens and unlocks and must land on sign-in with
+`text-session-notice` ("removed from your account").
+
 **Pins across members (automated, #1315):** `mobile/scripts/maestro-pins.sh <device>`
 — the lost-message shape with `pollis-tui`'s `pins_peer` example: the device
 opens a DM with a fresh peer (`two-client/pins/1-open-dm.yaml`), the peer sends

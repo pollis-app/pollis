@@ -184,6 +184,10 @@ interface MockPendingEnrollment {
 }
 
 interface MockStore {
+  /** #1338: the DS has called this device revoked; every command refuses. */
+  deviceRevoked: boolean;
+  /** `logout`'s last `deleteData`, so a spec can see what the app asked for. */
+  lastLogoutDeleteData: boolean | null;
   session: MockUser | null;
   profile: MockProfile | null;
   groups: MockGroup[];
@@ -297,6 +301,8 @@ function readPreferences(raw: unknown): Record<string, unknown> {
 }
 
 const store: MockStore = {
+  deviceRevoked: false,
+  lastLogoutDeleteData: null,
   session: preload.session ?? null,
   profile: preload.profile ?? null,
   groups: preload.groups ?? [],
@@ -340,6 +346,17 @@ const store: MockStore = {
 
 // Expose for test inspection via page.evaluate(() => window.__tauriMock)
 (window as any).__tauriMock = store;
+
+/**
+ * #1338: revoke this device from another one. From here every command rejects
+ * the way the real core does once the DS has said `device_revoked`, except the
+ * ones that still work on a removed device: signing out and the local account
+ * index the sign-in screen reads.
+ */
+const WORKS_WHEN_REVOKED = new Set(['logout', 'list_known_accounts', 'wipe_local_data']);
+(window as any).__tauriRevokeDevice = () => {
+  store.deviceRevoked = true;
+};
 
 /**
  * Per-command invoke tally (#874).
@@ -1831,6 +1848,8 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
 
     case 'logout':
       store.session = null;
+      store.deviceRevoked = false;
+      store.lastLogoutDeleteData = (args.deleteData as boolean | undefined) ?? null;
       return null;
 
     case 'request_otp':
@@ -1901,6 +1920,9 @@ export function invoke<T>(command: string, args?: Record<string, unknown>): Prom
   // is long enough for a test to look at the result and find nothing there.
   invokeCounts[command] = (invokeCounts[command] ?? 0) + 1;
   lastInvokeArgs[command] = args ?? {};
+  if (store.deviceRevoked && !WORKS_WHEN_REVOKED.has(command)) {
+    return Promise.reject('device_revoked');
+  }
   return new Promise((resolve, reject) => {
     let settle: () => void;
     try {

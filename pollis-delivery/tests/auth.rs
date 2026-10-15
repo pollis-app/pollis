@@ -325,6 +325,94 @@ async fn revoked_device_is_rejected_401() {
     assert_eq!(status_of(router, req).await, StatusCode::UNAUTHORIZED);
 }
 
+/// Status, `error` field and the auth-error header of a response.
+async fn rejection_of(router: axum::Router, req: Request<Body>) -> (StatusCode, String, Option<String>) {
+    let resp = router.oneshot(req).await.unwrap();
+    let status = resp.status();
+    let header = resp
+        .headers()
+        .get("x-pollis-auth-error")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
+    (status, json["error"].as_str().unwrap_or_default().to_string(), header)
+}
+
+/// #1338: a revoked device that signs with its OWN key is told it was revoked,
+/// so it can sign itself out instead of retrying forever.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_revoked_device_signing_with_its_own_key_is_told_it_was_revoked() {
+    let db = fresh_db().await;
+    let sk = gen_signing_key();
+    seed_revoked_device(&db, "alice", "dev-alice", &sk.verifying_key()).await;
+
+    let router = build_router_with_state(AppState::new(Arc::clone(&db), true));
+    let body = submit_body_json("conv1", 0, "alice");
+    let req = signed_request("alice", "dev-alice", now(), &sk, &body, None);
+
+    let (status, error, header) = rejection_of(router, req).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(error, "device_revoked");
+    assert_eq!(header.as_deref(), Some("device_revoked"));
+}
+
+/// #1338: the distinct answer needs the revoked device's own signature. A
+/// forged or tampered signature naming a revoked device, a key that is not the
+/// device's, and an unknown device all get the bare `unauthorized`, so nobody
+/// can learn a device's revocation without holding its key.
+#[tokio::test(flavor = "multi_thread")]
+async fn only_the_revoked_devices_own_signature_learns_it_was_revoked() {
+    let db = fresh_db().await;
+    let sk = gen_signing_key();
+    let other = gen_signing_key();
+    seed_revoked_device(&db, "alice", "dev-alice", &sk.verifying_key()).await;
+    let body = submit_body_json("conv1", 0, "alice");
+
+    let bad_sig = b64(&[0u8; pollis_device_cert::MLDSA44_SIG_LEN]);
+    let cases = [
+        ("a zeroed signature", signed_request("alice", "dev-alice", now(), &sk, &body, Some(&bad_sig))),
+        ("another key", signed_request("alice", "dev-alice", now(), &other, &body, None)),
+        ("an unknown device", signed_request("alice", "dev-ghost", now(), &sk, &body, None)),
+        ("a stale timestamp", signed_request("alice", "dev-alice", now() - 600, &sk, &body, None)),
+    ];
+    for (label, req) in cases {
+        let router = build_router_with_state(AppState::new(Arc::clone(&db), true));
+        let (status, error, header) = rejection_of(router, req).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{label}");
+        assert_eq!(error, "unauthorized", "{label}");
+        assert_eq!(header, None, "{label}");
+    }
+}
+
+/// #1338 through the real revoke endpoint: a device that was live a moment ago,
+/// then revoked by a sibling, gets `device_revoked` on its next call even though
+/// its key had been cached.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_revoked_by_its_sibling_is_told_on_its_next_call() {
+    let db = fresh_db().await;
+    let sk_mac = gen_signing_key();
+    let sk_phone = gen_signing_key();
+    seed_device(&db, "alice", "dev-mac", &sk_mac.verifying_key()).await;
+    seed_device(&db, "alice", "dev-phone", &sk_phone.verifying_key()).await;
+    seed_group_membership(&db, "conv1", "alice").await;
+
+    let state = AppState::new(Arc::clone(&db), true);
+    let body = submit_body_json("conv1", 0, "alice");
+    let warm = signed_request("alice", "dev-mac", now(), &sk_mac, &body, None);
+    assert_eq!(status_of(build_router_with_state(state.clone()), warm).await, StatusCode::OK);
+
+    let revoke = serde_json::to_vec(&serde_json::json!({ "device_id": "dev-mac" })).unwrap();
+    let req = signed_post("/v1/devices/revoke", "alice", "dev-phone", now(), &sk_phone, &revoke);
+    assert_eq!(status_of(build_router_with_state(state.clone()), req).await, StatusCode::OK);
+
+    let body = submit_body_json("conv1", 1, "alice");
+    let req = signed_request("alice", "dev-mac", now(), &sk_mac, &body, None);
+    let (status, error, _) = rejection_of(build_router_with_state(state), req).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(error, "device_revoked");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn missing_headers_are_rejected_401() {
     let db = fresh_db().await;

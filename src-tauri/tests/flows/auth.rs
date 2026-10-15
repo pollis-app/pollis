@@ -1,4 +1,4 @@
-use crate::harness::{wipe, world, TestClient, TEST_PIN};
+use crate::harness::{expire_ds_device_keys, wipe, world, TestClient, TEST_PIN};
 use pollis_lib::test_harness::invoke;
 use serde_json::json;
 use serial_test::serial;
@@ -448,6 +448,89 @@ async fn revoked_device_reports_itself_unregistered() {
         "a REVOKED device must report itself unregistered so the device_revoked \
          nudge signs it out — revocation is a tombstone, not a row delete, so a \
          bare existence check can never fail (#685)"
+    );
+
+    drop(alice);
+}
+
+/// **A revoked device that missed the nudge still signs itself out (#1338).**
+///
+/// Revocation used to reach a device only through the live `device_revoked`
+/// inbox nudge. A device asleep at the time missed it, and from then on every
+/// signed call — including the `is_current_device_registered` check the nudge
+/// handler runs — came back a bare 401: an error, read as "transient", so the
+/// device sat signed in on empty screens forever.
+///
+/// Now the DS answers that device's own signature with `device_revoked`. This
+/// asserts the whole client side: an ordinary command fails with exactly that,
+/// the registration check answers `false` instead of erroring, later calls fail
+/// the same way without reaching the DS, and a plain (keep-data) sign-out still
+/// wipes the device's id and keys, so the next sign-in is a new device rather
+/// than the revoked one again.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_revoked_device_that_missed_the_nudge_is_told_and_wiped() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let profile = alice.sign_up("alice@test.local").await;
+    let user_id = profile.id.clone();
+    alice.create_group("Before revocation").await;
+
+    let groups = || async {
+        invoke::<serde_json::Value>(&alice.webview, "list_user_groups", json!({ "userId": user_id }))
+            .await
+    };
+    groups().await.expect("control: a live device lists its groups");
+
+    // Revoked while it was not listening: tombstone the row as
+    // `POST /v1/devices/revoke` does, and drop the DS's cached key as that
+    // endpoint's eviction does. No nudge is delivered.
+    let w = world().await;
+    let conn = w.remote.conn().await.expect("remote conn");
+    conn.execute(
+        "UPDATE user_device SET revoked_at = datetime('now') WHERE user_id = ?1",
+        libsql::params![user_id.clone()],
+    )
+    .await
+    .expect("tombstone the device");
+    expire_ds_device_keys(&user_id);
+
+    let err = groups().await.expect_err("a revoked device's signed call must fail");
+    assert!(err.contains("device_revoked"), "the failure must say why: {err}");
+    assert!(
+        alice.state.device_revoked.load(std::sync::atomic::Ordering::Relaxed),
+        "the client must remember that it was revoked"
+    );
+
+    let registered = invoke::<bool>(
+        &alice.webview,
+        "is_current_device_registered",
+        json!({ "userId": user_id }),
+    )
+    .await
+    .expect("the registration check must answer, not error, for a revoked device");
+    assert!(!registered, "a revoked device must report itself unregistered");
+
+    let err = groups().await.expect_err("still revoked");
+    assert!(err.contains("device_revoked"), "{err}");
+
+    // The UI's ordinary sign-out (keep data) — the revoked device is wiped anyway.
+    invoke::<()>(&alice.webview, "logout", json!({ "deleteData": false }))
+        .await
+        .expect("logout");
+    let ks = alice.state.keystore.as_ref();
+    assert!(
+        ks.load_for_user("device_id", &user_id).await.unwrap().is_none(),
+        "the revoked device id must be forgotten, or the next sign-in is the same revoked device"
+    );
+    assert!(
+        ks.load_for_user("account_id_key_wrapped", &user_id).await.unwrap().is_none(),
+        "a device the account removed must not keep the account's keys"
+    );
+    assert!(
+        !alice.state.device_revoked.load(std::sync::atomic::Ordering::Relaxed),
+        "the next sign-in is a new device and must be allowed to reach the DS"
     );
 
     drop(alice);

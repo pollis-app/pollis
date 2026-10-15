@@ -1286,6 +1286,12 @@ async fn register_device(state: &Arc<AppState>, user_id: &str) -> Result<String>
 
 /// Clear the persisted session (logout). Optionally wipe the per-user DB and identity keys.
 pub async fn logout(state: &Arc<AppState>, delete_data: bool) -> Result<()> {
+    // A revoked device is wiped whatever the caller asked for (#1338): keeping
+    // its device id would sign the next login in as the same revoked device,
+    // and keeping its account keys on a device the account removed is the one
+    // thing revocation exists to stop.
+    let revoked = state.device_revoked.load(std::sync::atomic::Ordering::Relaxed);
+    let delete_data = delete_data || revoked;
     // If the index is corrupt we still want the user to be able to log out.
     // `accounts.json` has already been renamed to `.bad-<ts>.json` by the
     // read path, so a default (empty) index is the honest state of the world.
@@ -1368,6 +1374,12 @@ pub async fn logout(state: &Arc<AppState>, delete_data: bool) -> Result<()> {
         }
     } else {
         let _ = crate::accounts::clear_last_active_user();
+    }
+
+    // The revoked device is gone from this process; whoever signs in next is a
+    // new device and must be allowed to talk to the DS.
+    if revoked {
+        state.device_revoked.store(false, std::sync::atomic::Ordering::Relaxed);
     }
 
     Ok(())
@@ -1748,13 +1760,20 @@ pub async fn is_current_device_registered(
     // `include_revoked: false` IS the `revoked_at IS NULL` predicate, now
     // applied server-side (#987) — see the note above for why it is load-bearing.
     // Asking for one id keeps this a point lookup rather than a device-list scan.
-    let rows = crate::commands::ds_reads::devices(
+    // A revoked device's own signed read is refused as `device_revoked` — which
+    // is exactly the answer this asks for, not a transient error (#1338).
+    let rows = match crate::commands::ds_reads::devices(
         state,
         Some(&user_id),
         vec![device_id.clone()],
         false,
     )
-    .await?;
+    .await
+    {
+        Ok(rows) => rows,
+        Err(crate::error::Error::DeviceRevoked) => return Ok(false),
+        Err(e) => return Err(e),
+    };
     Ok(rows.iter().any(|d| d.device_id == device_id))
 }
 

@@ -25,7 +25,6 @@ import { useObserver } from "mobx-react-lite";
 import { useQueryClient } from "@tanstack/react-query";
 import { appStore } from "../stores/appStore";
 import { invoke } from "../lib/native";
-import { endSession } from "../lib/session";
 import { subscribeRealtime, type RealtimeSubscription } from "../lib/realtime/client";
 import type { RealtimeEvent } from "../lib/realtime/events";
 import {
@@ -42,6 +41,7 @@ import {
   messageQueryKeys,
   useIngestConversation,
 } from "./queries/useMessages";
+import { deviceWasRevoked } from "../lib/deviceRevoked";
 
 export function useInboxRealtime() {
   const userId = useObserver(() => appStore.currentUser?.id ?? null);
@@ -195,11 +195,9 @@ export function useInboxRealtime() {
                 return;
               }
               console.warn("[realtime] this device was revoked — signing out");
-              return invoke("logout", { deleteData: false })
-                .catch((e) => console.warn("[realtime] logout failed:", e))
-                // Also routes to sign-in: without that the user is stranded
-                // on a dead signed-in screen (every command now fails).
-                .then(() => endSession());
+              // The same sign-out as a command refused with `device_revoked`
+              // (#1338): wipes the device, routes to sign-in, says why.
+              deviceWasRevoked();
             })
             .catch((e) => {
               console.warn("[realtime] device_revoked check failed (ignored):", e);

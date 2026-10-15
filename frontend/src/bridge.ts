@@ -35,6 +35,9 @@ export {
   invoke,
   Channel,
   listen,
+  onDeviceRevoked,
+  isDeviceRevokedError,
+  deviceWasRevoked,
   type InvokeArgs,
   type InvokeOptions,
 } from "./bridge/invoke";

@@ -1,0 +1,23 @@
+appId: com.pollis.mobile
+tags:
+  - two-client
+---
+# DEVICE REVOKED (#1338), part 2 of 2. The peer revoked this device while the
+# app was closed, so no live nudge reached it. Reopen and unlock: the first
+# signed call is refused as `device_revoked`, and the app must land on sign-in
+# saying why — not sit on empty tabs as the 2026-10-15 Mac did.
+
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-pin"
+    timeout: 20000
+- runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "text-session-notice"
+    timeout: 60000
+- assertVisible:
+    id: "screen-auth-email"
+- assertVisible: ".*removed from your account.*"
+- takeScreenshot: device-revoked-02-signed-out

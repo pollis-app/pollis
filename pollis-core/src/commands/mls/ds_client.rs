@@ -105,6 +105,13 @@ async fn ds_post_bytes(
     path: &str,
     body_bytes: Vec<u8>,
 ) -> Result<reqwest::Response> {
+    // A device the DS has already called revoked cannot sign anything that will
+    // be accepted; fail here instead of putting every caller's request on the
+    // wire to be refused again (#1338).
+    if state.device_revoked.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err(Error::DeviceRevoked);
+    }
+
     // Resolved before the identity lookups below so a missing URL still reports
     // as "not configured" rather than "not signed in".
     let base = delivery_base(state)?;
@@ -162,7 +169,25 @@ async fn ds_post_bytes(
     let resp = send_ds(path, request)
         .await
         .map_err(|e| Error::Other(anyhow::anyhow!("ds_post {path}: {e}")))?;
+    if is_device_revoked_response(&resp) {
+        if !state.device_revoked.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            crate::diag!("[ds] {path}: this device was revoked from the account; signing out");
+        }
+        return Err(Error::DeviceRevoked);
+    }
     Ok(resp)
+}
+
+/// The DS's answer to a request signed by a revoked device (#1338): 401 plus
+/// `x-pollis-auth-error: device_revoked`. Read from the header so the body is
+/// left for callers that map their own statuses.
+fn is_device_revoked_response(resp: &reqwest::Response) -> bool {
+    resp.status() == reqwest::StatusCode::UNAUTHORIZED
+        && resp
+            .headers()
+            .get("x-pollis-auth-error")
+            .and_then(|v| v.to_str().ok())
+            == Some("device_revoked")
 }
 
 /// Claim one of `target_user_id`'s (optionally a specific device's) unclaimed

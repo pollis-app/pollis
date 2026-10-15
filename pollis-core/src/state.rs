@@ -76,6 +76,10 @@ pub struct AppState {
     #[cfg(feature = "media")]
     pub camera: Arc<Mutex<CameraState>>,
     pub update_required: Arc<AtomicBool>,
+    /// Set when the DS answers `device_revoked` (#1338): this device has been
+    /// removed from the account, so every signed call short-circuits and the
+    /// next `logout` wipes the device's keys and id. Cleared by that logout.
+    pub device_revoked: Arc<AtomicBool>,
     /// Per-device ULID, set during login. Each physical device gets a stable ID
     /// stored in the OS keystore so it survives local DB wipes.
     pub device_id: Arc<Mutex<Option<String>>>,
@@ -226,6 +230,7 @@ impl AppState {
             #[cfg(feature = "media")]
             camera: Arc::new(Mutex::new(CameraState::new())),
             update_required: Arc::new(AtomicBool::new(false)),
+            device_revoked: Arc::new(AtomicBool::new(false)),
             device_id: Arc::new(Mutex::new(None)),
             enrollment_ephemeral_keys: Arc::new(Mutex::new(HashMap::new())),
             device_link_tokens: Arc::new(Mutex::new(HashMap::new())),

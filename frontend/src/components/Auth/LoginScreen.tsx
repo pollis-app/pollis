@@ -12,12 +12,15 @@ interface LoginScreenProps {
   knownAccounts: AccountInfo[];
   onAuthSuccess: (result: api.AuthResult) => void | Promise<void>;
   onWipeComplete: () => void;
+  /** Why the previous session ended, when it was not the user's choice (#1338). */
+  notice?: string | null;
 }
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({
   knownAccounts,
   onAuthSuccess,
   onWipeComplete,
+  notice,
 }) => {
   const { t } = useTranslation("auth");
   const [view, setView] = useState<"login" | "wipe">("login");
@@ -40,6 +43,16 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
       <div className="flex-1 flex justify-center overflow-y-auto" style={{ position: "relative", zIndex: 1 }}>
         <Card padding="lg" className="my-auto" style={{ width: "100%", maxWidth: 360 }}>
+          {notice ? (
+            <p
+              data-testid="auth-session-notice"
+              role="status"
+              className="text-xs font-mono text-fg mb-4"
+              style={{ lineHeight: 1.5 }}
+            >
+              {notice}
+            </p>
+          ) : null}
           {view === "wipe" ? (
             <div data-testid="wipe-confirm-section" className="flex flex-col gap-5">
               <div>

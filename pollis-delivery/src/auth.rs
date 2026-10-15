@@ -562,6 +562,59 @@ async fn lookup_device_pubkey(
     Ok(Some(VerifyingKey::decode(encoded)))
 }
 
+/// The public key of a REVOKED device, if `device_id` is one on `user_id`'s
+/// account (#1338). Read only after [`lookup_device_pubkey`] refused, so the
+/// live path pays nothing for it.
+async fn revoked_device_pubkey(
+    conn: &Connection,
+    user_id: &str,
+    device_id: &str,
+) -> anyhow::Result<Option<VerifyingKey>> {
+    let mut rows = conn
+        .query(
+            "SELECT mls_signature_pub_pq FROM user_device \
+             WHERE device_id = ?1 AND user_id = ?2 AND revoked_at IS NOT NULL",
+            libsql::params![device_id, user_id],
+        )
+        .await?;
+    let Some(row) = rows.next().await? else {
+        return Ok(None);
+    };
+    let pub_bytes: Option<Vec<u8>> = row.get::<Option<Vec<u8>>>(0).ok().flatten();
+    let Some(pub_bytes) = pub_bytes else {
+        return Ok(None);
+    };
+    let encoded: &EncodedVerifyingKey<MlDsa44> = match pub_bytes.as_slice().try_into() {
+        Ok(e) => e,
+        Err(_) => return Ok(None),
+    };
+    Ok(Some(VerifyingKey::decode(encoded)))
+}
+
+/// Why a device the live lookup refused was refused: [`AuthRejection::DeviceRevoked`]
+/// when the device is revoked AND this request's signature verifies against its
+/// key, the bare [`AuthRejection::Unauthorized`] for everything else (unknown
+/// device, bad signature, suspended account, DB error).
+async fn refusal_for(
+    conn: &Connection,
+    creds: &Credentials,
+    method: &str,
+    path: &str,
+    body: &[u8],
+) -> AuthRejection {
+    match revoked_device_pubkey(conn, &creds.user_id, &creds.device_id).await {
+        Ok(Some(vk)) => {
+            let message = canonical_message(method, path, creds.timestamp, body);
+            if vk.verify(&message, &creds.signature).is_ok() {
+                AuthRejection::DeviceRevoked
+            } else {
+                AuthRejection::Unauthorized
+            }
+        }
+        _ => AuthRejection::Unauthorized,
+    }
+}
+
 /// Full verification of a write request.
 ///
 /// On success returns the authenticated `user_id` so the caller can bind it to
@@ -666,7 +719,10 @@ async fn verify_request_inner(
                     Ok(Some(vk)) => Arc::new(vk),
                     // Unknown / revoked device, or a DB error: never fail open,
                     // and never cache the negative (see `DeviceKeyCache` docs).
-                    Ok(None) | Err(_) => return Err(AuthRejection::Unauthorized),
+                    Ok(None) => {
+                        return Err(refusal_for(conn, &creds, method, path, body).await);
+                    }
+                    Err(_) => return Err(AuthRejection::Unauthorized),
                 };
                 // Test seam (#721): with a barrier installed, park here — after
                 // the read, before the insert — so a test can commit a revoke into
@@ -683,7 +739,8 @@ async fn verify_request_inner(
         // the DB.
         None => match lookup_device_pubkey(conn, &creds.user_id, &creds.device_id).await {
             Ok(Some(vk)) => Arc::new(vk),
-            Ok(None) | Err(_) => return Err(AuthRejection::Unauthorized),
+            Ok(None) => return Err(refusal_for(conn, &creds, method, path, body).await),
+            Err(_) => return Err(AuthRejection::Unauthorized),
         },
     };
 
