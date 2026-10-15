@@ -304,6 +304,10 @@ libc = "0.2"
 # Version 3.x is already in the workspace lock via desktop transitives.
 [target.'cfg(target_os = "ios")'.dependencies]
 security-framework = "3"
+# Marks the data directory excluded from backup (#1306, `ios_storage`). Both
+# are already in the lock via security-framework 3.
+core-foundation = "0.10"
+core-foundation-sys = { version = "0.8", features = ["mac_os_10_8_features"] }
 
 # Android-only: JNI to the Android Keystore so the file-backed keystore's bytes
 # are encrypted at rest under a hardware-backed AES key (issue #185 Section A).

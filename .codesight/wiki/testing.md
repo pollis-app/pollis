@@ -284,7 +284,7 @@ Test rigs need to point that somewhere disposable, and a multi-device rig needs 
 - `setenv` mutates a process-global array that any other thread's `getenv` may be reading at that instant. That is a data race — the reason Rust 2024 made `set_var` `unsafe` — and these rigs always have other threads live (the in-process DS, background sync loops, `spawn_blocking` keystore work). It fails rarely, under load, with nothing broken (#923).
 - `set_data_dir` is a locked write behind an `RwLock`, so a reader always sees one whole path.
 
-`POLLIS_DATA_DIR` still works and is still what a second dev instance and the mobile bridge use; the override just takes precedence. Production never sets it.
+`POLLIS_DATA_DIR` still works and is still what a second dev instance and the Android bridge use; the override just takes precedence. Production never sets it. iOS sets neither: `dirs_path()` resolves to `Library/Application Support/pollis` in the app container (`ios_storage`), which `init_pollis` creates and excludes from backup. Never the sandbox `tmp/`, which iOS may purge (#1306).
 
 ## Writing a scenario
 
