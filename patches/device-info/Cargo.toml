@@ -1,0 +1,19 @@
+# Stand-in for crates.io `device-info` 0.1.1 (#1320), swapped in by the
+# `[patch.crates-io]` entry in the workspace Cargo.toml. Read src/lib.rs for why.
+#
+# The name and version must match the registry crate exactly, or the patch stops
+# applying and cargo silently goes back to the real one (the pollis-core test
+# `livekit_join_sends_no_device_model` is what notices).
+[package]
+name = "device-info"
+version = "0.1.1"
+edition = "2021"
+description = "Pollis stand-in for LiveKit's device-info: reports no device model, so none reaches the SFU (#1320)"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+thiserror = "2"
+
+[lints]
+workspace = true

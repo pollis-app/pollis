@@ -1960,16 +1960,8 @@ dependencies = [
 [[package]]
 name = "device-info"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2ca8e71544c1b67dcdbc2699ab258828aff985e5bc8d5f6b486d90d7df2f848"
 dependencies = [
- "core-foundation 0.10.1",
- "jni",
- "libc",
  "thiserror 2.0.18",
- "wasm-bindgen",
- "web-sys",
- "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6477,6 +6469,7 @@ dependencies = [
  "libc",
  "libwebrtc",
  "livekit",
+ "livekit-protocol",
  "ml-dsa",
  "nix 0.30.1",
  "nnnoiseless",
@@ -6490,6 +6483,7 @@ dependencies = [
  "pollis-relay",
  "pollis-schema",
  "pollis-sqlcipher",
+ "prost 0.14.4",
  "quinn",
  "rand 0.8.6",
  "rand_core 0.6.4",
@@ -6507,6 +6501,7 @@ dependencies = [
  "tokio-rustls",
  "ulid",
  "uniffi",
+ "url",
  "verifiable-log-serve",
  "webrtc-audio-processing",
  "windows 0.62.2",
