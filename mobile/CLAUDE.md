@@ -1108,8 +1108,15 @@ Current state:
   `flush_outbox` on sign-in, on resume and on a LiveKit `Reconnected` — never
   on a timer. A failed send is a stored `failed` row: `MessageRow` shows
   Retry / Discard (`components/chat/UnsentActions.tsx`, `btn-retry-message-<id>`
-  / `btn-discard-message-<id>`; `useRetryMessage` / `useDiscardUnsent`). A send
-  whose attachment upload failed never reached the core: Discard only. Pure
+  / `btn-discard-message-<id>`; `useRetryMessage` / `useDiscardUnsent`); a
+  `rejected` row (no retry can fix it, so the drain stops trying) looks the
+  same. Attachments are not uploaded by the hook any more: `send_message` gets
+  the caption plus `attachments` (`lib/attachments.ts` →
+  `outgoingAttachments`, picker paths), the core copies the files into its
+  encrypted local DB with the row, and the outbox uploads them — so a kill
+  mid-upload loses nothing; until then the row's attachments have no key and
+  `components/Media.tsx` draws them pending. Discard of a row that was ever
+  sealed first withdraws it from everyone. Pure
   rules + tests: `pendingMessages.ts`, `tests/pending-messages.test.ts`;
   device tier: `.maestro/flows/outbox.yaml`. A core change, so phones get it
   with the next store build.

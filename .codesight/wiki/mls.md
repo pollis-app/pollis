@@ -712,14 +712,54 @@ Now `send_message` writes the local `message` row first, `send_state =
 (`new_message_id`), and only then delivers (`messages/outbox.rs` →
 `send::deliver_queued`). The row IS the outbox, so every read path — pages,
 previews, threads, search — shows the message across restarts with no second
-copy to keep in step. A confirmed DS post clears the state; any failed attempt
-sets `'failed'` (the renderers show Retry / Discard). An unsent row cannot be
-edited (there is no envelope to target); deleting it discards it locally.
+copy to keep in step. A confirmed DS post clears the state. A failed attempt
+sets `'failed'` when a later one may succeed (offline, 5xx, 429, an outdated
+client) and `'rejected'` when none can (`outbox::is_permanent`: the resolve says
+the sender is not a member, or a DS 400/403/404/410/422 — typed as
+`ds_client::DsRefused`, whose text is unchanged). The renderers show both alike
+with Retry / Discard. An unsent row cannot be edited (there is no envelope to
+target).
 
-**Drained, event-driven.** `unlock` (every cold start) spawns `flush_outbox`;
-the renderers call it after launch, on a realtime reconnect, on the browser
-`online` event (desktop) and on resume (mobile). It delivers oldest first. No
-timer.
+The row's `sent_at` is stamped once, at enqueue, and every attempt posts THAT
+stamp — a re-seal does not move it — so after a crash-after-post, whose retry
+the DS answers as a replay of the first post, the sender's copy sits where every
+recipient's does.
+
+**Attachments are the outbox's too.** The row is on screen from the moment the
+user sends, uploads included, so the upload is as durable as the send: the
+renderers pass `send_message` the caption plus `attachments` (a picked file's
+path — scope-checked by the Tauri shim like `upload_media`, `file://` stripped
+on mobile — or a desktop paste's staged id), and the core reads the bytes into
+`outbox_attachment` in the same transaction as the row, before any network
+work, releasing the staged copy. The bytes are plaintext only inside the
+SQLCipher database, under the session's `db_key` — never a file (#1000). Until
+they are uploaded the row holds a provisional `_att` envelope with no `key`,
+which both renderers draw as pending. Delivery (`outbox::finish_uploads`)
+uploads them (convergent, so a repeat after a kill dedupes), swaps in the
+finished envelope — byte for byte the renderers' encoding — and drops the bytes
+in one transaction, then posts. Sign-out drops any unsent message still holding
+bytes (they are the user's files and end with the session, like a staged paste);
+unsent text stays queued. A kill during the upload loses nothing.
+
+**Discard withdraws what may have left.** A row the seal never touched (empty
+ciphertext) never left this device and is simply deleted. One that WAS sealed may
+have landed — a crash after the post, then an attempt that failed for another
+reason — so Discard first withdraws it the way a self-delete does
+(`edit_delete::retract_for_everyone`: redaction for anyone who fetched it, then
+the envelope removal, a no-op when nothing landed) and refuses if that fails,
+so it never leaves recipients a copy the sender can no longer delete. Deleting an
+unsent row routes here. A redaction or admin tombstone that reaches an unsent
+row (`outbox::SOFT_DELETE_SQL`) also settles it: a delete targets only an envelope
+that exists, and leaving the state set would trip the CHECK and hold the ingest
+cursor.
+
+**Drained, event-driven, single-flight.** `unlock` (every cold start) spawns
+`flush_outbox`; the renderers call it after launch, on a realtime reconnect, on
+the browser `online` event (desktop) and on resume (mobile). Those triggers
+often coincide, so a drain that arrives while one runs (`AppState::outbox_drain`)
+waits for it and shares its report rather than re-attempting every message the
+first just failed. It delivers `pending` and `failed` rows oldest first and
+leaves `rejected` ones to the user. No timer.
 
 **Idempotent.** A retry reuses the message id — the envelope id. One attempt
 per message runs at a time (`AppState::outbox_locks`), and an attempt re-reads
@@ -727,15 +767,26 @@ the row once it holds the lock, so a drain behind an in-flight send finds it
 settled. If an earlier attempt's envelope DID land (the process died before
 recording it), the DS answers the re-post as a replay —
 `pollis_delivery::messages::send_envelope_once`: 200, nothing stored, no second
-push, checked before the epoch gate so its clean-up can never delete the
-delivered row. Before this the re-post hit the `message_envelope.id` primary key
-(a 500) and would have marked a delivered message failed forever. A recipient
-that somehow fetches the id twice keeps its one row (`loss::has_real_row`).
+push. Before this the re-post hit the `message_envelope.id` primary key (a 500)
+and would have marked a delivered message failed forever. The replay is:
 
-**Not covered:** the attachment UPLOAD before `send_message` — desktop's
-in-memory staged bytes cannot outlive the process by design (#1000, no
-plaintext temp files). A failed upload is labelled with Discard only (nothing
-was stored to retry); a kill during the upload loses that send, as before.
+- **author-bound** — answered only when the stored row is a `message` in the
+  same conversation whose `delete_token_hash` equals the body's (an HMAC of the
+  id under a key only the author's devices hold, identical on every retry).
+  Anything else gets `Forbidden`, the same answer a non-member gets, so it
+  reveals neither that the id exists nor where. Because the hash proves
+  authorship, a replay does not consult CURRENT membership: a sender removed
+  after a delivered-but-unrecorded post was a member when it landed, and the
+  retry settles instead of failing forever;
+- **serialized per id** — every post of an id holds that id's lock across the
+  replay check and the whole insert-then-verify epoch gate, so a retry can never
+  call "replay" on a first post's row that its own post-check is about to delete
+  (the DS is a single instance, so a process-local lock covers every post);
+- **checked before the epoch gate** — a replay sealed at an old epoch is still a
+  replay, and the gate's clean-up deletes by id.
+
+A recipient that somehow fetches the id twice keeps its one row
+(`loss::has_real_row`).
 
 **Receive** (`get_channel_messages` / `get_dm_messages`):
 1. Poll welcomes
