@@ -164,6 +164,80 @@ pub async fn send_text(
     send_message(conv_id, user_id, text, None, None, username, state).await
 }
 
+/// Send `text` into `conv_id` as a quote reply to `reply_to_id` and/or into
+/// the thread rooted at `thread_id` (#1337) — the same `send_message` the
+/// desktop composer calls, with the two optional fields it sets for a reply
+/// and a thread reply.
+pub async fn send_text_with(
+    state: &Arc<AppState>,
+    user_id: &str,
+    username: Option<String>,
+    conv_id: &str,
+    text: &str,
+    reply_to_id: Option<String>,
+    thread_id: Option<String>,
+) -> Result<Message> {
+    send_message(conv_id, user_id, text, reply_to_id, thread_id, username, state).await
+}
+
+/// Edit the user's own message (core `edit_message`: re-encrypts and publishes
+/// an edit envelope; the local copy updates immediately).
+pub async fn edit(
+    state: &Arc<AppState>,
+    conv_id: &str,
+    message_id: &str,
+    user_id: &str,
+    new_content: &str,
+) -> Result<()> {
+    messages::edit_message(
+        conv_id.to_string(),
+        message_id.to_string(),
+        user_id.to_string(),
+        new_content.to_string(),
+        state,
+    )
+    .await?;
+    Ok(())
+}
+
+/// Delete a message (core `delete_message`; the core decides self-delete vs
+/// admin-delete from the local author and refuses what the user may not do).
+pub async fn delete(state: &Arc<AppState>, message_id: &str, user_id: &str) -> Result<()> {
+    messages::delete_message(message_id.to_string(), user_id.to_string(), state).await?;
+    Ok(())
+}
+
+/// Toggle `emoji` on a message the way desktop's reaction pill does: remove it
+/// when the user already reacted with it (`already_mine`), add it otherwise.
+/// Returns whether the reaction is now present.
+pub async fn toggle_reaction(
+    state: &Arc<AppState>,
+    message_id: &str,
+    user_id: &str,
+    emoji: &str,
+    already_mine: bool,
+) -> Result<bool> {
+    if already_mine {
+        messages::remove_reaction(
+            message_id.to_string(),
+            user_id.to_string(),
+            emoji.to_string(),
+            state,
+        )
+        .await?;
+        Ok(false)
+    } else {
+        messages::add_reaction(
+            message_id.to_string(),
+            user_id.to_string(),
+            emoji.to_string(),
+            state,
+        )
+        .await?;
+        Ok(true)
+    }
+}
+
 /// Create a group named `name` owned by `user_id`, with the default text
 /// channel **on** and no voice channel — the sensible default for a text TUI.
 pub async fn new_group(state: &Arc<AppState>, user_id: &str, name: &str) -> Result<Group> {

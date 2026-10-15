@@ -120,6 +120,16 @@ jobs:
           echo "LIVEKIT_URL=${{ secrets.LIVEKIT_URL }}" >> $GITHUB_ENV
           echo "POLLIS_DELIVERY_URL=${{ secrets.POLLIS_DELIVERY_URL }}" >> $GITHUB_ENV
 
+      # #1337: `pollis --version` prints CARGO_PKG_VERSION, and the committed
+      # workspace version is a placeholder, so stamp the resolved release
+      # version in before building — the same script desktop-release.yml uses.
+      # Through env:, never interpolated into the script.
+      - name: Stamp version
+        shell: bash
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: ./scripts/bump-version.sh "$VERSION"
+
       - name: Build CLI (Linux)
         run: cargo build -p pollis-tui --release
 
@@ -170,8 +180,51 @@ jobs:
           echo "LIVEKIT_URL=${{ secrets.LIVEKIT_URL }}" >> $GITHUB_ENV
           echo "POLLIS_DELIVERY_URL=${{ secrets.POLLIS_DELIVERY_URL }}" >> $GITHUB_ENV
 
+      # #1337: `pollis --version` prints CARGO_PKG_VERSION, and the committed
+      # workspace version is a placeholder, so stamp the resolved release
+      # version in before building — the same script desktop-release.yml uses.
+      # Through env:, never interpolated into the script.
+      - name: Stamp version
+        shell: bash
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: ./scripts/bump-version.sh "$VERSION"
+
+      # #1337: the macOS CLI ships Developer ID signed and notarized, with the
+      # same Apple secrets desktop-release.yml signs the .app with. Fail on an
+      # empty secret BEFORE the build, exactly as the desktop job does — an empty
+      # APPLE_SIGNING_IDENTITY must never turn into a quietly ad-hoc binary.
+      - name: Preflight macOS signing secrets
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          scripts/verify-signed-artifact.sh preflight "macOS CLI" \
+            APPLE_SIGNING_IDENTITY APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD \
+            APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
+
       - name: Build CLI (macOS aarch64)
         run: cargo build -p pollis-tui --release --target aarch64-apple-darwin
+
+      # Developer ID sign (hardened runtime, secure timestamp) and notarize,
+      # BEFORE the upload, so provenance-cli attests and cosign-signs the bytes
+      # users get. The secrets are step-scoped — never $GITHUB_ENV — and the
+      # certificate lives in a throwaway keychain the script deletes on exit.
+      # A bare Mach-O cannot be stapled; Gatekeeper fetches the ticket online
+      # (see the script's header).
+      - name: Sign and notarize macOS CLI (Developer ID)
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: scripts/sign-macos-cli.sh target/aarch64-apple-darwin/release/pollis
 
       - name: Upload macOS CLI artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -228,6 +281,16 @@ jobs:
       # failed on `__imp__strdup` / `__imp__stat64i32`. Nothing pulled it until
       # #988, which is why it went unnoticed here too.
 
+      # #1337: `pollis --version` prints CARGO_PKG_VERSION, and the committed
+      # workspace version is a placeholder, so stamp the resolved release
+      # version in before building — the same script desktop-release.yml uses.
+      # Through env:, never interpolated into the script.
+      - name: Stamp version
+        shell: bash
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: ./scripts/bump-version.sh "$VERSION"
+
       - name: Build CLI (Windows)
         run: cargo build -p pollis-tui --release
 
@@ -238,10 +301,11 @@ jobs:
           if-no-files-found: error
           path: target/release/pollis.exe
 
-  # Publish to R2 under a dedicated `cli/` prefix. Mirrors the desktop
-  # release job's aws-s3-to-R2 mechanics (same ENDPOINT, credentials env,
-  # bucket) but never touches releases/install.sh, releases/latest.json, or
-  # the updater manifests.
+  # Upload the binaries to R2 under a dedicated `cli/` prefix. Mirrors the
+  # desktop release job's aws-s3-to-R2 mechanics (same ENDPOINT, credentials
+  # env, bucket) but never touches releases/install.sh, releases/latest.json,
+  # or the updater manifests. The binaries alone are inert: nothing points at
+  # this version until `announce-cli` flips latest.json, after provenance.
   publish-cli:
     needs: [resolve-version, build-cli-linux, build-cli-macos, build-cli-windows]
     runs-on: ubuntu-latest
@@ -266,7 +330,6 @@ jobs:
 
       - name: Upload CLI binaries to R2
         run: |
-          VERSION="${{ needs.resolve-version.outputs.version }}"
           ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
           aws s3 cp artifacts/pollis-cli-linux/pollis   "s3://pollis/releases/cli/${VERSION}/pollis-linux"       --endpoint-url "${ENDPOINT}"
           aws s3 cp artifacts/pollis-cli-macos/pollis   "s3://pollis/releases/cli/${VERSION}/pollis-macos"       --endpoint-url "${ENDPOINT}"
@@ -276,35 +339,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
           AWS_DEFAULT_REGION: auto
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-
-      - name: Publish cli latest.json to R2
-        run: |
-          VERSION="${{ needs.resolve-version.outputs.version }}"
-          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          BASE="https://cdn.pollis.com/releases/cli/${VERSION}"
-          echo "{\"version\":\"${VERSION}\",\"linux\":\"${BASE}/pollis-linux\",\"macos\":\"${BASE}/pollis-macos\",\"windows\":\"${BASE}/pollis-windows.exe\"}" > latest.json
-          aws s3 cp latest.json "s3://pollis/releases/cli/latest.json" \
-            --endpoint-url "${ENDPOINT}" \
-            --content-type "application/json" \
-            --cache-control "no-cache"
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
-          AWS_DEFAULT_REGION: auto
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-
-      - name: Upload cli install script to R2
-        run: |
-          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          aws s3 cp website/cli-install.sh "s3://pollis/releases/cli-install.sh" \
-            --endpoint-url "${ENDPOINT}" \
-            --content-type "text/plain" \
-            --cache-control "no-cache"
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
-          AWS_DEFAULT_REGION: auto
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VERSION: ${{ needs.resolve-version.outputs.version }}
 
   # Keyless build provenance for the CLI (#877).
   #
@@ -322,8 +357,11 @@ jobs:
   # signing identity is this workflow's GitHub Actions OIDC identity, so a
   # binary swapped on the CDN cannot be given a valid signature.
   #
-  # `needs: [publish-cli]`, so the release is already out when this runs: a
-  # failure here delays provenance, it never corrupts a shipped CLI.
+  # `needs: [publish-cli]`: the binaries are on R2 but not yet announced. Since
+  # #1337 cli-install.sh REFUSES a binary it cannot verify, so latest.json and
+  # the installer are published only after this job succeeds (`announce-cli`).
+  # A failure here therefore leaves the previous release as the one installers
+  # get — it never announces a CLI nobody can verify.
   provenance-cli:
     needs: [resolve-version, publish-cli]
     runs-on: ubuntu-latest
@@ -383,9 +421,7 @@ jobs:
       - name: Publish provenance + cosign signatures to R2
         run: |
           set -euo pipefail
-          VERSION="${{ needs.resolve-version.outputs.version }}"
           ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          BUNDLE="${{ steps.attest.outputs.bundle-path }}"
           for f in prov/*; do
             base="$(basename "$f")"
             case "$base" in
@@ -398,6 +434,48 @@ jobs:
             aws s3 cp "prov/${base}.pem" "s3://pollis/releases/cli/${VERSION}/${base}.pem" \
               --endpoint-url "${ENDPOINT}" --content-type "application/x-pem-file"
           done
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
+          AWS_DEFAULT_REGION: auto
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+
+  # Announce the release: point latest.json at it and publish the installer —
+  # LAST, after provenance-cli has put the attestation and the cosign
+  # .sig/.pem in place (#1337). cli-install.sh refuses what it cannot verify,
+  # so announcing first opened a window in which every install was refused,
+  # and a failed provenance job would have left it refused.
+  announce-cli:
+    needs: [resolve-version, provenance-cli]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Publish cli latest.json to R2
+        run: |
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          BASE="https://cdn.pollis.com/releases/cli/${VERSION}"
+          echo "{\"version\":\"${VERSION}\",\"linux\":\"${BASE}/pollis-linux\",\"macos\":\"${BASE}/pollis-macos\",\"windows\":\"${BASE}/pollis-windows.exe\"}" > latest.json
+          aws s3 cp latest.json "s3://pollis/releases/cli/latest.json" \
+            --endpoint-url "${ENDPOINT}" \
+            --content-type "application/json" \
+            --cache-control "no-cache"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
+          AWS_DEFAULT_REGION: auto
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+
+      - name: Upload cli install script to R2
+        run: |
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 cp website/cli-install.sh "s3://pollis/releases/cli-install.sh" \
+            --endpoint-url "${ENDPOINT}" \
+            --content-type "text/plain" \
+            --cache-control "no-cache"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}

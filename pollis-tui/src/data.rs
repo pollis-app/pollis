@@ -13,13 +13,15 @@
 //! (`get_channel_messages` / `get_dm_messages` run ingest before returning),
 //! which is what surfaces a peer's message locally.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
 use pollis_core::commands::dm::{list_dm_channels, list_dm_requests, DmChannel};
 use pollis_core::commands::groups::{list_user_groups_with_channels, GroupWithChannels};
 use pollis_core::commands::messages::{
-    get_channel_messages, get_dm_messages, MessageCursor, MessagePage,
+    get_channel_messages, get_dm_messages, get_reactions_for_messages, list_thread_summaries,
+    read_thread_messages, ChannelMessage, MessageCursor, MessagePage, Reaction,
 };
 use pollis_core::state::AppState;
 
@@ -129,6 +131,35 @@ pub async fn dm_messages(
     )
     .await?;
     Ok(page)
+}
+
+/// Reactions on `message_ids`, in one DS round trip (#1337). Messages with
+/// none are simply absent.
+pub async fn reactions(
+    state: &Arc<AppState>,
+    message_ids: Vec<String>,
+) -> Result<HashMap<String, Vec<Reaction>>> {
+    if message_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    Ok(get_reactions_for_messages(message_ids, state)
+        .await?
+        .into_iter()
+        .collect())
+}
+
+/// Thread root id → reply count for one conversation (local, #825).
+pub async fn thread_counts(state: &Arc<AppState>, conv_id: &str) -> Result<HashMap<String, i64>> {
+    Ok(list_thread_summaries(conv_id.to_string(), state)
+        .await?
+        .into_iter()
+        .map(|t| (t.thread_id, t.reply_count))
+        .collect())
+}
+
+/// One thread's replies, oldest first (local, #825). The root is not included.
+pub async fn thread_replies(state: &Arc<AppState>, root_id: &str) -> Result<Vec<ChannelMessage>> {
+    Ok(read_thread_messages(root_id.to_string(), state).await?)
 }
 
 #[cfg(test)]

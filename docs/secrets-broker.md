@@ -149,7 +149,11 @@ identity key in the payload is stripped and, for the inbox kinds that name their
 actor, the **verified signer** is stamped in as `sender_id` / `sender_username`
 (plus the legacy per-kind keys), so a recipient can never be shown a caller the
 sending client chose. Body `{ room, payload }`. A room with no participants
-(`404`) is success.
+is success: LiveKit's `404`, and its Twirp `503 {"code":"unavailable","msg":"no
+response from servers"}` — what it answers for a room nobody has joined, e.g. a
+DM whose members are all offline or on the media-off CLI (#1337; that exact code +
+message only, `send_data_room_is_empty` in `broker.rs` — any other failure is
+still a `502`).
 
 ### `POST /v1/livekit/participants`
 

@@ -64,6 +64,13 @@ Client side, `dispatch_data` (`pollis-core/src/commands/livekit/mod.rs`) attribu
 these events from the publishing participant when there is one, or from the DS
 stamp when there is none (the DS's own `SendData`), and never from the body's
 own claims; `enrollment_requested` is honoured only with no participant.
+
+An **empty room is success**, not a `502` (#1337): `room_send_data` accepts
+LiveKit's `404` and also the Twirp `503 {"code":"unavailable","msg":"no response
+from servers"}` LiveKit answers for a room no node hosts — every room nobody has
+joined, which is every DM whose members are offline or on the media-off CLI. The
+match (`send_data_room_is_empty`) is that exact code + message only, so a draining
+node or a LiveKit that is really down still surfaces as an error.
 Tests: `pollis-delivery/tests/livekit_send_data.rs` (refusals never reach a
 recording fake LiveKit; allowed sends carry the stamped signer) and the
 `dispatch_data` unit tests in `livekit/mod.rs`.

@@ -25,6 +25,7 @@ on:
       - "website/artifacts.js"
       - "website/transparency.js"
       - "website/install.sh"
+      - "website/cli-install.sh"
       - "website/learn.html"
       - "website/assurance.html"
       - "key-set.json"
@@ -62,6 +63,7 @@ on:
       - "website/artifacts.js"
       - "website/transparency.js"
       - "website/install.sh"
+      - "website/cli-install.sh"
       - "website/learn.html"
       - "website/assurance.html"
       - "key-set.json"
@@ -169,6 +171,12 @@ jobs:
       - name: install.sh log match accepts genuine and refuses forged records
         run: ./scripts/test-install-verify.sh
 
+      # #1337: cli-install.sh refuses a binary it cannot verify. Without cosign
+      # the check is GitHub's attestation store; this runs the real matcher
+      # against genuine, cross-platform, wrong-builder and junk responses.
+      - name: cli-install.sh attestation match accepts genuine and refuses the rest
+        run: ./scripts/test-cli-install-verify.sh
+
       # The e2e commit-log migration applier. Two silent failures shipped in it:
       # a stale migrations path that made it apply ZERO statements and exit 0,
       # and a naive `;` split that shredded every `CREATE TRIGGER` body. Both
@@ -225,4 +233,4 @@ jobs:
       - name: shellcheck (errors only)
         run: |
           set -euo pipefail
-          shellcheck --severity=error $(find scripts -type f -name '*.sh')
+          shellcheck --severity=error $(find scripts -type f -name '*.sh') website/cli-install.sh

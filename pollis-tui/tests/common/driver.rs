@@ -60,10 +60,7 @@ impl Driver {
         pollis_core::db::local::set_data_dir(&data_dir);
 
         let keystore: Arc<dyn Keystore> = Arc::new(InMemoryKeystore::new());
-        let state = Arc::new(AppState::new_with_parts(
-            world.config.clone(),
-            keystore,
-        ));
+        let state = Arc::new(AppState::new_with_parts(world.config.clone(), keystore));
 
         let app = App::with_sync_cadence(state.clone(), TEST_SYNC_CADENCE);
         let terminal = Terminal::new(TestBackend::new(COLS, ROWS)).expect("build TestBackend");
@@ -106,12 +103,12 @@ impl Driver {
 
     // ── Pumping the UI ────────────────────────────────────────────────────────
 
-    /// Mirror `main.rs::draw`: record the message-pane height (so page-scroll keys
+    /// Mirror `main.rs::draw`: record the message-pane size (so page-scroll keys
     /// jump correctly) then render one frame into the TestBackend.
     fn draw(&mut self) {
         let area = self.terminal.get_frame().area();
-        let msg_height = ui::message_viewport_height(area);
-        self.app.set_msg_height(msg_height);
+        let (width, height) = ui::message_viewport(area, &self.app);
+        self.app.set_msg_viewport(width, height);
         let app = &self.app;
         self.terminal
             .draw(|frame| ui::render(frame, app))
@@ -180,6 +177,45 @@ impl Driver {
             out.push_str(cell.symbol());
         }
         out
+    }
+
+    /// The rendered background colour of the first cell of `needle` on screen,
+    /// or `None` when the text is not on screen. For assertions about
+    /// highlighting (a mention, the selected message) that the flattened text
+    /// cannot express.
+    pub fn bg_of(&self, needle: &str) -> Option<ratatui::style::Color> {
+        let buffer = self.terminal.backend().buffer();
+        let width = buffer.area.width as usize;
+        let first = needle.chars().next()?;
+        let rest: Vec<char> = needle.chars().skip(1).collect();
+        for (i, cell) in buffer.content.iter().enumerate() {
+            if !cell.symbol().starts_with(first) {
+                continue;
+            }
+            let row_end = (i / width + 1) * width;
+            let follows = rest.iter().enumerate().all(|(k, c)| {
+                let j = i + 1 + k;
+                j < row_end && buffer.content[j].symbol().starts_with(*c)
+            });
+            if follows {
+                return Some(cell.bg);
+            }
+        }
+        None
+    }
+
+    /// This client's username, as its header shows it.
+    pub fn username(&self) -> String {
+        self.app
+            .identity()
+            .expect("driver not signed in yet")
+            .to_string()
+    }
+
+    /// The live UI state machine, for the rare assertion rendered text cannot
+    /// make (which pane has focus is also visible in the hint bar; prefer that).
+    pub fn app(&self) -> &App {
+        &self.app
     }
 
     /// Drive ONE deterministic sync round for this client outside the UI loop —
@@ -262,10 +298,36 @@ impl Driver {
         // OTP (6 digits) → verify.
         self.send_keys(otp).await;
         self.enter().await;
+
+        // First device: the Secret Key screen comes before the PIN (#1337).
+        // Read the key off the RENDERED screen — that is what a user copies —
+        // and type it back.
+        assert_eq!(
+            &self.app.screen,
+            &Screen::SaveSecretKey,
+            "a first-device signup should show the Secret Key before the PIN, buffer:\n{}",
+            self.buffer_text()
+        );
+        let secret = self.rendered_secret_key();
+        self.enter().await;
+        // A wrong key is refused and the screen stays put.
+        self.send_keys("A3-WRONG").await;
+        self.enter().await;
+        assert_eq!(&self.app.screen, &Screen::SaveSecretKey);
+        assert!(
+            self.buffer_text().contains("doesn't match"),
+            "a wrong key must say so, buffer:\n{}",
+            self.buffer_text()
+        );
+        for _ in 0.."A3-WRONG".len() {
+            self.press(KeyCode::Backspace, KeyModifiers::NONE).await;
+        }
+        self.send_keys(&secret).await;
+        self.enter().await;
         assert_eq!(
             &self.app.screen,
             &Screen::SetPin,
-            "a valid OTP should advance to the SetPin screen, buffer:\n{}",
+            "typing the shown Secret Key back should advance to the SetPin screen, buffer:\n{}",
             self.buffer_text()
         );
 
@@ -278,6 +340,15 @@ impl Driver {
             "setting a PIN should land on Home, buffer:\n{}",
             self.buffer_text()
         );
+    }
+
+    /// The `A3-…` Secret Key as the Emergency Kit screen renders it.
+    fn rendered_secret_key(&self) -> String {
+        let text = self.buffer_text();
+        text.split_whitespace()
+            .find(|w| w.starts_with("A3-") && w.len() > 20)
+            .unwrap_or_else(|| panic!("no Secret Key on screen, buffer:\n{text}"))
+            .to_string()
     }
 
     /// The default dev signup: fixed dev OTP + PIN (the same the smokes use).

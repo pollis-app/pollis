@@ -12,9 +12,13 @@ exact same `pollis_core::commands::*` surface the desktop app reaches over Tauri
   UI** (compose+send, accept DM, create group/channel/DM, invite) + **M4 core**
   (`src/enroll.rs` — multi-device enrollment + Secret-Key recovery, gated by two
   multi-device smokes) + **M4b enrollment/recovery UI** (`src/enroll_flow.rs` +
-  screens). Text messaging only — attachments/media are intentionally out of scope
-  (this is an RCS-like text client). Remaining possible enhancement: realtime
-  (replace the poll loop with a LiveKit inbox).
+  screens) + **#1337** (it reads everything the other clients write: the
+  `_att`/`_txt` attachment envelope, newlines, wrapping, threads, quote replies,
+  reactions, timestamps, mentions; and it can reply / edit / delete / react / open
+  a thread; sign-up shows the Secret Key; `--help`/`--version`). It is a text
+  client: an attachment renders as a line (`[image: photo.png, 2 KB]`), nothing is
+  downloaded or uploaded, and media are out of scope. Remaining possible
+  enhancement: realtime (replace the poll loop with a LiveKit inbox).
 
   **M4b screen flow** (spec §7): `verify_otp` returns `enrollment_required`. If
   false → first-device `SetPin` (unchanged). If true → **EnrollChoice** (↑/↓ or
@@ -75,16 +79,19 @@ pollis-tui (binary `pollis`)
 ### Source layout
 | File | Role |
 |---|---|
-| `src/main.rs` | Entry. Multi-thread tokio runtime, `Config::from_env` → `AppState::new`, terminal setup, `tokio::select!` render/input loop (key input + UI-refresh tick), panic hook, clean sync-loop shutdown. |
+| `src/main.rs` | Entry. Parses arguments (`cli.rs`) and checks for a terminal **before** anything else, then builds the multi-thread tokio runtime, `Config::from_env` → `AppState::new`, terminal setup, `tokio::select!` render/input loop (key input + UI-refresh tick), panic hook, clean sync-loop shutdown. |
+| `src/cli.rs` | `--help` / `--version` (from `CARGO_PKG_VERSION`) and the not-a-terminal message (#1337). Pure, unit-tested; `tests/cli_args.rs` runs the real binary with an empty environment and no TTY. |
+| `src/content.rs` | The message body as the other clients write it: `parse_content` (line-for-line port of mobile's `parseContent` / desktop's, `_att`/`_txt` envelope), `attachment_label`, `format_file_size`, `preview` (quote / prompt snippets), `mention_ranges` (same rule as core's `mention_tokens`), `replace_caption` (an edit keeps the attachments), `resolve_reaction` (`:shortcode:` via the vendored `scripts/emoji-shortcodes.json`, bare form like desktop), `fit_width` (sidebar ellipsis). |
+| `src/timeline.rs` | The message pane's layout: displayed messages → `Block`s of wrapped, styled lines at a given width — date separators, `HH:MM sender` headers, kept newlines, word wrap (hard-break for over-long words), attachment lines, `↳ name: first words` quote context, reaction pills, `↪ N replies`, mention + selection highlight, lost-message runs. `layout_open` is shared by the renderer and the key handler (`scroll_to_show` keeps the selected message on screen). Pure, unit-tested per message shape. |
 | `src/terminal.rs` | `TerminalGuard` — RAII enter/leave raw mode + alt screen; restores the terminal on **every** exit path (quit, `?`, panic). |
-| `src/app.rs` | `App` state machine: `Screen` enum, synchronous `on_key` (auth + Home navigation/compose/prompt), async `run(Action) -> Option<Action>` (returns a follow-up action), background `SyncLoop` ownership + `shutdown()`. M3b adds the `SendMessage`/`AcceptDm`/`SubmitPrompt` actions + the `begin_*`/`do_*` compose/create handlers. |
-| `src/home.rs` | The three-pane model + **pure, unit-tested** helpers: sidebar flattening (`build_sidebar_rows`), selection movement (`step_selection`/`clamp_selection`), bottom-anchored scroll windowing (`visible_window`), scrollback prefetch (`should_load_older`), page merge/dedup (`merge_messages`). M3b adds the input-mode model (`HomeMode` = Navigate/Compose/Prompt, `PromptKind` + its `label()`), the empty-input guard (`is_blank`), and the pure selection-context helpers (`selected_dm_request`, `context_group`). |
+| `src/app.rs` | `App` state machine: `Screen` enum, synchronous `on_key` (auth + Home navigation/compose/prompt/confirm), async `run(Action) -> Option<Action>` (returns a follow-up action), background `SyncLoop` ownership + `shutdown()`. M3b adds the `SendMessage`/`AcceptDm`/`SubmitPrompt` actions + the `begin_*`/`do_*` compose/create handlers; #1337 adds `Screen::SaveSecretKey`, the message actions (`begin_reply`/`begin_edit`/`begin_delete`/`begin_react`/`begin_open_thread`, `Action::DeleteMessage`/`OpenThread`), `refresh_extras` (reactions + thread counts + open thread) and `land_on` (focus the conversation just created). |
+| `src/home.rs` | The three-pane model + **pure, unit-tested** helpers: sidebar flattening (`build_sidebar_rows`), selection movement (`step_selection`/`clamp_selection`), bottom-anchored scroll windowing (`visible_window`), scrollback prefetch (`should_load_older`), page merge/dedup (`merge_messages`). M3b adds the input-mode model (`HomeMode` = Navigate/Compose/Prompt, `PromptKind` + its `label()`), the empty-input guard (`is_blank`), and the pure selection-context helpers (`selected_dm_request`, `context_group`). #1337 adds `HomeMode::ConfirmDelete`, `PromptKind::React`, `ComposeTarget` (new / reply / edit), `ThreadView`, and on `OpenConversation` the reactions, thread counts, selected message id and `displayed()` (thread replies filtered out of the channel view; root + replies in a thread view), `step_message`, `select_conversation`. |
 | `src/auth.rs` | Thin wrappers over `pollis_core::commands::{auth,pin}` that encode the M1 call order. No forked logic. |
-| `src/data.rs` | Typed read layer: `load_conversations` (tree) + `channel_messages`/`dm_messages` (paginated). Shared by `sync.rs` and the Home UI. |
-| `src/send.rs` | **M3 write CORE.** Typed passthroughs over the exact core writes (`send_message`, `create_group`, `create_channel`, `create_dm_channel`, `accept_dm_request`, `invite_to_group`) + ergonomic shorthands with UI defaults baked in (`send_text`, `new_group`, `new_channel`, `start_dm`, `accept_dm`, `invite`). No forked logic — every write routes through the DS via the core fn. M3b calls one fn per action. |
+| `src/data.rs` | Typed read layer: `load_conversations` (tree) + `channel_messages`/`dm_messages` (paginated), plus (#1337) `reactions` (one batched DS read via core `get_reactions_for_messages`), `thread_counts` (`list_thread_summaries`) and `thread_replies` (`read_thread_messages`), both local. Shared by `sync.rs` and the Home UI. |
+| `src/send.rs` | **M3 write CORE.** Typed passthroughs over the exact core writes (`send_message`, `create_group`, `create_channel`, `create_dm_channel`, `accept_dm_request`, `invite_to_group`) + ergonomic shorthands with UI defaults baked in (`send_text`, `new_group`, `new_channel`, `start_dm`, `accept_dm`, `invite`), and (#1337) `send_text_with` (reply_to_id / thread_id), `edit`, `delete`, `toggle_reaction` — the same core calls desktop and mobile make. No forked logic — every write routes through the DS via the core fn. M3b calls one fn per action. |
 | `src/enroll.rs` | **M4 DATA core.** Typed, order-enforcing wrappers over `pollis_core::commands::device_enrollment` for the two "add a terminal to an existing account" flows: sibling-approval enrollment (`request_enrollment`/`enrollment_status`/`finalize` on the new device, `pending_requests`/`approve`/`reject` on the existing one) and Secret-Key recovery (`recover`, plus the last-resort `reset_and_recover`). No forked logic. Re-exports `EnrollmentHandle`/`EnrollmentStatus`/`PendingEnrollmentRequest` for the M4b UI. |
 | `src/sync.rs` | §6 poll loop: `sync_once`/`sync_rounds` + `spawn_loop` (cancelable background `SyncLoop`). |
-| `src/ui.rs` | Pure `render(frame, &app)` — header (identity · open-conversation name · sync spinner) / three-pane Home body / auth card / status line. |
+| `src/ui.rs` | Pure `render(frame, &app)` — header (identity · open-conversation name · sync spinner) / three-pane Home body / auth card / Secret Key card / status line, and on Home an always-visible key-hint bar (`home_help`, per focused pane and mode). `message_viewport` gives the input loop the pane's inner size from the same `home_layout` the renderer uses. |
 
 ### Key design points (from the spec)
 - **Multi-thread runtime is mandatory.** `pollis-core`'s DB/keystore paths use
@@ -103,19 +110,32 @@ pollis-tui (binary `pollis`)
   since #987 — `POLLIS_DELIVERY_URL` is **mandatory** config and is now the only
   backend the TUI can reach at all: it holds no database credential, and neither
   does `pollis-core`. The TUI invents no new backend path.
-- **Own device identity.** Set `POLLIS_DATA_DIR` (default
+- **Own device identity.** Set `POLLIS_DATA_DIR` (e.g.
   `~/.local/share/pollis-tui`) so the TUI's file keystore + local SQLCipher DB do
   not share identity with the desktop app — it enrolls as its own device with its
-  own `device_id` and MLS leaf.
+  own `device_id` and MLS leaf. Unset, it uses `pollis_core::db::local::dirs_path()`,
+  the platform default (on macOS the desktop app's own
+  `~/Library/Application Support/com.pollis.app`); `pollis --help` prints the
+  directory in effect.
 - **The stderr log is owner-only, and its directory matters.** `main.rs` `dup2`s
   fd 2 into `pollis-tui.log` so `pollis-core`'s `eprintln!` output does not
-  scroll over the TUI. The file lands in `POLLIS_DATA_DIR` — and in the OS temp
-  directory when that is unset, which is world-*writable*. It is created 0600
+  scroll over the TUI. The file lands in the data dir — `POLLIS_DATA_DIR`, else
+  `dirs_path()`, the same directory as the database and keystore. It used to fall
+  back to the shared, world-*writable* OS temp dir when `POLLIS_DATA_DIR` was unset
+  (#1337). It is created 0600
   (`pollis_core::private_fs::FILE_MODE`), and one left by an older build is
   tightened through the open handle. The two `auth` log lines that carried the
   account's email now mask it (`pollis_core::util::mask_email`, the same shape
   the DS uses in `pollis-delivery/src/redact.rs`), so a signup no longer writes
   the user's real address into it in the clear (#1000).
+- **Arguments and the terminal come first (#1337).** `main` parses `--help` /
+  `--version` before `Config::from_env`, so both work with no TTY and no
+  environment (a dev build without its env used to die on `missing env var:
+  R2_S3_ENDPOINT`); any other argument is refused with exit 2. Without a TTY on
+  stdin and stdout it says so on stderr and exits 1, before stderr is redirected —
+  it used to exit 1 with `entering raw mode: Device not configured` only in the
+  log. `cli-release.yml` stamps the release version in (`scripts/bump-version.sh`)
+  so `--version` is the shipped version, not the placeholder.
 - **Input isolation.** `crossterm::event::read` is blocking, so it runs on a
   dedicated OS thread that forwards key *presses* over an mpsc channel; the tokio
   loop never blocks on stdin. Only `KeyEventKind::Press` is forwarded (some
@@ -150,10 +170,31 @@ can't be gotten wrong at a call site.
 ### Screen flow
 ```
 Booting ──get_session──► Returning ─► Unlock ──unlock──► Home
-                       └► Fresh ─► Email ─► Otp ─► SetPin ──set_pin+init──► Home
+                       └► Fresh ─► Email ─► Otp ─► SaveSecretKey ─► SetPin ──set_pin+init──► Home
 ```
 
+**SaveSecretKey (#1337).** A first-device `verify_otp` returns the account's
+Secret Key (`UserProfile.new_secret_key`), and only then. The CLI never showed it,
+so a CLI-only account had no recovery path. Now `App` takes it out of the profile
+the moment it arrives (into a `Zeroizing` buffer — wiped when dropped, never
+logged or persisted) and shows it, as desktop's `SaveSecretKeyScreen` and mobile's
+`emergency-kit` screen do. `s` writes the Emergency Kit file — the same document
+desktop downloads, pinned to desktop's `auth.json` by a unit test — owner-only to
+the **current directory** (never the data dir: a recovery key beside the keystore
+it recovers is no backup). Enter moves to a confirm phase where the user must type
+or paste the key back (desktop's rule: whitespace, dashes, `A3-` and case
+ignored); only a match goes on to `SetPin`. Esc shows the key again.
+
 ## Build & run (headless, in-box)
+
+**Hands-on against the dev DS (#1337).** `cargo run -p pollis-tui --example
+message_shapes_peer -- <email>` (with `POLLIS_DATA_DIR` set to a fresh dir and the
+dev env sourced) signs up a second account, prints its handle, waits for a DM
+request from the client under test (`d` + the handle), accepts it and sends one of
+every message shape the other clients produce — multi-line, long, a captioned photo
+(`_att` envelope), a mention of the requester, a thread reply and a quote reply to
+the first message, and a reaction. Use a DEBUG build of `pollis` for this (debug
+builds use the encrypted-file keystore and never touch the OS keychain).
 
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -245,6 +286,12 @@ second test in the same binary repoints the dir mid-signup of the first
 ("Couldn't set PIN: no active user; call verify_otp first" — exactly how
 #1041's PR first went red). A new scenario gets a new file, e.g.
 `tests/ui_e2e.rs` (the rendered-screen two-client gate) and
+`tests/ui_messages_e2e.rs` (#1337: every message shape another client
+produces — attachment envelope, multi-line, long, thread reply, quote reply,
+reaction, mention — asserted on the rendered screen, plus reply / edit / delete /
+react / thread driven by keystrokes, focus landing on a UI-started DM, and the
+hint bar on first entry), `tests/cli_args.rs` (the real binary's `--help` /
+`--version` / no-TTY behaviour with an empty environment), and
 `tests/ui_race_e2e.rs` (the same scenario with the rendezvous points forcing
 the recipient to lose the epoch-0 external-join race).
 
@@ -306,10 +353,56 @@ cancelable background task the Home UI owns (see below).
   live sync spinner + conversation count; the status line shows the keybindings or
   the latest transient status/error.
 
-**Keys:** `↑/↓` or `j/k` move (sidebar selection, or message scroll when the main
-pane is focused); `Tab` cycles focus; `Enter` toggles a group / opens a
+**Keys:** `↑/↓` or `j/k` move (sidebar selection, or message selection when the
+main pane is focused); `Tab` cycles focus; `Enter` toggles a group / opens a
 conversation; `PageUp`/`PageDown` scroll by a screen; `q` or `Ctrl-C` quit. No
 modal overlays — everything is a pane or a full-screen view.
+
+### Rendering what the other clients write (#1337)
+
+The main pane lays out through `timeline::layout_open` (see the source table):
+
+```
+── Today ────────────────────────────────────
+14:05 bob  ROOT first line
+      second line                      ← newlines kept
+       🎉 1   👍 1                       ← reactions (own ones highlighted)
+      ↪ 2 replies · t to open           ← thread root; replies are NOT in the timeline
+14:06 bob  LONGSTART word word word …
+      word word … LONGEND              ← wrapped, never cut off
+14:06 bob  CAPTION_HERE
+      [image: photo.png, 2 KB]         ← `_att` envelope → caption + attachment line
+      ↳ bob: ROOT first line …          ← quote-reply context (`reply_to_id`)
+14:07 bob  hey @alice look             ← a mention of you (or @all) is highlighted
+```
+
+- **Threads.** The channel view is `displayed()`: messages with a `thread_id` are
+  filtered out, as other clients file them under the thread; the root carries
+  `↪ N replies` from `list_thread_summaries`. `t` opens a thread view (root +
+  `read_thread_messages`), where `i` replies into the thread (`thread_id` = root)
+  and `Esc` closes it.
+- **Reactions** are read once per completed sync round (and after the user's own
+  reaction) for the newest 60 displayed messages, in ONE request —
+  `get_reactions_for_messages` in `pollis-core`, the batched form of
+  `get_reactions` (the wire read was always batched; the CLI has no realtime
+  invalidation, so per-message reads would be one request per visible message per
+  round).
+- **Selection.** With the message pane focused, ↑/↓ select a message (by id, so
+  it survives page merges); the view scrolls to keep it on screen
+  (`scroll_to_show`), and selecting near the top of what is loaded prefetches
+  history. Down past the newest releases the selection and follows new messages
+  again.
+
+### Focus and hints (#1337)
+
+The focused pane has a thick accent border and an accent title bar; the other a
+thin dim one. Creating a group / channel / DM highlights its sidebar row and opens
+it with the message pane focused (`land_on`) — the highlight used to stay where it
+was, so after starting a DM ↑/↓ scrolled an empty pane and the DM was unreachable
+without knowing to press Tab. The key-hint bar has its own row under the status
+line, so it shows from the first frame of Home (it used to share the status line
+and stay hidden behind "You're signed in." until Esc). Sidebar names that do not
+fit end in `…` (`fit_width`) instead of being clipped.
 
 ### Sync → UI refresh wiring (the M2b integration)
 
@@ -376,9 +469,19 @@ the desktop app's "replace the input bar" pattern. Solid accent border, no glow.
 | `q` / `Ctrl-C` | Navigate | Quit (`Ctrl-C` quits from any mode) |
 | `Enter` | Compose/Prompt | Send / submit (empty is a no-op) |
 | `Esc` | Compose/Prompt | Cancel back to Navigate |
+| `↑/↓` (message pane) | Navigate | Select a message (newest first; past the newest releases the selection) |
+| `r` | Navigate | Quote-reply to the selected message (`reply_to_id`) |
+| `e` | Navigate | Edit the selected message — own only; an attachment message keeps its attachments (`replace_caption`) |
+| `x` / `Delete` | Navigate | Delete the selected message — own only; asks `y`/`n` in the input bar |
+| `+` | Navigate | React (prompt: emoji or `:shortcode:`); reacting with one you already have removes it, like desktop's pill |
+| `t` | Navigate | Open the selected message's thread |
+| `Esc` | Navigate | Close the thread → drop the selection → back to the sidebar |
+| `Alt-Enter` / `Ctrl-J` | Compose | New line |
+| `y` / `n` | Confirm delete | Delete / keep |
 
-The status line surfaces the mode's bindings when idle (`home_help`), so the
-compose/accept/create/invite/quit keys are discoverable in-app.
+The hint bar (its own row under the status line, always visible on Home) shows
+the bindings for the focused pane and mode (`home_help`), so every key is
+discoverable in-app.
 
 **Pure, unit-tested M3b helpers** (`home.rs`): `is_blank` (empty-input guard),
 `PromptKind::label`, `selected_dm_request` (accept target), `context_group`

@@ -765,8 +765,10 @@ async fn lookup_group_name(conn: &Connection, group_id: &str) -> anyhow::Result<
 }
 
 /// POST /v1/livekit/send-data — fan out a control payload to a LiveKit room via
-/// server-side `RoomService/SendData`. A 404 (room currently has no
-/// participants) is success, mirroring the client's fire-and-forget semantics.
+/// server-side `RoomService/SendData`. A room with no participants (LiveKit's
+/// 404, or its "no response from servers" 503 — see
+/// [`send_data_room_is_empty`]) is success, mirroring the client's
+/// fire-and-forget semantics.
 ///
 /// Refuses (403) a target the signer may not reach and a payload `type` a client
 /// may not originate; strips and re-stamps identity before anything is signed.
@@ -850,8 +852,9 @@ pub async fn livekit_send_data(
 }
 
 /// Fan out a JSON control payload to a LiveKit room via server-side
-/// `RoomService/SendData`. A 404 (room currently has no participants) is
-/// treated as success, matching the fire-and-forget nudge semantics.
+/// `RoomService/SendData`. A room with no participants (a 404, or the 503
+/// [`send_data_room_is_empty`] recognises) is treated as success, matching the
+/// fire-and-forget nudge semantics.
 ///
 /// Shared by the client-facing `/v1/livekit/send-data` endpoint and by
 /// **server-side emitters** — notably the enrollment-request inbox
@@ -896,6 +899,17 @@ pub async fn room_send_data(
         Ok(r) => {
             let status = r.status();
             let text = r.text().await.unwrap_or_default();
+            // #1337: nobody is in the room, so there is nobody to nudge.
+            if send_data_room_is_empty(status, &text) {
+                // LiveKit gives this same answer when the node hosting a LIVE
+                // room is down, so keep it countable: one line per occurrence,
+                // naming the route only — no room, user, device or address.
+                tracing::info!(
+                    route = "livekit.RoomService/SendData",
+                    "livekit: no server for room (empty or unhosted); nudge treated as delivered"
+                );
+                return Ok(());
+            }
             Err(format!("SendData {status}: {text}"))
         }
         // Callers of this one are fire-and-forget: they log the reason and move
@@ -908,6 +922,33 @@ pub async fn room_send_data(
         )),
         Err(e) => Err(format!("SendData: {e}")),
     }
+}
+
+/// Whether a non-2xx `RoomService/SendData` answer means "this room has no
+/// participants (or does not exist)" rather than a real failure (#1337).
+///
+/// LiveKit's router answers SendData for a room no node is hosting — which is
+/// every room nobody has joined, e.g. a DM whose members are all on the
+/// media-off CLI or offline — with the Twirp error
+/// `{"code":"unavailable","msg":"no response from servers"}` (HTTP 503), not
+/// with the 404 the arm above already accepts. For a fire-and-forget nudge that
+/// is the same outcome as an empty room: there is nobody to notify. It used to
+/// surface as a 502 on every such send.
+///
+/// Deliberately narrow: only that exact Twirp code + message. Any other 503
+/// (an overloaded or draining node answers `unavailable` with a different
+/// message), any other code, and anything that is not a Twirp error body stays
+/// an error, so a LiveKit that is genuinely down still reads as down.
+pub fn send_data_room_is_empty(status: StatusCode, body: &str) -> bool {
+    if status != StatusCode::SERVICE_UNAVAILABLE {
+        return false;
+    }
+    let Ok(err) = serde_json::from_str::<serde_json::Value>(body) else {
+        return false;
+    };
+    let code = err.get("code").and_then(|v| v.as_str());
+    let msg = err.get("msg").and_then(|v| v.as_str());
+    code == Some("unavailable") && msg == Some("no response from servers")
 }
 
 // ── 1c. RoomService/RemoveParticipant — evicting who lost access ─────────────

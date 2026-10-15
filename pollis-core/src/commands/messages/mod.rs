@@ -199,7 +199,9 @@ pub use read_state::{
 pub use receipts::{get_conversation_receipts, mark_messages_read, MessageReceipts};
 
 // ── Reactions ────────────────────────────────────────────────────────────────
-pub use reactions::{add_reaction, get_reactions, remove_reaction, Reaction};
+pub use reactions::{
+    add_reaction, get_reactions, get_reactions_for_messages, remove_reaction, Reaction,
+};
 
 // ── Retention / local eviction ───────────────────────────────────────────────
 pub use retention::{get_message_retention, run_message_eviction, set_message_retention};
