@@ -1171,9 +1171,11 @@ Current state:
   offline) finds out on its next command instead: the DS answers its signature
   with `device_revoked`, the core fails every command with it, and the native
   bridge passes each failure to `noticeDeviceRevoked`, so the root layout's one
-  handler runs `logout` (the core wipes a revoked device whatever `deleteData`
-  says) and `endSession()`, and sign-in shows `text-session-notice` (#1338;
-  Maestro `scripts/maestro-device-revoked.sh`).
+  handler confirms with `is_current_device_revoked` (a late or stray rejection
+  never ends a healthy session), runs `logout` with `deleteData: false` (the
+  core wipes the revoked device itself, and only that one) and `endSession()`,
+  and sign-in shows `text-session-notice` (#1338; Maestro
+  `scripts/maestro-device-revoked.sh`).
 
 ## Secrets architecture — settled (#393, #987, #995)
 

@@ -80,8 +80,15 @@ export default function RootLayout() {
   useEffect(
     () =>
       onDeviceRevoked(async () => {
+        // A rejection can land late, after a sign-out or another account's
+        // sign-in: act only if the core says THIS device is the revoked one.
+        const revoked = await invoke<boolean>("is_current_device_revoked").catch(() => false);
+        if (!revoked) {
+          return;
+        }
         console.warn("[session] this device was removed from the account — signing out");
-        await invoke("logout", { deleteData: true }).catch((e) =>
+        // The core wipes a revoked device itself; the app never asks for it.
+        await invoke("logout", { deleteData: false }).catch((e) =>
           console.warn("[session] logout of a revoked device failed:", e),
         );
         setSessionNotice(i18n.t("auth:login.deviceRemoved"));

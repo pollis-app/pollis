@@ -416,6 +416,9 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let user_id: String = arg(&args, "userId")?;
             ok(auth::is_current_device_registered(&state()?, user_id).await?)
         }
+        // #1338: whether THIS device is the one the DS answered `device_revoked`
+        // for. The app asks before acting on a `device_revoked` error.
+        "is_current_device_revoked" => ok(auth::is_current_device_revoked(&state()?).await?),
         "list_security_events" => {
             let user_id: String = arg(&args, "userId")?;
             let limit: Option<i64> = arg_opt(&args, "limit")?;

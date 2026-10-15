@@ -88,3 +88,9 @@ pub async fn revoke_device(state: State<'_, Arc<AppState>>, user_id: String, dev
 pub async fn is_current_device_registered(state: State<'_, Arc<AppState>>, user_id: String) -> Result<bool> {
     pollis_core::commands::auth::is_current_device_registered(&state, user_id).await
 }
+
+/// #1338: whether this device is the one the DS answered `device_revoked` for.
+#[tauri::command]
+pub async fn is_current_device_revoked(state: State<'_, Arc<AppState>>) -> Result<bool> {
+    pollis_core::commands::auth::is_current_device_revoked(&state).await
+}

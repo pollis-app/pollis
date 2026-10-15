@@ -8,7 +8,7 @@
  * bridge's one chokepoint sends the app to sign-in with the reason on screen.
  *
  * What this pins, in both skins: whichever command finds out first, the app
- * ends the session (asking for the data-wiping sign-out), lands on sign-in
+ * ends the session (the core, not the app, decides the wipe), lands on sign-in
  * with the notice, and leaves no decrypted message on screen.
  *
  *   pnpm --filter @pollis/e2e playwright
@@ -102,9 +102,42 @@ for (const skin of SKINS) {
     await expect(page.getByTestId("auth-screen")).toBeVisible();
     await expect(page.getByTestId("auth-session-notice")).toContainText("removed from your account");
     await expect(page.getByText(SECRET)).toHaveCount(0);
+    // The core decides the wipe from its own record of which device was
+    // revoked; the app only signs out, and never asks for a wipe itself.
     const asked = await page.evaluate(
       () => (window as unknown as { __tauriMock: { lastLogoutDeleteData: boolean | null } }).__tauriMock.lastLogoutDeleteData,
     );
-    expect(asked, "a removed device must be wiped, not kept").toBe(true);
+    expect(asked, "the app signed out").toBe(false);
+  });
+}
+
+for (const skin of SKINS) {
+  test(`${skin}: a stray device_revoked rejection never signs a healthy device out`, async ({ page }) => {
+    await boot(page, skin);
+
+    // A rejection that says device_revoked while the core says this device is
+    // NOT revoked — e.g. one that landed after the session it belonged to.
+    await page.evaluate(() => {
+      (window as unknown as { __tauriRejectWith: (c: string, m: string) => void }).__tauriRejectWith(
+        "read_channel_messages",
+        "device_revoked",
+      );
+    });
+    // Opening the channel reads its messages: that read is refused.
+    await openCommandPalette(page);
+    await page.getByTestId("search-panel-input").fill("general");
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(500);
+
+    const searches = await page.evaluate(
+      () => (window as unknown as { __tauriInvokeCounts: Record<string, number> }).__tauriInvokeCounts["read_channel_messages"] ?? 0,
+    );
+    expect(searches, "control: the rejected command really ran").toBeGreaterThan(0);
+    await expect(page.getByTestId("sidebar")).toBeVisible();
+    await expect(page.getByTestId("auth-screen")).toHaveCount(0);
+    const loggedOut = await page.evaluate(
+      () => (window as unknown as { __tauriMock: { lastLogoutDeleteData: boolean | null } }).__tauriMock.lastLogoutDeleteData,
+    );
+    expect(loggedOut, "no sign-out happened").toBeNull();
   });
 }

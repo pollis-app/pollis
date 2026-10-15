@@ -37,7 +37,10 @@ let deviceRevokedRunning = false;
 export function isDeviceRevokedError(error: unknown): boolean {
   const message =
     typeof error === "string" ? error : error instanceof Error ? error.message : String(error);
-  return message.includes("device_revoked");
+  // The core's `Error::DeviceRevoked` displays as exactly `device_revoked`; a
+  // command that wraps it appends it after ": ". Anything else that merely
+  // mentions the word (a security-event kind, a nudge payload) is not it.
+  return message === "device_revoked" || message.endsWith(": device_revoked");
 }
 
 /** Register what to do when this device turns out to be revoked. Returns an unsubscribe. */

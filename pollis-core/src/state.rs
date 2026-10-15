@@ -76,10 +76,13 @@ pub struct AppState {
     #[cfg(feature = "media")]
     pub camera: Arc<Mutex<CameraState>>,
     pub update_required: Arc<AtomicBool>,
-    /// Set when the DS answers `device_revoked` (#1338): this device has been
-    /// removed from the account, so every signed call short-circuits and the
-    /// next `logout` wipes the device's keys and id. Cleared by that logout.
-    pub device_revoked: Arc<AtomicBool>,
+    /// The device the DS has answered `device_revoked` for (#1338), bound to the
+    /// exact `(user_id, device_id)` that signed the refused request. Only that
+    /// device's signed calls short-circuit, and only a `logout` of that account
+    /// is forced to wipe — so a response that lands late, after a sign-out or a
+    /// switch to another account, can never act on anyone else. Cleared by that
+    /// logout.
+    pub revoked_device: Arc<std::sync::Mutex<Option<RevokedDevice>>>,
     /// Per-device ULID, set during login. Each physical device gets a stable ID
     /// stored in the OS keystore so it survives local DB wipes.
     pub device_id: Arc<Mutex<Option<String>>>,
@@ -230,7 +233,7 @@ impl AppState {
             #[cfg(feature = "media")]
             camera: Arc::new(Mutex::new(CameraState::new())),
             update_required: Arc::new(AtomicBool::new(false)),
-            device_revoked: Arc::new(AtomicBool::new(false)),
+            revoked_device: Arc::new(std::sync::Mutex::new(None)),
             device_id: Arc::new(Mutex::new(None)),
             enrollment_ephemeral_keys: Arc::new(Mutex::new(HashMap::new())),
             device_link_tokens: Arc::new(Mutex::new(HashMap::new())),
@@ -404,6 +407,43 @@ impl AppState {
         // The corpus footer reading is per-account; the next user has a
         // different history and must not be shown the previous one's count.
         crate::commands::messages::invalidate_corpus_cache();
+    }
+
+    /// Whether `(user_id, device_id)` is the device the DS called revoked.
+    pub fn is_revoked_device(&self, user_id: &str, device_id: &str) -> bool {
+        self.revoked_device
+            .lock()
+            .map(|g| {
+                g.as_ref()
+                    .is_some_and(|r| r.user_id == user_id && r.device_id == device_id)
+            })
+            .unwrap_or(false)
+    }
+
+    /// Record that the DS refused `(user_id, device_id)` as revoked. Callers
+    /// pass the identity that SIGNED the refused request, and must only call
+    /// this while that device is still this process's device.
+    pub fn mark_revoked_device(&self, user_id: &str, device_id: &str) {
+        if let Ok(mut g) = self.revoked_device.lock() {
+            *g = Some(RevokedDevice {
+                user_id: user_id.to_string(),
+                device_id: device_id.to_string(),
+            });
+        }
+    }
+
+    /// The account whose device was revoked, if any.
+    pub fn revoked_user(&self) -> Option<String> {
+        self.revoked_device
+            .lock()
+            .ok()
+            .and_then(|g| g.as_ref().map(|r| r.user_id.clone()))
+    }
+
+    pub fn clear_revoked_device(&self) {
+        if let Ok(mut g) = self.revoked_device.lock() {
+            *g = None;
+        }
     }
 
     pub fn check_not_outdated(&self) -> crate::error::Result<()> {
@@ -645,4 +685,11 @@ mod guard_lifetime_tests {
             }
         }
     }
+}
+
+/// The device the DS answered `device_revoked` for (#1338).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevokedDevice {
+    pub user_id: String,
+    pub device_id: String,
 }

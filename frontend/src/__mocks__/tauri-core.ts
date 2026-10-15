@@ -353,9 +353,28 @@ const store: MockStore = {
  * ones that still work on a removed device: signing out and the local account
  * index the sign-in screen reads.
  */
-const WORKS_WHEN_REVOKED = new Set(['logout', 'list_known_accounts', 'wipe_local_data']);
+const WORKS_WHEN_REVOKED = new Set([
+  'logout',
+  'list_known_accounts',
+  'wipe_local_data',
+  'is_current_device_revoked',
+]);
 (window as any).__tauriRevokeDevice = () => {
   store.deviceRevoked = true;
+};
+
+/**
+ * Reject every call of `cmd` with `message` until cleared, without revoking
+ * anything — the shape of a late rejection that arrives after the session it
+ * belonged to (#1338 review).
+ */
+const rejectWith = new Map<string, string>();
+(window as any).__tauriRejectWith = (cmd: string, message: string | null) => {
+  if (message === null) {
+    rejectWith.delete(cmd);
+  } else {
+    rejectWith.set(cmd, message);
+  }
 };
 
 /**
@@ -1846,6 +1865,9 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return true;
     }
 
+    case 'is_current_device_revoked':
+      return store.deviceRevoked;
+
     case 'logout':
       store.session = null;
       store.deviceRevoked = false;
@@ -1922,6 +1944,10 @@ export function invoke<T>(command: string, args?: Record<string, unknown>): Prom
   lastInvokeArgs[command] = args ?? {};
   if (store.deviceRevoked && !WORKS_WHEN_REVOKED.has(command)) {
     return Promise.reject('device_revoked');
+  }
+  const forcedRejection = rejectWith.get(command);
+  if (forcedRejection !== undefined) {
+    return Promise.reject(forcedRejection);
   }
   return new Promise((resolve, reject) => {
     let settle: () => void;

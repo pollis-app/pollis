@@ -46,6 +46,7 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::auth::list_user_devices,
             crate::commands::auth::revoke_device,
             crate::commands::auth::is_current_device_registered,
+            crate::commands::auth::is_current_device_revoked,
             crate::commands::pin::set_pin,
             crate::commands::pin::unlock,
             crate::commands::pin::lock,

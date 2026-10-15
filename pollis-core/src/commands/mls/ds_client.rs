@@ -105,13 +105,6 @@ async fn ds_post_bytes(
     path: &str,
     body_bytes: Vec<u8>,
 ) -> Result<reqwest::Response> {
-    // A device the DS has already called revoked cannot sign anything that will
-    // be accepted; fail here instead of putting every caller's request on the
-    // wire to be refused again (#1338).
-    if state.device_revoked.load(std::sync::atomic::Ordering::Relaxed) {
-        return Err(Error::DeviceRevoked);
-    }
-
     // Resolved before the identity lookups below so a missing URL still reports
     // as "not configured" rather than "not signed in".
     let base = delivery_base(state)?;
@@ -123,6 +116,14 @@ async fn ds_post_bytes(
         .await
         .clone()
         .ok_or_else(|| Error::Other(anyhow::anyhow!("device_id not set for DS request signing")))?;
+
+    // A device the DS has already called revoked cannot sign anything that will
+    // be accepted; fail here instead of putting every caller's request on the
+    // wire to be refused again (#1338). Bound to this exact device, so it never
+    // blocks another account or a newly enrolled device.
+    if state.is_revoked_device(&user_id, &device_id) {
+        return Err(Error::DeviceRevoked);
+    }
 
     // The exact bytes we hash MUST be the exact bytes we send — hence `Vec<u8>`
     // in, serialized once by the caller and never re-encoded here.
@@ -170,12 +171,33 @@ async fn ds_post_bytes(
         .await
         .map_err(|e| Error::Other(anyhow::anyhow!("ds_post {path}: {e}")))?;
     if is_device_revoked_response(&resp) {
-        if !state.device_revoked.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        if note_revoked_response(state, &user_id, &device_id).await {
             crate::diag!("[ds] {path}: this device was revoked from the account; signing out");
         }
         return Err(Error::DeviceRevoked);
     }
     Ok(resp)
+}
+
+/// Record a `device_revoked` answer to a request signed by `(user_id,
+/// device_id)` (#1338) — but only while that device is still this process's
+/// device. A response that lands late, after a sign-out or after another
+/// account signed in, marks nobody, so it can never short-circuit or wipe the
+/// session that replaced it. Returns whether it newly recorded one.
+#[doc(hidden)]
+pub async fn note_revoked_response(state: &Arc<AppState>, user_id: &str, device_id: &str) -> bool {
+    let still_this_device = state.device_id.lock().await.as_deref() == Some(device_id);
+    let signed_in_as = crate::accounts::read_accounts_index()
+        .unwrap_or_default()
+        .last_active_user;
+    if !still_this_device || signed_in_as.as_deref() != Some(user_id) {
+        return false;
+    }
+    if state.is_revoked_device(user_id, device_id) {
+        return false;
+    }
+    state.mark_revoked_device(user_id, device_id);
+    true
 }
 
 /// The DS's answer to a request signed by a revoked device (#1338): 401 plus
