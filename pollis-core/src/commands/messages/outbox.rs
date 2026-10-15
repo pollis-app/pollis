@@ -1049,8 +1049,8 @@ mod tests {
         enqueue_on(conn, &queued(&fresh, "a"), &[]).unwrap();
         enqueue_on(conn, &queued(&sealed, "b"), &[]).unwrap();
         conn.execute("UPDATE message SET ciphertext = X'01' WHERE id = ?1", [&sealed]).unwrap();
-        assert_eq!(unsent_row_on(conn, &fresh).unwrap().unwrap().2, false);
-        assert_eq!(unsent_row_on(conn, &sealed).unwrap().unwrap().2, true);
+        assert!(!unsent_row_on(conn, &fresh).unwrap().unwrap().2);
+        assert!(unsent_row_on(conn, &sealed).unwrap().unwrap().2);
         // A delivered message is not the discard's to touch.
         conn.execute("UPDATE message SET send_state = NULL WHERE id = ?1", [&sealed]).unwrap();
         assert!(unsent_row_on(conn, &sealed).unwrap().is_none());
