@@ -98,16 +98,17 @@ cross-compile of `pollis-core`, `expo prebuild`, then
 `expo prebuild` + Gradle directly (never `eas build`, so the job needs no
 account, token or queue) and signs with the throwaway debug keystore.
 
-**Android sideload APK (pollis.com/android):** the one mobile output a workflow
-*publishes*. `.github/workflows/mobile-apk-release.yml` fires on a `mobile-v*`
+**Android sideload APK (pollis.com/android):** the one mobile *binary* a workflow
+publishes (JS-only OTA updates go out via `mobile-ota-release.yml`). `.github/workflows/mobile-apk-release.yml` fires on a `mobile-v*`
 tag (never on the desktop's `v*`), runs the same chain with `--release`, emits
 one APK per ABI (`POLLIS_ABI_SPLITS=true` → `mobile/plugins/withAbiSplits.js`;
 a universal APK is >2x the size), signs each with the dedicated **sideload** key (`POLLIS_RELEASE_KEY=sideload` selects it in
 `mobile/plugins/withReleaseSigning.js`; it has no debug fallback), and refuses to
 publish unless the signing cert matches `mobile/store/android-sideload-cert.sha256`
 and the Hermes bundle names `api.pollis.com` and not api-dev. Ships to
-`cdn.pollis.com/releases/android/` + a GitHub Release. Play store builds are a
-separate, local path with the Play upload key. See `docs/deployments.md` and
+`cdn.pollis.com/releases/android/` + a GitHub Release. Store builds (iOS →
+TestFlight; Android → Play internal + closed `alpha`, with the Play upload key)
+are built and uploaded by hand on a workstation. See `docs/deployments.md` and
 `mobile/CLAUDE.md`.
 
 **Shared Rust primitives.** `pollis-core/src/util.rs` and

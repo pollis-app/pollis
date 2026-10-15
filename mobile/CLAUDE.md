@@ -436,7 +436,7 @@ distribution cert from the API key alone.
 `CODE_SIGNING_ALLOWED=NO` on the archive is deliberate: automatic *archive*
 signing wants a development profile, and the team has zero registered devices,
 so it fails. Signing at export instead needs only a distribution cert, which
-`-allowProvisioningUpdates` cloud-mints from the Xcode Apple ID session (no EAS
+`-allowProvisioningUpdates` cloud-mints with the ASC API key above (no EAS
 account exists, deliberately — `eas.json` is vestigial).
 
 **Step 4 is load-bearing.** An unsigned archive carries no entitlements, and

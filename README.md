@@ -213,7 +213,7 @@ and [ARCHITECTURE.md](ARCHITECTURE.md); subsystem docs are in
 | Output | Lives in | What it is |
 |---|---|---|
 | **Desktop app** | `src-tauri/` + `frontend/` | The Tauri client for macOS / Windows / Linux |
-| **Mobile app** | `mobile/` | React Native / Expo client for iOS + Android, using `pollis-core` via uniffi (in development) |
+| **Mobile app** | `mobile/` | React Native / Expo client for iOS + Android, using `pollis-core` via uniffi (TestFlight / Play closed testing, plus a signed APK at pollis.com/android) |
 | **MLS Delivery Service** | `pollis-delivery/` | Dockerized axum service at `api.pollis.com`; the only writer, it serializes MLS commits; crypto stays client-side |
 | **LiveKit stack** | `livekit/` | docker-compose + nginx config for the self-hostable voice/screenshare SFU |
 | **Transparency log** | `verifiable-log*/` + `transparency-publish.yml` | The daily signed Merkle log, built and signed in CI and served from R2 at `verify.pollis.com` |
