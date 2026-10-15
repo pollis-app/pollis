@@ -128,7 +128,7 @@ dotenvy = "0.15"
 # harness stands up a process-local "remote" the DS reads from. Making it
 # optional is what keeps `libsql` — and the h2 0.3 / hyper 0.14 stack it drags
 # behind it — out of the graph a user actually installs.
-libsql = { version = "0.9", features = ["remote"], optional = true }
+libsql = { version = "0.10", default-features = false, features = ["core", "remote"], optional = true }
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 

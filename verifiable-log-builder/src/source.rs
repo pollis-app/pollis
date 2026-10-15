@@ -97,7 +97,10 @@ fn is_remote_url(db: &str) -> bool {
 #[cfg(feature = "db-source")]
 pub async fn connect_with_token(db: &str, token: &str) -> Result<libsql::Connection> {
     let database = if is_remote_url(db) {
+        // libsql is built without its own `tls` feature (#1303); this is
+        // the connector it dials Turso through instead.
         libsql::Builder::new_remote(db.to_string(), token.to_string())
+            .connector(pollis_libsql_connector::Connector::new())
             .build()
             .await?
     } else {

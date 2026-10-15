@@ -15,7 +15,7 @@ path = "src/lib.rs"
 # the three `apply_*` helpers so a test can stamp a real connection with the
 # real schema in one call. The schema constants themselves are plain `&str` and
 # need nothing.
-libsql = { version = "0.9", optional = true }
+libsql = { version = "0.10", default-features = false, features = ["core"], optional = true }
 
 [features]
 default = []

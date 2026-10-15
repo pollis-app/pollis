@@ -102,7 +102,7 @@ tempfile = "3"
 hex = "0.4"
 verifiable-log = { path = "../verifiable-log" }
 # Seed local libSQL fixture DBs for the live-mode tests (no network).
-libsql = { version = "0.9", features = ["remote"] }
+libsql = { version = "0.10", default-features = false, features = ["core", "remote"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 # Spin an in-process relay + SOCKS5 shim to prove the overlay proxy plumbing:
 # that `build_agent(Some(shim))` really dials the origin THROUGH the relay.

@@ -31,11 +31,14 @@ required-features = ["db-source"]
 # said to hold no database credential.
 [features]
 default = ["db-source"]
-db-source = ["dep:libsql"]
+db-source = ["dep:libsql", "dep:pollis-libsql-connector"]
 
 [dependencies]
 verifiable-log = { path = "../verifiable-log" }
-libsql = { version = "0.9", features = ["remote"], optional = true }
+libsql = { version = "0.10", default-features = false, features = ["core", "remote"], optional = true }
+# libsql's own `tls` feature is OFF (above) because it pins rustls 0.22 /
+# rustls-webpki 0.102 (#1303); the Turso reader dials through this instead.
+pollis-libsql-connector = { path = "../pollis-libsql-connector", optional = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 sha2 = "0.10"
 # STH signing key (#668): ML-DSA-44. Its private key IS a 32-byte seed, so the

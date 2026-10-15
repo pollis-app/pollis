@@ -103,6 +103,29 @@ every transaction runs on its own stream regardless of pooling. Pooling also doe
 not widen concurrency — every request already had its own connection; they are
 now reused rather than rebuilt.
 
+### How it dials Turso (TLS) (#1303)
+
+Every libsql dependent in the workspace builds libsql **0.10** with
+`default-features = false` (`core` + `remote` only — no `replication`, `sync` or
+`tls`). libsql's own `tls` feature wraps hyper-rustls 0.25 → rustls 0.22 →
+rustls-webpki 0.102 (RUSTSEC-2026-0049/0098/0099), still in 0.10, and there is
+no hyper-0.14-compatible hyper-rustls on rustls 0.23. So both remote callers —
+`Db::connect_remote` here and `verifiable-log-builder`'s `connect_with_token` —
+pass `pollis_libsql_connector::Connector::new()` to `Builder::connector`: plain
+tokio TCP, wrapped in rustls 0.23 for `https`, ALPN `http/1.1` only, trust
+anchors = Mozilla's set via `webpki-roots` (was the host CA bundle via
+rustls-native-certs; reqwest already used webpki-roots for the DS's other
+outbound calls). `http://` URLs stay plain TCP (local sqld, the #777 hrana
+double).
+
+**Every new `Builder::new_remote` must call `.connector(...)`.** With `tls` off
+and no connector, libsql panics on the first remote query ("you must provide
+your own http connector"). `pollis-libsql-connector/tests/connector.rs` pins the
+contract: verified chain + name, untrusted CA and wrong name refused, `http`
+plain, other schemes refused, and a real libsql remote handle completing the
+handshake through it. h2 0.3 is still linked (libsql declares hyper 0.14 with
+`http2`) but never negotiated — see the RUSTSEC-2026-0258 note in `deny.toml`.
+
 ### users
 - `id` TEXT PK
 - `email` TEXT NOT NULL UNIQUE

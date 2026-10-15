@@ -16,6 +16,7 @@ members = [
     "pollis-api",
     "pollis-schema",
     "pollis-sqlcipher",
+    "pollis-libsql-connector",
 ]
 # Detached from this workspace on purpose: `fuzz/` is the Track-B cargo-fuzz crate
 # (#481). cargo-fuzz needs nightly, but this repo pins Rust 1.96.0 STABLE for
