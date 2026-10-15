@@ -62,8 +62,9 @@
 //!     only way to release one is to delete its message envelope through the
 //!     already-authorized delete/GC/teardown paths above. `/v1/attachments/
 //!     register` additionally binds each declaration to the named message's
-//!     `sender_id` (#1165), so you cannot declare a reference for somebody
-//!     else's message; `/v1/attachments/delete` need only prove a real device,
+//!     author (#1165) — its `sender_id`, or for a sealed envelope its deletion
+//!     capability — so you cannot declare a reference for somebody else's
+//!     message; `/v1/attachments/delete` need only prove a real device,
 //!     because it merely collects an already-unreferenced object — for every
 //!     caller alike, uploader included.
 //!
@@ -1033,9 +1034,6 @@ pub(crate) async fn check_delete_capability(
     message_id: &str,
     token: Option<&str>,
 ) -> anyhow::Result<DeleteCapability> {
-    use sha2::{Digest, Sha256};
-    use subtle::ConstantTimeEq;
-
     let mut rows = conn
         .query(
             "SELECT delete_token_hash FROM message_envelope \
@@ -1074,12 +1072,7 @@ pub(crate) async fn check_delete_capability(
     let Some(token) = token else {
         return Ok(DeleteCapability::Refused);
     };
-    // Compare the base64 forms, in constant time: both are fixed-length encodings
-    // of a 32-byte digest, so a length difference is itself a mismatch rather
-    // than something to branch on.
-    use base64::Engine as _;
-    let digest = base64::engine::general_purpose::STANDARD.encode(Sha256::digest(token.as_bytes()));
-    if digest.as_bytes().ct_eq(stored.as_bytes()).into() {
+    if capability_matches(&stored, token) {
         Ok(DeleteCapability::Proved)
     } else {
         Ok(DeleteCapability::Refused)
@@ -1957,24 +1950,60 @@ const REAP_ORPHANED_VAULT_REFS_SQL: &str = "\
 DELETE FROM vault_attachment_ref \
  WHERE NOT EXISTS (SELECT 1 FROM vault_message vm WHERE vm.id = vault_attachment_ref.vault_message_id)";
 
-/// True when `message_id` names a STILL-EXISTING envelope authored by `user_id`.
+/// True when `message_id` names a STILL-EXISTING envelope the caller provably
+/// wrote.
 ///
 /// Both halves matter. Existence alone was the pre-#690 story and is what made a
 /// forged reference merely inert rather than refused; authorship is what binds
 /// the declaration to an account. A deleted or GC'd envelope answers `false`,
 /// which is correct — there is no message left to declare an attachment for.
+///
+/// Authorship is proved one of two ways. An unsealed envelope names its sender,
+/// so `sender_id == user_id` is the proof. Every envelope a current client
+/// writes is SEALED (#331), though: its `sender_id` is the sentinel `"sealed"`,
+/// which names no account — so the name check alone refused every real
+/// declaration, no message's attachment was ever counted, and each object stayed
+/// collectable by the next delete of the same bytes anywhere. For a sealed
+/// envelope the proof is its own deletion capability (#1086): only its author
+/// can produce the preimage of `delete_token_hash`, and checking it identifies
+/// no one. A sealed envelope with no stored hash (written before #1086) offers
+/// nothing to prove against and is refused, as before.
 async fn envelope_is_authored_by(
     conn: &Connection,
     message_id: &str,
     user_id: &str,
+    delete_token: Option<&str>,
 ) -> anyhow::Result<bool> {
     let mut rows = conn
         .query(
-            "SELECT 1 FROM message_envelope WHERE id = ?1 AND sender_id = ?2 LIMIT 1",
-            libsql::params![message_id.to_string(), user_id.to_string()],
+            "SELECT sender_id, delete_token_hash FROM message_envelope WHERE id = ?1 LIMIT 1",
+            libsql::params![message_id.to_string()],
         )
         .await?;
-    Ok(rows.next().await?.is_some())
+    let Some(row) = rows.next().await? else {
+        return Ok(false);
+    };
+    let sender: String = row.get(0)?;
+    // TEXT, as in `check_delete_capability`.
+    let stored: Option<String> = row.get::<Option<String>>(1).ok().flatten();
+    if sender == user_id {
+        return Ok(true);
+    }
+    Ok(match (stored, delete_token) {
+        (Some(stored), Some(token)) => capability_matches(&stored, token),
+        _ => false,
+    })
+}
+
+/// Does `token` hash to the stored capability `stored`? Compared as base64, in
+/// constant time: both are fixed-length encodings of a 32-byte digest, so a
+/// length difference is itself a mismatch rather than something to branch on.
+fn capability_matches(stored: &str, token: &str) -> bool {
+    use base64::Engine as _;
+    use sha2::{Digest, Sha256};
+    use subtle::ConstantTimeEq;
+    let digest = base64::engine::general_purpose::STANDARD.encode(Sha256::digest(token.as_bytes()));
+    digest.as_bytes().ct_eq(stored.as_bytes()).into()
 }
 
 pub async fn register_attachment(
@@ -2018,7 +2047,9 @@ pub async fn delete_attachment(
 /// collection (see [`live_ref_exists`]), so an ungated declaration is a write
 /// into somebody else's retention decision. A reference is therefore bound to
 /// the account that owns the message it names (#1165, #1161 M5): the
-/// actor must be the `message_envelope.sender_id` of `message_id`. Declaring
+/// actor must be the `message_envelope.sender_id` of `message_id`, or — for a
+/// sealed envelope, whose `sender_id` names no one — present that envelope's
+/// deletion capability (see [`envelope_is_authored_by`]). Declaring
 /// "this file belongs to somebody else's message" is not a claim any account
 /// other than that message's author can make.
 ///
@@ -2060,7 +2091,7 @@ pub async fn apply_register_attachment(
     // nothing at all — not even the (harmless) object row, which would otherwise
     // let a refused caller confirm the shape of the refusal.
     if let (Some(actor), Some(message_id)) = (authed, body.message_id()) {
-        if !envelope_is_authored_by(conn, message_id, actor).await? {
+        if !envelope_is_authored_by(conn, message_id, actor, body.delete_token()).await? {
             return Ok(WriteOutcome::Forbidden);
         }
     }

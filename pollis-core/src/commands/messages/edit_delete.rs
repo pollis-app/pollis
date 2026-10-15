@@ -718,24 +718,143 @@ fn filter_orphaned_locally_all(
 /// durable delivery; a missing reference only risks the pre-#690 status quo for
 /// this one object (it could be collected early if every OTHER reference is
 /// released), so this is never worse than before server-side counting existed.
+///
+/// Returns how many declarations failed, so the backfill below can tell a
+/// finished pass from one to try again.
 pub(crate) async fn register_attachment_refs(
     state: &Arc<AppState>,
     message_id: &str,
     content: &str,
-) {
-    for att in parse_attachment_refs(content) {
+) -> usize {
+    let refs = parse_attachment_refs(content);
+    if refs.is_empty() {
+        return 0;
+    }
+    let mut failed = 0;
+    // The envelope is sealed, so its `sender_id` names no one: the DS binds the
+    // declaration to its author through the envelope's deletion capability
+    // instead. Without it every declaration is refused (403) and the object is
+    // left collectable by the next delete of the same bytes anywhere.
+    let delete_token = super::delete_capability::envelope_delete_token(state, message_id).await;
+    for att in refs {
         let body = pollis_api::messages::AttachmentRegisterBody::ForMessage {
             content_hash: att.content_hash.clone(),
             r2_key: att.r2_key,
             message_id: message_id.to_string(),
+            delete_token: delete_token.clone(),
         };
         if let Err(e) = crate::commands::mls::ds_post_ok(state, &body).await {
+            failed += 1;
             crate::diag!(
                 "[send_message] failed to register attachment ref for {} (msg {message_id}): {e}",
                 att.content_hash
             );
         }
     }
+    failed
+}
+
+const ATTACHMENT_REF_BACKFILL_KEY: &str = "attachment_ref_backfill";
+
+/// Unlocks a backfill pass may take before it stops trying. A message whose
+/// envelope is gone (deleted, or collected under #720) is refused for good, so
+/// a pass that still has failures cannot tell "DS not deployed yet" from
+/// "nothing left to declare"; three tries covers the first without retrying
+/// the second forever.
+const ATTACHMENT_REF_BACKFILL_TRIES: u32 = 3;
+
+/// Re-declare the attachment references of this account's own sent messages
+/// (#1330), once per device, after unlock.
+///
+/// Until #1330 every sealed send's declaration was refused, so no attachment
+/// sent before it is counted on the DS and any delete of the same bytes could
+/// collect it. The author's devices still hold those messages and the account
+/// key that proves authorship, so they can declare the references now. The DS
+/// insert is idempotent, a sibling device repeating the pass is harmless, and a
+/// failure costs only what the user already had. Runs in the background so an
+/// unlock never waits on it.
+pub(crate) fn spawn_attachment_ref_backfill(state: &Arc<AppState>, user_id: &str) {
+    let state = state.clone();
+    let user_id = user_id.to_string();
+    tokio::spawn(async move {
+        let pending: Vec<(String, String)> = {
+            let guard = state.local_db.lock().await;
+            let Some(db) = guard.as_ref() else {
+                return;
+            };
+            let tries: Option<String> = match db
+                .conn()
+                .query_row(
+                    "SELECT value FROM kv WHERE key = ?1",
+                    rusqlite::params![ATTACHMENT_REF_BACKFILL_KEY],
+                    |row| row.get(0),
+                )
+                .optional()
+            {
+                Ok(v) => v,
+                Err(e) => {
+                    crate::diag!("[attachments] backfill state unreadable (non-fatal): {e}");
+                    return;
+                }
+            };
+            let tries = match tries.as_deref() {
+                Some("done") => return,
+                Some(n) => n.parse::<u32>().unwrap_or(ATTACHMENT_REF_BACKFILL_TRIES),
+                None => 0,
+            };
+            if tries >= ATTACHMENT_REF_BACKFILL_TRIES {
+                return;
+            }
+            if let Err(e) = db.conn().execute(
+                "INSERT OR REPLACE INTO kv (key, value) VALUES (?1, ?2)",
+                rusqlite::params![ATTACHMENT_REF_BACKFILL_KEY, (tries + 1).to_string()],
+            ) {
+                crate::diag!("[attachments] backfill state unwritable (non-fatal): {e}");
+                return;
+            }
+            let mut stmt = match db.conn().prepare(
+                "SELECT id, content FROM message \
+                 WHERE sender_id = ?1 AND deleted_at IS NULL \
+                   AND content IS NOT NULL AND content LIKE '{%\"_att\"%'",
+            ) {
+                Ok(s) => s,
+                Err(e) => {
+                    crate::diag!("[attachments] backfill query failed (non-fatal): {e}");
+                    return;
+                }
+            };
+            let rows = stmt.query_map(rusqlite::params![user_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            });
+            match rows {
+                Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                Err(e) => {
+                    crate::diag!("[attachments] backfill query failed (non-fatal): {e}");
+                    return;
+                }
+            }
+        };
+
+        let mut failed = 0;
+        for (message_id, content) in &pending {
+            failed += register_attachment_refs(&state, message_id, content).await;
+        }
+        crate::diag!(
+            "[attachments] backfill declared {} message(s), {failed} refused",
+            pending.len()
+        );
+        if failed == 0 {
+            let guard = state.local_db.lock().await;
+            if let Some(db) = guard.as_ref() {
+                if let Err(e) = db.conn().execute(
+                    "INSERT OR REPLACE INTO kv (key, value) VALUES (?1, 'done')",
+                    rusqlite::params![ATTACHMENT_REF_BACKFILL_KEY],
+                ) {
+                    crate::diag!("[attachments] backfill state unwritable (non-fatal): {e}");
+                }
+            }
+        }
+    });
 }
 
 /// Trigger server-side collection of a deleted message's attachment, and — when

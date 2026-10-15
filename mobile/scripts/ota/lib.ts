@@ -90,6 +90,14 @@ export function assertPublicEnv(env: Record<string, string | undefined>): void {
   if (env.EXPO_PUBLIC_POLLIS_DELIVERY_URL !== PROD_DS) {
     problems.push(`EXPO_PUBLIC_POLLIS_DELIVERY_URL must be exactly ${PROD_DS}`);
   }
+  // Without both R2 origins the core refuses to start (pollis-core's
+  // `r2_config_problem`), so an update built without them would take every
+  // phone that applies it down.
+  for (const name of ["EXPO_PUBLIC_R2_ENDPOINT", "EXPO_PUBLIC_R2_PUBLIC_URL"]) {
+    if (!(env[name] ?? "").trim()) {
+      problems.push(`${name} must be set`);
+    }
+  }
   if (problems.length > 0) {
     throw new Error(`refusing to build an OTA update:\n  - ${problems.join("\n  - ")}`);
   }

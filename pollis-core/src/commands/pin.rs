@@ -720,6 +720,9 @@ pub async fn unlock(
         crate::diag!("[pin] unlock: resign_stale_device_certs failed (non-fatal): {e}");
     }
 
+    // Declare the attachment references sends before #1330 could not. Background.
+    crate::commands::messages::spawn_attachment_ref_backfill(state, &user_id);
+
     Ok(UnlockOutcome {
         user_id: unlocked.user_id,
         attempts_remaining: None,

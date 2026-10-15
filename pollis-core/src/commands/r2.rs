@@ -1358,6 +1358,36 @@ fn origin_of(url: &str) -> Option<String> {
     ))
 }
 
+/// Why an R2 configuration handed in by a host can never move a byte of media,
+/// or `None` when both values name an origin.
+///
+/// [`PresignedUrl::parse`] fails closed on an empty origin, which is right for
+/// the request — but it means a build that simply never received its R2 values
+/// boots, signs in, sends text, and then refuses every attachment, one image at
+/// a time, as "Image unavailable" (a convergent re-upload of a file someone
+/// already stored even "succeeds", because it skips the PUT). The mobile bridge
+/// calls this at `init_pollis` so that build fails at launch with the missing
+/// variable named, the way desktop's `Config::from_env` already refuses to start
+/// without `R2_S3_ENDPOINT` / `R2_PUBLIC_URL`.
+pub(crate) fn r2_config_problem(r2_endpoint: &str, r2_public_url: &str) -> Option<String> {
+    let missing: Vec<&str> = [
+        ("r2_endpoint (EXPO_PUBLIC_R2_ENDPOINT)", r2_endpoint),
+        ("r2_public_url (EXPO_PUBLIC_R2_PUBLIC_URL)", r2_public_url),
+    ]
+    .into_iter()
+    .filter(|(_, value)| origin_of(value.trim()).is_none())
+    .map(|(name, _)| name)
+    .collect();
+    if missing.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{} not set to an R2 URL; every attachment upload and download would be refused. \
+         Build with the R2 values for the Delivery Service this build talks to.",
+        missing.join(" and ")
+    ))
+}
+
 /// Ask the DS to presign an R2 `operation` (`"get"` / `"put"` / `"delete"`) on
 /// `key` and return the ready-to-use URL. Device-signed via [`ds_post`].
 async fn presign_r2(
@@ -1907,6 +1937,27 @@ mod tests {
         let config = crate::config::Config::for_test().expect("test config");
         assert!(PresignedUrl::parse("https://evil.test/x".into(), &config).is_err());
         assert!(PresignedUrl::parse("".into(), &config).is_err());
+    }
+
+    /// A host that hands in no R2 origin is refused by name at init rather than
+    /// booting into a build where every attachment fails. Both values are
+    /// required, each is named when missing, and a configured pair passes.
+    #[test]
+    fn an_r2_config_without_origins_is_named_at_init() {
+        let both = r2_config_problem("", "").expect("empty config must be refused");
+        assert!(both.contains("EXPO_PUBLIC_R2_ENDPOINT"), "{both}");
+        assert!(both.contains("EXPO_PUBLIC_R2_PUBLIC_URL"), "{both}");
+
+        let endpoint_only = r2_config_problem("https://acct.r2.cloudflarestorage.com/bucket", " ")
+            .expect("a missing public URL must be refused");
+        assert!(!endpoint_only.contains("EXPO_PUBLIC_R2_ENDPOINT"), "{endpoint_only}");
+        assert!(endpoint_only.contains("EXPO_PUBLIC_R2_PUBLIC_URL"), "{endpoint_only}");
+
+        assert!(r2_config_problem("acct.r2.cloudflarestorage.com", "https://cdn.pollis.test").is_some());
+        assert_eq!(
+            r2_config_problem("https://acct.r2.cloudflarestorage.com/bucket", "https://cdn.pollis.test"),
+            None
+        );
     }
 
     /// A minimal HTTP/1.1 server that answers every request with `total` bytes,

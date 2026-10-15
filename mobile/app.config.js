@@ -131,6 +131,31 @@ function updatesConfigFor(env, certExists) {
   };
 }
 
+// ## Media origins
+//
+// The core only fetches or stores media at the two R2 origins it was handed at
+// init (`PresignedUrl` in pollis-core/src/commands/r2.rs), so a build that
+// talks to a Delivery Service without them can sign in and send text while
+// every image renders as "Image unavailable". A Release build reads no
+// `.env.development` (Expo loads `.env.production` for it), which is how a dev
+// build used to end up exactly there. Refuse to configure such a build; the
+// core refuses again at init for any build that slips past this.
+const MEDIA_ENV = ["EXPO_PUBLIC_R2_ENDPOINT", "EXPO_PUBLIC_R2_PUBLIC_URL"];
+
+function assertMediaEnv(env) {
+  if (!env.EXPO_PUBLIC_POLLIS_DELIVERY_URL) {
+    return;
+  }
+  const missing = MEDIA_ENV.filter((name) => !(env[name] ?? "").trim());
+  if (missing.length > 0) {
+    throw new Error(
+      `EXPO_PUBLIC_POLLIS_DELIVERY_URL is set but ${missing.join(" and ")} ${missing.length > 1 ? "are" : "is"} not: ` +
+        "this build could not load a single attachment. Set them for the same environment as the DS " +
+        "(dev: doppler secrets get R2_S3_ENDPOINT / R2_PUBLIC_URL -p pollis -c dev_personal --plain; see mobile/.env.example).",
+    );
+  }
+}
+
 // Guard the inputs rather than silently shipping a wrong number: a bad version
 // string here becomes NaN in a store field, which fails late and confusingly.
 function versionCodeFrom(version, build) {
@@ -164,6 +189,7 @@ module.exports = ({ config }) => {
   }
   const code = versionCodeFrom(pkg.version, build);
 
+  assertMediaEnv(process.env);
   const certExists = fs.existsSync(path.join(__dirname, OTA_CERT_PATH));
 
   return {
@@ -176,4 +202,5 @@ module.exports = ({ config }) => {
 };
 
 module.exports.updatesConfigFor = updatesConfigFor;
+module.exports.assertMediaEnv = assertMediaEnv;
 module.exports.OTA = { OTA_CHANNEL, OTA_UPDATE_URL, OTA_CERT_PATH, OTA_PROD_DS, OTA_NEUTRAL_CLIENT_ID };

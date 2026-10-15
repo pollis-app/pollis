@@ -296,7 +296,7 @@ pub async fn send_message(
     // conversation can no longer strand this one. Best-effort — never fails the
     // send (the envelope above is the durable delivery).
     if super::edit_delete::is_attachment_content(&content) {
-        super::edit_delete::register_attachment_refs(state, &id, &content).await;
+        let _ = super::edit_delete::register_attachment_refs(state, &id, &content).await;
     }
 
     // Notify recipients via LiveKit. Non-fatal — errors are logged, not returned.

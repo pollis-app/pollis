@@ -9,7 +9,7 @@
 // (file path today, possibly an expo-image cache delegate later — see the
 // issue) can change without touching screens.
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { View, Text } from "react-native";
 import { Image } from "expo-image";
 import { useTranslation } from "react-i18next";
@@ -42,9 +42,16 @@ export function MediaImage({
     [attachment.blurhash],
   );
 
+  // The URI expo-image last finished drawing. Drives the testID below, so the
+  // Maestro tier can tell a decrypted, rendered image from a blurhash
+  // placeholder that never resolved.
+  const [renderedUri, setRenderedUri] = useState<string | null>(null);
+  const rendered = !!displayUri && renderedUri === displayUri;
+
   if (error) {
     return (
       <View
+        testID="media-unavailable"
         style={[
           {
             borderRadius: r.md,
@@ -75,6 +82,8 @@ export function MediaImage({
       // read on every render and follow a live accent change.
       style={[{ borderRadius: r.md, backgroundColor: semantic.raised }, style]}
       accessibilityLabel={attachment.filename}
+      testID={rendered ? "media-image-rendered" : "media-image-loading"}
+      onLoad={() => setRenderedUri(displayUri)}
     />
   );
 }

@@ -162,8 +162,16 @@ test("no secret value the publisher can see may sit in the bundle", () => {
 });
 
 test("only the four public EXPO_PUBLIC_* names may be set, and the DS must be prod", () => {
-  const ok = { EXPO_PUBLIC_POLLIS_DELIVERY_URL: "https://api.pollis.com", EXPO_PUBLIC_LIVEKIT_URL: "wss://lk.example" };
+  const ok = {
+    EXPO_PUBLIC_POLLIS_DELIVERY_URL: "https://api.pollis.com",
+    EXPO_PUBLIC_LIVEKIT_URL: "wss://lk.example",
+    EXPO_PUBLIC_R2_ENDPOINT: "https://acct.r2.cloudflarestorage.com/pollis",
+    EXPO_PUBLIC_R2_PUBLIC_URL: "https://cdn.example.com",
+  };
   assert.doesNotThrow(() => assertPublicEnv(ok));
+  // The core refuses to start without both R2 origins, so an update must carry them.
+  assert.throws(() => assertPublicEnv({ ...ok, EXPO_PUBLIC_R2_ENDPOINT: "" }), /EXPO_PUBLIC_R2_ENDPOINT must be set/);
+  assert.throws(() => assertPublicEnv({ ...ok, EXPO_PUBLIC_R2_PUBLIC_URL: undefined }), /EXPO_PUBLIC_R2_PUBLIC_URL must be set/);
   assert.throws(() => assertPublicEnv({ ...ok, EXPO_PUBLIC_LIVEKIT_API_SECRET: "s" }), /not a public variable/);
   assert.throws(() => assertPublicEnv({ EXPO_PUBLIC_POLLIS_DELIVERY_URL: "https://api-dev.pollis.com" }), /api-dev/);
   assert.throws(() => assertPublicEnv({}), /must be exactly/);

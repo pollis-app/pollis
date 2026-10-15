@@ -2,20 +2,26 @@ appId: com.pollis.mobile
 tags:
   - parity
 ---
-# MEDIA VIEWER (#1248) — tap an image attachment in chat → the full-screen
-# viewer (a pushed page): double-tap zoom, Save to photos (add-only
-# permission, on demand) with visible feedback, Share reachable, Close back
-# to the chat. Self-contained: signs in, creates a group (→ #General) and
-# sends an image from the photo library.
+# MEDIA VIEWER (#1248) — send an image, prove it renders from R2, then tap it
+# in chat → the full-screen viewer (a pushed page): double-tap zoom, Save to
+# photos (add-only permission, on demand) with visible feedback, Share
+# reachable, Close back to the chat. Self-contained: signs in, creates a group
+# (→ #General) and sends an image from the photo library.
 #
 # The attach step goes through the SYSTEM photo picker (PHPicker on iOS, the
 # Android photo picker), which this app does not own: its cells carry no
-# testIDs and their labels differ by OS version. `addMedia` seeds the library
-# with a known image, and the picker taps below are best-effort and
-# `optional`. Everything after the send runs only when an attachment row
-# actually appeared (`runFlow` + `when`), so a picker that could not be
-# driven skips the viewer half instead of failing the suite — read the
-# screenshots: `media-viewer-03-*` onwards only exist when it ran.
+# testIDs. `addMedia` seeds the library with a known image, and the cell is
+# picked by its accessibility label — "Photo, <date>" on iOS, "Photo taken on
+# <date>" on Android 13+ — never by a screen coordinate, which lands on a
+# different cell (or none) on another OS version or screen size. Every step is
+# mandatory: a picker this flow cannot drive is a failure, not a skip.
+#
+# Right after the send the chat shows the picker's LOCAL preview, which renders
+# whether or not the upload/download/decrypt path works. So the flow cold-
+# restarts the app and re-opens the channel: what renders then came from R2
+# through `get_media_path`. `media-image-rendered` is the image's testID once
+# expo-image has drawn the decrypted file; `media-unavailable` is the "Image
+# unavailable" placeholder, which must not appear.
 
 - runFlow: ../subflows/sign-in.yaml
 - tapOn:
@@ -56,95 +62,98 @@ tags:
 - waitForAnimationToEnd:
     timeout: 5000
 - takeScreenshot: media-viewer-02-picker
-# iOS PHPicker cells read "Photo, <date>". Android's photo picker cells have
-# no text a regex can pick out from its "Photos" tab, so tap the first cell.
-- runFlow:
-    when:
-      platform: iOS
-    commands:
-      - tapOn:
-          text: "Photo, .*"
-          index: 0
-          optional: true
-- runFlow:
-    when:
-      platform: Android
-    commands:
-      - tapOn:
-          point: "16%,61%"
-          optional: true
-# Multiple selection is on, so both pickers need an explicit confirm: "Add"
-# on iOS, "Done" on Android.
+# Tap the seeded photo by label (see the header), then confirm: multiple
+# selection is on, so both pickers need "Add" (iOS) / "Done" (Android).
+- tapOn:
+    text: "Photo(,| taken on) .*"
+    index: 0
 - tapOn:
     text: "(?i)(add|done).*"
-    optional: true
 - extendedWaitUntil:
     visible:
       id: "strip-attachments"
     timeout: 10000
+- tapOn:
+    id: "btn-send"
+# Upload (encrypt + presigned PUT) and the first MLS send in a fresh group can
+# take a while (see messaging.yaml).
+- extendedWaitUntil:
+    visible:
+      id: "btn-attachment-.*"
+    timeout: 60000
+- takeScreenshot: media-viewer-03-sent
+
+# Cold restart: no local preview survives it, so what renders next was
+# downloaded from R2 and decrypted to the sandbox.
+- stopApp
+- launchApp
+- runFlow: ../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 20000
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    text: "E2E Media Group.*"
+    index: 0
+- tapOn:
+    text: "General"
     optional: true
+- assertVisible:
+    id: "screen-chat"
+- extendedWaitUntil:
+    visible:
+      id: "media-image-rendered"
+    timeout: 60000
+- assertNotVisible:
+    id: "media-unavailable"
+- takeScreenshot: media-viewer-04-rendered-after-restart
 
-- runFlow:
-    when:
-      visible:
-        id: "strip-attachments"
-    commands:
-      - tapOn:
-          id: "btn-send"
-      # Upload (encrypt + presigned PUT) and the first MLS send in a fresh
-      # group can take a while (see messaging.yaml).
-      - extendedWaitUntil:
-          visible:
-            id: "btn-attachment-.*"
-          timeout: 60000
-      - takeScreenshot: media-viewer-03-sent
+# The viewer over the same attachment.
+- tapOn:
+    id: "btn-attachment-.*"
+    index: 0
+- extendedWaitUntil:
+    visible:
+      id: "screen-media-viewer"
+    timeout: 10000
+- assertNotVisible:
+    id: "text-media-unavailable"
+- assertVisible:
+    id: "btn-media-close"
+- assertVisible:
+    id: "btn-media-save"
+- assertVisible:
+    id: "btn-media-share"
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: media-viewer-05-open
 
-- runFlow:
-    when:
-      visible:
-        id: "btn-attachment-.*"
-    commands:
-      - tapOn:
-          id: "btn-attachment-.*"
-          index: 0
-      - extendedWaitUntil:
-          visible:
-            id: "screen-media-viewer"
-          timeout: 10000
-      - assertVisible:
-          id: "btn-media-close"
-      - assertVisible:
-          id: "btn-media-save"
-      - assertVisible:
-          id: "btn-media-share"
-      - waitForAnimationToEnd:
-          timeout: 3000
-      - takeScreenshot: media-viewer-04-open
+# Double-tap zooms in on the tapped point; a second double-tap resets.
+- doubleTapOn:
+    id: "media-page-.*"
+- waitForAnimationToEnd:
+    timeout: 2000
+- takeScreenshot: media-viewer-06-zoomed
+- doubleTapOn:
+    id: "media-page-.*"
 
-      # Double-tap zooms in on the tapped point; a second double-tap resets.
-      - doubleTapOn:
-          id: "media-page-.*"
-      - waitForAnimationToEnd:
-          timeout: 2000
-      - takeScreenshot: media-viewer-05-zoomed
-      - doubleTapOn:
-          id: "media-page-.*"
+# Save asks for add-only photo access on first use (iOS shows the
+# system alert; Android 13+ needs no grant at all).
+- tapOn:
+    id: "btn-media-save"
+- tapOn:
+    text: "(?i)allow.*"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: "text-media-feedback"
+    timeout: 10000
+- takeScreenshot: media-viewer-07-saved
 
-      # Save asks for add-only photo access on first use (iOS shows the
-      # system alert; Android 13+ needs no grant at all).
-      - tapOn:
-          id: "btn-media-save"
-      - tapOn:
-          text: "(?i)allow.*"
-          optional: true
-      - extendedWaitUntil:
-          visible:
-            id: "text-media-feedback"
-          timeout: 10000
-      - takeScreenshot: media-viewer-06-saved
-
-      # Close returns to the conversation.
-      - tapOn:
-          id: "btn-media-close"
-      - assertVisible:
-          id: "screen-chat"
+# Close returns to the conversation.
+- tapOn:
+    id: "btn-media-close"
+- assertVisible:
+    id: "screen-chat"

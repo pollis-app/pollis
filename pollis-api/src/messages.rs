@@ -260,6 +260,14 @@ pub enum AttachmentRegisterBody {
         content_hash: String,
         r2_key: String,
         message_id: String,
+        /// The message's deletion capability (#1086) — what proves the caller
+        /// wrote it. Under sealed sender the envelope's `sender_id` is a
+        /// sentinel, so the DS cannot bind the declaration to an account by
+        /// name; it checks this token against the envelope's
+        /// `delete_token_hash` instead. Absent on a client that predates it,
+        /// which the DS can then only accept for an unsealed envelope.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        delete_token: Option<String>,
     },
     /// Upload-time dedup registration: the object exists, no message carries it
     /// yet, so there is no reference to count. Also what a pre-#690 client
@@ -288,6 +296,14 @@ impl AttachmentRegisterBody {
     pub fn message_id(&self) -> Option<&str> {
         match self {
             Self::ForMessage { message_id, .. } => Some(message_id),
+            Self::ObjectOnly { .. } => None,
+        }
+    }
+
+    /// The deletion capability presented for the referenced message, if any.
+    pub fn delete_token(&self) -> Option<&str> {
+        match self {
+            Self::ForMessage { delete_token, .. } => delete_token.as_deref(),
             Self::ObjectOnly { .. } => None,
         }
     }

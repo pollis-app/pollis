@@ -133,9 +133,11 @@ struct InitConfig {
 
 /// Initialize the process-global `AppState`. Safe to call multiple times —
 /// only the first call does any work. `config_json` is a JSON object whose
-/// fields mirror [`Config`]; every field defaults, so a mobile build that does
-/// not use R2 / LiveKit yet can omit them all. In practice `pollis_delivery_url`
-/// is the one that matters: since #987 it is the only backend there is.
+/// fields mirror [`Config`]. `r2_endpoint` and `r2_public_url` are required —
+/// they are the only origins a presigned media URL may point at, so a build
+/// without them is refused here rather than failing every attachment later.
+/// The rest default; `pollis_delivery_url` is the one that matters: since #987
+/// it is the only backend there is.
 #[uniffi::export(async_runtime = "tokio")]
 pub async fn init_pollis(config_json: String) -> Result<(), BridgeError> {
     run_on_worker(init_pollis_inner(config_json)).await
@@ -154,6 +156,15 @@ async fn init_pollis_inner(config_json: String) -> Result<(), BridgeError> {
             let log_dir = crate::diag::log_dir(&crate::db::local::dirs_path());
             if let Err(e) = crate::diag::init(&log_dir) {
                 crate::diag!("[diag] could not open the diagnostics log: {e}");
+            }
+            // Media needs both R2 origins: without them every presigned URL is
+            // refused and each attachment renders as unavailable while the rest
+            // of the app looks healthy. Refuse the build here instead, by name.
+            if let Some(problem) =
+                crate::commands::r2::r2_config_problem(&parsed.r2_endpoint, &parsed.r2_public_url)
+            {
+                crate::diag!("[init] {problem}");
+                return Err(BridgeError::Bridge(problem));
             }
             let config = Config {
                 r2_endpoint: parsed.r2_endpoint,
@@ -1182,9 +1193,19 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             // expo's cacheDirectory comes through as a `file://` URI; Rust's
             // PathBuf needs a bare path (same strip as init's data_dir).
             let dir = dest_dir.strip_prefix("file://").unwrap_or(&dest_dir);
+            // A failure here is what the app renders as "Image unavailable",
+            // with no detail on screen — so the reason goes to the on-device
+            // diagnostics log, where Self → Diagnostics can show it.
             let bytes =
-                crate::commands::r2::download_media(r2_key, content_hash.clone(), &state()?)
-                    .await?;
+                match crate::commands::r2::download_media(r2_key, content_hash.clone(), &state()?)
+                    .await
+                {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        crate::diag!("[media] get_media_path {content_hash} failed: {e}");
+                        return Err(e.into());
+                    }
+                };
             crate::private_fs::create_dir_all(std::path::Path::new(dir))
                 .map_err(|e| BridgeError::Bridge(format!("create media dir: {e}")))?;
             let path = std::path::Path::new(dir).join(&content_hash);

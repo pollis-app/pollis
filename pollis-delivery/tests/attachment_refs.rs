@@ -108,6 +108,7 @@ async fn register_ref(db: &Db, hash: &str, key: &str, msg: &str) {
         content_hash: hash.into(),
         r2_key: key.into(),
         message_id: msg.into(),
+        delete_token: None,
     };
     let out = apply_register_attachment(&db.conn().await.unwrap(), Some("sender"), &body)
         .await
@@ -511,6 +512,7 @@ async fn a_reference_cannot_be_declared_for_another_users_message() {
         content_hash: hash.clone(),
         r2_key: format!("media/{hash}.enc"),
         message_id: "m-owned-by-sender".into(),
+        delete_token: None,
     };
     let out = apply_register_attachment(&db.conn().await.unwrap(), Some("mallory"), &body)
         .await
@@ -547,12 +549,80 @@ async fn a_reference_cannot_be_declared_for_a_message_that_does_not_exist() {
         content_hash: hash.clone(),
         r2_key: format!("media/{hash}.enc"),
         message_id: "no-such-message".into(),
+        delete_token: None,
     };
     let out = apply_register_attachment(&db.conn().await.unwrap(), Some("sender"), &body)
         .await
         .unwrap();
     assert!(matches!(out, WriteOutcome::Forbidden));
     assert!(!referenced(&db, &hash).await);
+}
+
+/// The SEALED envelope — the only kind a current client writes. Its `sender_id`
+/// is the sentinel `"sealed"`, which names no account, so binding by name alone
+/// refused every real declaration: no attachment was ever counted, and every
+/// object stayed collectable by the next delete of the same bytes anywhere. The
+/// author proves itself with the envelope's deletion capability instead
+/// (#1086); a missing or wrong token is still refused, so the M5 binding holds.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_author_of_a_sealed_message_declares_its_reference_with_the_capability() {
+    use base64::Engine as _;
+    use sha2::{Digest, Sha256};
+
+    let db = fresh().await;
+    let hash = "c".repeat(64);
+    let token = "the-author-only-capability";
+    let stored = base64::engine::general_purpose::STANDARD.encode(Sha256::digest(token.as_bytes()));
+    db.conn()
+        .await
+        .unwrap()
+        .execute(
+            "INSERT INTO message_envelope \
+               (id, conversation_id, sender_id, ciphertext, sent_at, sealed, delete_token_hash) \
+             VALUES ('m-sealed', 'conv', 'sealed', 'ct', '2026-01-01T00:00:00Z', 1, ?1)",
+            libsql::params![stored],
+        )
+        .await
+        .unwrap();
+    let body = |delete_token: Option<&str>| AttachmentRegisterBody::ForMessage {
+        content_hash: hash.clone(),
+        r2_key: format!("media/{hash}.enc"),
+        message_id: "m-sealed".into(),
+        delete_token: delete_token.map(str::to_string),
+    };
+
+    for (label, presented) in [("no token", None), ("a wrong token", Some("guess"))] {
+        let out = apply_register_attachment(&db.conn().await.unwrap(), Some("mallory"), &body(presented))
+            .await
+            .unwrap();
+        assert!(
+            matches!(out, WriteOutcome::Forbidden),
+            "{label} must not declare a reference on a sealed message"
+        );
+        assert!(!referenced(&db, &hash).await, "{label} must not pin the object");
+    }
+
+    let out = apply_register_attachment(&db.conn().await.unwrap(), Some("alice"), &body(Some(token)))
+        .await
+        .unwrap();
+    assert!(matches!(out, WriteOutcome::Ok), "the author's capability must be accepted");
+    assert!(
+        referenced(&db, &hash).await,
+        "the sealed message's attachment must now be counted"
+    );
+}
+
+/// The capability travels as an optional field, so the body an older client
+/// sends — no `delete_token` — still parses as a send-path registration, and the
+/// new field is left off the wire when there is none to send.
+#[test]
+fn the_capability_is_optional_on_the_wire() {
+    let old: AttachmentRegisterBody =
+        serde_json::from_str(r#"{"content_hash":"h","r2_key":"media/h.enc","message_id":"m"}"#).unwrap();
+    assert_eq!(old.message_id(), Some("m"));
+    assert_eq!(old.delete_token(), None);
+    let json = serde_json::to_string(&old).unwrap();
+    assert!(!json.contains("delete_token"), "{json}");
 }
 
 /// The upload-time, messageless registration stays open to any authenticated
@@ -602,6 +672,7 @@ async fn register_ref_as(db: &Db, hash: &str, key: &str, msg: &str, actor: &str)
         content_hash: hash.into(),
         r2_key: key.into(),
         message_id: msg.into(),
+        delete_token: None,
     };
     let out = apply_register_attachment(&db.conn().await.unwrap(), Some(actor), &body)
         .await

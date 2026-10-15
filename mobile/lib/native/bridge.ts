@@ -43,11 +43,19 @@ export function registerMockCommand(cmd: string, handler: MockHandler): () => vo
   };
 }
 
+// Why `initializeNativeBridge` failed, when it did. Every command then lands on
+// `defaultBridge`, and the reason the core refused to start (e.g. a build
+// missing its R2 origins) is what the caller needs to see, not "no handler".
+let initFailure: string | null = null;
+
 const defaultBridge: NativeBridge = {
   async invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
     const mock = mockHandlers.get(cmd);
     if (mock) {
       return (await mock(args)) as T;
+    }
+    if (initFailure) {
+      throw new Error(`[pollis-native] the core did not start: ${initFailure}`);
     }
     throw new Error(
       `[pollis-native] invoke("${cmd}") has no handler. ` +
@@ -154,7 +162,14 @@ export async function initializeNativeBridge(config: InitConfig): Promise<void> 
     pollis_delivery_url: config.pollisDeliveryUrl ?? "",
     dev_access_key: config.devAccessKey ?? "",
   });
-  await pollisNative.initPollis(configJson);
+  try {
+    await pollisNative.initPollis(configJson);
+  } catch (err) {
+    const failure = plainBridgeError(err);
+    initFailure = failure instanceof Error ? failure.message : String(failure);
+    throw failure;
+  }
+  initFailure = null;
   setNativeBridge(pollisNativeBridge);
   initialized = true;
 }

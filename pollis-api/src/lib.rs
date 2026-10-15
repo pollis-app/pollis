@@ -522,6 +522,7 @@ endpoints! {
 /// let _ = AttachmentRegisterBody::ForMessage {
 ///     content_hash: "h".into(),
 ///     r2_key: "media/h.enc".into(),
+///     delete_token: None,
 ///     // message_id omitted — the whole point of this variant. Does not compile.
 /// };
 /// ```
@@ -758,6 +759,7 @@ mod tests {
             content_hash: "h".into(),
             r2_key: "media/h.enc".into(),
             message_id: "m1".into(),
+            delete_token: None,
         };
         assert_eq!(
             serde_json::to_string(&for_message).unwrap(),

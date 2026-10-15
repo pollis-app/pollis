@@ -40,7 +40,7 @@ const { updatesConfigFor, OTA } = appConfig;
 function evaluate(env: Record<string, string | undefined>) {
   const saved = { ...process.env };
   try {
-    for (const k of ["POLLIS_OTA", "EXPO_PUBLIC_POLLIS_DELIVERY_URL"]) {
+    for (const k of ["POLLIS_OTA", "EXPO_PUBLIC_POLLIS_DELIVERY_URL", "EXPO_PUBLIC_R2_ENDPOINT", "EXPO_PUBLIC_R2_PUBLIC_URL"]) {
       delete process.env[k];
     }
     Object.assign(process.env, env);
@@ -51,8 +51,23 @@ function evaluate(env: Record<string, string | undefined>) {
   }
 }
 
+const R2 = {
+  EXPO_PUBLIC_R2_ENDPOINT: "https://acct.r2.cloudflarestorage.com/pollis-dev",
+  EXPO_PUBLIC_R2_PUBLIC_URL: "https://cdn.example.com",
+};
+
+test("a build that talks to a DS refuses to configure without both R2 origins", () => {
+  const ds = { EXPO_PUBLIC_POLLIS_DELIVERY_URL: "https://api-dev.pollis.com" };
+  assert.throws(() => evaluate(ds), /EXPO_PUBLIC_R2_ENDPOINT and EXPO_PUBLIC_R2_PUBLIC_URL are not/);
+  assert.throws(() => evaluate({ ...ds, ...R2, EXPO_PUBLIC_R2_PUBLIC_URL: " " }), /EXPO_PUBLIC_R2_PUBLIC_URL is not/);
+  assert.throws(() => evaluate({ ...ds, ...R2, EXPO_PUBLIC_R2_ENDPOINT: "" }), /EXPO_PUBLIC_R2_ENDPOINT is not/);
+  assert.doesNotThrow(() => evaluate({ ...ds, ...R2 }));
+  // No DS at all (CI's compile-only APK): nothing to fetch media for.
+  assert.doesNotThrow(() => evaluate({}));
+});
+
 test("a build without POLLIS_OTA=production has updates off and no URL at all", () => {
-  for (const env of [{}, { POLLIS_OTA: "" }, { POLLIS_OTA: "off" }, { EXPO_PUBLIC_POLLIS_DELIVERY_URL: "https://api-dev.pollis.com" }]) {
+  for (const env of [{}, { POLLIS_OTA: "" }, { POLLIS_OTA: "off" }, { EXPO_PUBLIC_POLLIS_DELIVERY_URL: "https://api-dev.pollis.com", ...R2 }]) {
     const config = evaluate(env);
     assert.deepEqual(config.updates, { enabled: false }, JSON.stringify(env));
   }
