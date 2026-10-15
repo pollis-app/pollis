@@ -27,13 +27,69 @@ export interface InvokeOptions {
   headers: HeadersInit;
 }
 
+// #1338: the core rejects every command with `device_revoked` once the DS has
+// said this device was removed from the account. The one place every command
+// passes through is here, so this is where it is noticed, whichever command
+// happened to hit it first.
+let deviceRevokedHandler: (() => void | Promise<void>) | null = null;
+let deviceRevokedRunning = false;
+
+export function isDeviceRevokedError(error: unknown): boolean {
+  const message =
+    typeof error === "string" ? error : error instanceof Error ? error.message : String(error);
+  // The core's `Error::DeviceRevoked` displays as exactly `device_revoked`; a
+  // command that wraps it appends it after ": ". Anything else that merely
+  // mentions the word (a security-event kind, a nudge payload) is not it.
+  return message === "device_revoked" || message.endsWith(": device_revoked");
+}
+
+/** Register what to do when this device turns out to be revoked. Returns an unsubscribe. */
+export function onDeviceRevoked(handler: () => void | Promise<void>): () => void {
+  deviceRevokedHandler = handler;
+  return () => {
+    if (deviceRevokedHandler === handler) {
+      deviceRevokedHandler = null;
+    }
+  };
+}
+
+function noticeDeviceRevoked(error: unknown): void {
+  if (!isDeviceRevokedError(error) || !deviceRevokedHandler || deviceRevokedRunning) {
+    return;
+  }
+  deviceRevokedRunning = true;
+  const handler = deviceRevokedHandler;
+  // Run after the failing caller's own catch, and only once however many
+  // in-flight commands fail together.
+  queueMicrotask(() => {
+    void Promise.resolve()
+      .then(handler)
+      .catch((e) => console.warn("[device_revoked] handler failed", e))
+      .finally(() => {
+        deviceRevokedRunning = false;
+      });
+  });
+}
+
+/**
+ * Run the device-revoked handler for a revocation learned some other way (the
+ * live `device_revoked` nudge, the startup registration check), so every path
+ * ends the session the same way and shows the same notice.
+ */
+export function deviceWasRevoked(): void {
+  noticeDeviceRevoked("device_revoked");
+}
+
 export function invoke<T>(
   cmd: string,
   args?: InvokeArgs,
   options?: InvokeOptions,
 ): Promise<T> {
   // Real Tauri runtime, or the Playwright vite-alias mock.
-  return tauriInvoke<T>(cmd, args, options);
+  return tauriInvoke<T>(cmd, args, options).catch((error: unknown) => {
+    noticeDeviceRevoked(error);
+    throw error;
+  });
 }
 
 let nextStubChannelId = 0;

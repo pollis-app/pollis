@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { Linking, View, Text } from "react-native";
 import { useRouter } from "expo-router";
 import { Trans, useTranslation } from "react-i18next";
@@ -8,12 +8,15 @@ import { Heading } from "../../components/auth/Heading";
 import { AuthError } from "../../components/auth/AuthError";
 import { semantic, type as ty } from "../../theme/tokens";
 import { useRequestOtp } from "../../hooks/queries/useAuth";
+import { getSessionNotice, setSessionNotice, subscribeSessionNotice } from "../../lib/deviceRevoked";
 
 export default function AuthEmail() {
   const { t } = useTranslation("auth");
   const router = useRouter();
   const [email, setEmail] = useState("");
   const requestOtp = useRequestOtp();
+  // Why the last session ended, when the user did not end it (#1338).
+  const notice = useSyncExternalStore(subscribeSessionNotice, getSessionNotice);
 
   const onSubmit = () => {
     const trimmed = email.trim();
@@ -22,6 +25,7 @@ export default function AuthEmail() {
     }
     requestOtp.mutate(trimmed, {
       onSuccess: () => {
+        setSessionNotice(null);
         router.push({ pathname: "/(auth)/otp", params: { email: trimmed } });
       },
     });
@@ -36,6 +40,11 @@ export default function AuthEmail() {
     <Screen testID="screen-auth-email" centered>
       <Body contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 52, gap: 28 }}>
         <Heading title={t("mobile:auth.email.title")} subtitle={t("mobile:auth.email.intro")} />
+        {notice ? (
+          <Text testID="text-session-notice" accessibilityRole="alert" style={[ty.body, { color: semantic.text }]}>
+            {notice}
+          </Text>
+        ) : null}
         <View style={{ gap: 8 }}>
           <Text style={ty.section}>{t("otp.emailLabel")}</Text>
           <Field

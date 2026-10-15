@@ -32,6 +32,12 @@ pub enum Error {
     #[error("client_outdated")]
     ClientOutdated,
 
+    /// The DS refused this device because it was revoked from another device
+    /// on the account (#1338). Hosts end the session on it; every later signed
+    /// call fails with it too, without reaching the network.
+    #[error("device_revoked")]
+    DeviceRevoked,
+
     #[error("{0}")]
     Other(#[from] anyhow::Error),
 }

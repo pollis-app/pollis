@@ -521,6 +521,7 @@ pub fn run() {
             commands::auth::list_user_devices,
             commands::auth::revoke_device,
             commands::auth::is_current_device_registered,
+            commands::auth::is_current_device_revoked,
             commands::device_enrollment::start_device_enrollment,
             commands::device_enrollment::poll_enrollment_status,
             commands::device_enrollment::await_enrollment_approval,

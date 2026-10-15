@@ -502,9 +502,10 @@ fn parse_credentials(headers: &HeaderMap, now: i64) -> Result<Credentials, AuthR
 
 /// Look up the registered `mls_signature_pub_pq` for `(user_id, device_id)`.
 ///
-/// Returns `Ok(Some(pub))` for a live, enrolled device; `Ok(None)` if the row
-/// is absent, revoked, belongs to a suspended account (#1213), or has a
-/// NULL/wrong-length pubkey — all of which the
+/// Returns [`DeviceLookup::Live`] for a live, enrolled device,
+/// [`DeviceLookup::Revoked`] for a revoked one with a key on record (#1338),
+/// and [`DeviceLookup::Refused`] if the row is absent, belongs to a suspended
+/// account (#1213), or has a NULL/wrong-length pubkey — all of which the
 /// caller treats as "unknown device" → 401. A NULL column specifically means a
 /// device that has not published a cert since #668; it must re-run
 /// `publish-device-cert` (which is session/cert gated, never device-signature
@@ -514,7 +515,7 @@ async fn lookup_device_pubkey(
     conn: &Connection,
     user_id: &str,
     device_id: &str,
-) -> anyhow::Result<Option<VerifyingKey>> {
+) -> anyhow::Result<DeviceLookup> {
     let mut rows = conn
         .query(
             "SELECT mls_signature_pub_pq, revoked_at, \
@@ -526,40 +527,75 @@ async fn lookup_device_pubkey(
 
     let row = match rows.next().await? {
         Some(r) => r,
-        None => return Ok(None),
+        None => return Ok(DeviceLookup::Refused),
     };
 
+    let pub_bytes: Option<Vec<u8>> = row.get::<Option<Vec<u8>>>(0).ok().flatten();
+    let key = pub_bytes.and_then(|b| {
+        if b.len() != MLDSA44_PUB_LEN {
+            return None;
+        }
+        let encoded: &EncodedVerifyingKey<MlDsa44> = b.as_slice().try_into().ok()?;
+        Some(VerifyingKey::decode(encoded))
+    });
+
     // A revoked device must not be able to authenticate, regardless of whether
-    // its pubkey column is still populated.
+    // its pubkey column is still populated. Its key is still returned (#1338)
+    // so the caller can tell its OWN signature apart — from the same single
+    // read, so a revoked device costs exactly what a live one does.
     let revoked_at: Option<String> = row.get::<Option<String>>(1).ok().flatten();
     if revoked_at.is_some() {
-        return Ok(None);
+        return Ok(match key {
+            Some(vk) => DeviceLookup::Revoked(vk),
+            None => DeviceLookup::Refused,
+        });
     }
 
     // A suspended account (#1213) authenticates nothing from any of its
-    // devices — the same refusal as a revoked device, enforced here because
+    // devices — the same refusal as an unknown device, enforced here because
     // this lookup is the one every device-signed endpoint funnels through. The
     // column is read as a required integer so a schema mistake fails closed
     // (Err → reject), never open.
     let suspended: i64 = row.get(2)?;
     if suspended != 0 {
-        return Ok(None);
+        return Ok(DeviceLookup::Refused);
     }
 
-    let pub_bytes: Option<Vec<u8>> = row.get::<Option<Vec<u8>>>(0).ok().flatten();
-    let pub_bytes = match pub_bytes {
-        Some(b) => b,
-        None => return Ok(None),
-    };
+    Ok(match key {
+        Some(vk) => DeviceLookup::Live(vk),
+        None => DeviceLookup::Refused,
+    })
+}
 
-    if pub_bytes.len() != MLDSA44_PUB_LEN {
-        return Ok(None);
+/// What [`lookup_device_pubkey`] found for a `(user_id, device_id)`.
+enum DeviceLookup {
+    /// A live, enrolled device: its key authenticates the request.
+    Live(VerifyingKey),
+    /// A REVOKED device that still has a key on record (#1338). Never
+    /// authenticates; its key only decides whether the refusal may say
+    /// `device_revoked` (the signer's own key) or must stay bare.
+    Revoked(VerifyingKey),
+    /// Unknown device, suspended account, or no usable key: a bare 401.
+    Refused,
+}
+
+/// The refusal for a revoked device: [`AuthRejection::DeviceRevoked`] when this
+/// request's signature verifies against its own key, the bare
+/// [`AuthRejection::Unauthorized`] otherwise. Verifying here costs what a live
+/// device's request costs, so the answer's timing tells nothing either.
+fn revoked_refusal(
+    vk: &VerifyingKey,
+    creds: &Credentials,
+    method: &str,
+    path: &str,
+    body: &[u8],
+) -> AuthRejection {
+    let message = canonical_message(method, path, creds.timestamp, body);
+    if vk.verify(&message, &creds.signature).is_ok() {
+        AuthRejection::DeviceRevoked
+    } else {
+        AuthRejection::Unauthorized
     }
-    let encoded: &EncodedVerifyingKey<MlDsa44> = match pub_bytes.as_slice().try_into() {
-        Ok(e) => e,
-        Err(_) => return Ok(None),
-    };
-    Ok(Some(VerifyingKey::decode(encoded)))
 }
 
 /// Full verification of a write request.
@@ -663,10 +699,14 @@ async fn verify_request_inner(
             Lookup::Hit(vk) => vk,
             Lookup::Miss(stamp) => {
                 let vk = match lookup_device_pubkey(conn, &creds.user_id, &creds.device_id).await {
-                    Ok(Some(vk)) => Arc::new(vk),
+                    Ok(DeviceLookup::Live(vk)) => Arc::new(vk),
                     // Unknown / revoked device, or a DB error: never fail open,
                     // and never cache the negative (see `DeviceKeyCache` docs).
-                    Ok(None) | Err(_) => return Err(AuthRejection::Unauthorized),
+                    Ok(DeviceLookup::Revoked(vk)) => {
+                        return Err(revoked_refusal(&vk, &creds, method, path, body));
+                    }
+                    Ok(DeviceLookup::Refused) => return Err(AuthRejection::Unauthorized),
+                    Err(_) => return Err(AuthRejection::Unauthorized),
                 };
                 // Test seam (#721): with a barrier installed, park here — after
                 // the read, before the insert — so a test can commit a revoke into
@@ -682,8 +722,12 @@ async fn verify_request_inner(
         // routers and have no `AppState` to hang a cache off — every lookup hits
         // the DB.
         None => match lookup_device_pubkey(conn, &creds.user_id, &creds.device_id).await {
-            Ok(Some(vk)) => Arc::new(vk),
-            Ok(None) | Err(_) => return Err(AuthRejection::Unauthorized),
+            Ok(DeviceLookup::Live(vk)) => Arc::new(vk),
+            Ok(DeviceLookup::Revoked(vk)) => {
+                return Err(revoked_refusal(&vk, &creds, method, path, body));
+            }
+            Ok(DeviceLookup::Refused) => return Err(AuthRejection::Unauthorized),
+            Err(_) => return Err(AuthRejection::Unauthorized),
         },
     };
 

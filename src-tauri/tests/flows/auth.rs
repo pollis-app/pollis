@@ -1,4 +1,4 @@
-use crate::harness::{wipe, world, TestClient, TEST_PIN};
+use crate::harness::{expire_ds_device_keys, wipe, world, TestClient, TEST_PIN};
 use pollis_lib::test_harness::invoke;
 use serde_json::json;
 use serial_test::serial;
@@ -451,6 +451,154 @@ async fn revoked_device_reports_itself_unregistered() {
     );
 
     drop(alice);
+}
+
+/// **A revoked device that missed the nudge still signs itself out (#1338).**
+///
+/// Revocation used to reach a device only through the live `device_revoked`
+/// inbox nudge. A device asleep at the time missed it, and from then on every
+/// signed call — including the `is_current_device_registered` check the nudge
+/// handler runs — came back a bare 401: an error, read as "transient", so the
+/// device sat signed in on empty screens forever.
+///
+/// Now the DS answers that device's own signature with `device_revoked`. This
+/// asserts the whole client side: an ordinary command fails with exactly that,
+/// the registration check answers `false` instead of erroring, later calls fail
+/// the same way without reaching the DS, and a plain (keep-data) sign-out still
+/// wipes the device's id and keys, so the next sign-in is a new device rather
+/// than the revoked one again.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_revoked_device_that_missed_the_nudge_is_told_and_wiped() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let profile = alice.sign_up("alice@test.local").await;
+    let user_id = profile.id.clone();
+    alice.create_group("Before revocation").await;
+
+    let groups = || async {
+        invoke::<serde_json::Value>(&alice.webview, "list_user_groups", json!({ "userId": user_id }))
+            .await
+    };
+    groups().await.expect("control: a live device lists its groups");
+
+    // Revoked while it was not listening: tombstone the row as
+    // `POST /v1/devices/revoke` does, and drop the DS's cached key as that
+    // endpoint's eviction does. No nudge is delivered.
+    let w = world().await;
+    let conn = w.remote.conn().await.expect("remote conn");
+    conn.execute(
+        "UPDATE user_device SET revoked_at = datetime('now') WHERE user_id = ?1",
+        libsql::params![user_id.clone()],
+    )
+    .await
+    .expect("tombstone the device");
+    expire_ds_device_keys(&user_id);
+
+    let err = groups().await.expect_err("a revoked device's signed call must fail");
+    assert!(err.contains("device_revoked"), "the failure must say why: {err}");
+    assert!(
+        invoke::<bool>(&alice.webview, "is_current_device_revoked", json!({})).await.unwrap(),
+        "the client must remember that THIS device was revoked"
+    );
+
+    let registered = invoke::<bool>(
+        &alice.webview,
+        "is_current_device_registered",
+        json!({ "userId": user_id }),
+    )
+    .await
+    .expect("the registration check must answer, not error, for a revoked device");
+    assert!(!registered, "a revoked device must report itself unregistered");
+
+    let err = groups().await.expect_err("still revoked");
+    assert!(err.contains("device_revoked"), "{err}");
+
+    // The UI's ordinary sign-out (keep data) — the revoked device is wiped anyway.
+    invoke::<()>(&alice.webview, "logout", json!({ "deleteData": false }))
+        .await
+        .expect("logout");
+    let ks = alice.state.keystore.as_ref();
+    assert!(
+        ks.load_for_user("device_id", &user_id).await.unwrap().is_none(),
+        "the revoked device id must be forgotten, or the next sign-in is the same revoked device"
+    );
+    assert!(
+        ks.load_for_user("account_id_key_wrapped", &user_id).await.unwrap().is_none(),
+        "a device the account removed must not keep the account's keys"
+    );
+    assert!(
+        !invoke::<bool>(&alice.webview, "is_current_device_revoked", json!({})).await.unwrap(),
+        "the next sign-in is a new device and must be allowed to reach the DS"
+    );
+
+    drop(alice);
+}
+
+/// **A late `device_revoked` answer never touches the session that replaced it
+/// (#1338 review).** Requests already in flight when a revoked device is
+/// signed out can come back refused afterwards. If that re-armed a bare
+/// "revoked" flag, the next sign-out would wipe whichever account the index
+/// names next, and the next new device's first call would short-circuit.
+/// The revocation is bound to the exact device that signed the refused
+/// request, and recorded only while it is still this process's device.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_late_revocation_answer_never_touches_the_next_account() {
+    wipe().await;
+
+    let mut client = TestClient::new().await;
+    let alice = client.sign_up("alice@test.local").await;
+    let alice_device = client.state.device_id.lock().await.clone().expect("alice's device");
+
+    let w = world().await;
+    let conn = w.remote.conn().await.expect("remote conn");
+    conn.execute(
+        "UPDATE user_device SET revoked_at = datetime('now') WHERE user_id = ?1",
+        libsql::params![alice.id.clone()],
+    )
+    .await
+    .expect("tombstone alice's device");
+    expire_ds_device_keys(&alice.id);
+    invoke::<serde_json::Value>(&client.webview, "list_user_groups", json!({ "userId": alice.id }))
+        .await
+        .expect_err("alice's device is revoked");
+    invoke::<()>(&client.webview, "logout", json!({ "deleteData": false }))
+        .await
+        .expect("logout alice");
+
+    // Another account signs in on the same app.
+    let bob = client.sign_up("bob@test.local").await;
+    client.create_group("Bob's group").await;
+
+    // An in-flight request of alice's comes back refused only now.
+    let recorded = pollis_lib::commands::auth::note_revoked_response(
+        &client.state,
+        &alice.id,
+        &alice_device,
+    )
+    .await;
+    assert!(!recorded, "a refusal for a device that is no longer this one must mark nobody");
+    assert!(
+        !invoke::<bool>(&client.webview, "is_current_device_revoked", json!({})).await.unwrap(),
+        "bob's device is not revoked"
+    );
+    invoke::<serde_json::Value>(&client.webview, "list_user_groups", json!({ "userId": bob.id }))
+        .await
+        .expect("bob's signed calls still work");
+
+    // Bob signing out normally keeps his data: no forced wipe.
+    invoke::<()>(&client.webview, "logout", json!({ "deleteData": false }))
+        .await
+        .expect("logout bob");
+    let ks = client.state.keystore.as_ref();
+    assert!(
+        ks.load_for_user("account_id_key_wrapped", &bob.id).await.unwrap().is_some(),
+        "a keep-data sign-out of a healthy account must keep its keys"
+    );
+
+    drop(client);
 }
 
 /// Revoking a device leaves a trail in the account's own security log (#947).

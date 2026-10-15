@@ -49,7 +49,7 @@ delete/remove/revoke), the record id is appended to keep the selector unique
 
 | Route | `screen-*` | Key testIDs |
 | --- | --- | --- |
-| `(auth)/email` | `screen-auth-email` | `input-email`, `btn-submit-email`, `btn-sign-in-with-device` (→ `(auth)/link`), `text-legal` |
+| `(auth)/email` | `screen-auth-email` | `input-email`, `btn-submit-email`, `btn-sign-in-with-device` (→ `(auth)/link`), `text-legal`, `text-session-notice` (why the last session ended — e.g. this device was removed from the account, #1338) |
 | `(auth)/link` | `screen-auth-link` | `link-camera`, `btn-link-allow-camera`, `btn-link-toggle-manual`, `input-link-code`, `btn-link-submit`, `link-claiming`, `link-error`; the top back chevron is `btn-link-use-email` (back to email sign-in), not `btn-back` |
 | `(auth)/otp` | `screen-auth-otp` | `input-otp`, `btn-submit-otp` |
 | `(auth)/pin` | `screen-auth-pin` | keypad `btn-pin-0`…`btn-pin-9`, `btn-pin-back`, `btn-pin-signout` |

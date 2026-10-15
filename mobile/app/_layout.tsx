@@ -18,13 +18,14 @@ import { semantic } from "../theme/tokens";
 import { drillIn, settingsPage } from "../lib/transitions";
 import { ThemeProvider } from "../components/theme";
 import { queryClient } from "../lib/queryClient";
-import { initializeNativeBridge } from "../lib/native";
+import { initializeNativeBridge, invoke } from "../lib/native";
 import { usePushNotifications } from "../hooks/usePushNotifications";
 import { useInboxRealtime } from "../hooks/useInboxRealtime";
 import { AutoLockProvider } from "../lib/autolock";
-import { adoptUserLanguage, hydrateLanguage } from "../i18n";
+import i18n, { adoptUserLanguage, hydrateLanguage } from "../i18n";
 import { appStore } from "../stores/appStore";
-import { sweepStalePlaintext } from "../lib/session";
+import { endSession, sweepStalePlaintext } from "../lib/session";
+import { onDeviceRevoked, setSessionNotice } from "../lib/deviceRevoked";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -71,6 +72,30 @@ export default function RootLayout() {
   useEffect(() => {
     hydrateLanguage().finally(() => setLanguageReady(true));
   }, []);
+
+  // #1338: this device was revoked from another device on the account. The
+  // core has already refused the command that found out; end the session (the
+  // core wipes a revoked device's keys and id whatever `deleteData` says) and
+  // say why on sign-in, instead of leaving every screen empty.
+  useEffect(
+    () =>
+      onDeviceRevoked(async () => {
+        // A rejection can land late, after a sign-out or another account's
+        // sign-in: act only if the core says THIS device is the revoked one.
+        const revoked = await invoke<boolean>("is_current_device_revoked").catch(() => false);
+        if (!revoked) {
+          return;
+        }
+        console.warn("[session] this device was removed from the account — signing out");
+        // The core wipes a revoked device itself; the app never asks for it.
+        await invoke("logout", { deleteData: false }).catch((e) =>
+          console.warn("[session] logout of a revoked device failed:", e),
+        );
+        setSessionNotice(i18n.t("auth:login.deviceRemoved"));
+        await endSession();
+      }),
+    [],
+  );
 
   useEffect(() => {
     initializeNativeBridge({

@@ -1292,6 +1292,15 @@ pub async fn logout(state: &Arc<AppState>, delete_data: bool) -> Result<()> {
     let index = crate::accounts::read_accounts_index().unwrap_or_default();
     let user_id = index.last_active_user;
 
+    // A revoked device is wiped whatever the caller asked for (#1338): keeping
+    // its device id would sign the next login in as the same revoked device,
+    // and keeping its account keys on a device the account removed is the one
+    // thing revocation exists to stop. Only when the account being signed out
+    // IS the one whose device was revoked — never another account the index
+    // happens to name.
+    let revoked = user_id.is_some() && state.revoked_user() == user_id;
+    let delete_data = delete_data || revoked;
+
     // Snapshot the device_id WITHOUT clearing it yet — a DS-routed device
     // removal (below) is device-signed and needs `state.device_id` still set.
     let device_id = state.device_id.lock().await.clone();
@@ -1369,6 +1378,10 @@ pub async fn logout(state: &Arc<AppState>, delete_data: bool) -> Result<()> {
     } else {
         let _ = crate::accounts::clear_last_active_user();
     }
+
+    // Whatever the reason for this sign-out, the revoked device (if any) is no
+    // longer this process's device; whoever signs in next starts clean.
+    state.clear_revoked_device();
 
     Ok(())
 }
@@ -1737,6 +1750,24 @@ pub async fn revoke_device(
 /// disabled the entire graceful sign-out path: `revoke_device` publishes a
 /// `device_revoked` nudge specifically so each device re-checks here and only
 /// the revoked one logs out, and that check could never fail.
+/// The recording half of the `device_revoked` answer, exposed for the flows
+/// harness's late-response test (#1338).
+#[doc(hidden)]
+pub use crate::commands::mls::ds_client::note_revoked_response;
+
+/// Whether THIS process's current device is the one the DS answered
+/// `device_revoked` for (#1338). The hosts ask before they act on a
+/// `device_revoked` error, so a rejection that arrives late — after a sign-out
+/// or a switch of account — never ends a healthy session.
+pub async fn is_current_device_revoked(state: &Arc<AppState>) -> Result<bool> {
+    let device_id = state.device_id.lock().await.clone();
+    let index = crate::accounts::read_accounts_index().unwrap_or_default();
+    Ok(match (index.last_active_user, device_id) {
+        (Some(user_id), Some(device_id)) => state.is_revoked_device(&user_id, &device_id),
+        _ => false,
+    })
+}
+
 pub async fn is_current_device_registered(
     state: &Arc<AppState>,
     user_id: String,
@@ -1748,13 +1779,20 @@ pub async fn is_current_device_registered(
     // `include_revoked: false` IS the `revoked_at IS NULL` predicate, now
     // applied server-side (#987) — see the note above for why it is load-bearing.
     // Asking for one id keeps this a point lookup rather than a device-list scan.
-    let rows = crate::commands::ds_reads::devices(
+    // A revoked device's own signed read is refused as `device_revoked` — which
+    // is exactly the answer this asks for, not a transient error (#1338).
+    let rows = match crate::commands::ds_reads::devices(
         state,
         Some(&user_id),
         vec![device_id.clone()],
         false,
     )
-    .await?;
+    .await
+    {
+        Ok(rows) => rows,
+        Err(crate::error::Error::DeviceRevoked) => return Ok(false),
+        Err(e) => return Err(e),
+    };
     Ok(rows.iter().any(|d| d.device_id == device_id))
 }
 

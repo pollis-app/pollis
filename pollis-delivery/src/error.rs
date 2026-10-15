@@ -54,14 +54,33 @@ where
 pub enum AuthRejection {
     Unauthorized,
     Forbidden,
+    /// The request is signed by the device's own key, and that device has been
+    /// revoked (#1338). Told apart from [`AuthRejection::Unauthorized`] so the
+    /// device can sign itself out instead of retrying forever. Only a holder of
+    /// the revoked device's private key can earn this answer, so it tells the
+    /// caller nothing it could not already infer; an unknown device or a bad
+    /// signature still gets the bare `unauthorized`.
+    DeviceRevoked,
 }
+
+/// Response header carried by a [`AuthRejection::DeviceRevoked`] answer, so a
+/// client can recognise it without reading (and consuming) the body.
+pub const AUTH_ERROR_HEADER: &str = "x-pollis-auth-error";
 
 impl IntoResponse for AuthRejection {
     fn into_response(self) -> Response {
         let (code, msg) = match self {
             AuthRejection::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
             AuthRejection::Forbidden => (StatusCode::FORBIDDEN, "forbidden"),
+            AuthRejection::DeviceRevoked => (StatusCode::UNAUTHORIZED, "device_revoked"),
         };
-        (code, Json(serde_json::json!({ "error": msg }))).into_response()
+        let mut resp = (code, Json(serde_json::json!({ "error": msg }))).into_response();
+        if matches!(self, AuthRejection::DeviceRevoked) {
+            resp.headers_mut().insert(
+                AUTH_ERROR_HEADER,
+                axum::http::HeaderValue::from_static("device_revoked"),
+            );
+        }
+        resp
     }
 }

@@ -1,0 +1,52 @@
+appId: com.pollis.mobile
+tags:
+  - two-client
+---
+# DEVICE REVOKED (#1338), part 1 of 2 — driven by scripts/maestro-device-revoked.sh.
+# The peer (the account's first device) signed up ${MAESTRO_EMAIL} and printed
+# its recovery key. Join that account as a second device with the key, set a
+# PIN and reach the tabs. The script then closes the app and the peer revokes
+# this device while it is not listening.
+
+- clearState
+- launchApp
+- assertVisible:
+    id: "screen-auth-email"
+- tapOn:
+    id: "input-email"
+- inputText: "${MAESTRO_EMAIL}"
+- tapOn:
+    id: "btn-submit-email"
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-otp"
+    timeout: 20000
+- inputText: "${MAESTRO_OTP}"
+- tapOn:
+    id: "btn-submit-otp"
+
+# A known account on a new device: enroll with the recovery key.
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-enrollment"
+    timeout: 20000
+- tapOn:
+    id: "btn-enroll-recovery"
+- tapOn:
+    id: "input-recovery-key"
+- inputText: "${MAESTRO_RECOVERY_KEY}"
+- tapOn:
+    id: "btn-submit-recovery"
+
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-pin"
+    timeout: 30000
+- runFlow: ../../subflows/enter-pin.yaml
+- runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 60000
+- takeScreenshot: device-revoked-01-enrolled
+- stopApp

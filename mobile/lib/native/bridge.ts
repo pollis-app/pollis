@@ -22,6 +22,7 @@ import { Platform } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
 import * as pollisNative from "pollis-native";
 import { plainBridgeError } from "./bridgeError";
+import { noticeDeviceRevoked } from "../deviceRevoked";
 
 export interface NativeBridge {
   invoke<T = unknown>(cmd: string, args?: Record<string, unknown>): Promise<T>;
@@ -82,7 +83,9 @@ const pollisNativeBridge: NativeBridge = {
     try {
       resultJson = await pollisNative.invoke(cmd, argsJson);
     } catch (err) {
-      throw plainBridgeError(err);
+      const failure = plainBridgeError(err);
+      noticeDeviceRevoked(failure);
+      throw failure;
     }
     if (resultJson === "" || resultJson === "null") {
       return null as T;
