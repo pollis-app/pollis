@@ -207,6 +207,8 @@ The vendored build runs meson + ninja on the C++ source. CI installs:
 
 For local Linux dev: `pacman -S meson ninja clang cmake` (Arch) or the equivalent for your distro.
 
+**Linux needs clang ≥ 21 for webrtc-sys (#1303).** Since livekit 0.9, webrtc-sys compiles its C++ shims with `clang++` against the hermetic libc++ baked into libwebrtc.a, and that libc++ refuses a clang older than the one it was built with (21 today — webrtc-sys reads the floor from the artifact, so a libwebrtc bump can raise it; GCC is rejected outright). Ubuntu's apt `clang` is 14 (22.04) / 18 (24.04), so every Linux CI job that builds the media stack runs `scripts/install-clang.sh`, which adds the LLVM apt repo and puts a `clang`/`clang++` shim first on PATH (`$GITHUB_PATH`, never `$GITHUB_ENV`). Arch/Fedora's distro clang is already new enough; on Ubuntu run the script locally. `.cargo/config.toml` no longer forces `-std=c++17` in `CXXFLAGS` — it overrode webrtc-sys's `-std=c++20`, which the new headers need.
+
 ## Where APM does *not* run
 
 - **Voice Settings test harness** (`commands/voice_test.rs`). The mic test, record/playback, and tone playback all bypass APM intentionally: users want to verify the device is delivering audio at all, not what it sounds like after processing. The level meter shows the raw pre-APM signal.

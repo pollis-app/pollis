@@ -77,3 +77,12 @@ $SUDO apt-get install -y --no-install-recommends \
   v4l2loopback-utils \
   "linux-headers-$(uname -r)" \
   || echo "[install-system-deps] v4l2loopback-dkms/headers unavailable here (expected during the Docker image build); start-camera.sh retries at runtime on the runner kernel" >&2
+
+# --- clang >= 21 for webrtc-sys (#1303) -------------------------------------------
+# livekit 0.9's webrtc-sys compiles against libwebrtc's hermetic libc++, which
+# rejects any clang older than the one it was built with; 24.04's `clang` (18,
+# installed above for meson) is too old. scripts/install-clang.sh adds the LLVM
+# apt repo and puts a `clang++` shim first on PATH ($GITHUB_PATH on the runner;
+# the Dockerfile sets ENV PATH). The Docker build passes INSTALL_CLANG_SCRIPT
+# because it copies this script alone, without the rest of the tree.
+bash "${INSTALL_CLANG_SCRIPT:-$(dirname "$0")/../../scripts/install-clang.sh}"

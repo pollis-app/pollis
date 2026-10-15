@@ -269,7 +269,7 @@ verifiable-log-serve = { path = "../verifiable-log-serve", default-features = fa
 # exactly.
 # - livekit/libwebrtc: Rust LiveKit realtime/media engine.
 # - cpal/rodio: host audio I/O for voice + sound effects.
-livekit = { version = "0.7", features = ["rustls-tls-webpki-roots"], optional = true }
+livekit = { version = "0.9", features = ["rustls-tls-webpki-roots"], optional = true }
 libwebrtc = { version = "0.3", optional = true }
 cpal = { version = "0.15", optional = true }
 rodio = { version = "0.19", default-features = false, features = ["wav"], optional = true }

@@ -750,6 +750,8 @@ fn push_frame(
     let frame = VideoFrame {
         rotation: VideoRotation::VideoRotation0,
         timestamp_us,
+        // No packet-trailer features are negotiated, so there is no metadata to attach.
+        frame_metadata: None,
         buffer,
     };
     if let Some(source) = source {

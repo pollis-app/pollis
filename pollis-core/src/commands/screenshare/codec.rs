@@ -17,7 +17,7 @@ use livekit::options::VideoCodec;
 /// - The "VideoToolbox H.264" HW-accel path on macOS is real but
 ///   LiveKit's Rust SDK pins H.264 SDP preferences to profile
 ///   `42e01f` (Constrained Baseline Level 3.1, 1280×720 ceiling — see
-///   `rtc_session.rs::create_sender` in livekit 0.7). Publishing >720p
+///   `rtc_session.rs` in livekit 0.7, unchanged in 0.9). Publishing >720p
 ///   as H.264 silently emits zero RTP packets. That tradeoff (HW accel
 ///   at the cost of capped resolution) is exposed via the env var
 ///   below; it is not the default.
