@@ -722,7 +722,11 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let reply_to_id: Option<String> = arg_opt(&args, "replyToId")?;
             let thread_id: Option<String> = arg_opt(&args, "threadId")?;
             let sender_username: Option<String> = arg_opt(&args, "senderUsername")?;
-            ok(messages::send_message(
+            // Optional (#1335): a renderer that predates the outbox sends none
+            // and the core mints one.
+            let message_id: Option<String> = arg_opt(&args, "messageId")?;
+            ok(messages::send_message_with_id(
+                message_id,
                 conversation_id,
                 sender_id,
                 content,
@@ -733,6 +737,17 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             )
             .await?)
         }
+        // Durable outbox (#1335).
+        "new_message_id" => ok(messages::new_message_id()),
+        "retry_message" => {
+            let message_id: String = arg(&args, "messageId")?;
+            ok(messages::retry_message(message_id, &state()?).await?)
+        }
+        "discard_unsent_message" => {
+            let message_id: String = arg(&args, "messageId")?;
+            ok(messages::discard_unsent_message(message_id, &state()?).await?)
+        }
+        "flush_outbox" => ok(messages::flush_outbox(&state()?).await?),
         "get_channel_messages" => {
             let user_id: String = arg(&args, "userId")?;
             let channel_id: String = arg(&args, "channelId")?;

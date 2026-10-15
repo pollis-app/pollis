@@ -145,6 +145,11 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::vault::search_vault_messages,
             crate::commands::messages::list_messages,
             crate::commands::messages::send_message,
+            // Durable outbox (#1335)
+            crate::commands::messages::new_message_id,
+            crate::commands::messages::retry_message,
+            crate::commands::messages::discard_unsent_message,
+            crate::commands::messages::flush_outbox,
             crate::commands::messages::get_channel_messages,
             crate::commands::messages::get_dm_messages,
             // The realtime-hint ingest the renderer fires on a `new_message`

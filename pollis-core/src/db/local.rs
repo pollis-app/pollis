@@ -680,6 +680,16 @@ const ADDITIVE_COLUMNS: &[(&str, &str, &str)] = &[
             OR (undecryptable IN ('stranded', 'failed', 'lineage') AND content IS NULL)
         )",
     ),
+    // The durable outbox (#1335). Must stay identical to the column in
+    // `local_schema.sql`.
+    (
+        "message",
+        "send_state",
+        "ALTER TABLE message ADD COLUMN send_state TEXT CHECK (
+            send_state IS NULL
+            OR (send_state IN ('pending', 'failed') AND undecryptable IS NULL AND content IS NOT NULL)
+        )",
+    ),
 ];
 
 /// Apply [`ADDITIVE_COLUMNS`] to a database that predates them.
@@ -773,8 +783,10 @@ pub fn evict_old_messages(conn: &Connection) -> Result<usize> {
     // `received_at` is stored as "YYYY-MM-DD HH:MM:SS" (datetime('now') format),
     // which compares correctly against datetime('now', '-N days').
     let modifier = format!("-{days} days");
+    // An unsent message (#1335) is never evicted: it is the only copy of
+    // something the user wrote and is still waiting to deliver, not history.
     let deleted = conn.execute(
-        "DELETE FROM message WHERE received_at < datetime('now', ?1)",
+        "DELETE FROM message WHERE received_at < datetime('now', ?1) AND send_state IS NULL",
         rusqlite::params![modifier],
     )?;
     if deleted > 0 {
@@ -1335,6 +1347,67 @@ mod tests {
             [],
         )
         .expect("thread_id is writable");
+
+        // #1335: the outbox column arrived the same way, and pre-existing
+        // history reads as delivered.
+        let send_state: Option<String> = conn
+            .query_row("SELECT send_state FROM message WHERE id = 'old1'", [], |row| row.get(0))
+            .expect("send_state is readable on an upgraded DB");
+        assert_eq!(send_state, None, "pre-outbox history is delivered history");
+        conn.execute(
+            "INSERT INTO message (id, conversation_id, sender_id, ciphertext, content, sent_at, send_state)
+             VALUES ('new2', 'conv1', 'user1', X'', 'queued', '2024-01-03T00:00:00Z', 'pending')",
+            [],
+        )
+        .expect("send_state is writable on an upgraded DB");
+    }
+
+    /// #1335: an unsent row is always a real message of ours with content —
+    /// never a placeholder, never an unknown state, never contentless.
+    #[test]
+    fn send_state_admits_only_unsent_real_messages() {
+        let db = db();
+        let conn = db.conn();
+        let insert = |id: &str, content: Option<&str>, undecryptable: Option<&str>, state: Option<&str>| {
+            conn.execute(
+                "INSERT INTO message (id, conversation_id, sender_id, ciphertext, content, sent_at, undecryptable, send_state)
+                 VALUES (?1, 'c1', 'u1', X'', ?2, '2024-01-01T00:00:00Z', ?3, ?4)",
+                rusqlite::params![id, content, undecryptable, state],
+            )
+        };
+        insert("ok-pending", Some("hi"), None, Some("pending")).expect("pending is admitted");
+        insert("ok-failed", Some("hi"), None, Some("failed")).expect("failed is admitted");
+        insert("ok-sent", Some("hi"), None, None).expect("delivered is admitted");
+        assert!(insert("bad-state", Some("hi"), None, Some("sending")).is_err(), "unknown state");
+        assert!(insert("bad-empty", None, None, Some("pending")).is_err(), "no content to send");
+        assert!(
+            insert("bad-placeholder", None, Some("failed"), Some("pending")).is_err(),
+            "a placeholder is never ours to send"
+        );
+    }
+
+    /// #1335: retention never evicts a message that is still waiting to send.
+    #[test]
+    fn eviction_spares_unsent_messages() {
+        let db = db();
+        let conn = db.conn();
+        for (id, state) in [("old-sent", None), ("old-unsent", Some("failed"))] {
+            conn.execute(
+                "INSERT INTO message (id, conversation_id, sender_id, ciphertext, content, sent_at, received_at, send_state)
+                 VALUES (?1, 'c1', 'u1', X'', 'x', '2020-01-01T00:00:00Z', '2020-01-01 00:00:00', ?2)",
+                rusqlite::params![id, state],
+            )
+            .unwrap();
+        }
+        set_message_retention_days(conn, 30).expect("set retention");
+        let left: Vec<String> = conn
+            .prepare("SELECT id FROM message ORDER BY id")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<std::result::Result<_, _>>()
+            .unwrap();
+        assert_eq!(left, vec!["old-unsent".to_string()]);
     }
 
     /// A fresh database has no `message` table when additive columns run, and

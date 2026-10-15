@@ -614,6 +614,7 @@ mod tests {
             edited_at: None,
             deleted_at: None,
             undecryptable: false,
+            send_state: None,
         }
     }
 

@@ -61,6 +61,12 @@ pub struct ChannelMessage {
     /// not decrypt (#1312). `content` is always `None` when set.
     #[serde(default)]
     pub undecryptable: bool,
+    /// The durable outbox (#1335): `Some("pending")` for this device's own
+    /// message that is stored but not yet confirmed by the DS, `Some("failed")`
+    /// when its last delivery attempt failed (the renderer offers Retry), `None`
+    /// for everything delivered or received. Omitted from the JSON when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub send_state: Option<String>,
 }
 
 /// Opaque pagination cursor — the (sent_at, id) of the oldest row on the

@@ -598,7 +598,8 @@ pub async fn send_message(
     };
     let conn = state.db.conn().await?;
     let log = state.log_db.conn().await?;
-    let outcome = send_envelope(&conn, &log, authed.as_deref(), &parsed).await?;
+    let (outcome, replayed) =
+        send_envelope_once(&conn, &log, authed.as_deref(), &parsed).await?;
 
     // Wake the recipients, AFTER the envelope has landed and only if it did
     // (#987). Best-effort and detached: a push that fails must never fail a send
@@ -607,7 +608,8 @@ pub async fn send_message(
     // The sender is taken from the AUTHENTICATED user, never from the body:
     // under sealed sender (#331) `body.sender_id` is a blinded sentinel, so
     // using it would exclude nobody and push the sender their own message.
-    if matches!(outcome, WriteOutcome::Ok) {
+    // A replay (#1335) already woke them the first time.
+    if matches!(outcome, WriteOutcome::Ok) && !replayed {
         if let Some(push_to) = parsed.push_to.clone() {
             let sender = authed.clone().unwrap_or_else(|| {
                 parsed.sender_id.clone().unwrap_or_default()
@@ -858,7 +860,36 @@ pub async fn send_envelope(
     authed: Option<&str>,
     body: &SendMessageBody,
 ) -> anyhow::Result<WriteOutcome> {
-    apply_at_head(
+    Ok(send_envelope_once(main, log, authed, body).await?.0)
+}
+
+/// [`send_envelope`], also saying whether the envelope was a REPLAY of one this
+/// DS already holds — `true` means nothing was written, and the handler must
+/// not push the recipients a second time.
+///
+/// A replay is the client's durable outbox at work (#1335): a sender that died
+/// after its post landed but before it recorded that, re-posting the same
+/// message under the same id after the next unlock. The id is the envelope's
+/// primary key, so before this the re-post failed on the constraint (a 500)
+/// and the outbox would have marked a DELIVERED message failed forever. It is
+/// answered as success instead, without touching the stored row — the
+/// re-post's ciphertext is a fresh seal of the same plaintext, and recipients
+/// already have (or will fetch) the first one.
+///
+/// Checked BEFORE the epoch gate on purpose: a replay sealed at an old epoch
+/// is still a replay, and `apply_at_head`'s post-check deletes the row `id`
+/// names when the head moved — which, for a replay, would be the already
+/// delivered envelope.
+pub async fn send_envelope_once(
+    main: &Connection,
+    log: &Connection,
+    authed: Option<&str>,
+    body: &SendMessageBody,
+) -> anyhow::Result<(WriteOutcome, bool)> {
+    if let Some(replay) = replayed_send(main, authed, body).await? {
+        return Ok((replay, true));
+    }
+    let outcome = apply_at_head(
         main,
         log,
         &body.conversation_id,
@@ -866,7 +897,39 @@ pub async fn send_envelope(
         body.generation.zip(body.epoch),
         || apply_send_message(main, authed, body),
     )
-    .await
+    .await?;
+    Ok((outcome, false))
+}
+
+/// `Some(outcome)` when `body.id` is already a stored envelope: `Ok` for the
+/// same message in the same conversation (a replay), `Invalid` for an id some
+/// other envelope holds, `Forbidden` for a caller who could not send here
+/// anyway (checked first, so a non-member learns nothing about which ids
+/// exist). `None` for a new envelope.
+async fn replayed_send(
+    main: &Connection,
+    authed: Option<&str>,
+    body: &SendMessageBody,
+) -> anyhow::Result<Option<WriteOutcome>> {
+    let mut rows = main
+        .query(
+            "SELECT conversation_id, type FROM message_envelope WHERE id = ?1 LIMIT 1",
+            libsql::params![body.id.clone()],
+        )
+        .await?;
+    let Some(row) = rows.next().await? else {
+        return Ok(None);
+    };
+    let (conversation_id, kind): (String, String) = (row.get(0)?, row.get(1)?);
+    if let Some(user) = authed {
+        if !is_member(main, &body.conversation_id, user).await? {
+            return Ok(Some(WriteOutcome::Forbidden));
+        }
+    }
+    if conversation_id != body.conversation_id || kind != "message" {
+        return Ok(Some(WriteOutcome::Invalid("envelope id is already in use")));
+    }
+    Ok(Some(WriteOutcome::Ok))
 }
 
 /// [`apply_edit_message`] under the epoch gate — what `/v1/messages/edit` runs.
@@ -4394,6 +4457,60 @@ mod epoch_gate_tests {
         assert!(matches!(behind, WriteOutcome::EpochBehind { .. }), "{behind:?}");
         assert!(stored(&c, "m0").await);
         assert!(!stored(&c, "m1").await);
+    }
+
+    /// #1335: a sender's outbox re-posting an envelope that already landed is
+    /// told it succeeded, and nothing is stored twice — even when the re-post
+    /// was sealed at an epoch the group has since left, because the epoch
+    /// gate's clean-up would otherwise delete the DELIVERED row.
+    #[tokio::test]
+    async fn a_replayed_envelope_is_success_and_stores_nothing_new() {
+        let c = conn().await;
+        append_commit(&c, "dm", 0, 0).await;
+        // Head is (0, 1); the first post lands.
+        let (first, replayed) =
+            send_envelope_once(&c, &c, None, &send("m1", "dm", Some(0), Some(1)))
+                .await
+                .unwrap();
+        assert!(matches!(first, WriteOutcome::Ok) && !replayed, "{first:?}");
+
+        // The group moves on, and the retry is sealed at the old epoch.
+        append_commit(&c, "dm", 0, 1).await;
+        let mut again = send("m1", "dm", Some(0), Some(1));
+        again.ciphertext = "mls:01".to_string();
+        let (second, replayed) = send_envelope_once(&c, &c, None, &again).await.unwrap();
+        assert!(matches!(second, WriteOutcome::Ok), "{second:?}");
+        assert!(replayed, "the handler must know not to push again");
+
+        let mut rows = c
+            .query(
+                "SELECT COUNT(*), MIN(ciphertext) FROM message_envelope WHERE id = 'm1'",
+                (),
+            )
+            .await
+            .unwrap();
+        let row = rows.next().await.unwrap().unwrap();
+        assert_eq!(row.get::<i64>(0).unwrap(), 1, "one envelope, not two");
+        assert_eq!(
+            row.get::<String>(1).unwrap(),
+            "mls:00",
+            "the delivered envelope is untouched"
+        );
+    }
+
+    /// An id another conversation's envelope holds is refused, never treated
+    /// as a replay.
+    #[tokio::test]
+    async fn an_envelope_id_used_elsewhere_is_refused() {
+        let c = conn().await;
+        let ok = send_envelope(&c, &c, None, &send("m1", "dm", None, None))
+            .await
+            .unwrap();
+        assert!(matches!(ok, WriteOutcome::Ok), "{ok:?}");
+        let out = send_envelope(&c, &c, None, &send("m1", "other-dm", None, None))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Invalid(_)), "{out:?}");
     }
 
     #[tokio::test]

@@ -167,6 +167,11 @@ pub struct AppState {
     /// atomic on this device. Cross-device races are caught instead by the
     /// `UNIQUE(conversation_id, epoch)` constraint on `mls_commit_log`.
     pub mls_group_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+    /// Per-message locks for the durable outbox (#1335): one delivery attempt
+    /// per queued message at a time, so a send still in flight, a retry the user
+    /// asked for and the drain that runs after unlock or a reconnect can never
+    /// post the same message twice at once. See `messages::outbox`.
+    pub outbox_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
     /// Fan-out of decoded remote screenshare frames (packed I420, the same
     /// `pack_frame_bytes` wire format the legacy Tauri `Channel` carried) to
     /// the loopback media server's `/screenshare/<token>` WebSocket route.
@@ -247,6 +252,7 @@ impl AppState {
             terminals: Arc::new(Mutex::new(HashMap::new())),
             shutdown_signal: Arc::new(Notify::new()),
             mls_group_locks: Arc::new(Mutex::new(HashMap::new())),
+            outbox_locks: Arc::new(Mutex::new(HashMap::new())),
             // Receiver dropped immediately; subscribers are created per
             // WebSocket connection via `screenshare_frame_tx.subscribe()`.
             screenshare_frame_tx: tokio::sync::broadcast::channel(8).0,

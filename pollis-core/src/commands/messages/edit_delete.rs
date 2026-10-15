@@ -93,6 +93,12 @@ pub async fn delete_message(
     user_id: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
+    // Deleting a message that never left this device (#1335) is discarding it:
+    // there is no envelope to remove and nobody else to tell.
+    if super::outbox::is_unsent(state, &message_id).await? {
+        super::outbox::discard_unsent_message(message_id, state).await?;
+        return Ok(());
+    }
     // Resolve the message's AUTHOR + conversation. Authorship MUST come from the
     // LOCAL `message` row — its `sender_id` is the credential-authenticated author
     // (written from the MLS credential at ingest, or self-attributed at send).
@@ -930,6 +936,14 @@ pub async fn edit_message(
     new_content: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
+    // An unsent message (#1335) has no envelope for an edit to target; the
+    // recipients would get an edit of a message they never received. The
+    // renderer offers Retry or Discard on such a row instead.
+    if super::outbox::is_unsent(state, &message_id).await? {
+        return Err(crate::error::Error::Other(anyhow::anyhow!(
+            "message has not been sent yet"
+        )));
+    }
     let envelope_id = Ulid::new().to_string();
 
     // Resolve the MLS group for this conversation (channel → group_id, DM → conversation_id).

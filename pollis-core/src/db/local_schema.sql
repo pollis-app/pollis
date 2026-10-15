@@ -42,6 +42,17 @@ CREATE TABLE IF NOT EXISTS message (
     undecryptable TEXT CHECK (
         undecryptable IS NULL
         OR (undecryptable IN ('stranded', 'failed', 'lineage') AND content IS NULL)
+    ),
+    -- The durable outbox (#1335). NULL for every delivered or received row.
+    -- 'pending' = this device's own message, stored BEFORE any network work and
+    -- not yet confirmed by the DS; 'failed' = its last delivery attempt failed.
+    -- Both are retried by the outbox drain (after unlock, on reconnect, on
+    -- resume) and by an explicit retry; delivery clears it. An unsent row is
+    -- always a real message — never a placeholder. Also added to existing DBs
+    -- by `add_missing_columns`.
+    send_state TEXT CHECK (
+        send_state IS NULL
+        OR (send_state IN ('pending', 'failed') AND undecryptable IS NULL AND content IS NOT NULL)
     )
 );
 
@@ -70,6 +81,9 @@ CREATE INDEX IF NOT EXISTS idx_message_thread ON message(thread_id, sent_at);
 -- every open (this schema is re-applied each open) so existing DBs gain it
 -- without a schema-version bump (which would wipe history).
 CREATE INDEX IF NOT EXISTS idx_message_received_at ON message(received_at);
+
+-- The outbox drain's scan (#1335): only unsent rows, which are few.
+CREATE INDEX IF NOT EXISTS idx_message_send_state ON message(sent_at) WHERE send_state IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS dm_conversation (
     id TEXT PRIMARY KEY,

@@ -4,6 +4,7 @@ use ulid::Ulid;
 use crate::error::Result;
 use crate::state::AppState;
 
+use super::outbox::Queued;
 use super::types::Message;
 
 /// Non-identifying placeholder written into the still-NOT-NULL
@@ -14,6 +15,7 @@ use super::types::Message;
 /// `docs/metadata-minimization-design.md` §2.1.
 pub const SEALED_SENDER_SENTINEL: &str = "sealed";
 
+/// Send a message under a fresh id. See [`send_message_with_id`].
 pub async fn send_message(
     conversation_id: String,
     sender_id: String,
@@ -26,9 +28,90 @@ pub async fn send_message(
     sender_username: Option<String>,
     state: &Arc<AppState>,
 ) -> Result<Message> {
+    send_message_with_id(
+        None,
+        conversation_id,
+        sender_id,
+        content,
+        reply_to_id,
+        thread_id,
+        sender_username,
+        state,
+    )
+    .await
+}
+
+/// Send a message, durably (#1335).
+///
+/// The message is written to the local `message` table as `send_state =
+/// 'pending'` BEFORE any network work — that row is the outbox entry. Only then
+/// does delivery (catch-up, seal, DS post) run, and only a confirmed post clears
+/// the state. If this process dies part-way, the row survives and the outbox
+/// drain delivers it after the next unlock or reconnect; if the attempt fails,
+/// the row is marked `'failed'` and the renderer offers Retry. Either way a
+/// message the user saw accepted is never silently gone.
+///
+/// `message_id` lets the renderer name the message before it calls (from
+/// `new_message_id`), so its optimistic row and the stored row are the same
+/// message. A second call with the same id is idempotent: an unsent row is
+/// delivered (never duplicated), a delivered one is returned as it stands.
+#[allow(clippy::too_many_arguments)]
+pub async fn send_message_with_id(
+    message_id: Option<String>,
+    conversation_id: String,
+    sender_id: String,
+    content: String,
+    reply_to_id: Option<String>,
+    thread_id: Option<String>,
+    sender_username: Option<String>,
+    state: &Arc<AppState>,
+) -> Result<Message> {
+    let id = match message_id {
+        Some(id) => super::outbox::checked_message_id(id)?,
+        None => Ulid::new().to_string(),
+    };
+    let queued = Queued {
+        id,
+        conversation_id,
+        sender_id,
+        content,
+        reply_to_id,
+        thread_id,
+    };
+    if let super::outbox::Enqueued::AlreadySent(message) =
+        super::outbox::enqueue(state, &queued).await?
+    {
+        return Ok(message);
+    }
+    // Test-harness only: stand in for the process dying right after the
+    // outbox row was written (#1335) — nothing marks it failed, exactly as
+    // with a real kill.
+    if test_hooks::take(test_hooks::Crash::AfterEnqueue) {
+        return Err(test_hooks::simulated_crash());
+    }
+    super::outbox::deliver(state, &queued.id, sender_username).await
+}
+
+/// Deliver one queued message: everything `send_message` did before #1335,
+/// minus writing the local row, which the outbox already holds.
+///
+/// Runs under the message's outbox lock (`outbox::deliver`). Clears
+/// `send_state` once the DS has the envelope; any error leaves it set, and the
+/// caller marks it failed.
+pub(super) async fn deliver_queued(
+    queued: &Queued,
+    sender_username: Option<String>,
+    state: &Arc<AppState>,
+) -> Result<Message> {
+    let Queued {
+        id,
+        conversation_id,
+        sender_id,
+        content,
+        reply_to_id,
+        thread_id,
+    } = queued.clone();
     state.check_not_outdated()?;
-    let id = Ulid::new().to_string();
-    let now = super::envelope_sent_at();
 
     // For group channels, all channels share the group's MLS group (keyed by group_id).
     // For DM conversations, the MLS group is keyed by conversation_id directly.
@@ -69,22 +152,12 @@ pub async fn send_message(
     };
 
     if suppress_delivery {
-        // Write a local-only row so the sender's own conversation
-        // view stays consistent (history survives reloads). Empty
-        // ciphertext is fine — nothing will ever decrypt this row;
-        // it's only read back via the `content` column.
-        {
-            let guard = state.local_db.lock().await;
-            let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(
-                anyhow::anyhow!("Not signed in")
-            ))?;
-            let empty: Vec<u8> = Vec::new();
-            db.conn().execute(
-                "INSERT INTO message (id, conversation_id, sender_id, ciphertext, content, reply_to_id, thread_id, sent_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                rusqlite::params![id, conversation_id, sender_id, empty, content, reply_to_id, thread_id, now],
-            )?;
-        }
+        // The outbox row stays as the local-only copy, so the sender's own
+        // conversation view stays consistent (history survives reloads). Its
+        // empty ciphertext is fine — nothing will ever decrypt this row; it's
+        // only read back via the `content` column. Settling it is the whole
+        // "delivery".
+        let sent_at = super::outbox::settle(state, &id).await?;
         return Ok(Message {
             id,
             conversation_id,
@@ -92,7 +165,7 @@ pub async fn send_message(
             content: Some(content),
             reply_to_id,
             thread_id,
-            sent_at: now,
+            sent_at,
         });
     }
 
@@ -166,10 +239,10 @@ pub async fn send_message(
             &held,
         )?;
 
+        // The outbox row (#1335) already holds everything but the ciphertext.
         db.conn().execute(
-            "INSERT INTO message (id, conversation_id, sender_id, ciphertext, content, reply_to_id, thread_id, sent_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            rusqlite::params![id, conversation_id, sender_id, sealed.bytes, content, reply_to_id, thread_id, sealed.sent_at],
+            "UPDATE message SET ciphertext = ?1, sent_at = ?2 WHERE id = ?3",
+            rusqlite::params![sealed.bytes, sealed.sent_at, id],
         )?;
 
         sealed
@@ -288,6 +361,16 @@ pub async fn send_message(
         },
     )
     .await?;
+
+    // Test-harness only: the process dies after the DS took the envelope but
+    // before this device recorded it (#1335) — the retry must not deliver it
+    // twice.
+    if test_hooks::take(test_hooks::Crash::AfterPost) {
+        return Err(test_hooks::simulated_crash());
+    }
+    // Delivered: the DS holds the envelope, so the outbox entry is done.
+    // Everything below is best-effort signalling that never fails a send.
+    super::outbox::settle(state, &id).await?;
     let now = sealed.sent_at;
 
     // Register a server-side reference for each attachment this message carries
@@ -601,6 +684,49 @@ mod tests {
 /// the DS and a real recipient's ingest — instead of only simulated. Compiled
 /// out of every shipping build: without `test-harness` it is the identity.
 pub mod test_hooks {
+    /// Where a simulated process death cuts a send short (#1335).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Crash {
+        /// The outbox row is written; nothing has touched the network.
+        AfterEnqueue,
+        /// The DS holds the envelope; this device has not recorded that.
+        AfterPost,
+    }
+
+    #[cfg(feature = "test-harness")]
+    static NEXT_CRASH: std::sync::Mutex<Option<Crash>> = std::sync::Mutex::new(None);
+
+    /// Make the next send in this process "die" at `at`. One-shot.
+    #[cfg(feature = "test-harness")]
+    pub fn crash_next_send(at: Crash) {
+        *NEXT_CRASH.lock().expect("NEXT_CRASH poisoned") = Some(at);
+    }
+
+    /// Consume an armed crash at `at`. Always `false` outside the harness.
+    pub(super) fn take(at: Crash) -> bool {
+        #[cfg(feature = "test-harness")]
+        {
+            let mut armed = NEXT_CRASH.lock().expect("NEXT_CRASH poisoned");
+            if *armed == Some(at) {
+                *armed = None;
+                return true;
+            }
+        }
+        let _ = at;
+        false
+    }
+
+    const SIMULATED_CRASH: &str = "simulated process death (test harness)";
+
+    pub(super) fn simulated_crash() -> crate::error::Error {
+        crate::error::Error::Other(anyhow::anyhow!(SIMULATED_CRASH))
+    }
+
+    /// A dead process marks nothing failed, so neither may its stand-in.
+    pub(crate) fn is_simulated_crash(e: &crate::error::Error) -> bool {
+        e.to_string().contains(SIMULATED_CRASH)
+    }
+
     #[cfg(feature = "test-harness")]
     static CORRUPT_NEXT_SEND: std::sync::atomic::AtomicBool =
         std::sync::atomic::AtomicBool::new(false);

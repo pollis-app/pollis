@@ -37,6 +37,8 @@ mod lost_messages;
 mod messages;
 #[path = "flows/model.rs"]
 mod model;
+#[path = "flows/outbox.rs"]
+mod outbox;
 #[path = "flows/pinning.rs"]
 mod pinning;
 #[path = "flows/pq_key_packages.rs"]
