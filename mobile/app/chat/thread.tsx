@@ -13,11 +13,14 @@ import { outgoingText } from "../../lib/messageText";
 import {
   useMessages,
   useSendMessage,
+  useRetryMessage,
+  useDiscardUnsent,
   useThreadMessages,
   flattenPages,
   type ConversationKind,
   type Message,
 } from "../../hooks/queries";
+import { retryTarget } from "../../hooks/queries/pendingMessages";
 import { useMentionCandidates } from "../../hooks/useMentionCandidates";
 import { useOpenMediaViewer } from "../../hooks/useOpenMediaViewer";
 import { appStore } from "../../stores/appStore";
@@ -60,6 +63,8 @@ function ThreadScreen() {
   const { data: replies = [], isLoading } = useThreadMessages(threadId);
   const openMedia = useOpenMediaViewer(conversationId, kind, threadId);
   const sendMessage = useSendMessage(conversationId, kind);
+  const retryMessage = useRetryMessage(conversationId, kind, threadId);
+  const discardUnsent = useDiscardUnsent(conversationId, kind, threadId);
 
   // Mentions (#886) — same roster-only pool as the parent conversation.
   // Channels resolve the group from the store (set when the channel opened).
@@ -110,6 +115,8 @@ function ThreadScreen() {
         !!prev &&
         prev.sender_id === m.sender_id &&
         m.created_at - prev.created_at < GROUP_WINDOW_MS;
+      // A failed send (#1335) offers Retry when the core stored it.
+      const retryId = retryTarget(m);
       const mine = currentUser?.id === m.sender_id;
       const name =
         authorName(m.sender_id, m.sender_username, currentUser) ??
@@ -127,6 +134,8 @@ function ThreadScreen() {
           onOpenAttachment={openMedia}
           pending={m.pending}
           failed={m.failed}
+          onRetry={retryId ? () => retryMessage.mutate(retryId) : undefined}
+          onDiscard={m.failed ? () => discardUnsent.mutate(m.outboxId ?? m.id) : undefined}
           edited={!!m.edited_at}
           continued={continued}
           mentionNames={mentionNames}
@@ -143,7 +152,7 @@ function ThreadScreen() {
         />
       );
     },
-    [currentUser, router, t, replies, mentionNames, selfName, openMedia],
+    [currentUser, router, t, replies, mentionNames, selfName, openMedia, retryMessage, discardUnsent],
   );
 
   const rootName = root

@@ -28,6 +28,8 @@ import { afterSheetClose } from "../../components/chat/SheetOverlay";
 import {
   useMessages,
   useSendMessage,
+  useRetryMessage,
+  useDiscardUnsent,
   useIngestConversation,
   useToggleReaction,
   useConversationReactions,
@@ -46,6 +48,7 @@ import {
   type ConversationKind,
   type Message,
 } from "../../hooks/queries";
+import { retryTarget } from "../../hooks/queries/pendingMessages";
 import { useConversationRealtime } from "../../hooks/useConversationRealtime";
 import { useReadReceipts } from "../../hooks/useReadReceipts";
 import { useMentionCandidates } from "../../hooks/useMentionCandidates";
@@ -157,6 +160,8 @@ function TextChat(props: ChatViewProps = {}) {
   // same 2-member fallback).
   const peerCount = 1;
   const sendMessage = useSendMessage(conversationId, kind);
+  const retryMessage = useRetryMessage(conversationId, kind);
+  const discardUnsent = useDiscardUnsent(conversationId, kind);
   const ingest = useIngestConversation();
   const toggleReaction = useToggleReaction(conversationId, kind);
   const editMessage = useEditMessage(conversationId, kind);
@@ -576,6 +581,8 @@ function TextChat(props: ChatViewProps = {}) {
           : null
         : undefined;
       const settled = !m.pending && !m.failed;
+      // A failed send (#1335) offers Retry when the core stored it.
+      const retryId = retryTarget(m);
       return (
         <MessageRow
           testID={`row-message-${m.id}`}
@@ -589,6 +596,8 @@ function TextChat(props: ChatViewProps = {}) {
           onOpenAttachment={openMedia}
           pending={m.pending}
           failed={m.failed}
+          onRetry={retryId ? () => retryMessage.mutate(retryId) : undefined}
+          onDiscard={m.failed ? () => discardUnsent.mutate(m.outboxId ?? m.id) : undefined}
           edited={!!m.edited_at}
           reactions={reactionsByMessage?.get(m.id)}
           currentUserId={currentUser?.id}
@@ -646,6 +655,8 @@ function TextChat(props: ChatViewProps = {}) {
       startReply,
       scrollToMessage,
       highlightId,
+      retryMessage,
+      discardUnsent,
       t,
     ],
   );

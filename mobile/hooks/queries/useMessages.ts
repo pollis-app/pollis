@@ -31,7 +31,14 @@ import {
   buildMessageContent,
   type PickedAttachment,
 } from "../../lib/attachments";
-import { carryStubs, settleSend } from "./pendingMessages";
+import {
+  carryStubs,
+  mapOutboxRows,
+  settleSend,
+  unsentFlags,
+  withoutOutboxRows,
+  type SendState,
+} from "./pendingMessages";
 import { parseContent } from "../../lib/messageContent";
 
 export type ConversationKind = "channel" | "dm";
@@ -51,6 +58,15 @@ export interface RawChannelMessage {
   deleted_at?: string;
   /** A placeholder for a message this device could not decrypt (#1312). */
   undecryptable?: boolean;
+  /** Our own message the durable outbox has not delivered yet (#1335).
+   *  Absent once delivered, and on everything received. */
+  send_state?: SendState;
+}
+
+/** Mirror of `pollis_core::commands::messages::OutboxReport`. */
+interface OutboxReport {
+  delivered: string[];
+  failed: string[];
 }
 
 /** Mirror of `pollis_core::commands::messages::ThreadSummary`. */
@@ -90,8 +106,15 @@ export interface Message {
   undecryptableCount?: number;
   /** Local-only optimistic stub flag. Replaced when `send_message` resolves. */
   pending?: boolean;
-  /** Local-only: the optimistic stub's send failed. Kept in the list, labelled. */
+  /** The send failed — a stub's, or a stored unsent row's (#1335). Kept in
+   *  the list, labelled, with Retry / Discard. */
   failed?: boolean;
+  /** The core's id for this outgoing message (#1335) — what Retry and
+   *  Discard name. On stubs and on unsent stored rows only. */
+  outboxId?: string;
+  /** False when the send failed before the core stored it (an attachment
+   *  upload): there is nothing to retry, only to discard. */
+  retryable?: boolean;
 }
 
 /** One decoded page: newest-first messages plus the cursor to the next
@@ -118,6 +141,7 @@ function transform(raw: RawChannelMessage): Message {
     edited_at: raw.edited_at ? new Date(raw.edited_at).getTime() : undefined,
     deleted_at: raw.deleted_at ? new Date(raw.deleted_at).getTime() : undefined,
     undecryptable: raw.undecryptable === true ? true : undefined,
+    ...unsentFlags(raw.id, raw.send_state),
   };
 }
 
@@ -241,10 +265,45 @@ function mapPages(
   };
 }
 
+/** A send that failed before the core stored it (#1335) — an attachment
+ *  upload. The stub can only be discarded: there is no stored message. */
+class NotQueuedError extends Error {}
+
+/**
+ * The stub id `onMutate` chose for each send, keyed by the mutation's
+ * variables object (TanStack hands the same object to `onMutate` and
+ * `mutationFn`), so the send can tag its stub with the core's message id.
+ */
+const stubIds = new WeakMap<object, string>();
+
+/** Apply `fn` to every row standing for `outboxId`, in a conversation's
+ *  pages and (when given) its open thread. */
+function patchOutboxRows(
+  queryClient: ReturnType<typeof useQueryClient>,
+  key: readonly unknown[],
+  threadId: string | null | undefined,
+  outboxId: string,
+  fn: (m: Message) => Message,
+) {
+  queryClient.setQueryData<MessagesData>(key, (cache) =>
+    mapPages(cache, (msgs) => mapOutboxRows(msgs, outboxId, fn)),
+  );
+  if (threadId) {
+    queryClient.setQueryData<Message[]>(messageQueryKeys.thread(threadId), (cache) =>
+      cache ? mapOutboxRows(cache, outboxId, fn) : cache,
+    );
+  }
+}
+
 /**
  * Send a text message. Optimistic: the new message is prepended to the
  * newest cached page with `pending: true`, then replaced with the
  * server-confirmed row on success, or marked `failed` on failure.
+ *
+ * Durable since #1335: the core stores the message before any network work,
+ * under an id this hook asks it for first, so a send the process never
+ * finished is still there — unsent — after a restart, and the outbox
+ * delivers it. A failure is a stored `failed` row with Retry.
  */
 export function useSendMessage(
   conversationId: string | null,
@@ -263,14 +322,37 @@ export function useSendMessage(
       attachments?: PickedAttachment[];
     }) => {
       if (!conversationId || !currentUser) {
-        throw new Error("No active conversation");
+        throw new NotQueuedError("No active conversation");
+      }
+      // The core names the message first (#1335), so the stub and the row
+      // the core stores are the same message: a refetch that brings the
+      // stored row in drops the stub instead of showing it twice.
+      const messageId = await invoke<string>("new_message_id").catch((e) => {
+        throw new NotQueuedError(String(e));
+      });
+      const stubId = stubIds.get(vars);
+      if (stubId && kind) {
+        const key = messageQueryKeys.conversation(conversationId, kind);
+        const tag = (m: Message): Message => (m.id === stubId ? { ...m, outboxId: messageId } : m);
+        queryClient.setQueryData<MessagesData>(key, (cache) =>
+          mapPages(cache, (msgs) => msgs.map(tag)),
+        );
+        if (vars.threadId) {
+          queryClient.setQueryData<Message[]>(
+            messageQueryKeys.thread(vars.threadId),
+            (cache) => (cache ?? []).map(tag),
+          );
+        }
       }
       // Upload first (Rust does encrypt + dedup + register), then send the
-      // envelope string — same sequence as desktop's send handlers.
+      // envelope string — same sequence as desktop's send handlers. An upload
+      // that fails never reached the outbox.
       const content = await buildMessageContent(
         vars.attachments ?? [],
         vars.content,
-      );
+      ).catch((e) => {
+        throw new NotQueuedError(String(e));
+      });
       const raw = await invoke<RawChannelMessage>("send_message", {
         conversationId,
         senderId: currentUser.id,
@@ -278,6 +360,7 @@ export function useSendMessage(
         replyToId: vars.replyToId ?? null,
         threadId: vars.threadId ?? null,
         senderUsername: currentUser.username ?? null,
+        messageId,
       });
       return transform(raw);
     },
@@ -288,6 +371,7 @@ export function useSendMessage(
       const key = messageQueryKeys.conversation(conversationId, kind);
       await queryClient.cancelQueries({ queryKey: key });
       const optimisticId = `pending-${Date.now()}`;
+      stubIds.set(vars, optimisticId);
       const optimistic: Message = {
         id: optimisticId,
         conversation_id: conversationId,
@@ -391,14 +475,17 @@ export function useSendMessage(
         });
       }
     },
-    onError: (_e, _vars, ctx) => {
+    onError: (e, _vars, ctx) => {
       if (!ctx) {
         return;
       }
       // Keep the stub and mark it failed rather than rolling it back: a send
-      // that silently vanishes is worse than one labelled "failed".
+      // that silently vanishes is worse than one labelled "failed". When the
+      // core had stored it, the stored row is failed too and Retry delivers
+      // it; the refetch below swaps the stub for that row.
+      const retryable = !(e instanceof NotQueuedError);
       const markFailed = (m: Message): Message =>
-        m.id === ctx.optimisticId ? { ...m, pending: false, failed: true } : m;
+        m.id === ctx.optimisticId ? { ...m, pending: false, failed: true, retryable } : m;
       queryClient.setQueryData<MessagesData>(ctx.key, (cache) =>
         mapPages(cache, (msgs) => msgs.map(markFailed)),
       );
@@ -408,8 +495,130 @@ export function useSendMessage(
           (cache) => (cache ?? []).map(markFailed),
         );
       }
+      if (retryable) {
+        queryClient.invalidateQueries({ queryKey: ctx.key });
+        if (ctx.threadId) {
+          queryClient.invalidateQueries({ queryKey: messageQueryKeys.thread(ctx.threadId) });
+        }
+      }
     },
   });
+}
+
+/**
+ * Retry one unsent message (#1335): `retry_message` re-runs delivery under
+ * the same id, so it can never arrive twice. The row reads as pending while
+ * it runs, and the refetch afterwards shows what the core settled on.
+ */
+export function useRetryMessage(
+  conversationId: string | null,
+  kind: ConversationKind | null,
+  threadId?: string | null,
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    // A retry feels like the send it repeats (#1286).
+    meta: { haptic: { mutate: "send" } },
+    mutationFn: async (outboxId: string) =>
+      transform(await invoke<RawChannelMessage>("retry_message", { messageId: outboxId })),
+    onMutate: (outboxId) => {
+      if (!conversationId || !kind) {
+        return;
+      }
+      patchOutboxRows(
+        queryClient,
+        messageQueryKeys.conversation(conversationId, kind),
+        threadId,
+        outboxId,
+        (m) => ({ ...m, pending: true, failed: false }),
+      );
+    },
+    onError: (_e, outboxId) => {
+      if (!conversationId || !kind) {
+        return;
+      }
+      patchOutboxRows(
+        queryClient,
+        messageQueryKeys.conversation(conversationId, kind),
+        threadId,
+        outboxId,
+        (m) => ({ ...m, pending: false, failed: true }),
+      );
+    },
+    onSettled: () => {
+      if (!conversationId || !kind) {
+        return;
+      }
+      queryClient.invalidateQueries({
+        queryKey: messageQueryKeys.conversation(conversationId, kind),
+      });
+      queryClient.invalidateQueries({ queryKey: messageQueryKeys.threads });
+      queryClient.invalidateQueries({ queryKey: messageQueryKeys.threadSummaries(conversationId) });
+      queryClient.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
+    },
+  });
+}
+
+/**
+ * Throw away one unsent message (#1335) — it never reached anyone, so this
+ * only removes it here. Also clears a stub whose upload failed before the
+ * core stored anything.
+ */
+export function useDiscardUnsent(
+  conversationId: string | null,
+  kind: ConversationKind | null,
+  threadId?: string | null,
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    // Throwing a message away feels like deleting one (#1286).
+    meta: { haptic: { success: "destructive" } },
+    mutationFn: async (outboxId: string) =>
+      invoke<boolean>("discard_unsent_message", { messageId: outboxId }),
+    onMutate: (outboxId) => {
+      if (!conversationId || !kind) {
+        return;
+      }
+      queryClient.setQueryData<MessagesData>(
+        messageQueryKeys.conversation(conversationId, kind),
+        (cache) => mapPages(cache, (msgs) => withoutOutboxRows(msgs, outboxId)),
+      );
+      if (threadId) {
+        queryClient.setQueryData<Message[]>(messageQueryKeys.thread(threadId), (cache) =>
+          cache ? withoutOutboxRows(cache, outboxId) : cache,
+        );
+      }
+    },
+    onSettled: () => {
+      if (!conversationId || !kind) {
+        return;
+      }
+      queryClient.invalidateQueries({
+        queryKey: messageQueryKeys.conversation(conversationId, kind),
+      });
+      queryClient.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
+    },
+  });
+}
+
+/**
+ * Deliver whatever the durable outbox holds (#1335) — run on sign-in, on a
+ * return to the foreground and on a realtime reconnect. Event-driven, never
+ * on a timer. The core already drains after every unlock; this call waits for
+ * that and then refreshes what it changed.
+ */
+export async function flushOutbox(
+  queryClient: ReturnType<typeof useQueryClient>,
+): Promise<void> {
+  try {
+    const report = await invoke<OutboxReport>("flush_outbox");
+    if ((report?.delivered?.length ?? 0) + (report?.failed?.length ?? 0) > 0) {
+      await queryClient.invalidateQueries({ queryKey: messageQueryKeys.all });
+      await queryClient.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
+    }
+  } catch (e) {
+    console.warn("[outbox] flush_outbox failed:", e);
+  }
 }
 
 /**

@@ -37,6 +37,7 @@ import { dmQueryKeys, useDMChannels } from "./queries/useDMChannels";
 import { groupQueryKeys, useUserGroupsWithChannels } from "./queries/useUserGroups";
 import { groupInviteQueryKeys } from "./queries/useGroupInvites";
 import {
+  flushOutbox,
   lastMessageQueryKeys,
   messageQueryKeys,
   useIngestConversation,
@@ -137,6 +138,8 @@ export function useInboxRealtime() {
           if (target) {
             void ingestRef.current(target.id, target.kind);
           }
+          // The network is back, so whatever the outbox holds can go (#1335).
+          void flushOutbox(qc);
           break;
         }
         case "edited_message":
@@ -255,10 +258,25 @@ export function useInboxRealtime() {
       for (const target of catchUpTargets(groupsRef.current, dmsRef.current)) {
         void ingestRef.current(target.id, target.kind);
       }
+      // A send the OS suspended mid-flight, or one that failed while the
+      // phone was offline, goes out now (#1335).
+      void flushOutbox(qcRef.current);
     });
     return () => {
       sub.remove();
     };
+  }, [userId]);
+
+  // Signed in / unlocked: deliver what the durable outbox holds (#1335) — a
+  // message a killed process left unsent. The core starts this drain itself
+  // after unlock; calling it here waits for that and refreshes the rows it
+  // settled, so a delivered message stops reading pending and a failed one
+  // shows Retry. Once per session, event-driven.
+  useEffect(() => {
+    if (!userId) {
+      return;
+    }
+    void flushOutbox(qcRef.current);
   }, [userId]);
 
   // Full teardown on sign-out / unmount.
