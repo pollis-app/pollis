@@ -536,3 +536,105 @@ async fn own_inbox_is_always_reachable() {
     let payload = broadcast_payload(&seen[0]);
     assert_eq!(payload, serde_json::json!({ "type": "device_revoked" }));
 }
+
+// ── #1337: an empty room is "nothing to notify", not a 502 ──────────────────
+
+/// A stand-in LiveKit whose `SendData` always answers `status` with `body`.
+async fn livekit_answering(status: StatusCode, body: &'static str) -> String {
+    let app = Router::new().route(
+        "/twirp/livekit.RoomService/SendData",
+        post(move || async move {
+            (
+                status,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                body,
+            )
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    format!("ws://{addr}")
+}
+
+/// A member nudging their own group's room, against a LiveKit that answers
+/// `status` / `body`. Returns the endpoint's status.
+async fn nudge_against(status: StatusCode, body: &'static str) -> StatusCode {
+    let db = fresh_db().await;
+    let member = seed_actor(&db, "alice").await;
+    seed_group(&db, "g-1", &["alice", "bob"]).await;
+    let url = livekit_answering(status, body).await;
+    let state = AppState::new(db.arc(), true).with_broker_config(livekit_broker(&url));
+    let router = build_router_with_state(state);
+    let req = signed_send(
+        &member,
+        "g-1",
+        serde_json::json!({ "type": "new_message", "conversation_id": "g-1" }),
+    );
+    let resp = router.oneshot(req).await.unwrap();
+    let status = resp.status();
+    let _ = resp.into_body().collect().await;
+    drop(db);
+    status
+}
+
+/// LiveKit's answer for a room nobody has joined. Every send from a client
+/// whose peers are all offline or media-off (the CLI) hit this and logged
+/// `ds_livekit_send_data 502`.
+const NO_ROOM: &str = r#"{"code":"unavailable","msg":"no response from servers"}"#;
+
+#[tokio::test]
+async fn an_empty_room_is_nothing_to_notify_not_a_bad_gateway() {
+    assert_eq!(
+        nudge_against(StatusCode::SERVICE_UNAVAILABLE, NO_ROOM).await,
+        StatusCode::OK
+    );
+}
+
+/// Only that exact answer is forgiven. A node that is genuinely unavailable
+/// says something else, and a real LiveKit failure must still read as one.
+#[tokio::test]
+async fn a_real_livekit_failure_is_still_a_bad_gateway() {
+    let draining = r#"{"code":"unavailable","msg":"node is draining"}"#;
+    assert_eq!(
+        nudge_against(StatusCode::SERVICE_UNAVAILABLE, draining).await,
+        StatusCode::BAD_GATEWAY
+    );
+    let internal = r#"{"code":"internal","msg":"no response from servers"}"#;
+    assert_eq!(
+        nudge_against(StatusCode::INTERNAL_SERVER_ERROR, internal).await,
+        StatusCode::BAD_GATEWAY
+    );
+    assert_eq!(
+        nudge_against(StatusCode::SERVICE_UNAVAILABLE, "upstream connect error").await,
+        StatusCode::BAD_GATEWAY
+    );
+}
+
+/// The classifier itself, case by case.
+#[test]
+fn the_empty_room_classifier_is_narrow() {
+    use pollis_delivery::broker::send_data_room_is_empty;
+
+    assert!(send_data_room_is_empty(StatusCode::SERVICE_UNAVAILABLE, NO_ROOM));
+    // Wrong status for the same body.
+    assert!(!send_data_room_is_empty(StatusCode::BAD_GATEWAY, NO_ROOM));
+    assert!(!send_data_room_is_empty(StatusCode::INTERNAL_SERVER_ERROR, NO_ROOM));
+    // Same status, other Twirp errors.
+    assert!(!send_data_room_is_empty(
+        StatusCode::SERVICE_UNAVAILABLE,
+        r#"{"code":"unavailable","msg":"node is draining"}"#
+    ));
+    assert!(!send_data_room_is_empty(
+        StatusCode::SERVICE_UNAVAILABLE,
+        r#"{"code":"internal","msg":"no response from servers"}"#
+    ));
+    // Not a Twirp body at all.
+    assert!(!send_data_room_is_empty(StatusCode::SERVICE_UNAVAILABLE, ""));
+    assert!(!send_data_room_is_empty(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "no response from servers"
+    ));
+}
