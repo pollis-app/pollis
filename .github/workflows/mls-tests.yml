@@ -210,6 +210,14 @@ jobs:
             clang \
             ninja-build
 
+      # livekit 0.9's webrtc-sys compiles against libwebrtc's hermetic libc++,
+      # which rejects any clang older than 21; this runner's apt `clang` (14 on
+      # 22.04, 18 on 24.04) is too old (#1303). Adds the LLVM apt repo (key
+      # fingerprint-checked) and puts a clang/clang++ shim first on PATH via
+      # $GITHUB_PATH — no $GITHUB_ENV export, so the build recipe is unchanged.
+      - name: Install clang 21 (webrtc-sys)
+        run: bash scripts/install-clang.sh
+
       - name: Install meson (newer than apt)
         run: |
           python3 -m pip install --user 'meson>=1.3'
@@ -462,6 +470,14 @@ jobs:
             cmake \
             clang \
             ninja-build
+
+      # livekit 0.9's webrtc-sys compiles against libwebrtc's hermetic libc++,
+      # which rejects any clang older than 21; this runner's apt `clang` (14 on
+      # 22.04, 18 on 24.04) is too old (#1303). Adds the LLVM apt repo (key
+      # fingerprint-checked) and puts a clang/clang++ shim first on PATH via
+      # $GITHUB_PATH — no $GITHUB_ENV export, so the build recipe is unchanged.
+      - name: Install clang 21 (webrtc-sys)
+        run: bash scripts/install-clang.sh
 
       - name: Install meson (newer than apt)
         run: |

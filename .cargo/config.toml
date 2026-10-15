@@ -31,11 +31,17 @@ rustflags = [
 rustflags = ["-C", "target-feature=+crt-static"]
 
 [env]
-# Force C++17 and suppress warnings to work around WebRTC header issues
-# -std=c++17: Avoids C++20 iterator concepts issues with rust::Slice
-# -w: Suppress all warnings (prevents warning-as-error issues across GCC versions)
+# Suppress warnings to work around WebRTC header issues.
+# -w: Suppress all warnings (prevents warning-as-error issues across compilers)
 # -fpermissive: Allows method names that shadow class names (Network() returning Network*)
-CXXFLAGS = "-std=c++17 -w -fpermissive"
+#
+# No `-std=` here (#1303). It used to force `-std=c++17` to dodge C++20
+# iterator-concept errors around cxx's rust::Slice under GCC, but cc appends
+# CXXFLAGS AFTER a build script's own flags, so the override beat
+# webrtc-sys's `-std=c++20`. webrtc-sys >= 0.3.4x compiles with clang++ against
+# libwebrtc's hermetic libc++, whose headers use `requires` and std::span and
+# need C++20 — every crate now picks its own standard.
+CXXFLAGS = "-w -fpermissive"
 
 # Do NOT put IPHONEOS_DEPLOYMENT_TARGET (or any *_DEPLOYMENT_TARGET) in this
 # global table. Apple clang infers the target PLATFORM from whichever

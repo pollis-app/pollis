@@ -46,6 +46,10 @@ and confirm none of it is intelligible without the client-held MLS keys.
   sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
     libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
   ```
+- **Linux: clang 21 or newer.** The voice/video engine (webrtc-sys) refuses an
+  older clang. Ubuntu's apt `clang` is too old — run `scripts/install-clang.sh`
+  after cloning (it adds the LLVM apt repo and puts `clang++` 21 first on PATH).
+  Arch and Fedora ship a new enough clang.
 
 ```bash
 git clone https://github.com/actuallydan/pollis.git

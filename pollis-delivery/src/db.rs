@@ -193,7 +193,11 @@ pub struct Db {
 impl Db {
     /// Connect to a remote Turso database (production).
     pub async fn connect_remote(url: &str, token: &str) -> Result<Self> {
+        // libsql is built without its own `tls` feature (#1303), so without a
+        // connector this would panic on the first query. See
+        // `pollis-libsql-connector` for why it is not hyper-rustls.
         let db = Builder::new_remote(url.to_string(), token.to_string())
+            .connector(pollis_libsql_connector::Connector::new())
             .build()
             .await?;
         Ok(Self::wrap(Arc::new(db), REMOTE_PRAGMAS))

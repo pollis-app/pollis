@@ -61,10 +61,6 @@ criteria = "safe-to-deploy"
 version = "0.10.3"
 criteria = "safe-to-deploy"
 
-[[exemptions.ahash]]
-version = "0.8.12"
-criteria = "safe-to-deploy"
-
 [[exemptions.aho-corasick]]
 version = "1.1.4"
 criteria = "safe-to-deploy"
@@ -137,6 +133,10 @@ criteria = "safe-to-deploy"
 version = "0.2.5"
 criteria = "safe-to-deploy"
 
+[[exemptions.async-compression]]
+version = "0.4.50"
+criteria = "safe-to-deploy"
+
 [[exemptions.async-executor]]
 version = "1.14.0"
 criteria = "safe-to-deploy"
@@ -186,19 +186,11 @@ version = "0.2.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.axum]]
-version = "0.6.20"
-criteria = "safe-to-deploy"
-
-[[exemptions.axum]]
 version = "0.7.9"
 criteria = "safe-to-deploy"
 
 [[exemptions.axum]]
 version = "0.8.9"
-criteria = "safe-to-deploy"
-
-[[exemptions.axum-core]]
-version = "0.3.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.axum-core]]
@@ -219,10 +211,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.basic-toml]]
 version = "0.1.10"
-criteria = "safe-to-deploy"
-
-[[exemptions.bincode]]
-version = "1.3.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.bindgen]]
@@ -283,14 +271,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.bytes]]
 version = "1.11.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.bzip2]]
-version = "0.4.4"
-criteria = "safe-to-deploy"
-
-[[exemptions.bzip2-sys]]
-version = "0.1.13+1.0.8"
 criteria = "safe-to-deploy"
 
 [[exemptions.cairo-rs]]
@@ -409,6 +389,14 @@ criteria = "safe-to-deploy"
 version = "0.8.2"
 criteria = "safe-to-deploy"
 
+[[exemptions.compression-codecs]]
+version = "0.4.45"
+criteria = "safe-to-deploy"
+
+[[exemptions.compression-core]]
+version = "0.4.33"
+criteria = "safe-to-deploy"
+
 [[exemptions.concurrent-queue]]
 version = "2.5.0"
 criteria = "safe-to-deploy"
@@ -419,10 +407,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.const-oid]]
 version = "0.10.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.constant_time_eq]]
-version = "0.1.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.convert_case]]
@@ -604,6 +588,11 @@ criteria = "safe-to-deploy"
 [[exemptions.derive_more-impl]]
 version = "2.1.1"
 criteria = "safe-to-deploy"
+
+[[exemptions.device-info]]
+version = "0.1.1"
+criteria = "safe-to-deploy"
+notes = "No independent review performed. Small OS/device-description helper pulled by livekit 0.9 for the client-info it reports to the SFU (#1303). Exempted as a transitive dependency of the livekit family, not a source read."
 
 [[exemptions.digest]]
 version = "0.10.7"
@@ -901,32 +890,16 @@ criteria = "safe-to-deploy"
 version = "0.18.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.gio-sys]]
-version = "0.21.5"
-criteria = "safe-to-deploy"
-
 [[exemptions.glib]]
 version = "0.18.5"
 criteria = "safe-to-deploy"
 
-[[exemptions.glib]]
-version = "0.21.5"
-criteria = "safe-to-deploy"
-
 [[exemptions.glib-macros]]
 version = "0.18.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.glib-macros]]
-version = "0.21.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.glib-sys]]
 version = "0.18.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.glib-sys]]
-version = "0.21.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.glob]]
@@ -935,10 +908,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.gobject-sys]]
 version = "0.18.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.gobject-sys]]
-version = "0.21.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.goblin]]
@@ -964,7 +933,7 @@ criteria = "safe-to-deploy"
 [[exemptions.h2]]
 version = "0.3.27"
 criteria = "safe-to-deploy"
-notes = "No independent review performed. HTTP/2 implementation, reached only transitively via libsql -> tonic 0.11 -> hyper 0.14 (see the RUSTSEC-2026-0258 [advisories] entry above for the reachability analysis: this is an outbound client to Turso only, never the DS's untrusted-facing listener, which runs axum 0.8 on hyper 1.9 without h2). Widely used (the de facto Rust HTTP/2 crate, underlies most of the hyper ecosystem); exempted on that ecosystem-maturity basis, not a line-by-line read."
+notes = "No independent review performed. HTTP/2 implementation, reached only transitively via libsql -> hyper 0.14 (`http2` feature; see the RUSTSEC-2026-0258 [advisories] entry in deny.toml for the reachability analysis: this is an outbound client to Turso only, which since #1303 negotiates HTTP/1.1 only through `pollis-libsql-connector`, never the DS's untrusted-facing listener, which runs axum 0.8 on hyper 1.9 without h2). Widely used (the de facto Rust HTTP/2 crate, underlies most of the hyper ecosystem); exempted on that ecosystem-maturity basis, not a line-by-line read."
 
 [[exemptions.half]]
 version = "2.7.1"
@@ -973,10 +942,7 @@ criteria = "safe-to-deploy"
 [[exemptions.hashbrown]]
 version = "0.14.5"
 criteria = "safe-to-deploy"
-
-[[exemptions.hashlink]]
-version = "0.8.4"
-criteria = "safe-to-deploy"
+notes = "No longer in the lockfile (#1303 dropped libsql's replication stack, its last user), but kept: it is the base the imported delta audits for hashbrown 0.15.5 / 0.17.0 chain from."
 
 [[exemptions.hashlink]]
 version = "0.9.1"
@@ -1073,7 +1039,7 @@ criteria = "safe-to-deploy"
 [[exemptions.hyper]]
 version = "0.14.32"
 criteria = "safe-to-deploy"
-notes = "No independent review performed. Pulled in transitively via libsql -> tonic 0.11 (outbound client to Turso only; see the h2 0.3 note above for why this line never faces untrusted input). Exempted on the strength of hyperium/hyper's status as the standard Rust HTTP implementation, not a source read."
+notes = "No independent review performed. Pulled in transitively by libsql's hrana client (outbound client to Turso only; see the h2 0.3 note above for why this line never faces untrusted input). Exempted on the strength of hyperium/hyper's status as the standard Rust HTTP implementation, not a source read."
 
 [[exemptions.hyper]]
 version = "1.9.0"
@@ -1081,15 +1047,7 @@ criteria = "safe-to-deploy"
 notes = "No independent review performed. This is the version on the surface that DOES face untrusted input: pollis-delivery's axum 0.8 listener runs on hyper 1.9 (per the RUSTSEC-2026-0258 [advisories] note above), and reqwest's outbound HTTPS client (DS API calls, LiveKit) also resolves to this line. Higher-stakes than the 0.14 line above for that reason; exempted on hyperium's maturity/maintenance track record, not a line-by-line read — a real audit of this crate would be a better use of first-party review time than most others in this file."
 
 [[exemptions.hyper-rustls]]
-version = "0.25.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.hyper-rustls]]
 version = "0.27.9"
-criteria = "safe-to-deploy"
-
-[[exemptions.hyper-timeout]]
-version = "0.4.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.hyper-util]]
@@ -1181,15 +1139,15 @@ version = "1.70.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.itertools]]
-version = "0.11.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.itertools]]
 version = "0.12.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.itertools]]
 version = "0.13.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.itertools]]
+version = "0.14.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.itoa]]
@@ -1389,19 +1347,16 @@ version = "0.9.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.libsql]]
-version = "0.9.30"
+version = "0.10.0"
 criteria = "safe-to-deploy"
+notes = "No independent review performed. libsql 0.10 (#1303 moved from 0.9.30), built with `default-features = false` so only `core` + `remote` (the hrana HTTP client) compile in — no replication/sync/tls; TLS to Turso goes through `pollis-libsql-connector` on rustls 0.23. Server-side only (DS + commit-log tooling); the client links no libsql (#987). Exempted on the same basis as the 0.9 line it replaces, not a source read."
 
 [[exemptions.libsql-ffi]]
-version = "0.9.30"
+version = "0.10.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.libsql-hrana]]
-version = "0.9.30"
-criteria = "safe-to-deploy"
-
-[[exemptions.libsql-rusqlite]]
-version = "0.9.30"
+version = "0.10.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.libsql-sqlite3-parser]]
@@ -1409,11 +1364,7 @@ version = "0.13.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.libsql-sys]]
-version = "0.9.30"
-criteria = "safe-to-deploy"
-
-[[exemptions.libsql_replication]]
-version = "0.9.30"
+version = "0.10.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.libsqlite3-sys]]
@@ -1421,8 +1372,9 @@ version = "0.28.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.libwebrtc]]
-version = "0.3.29"
+version = "0.3.52"
 criteria = "safe-to-deploy"
+notes = "No independent review performed. LiveKit's libwebrtc bindings (#1303 moved with livekit 0.9). Desktop-only (`media` feature); wraps Google's prebuilt libwebrtc. Exempted on the same basis as the version it replaces, not a source read."
 
 [[exemptions.linux-raw-sys]]
 version = "0.4.15"
@@ -1437,24 +1389,47 @@ version = "0.8.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.livekit]]
-version = "0.7.36"
+version = "0.9.5"
 criteria = "safe-to-deploy"
+notes = "No independent review performed. LiveKit's Rust SDK (#1303 moved 0.7 -> 0.9): the desktop realtime/media engine behind the `media` feature, which mobile builds turn off. Talks only to our own LiveKit SFU over the signalling WebSocket + WebRTC. Exempted on LiveKit's maintenance track record and because the same family was already exempted at 0.7, not a source read."
 
-[[exemptions.livekit-api]]
-version = "0.4.18"
+[[exemptions.livekit-common]]
+version = "0.1.5"
 criteria = "safe-to-deploy"
+notes = "No independent review performed. One of the crates livekit 0.9 split its 0.7-era livekit-api / livekit-runtime into (signalling, networking, region lookup, data streams, RPC, shared types) — same upstream repo (livekit/rust-sdks) and maintainers as the livekit entry; exempted on that basis (#1303), not a source read."
+
+[[exemptions.livekit-data-stream]]
+version = "0.1.8"
+criteria = "safe-to-deploy"
+notes = "No independent review performed. One of the crates livekit 0.9 split its 0.7-era livekit-api / livekit-runtime into (signalling, networking, region lookup, data streams, RPC, shared types) — same upstream repo (livekit/rust-sdks) and maintainers as the livekit entry; exempted on that basis (#1303), not a source read."
 
 [[exemptions.livekit-datatrack]]
+version = "0.2.3"
+criteria = "safe-to-deploy"
+
+[[exemptions.livekit-net]]
 version = "0.1.3"
 criteria = "safe-to-deploy"
+notes = "No independent review performed. One of the crates livekit 0.9 split its 0.7-era livekit-api / livekit-runtime into (signalling, networking, region lookup, data streams, RPC, shared types) — same upstream repo (livekit/rust-sdks) and maintainers as the livekit entry; exempted on that basis (#1303), not a source read."
 
 [[exemptions.livekit-protocol]]
-version = "0.7.4"
+version = "0.8.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.livekit-runtime]]
-version = "0.4.0"
+[[exemptions.livekit-region]]
+version = "0.1.1"
 criteria = "safe-to-deploy"
+notes = "No independent review performed. One of the crates livekit 0.9 split its 0.7-era livekit-api / livekit-runtime into (signalling, networking, region lookup, data streams, RPC, shared types) — same upstream repo (livekit/rust-sdks) and maintainers as the livekit entry; exempted on that basis (#1303), not a source read."
+
+[[exemptions.livekit-rpc]]
+version = "0.1.4"
+criteria = "safe-to-deploy"
+notes = "No independent review performed. One of the crates livekit 0.9 split its 0.7-era livekit-api / livekit-runtime into (signalling, networking, region lookup, data streams, RPC, shared types) — same upstream repo (livekit/rust-sdks) and maintainers as the livekit entry; exempted on that basis (#1303), not a source read."
+
+[[exemptions.livekit-signaling]]
+version = "0.1.6"
+criteria = "safe-to-deploy"
+notes = "No independent review performed. One of the crates livekit 0.9 split its 0.7-era livekit-api / livekit-runtime into (signalling, networking, region lookup, data streams, RPC, shared types) — same upstream repo (livekit/rust-sdks) and maintainers as the livekit entry; exempted on that basis (#1303), not a source read."
 
 [[exemptions.lock_api]]
 version = "0.4.14"
@@ -1762,10 +1737,6 @@ criteria = "safe-to-deploy"
 notes = "Same openmls-repo rev; no independent review performed. Defines the trait boundary (crypto provider, storage provider) the rest of the openmls family implements — the contract every other crate in this exemption block is reviewed against, so it carries the same weight as openmls itself despite being 'just traits'."
 
 [[exemptions.openssl-probe]]
-version = "0.1.6"
-criteria = "safe-to-deploy"
-
-[[exemptions.openssl-probe]]
 version = "0.2.1"
 criteria = "safe-to-deploy"
 
@@ -1818,10 +1789,6 @@ version = "0.9.12"
 criteria = "safe-to-deploy"
 
 [[exemptions.password-hash]]
-version = "0.4.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.password-hash]]
 version = "0.5.0"
 criteria = "safe-to-deploy"
 
@@ -1838,15 +1805,15 @@ version = "0.2.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.pbjson]]
-version = "0.6.0"
+version = "0.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.pbjson-build]]
-version = "0.6.2"
+version = "0.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.pbjson-types]]
-version = "0.6.0"
+version = "0.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.pbkdf2]]
@@ -1855,10 +1822,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.pem]]
 version = "3.0.6"
-criteria = "safe-to-deploy"
-
-[[exemptions.petgraph]]
-version = "0.6.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.petgraph]]
@@ -2029,16 +1992,25 @@ criteria = "safe-to-run"
 version = "0.12.6"
 criteria = "safe-to-deploy"
 
+[[exemptions.prost]]
+version = "0.14.4"
+criteria = "safe-to-deploy"
+notes = "No independent review performed. Protobuf runtime/codegen (tokio-rs/prost), 0.14 line pulled by livekit-protocol 0.8 (#1303); the 0.12 line stays for libsql-hrana. Exempted on prost's status as the de facto Rust protobuf crate, not a source read."
+
 [[exemptions.prost-build]]
-version = "0.12.6"
+version = "0.14.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.prost-derive]]
 version = "0.12.6"
 criteria = "safe-to-deploy"
 
+[[exemptions.prost-derive]]
+version = "0.14.4"
+criteria = "safe-to-deploy"
+
 [[exemptions.prost-types]]
-version = "0.12.6"
+version = "0.14.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.pxfm]]
@@ -2198,7 +2170,7 @@ criteria = "safe-to-deploy"
 [[exemptions.ring]]
 version = "0.17.14"
 criteria = "safe-to-deploy"
-notes = "No independent review performed. The AEAD/hash/HMAC/RSA-verify primitives underneath rustls across this whole tree (reqwest's TLS to the DS/LiveKit, quinn's QUIC, tonic/libsql's TLS to Turso) — one of the highest-stakes crates in this file since it is the actual crypto, not a protocol shell around someone else's crypto. Exempted on ring's status as the most widely-deployed Rust crypto primitive crate (BoringSSL-derived, used by rustls/quinn/webpki upstream), not a source read. If first-party review time is spent anywhere in this file, this crate is one of the top candidates."
+notes = "No independent review performed. The AEAD/hash/HMAC/RSA-verify primitives underneath rustls across this whole tree (reqwest's TLS to the DS/LiveKit, quinn's QUIC, `pollis-libsql-connector`'s TLS to Turso) — one of the highest-stakes crates in this file since it is the actual crypto, not a protocol shell around someone else's crypto. Exempted on ring's status as the most widely-deployed Rust crypto primitive crate (BoringSSL-derived, used by rustls/quinn/webpki upstream), not a source read. If first-party review time is spent anywhere in this file, this crate is one of the top candidates."
 
 [[exemptions.rodio]]
 version = "0.19.0"
@@ -2233,30 +2205,12 @@ version = "1.1.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls]]
-version = "0.21.12"
-criteria = "safe-to-deploy"
-notes = "No independent review performed. Old line pinned transitively via livekit's own rustls dependency (see the RUSTSEC-2026-0049/-0104 [advisories] notes above — this is exactly the stale line those ignores describe, still on old rustls-webpki because livekit hasn't bumped). Exempted on rustls's overall track record (memory-safe-by-construction TLS, backed by the Rustls/ISRG team whose own audits.toml we import above), not a source read of this specific old line."
-
-[[exemptions.rustls]]
-version = "0.22.4"
-criteria = "safe-to-deploy"
-notes = "No independent review performed. Pinned transitively via libsql's TLS stack to Turso (see RUSTSEC-2026-0098/-0099 [advisories] notes above — same stale-rustls-webpki situation as the 0.21 line, different upstream). Same trust rationale as the other rustls entries in this file."
-
-[[exemptions.rustls]]
 version = "0.23.46"
 criteria = "safe-to-deploy"
-notes = "No independent review performed. This is the current, non-stale line this app uses directly via reqwest/hyper-rustls for outbound HTTPS to the DS and LiveKit (and via tokio-rustls elsewhere) — already on the fixed rustls-webpki 0.103.15 line, unlike the 0.21/0.22 entries above. Exempted on rustls's maintenance and design track record (memory-safe by construction, ISRG-affiliated); note this exact version/criteria pair is NOT satisfied by the isrg/mozilla imports above even though those bring in real third-party audits for other crates in this tree, so no claim is being borrowed from them here."
-
-[[exemptions.rustls-native-certs]]
-version = "0.7.3"
-criteria = "safe-to-deploy"
+notes = "No independent review performed. The ONLY rustls line in the tree since #1303 (livekit 0.9 dropped rustls 0.21; libsql is built without its rustls 0.22 `tls` feature and dials Turso through `pollis-libsql-connector` instead), on the fixed rustls-webpki 0.103 line. Used directly via reqwest/hyper-rustls for outbound HTTPS to the DS and LiveKit, quinn, tokio-rustls, and the libsql connector. 0.23.46 carries the RUSTSEC-2026-0346..0349 fixes. Exempted on rustls's maintenance and design track record (memory-safe by construction, ISRG-affiliated); note this exact version/criteria pair is NOT satisfied by the isrg/mozilla imports above, so no claim is being borrowed from them here."
 
 [[exemptions.rustls-native-certs]]
 version = "0.8.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.rustls-pemfile]]
-version = "2.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls-pki-types]]
@@ -2270,16 +2224,6 @@ criteria = "safe-to-deploy"
 [[exemptions.rustls-platform-verifier-android]]
 version = "0.1.1"
 criteria = "safe-to-deploy"
-
-[[exemptions.rustls-webpki]]
-version = "0.101.7"
-criteria = "safe-to-deploy"
-notes = "No independent review performed. The stale line named directly in the RUSTSEC-2026-0104 [advisories] ignore above (pinned via livekit's rustls 0.21); X.509 chain validation, so a real-world attack surface (a malicious cert) reaches this code even though the transport is TLS. Exempted on webpki's provenance (Rustls-project-maintained, BoringSSL/Chromium-derived validation logic), not a source read — the reachability argument in [advisories] is the actual mitigation, this exemption only says vet has no independent opinion on the code itself."
-
-[[exemptions.rustls-webpki]]
-version = "0.102.8"
-criteria = "safe-to-deploy"
-notes = "No independent review performed. Same situation as the 0.101.7 entry above, pinned via libsql's rustls 0.22 (RUSTSEC-2026-0098/-0099)."
 
 [[exemptions.rustls-webpki]]
 version = "0.103.15"
@@ -2344,10 +2288,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.scroll_derive]]
 version = "0.12.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.sct]]
-version = "0.7.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.sdd]]
@@ -2587,10 +2527,6 @@ version = "2.0.117"
 criteria = "safe-to-deploy"
 
 [[exemptions.sync_wrapper]]
-version = "0.1.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.sync_wrapper]]
 version = "1.0.2"
 criteria = "safe-to-deploy"
 
@@ -2750,20 +2686,8 @@ criteria = "safe-to-deploy"
 version = "1.52.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.tokio-io-timeout]]
-version = "1.2.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.tokio-macros]]
 version = "2.7.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.tokio-rustls]]
-version = "0.24.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.tokio-rustls]]
-version = "0.25.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.tokio-rustls]]
@@ -2776,10 +2700,6 @@ criteria = "safe-to-run"
 
 [[exemptions.tokio-stream]]
 version = "0.1.18"
-criteria = "safe-to-deploy"
-
-[[exemptions.tokio-tungstenite]]
-version = "0.20.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.tokio-tungstenite]]
@@ -2822,24 +2742,12 @@ criteria = "safe-to-deploy"
 version = "1.1.1+spec-1.1.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.tonic]]
-version = "0.11.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.tonic-web]]
-version = "0.11.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.tower]]
 version = "0.4.13"
 criteria = "safe-to-deploy"
 
 [[exemptions.tower]]
 version = "0.5.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.tower-http]]
-version = "0.4.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.tower-http]]
@@ -2880,10 +2788,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.tree_magic_mini]]
 version = "3.2.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.tungstenite]]
-version = "0.20.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.tungstenite]]
@@ -3043,10 +2947,6 @@ version = "1.0.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.webpki-roots]]
-version = "0.25.4"
-criteria = "safe-to-deploy"
-
-[[exemptions.webpki-roots]]
 version = "0.26.11"
 criteria = "safe-to-deploy"
 
@@ -3067,11 +2967,11 @@ version = "2.0.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.webrtc-sys]]
-version = "0.3.27"
+version = "0.3.49"
 criteria = "safe-to-deploy"
 
 [[exemptions.webrtc-sys-build]]
-version = "0.3.15"
+version = "0.3.19"
 criteria = "safe-to-deploy"
 
 [[exemptions.webview2-com]]
@@ -3492,18 +3392,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.zmij]]
 version = "1.0.21"
-criteria = "safe-to-deploy"
-
-[[exemptions.zstd]]
-version = "0.11.2+zstd.1.5.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.zstd-safe]]
-version = "5.0.2+zstd.1.5.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.zstd-sys]]
-version = "2.0.16+zstd.1.5.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.zune-core]]

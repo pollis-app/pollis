@@ -248,6 +248,7 @@ TUI, and mobile-via-uniffi share one copy of the command/state/db/MLS code.
 | `pollis-device-cert` | Device cross-signing certificate types |
 | `pollis-schema` | The remote schema as data: `migrations/` (main DB) + `migrations-log/` (commit-log DB) and the constants that embed them. Dependency-free, so `pollis-delivery` — which must not depend on `pollis-core` — builds its test databases from the same definitions (#875) |
 | `pollis-sqlcipher` | The SQLCipher the **Windows** build links, and only Windows: the stock amalgamation (`vendor/sqlite3.c`, unpatched) compiled with `-DSQLCIPHER_CRYPTO_LIBTOMCRYPT` against a ~20-function header whose primitives are RustCrypto, so no OpenSSL lands beside libwebrtc's BoringSSL (#992). Its C is built on every target anyway, so its known-answer and at-rest tests run on the ordinary Linux gate |
+| `pollis-libsql-connector` | The connector every remote libsql handle (DS, commit-log builder) dials Turso through: rustls 0.23 over tokio TCP with Mozilla roots, because libsql 0.10's own `tls` feature still pins rustls 0.22 / rustls-webpki 0.102 (#1303). Server-side only; the client links no libsql (#987) |
 
 Outside the Rust workspace: `frontend/` (React renderer — the renderer reaches the host only
 through `frontend/src/bridge`, never `@tauri-apps/*` directly) and `website/` (static

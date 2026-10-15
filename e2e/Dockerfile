@@ -37,8 +37,12 @@ ENV WEBKIT_DISABLE_COMPOSITING_MODE=1 \
 # xvfb) + the forward-compat xcb libs. Copy only the script so this layer is
 # cached independently of the rest of the tree.
 COPY e2e/scripts/install-system-deps.sh /tmp/install-system-deps.sh
-RUN bash /tmp/install-system-deps.sh \
-  && rm -rf /var/lib/apt/lists/* /tmp/install-system-deps.sh
+COPY scripts/install-clang.sh /tmp/install-clang.sh
+RUN INSTALL_CLANG_SCRIPT=/tmp/install-clang.sh bash /tmp/install-system-deps.sh \
+  && rm -rf /var/lib/apt/lists/* /tmp/install-system-deps.sh /tmp/install-clang.sh
+# The clang 21 shims install-clang.sh made, first on PATH: webrtc-sys calls
+# `clang++` by name and needs >= 21 (#1303); 24.04's own clang is 18.
+ENV PATH=/usr/local/lib/pollis-clang-21/bin:$PATH
 
 # Node 20 + pnpm (via corepack, pinned to the repo's packageManager version).
 RUN apt-get update \
