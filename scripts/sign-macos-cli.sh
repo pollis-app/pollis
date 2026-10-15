@@ -26,7 +26,9 @@
 #      secure timestamp are both notarization requirements;
 #   3. asserts the signature verifies and its authority is Developer ID
 #      Application (an ad-hoc signature passes `--verify` alone);
-#   4. submits to Apple's notary service and waits; anything but "Accepted"
+#   4. submits to Apple's notary service (credentials from a notarytool
+#      profile stored in that keychain, not passed on each command line) and
+#      waits; anything but "Accepted" — including notarytool itself failing —
 #      fails the job, with Apple's log printed.
 #
 # A bare executable cannot carry a stapled ticket (`stapler` handles .app,
@@ -105,22 +107,36 @@ if ! grep -q 'flags=.*runtime' <<<"$details"; then
 fi
 
 # 4. Notarize and wait for Apple's verdict.
-ditto -c -k --keepParent "$bin" "$zip"
-result="$(xcrun notarytool submit "$zip" \
+#
+# The app-specific password is handed to notarytool ONCE, to store a profile
+# in the throwaway keychain; every later call names the profile, so the
+# password is not on the command line of the long-running submit/log calls.
+# (`security import` above has no way to take the .p12 password other than
+# -P; that keychain and the decoded .p12 are deleted on exit.)
+profile="pollis-cli-notary"
+xcrun notarytool store-credentials "$profile" \
   --apple-id "$APPLE_ID" \
-  --password "$APPLE_PASSWORD" \
   --team-id "$APPLE_TEAM_ID" \
+  --password "$APPLE_PASSWORD" \
+  --keychain "$keychain" >/dev/null
+ditto -c -k --keepParent "$bin" "$zip"
+# Captured rather than allowed to abort under `set -e`: a failed or invalid
+# submission is exactly when Apple's log is needed.
+submit_rc=0
+result="$(xcrun notarytool submit "$zip" \
+  --keychain-profile "$profile" \
+  --keychain "$keychain" \
   --wait \
-  --output-format json)"
-status="$(printf '%s' "$result" | grep -o '"status"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')"
-submission="$(printf '%s' "$result" | grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')"
-if [ "$status" != "Accepted" ]; then
-  echo "::error::sign-macos-cli: notarization status '${status:-unknown}' (submission ${submission:-unknown})."
+  --output-format json)" || submit_rc=$?
+status="$(printf '%s' "$result" | grep -o '"status"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/' || true)"
+submission="$(printf '%s' "$result" | grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/' || true)"
+if [ "$submit_rc" -ne 0 ] || [ "$status" != "Accepted" ]; then
+  echo "::error::sign-macos-cli: notarization failed — status '${status:-unknown}', notarytool exit ${submit_rc} (submission ${submission:-none})."
+  printf '%s\n' "$result"
   if [ -n "$submission" ]; then
     xcrun notarytool log "$submission" \
-      --apple-id "$APPLE_ID" \
-      --password "$APPLE_PASSWORD" \
-      --team-id "$APPLE_TEAM_ID" || true
+      --keychain-profile "$profile" \
+      --keychain "$keychain" || true
   fi
   exit 1
 fi

@@ -301,10 +301,11 @@ jobs:
           if-no-files-found: error
           path: target/release/pollis.exe
 
-  # Publish to R2 under a dedicated `cli/` prefix. Mirrors the desktop
-  # release job's aws-s3-to-R2 mechanics (same ENDPOINT, credentials env,
-  # bucket) but never touches releases/install.sh, releases/latest.json, or
-  # the updater manifests.
+  # Upload the binaries to R2 under a dedicated `cli/` prefix. Mirrors the
+  # desktop release job's aws-s3-to-R2 mechanics (same ENDPOINT, credentials
+  # env, bucket) but never touches releases/install.sh, releases/latest.json,
+  # or the updater manifests. The binaries alone are inert: nothing points at
+  # this version until `announce-cli` flips latest.json, after provenance.
   publish-cli:
     needs: [resolve-version, build-cli-linux, build-cli-macos, build-cli-windows]
     runs-on: ubuntu-latest
@@ -329,7 +330,6 @@ jobs:
 
       - name: Upload CLI binaries to R2
         run: |
-          VERSION="${{ needs.resolve-version.outputs.version }}"
           ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
           aws s3 cp artifacts/pollis-cli-linux/pollis   "s3://pollis/releases/cli/${VERSION}/pollis-linux"       --endpoint-url "${ENDPOINT}"
           aws s3 cp artifacts/pollis-cli-macos/pollis   "s3://pollis/releases/cli/${VERSION}/pollis-macos"       --endpoint-url "${ENDPOINT}"
@@ -339,35 +339,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
           AWS_DEFAULT_REGION: auto
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-
-      - name: Publish cli latest.json to R2
-        run: |
-          VERSION="${{ needs.resolve-version.outputs.version }}"
-          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          BASE="https://cdn.pollis.com/releases/cli/${VERSION}"
-          echo "{\"version\":\"${VERSION}\",\"linux\":\"${BASE}/pollis-linux\",\"macos\":\"${BASE}/pollis-macos\",\"windows\":\"${BASE}/pollis-windows.exe\"}" > latest.json
-          aws s3 cp latest.json "s3://pollis/releases/cli/latest.json" \
-            --endpoint-url "${ENDPOINT}" \
-            --content-type "application/json" \
-            --cache-control "no-cache"
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
-          AWS_DEFAULT_REGION: auto
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-
-      - name: Upload cli install script to R2
-        run: |
-          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          aws s3 cp website/cli-install.sh "s3://pollis/releases/cli-install.sh" \
-            --endpoint-url "${ENDPOINT}" \
-            --content-type "text/plain" \
-            --cache-control "no-cache"
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
-          AWS_DEFAULT_REGION: auto
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VERSION: ${{ needs.resolve-version.outputs.version }}
 
   # Keyless build provenance for the CLI (#877).
   #
@@ -385,8 +357,11 @@ jobs:
   # signing identity is this workflow's GitHub Actions OIDC identity, so a
   # binary swapped on the CDN cannot be given a valid signature.
   #
-  # `needs: [publish-cli]`, so the release is already out when this runs: a
-  # failure here delays provenance, it never corrupts a shipped CLI.
+  # `needs: [publish-cli]`: the binaries are on R2 but not yet announced. Since
+  # #1337 cli-install.sh REFUSES a binary it cannot verify, so latest.json and
+  # the installer are published only after this job succeeds (`announce-cli`).
+  # A failure here therefore leaves the previous release as the one installers
+  # get — it never announces a CLI nobody can verify.
   provenance-cli:
     needs: [resolve-version, publish-cli]
     runs-on: ubuntu-latest
@@ -446,9 +421,7 @@ jobs:
       - name: Publish provenance + cosign signatures to R2
         run: |
           set -euo pipefail
-          VERSION="${{ needs.resolve-version.outputs.version }}"
           ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          BUNDLE="${{ steps.attest.outputs.bundle-path }}"
           for f in prov/*; do
             base="$(basename "$f")"
             case "$base" in
@@ -461,6 +434,48 @@ jobs:
             aws s3 cp "prov/${base}.pem" "s3://pollis/releases/cli/${VERSION}/${base}.pem" \
               --endpoint-url "${ENDPOINT}" --content-type "application/x-pem-file"
           done
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
+          AWS_DEFAULT_REGION: auto
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+
+  # Announce the release: point latest.json at it and publish the installer —
+  # LAST, after provenance-cli has put the attestation and the cosign
+  # .sig/.pem in place (#1337). cli-install.sh refuses what it cannot verify,
+  # so announcing first opened a window in which every install was refused,
+  # and a failed provenance job would have left it refused.
+  announce-cli:
+    needs: [resolve-version, provenance-cli]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Publish cli latest.json to R2
+        run: |
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          BASE="https://cdn.pollis.com/releases/cli/${VERSION}"
+          echo "{\"version\":\"${VERSION}\",\"linux\":\"${BASE}/pollis-linux\",\"macos\":\"${BASE}/pollis-macos\",\"windows\":\"${BASE}/pollis-windows.exe\"}" > latest.json
+          aws s3 cp latest.json "s3://pollis/releases/cli/latest.json" \
+            --endpoint-url "${ENDPOINT}" \
+            --content-type "application/json" \
+            --cache-control "no-cache"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
+          AWS_DEFAULT_REGION: auto
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+
+      - name: Upload cli install script to R2
+        run: |
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 cp website/cli-install.sh "s3://pollis/releases/cli-install.sh" \
+            --endpoint-url "${ENDPOINT}" \
+            --content-type "text/plain" \
+            --cache-control "no-cache"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
