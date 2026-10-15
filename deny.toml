@@ -31,32 +31,24 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 ignore = [
     # --- Vulnerabilities with no reachable fix (transitive, upstream-pinned) ---
 
-    # rsa timing sidechannel (Marvin). Transitive: livekit -> livekit-api ->
-    # jsonwebtoken -> rsa 0.9.10. No patched rsa release exists (the fix needs a
-    # constant-time bigint the crate hasn't shipped). Path is LiveKit JWT
-    # RS256 *signing*, not PKCS#1v1.5 *decryption*; the Marvin oracle (timing
-    # many decryptions) is not exercised. Re-evaluate when rsa ships a fix.
-    { id = "RUSTSEC-2023-0071", reason = "rsa: no upstream fix; transitive via livekit-api/jsonwebtoken; decryption-timing oracle not reachable on the JWT-signing path" },
-
-    # rustls-webpki cert-validation bugs (name-constraint bypass, CRL panic,
-    # CRL authority). Our direct TLS already uses the fixed rustls-webpki
-    # 0.103.13. These flags come from OLD lines pinned transitively:
-    # 0.101.7 via livekit's rustls 0.21, 0.102.8 via libsql's rustls 0.22.
-    # Neither line has a backported fix (fixes are 0.103+); bumping requires
-    # livekit/libsql to move rustls, an upstream change. Tracked for a future
-    # dep bump.
-    { id = "RUSTSEC-2026-0049", reason = "rustls-webpki 0.101/0.102 (livekit rustls 0.21 / libsql rustls 0.22); fixed only on 0.103 line which our direct TLS already uses; old lines pinned upstream" },
-    { id = "RUSTSEC-2026-0098", reason = "rustls-webpki 0.101/0.102 pinned via livekit/libsql; fix only on 0.103 line (already used directly); awaiting upstream rustls bump" },
-    { id = "RUSTSEC-2026-0099", reason = "rustls-webpki 0.101/0.102 pinned via livekit/libsql; fix only on 0.103 line (already used directly); awaiting upstream rustls bump" },
-    { id = "RUSTSEC-2026-0104", reason = "rustls-webpki 0.101 pinned via livekit rustls 0.21; fix only on 0.103 line (already used directly); awaiting upstream rustls bump" },
+    # rsa timing sidechannel (Marvin). Transitive: pollis-delivery ->
+    # jsonwebtoken (`rust_crypto`) -> rsa 0.9.10 — the only path since #1303
+    # dropped livekit-api from the client. No patched rsa release exists (the
+    # fix needs a constant-time bigint the crate hasn't shipped). The DS mints
+    # LiveKit JWTs with HS256; RSA is linked, never used for PKCS#1v1.5
+    # *decryption*, so the Marvin oracle (timing many decryptions) is not
+    # exercised. Re-evaluate when rsa ships a fix.
+    { id = "RUSTSEC-2023-0071", reason = "rsa: no upstream fix; transitive via the DS's jsonwebtoken; decryption-timing oracle not reachable (HS256 JWT signing only)" },
 
     # h2 0.3 accepts and queues empty DATA frames without limit (unbounded
     # memory, or a panic on length overflow). Low severity. The fix is h2
     # 0.4.16; there is no 0.3 backport, and 0.3.27 is the last 0.3 release.
     #
-    # h2 0.3 enters through exactly one edge — libsql's replication/hrana stack
-    # (libsql -> tonic 0.11 -> hyper 0.14 -> h2 0.3) — and #987 removed every
-    # other one: `pollis-core` and the shipping `pollis` binary now link no
+    # h2 0.3 enters through exactly one edge — libsql's hrana client (libsql ->
+    # hyper 0.14 with its `http2` feature -> h2 0.3; libsql 0.10 still declares
+    # hyper 0.14 that way, and #1303 dropped the tonic 0.11 path by building
+    # libsql without its `replication`/`sync`/`tls` defaults) — and #987 removed
+    # every other one: `pollis-core` and the shipping `pollis` binary now link no
     # database driver at all, which `pollis-core/tests/no_client_side_remote_
     # reads.rs` holds shut. What remains is server-side: `pollis-delivery` and
     # `pollis-schema`'s migration runner, which ARE the database clients.
@@ -64,12 +56,15 @@ ignore = [
     # Not reachable as stated. The flaw is a peer flooding an HTTP/2 connection;
     # every h2 0.3 instance here is an OUTBOUND CLIENT to Turso over TLS, so the
     # only peer that can send those frames is Turso itself or a broken TLS
-    # session. The DS's inbound listener — the surface untrusted peers actually
+    # session. Since #1303 it is not even negotiated: every remote libsql
+    # handle dials through `pollis-libsql-connector`, which offers ALPN
+    # `http/1.1` only and never reports an h2 connection, so hyper 0.14 speaks
+    # HTTP/1.1 to Turso and the h2 code is linked but dead. The DS's inbound listener — the surface untrusted peers actually
     # reach — is axum 0.8 on hyper 1.9, which is not built with h2 at all (see
     # `cargo tree -p pollis-delivery -i h2`: hyper 1.9 does not appear).
     #
-    # Drop this entry when libsql moves to tonic 0.12+ / hyper 1.x.
-    { id = "RUSTSEC-2026-0258", reason = "h2 0.3 empty-DATA-frame DoS; no 0.3 backport (fix is 0.4.16); reachable only as libsql's outbound client to Turso, never on the DS's inbound listener (hyper 1.9, no h2)" },
+    # Drop this entry when libsql moves to hyper 1.x.
+    { id = "RUSTSEC-2026-0258", reason = "h2 0.3 empty-DATA-frame DoS; no 0.3 backport (fix is 0.4.16); linked only into libsql's outbound client to Turso, which negotiates HTTP/1.1 only (#1303), never on the DS's inbound listener (hyper 1.9, no h2)" },
 
     # quick-xml DoS (quadratic attribute scan / unbounded namespace alloc).
     # Requires attacker-controlled XML. Every vulnerable instance in our tree is
@@ -137,8 +132,6 @@ ignore = [
     { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 unmaintained; compile-time macro helper (transitive); no runtime surface" },
     { id = "RUSTSEC-2024-0436", reason = "paste unmaintained; compile-time proc-macro (via ratatui); no runtime surface" },
     { id = "RUSTSEC-2025-0057", reason = "fxhash unmaintained; non-cryptographic hasher (transitive); no security impact" },
-    { id = "RUSTSEC-2025-0141", reason = "bincode unmaintained (transitive); no reachable vulnerability" },
-    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile unmaintained; folded into rustls-pki-types upstream; transitive via libsql's rustls-native-certs" },
 ]
 
 # ---------------------------------------------------------------------------
@@ -305,9 +298,7 @@ multiple-versions = "deny"
 # Wildcard ("*") version requirements are a supply-chain smell; flag them.
 wildcards = "warn"
 skip = [
-    { name = "axum", version = "0.6.20" },
     { name = "axum", version = "0.7.9" },
-    { name = "axum-core", version = "0.3.4" },
     { name = "axum-core", version = "0.4.5" },
     { name = "base64", version = "0.21.7" },
     { name = "bindgen", version = "0.65.1" },
@@ -330,22 +321,13 @@ skip = [
     { name = "der", version = "0.7.10" },
     { name = "derive_more", version = "0.99.20" },
     { name = "digest", version = "0.10.7" },
-    { name = "fallible-iterator", version = "0.2.0" },
     { name = "fiat-crypto", version = "0.2.9" },
-    { name = "fixedbitset", version = "0.4.2" },
     { name = "foldhash", version = "0.1.5" },
     { name = "getrandom", version = "0.1.16" },
     { name = "getrandom", version = "0.2.17" },
     { name = "getrandom", version = "0.3.4" },
-    { name = "gio-sys", version = "0.18.1" },
-    { name = "glib", version = "0.18.5" },
-    { name = "glib-macros", version = "0.18.5" },
-    { name = "glib-sys", version = "0.18.1" },
-    { name = "gobject-sys", version = "0.18.0" },
     { name = "hashbrown", version = "0.12.3" },
-    { name = "hashbrown", version = "0.14.5" },
     { name = "hashbrown", version = "0.15.5" },
-    { name = "hashlink", version = "0.8.4" },
     { name = "heck", version = "0.4.1" },
     { name = "hkdf", version = "0.12.4" },
     { name = "hmac", version = "0.12.1" },
@@ -353,10 +335,9 @@ skip = [
     { name = "http", version = "0.2.12" },
     { name = "http-body", version = "0.4.6" },
     { name = "hyper", version = "0.14.32" },
-    { name = "hyper-rustls", version = "0.25.0" },
     { name = "indexmap", version = "1.9.3" },
-    { name = "itertools", version = "0.11.0" },
     { name = "itertools", version = "0.12.1" },
+    { name = "itertools", version = "0.13.0" },
     { name = "libloading", version = "0.7.4" },
     { name = "linux-raw-sys", version = "0.4.15" },
     { name = "markup5ever", version = "0.14.1" },
@@ -365,9 +346,6 @@ skip = [
     { name = "ndk-sys", version = "0.5.0+25.2.9519653" },
     { name = "nix", version = "0.29.0" },
     { name = "nom", version = "7.1.3" },
-    { name = "openssl-probe", version = "0.1.6" },
-    { name = "password-hash", version = "0.4.2" },
-    { name = "petgraph", version = "0.6.5" },
     { name = "phf", version = "0.8.0" },
     { name = "phf", version = "0.10.1" },
     { name = "phf", version = "0.11.3" },
@@ -384,6 +362,8 @@ skip = [
     { name = "png", version = "0.17.16" },
     { name = "proc-macro-crate", version = "1.3.1" },
     { name = "proc-macro-crate", version = "2.0.2" },
+    { name = "prost", version = "0.12.6" },
+    { name = "prost-derive", version = "0.12.6" },
     { name = "quick-xml", version = "0.30.0" },
     { name = "quick-xml", version = "0.37.5" },
     { name = "quick-xml", version = "0.38.4" },
@@ -402,11 +382,6 @@ skip = [
     { name = "reqwest", version = "0.12.28" },
     { name = "rustc-hash", version = "1.1.0" },
     { name = "rustix", version = "0.38.44" },
-    { name = "rustls", version = "0.21.12" },
-    { name = "rustls", version = "0.22.4" },
-    { name = "rustls-native-certs", version = "0.7.3" },
-    { name = "rustls-webpki", version = "0.101.7" },
-    { name = "rustls-webpki", version = "0.102.8" },
     { name = "security-framework", version = "2.11.1" },
     { name = "selectors", version = "0.24.0" },
     { name = "serde_spanned", version = "0.6.9" },
@@ -421,15 +396,11 @@ skip = [
     { name = "string_cache_codegen", version = "0.5.4" },
     { name = "strsim", version = "0.10.0" },
     { name = "syn", version = "1.0.109" },
-    { name = "sync_wrapper", version = "0.1.2" },
     { name = "system-deps", version = "6.2.2" },
     { name = "target-lexicon", version = "0.12.16" },
     { name = "tendril", version = "0.4.3" },
     { name = "thiserror", version = "1.0.69" },
     { name = "thiserror-impl", version = "1.0.69" },
-    { name = "tokio-rustls", version = "0.24.1" },
-    { name = "tokio-rustls", version = "0.25.0" },
-    { name = "tokio-tungstenite", version = "0.20.1" },
     { name = "toml", version = "0.8.2" },
     { name = "toml", version = "0.9.12+spec-1.1.0" },
     { name = "toml_datetime", version = "0.6.3" },
@@ -437,11 +408,8 @@ skip = [
     { name = "toml_edit", version = "0.19.15" },
     { name = "toml_edit", version = "0.20.2" },
     { name = "tower", version = "0.4.13" },
-    { name = "tower-http", version = "0.4.4" },
-    { name = "tungstenite", version = "0.20.1" },
     { name = "unicode-width", version = "0.1.14" },
     { name = "wasi", version = "0.9.0+wasi-snapshot-preview1" },
-    { name = "webpki-roots", version = "0.25.4" },
     { name = "webpki-roots", version = "0.26.11" },
     { name = "windows", version = "0.54.0" },
     { name = "windows", version = "0.61.3" },
