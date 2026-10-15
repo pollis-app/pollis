@@ -370,6 +370,51 @@ parks the sender at `EnvelopeBeforePost`), and
 the committer, drives `mark_messages_read` at it, and asserts the epoch and the
 staged commit are both untouched).
 
+### Lost messages are visible (#1312)
+
+Every path above exists to stop a device passing an epoch before it has read
+what was sealed at it. When one is missed anyway, the watermark still has to
+move past the envelope (holding it would wedge the conversation), and before
+#1312 that was all that happened: no row, no log line. Losses were invisible by
+construction, so a missing message looked exactly like one never sent.
+
+Now `ingest::record_losses` runs after each pass's watermark is computed. For
+every `message`/`edit` envelope at or below the new cursor that the pass did
+not open, and that has neither a real row nor a `known_envelope` record, it
+asks `messages::loss::classify`:
+
+- **Not a loss** — sealed below the epoch this device was added to the tree at
+  (`mls::first_join`), or in a lineage it never held. A Welcome sets that floor
+  (`record_added`, replacing it — so the gap while a removed member was out
+  counts too); creating the group or an external join only sets it if none
+  exists (`record_first_join`), because a recovery rebuild's gap was sent while
+  the device was a member and IS a loss. That is the accepted pre-join loss;
+  one summary log line counts them.
+- **`stranded`** — the replay started above its epoch, so it was never attempted.
+- **`failed`** — attempted at its own epoch and would not open.
+- **`lineage`** — sealed in a generation this device held but no longer does.
+
+A loss writes a `[loss]` line to the on-device log (conversation, envelope,
+sealed position, where the replay went, the join floor) and, for a `message`,
+a placeholder row (`message.undecryptable`). Clients render it as "This message
+couldn't be decrypted on this device" with no author and no message actions,
+only a link to Diagnostics (desktop `/diagnostics`, mobile Self → Diagnostics;
+the TUI has no such page). A run of consecutive placeholders is drawn as ONE
+row that says how many (`collapseUndecryptable` on desktop and mobile,
+`message_lines` in the TUI); the rows themselves stay one per envelope. A
+successful decrypt of the same id later replaces it; a control frame drops it.
+
+A lineage this device held before #1312 has no recorded join; its floor becomes
+one above the epoch the first catch-up after the upgrade started at
+(`loss::fallback_floor`), so control frames it posted before `known_envelope`
+existed cannot come back as losses. The price is that one epoch stays silent.
+
+Tests: `src-tauri/tests/flows/lost_messages.rs` forces a strand (a bare commit
+replay) and a decrypt failure (`messages::test_hooks::corrupt_next_send`, a
+`test-harness`-only hook) and asserts one placeholder each, and that pre-join
+history, a device's own receipts/edits/deletes and a sibling device's frames
+produce none.
+
 ### Recovery-path guards (revocation + membership lockout)
 
 The external-join **recovery** paths in `process_pending_commits_locked_impl`

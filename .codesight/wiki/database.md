@@ -1232,6 +1232,25 @@ Full reasoning: the rusqlite note in `pollis-core/Cargo.toml` and `docs/security
 - `delivered` INTEGER NOT NULL DEFAULT 0
 - `edited_at` TEXT
 - `deleted_at` TEXT
+- `thread_id` TEXT _(thread root, #825)_
+- `undecryptable` TEXT _(#1312: set only on a **placeholder** row — `stranded` / `failed` / `lineage`; CHECK forces `content IS NULL`)_
+
+A placeholder stands in for a message this device was entitled to read and
+never decrypted: the ingest writes it when its cursor moves past such an
+envelope, so the loss shows in the conversation instead of vanishing. See
+[MLS → Lost messages are visible](mls.md#lost-messages-are-visible-1312).
+
+### known_envelope (#1312)
+- `id` TEXT PK — an envelope id
+- `kind` TEXT NOT NULL CHECK IN (`own`, `opened`)
+- `recorded_at` TEXT NOT NULL DEFAULT now
+
+Envelopes this device already accounted for that leave no `message` row: ones it
+**posted** (sealed sender hides the author, and MLS cannot decrypt a message for
+the leaf that sealed it) and control frames or edits it already **opened** (an
+MLS message cannot be decrypted twice, and an envelope can be fetched again).
+Without it each would read as a loss. Pruned after 400 days, past the DS's
+longest envelope retention.
 
 The `message` table is bounded by a **device-local retention window** (#150). It
 is not unbounded history — old rows are evicted to cap disk use on this device.

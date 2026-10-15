@@ -313,8 +313,12 @@ fn render_messages(frame: &mut Frame, area: Rect, home: &HomeState) {
     let viewport = inner.height as usize;
     let (start, end, top_pad) = visible_window(open.messages.len(), viewport, open.scroll);
 
+    // A run of lost messages (#1312) is one line, as on desktop and mobile. The
+    // lines it saves go back on top so the log stays bottom-anchored.
+    let body = message_lines(&open.messages[start..end]);
+    let saved = (end - start) - body.len();
     let mut lines: Vec<Line> = Vec::with_capacity(viewport);
-    for _ in 0..top_pad {
+    for _ in 0..top_pad + saved {
         lines.push(Line::from(""));
     }
     // A hint that older history is still loadable, shown at the very top.
@@ -324,11 +328,42 @@ fn render_messages(frame: &mut Frame, area: Rect, home: &HomeState) {
             Style::default().fg(Color::DarkGray),
         )));
     }
-    for m in &open.messages[start..end] {
-        lines.push(message_line(m));
-    }
+    lines.extend(body);
 
     frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// One line per message, except that a run of consecutive lost-message
+/// placeholders (#1312) becomes a single line saying how many.
+fn message_lines(messages: &[pollis_core::commands::messages::ChannelMessage]) -> Vec<Line<'_>> {
+    let mut out = Vec::with_capacity(messages.len());
+    let mut i = 0;
+    while i < messages.len() {
+        if messages[i].undecryptable {
+            let run = messages[i..].iter().take_while(|m| m.undecryptable).count();
+            out.push(undecryptable_line(run));
+            i += run;
+        } else {
+            out.push(message_line(&messages[i]));
+            i += 1;
+        }
+    }
+    out
+}
+
+/// The placeholder line for `count` consecutive lost messages. Nothing
+/// readable says who sent them, so no sender is shown.
+fn undecryptable_line(count: usize) -> Line<'static> {
+    let text = if count == 1 {
+        UNDECRYPTABLE_TEXT.to_string()
+    } else {
+        format!("{count} messages couldn't be decrypted on this device")
+    };
+    Line::from(vec![
+        Span::styled("?", Style::default().fg(Color::DarkGray)),
+        Span::raw("  "),
+        Span::styled(text, Style::default().fg(Color::Red).add_modifier(Modifier::ITALIC)),
+    ])
 }
 
 /// Render a single message as `sender  content`, handling the deleted / not-yet-
@@ -337,6 +372,11 @@ fn render_messages(frame: &mut Frame, area: Rect, home: &HomeState) {
 /// Borrows from `m` rather than owning: this runs for every visible message on
 /// every frame, and the owned form copied the whole body text each time.
 fn message_line(m: &pollis_core::commands::messages::ChannelMessage) -> Line<'_> {
+    // A message this device should have been able to read and could not
+    // (#1312).
+    if m.undecryptable {
+        return undecryptable_line(1);
+    }
     let sender = m.sender_username.as_deref().unwrap_or(&m.sender_id);
     let sender_style = Style::default()
         .fg(Color::Cyan)
@@ -365,6 +405,10 @@ fn message_line(m: &pollis_core::commands::messages::ChannelMessage) -> Line<'_>
     }
     Line::from(spans)
 }
+
+/// The placeholder line for a lost message — the same words desktop and mobile
+/// use.
+pub(crate) const UNDECRYPTABLE_TEXT: &str = "This message couldn't be decrypted on this device";
 
 /// A focused pane gets a solid accent border; an unfocused one a muted border.
 fn border_style(focused: bool) -> Style {
@@ -592,4 +636,50 @@ fn centered(area: Rect, w: u16, h: u16) -> Rect {
     let x = area.x + (area.width.saturating_sub(w)) / 2;
     let y = area.y + (area.height.saturating_sub(h)) / 2;
     Rect::new(x, y, w, h)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pollis_core::commands::messages::ChannelMessage;
+
+    fn text(line: &Line<'_>) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    fn message(undecryptable: bool) -> ChannelMessage {
+        ChannelMessage {
+            id: "m".to_string(),
+            conversation_id: "c".to_string(),
+            sender_id: if undecryptable { "sealed" } else { "u" }.to_string(),
+            sender_username: None,
+            ciphertext: String::new(),
+            content: if undecryptable { None } else { Some("hi".to_string()) },
+            reply_to_id: None,
+            thread_id: None,
+            sent_at: "t".to_string(),
+            edited_at: None,
+            deleted_at: None,
+            undecryptable,
+        }
+    }
+
+    /// A lost message (#1312) renders as the placeholder, with no sender —
+    /// never as an empty line or as "(unable to decrypt)" under a fake author.
+    #[test]
+    fn an_undecryptable_message_renders_the_placeholder() {
+        let rendered = text(&message_line(&message(true)));
+        assert!(rendered.contains(UNDECRYPTABLE_TEXT), "{rendered}");
+        assert!(!rendered.contains("sealed"), "{rendered}");
+    }
+
+    /// A run of three is one line that says three; a real message ends it.
+    #[test]
+    fn a_run_of_lost_messages_is_one_line() {
+        let all = vec![message(true), message(true), message(true), message(false), message(true)];
+        let lines: Vec<String> = message_lines(&all).iter().map(text).collect();
+        assert_eq!(lines.len(), 3, "{lines:?}");
+        assert!(lines[0].contains("3 messages couldn't be decrypted"), "{lines:?}");
+        assert!(lines[2].contains(UNDECRYPTABLE_TEXT), "{lines:?}");
+    }
 }

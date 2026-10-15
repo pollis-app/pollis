@@ -160,6 +160,14 @@ where
 
     staged.into_group(provider)
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("into group: {e}")))?;
+    // Added to the tree here: nothing sealed before this epoch was sent to
+    // this device (#1312).
+    super::join_branch::record_added(
+        provider.raw_conn(),
+        &conversation_id,
+        generation,
+        welcome_epoch,
+    );
 
     Ok(raw_group_id)
 }

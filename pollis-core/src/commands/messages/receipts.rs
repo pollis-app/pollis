@@ -203,6 +203,7 @@ pub(crate) async fn emit_receipt(
     let dm = is_dm(state, conversation_id).await?;
 
     let now = super::envelope_sent_at();
+    let envelope_id = ulid::Ulid::new().to_string();
     let sealed = {
         let guard = state.local_db.lock().await;
         let db = guard
@@ -223,13 +224,15 @@ pub(crate) async fn emit_receipt(
             // it would be worse than silently skipping.
             return Ok(());
         };
+        // It will come back through this device's own fetch, undecryptable
+        // here (#1312).
+        super::loss::record_own_envelope(db.conn(), &envelope_id);
         sealed
     };
 
     // Blind the envelope sender exactly like every other send — sealing is
     // unconditional (#607). The reader's true identity is the MLS credential
     // inside the ciphertext, which is what the recipient records as `reader_id`.
-    let envelope_id = ulid::Ulid::new().to_string();
     // A receipt frame is an envelope like any other, so it carries a capability
     // like any other (#1086) — uniform, rather than a per-type carve-out nobody
     // would remember to keep in step. Deleting one would stop a recipient

@@ -33,7 +33,30 @@ CREATE TABLE IF NOT EXISTS message (
     -- This column is ALSO added to pre-existing databases by
     -- `add_missing_columns` in `local.rs`; CREATE TABLE IF NOT EXISTS is a
     -- no-op once the table exists, so this line only serves fresh DBs.
-    thread_id TEXT
+    thread_id TEXT,
+    -- Set on a PLACEHOLDER row (#1312): an envelope this device was entitled to
+    -- read but never decrypted, written when the ingest cursor moves past it so
+    -- the loss shows in the conversation instead of vanishing. The value is the
+    -- reason (see `messages::loss::Reason`); a placeholder never holds content.
+    -- Also added to existing DBs by `add_missing_columns`.
+    undecryptable TEXT CHECK (
+        undecryptable IS NULL
+        OR (undecryptable IN ('stranded', 'failed', 'lineage') AND content IS NULL)
+    )
+);
+
+-- Envelopes this device has already accounted for, that leave no `message`
+-- row of their own (#1312): ones it POSTED ('own') — under sealed sender
+-- nothing on an envelope says who sent it, and a device cannot decrypt its own
+-- MLS messages — and control frames (receipts, deletes, edits) it already
+-- OPENED ('opened'), since an MLS message cannot be decrypted twice and an
+-- envelope can be fetched again. Without this list each would look like a lost
+-- message when it comes back through the fetch. Pruned past the DS's longest
+-- envelope retention.
+CREATE TABLE IF NOT EXISTS known_envelope (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('own', 'opened')),
+    recorded_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_message_conversation ON message(conversation_id, sent_at);

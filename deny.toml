@@ -176,7 +176,6 @@ confidence-threshold = 0.9
 # allow-list above already covers every third-party crate in the graph.
 exceptions = []
 
-
 # Our workspace crates have no `license` field (they are the proprietary Pollis
 # application, never published). Assert that truthfully as a custom LicenseRef so
 # the license check passes without inventing an OSS license or disabling it.

@@ -1,0 +1,45 @@
+appId: com.pollis.mobile
+tags:
+  - two-client
+---
+# LOST MESSAGE (#1312), part 2 of 2. The peer has sent all three messages. The
+# conversation must show the two readable ones and, between them, the
+# placeholder for the one this device could not decrypt — never silence.
+# No relaunch: the session from part 1 is still on screen.
+
+# Leave and re-open the conversation so its ingest runs whether or not a
+# realtime wake arrived.
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "tab-direct"
+- extendedWaitUntil:
+    visible:
+      text: ".*${MAESTRO_PEER_HANDLE}.*"
+    timeout: 30000
+- tapOn:
+    text: ".*${MAESTRO_PEER_HANDLE}.*"
+- extendedWaitUntil:
+    visible:
+      text: "after the lost message"
+    timeout: 60000
+- assertVisible:
+    text: "before the lost message"
+- assertVisible:
+    id: "text-undecryptable-.*"
+# The peer sent TWO undecryptable messages in a row: one row, counted.
+- assertVisible:
+    text: "2 messages couldn't be decrypted on this device."
+- assertNotVisible:
+    text: "this message is lost in transit"
+- assertNotVisible:
+    text: "so is this one"
+- takeScreenshot: lost-message-02-placeholder
+# Its link opens Diagnostics, where each loss has its own log line.
+- tapOn:
+    id: "btn-undecryptable-diagnostics-.*"
+- extendedWaitUntil:
+    visible:
+      id: "screen-self-diagnostics"
+    timeout: 15000
+- takeScreenshot: lost-message-03-diagnostics

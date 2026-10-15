@@ -385,6 +385,8 @@ for (const skin of SKINS) {
 
       // Copy-link lives in the per-message "more" menu — open it first.
       const message = page.getByTestId(`message-${CHANNEL_MESSAGE_ID}`);
+      // A hidden action bar takes no clicks until its row is hovered (#1312).
+      await message.hover();
       await message.getByTestId("message-actions-more").click();
       const copyButton = message.getByTestId("copy-link-button");
 
@@ -427,6 +429,8 @@ for (const skin of SKINS) {
       await gotoChannel(page);
 
       const message = page.getByTestId(`message-${CHANNEL_MESSAGE_ID}`);
+      // A hidden action bar takes no clicks until its row is hovered (#1312).
+      await message.hover();
       await message.getByTestId("message-actions-more").click();
       const copyButton = message.getByTestId("copy-link-button");
 
@@ -466,6 +470,8 @@ for (const skin of SKINS) {
       // menu deliberately stays open after the click so the copied/failed
       // feedback is visible where the click happened.
       const message = page.getByTestId(`message-${CHANNEL_MESSAGE_ID}`);
+      // A hidden action bar takes no clicks until its row is hovered (#1312).
+      await message.hover();
       await message.getByTestId("message-actions-more").click();
       const copyButton = message.getByTestId("copy-link-button");
 
@@ -491,6 +497,8 @@ for (const skin of SKINS) {
 
       // Copy-link lives in the per-message "more" menu — open it first.
       const message = page.getByTestId(`message-${CHANNEL_MESSAGE_ID}`);
+      // A hidden action bar takes no clicks until its row is hovered (#1312).
+      await message.hover();
       await message.getByTestId("message-actions-more").click();
       const copyButton = message.getByTestId("copy-link-button");
 
@@ -526,6 +534,8 @@ for (const skin of SKINS) {
 
       // Save lives in the per-message "more" menu — open it first.
       const message = page.getByTestId(`message-${CHANNEL_MESSAGE_ID}`);
+      // A hidden action bar takes no clicks until its row is hovered (#1312).
+      await message.hover();
       await message.getByTestId("message-actions-more").click();
       const saveButton = message.getByTestId("save-button");
 

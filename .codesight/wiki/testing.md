@@ -284,7 +284,7 @@ Test rigs need to point that somewhere disposable, and a multi-device rig needs 
 - `setenv` mutates a process-global array that any other thread's `getenv` may be reading at that instant. That is a data race — the reason Rust 2024 made `set_var` `unsafe` — and these rigs always have other threads live (the in-process DS, background sync loops, `spawn_blocking` keystore work). It fails rarely, under load, with nothing broken (#923).
 - `set_data_dir` is a locked write behind an `RwLock`, so a reader always sees one whole path.
 
-`POLLIS_DATA_DIR` still works and is still what a second dev instance and the mobile bridge use; the override just takes precedence. Production never sets it.
+`POLLIS_DATA_DIR` still works and is still what a second dev instance and the Android bridge use; the override just takes precedence. Production never sets it. iOS sets neither: `dirs_path()` resolves to `Library/Application Support/pollis` in the app container (`ios_storage`), which `init_pollis` creates and excludes from backup. Never the sandbox `tmp/`, which iOS may purge (#1306).
 
 ## Writing a scenario
 
@@ -479,6 +479,19 @@ reads the DS and Worker source plus both wrangler configs and fails if a client
 IP could be logged, traced or recorded (see `overview.md` → Client IPs).
 `tests/ip_shaped_device_names.rs` pins migration 000034's scrub and the DS's
 write-time redaction of IP-shaped device names.
+
+## Producing a lost message for real (#1312)
+
+`pollis_core::commands::messages::test_hooks::corrupt_next_send()` (only in a
+`test-harness` build) flips one bit of the next outgoing envelope's AEAD tag:
+the header still parses and the DS still accepts it, but no recipient can open
+it. `flows/lost_messages.rs` uses it, and a bare
+`process_pending_commits_inner` call to strand a device, to assert each loss
+shows as exactly one placeholder and that pre-join history and a device's own
+control frames show none. On mobile, `pollis-tui/examples/lost_message_peer.rs`
+uses the same hook against the dev DS for the Maestro flow
+(`mobile/scripts/maestro-lost-message.sh`). Desktop rendering in both skins is
+`e2e/lost-messages.spec.ts`.
 
 ## The `DsFault` seam — injecting DS-side faults
 

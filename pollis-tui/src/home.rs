@@ -497,6 +497,7 @@ mod tests {
             sent_at: sent_at.to_string(),
             edited_at: None,
             deleted_at: None,
+            undecryptable: false,
         }
     }
 

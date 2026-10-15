@@ -165,9 +165,13 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
   // open menu would turn invisible yet keep intercepting clicks.
   // group-focus-within: the row root carries `group`, so keyboard focus on
   // the ROW (arrow-key log navigation) reveals the bar exactly like hover.
+  //
+  // Hidden also means unclickable: an `opacity-0` bar still takes the pointer,
+  // and the refined bar sits half over the row above (`-translate-y-1/2`), so
+  // it silently swallowed clicks on that row's bottom edge — links included.
   const visibilityClass = menuOpen || pickerOpen
     ? "opacity-100"
-    : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100";
+    : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto";
   const containerClass =
     variant === "refined"
       ? `absolute end-4 top-0 -translate-y-1/2 flex items-center gap-1 rounded-control border border-line bg-surface-raised px-1 py-0.5 transition-opacity ${visibilityClass}`

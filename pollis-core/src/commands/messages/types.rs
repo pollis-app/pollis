@@ -57,6 +57,10 @@ pub struct ChannelMessage {
     pub sent_at: String,
     pub edited_at: Option<String>,
     pub deleted_at: Option<String>,
+    /// A placeholder for a message this device was entitled to read but could
+    /// not decrypt (#1312). `content` is always `None` when set.
+    #[serde(default)]
+    pub undecryptable: bool,
 }
 
 /// Opaque pagination cursor — the (sent_at, id) of the oldest row on the

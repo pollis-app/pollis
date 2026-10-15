@@ -129,6 +129,9 @@ pub(super) struct Target<'a> {
     /// The acting user — whose catch-up runs when a re-seal is needed.
     pub user_id: &'a str,
     pub plaintext: &'a [u8],
+    /// The envelope's id, recorded as this device's own before the first post
+    /// (#1312) — it will come back through the fetch, undecryptable to us.
+    pub envelope_id: &'a str,
 }
 
 /// Post an envelope, re-sealing and re-posting while the DS reports its epoch
@@ -154,7 +157,14 @@ pub(super) async fn post_resealing<B: ClientRequest>(
         conversation_id,
         user_id,
         plaintext,
+        envelope_id,
     } = target;
+    {
+        let guard = state.local_db.lock().await;
+        if let Some(db) = guard.as_ref() {
+            super::loss::record_own_envelope(db.conn(), envelope_id);
+        }
+    }
     // Test-harness only: a test can park a sender here and land a commit
     // while its envelope is sealed-but-unposted (#1041).
     #[cfg(feature = "test-harness")]

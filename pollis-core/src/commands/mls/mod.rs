@@ -29,6 +29,7 @@ pub use provider::{
 // a call site.
 #[cfg(feature = "media")]
 pub(crate) use provider::MlsProvider;
+pub(crate) use join_branch::{first_join, record_first_join};
 // The one seam the flows harness needs to exercise suite migration now that
 // production ships a single suite (#669) — see `provider::current_suite`.
 #[cfg(feature = "test-harness")]

@@ -48,6 +48,8 @@ export interface RawChannelMessage {
   sent_at: string;
   edited_at?: string;
   deleted_at?: string;
+  /** A placeholder for a message this device could not decrypt (#1312). */
+  undecryptable?: boolean;
 }
 
 /** Mirror of `pollis_core::commands::messages::ThreadSummary`. */
@@ -79,6 +81,12 @@ export interface Message {
   created_at: number;
   edited_at?: number;
   deleted_at?: number;
+  /** A placeholder for a message this device could not decrypt (#1312):
+   *  no content, no author, nothing to act on. */
+  undecryptable?: boolean;
+  /** How many consecutive placeholders this row stands for — set by
+   *  `collapseUndecryptable` when the timeline is built. */
+  undecryptableCount?: number;
   /** Local-only optimistic stub flag. Replaced when `send_message` resolves. */
   pending?: boolean;
   /** Local-only: the optimistic stub's send failed. Kept in the list, labelled. */
@@ -162,6 +170,7 @@ function transform(raw: RawChannelMessage): Message {
     created_at: new Date(raw.sent_at).getTime(),
     edited_at: raw.edited_at ? new Date(raw.edited_at).getTime() : undefined,
     deleted_at: raw.deleted_at ? new Date(raw.deleted_at).getTime() : undefined,
+    undecryptable: raw.undecryptable === true ? true : undefined,
   };
 }
 
@@ -718,6 +727,9 @@ export function previewText(message: Message | undefined): string | null {
   }
   if (message.deleted_at) {
     return i18n.t("mobile:direct.previewDeleted");
+  }
+  if (message.undecryptable) {
+    return i18n.t("chat:preview.undecryptable");
   }
   if (message.content) {
     return message.content;

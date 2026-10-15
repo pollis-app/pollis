@@ -12,6 +12,8 @@ import {
   timeLabel,
 } from "../../components/chat/dates";
 import { DaySeparator } from "../../components/chat/DaySeparator";
+import { UndecryptableRow } from "../../components/chat/UndecryptableRow";
+import { collapseUndecryptable } from "../../lib/collapseUndecryptable";
 import { MessageRow } from "../../components/chat/MessageRow";
 import { Composer } from "../../components/chat/Composer";
 import { authorName } from "../../lib/authorName";
@@ -322,9 +324,10 @@ function TextChat(props: ChatViewProps = {}) {
   // thread screen (#837's isolation fix; same filter as desktop's
   // `!m.thread_id || m.thread_id === m.id` render boundary).
   const items = useMemo(() => {
-    const chrono = [...messages]
-      .reverse()
-      .filter((m) => !m.thread_id || m.thread_id === m.id);
+    // A run of lost messages (#1312) is one row, as on desktop.
+    const chrono = collapseUndecryptable(
+      [...messages].reverse().filter((m) => !m.thread_id || m.thread_id === m.id),
+    );
     const out: ChatListItem[] = [];
     let lastKey = "";
     let prev: Message | null = null;
@@ -497,6 +500,16 @@ function TextChat(props: ChatViewProps = {}) {
         return <DaySeparator label={item.label} />;
       }
       const m = item.message;
+      if (m.undecryptable) {
+        return (
+          <UndecryptableRow
+            messageId={m.id}
+            time={timeLabel(m.created_at)}
+            count={m.undecryptableCount ?? 1}
+            onOpenDiagnostics={() => router.push("/self/diagnostics")}
+          />
+        );
+      }
       const mine = currentUser?.id === m.sender_id;
       const summary = threadSummaries?.get(m.id);
       const name =
