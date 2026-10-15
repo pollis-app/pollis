@@ -7,7 +7,7 @@ import { LoadingSpinner } from "./ui/LoaderSpinner";
 type UpdatePhase = "preparing" | "checking" | "downloading" | "installing" | "relaunching" | "error";
 
 // Mirrors `ReadOnlyLocation` in src-tauri/src/commands/install_kind.rs.
-type ReadOnlyLocation = "disk_image" | "translocated";
+type ReadOnlyLocation = "disk_image" | "translocated" | "translocated_healed";
 
 // The updater replaces the app bundle in place, so it fails with EROFS when the
 // app runs from a read-only mount (the disk image, or macOS App Translocation).
@@ -59,6 +59,11 @@ export const UpdateScreen: React.FC = () => {
         }
         if (location === "translocated") {
           setError(t("update.readOnlyTranslocated"));
+          setPhase("error");
+          return;
+        }
+        if (location === "translocated_healed") {
+          setError(t("update.readOnlyTranslocatedHealed"));
           setPhase("error");
           return;
         }

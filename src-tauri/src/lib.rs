@@ -378,6 +378,9 @@ pub fn run() {
                 apply_macos_rounded_corners(&window, 10.0);
             }
 
+            #[cfg(target_os = "macos")]
+            tauri::async_runtime::spawn_blocking(commands::install_kind::heal_self_quarantine_at_startup);
+
             // Windows 11 rounds decorated windows via DWM. Since we use
             // decorations: false we must opt in explicitly. Windows 10 has
             // no API for this and falls back to square corners.

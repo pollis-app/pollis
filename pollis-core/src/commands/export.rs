@@ -545,7 +545,7 @@ fn write_cached_attachment(cached: &CachedBytes<'_>, files_dir: &Path, att: &Arc
     if hex::encode(Sha256::digest(&plaintext)) != att.content_hash {
         return false;
     }
-    crate::private_fs::write(&files_dir.join(&att.file), plaintext).is_ok()
+    crate::downloads::write_downloaded_file(&files_dir.join(&att.file), &plaintext).is_ok()
 }
 
 // ── Bundling (mobile) ─────────────────────────────────────────────────────

@@ -51,10 +51,18 @@ Protected View and the script-host warnings all key on exactly that marker, so
 every one of them stood down for anything saved out of Pollis. `pollis-core/src/downloads.rs`
 writes the bytes and applies the marker in **one** function
 (`write_downloaded_file`) precisely so a future save path cannot do the first
-without the second; `src-tauri/Info.plist` sets `LSFileQuarantineEnabled` as the
-backstop for any macOS write that does not go through it. Linux has no enforced
-equivalent and the function says so (`Marking::Unsupported`) rather than
-reporting a success it did not achieve.
+without the second, and the export paths (`commands::export`,
+`commands::export_fetch`) use it for the attachments they write out. There is
+deliberately **no** `LSFileQuarantineEnabled` backstop in `src-tauri/Info.plist`:
+that key stamps every file the process writes, including the bundle the in-app
+updater installs, and a bundle stamped by Pollis itself is translocated on its
+next Finder launch and can never update again. Releases that shipped the key
+left such bundles behind; `commands::install_kind` removes Pollis's own stamp
+(never a browser's) from the standard install locations at startup and before an
+update, and reports `translocated_healed` so the update screen asks for a
+relaunch rather than the Finder move. Linux has no enforced equivalent and the
+function says so (`Marking::Unsupported`) rather than reporting a success it did
+not achieve.
 
 The command's target path goes through the same `PathScope` gate as every other
 path-taking command (see `.codesight/wiki/commands.md`).

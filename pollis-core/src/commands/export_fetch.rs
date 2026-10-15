@@ -100,8 +100,8 @@ where
                     });
                     continue;
                 }
-                match crate::private_fs::write(&target, bytes) {
-                    Ok(()) => fetched += 1,
+                match crate::downloads::write_downloaded_file(&target, &bytes) {
+                    Ok(_) => fetched += 1,
                     Err(e) => failed.push(FetchFailure {
                         content_hash: att.content_hash.clone(),
                         file: att.file.clone(),

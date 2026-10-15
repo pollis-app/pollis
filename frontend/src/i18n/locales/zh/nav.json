@@ -145,6 +145,7 @@
     "failed": "更新失败：{{error}}",
     "readOnlyDiskImage": "Pollis 正在从只读的磁盘映像运行。请退出 Pollis，将其拖到“应用程序”，推出磁盘映像，然后从“应用程序”打开。",
     "readOnlyTranslocated": "macOS 正在从一个临时的只读位置运行 Pollis。请退出 Pollis，用访达把它移出“应用程序”再移回去，然后重新打开。",
+    "readOnlyTranslocatedHealed": "macOS 正在从上一次更新遗留的临时只读位置运行 Pollis。该问题已修复。请退出 Pollis，然后从“应用程序”重新打开。",
     "readOnlyGeneric": "Pollis 无法自行更新，因为它所在的位置是只读的。请退出 Pollis，确认它位于“应用程序”文件夹中（用访达移入），然后重新打开。"
   },
   "home": {
