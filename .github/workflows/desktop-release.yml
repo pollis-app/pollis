@@ -1193,9 +1193,12 @@ jobs:
               echo "Pruning installers from s3://pollis/releases/$v/ (evidence retained)"
               # Delete per key rather than --recursive, so the evidence files can
               # be excluded. `aws s3 ls --recursive` prints `date time size key`.
+              # A version pruned by an earlier release holds only evidence, so the
+              # grep matches nothing and exits 1; under bash -e + pipefail that
+              # used to abort the whole step at the first such version.
               aws s3 ls "s3://pollis/releases/$v/" --recursive --endpoint-url "${ENDPOINT}" \
                 | awk '{ $1=""; $2=""; $3=""; sub(/^ +/, ""); print }' \
-                | grep -Ev "$KEEP_SUFFIXES" \
+                | { grep -Ev "$KEEP_SUFFIXES" || true; } \
                 | while IFS= read -r key; do
                     [ -n "$key" ] || continue
                     aws s3 rm "s3://pollis/${key}" --endpoint-url "${ENDPOINT}" >/dev/null \
