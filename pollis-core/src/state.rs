@@ -167,6 +167,19 @@ pub struct AppState {
     /// atomic on this device. Cross-device races are caught instead by the
     /// `UNIQUE(conversation_id, epoch)` constraint on `mls_commit_log`.
     pub mls_group_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+    /// Per-message locks for the durable outbox (#1335): one delivery attempt
+    /// per queued message at a time, so a send still in flight, a retry the user
+    /// asked for and the drain that runs after unlock or a reconnect can never
+    /// post the same message twice at once. See `messages::outbox`.
+    pub outbox_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+    /// Held for the length of an outbox drain, carrying the last drain's
+    /// report: `flush_outbox` is single-flight, and a call that finds it held
+    /// waits and answers with that report rather than draining again (#1335).
+    pub outbox_drain: Arc<Mutex<Option<crate::commands::messages::OutboxReport>>>,
+    /// Set by a `flush_outbox` call that found a drain running: that drain
+    /// goes round once more (or the caller drains itself) so the trigger is
+    /// not lost (#1335).
+    pub outbox_rerun: Arc<AtomicBool>,
     /// Fan-out of decoded remote screenshare frames (packed I420, the same
     /// `pack_frame_bytes` wire format the legacy Tauri `Channel` carried) to
     /// the loopback media server's `/screenshare/<token>` WebSocket route.
@@ -247,6 +260,9 @@ impl AppState {
             terminals: Arc::new(Mutex::new(HashMap::new())),
             shutdown_signal: Arc::new(Notify::new()),
             mls_group_locks: Arc::new(Mutex::new(HashMap::new())),
+            outbox_locks: Arc::new(Mutex::new(HashMap::new())),
+            outbox_drain: Arc::new(Mutex::new(None)),
+            outbox_rerun: Arc::new(AtomicBool::new(false)),
             // Receiver dropped immediately; subscribers are created per
             // WebSocket connection via `screenshare_frame_tx.subscribe()`.
             screenshare_frame_tx: tokio::sync::broadcast::channel(8).0,

@@ -301,7 +301,7 @@ credentials live.
 - `created_at` TEXT NOT NULL DEFAULT now
 
 ### message_envelope
-- `id` TEXT PK
+- `id` TEXT PK _(the client's message id; a re-post of an id already stored in the same conversation, carrying the same `delete_token_hash`, is answered as a REPLAY — 200, nothing written, no push, regardless of current membership — so a sender's durable outbox can retry without double-delivering, #1335. Any other collision gets `Forbidden`, the non-member answer. Posts of one id are serialized across the replay check and the epoch gate)_
 - `conversation_id` TEXT NOT NULL _(channel ID or DM channel ID)_
 - `sender_id` TEXT NOT NULL _(server-writable; NOT trusted for attribution — see below)_
 - `ciphertext` TEXT NOT NULL _(MLS-encrypted, hex-prefixed with `mls:`)_
@@ -1236,11 +1236,29 @@ Full reasoning: the rusqlite note in `pollis-core/Cargo.toml` and `docs/security
 - `deleted_at` TEXT
 - `thread_id` TEXT _(thread root, #825)_
 - `undecryptable` TEXT _(#1312: set only on a **placeholder** row — `stranded` / `failed` / `lineage`; CHECK forces `content IS NULL`)_
+- `send_state` TEXT _(#1335, the durable outbox: NULL for every delivered or received row; `pending` = this device's own message stored before any network work and not yet confirmed by the DS; `failed` = its last delivery attempt failed and a later one may not; `rejected` = refused in a way no retry fixes (the drain stops retrying it). CHECK admits only those three, and only on a real message with content — never a placeholder. Added to existing DBs by `add_missing_columns`; partial index `idx_message_send_state` serves the drain's scan. Retention eviction never removes an unsent row)_
 
 A placeholder stands in for a message this device was entitled to read and
 never decrypted: the ingest writes it when its cursor moves past such an
 envelope, so the loss shows in the conversation instead of vanishing. See
 [MLS → Lost messages are visible](mls.md#lost-messages-are-visible-1312).
+
+### outbox_attachment (#1335)
+- `message_id` TEXT NOT NULL — the message these bytes belong to (no foreign key: the bytes are written BEFORE the row, which is the commit point)
+- `position` INTEGER NOT NULL CHECK ≥ 0 — PK is (`message_id`, `position`)
+- `filename`, `content_type` TEXT NOT NULL
+- `data` BLOB NOT NULL — the attachment's plaintext bytes
+- `blurhash` TEXT, `width` / `height` INTEGER — renderer-computed metadata (a video's poster); the upload's own values win
+
+Attachment bytes an unsent message still has to upload, each written in its own
+short insert before the message row and before any network work, so a kill
+mid-upload loses nothing; bytes whose row never landed are swept when the
+database opens. Plaintext only inside this SQLCipher database (under the
+session's `db_key`) — never a file on disk (#1000). At most
+`MAX_OUTBOX_BYTES_PER_MESSAGE` per message. Deleted once uploaded (in the same
+transaction that swaps the row's provisional `_att` content for the finished
+envelope) and with the message on a discard; kept, like the rest of the outbox,
+across a keep-data sign-out.
 
 ### known_envelope (#1312)
 - `id` TEXT PK — an envelope id
@@ -1414,7 +1432,8 @@ so message history on a device does not grow without limit.
   SQLite DB and is **never synced** to remote/Turso or to the user's other devices.
 - **Eviction:** the sweep (`run_message_eviction`, also fired immediately when the
   setting changes) deletes `message` rows whose `received_at` is older than the
-  window. Eviction is keyed on `received_at` (when the row landed on this device),
+  window — except unsent ones (`send_state` set, #1335), which are the only copy of
+  something the user wrote and is still waiting to deliver. Eviction is keyed on `received_at` (when the row landed on this device),
   not `sent_at`, so a backfilled-but-old message gets its full window locally.
 - **mls_kv is never evicted.** Only the `message` table is bounded; MLS group state
   (`mls_kv`) is retained so the device stays a valid group member and can keep

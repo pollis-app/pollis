@@ -8,7 +8,7 @@ import {
   useThreadMessages,
 } from "../../../hooks/queries/useMessages";
 import { ChatInput, type Attachment } from "../../ui/ChatInput";
-import { buildMessageContent } from "../../../utils/attachmentEnvelope";
+import { outgoingAttachments, releaseStaged, type OutgoingAttachment } from "../../../utils/attachmentEnvelope";
 import { ThreadMessageRow } from "./ThreadMessageRow";
 
 interface ThreadPanelProps {
@@ -46,16 +46,28 @@ export const ThreadPanel: React.FC<ThreadPanelProps> = observer(
       if ((!contentText && attachments.length === 0) || !currentUser) {
         return;
       }
-      // Same upload + `_att` envelope the channel composer uses, so a file
-      // dropped in a thread is indistinguishable on the wire from one dropped
-      // in the channel.
-      const content = await buildMessageContent(attachments, contentText);
-      sendMessage.mutate({
-        channelId: channelId ?? "",
-        conversationId: conversationId ?? "",
-        content,
-        threadId,
-      });
+      // Same hand-off the channel composer uses: the core stores the bytes
+      // with the row and the outbox uploads them (#1335), so a file dropped in
+      // a thread is indistinguishable on the wire from one dropped in the
+      // channel, and survives a kill mid-upload the same way.
+      let outgoing: OutgoingAttachment[];
+      try {
+        outgoing = await outgoingAttachments(attachments);
+      } catch (error) {
+        await releaseStaged(attachments);
+        console.error("Failed to send thread reply:", error);
+        return;
+      }
+      sendMessage.mutate(
+        {
+          channelId: channelId ?? "",
+          conversationId: conversationId ?? "",
+          content: contentText,
+          attachments: outgoing,
+          threadId,
+        },
+        { onError: () => void releaseStaged(attachments) },
+      );
     };
 
     return (

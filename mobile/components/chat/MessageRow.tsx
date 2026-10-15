@@ -16,6 +16,7 @@ import { ReactionPills } from "./ReactionPills";
 import { ReceiptIndicator } from "./ReceiptIndicator";
 import { AttachmentTile } from "./AttachmentTile";
 import { SwipeToReply } from "./SwipeToReply";
+import { UnsentActions } from "./UnsentActions";
 import { findMentions } from "../../lib/mentions";
 import {
   LONG_PRESS_MS,
@@ -62,6 +63,8 @@ export function MessageRow({
   text,
   pending,
   failed,
+  onRetry,
+  onDiscard,
   edited,
   reactions,
   currentUserId,
@@ -93,6 +96,9 @@ export function MessageRow({
   text?: string;
   pending?: boolean;
   failed?: boolean;
+  // A failed send's way out (#1335): deliver it again, or throw it away.
+  onRetry?: () => void;
+  onDiscard?: () => void;
   edited?: boolean;
   reactions?: Reaction[];
   currentUserId?: string;
@@ -189,6 +195,8 @@ export function MessageRow({
   const a11yActions = [
     ...(onLongPress ? [{ name: "activate" }, { name: "longpress" }] : []),
     ...(onReply ? [{ name: "reply", label: t("actions.reply") }] : []),
+    ...(failed && onRetry ? [{ name: "retrySend", label: t("outbox.retryLabel") }] : []),
+    ...(failed && onDiscard ? [{ name: "discardSend", label: t("outbox.discardLabel") }] : []),
     ...(onPressReplyQuote ? [{ name: "openReply", label: t("replyBar.scrollToMessage") }] : []),
     ...(onPressAvatar ? [{ name: "viewProfile", label: t("mobile:chat.viewProfile") }] : []),
     ...openableAttachments.map((a, i) => ({
@@ -225,6 +233,10 @@ export function MessageRow({
             }
           } else if (action === "reply") {
             onReply?.();
+          } else if (action === "retrySend") {
+            onRetry?.();
+          } else if (action === "discardSend") {
+            onDiscard?.();
           } else if (action === "openReply") {
             onPressReplyQuote?.();
           } else if (action === "activate" || action === "longpress") {
@@ -355,6 +367,13 @@ export function MessageRow({
                   visible={showReceipt && !pending && !failed}
                 />
               </View>
+            ) : null}
+            {failed && (onRetry || onDiscard) ? (
+              <UnsentActions
+                messageId={messageId ?? ""}
+                onRetry={onRetry}
+                onDiscard={onDiscard}
+              />
             ) : null}
             {attachments && attachments.length > 0 ? (
               <View

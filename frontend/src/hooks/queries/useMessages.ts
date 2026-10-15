@@ -4,6 +4,15 @@ import { invoke } from "../../bridge";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
 import type { Message, DMConversation } from "../../types";
+import type { OutgoingAttachment } from "../../utils/attachmentEnvelope";
+import {
+  carryStubs,
+  mapOutboxRows,
+  outboxFields,
+  settleSend,
+  withoutOutboxRows,
+  type SendState,
+} from "../../utils/pendingMessages";
 
 // Per-conversation timestamp of the last background ingest. Used to debounce
 // rapid channel-switching so we don't fire one ingest per click. Realtime
@@ -82,6 +91,14 @@ export type RawChannelMessage = {
   deleted_at?: string;
   /** A placeholder for a message this device could not decrypt (#1312). */
   undecryptable?: boolean;
+  /** Our own message the durable outbox has not delivered yet (#1335). */
+  send_state?: SendState;
+};
+
+/** Mirror of `pollis_core::commands::messages::OutboxReport`. */
+type OutboxReport = {
+  delivered: string[];
+  failed: string[];
 };
 
 type MessagePage = {
@@ -113,10 +130,12 @@ export function parseContent(raw: string | undefined): { text: string; attachmen
     }
     return {
       text: parsed._txt ?? '',
-      attachments: (parsed._att as AttachmentWire[]).map((a) => ({
-        id: a.key,
-        object_key: a.key,
-        content_hash: a.hash,
+      // An entry with no `key` is one the outbox has not uploaded yet (#1335):
+      // drawn like an optimistic stub's attachment, pending.
+      attachments: (parsed._att as AttachmentWire[]).map((a, i) => ({
+        id: a.key ?? `uploading-${i}`,
+        object_key: a.key ?? '',
+        content_hash: a.hash ?? '',
         filename: a.name,
         content_type: a.ct,
         file_size: a.size,
@@ -172,12 +191,12 @@ export function transformChannelMessage(m: RawChannelMessage): Message {
     thread_id: m.thread_id,
     is_pinned: false,
     created_at: new Date(m.sent_at).getTime(),
-    delivered: true,
-    status: 'sent' as const,
     attachments: parsed?.attachments ?? [],
     edited_at: m.edited_at,
     deleted_at: m.deleted_at,
     undecryptable: m.undecryptable,
+    // `delivered` / `status` / `outbox_id` from the durable outbox (#1335).
+    ...outboxFields(m.id, m.send_state),
   };
 }
 
@@ -198,13 +217,17 @@ export function useMessages(channelId: string | null, conversationId: string | n
   const query = useQuery({
     queryKey,
     queryFn: async (): Promise<MessagesQueryResult> => {
+      // A stub for a send the store does not hold (yet, or ever — a failed
+      // upload) survives the refetch; one whose message it does hold steps
+      // aside for the stored row (#1335).
+      const cachedStubs = queryClient.getQueryData<MessagesQueryResult>(queryKey)?.messages;
       if (isChannel && channelId) {
         const page = await invoke<MessagePage>('read_channel_messages', {
           channelId,
           limit: 50,
         });
         return {
-          messages: (page.messages || []).map(transformChannelMessage),
+          messages: carryStubs((page.messages || []).map(transformChannelMessage), cachedStubs),
           nextCursor: page.next_cursor ?? null,
         };
       }
@@ -215,7 +238,7 @@ export function useMessages(channelId: string | null, conversationId: string | n
           limit: 50,
         });
         return {
-          messages: (page.messages || []).map(transformChannelMessage),
+          messages: carryStubs((page.messages || []).map(transformChannelMessage), cachedStubs),
           nextCursor: page.next_cursor ?? null,
         };
       }
@@ -291,6 +314,8 @@ export function useSendMessage() {
       content,
       replyToMessageId,
       threadId,
+      messageId,
+      attachments,
     }: {
       channelId: string;
       conversationId: string;
@@ -300,12 +325,20 @@ export function useSendMessage() {
       // inside the MLS ciphertext, never in the DS request body.
       threadId?: string;
       optimisticId?: string; // used by onSuccess to replace the optimistic stub
+      // The core's id for this message (#1335), from `new_message_id`. The
+      // caller that drew a stub passes it so stub and stored row are one
+      // message; otherwise one is asked for here.
+      messageId?: string;
+      // Attachments for the outbox to upload (#1335); `content` is then the
+      // caption.
+      attachments?: OutgoingAttachment[];
     }) => {
       if (!currentUser) {
         throw new Error("No current user");
       }
 
       const targetId = channelId || conversationId;
+      const id = messageId ?? (await invoke<string>('new_message_id'));
       return await invoke<RawMessage>('send_message', {
         conversationId: targetId,
         senderId: currentUser.id,
@@ -313,6 +346,8 @@ export function useSendMessage() {
         replyToId: replyToMessageId ?? null,
         threadId: threadId ?? null,
         senderUsername: currentUser.username ?? null,
+        messageId: id,
+        attachments: attachments ?? [],
       });
     },
     onSuccess: (newMessage, variables) => {
@@ -326,12 +361,14 @@ export function useSendMessage() {
         ...transformMessage(newMessage),
         sender_username: currentUser?.username ?? undefined,
       };
+      // A refetch may already hold the stored row (#1335): replace it rather
+      // than appending a second copy.
       queryClient.setQueryData<MessagesQueryResult>(queryKey, (old) => {
         const prev = old ?? { messages: [], nextCursor: null };
-        const filtered = variables.optimisticId
-          ? prev.messages.filter((m) => m.id !== variables.optimisticId)
-          : prev.messages;
-        return { ...prev, messages: [...filtered, confirmedMessage] };
+        return {
+          ...prev,
+          messages: settleSend(prev.messages, variables.optimisticId, confirmedMessage),
+        };
       });
 
       // Update the last-message preview immediately. Previews are batched per
@@ -370,7 +407,109 @@ export function useSendMessage() {
         });
       }
     },
+    // The core kept the message and marked it failed (#1335): read it back so
+    // the row shows Retry — in the thread panel too, which draws no stub.
+    onError: (_err, variables) => {
+      const queryKey = variables.channelId
+        ? messageQueryKeys.channel(variables.channelId)
+        : messageQueryKeys.conversation(variables.conversationId);
+      queryClient.invalidateQueries({ queryKey });
+      if (variables.threadId) {
+        queryClient.invalidateQueries({
+          queryKey: messageQueryKeys.thread(variables.threadId),
+        });
+      }
+    },
   });
+}
+
+/**
+ * Apply `fn` to every cached message list — conversation pages and open
+ * threads, the two shapes under the `messages` prefix that hold rows.
+ */
+function updateMessageLists(
+  queryClient: ReturnType<typeof useQueryClient>,
+  fn: (messages: Message[]) => Message[],
+) {
+  queryClient.setQueriesData<unknown>({ queryKey: messageQueryKeys.all }, (old: unknown) => {
+    if (Array.isArray(old)) {
+      return fn(old as Message[]);
+    }
+    if (old && typeof old === "object" && Array.isArray((old as MessagesQueryResult).messages)) {
+      const page = old as MessagesQueryResult;
+      return { ...page, messages: fn(page.messages) };
+    }
+    return old;
+  });
+}
+
+/**
+ * Retry one unsent message (#1335). `retry_message` re-runs delivery under
+ * the same id, so it never arrives twice. The row reads as sending while it
+ * runs; the refetch afterwards shows what the core settled on.
+ */
+export function useRetryMessage() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (outboxId: string) =>
+      invoke<RawMessage>("retry_message", { messageId: outboxId }),
+    onMutate: (outboxId) => {
+      updateMessageLists(queryClient, (msgs) =>
+        mapOutboxRows(msgs, outboxId, (m) => ({ ...m, status: "sending" as const })),
+      );
+    },
+    onError: (_err, outboxId) => {
+      updateMessageLists(queryClient, (msgs) =>
+        mapOutboxRows(msgs, outboxId, (m) => ({ ...m, status: "failed" as const })),
+      );
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: messageQueryKeys.all });
+      queryClient.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
+    },
+  });
+}
+
+/**
+ * Throw away one unsent message (#1335). If an earlier attempt may have reached
+ * the server (it was ever sealed), the core withdraws it from everyone first —
+ * and refuses the discard if it cannot, so the row stays rather than leaving a
+ * delivered copy the sender cannot delete. Also clears a stub the core never
+ * stored.
+ */
+export function useDiscardUnsent() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (outboxId: string) =>
+      invoke<boolean>("discard_unsent_message", { messageId: outboxId }),
+    onMutate: (outboxId) => {
+      updateMessageLists(queryClient, (msgs) => withoutOutboxRows(msgs, outboxId));
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: messageQueryKeys.all });
+      queryClient.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
+    },
+  });
+}
+
+/**
+ * Deliver whatever the durable outbox holds (#1335) — run once the launch
+ * catch-up has finished, when the browser reports the network back, and on a
+ * realtime reconnect. Event-driven, never on a timer. The core already drains
+ * after every unlock; this waits for that and refreshes what it changed.
+ */
+export async function flushOutbox(
+  queryClient: ReturnType<typeof useQueryClient>,
+): Promise<void> {
+  try {
+    const report = await invoke<OutboxReport>("flush_outbox");
+    if ((report?.delivered?.length ?? 0) + (report?.failed?.length ?? 0) > 0) {
+      await queryClient.invalidateQueries({ queryKey: messageQueryKeys.all });
+      await queryClient.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
+    }
+  } catch (err) {
+    console.warn("[outbox] flush_outbox failed:", err);
+  }
 }
 
 export function useDMConversations() {

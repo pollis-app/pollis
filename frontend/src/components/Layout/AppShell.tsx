@@ -29,6 +29,7 @@ import { panelWidthStore } from "../../stores/panelWidthStore";
 import { historyNavStore } from "../../stores/historyNavStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useLiveKitRealtime } from "../../hooks/useLiveKitRealtime";
+import { flushOutbox } from "../../hooks/queries/useMessages";
 import { useBadge } from "../../hooks/useBadge";
 import { useAutoLock } from "../../hooks/useAutoLock";
 import { AlertTriangle, Download, Mail, Phone, X } from "lucide-react";
@@ -251,12 +252,31 @@ export const AppShell: React.FC = observer(() => {
       .finally(() => {
         if (!cancelled) {
           setIsSyncing(false);
+          // Caught up: deliver what the durable outbox holds — a message a
+          // killed process left unsent (#1335). The core began this drain at
+          // unlock; this call waits for it and refreshes the rows it settled.
+          void flushOutbox(queryClient);
         }
       });
     return () => {
       cancelled = true;
     };
   }, [currentUser?.id]);
+
+  // The network came back: whatever failed while it was gone can go now
+  // (#1335). An event, not a timer — a realtime reconnect drains too.
+  useEffect(() => {
+    if (!currentUser) {
+      return;
+    }
+    const onOnline = () => {
+      void flushOutbox(queryClient);
+    };
+    window.addEventListener("online", onOnline);
+    return () => {
+      window.removeEventListener("online", onOnline);
+    };
+  }, [currentUser?.id, queryClient]);
 
   // Once authenticated, hook up the screen-share event + frame Channels.
   // Idempotent — only the first call actually invokes the backend.

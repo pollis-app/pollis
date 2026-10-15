@@ -12,9 +12,10 @@ import type { MessageAttachment } from "../types";
 
 // Wire shape of a single attachment inside the `_att` array.
 export interface AttachmentWire {
-  key: string;
+  // Absent on an entry the outbox has not uploaded yet (#1335).
+  key?: string;
   url?: string;
-  hash: string;
+  hash?: string;
   name: string;
   ct: string;
   size: number;
@@ -43,10 +44,12 @@ export function parseContent(raw: string | undefined): {
     }
     return {
       text: typeof parsed._txt === "string" ? parsed._txt : "",
-      attachments: (parsed._att as AttachmentWire[]).map((a) => ({
-        id: a.key,
-        object_key: a.key,
-        content_hash: a.hash,
+      // An entry with no `key` is one the outbox has not uploaded yet (#1335):
+      // drawn like an optimistic stub's attachment, pending.
+      attachments: (parsed._att as AttachmentWire[]).map((a, i) => ({
+        id: a.key ?? `uploading-${i}`,
+        object_key: a.key ?? "",
+        content_hash: a.hash ?? "",
         filename: a.name,
         content_type: a.ct,
         file_size: a.size,

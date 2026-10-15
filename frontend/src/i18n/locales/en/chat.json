@@ -22,6 +22,12 @@
     "failed": "failed",
     "cancelled": "cancelled"
   },
+  "outbox": {
+    "retry": "Retry",
+    "discard": "Discard",
+    "retryLabel": "Retry sending this message",
+    "discardLabel": "Discard this unsent message"
+  },
   "actions": {
     "reply": "Reply",
     "replyInThread": "Reply in thread",

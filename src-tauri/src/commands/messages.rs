@@ -14,8 +14,37 @@ pub async fn list_messages(conversation_id: String, limit: Option<i64>, before_i
 }
 
 #[tauri::command]
-pub async fn send_message(conversation_id: String, sender_id: String, content: String, reply_to_id: Option<String>, thread_id: Option<String>, sender_username: Option<String>, state: State<'_, Arc<AppState>>) -> Result<Message> {
-    pollis_core::commands::messages::send_message(conversation_id, sender_id, content, reply_to_id, thread_id, sender_username, &state).await
+#[allow(clippy::too_many_arguments)]
+pub async fn send_message(conversation_id: String, sender_id: String, content: String, reply_to_id: Option<String>, thread_id: Option<String>, sender_username: Option<String>, message_id: Option<String>, attachments: Option<Vec<OutgoingAttachment>>, scope: State<'_, crate::pathscope::PathScope>, state: State<'_, Arc<AppState>>) -> Result<Message> {
+    // The outbox reads an attachment's file itself (#1335), so every path must
+    // be one the user chose — the same gate `upload_media` applies.
+    let attachments = attachments.unwrap_or_default();
+    for att in &attachments {
+        if let Some(path) = &att.path {
+            scope.require(std::path::Path::new(path), "send_message")?;
+        }
+    }
+    pollis_core::commands::messages::send_message_with_id(message_id, conversation_id, sender_id, content, attachments, reply_to_id, thread_id, sender_username, &state).await
+}
+
+#[tauri::command]
+pub async fn new_message_id() -> Result<String> {
+    Ok(pollis_core::commands::messages::new_message_id())
+}
+
+#[tauri::command]
+pub async fn retry_message(message_id: String, state: State<'_, Arc<AppState>>) -> Result<Message> {
+    pollis_core::commands::messages::retry_message(message_id, &state).await
+}
+
+#[tauri::command]
+pub async fn discard_unsent_message(message_id: String, state: State<'_, Arc<AppState>>) -> Result<bool> {
+    pollis_core::commands::messages::discard_unsent_message(message_id, &state).await
+}
+
+#[tauri::command]
+pub async fn flush_outbox(state: State<'_, Arc<AppState>>) -> Result<OutboxReport> {
+    pollis_core::commands::messages::flush_outbox(&state).await
 }
 
 #[tauri::command]

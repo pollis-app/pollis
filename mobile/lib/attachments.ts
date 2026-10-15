@@ -34,6 +34,32 @@ export interface MediaUploadResult {
   height?: number | null;
 }
 
+/** What `send_message` takes for an attachment the durable outbox uploads
+ *  itself (#1335). Mirrors `pollis_core::commands::messages::OutgoingAttachment`. */
+export interface OutgoingAttachment {
+  path: string;
+  filename: string;
+  contentType: string;
+  width?: number;
+  height?: number;
+}
+
+/**
+ * Hand picked attachments to the outbox instead of uploading them here
+ * (#1335): the row is on screen from the moment the user sends, so the upload
+ * has to survive the app being killed. The core copies each file into its
+ * encrypted local database with the row (the bridge strips `file://`).
+ */
+export function outgoingAttachments(attachments: PickedAttachment[]): OutgoingAttachment[] {
+  return attachments.map((att) => ({
+    path: att.uri,
+    filename: att.name,
+    contentType: att.mimeType,
+    width: att.width,
+    height: att.height,
+  }));
+}
+
 /**
  * Upload every attachment, then build the message content string. With no
  * attachments the caption passes through untouched (plain-text fast path).

@@ -722,10 +722,28 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let reply_to_id: Option<String> = arg_opt(&args, "replyToId")?;
             let thread_id: Option<String> = arg_opt(&args, "threadId")?;
             let sender_username: Option<String> = arg_opt(&args, "senderUsername")?;
-            ok(messages::send_message(
+            // Optional (#1335): a renderer that predates the outbox sends none
+            // and the core mints one.
+            let message_id: Option<String> = arg_opt(&args, "messageId")?;
+            // Attachments the outbox uploads itself (#1335). Expo pickers hand
+            // out `file://` URIs; the core reads bare paths.
+            let attachments: Vec<messages::OutgoingAttachment> =
+                arg_opt::<Vec<messages::OutgoingAttachment>>(&args, "attachments")?
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|mut a| {
+                        a.path = a
+                            .path
+                            .map(|p| p.strip_prefix("file://").unwrap_or(&p).to_string());
+                        a
+                    })
+                    .collect();
+            ok(messages::send_message_with_id(
+                message_id,
                 conversation_id,
                 sender_id,
                 content,
+                attachments,
                 reply_to_id,
                 thread_id,
                 sender_username,
@@ -733,6 +751,17 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             )
             .await?)
         }
+        // Durable outbox (#1335).
+        "new_message_id" => ok(messages::new_message_id()),
+        "retry_message" => {
+            let message_id: String = arg(&args, "messageId")?;
+            ok(messages::retry_message(message_id, &state()?).await?)
+        }
+        "discard_unsent_message" => {
+            let message_id: String = arg(&args, "messageId")?;
+            ok(messages::discard_unsent_message(message_id, &state()?).await?)
+        }
+        "flush_outbox" => ok(messages::flush_outbox(&state()?).await?),
         "get_channel_messages" => {
             let user_id: String = arg(&args, "userId")?;
             let channel_id: String = arg(&args, "channelId")?;
@@ -1270,6 +1299,10 @@ mod tests {
             "delete_account",
             "wipe_local_data",
             "upload_media",
+            "new_message_id",
+            "retry_message",
+            "discard_unsent_message",
+            "flush_outbox",
             "pin_message",
             "unpin_message",
             "list_pinned_messages",

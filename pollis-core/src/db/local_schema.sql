@@ -42,6 +42,20 @@ CREATE TABLE IF NOT EXISTS message (
     undecryptable TEXT CHECK (
         undecryptable IS NULL
         OR (undecryptable IN ('stranded', 'failed', 'lineage') AND content IS NULL)
+    ),
+    -- The durable outbox (#1335). NULL for every delivered or received row.
+    -- 'pending' = this device's own message, stored BEFORE any network work and
+    -- not yet confirmed by the DS; 'failed' = its last delivery attempt failed
+    -- in a way a later attempt may not; 'rejected' = the DS refused it in a way
+    -- no retry fixes (not a member, conversation gone, malformed). The outbox
+    -- drain (after unlock, on reconnect, on resume) retries pending and failed,
+    -- never rejected; an explicit Retry tries any of them; delivery clears it.
+    -- The renderers show failed and rejected alike. An unsent row is
+    -- always a real message — never a placeholder. Also added to existing DBs
+    -- by `add_missing_columns`.
+    send_state TEXT CHECK (
+        send_state IS NULL
+        OR (send_state IN ('pending', 'failed', 'rejected') AND undecryptable IS NULL AND content IS NOT NULL)
     )
 );
 
@@ -70,6 +84,36 @@ CREATE INDEX IF NOT EXISTS idx_message_thread ON message(thread_id, sent_at);
 -- every open (this schema is re-applied each open) so existing DBs gain it
 -- without a schema-version bump (which would wipe history).
 CREATE INDEX IF NOT EXISTS idx_message_received_at ON message(received_at);
+
+-- Attachment bytes an unsent message still has to upload (#1335). A send with
+-- attachments stores them here BEFORE its `message` row and before any network
+-- work — one row per attachment, each in its own short insert so a large
+-- message never holds the database lock across all its files — and then writes
+-- the message row, which is the commit point. So a process killed mid-upload
+-- loses nothing: the outbox drain uploads them, rewrites the row's content to
+-- the final `_att` envelope, deletes these rows, and only then posts. Bytes
+-- whose message row was never written (killed between the two) are swept when
+-- the database opens. No foreign key, for that reason: the bytes exist before
+-- the row. The bytes are plaintext only inside this SQLCipher database
+-- (encrypted under the session's db_key) — never a file on disk (#1000).
+-- Deleted once uploaded and with their message on a discard; kept across a
+-- keep-data sign-out like the rest of the outbox.
+CREATE TABLE IF NOT EXISTS outbox_attachment (
+    message_id   TEXT NOT NULL,
+    position     INTEGER NOT NULL CHECK (position >= 0),
+    filename     TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    data         BLOB NOT NULL,
+    -- Renderer-computed metadata (a video's poster blurhash and size); the
+    -- upload's own values win when it produces them, as on the renderer path.
+    blurhash     TEXT,
+    width        INTEGER,
+    height       INTEGER,
+    PRIMARY KEY (message_id, position)
+);
+
+-- The outbox drain's scan (#1335): only unsent rows, which are few.
+CREATE INDEX IF NOT EXISTS idx_message_send_state ON message(sent_at) WHERE send_state IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS dm_conversation (
     id TEXT PRIMARY KEY,

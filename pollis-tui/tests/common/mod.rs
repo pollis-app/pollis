@@ -485,7 +485,7 @@ impl TestClient {
     /// THIS client. `current_user_id` prefers `state.unlock`, so per-client
     /// signing already works after signup; this keeps the shared fallback honest
     /// for any path that consults it.
-    fn activate(&self) {
+    pub fn activate(&self) {
         // Repoint the data dir FIRST so the accounts-index write below (and
         // every subsequent DB/keystore touch) lands in THIS device's dir.
         self.use_dir();

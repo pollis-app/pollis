@@ -46,6 +46,30 @@ pub fn delete_message_body(
     }
 }
 
+/// The "for everyone" half of a self-delete: an E2EE redaction for members who
+/// already fetched the message, then the removal of its envelope (and any
+/// pending edit) from the DS for those who have not. Deleting an envelope the
+/// DS does not hold is a no-op, so this is also how a DISCARD withdraws an
+/// unsent message whose post may have landed (#1335).
+///
+/// The redaction is sent FIRST so there is no window where the original is
+/// gone but no redaction is in flight for an in-progress fetch. The removal
+/// proves authorship rather than asserting it (#1086): the DS checks the token
+/// against the hash stored with the envelope. `None` — this device cannot
+/// compute one, or the message predates the capability — leaves the DS on its
+/// legacy membership check.
+pub(super) async fn retract_for_everyone(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    message_id: &str,
+    user_id: &str,
+) -> Result<()> {
+    send_redaction_message(state, conversation_id, message_id, user_id).await?;
+    let delete_token = super::delete_capability::envelope_delete_token(state, message_id).await;
+    let body = delete_message_body(message_id, conversation_id, user_id, user_id, delete_token);
+    crate::commands::mls::ds_post_ok(state, &body).await
+}
+
 /// Delete a message.
 ///
 /// Two paths, selected automatically by comparing `user_id` (the caller) to the
@@ -93,6 +117,13 @@ pub async fn delete_message(
     user_id: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
+    // Deleting a message the outbox still holds (#1335) is discarding it —
+    // which also withdraws it from everyone if an attempt may have reached the
+    // DS (see `outbox::discard_unsent_message`).
+    if super::outbox::is_unsent(state, &message_id).await? {
+        super::outbox::discard_unsent_message(message_id, state).await?;
+        return Ok(());
+    }
     // Resolve the message's AUTHOR + conversation. Authorship MUST come from the
     // LOCAL `message` row — its `sender_id` is the credential-authenticated author
     // (written from the MLS credential at ingest, or self-attributed at send).
@@ -202,11 +233,7 @@ pub async fn delete_message(
                 )
                 .optional()?;
 
-            db.conn().execute(
-                "UPDATE message SET content = NULL, deleted_at = ?1
-                 WHERE id = ?2 AND deleted_at IS NULL",
-                rusqlite::params![now, message_id],
-            )?;
+            db.conn().execute(super::outbox::SOFT_DELETE_SQL, rusqlite::params![now, message_id])?;
 
             let raw = content.unwrap_or_default();
             let attachments = parse_attachment_refs(&raw);
@@ -256,25 +283,7 @@ pub async fn delete_message(
     //      linger at rest.
     // The redaction is sent FIRST so there is no window where the original is
     // gone but no redaction is in flight for an in-progress fetch.
-    send_redaction_message(state, &conversation_id, &message_id, &user_id).await?;
-
-    // Remove the original envelope (best-effort — may already be GC'd) and any
-    // pending edit. DS seam: route both deletes (one transaction server-side,
-    // scoped to the authenticated sender) through the Delivery Service.
-    // Prove authorship rather than assert it (#1086): the DS checks this against
-    // the hash stored when the envelope was written. `None` — this device cannot
-    // compute one, or the message predates the capability — leaves the DS on its
-    // legacy membership check.
-    let delete_token =
-        super::delete_capability::envelope_delete_token(state, &message_id).await;
-    let body = delete_message_body(
-        &message_id,
-        &conversation_id,
-        &user_id,
-        &user_id,
-        delete_token,
-    );
-    crate::commands::mls::ds_post_ok(state, &body).await?;
+    retract_for_everyone(state, &conversation_id, &message_id, &user_id).await?;
 
     // Read the local plaintext content before soft-deleting so we can inspect
     // any embedded attachment metadata. Then SOFT-delete the local row (content
@@ -814,7 +823,7 @@ pub(crate) fn spawn_attachment_ref_backfill(state: &Arc<AppState>, user_id: &str
             }
             let mut stmt = match db.conn().prepare(
                 "SELECT id, content FROM message \
-                 WHERE sender_id = ?1 AND deleted_at IS NULL \
+                 WHERE sender_id = ?1 AND deleted_at IS NULL AND send_state IS NULL \
                    AND content IS NOT NULL AND content LIKE '{%\"_att\"%'",
             ) {
                 Ok(s) => s,
@@ -930,6 +939,14 @@ pub async fn edit_message(
     new_content: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
+    // An unsent message (#1335) has no envelope for an edit to target; the
+    // recipients would get an edit of a message they never received. The
+    // renderer offers Retry or Discard on such a row instead.
+    if super::outbox::is_unsent(state, &message_id).await? {
+        return Err(crate::error::Error::Other(anyhow::anyhow!(
+            "message has not been sent yet"
+        )));
+    }
     let envelope_id = Ulid::new().to_string();
 
     // Resolve the MLS group for this conversation (channel → group_id, DM → conversation_id).

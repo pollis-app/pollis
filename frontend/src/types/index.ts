@@ -93,6 +93,12 @@ export interface Message {
   undecryptable_count?: number;
   // UI state
   status?: 'pending' | 'sending' | 'sent' | 'failed' | 'cancelled';
+  // The core's id for our own outgoing message (#1335) — the stored outbox
+  // row that Retry / Discard name. Set on optimistic stubs and on unsent rows.
+  outbox_id?: string;
+  // False when the send failed before the core stored it (an attachment
+  // upload): there is nothing to retry, only to discard.
+  retryable?: boolean;
 }
 
 export interface ReplyPreview {

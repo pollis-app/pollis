@@ -723,6 +723,10 @@ pub async fn unlock(
     // Declare the attachment references sends before #1330 could not. Background.
     crate::commands::messages::spawn_attachment_ref_backfill(state, &user_id);
 
+    // Deliver whatever a killed process left in the outbox (#1335). Background:
+    // the unlock must not wait on the network.
+    crate::commands::messages::spawn_outbox_flush(state);
+
     Ok(UnlockOutcome {
         user_id: unlocked.user_id,
         attempts_remaining: None,

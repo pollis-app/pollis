@@ -9,6 +9,7 @@ mod edit_delete;
 pub(crate) mod framing;
 mod ingest;
 pub(crate) mod loss;
+mod outbox;
 mod reactions;
 mod read;
 mod read_state;
@@ -160,8 +161,15 @@ pub use types::{
 };
 
 // ── Send ─────────────────────────────────────────────────────────────────────
-pub use send::send_message;
+pub use send::{send_message, send_message_with_id};
 pub use send::test_hooks;
+
+// ── Durable outbox (#1335) ──────────────────────────────────────────────────
+pub use outbox::{
+    discard_unsent_message, flush_outbox, new_message_id, retry_message, OutboxReport,
+};
+pub(crate) use outbox::{spawn_outbox_flush, sweep_orphan_attachments_on};
+pub use outbox::OutgoingAttachment;
 
 // ── Read / list / search ─────────────────────────────────────────────────────
 pub use read::{

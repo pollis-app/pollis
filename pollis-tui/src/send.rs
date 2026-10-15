@@ -207,6 +207,20 @@ pub async fn delete(state: &Arc<AppState>, message_id: &str, user_id: &str) -> R
     Ok(())
 }
 
+/// One more delivery attempt for a message the durable outbox holds (#1335),
+/// under the same id — the CLI's `R`. Same core call as the apps' Retry.
+pub async fn retry(state: &Arc<AppState>, message_id: &str) -> Result<()> {
+    messages::retry_message(message_id.to_string(), state).await?;
+    Ok(())
+}
+
+/// Throw away an unsent message (#1335) — the CLI's `x` on a row marked not
+/// sent. The core withdraws it from everyone first if an attempt may have
+/// reached the DS. Returns whether there was anything to discard.
+pub async fn discard(state: &Arc<AppState>, message_id: &str) -> Result<bool> {
+    Ok(messages::discard_unsent_message(message_id.to_string(), state).await?)
+}
+
 /// Toggle `emoji` on a message the way desktop's reaction pill does: remove it
 /// when the user already reacted with it (`already_mine`), add it otherwise.
 /// Returns whether the reaction is now present.
