@@ -87,10 +87,17 @@ for (const skin of SKINS) {
       (window as unknown as { __tauriRevokeDevice: () => void }).__tauriRevokeDevice();
     });
 
-    // Any command finds out; opening Security asks for the device list.
-    await openCommandPalette(page);
-    await page.getByTestId("search-panel-input").fill("Security");
-    await page.getByTestId("search-panel-result-item").filter({ hasText: "/security" }).first().click();
+    // Whichever command runs next finds out — often the palette's own search,
+    // which signs the app out before a result could be clicked. Keys only, so
+    // the step cannot race the sign-out it is waiting for.
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+KeyK" : "Control+KeyK");
+    await page
+      .getByTestId("search-panel-input")
+      .pressSequentially("Security", { timeout: 5000 })
+      .catch(() => {
+        // Already signed out: the palette went with the shell.
+      });
+    await page.keyboard.press("Enter");
 
     await expect(page.getByTestId("auth-screen")).toBeVisible();
     await expect(page.getByTestId("auth-session-notice")).toContainText("removed from your account");
