@@ -753,6 +753,14 @@ async fn external_join_attempt(
             // The log accepted the commit: the branch is now the canonical
             // group (#1220).
             super::join_branch::clear(db.conn(), conversation_id, stored_generation);
+            // Recorded only now that the log has accepted the join: a branch
+            // that loses never held the lineage (#1312).
+            super::join_branch::record_first_join(
+                db.conn(),
+                conversation_id,
+                stored_generation,
+                stored_epoch as u64 + 1,
+            );
             set_local_generation(db.conn(), conversation_id, stored_generation);
             // Our leaf in this lineage is brand new and, being an external
             // commit, already merged — but the rotation clock belongs to the
@@ -1169,6 +1177,9 @@ where
 
     MlsGroup::new_with_group_id(provider, &sig_keys, &config, group_id, cred_with_key)
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("create mls group: {e}")))?;
+    // A repair recreates a lineage this device already held; the first-join
+    // record keeps the original floor (#1312).
+    super::join_branch::record_first_join(provider.raw_conn(), conversation_id, generation, 0);
 
     Ok(())
 }

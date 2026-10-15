@@ -48,7 +48,7 @@ export const DiagnosticsPage: React.FC = () => {
           )}
           <pre
             data-testid="diagnostics-preview"
-            className="max-h-96 overflow-auto whitespace-pre-wrap break-all rounded-control border border-line bg-surface p-3 text-dim"
+            className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-control border border-line bg-surface p-3 text-dim"
           >
             {report ?? t("common:states.loading")}
           </pre>

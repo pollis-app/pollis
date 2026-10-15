@@ -39,6 +39,7 @@ import { messageNavStore } from "../../stores/messageNavStore";
 import type { MessageNavAction } from "../../utils/messageNav";
 import { arrowStep, isHorizontalArrow, isRtlElement } from "../../utils/direction";
 import type { Message } from "../../types";
+import { collapseUndecryptable } from "../../utils/collapseUndecryptable";
 import { EmptyState } from "../ui/EmptyState";
 
 // How long the permalink jump highlight stays on the target row.
@@ -208,7 +209,9 @@ export const MessageList: React.FC<MessageListProps> = observer(({
 
   const sortedMessages = useMemo(
     () =>
-      [...messages]
+      // A run of lost messages (#1312) reads as one row, not a column of
+      // identical ones.
+      collapseUndecryptable([...messages]
         // Filter out blank messages — but keep any message with attachments even
         // if the text caption is empty.
         .filter((m) => {
@@ -219,9 +222,11 @@ export const MessageList: React.FC<MessageListProps> = observer(({
           const decryptionFailed = m.content_decrypted === undefined;
           // Soft-deleted messages have no content but should remain visible as "[deleted]".
           const isSoftDeleted = !!m.deleted_at;
-          return hasText || hasAttachments || decryptionFailed || isSoftDeleted;
+          // A lost message's placeholder (#1312) has no content by definition;
+          // dropping it here would make the loss silent again.
+          return hasText || hasAttachments || decryptionFailed || isSoftDeleted || !!m.undecryptable;
         })
-        .sort((a, b) => a.created_at - b.created_at),
+        .sort((a, b) => a.created_at - b.created_at)),
     [messages]
   );
 

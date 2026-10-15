@@ -458,6 +458,7 @@ pub async fn edit_message_as(
             conversation_id,
             user_id,
             plaintext: &plaintext,
+            envelope_id: &envelope_id,
         },
         sealed,
         |sealed| pollis_api::messages::EditMessageBody {
@@ -558,6 +559,7 @@ async fn send_redaction_message(
             conversation_id,
             user_id,
             plaintext: &plaintext,
+            envelope_id: &envelope_id,
         },
         sealed,
         |sealed| pollis_api::messages::SendMessageBody {
@@ -918,6 +920,7 @@ pub async fn edit_message(
             conversation_id: &conversation_id,
             user_id: &user_id,
             plaintext: &plaintext,
+            envelope_id: &envelope_id,
         },
         sealed,
         |sealed| pollis_api::messages::EditMessageBody {

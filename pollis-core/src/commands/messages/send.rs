@@ -263,13 +263,14 @@ pub async fn send_message(
             conversation_id: &conversation_id,
             user_id: &sender_id,
             plaintext: &plaintext,
+            envelope_id: &id,
         },
         sealed,
         |sealed| pollis_api::messages::SendMessageBody {
             id: id.clone(),
             conversation_id: conversation_id.clone(),
             sender_id: Some(SEALED_SENDER_SENTINEL.to_string()),
-            ciphertext: sealed.wire(),
+            ciphertext: test_hooks::maybe_corrupt(sealed.wire()),
             reply_to_id: reply_to_id.clone(),
             sent_at: sealed.sent_at.clone(),
             sealed: 1,
@@ -592,5 +593,37 @@ mod tests {
         assert_eq!(mention_tokens("@ hello"), Vec::<String>::new());
         assert_eq!(mention_tokens("user@example.com"), Vec::<String>::new());
         assert_eq!(mention_tokens("hi @dana"), vec!["dana".to_string()]);
+    }
+}
+
+/// A test-only way to make the next outgoing message undecryptable for every
+/// recipient (#1312), so a lost message can be produced end to end — through
+/// the DS and a real recipient's ingest — instead of only simulated. Compiled
+/// out of every shipping build: without `test-harness` it is the identity.
+pub mod test_hooks {
+    #[cfg(feature = "test-harness")]
+    static CORRUPT_NEXT_SEND: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+
+    /// Corrupt the ciphertext of the next message this process sends. One-shot.
+    #[cfg(feature = "test-harness")]
+    pub fn corrupt_next_send() {
+        CORRUPT_NEXT_SEND.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Flip the low bit of the envelope's last byte — inside the AEAD tag, so the
+    /// MLS header (group, epoch) still parses and the DS still accepts it, but no
+    /// recipient can open it.
+    pub(super) fn maybe_corrupt(wire: String) -> String {
+        #[cfg(feature = "test-harness")]
+        {
+            if CORRUPT_NEXT_SEND.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                let split = wire.len() - 2;
+                if let Ok(last) = u8::from_str_radix(&wire[split..], 16) {
+                    return format!("{}{:02x}", &wire[..split], last ^ 0x01);
+                }
+            }
+        }
+        wire
     }
 }

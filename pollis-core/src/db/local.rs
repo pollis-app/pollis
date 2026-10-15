@@ -123,17 +123,32 @@ impl LocalDb {
                 |row| row.get::<_, String>(0),
             );
 
-            let should_wipe = match version_res {
-                Ok(v) => v != LOCAL_SCHEMA_VERSION,
-                Err(rusqlite::Error::QueryReturnedNoRows) => true,
+            // Why the database is about to be destroyed, if it is. Logged
+            // (#1312): this deletes the device's whole history and MLS state,
+            // and it used to happen without a trace.
+            let wipe_reason: Option<String> = match version_res {
+                Ok(v) if v != LOCAL_SCHEMA_VERSION => Some(format!(
+                    "schema version {v} is not {LOCAL_SCHEMA_VERSION}"
+                )),
+                Ok(_) => None,
+                Err(rusqlite::Error::QueryReturnedNoRows) => {
+                    Some("no schema version recorded".to_string())
+                }
                 Err(rusqlite::Error::SqliteFailure(ffi_err, _))
                     if ffi_err.code == rusqlite::ErrorCode::NotADatabase =>
                 {
                     // Wrong SQLCipher key or genuinely not-a-database bytes.
-                    true
+                    Some("it does not open with this device's key".to_string())
                 }
                 Err(e) => return Err(e.into()),
             };
+            let should_wipe = wipe_reason.is_some();
+            if let Some(reason) = &wipe_reason {
+                crate::diag!(
+                    "[db] DESTROYING the local database — {reason}. This device's message \
+                     history and MLS state are gone; it rejoins its groups from scratch"
+                );
+            }
 
             if should_wipe {
                 drop(conn);
@@ -656,6 +671,15 @@ pub const ALLOWED_RETENTION_DAYS: [i64; 4] = [0, 30, 90, 365];
 const ADDITIVE_COLUMNS: &[(&str, &str, &str)] = &[
     // (table, column, full ALTER fragment)
     ("message", "thread_id", "ALTER TABLE message ADD COLUMN thread_id TEXT"),
+    // Must stay identical to the column in `local_schema.sql`.
+    (
+        "message",
+        "undecryptable",
+        "ALTER TABLE message ADD COLUMN undecryptable TEXT CHECK (
+            undecryptable IS NULL
+            OR (undecryptable IN ('stranded', 'failed', 'lineage') AND content IS NULL)
+        )",
+    ),
 ];
 
 /// Apply [`ADDITIVE_COLUMNS`] to a database that predates them.
@@ -753,6 +777,9 @@ pub fn evict_old_messages(conn: &Connection) -> Result<usize> {
         "DELETE FROM message WHERE received_at < datetime('now', ?1)",
         rusqlite::params![modifier],
     )?;
+    if deleted > 0 {
+        crate::diag!("[db] retention ({days} days) removed {deleted} message(s) from this device");
+    }
     reclaim(conn)?;
     Ok(deleted)
 }

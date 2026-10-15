@@ -25,6 +25,7 @@ export const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message,
 
   const fallbackText = (() => {
     if (!message) { return t("preview.noMessages"); }
+    if (message.undecryptable) { return t("preview.undecryptable"); }
     const attCount = message.attachments?.length ?? 0;
     if (attCount > 0) {
       const summary = t("preview.attachments", { count: attCount });

@@ -58,6 +58,18 @@ struct ConvIngest {
     newly_delivered: Vec<String>,
 }
 
+/// What one [`decrypt_and_persist_one`] attempt came to (#1312).
+#[derive(Debug, PartialEq, Eq)]
+enum Ingested {
+    /// Opened — or already held, or nothing to open. Carries the message id
+    /// when this persisted a NEW inbound DM message (the receipt batch, #857).
+    Opened(Option<String>),
+    /// The bytes would not open at the epoch they claim. Unless the envelope is
+    /// this device's own, what it carried is gone for good once the cursor
+    /// passes it.
+    Failed,
+}
+
 /// Decide a delete tombstone's fate from its redaction outcome. Pure so the
 /// edge-case matrix is unit-testable offline (`delete_resolution_tests`) without
 /// a DB:
@@ -444,7 +456,7 @@ pub(crate) async fn sweep_current_epoch(
             if crate::commands::mls::envelope_lineage(&bytes) != Some(at) {
                 continue;
             }
-            if let Some(id) =
+            if let Ingested::Opened(Some(id)) =
                 decrypt_and_persist_one(conn, &mut decryptor, cid, env, &bytes, user_id, is_dm)
             {
                 delivered.push(id);
@@ -553,6 +565,13 @@ async fn ingest_group_envelopes_interleaved(
     // watermark loop. Runs even with zero envelopes so the group still advances
     // to head (the cold-launch sweep guarantee).
     let mut max_fired_epoch: Option<(i64, u64)> = None;
+    // Where the replay started — the epoch the local group was already at — and
+    // every position it reached, so an envelope below the start (never
+    // attempted: its keys were gone before this pass) is told apart from one
+    // attempted and failed (#1312).
+    let mut first_fired_epoch: Option<(i64, u64)> = None;
+    let mut fired: HashSet<(i64, u64)> = HashSet::new();
+    let mut failed: HashSet<(usize, usize)> = HashSet::new();
     // Per-conversation batch of messages newly persisted on this pass — the
     // delivery receipts (#857) this device owes once the replay is done.
     let mut newly_delivered: Vec<Vec<String>> = vec![Vec::new(); per_conv.len()];
@@ -563,6 +582,8 @@ async fn ingest_group_envelopes_interleaved(
             // scalar max would run backwards across a migration.
             let key = (generation, epoch);
             max_fired_epoch = Some(max_fired_epoch.map_or(key, |m| m.max(key)));
+            first_fired_epoch.get_or_insert(key);
+            fired.insert(key);
             if let Some(indices) = by_epoch.get(&key) {
                 // One group load for the whole epoch's run (#875). Every
                 // envelope in `indices` is sealed at the epoch the replay has
@@ -574,8 +595,10 @@ async fn ingest_group_envelopes_interleaved(
                     crate::commands::mls::MlsDecryptor::open(conn, mls_group_id)
                 else {
                     // No local group: nothing at this epoch is decryptable.
-                    // The envelopes stay put for a later pass, exactly as a
-                    // per-envelope decrypt failure would leave them.
+                    // The epoch counts as reached, so the cursor passes these
+                    // like any per-envelope failure — and like one, they are
+                    // recorded as failed (#1312).
+                    failed.extend(indices.iter().copied());
                     return;
                 };
                 for &(ci, ei) in indices {
@@ -583,7 +606,7 @@ async fn ingest_group_envelopes_interleaved(
                     let Some(bytes) = decoded.get(&(ci, ei)) else {
                         continue;
                     };
-                    if let Some(delivered_id) = decrypt_and_persist_one(
+                    match decrypt_and_persist_one(
                         conn,
                         &mut decryptor,
                         &per_conv[ci].0,
@@ -592,7 +615,13 @@ async fn ingest_group_envelopes_interleaved(
                         user_id,
                         is_dm,
                     ) {
-                        newly_delivered[ci].push(delivered_id);
+                        Ingested::Opened(Some(delivered_id)) => {
+                            newly_delivered[ci].push(delivered_id);
+                        }
+                        Ingested::Opened(None) => {}
+                        Ingested::Failed => {
+                            failed.insert((ci, ei));
+                        }
                     }
                 }
             }
@@ -732,7 +761,115 @@ async fn ingest_group_envelopes_interleaved(
             newly_delivered: std::mem::take(&mut newly_delivered[ci]),
         });
     }
+
+    // Make every loss the cursor is about to commit to visible (#1312).
+    if let (Some(start), Some(reached)) = (first_fired_epoch, max_fired_epoch) {
+        let guard = state.local_db.lock().await;
+        let db = guard
+            .as_ref()
+            .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+        record_losses(
+            db.conn(),
+            mls_group_id,
+            per_conv,
+            &epoch_of,
+            &out,
+            Replay {
+                start,
+                reached,
+                fired: &fired,
+                failed: &failed,
+            },
+        );
+    }
     Ok(out)
+}
+
+/// What one pass's commit replay did, as [`record_losses`] needs it.
+struct Replay<'a> {
+    /// The position the local group was at when the replay began.
+    start: (i64, u64),
+    /// The highest position it reached.
+    reached: (i64, u64),
+    /// Every position it reached.
+    fired: &'a HashSet<(i64, u64)>,
+    /// `(conversation, envelope)` indices attempted and not opened.
+    failed: &'a HashSet<(usize, usize)>,
+}
+
+/// Write a placeholder (and a log line) for every message envelope this pass's
+/// cursor moves past that this device was entitled to read and did not.
+/// See [`super::loss`] for what "entitled" excludes.
+fn record_losses(
+    conn: &rusqlite::Connection,
+    mls_group_id: &str,
+    per_conv: &[(String, Vec<EnvelopeRow>)],
+    epoch_of: &[Vec<Option<(i64, u64)>>],
+    advanced: &[ConvIngest],
+    replay: Replay<'_>,
+) {
+    let lineage = replay.reached.0;
+    // A lineage held since before #1312 has no recorded join. Its floor is
+    // where this first look at it started (see `loss::fallback_floor`).
+    if crate::commands::mls::first_join(conn, mls_group_id, lineage).is_none() {
+        let start_epoch = if replay.start.0 == lineage { replay.start.1 } else { 0 };
+        crate::commands::mls::record_first_join(
+            conn,
+            mls_group_id,
+            lineage,
+            super::loss::fallback_floor(start_epoch),
+        );
+    }
+    let mut pre_join = 0usize;
+    for (ci, (cid, envs)) in per_conv.iter().enumerate() {
+        let Some((cursor, _)) = advanced.get(ci).and_then(|a| a.watermark.as_ref()) else {
+            continue;
+        };
+        for (ei, env) in envs.iter().enumerate() {
+            let (id, sender_id, _, _, _, sent_at, env_type, seq) = env;
+            if seq > cursor || (env_type != "message" && env_type != "edit") {
+                continue;
+            }
+            let Some(sealed_at) = epoch_of[ci][ei] else {
+                crate::diag!("[loss] {cid}: envelope {id} is not a readable MLS message — skipped");
+                continue;
+            };
+            let attempted = replay.fired.contains(&sealed_at);
+            let failed = replay.failed.contains(&(ci, ei));
+            // Opened (or a control frame, or already held).
+            if attempted && !failed {
+                continue;
+            }
+            if super::loss::has_real_row(conn, id) || super::loss::is_known_envelope(conn, id) {
+                continue;
+            }
+            let floor = crate::commands::mls::first_join(conn, mls_group_id, sealed_at.0);
+            let Some(reason) = super::loss::classify(sealed_at, lineage, floor, attempted) else {
+                pre_join += 1;
+                continue;
+            };
+            crate::diag!(
+                "[loss] {cid}: {env_type} {id} sealed at ({}, {}) lost on this device — {} \
+                 (device went from ({}, {}) to ({}, {}), joined at {floor:?})",
+                sealed_at.0,
+                sealed_at.1,
+                reason.as_str(),
+                replay.start.0,
+                replay.start.1,
+                replay.reached.0,
+                replay.reached.1,
+            );
+            // A lost edit or delete has no row of its own to stand in for.
+            if env_type == "message" {
+                super::loss::write_placeholder(conn, cid, id, sender_id, sent_at, reason);
+            }
+        }
+    }
+    if pre_join > 0 {
+        crate::diag!(
+            "[loss] {mls_group_id}: passed {pre_join} envelope(s) sealed before this device joined"
+        );
+    }
 }
 
 /// Decrypt one `message` or `edit` envelope at the group's CURRENT epoch and
@@ -761,35 +898,37 @@ fn decrypt_and_persist_one(
     bytes: &[u8],
     user_id: &str,
     is_dm: bool,
-) -> Option<String> {
+) -> Ingested {
     // `sender_id` (the server-writable envelope column) is intentionally NOT
     // read for attribution — the sender is taken from the MLS credential inside
     // the ciphertext (sealed sender, `docs/metadata-minimization-design.md` §2).
     let (id, _sender_id, _ciphertext, reply_to_id, target_id, sent_at, env_type, _seq) = env;
     match env_type.as_str() {
         "message" => {
-            let exists: bool = conn
-                .query_row(
-                    "SELECT 1 FROM message WHERE id = ?1",
-                    rusqlite::params![id],
-                    |_| Ok(true),
-                )
-                .optional()
-                .ok()
-                .flatten()
-                .unwrap_or(false);
-            if exists {
-                return None;
+            // A placeholder (#1312) does not count: if this ever opens after
+            // all, the real message replaces it.
+            if super::loss::has_real_row(conn, id) {
+                return Ingested::Opened(None);
             }
             // Attribute from the MLS-authenticated credential inside the
             // ciphertext, NOT the server-writable `message_envelope.sender_id`
             // tuple field (which may be a blinded sentinel under sealed sender).
             // See `docs/metadata-minimization-design.md` §2.
             let Some((plain, cred_sender)) = decryptor.decrypt(bytes) else {
-                // Decrypt failed — leave the envelope in message_envelope for a
-                // future retry; the watermark is computed to not skip past it.
-                return None;
+                // Whether this is a loss is decided once the cursor's position
+                // is known (`record_losses`), not here.
+                return Ingested::Failed;
             };
+            // Whatever it turns out to be, it opened. A control frame leaves no
+            // row: remember it opened, and drop any placeholder standing in
+            // for it.
+            if !matches!(super::framing::classify(&plain), super::framing::Frame::Text { .. }) {
+                super::loss::record_opened_envelope(conn, id);
+                let _ = conn.execute(
+                    "DELETE FROM message WHERE id = ?1 AND undecryptable IS NOT NULL",
+                    rusqlite::params![id],
+                );
+            }
             match super::framing::classify(&plain) {
                 // "Delete for everyone" (E2EE redaction). Honor it ONLY when the
                 // redaction's MLS-authenticated author (`cred_sender`) is the
@@ -829,10 +968,18 @@ fn decrypt_and_persist_one(
                 // send and for every message from a threads-unaware client.
                 super::framing::Frame::Text { text, thread_id } => {
                     if let Ok(text) = String::from_utf8(text) {
+                        // Replaces a placeholder for the same id (#1312), never
+                        // a real row.
                         let inserted = conn.execute(
-                            "INSERT OR IGNORE INTO message
+                            "INSERT INTO message
                              (id, conversation_id, sender_id, ciphertext, content, reply_to_id, thread_id, sent_at)
-                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                             ON CONFLICT(id) DO UPDATE SET
+                               sender_id = excluded.sender_id, ciphertext = excluded.ciphertext,
+                               content = excluded.content, reply_to_id = excluded.reply_to_id,
+                               thread_id = excluded.thread_id, sent_at = excluded.sent_at,
+                               undecryptable = NULL
+                             WHERE message.undecryptable IS NOT NULL",
                             rusqlite::params![id, conversation_id, cred_sender, bytes, text, reply_to_id, thread_id, sent_at],
                         ).unwrap_or(0);
                         // Delivered (#857) means exactly this: the envelope was
@@ -841,7 +988,7 @@ fn decrypt_and_persist_one(
                         // time — a re-ingest returns early above, so a message
                         // is never acknowledged twice.
                         if inserted > 0 && is_dm && cred_sender != user_id {
-                            return Some(id.clone());
+                            return Ingested::Opened(Some(id.clone()));
                         }
                     }
                 }
@@ -854,7 +1001,7 @@ fn decrypt_and_persist_one(
                     // Our own receipt, echoed back to us from the conversation
                     // we posted it to. Nothing to learn from it.
                     if cred_sender == user_id {
-                        return None;
+                        return Ingested::Opened(None);
                     }
                     // `is_dm` is passed through to the recorder rather than
                     // checked here: #857 excludes group channels on the
@@ -891,7 +1038,11 @@ fn decrypt_and_persist_one(
                 // authorship is proven here, cryptographically — neither the
                 // server nor another member can edit a message they did not write.
                 // A mismatched or unknown-target edit is silently dropped.
-                let (plain, cred_sender) = decryptor.decrypt(bytes)?;
+                let Some((plain, cred_sender)) = decryptor.decrypt(bytes) else {
+                    return Ingested::Failed;
+                };
+                // An edit leaves no row under its own id.
+                super::loss::record_opened_envelope(conn, id);
                 let author: Option<String> = conn
                     .query_row(
                         "SELECT sender_id FROM message WHERE id = ?1",
@@ -902,7 +1053,7 @@ fn decrypt_and_persist_one(
                     .ok()
                     .flatten();
                 if author.as_deref() != Some(cred_sender.as_str()) {
-                    return None;
+                    return Ingested::Opened(None);
                 }
                 // Strip size padding (§4.1); no-op for legacy/unpadded edits.
                 if let Ok(text) = String::from_utf8(super::framing::strip(&plain)) {
@@ -919,7 +1070,7 @@ fn decrypt_and_persist_one(
     }
     // Only the "persisted a new inbound DM message" path above returns an id;
     // every other outcome is nothing to acknowledge.
-    None
+    Ingested::Opened(None)
 }
 
 /// Frontend-triggerable ingest for a channel. Used by LiveKit real-time hints

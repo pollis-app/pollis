@@ -112,7 +112,7 @@ pub async fn get_channel_messages(
 /// Shared by the channel/DM page reads and the thread read (#825), so every
 /// caller must SELECT the same column order:
 /// `id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at,
-///  edited_at, deleted_at, thread_id`.
+///  edited_at, deleted_at, thread_id, undecryptable`.
 fn row_to_channel_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChannelMessage> {
     let ct: Vec<u8> = row.get(3)?;
     let content: Option<String> = row.get(4)?;
@@ -130,6 +130,7 @@ fn row_to_channel_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChannelMe
         sent_at: row.get(6)?,
         edited_at: row.get(7)?,
         deleted_at,
+        undecryptable: row.get::<_, Option<String>>(10)?.is_some(),
     })
 }
 
@@ -149,7 +150,7 @@ async fn read_local_channel_page(
     match cursor {
         None => {
             let mut stmt = db.conn().prepare(
-                "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id
+                "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id, undecryptable
                  FROM message
                  WHERE conversation_id = ?1
                  ORDER BY sent_at DESC, id DESC
@@ -162,7 +163,7 @@ async fn read_local_channel_page(
         }
         Some(c) => {
             let mut stmt = db.conn().prepare(
-                "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id
+                "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id, undecryptable
                  FROM message
                  WHERE conversation_id = ?1
                    AND (sent_at < ?2 OR (sent_at = ?2 AND id < ?3))
@@ -324,9 +325,9 @@ const LAST_MESSAGE_ID_CHUNK: usize = 400;
 pub(crate) fn last_messages_sql(n: usize) -> String {
     let placeholders = (1..=n).map(|i| format!("?{i}")).collect::<Vec<_>>().join(",");
     format!(
-        "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id
+        "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id, undecryptable
          FROM (
-           SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id,
+           SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id, undecryptable,
                   ROW_NUMBER() OVER (PARTITION BY conversation_id ORDER BY sent_at DESC, id DESC) AS rn
            FROM message
            WHERE conversation_id IN ({placeholders})
@@ -473,7 +474,7 @@ pub async fn read_messages_around(
         };
 
         let mut stmt = db.conn().prepare(
-            "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id
+            "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id, undecryptable
              FROM message
              WHERE conversation_id = ?1
                AND (sent_at < ?2 OR (sent_at = ?2 AND id <= ?3))
@@ -489,7 +490,7 @@ pub async fn read_messages_around(
             .collect();
 
         let mut stmt_newer = db.conn().prepare(
-            "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id
+            "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id, undecryptable
              FROM message
              WHERE conversation_id = ?1
                AND (sent_at > ?2 OR (sent_at = ?2 AND id > ?3))
@@ -535,7 +536,7 @@ pub(crate) fn read_after_on(
     limit: i64,
 ) -> rusqlite::Result<(Vec<ChannelMessage>, Option<MessageCursor>)> {
     let mut stmt = conn.prepare(
-        "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id
+        "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id, undecryptable
          FROM message
          WHERE conversation_id = ?1
            AND (sent_at > ?2 OR (sent_at = ?2 AND id > ?3))
@@ -629,7 +630,7 @@ pub async fn read_thread_messages(
             .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
 
         let mut stmt = db.conn().prepare(
-            "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id
+            "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id, undecryptable
              FROM message
              WHERE thread_id = ?1
              ORDER BY sent_at ASC, id ASC",

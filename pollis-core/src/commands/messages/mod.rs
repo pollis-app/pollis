@@ -8,6 +8,7 @@ mod delete_capability;
 mod edit_delete;
 pub(crate) mod framing;
 mod ingest;
+pub(crate) mod loss;
 mod reactions;
 mod read;
 mod read_state;
@@ -160,6 +161,7 @@ pub use types::{
 
 // ── Send ─────────────────────────────────────────────────────────────────────
 pub use send::send_message;
+pub use send::test_hooks;
 
 // ── Read / list / search ─────────────────────────────────────────────────────
 pub use read::{

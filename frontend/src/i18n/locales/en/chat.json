@@ -5,7 +5,15 @@
     "deleted": "[deleted]",
     "encrypted": "[encrypted]",
     "redacted": "[redacted]",
-    "edited": "(edited)"
+    "edited": "(edited)",
+    "undecryptable": {
+      "tag": "undecryptable",
+      "title": "Couldn't decrypt",
+      "body_one": "This message couldn't be decrypted on this device.",
+      "body_other": "{{count}} messages couldn't be decrypted on this device.",
+      "detail": "Something was sent here, but this device couldn't read it. Your other devices may still have it.",
+      "diagnostics": "See diagnostics"
+    }
   },
   "status": {
     "pending": "pending",
@@ -76,7 +84,8 @@
     "noMessages": "No messages yet",
     "withSender": "{{name}}: {{text}}",
     "attachments_one": "[attachment]",
-    "attachments_other": "[{{count}} attachments]"
+    "attachments_other": "[{{count}} attachments]",
+    "undecryptable": "A message couldn't be decrypted on this device"
   },
   "attachment": {
     "viewLabel": "View {{filename}}",

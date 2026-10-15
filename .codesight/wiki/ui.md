@@ -611,7 +611,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**162 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**163 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -689,7 +689,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 
 - **MediaGalleryView** — props: attachments, emptyLabel — `frontend/src/components/Media/MediaGalleryView.tsx`
 
-### `components/Message` (15)
+### `components/Message` (16)
 
 - **AttachmentDisplay** — props: attachment, tile, testId — `frontend/src/components/Message/AttachmentDisplay.tsx`
 - **LastMessagePreview** — props: message, isLoading — `frontend/src/components/Message/LastMessagePreview.tsx`
@@ -706,6 +706,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **ReceiptIndicator** — props: receipts, peerCount, visible — `frontend/src/components/Message/ReceiptIndicator.tsx`
 - **ReplyPreview** — props: messageId, allMessages, onDismiss, onScrollToMessage — `frontend/src/components/Message/ReplyPreview.tsx`. Mobile's counterpart is `mobile/components/chat/ReplyBar.tsx` (#1270), where a reply starts from a swipe toward the start edge or a double tap on the row (`SwipeToReply.tsx`) as well as the message sheet's Reply.
 - **ThreadReplyCount** — props: count, onOpen — `frontend/src/components/Message/ThreadReplyCount.tsx`
+- **UndecryptableMessage** — props: message, skin — `frontend/src/components/Message/UndecryptableMessage.tsx`
 
 ### `components/Preferences` (2)
 

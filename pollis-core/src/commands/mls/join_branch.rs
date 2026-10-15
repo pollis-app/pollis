@@ -134,9 +134,109 @@ pub(super) fn welcome_may_replace(local_epoch: u64, welcome_epoch: u64, unconfir
     }
 }
 
+/// `mls_kv` scope for the epoch from which this device is entitled to read each
+/// lineage (#1312). Key: as [`UNCONFIRMED_JOIN_SCOPE`]. Value: the epoch,
+/// little-endian.
+///
+/// It separates the one loss this device was never entitled to avoid — a
+/// message sealed while it was not in the tree — from every other. Two ways in
+/// set it, deliberately differently:
+///
+/// * **Added** (a Welcome, [`record_added`]): someone put this device in the
+///   tree at that epoch. Whatever was sealed before it — first join, or the gap
+///   while it was removed and before it was re-added — it was never sent to
+///   this device. Replaces any earlier value.
+/// * **Held** (creating the group, an external join, [`record_first_join`]):
+///   only the FIRST is kept. A group rebuilt by recovery keeps the original
+///   floor, because what the device missed in between was sent while it was a
+///   member and is a real loss.
+const FIRST_JOIN_SCOPE: &str = "pollis_first_join";
+
+fn write_join(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+    generation: i64,
+    epoch: u64,
+    verb: &str,
+) {
+    if let Err(e) = conn.execute(
+        &format!("{verb} INTO mls_kv (scope, key, value) VALUES (?1, ?2, ?3)"),
+        rusqlite::params![
+            FIRST_JOIN_SCOPE,
+            key(conversation_id, generation),
+            epoch.to_le_bytes().to_vec()
+        ],
+    ) {
+        crate::diag!(
+            "[mls] could not record the join of {conversation_id} generation {generation}: {e}"
+        );
+    }
+}
+
+/// Record that this device holds the lineage `(conversation_id, generation)`
+/// from `epoch` on, unless a join is already recorded. Best-effort: a missing
+/// floor only means the loss check stays quiet for that lineage.
+pub(crate) fn record_first_join(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+    generation: i64,
+    epoch: u64,
+) {
+    write_join(conn, conversation_id, generation, epoch, "INSERT OR IGNORE");
+}
+
+/// Record that this device was ADDED to the lineage's tree at `epoch` (a
+/// Welcome). Replaces any earlier floor — see [`FIRST_JOIN_SCOPE`].
+pub(crate) fn record_added(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+    generation: i64,
+    epoch: u64,
+) {
+    write_join(conn, conversation_id, generation, epoch, "INSERT OR REPLACE");
+}
+
+/// The epoch at which this device first held `(conversation_id, generation)`,
+/// or `None` if no join was ever recorded for it.
+pub(crate) fn first_join(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+    generation: i64,
+) -> Option<u64> {
+    use rusqlite::OptionalExtension;
+    let raw: Vec<u8> = conn
+        .query_row(
+            "SELECT value FROM mls_kv WHERE scope = ?1 AND key = ?2",
+            rusqlite::params![FIRST_JOIN_SCOPE, key(conversation_id, generation)],
+            |row| row.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten()?;
+    let bytes: [u8; 8] = raw.try_into().ok()?;
+    Some(u64::from_le_bytes(bytes))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A rebuild (external join) keeps the first floor — what the device missed
+    /// in between is a real loss — but being ADDED again (a Welcome after a
+    /// removal) moves it: the gap was never sent to this device.
+    #[test]
+    fn a_rebuild_keeps_the_floor_and_a_re_add_moves_it() {
+        let conn = kv();
+        assert_eq!(first_join(&conn, "c", 0), None);
+        record_first_join(&conn, "c", 0, 3);
+        record_first_join(&conn, "c", 0, 9);
+        assert_eq!(first_join(&conn, "c", 0), Some(3));
+        assert_eq!(first_join(&conn, "c", 1), None, "a successor lineage has its own floor");
+        record_first_join(&conn, "c", 1, 0);
+        assert_eq!(first_join(&conn, "c", 1), Some(0));
+        record_added(&conn, "c", 0, 7);
+        assert_eq!(first_join(&conn, "c", 0), Some(7));
+    }
 
     fn kv() -> rusqlite::Connection {
         let conn = rusqlite::Connection::open_in_memory().unwrap();

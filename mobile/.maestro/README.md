@@ -182,6 +182,17 @@ the remove control and removes it.
 — a fresh peer signs up, its handle is read off the screen, and the reporter
 reports it with "Report and block", then unblocks.
 
+**Lost message (automated, #1312):** `mobile/scripts/maestro-lost-message.sh <device>`
+— one device plus a dev-DS peer client, not a second device: the script runs
+`pollis-tui`'s `lost_message_peer` example (a `test-harness` build that never
+ships), which signs up a fresh peer and prints its handle. The device signs up,
+opens a DM with it (`two-client/lost-message/1-open-dm.yaml`); the peer accepts
+and sends four messages with the middle two corrupted; then the device
+re-opens the DM and must show the readable two with ONE collapsed "2 messages
+couldn't be decrypted" placeholder between them, whose link opens Diagnostics
+(`2-see-placeholder.yaml`). The dev gate
+key is read from Doppler `dev_personal` when `POLLIS_DEV_ACCESS_KEY` is unset.
+
 **QR device link (automated, #1207):** `mobile/scripts/maestro-qr-link.sh <existing-device> <new-device>`
 — the existing device shows a code from Security (PIN first), the script reads
 the code's text off its UI tree, the new device signs in with it from "Sign in

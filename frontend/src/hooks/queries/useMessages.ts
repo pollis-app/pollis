@@ -80,6 +80,8 @@ export type RawChannelMessage = {
   sent_at: string;
   edited_at?: string;
   deleted_at?: string;
+  /** A placeholder for a message this device could not decrypt (#1312). */
+  undecryptable?: boolean;
 };
 
 type MessagePage = {
@@ -175,6 +177,7 @@ export function transformChannelMessage(m: RawChannelMessage): Message {
     attachments: parsed?.attachments ?? [],
     edited_at: m.edited_at,
     deleted_at: m.deleted_at,
+    undecryptable: m.undecryptable,
   };
 }
 

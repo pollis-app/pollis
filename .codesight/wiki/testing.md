@@ -480,6 +480,19 @@ IP could be logged, traced or recorded (see `overview.md` → Client IPs).
 `tests/ip_shaped_device_names.rs` pins migration 000034's scrub and the DS's
 write-time redaction of IP-shaped device names.
 
+## Producing a lost message for real (#1312)
+
+`pollis_core::commands::messages::test_hooks::corrupt_next_send()` (only in a
+`test-harness` build) flips one bit of the next outgoing envelope's AEAD tag:
+the header still parses and the DS still accepts it, but no recipient can open
+it. `flows/lost_messages.rs` uses it, and a bare
+`process_pending_commits_inner` call to strand a device, to assert each loss
+shows as exactly one placeholder and that pre-join history and a device's own
+control frames show none. On mobile, `pollis-tui/examples/lost_message_peer.rs`
+uses the same hook against the dev DS for the Maestro flow
+(`mobile/scripts/maestro-lost-message.sh`). Desktop rendering in both skins is
+`e2e/lost-messages.spec.ts`.
+
 ## The `DsFault` seam — injecting DS-side faults
 
 `/v1/commits` is the ONE path the harness serves itself, mounted on an outer

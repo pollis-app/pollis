@@ -374,6 +374,7 @@ impl AppState {
         if let Err(e) = crate::db::local::evict_old_messages(db.conn()) {
             crate::diag!("[state] startup message eviction failed (non-fatal): {e}");
         }
+        crate::commands::messages::loss::prune_known_envelopes(db.conn());
 
         *self.local_db.lock().await = Some(db);
         // Bring the full-text search index up to date for whatever history this

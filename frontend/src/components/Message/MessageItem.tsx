@@ -12,6 +12,7 @@ import { MessageAvatar } from "./MessageAvatar";
 import { MessageActions } from "./MessageActions";
 import { MessageReactions } from "./MessageReactions";
 import { ReceiptIndicator } from "./ReceiptIndicator";
+import { UndecryptableMessage } from "./UndecryptableMessage";
 import { probeRender } from "../../utils/renderProbe";
 import type { MessageRenderContext } from "./messageRenderContext";
 import type { Message, MessageReceipts } from "../../types";
@@ -97,6 +98,11 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
   probeRender("MessageItem");
   const { t } = useTranslation("chat");
   const { skin, isLightBg, currentUserId } = ctx;
+  // A lost message (#1312) has no author, no content and no actions — it
+  // only marks the place where something could not be read.
+  if (message.undecryptable) {
+    return <UndecryptableMessage message={message} skin={skin} />;
+  }
   const isOwn = message.sender_id === currentUserId;
   // Falls back to the same placeholder the default prop used to supply, but
   // resolved at render so it follows the active language.

@@ -31,6 +31,8 @@ mod heavy_churn;
 // module here that tests the harness rather than the product.
 #[path = "flows/linked_sqlite.rs"]
 mod linked_sqlite;
+#[path = "flows/lost_messages.rs"]
+mod lost_messages;
 #[path = "flows/messages.rs"]
 mod messages;
 #[path = "flows/model.rs"]
