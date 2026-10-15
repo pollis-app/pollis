@@ -16,6 +16,7 @@ import {
 import { useConversationRoute } from "../../hooks/useConversationRoute";
 import { EmojiText } from "../../components/emoji/EmojiText";
 import { permalinkMissCopy } from "../../lib/permalinks";
+import { messageJumpStore } from "../../stores/messageJumpStore";
 
 function timeAgo(iso: string): string {
   const then = new Date(iso).getTime();
@@ -60,6 +61,8 @@ export default function SavedScreen() {
       setUnresolved(true);
       return;
     }
+    // Opens scrolled to the message, like a permalink (#1315).
+    messageJumpStore.request(item.conversation_id, item.message_id);
     const route = routeFor(item.conversation_id);
     openConversation({
       id: item.conversation_id,

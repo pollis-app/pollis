@@ -900,7 +900,7 @@ app/
   group/[id].tsx       one group's channel panel (phones: pushed, no tab bar; iPad: redirects to the Groups tab)
   group/*              new, invite, invite-links, members, settings, emoji, requests, discover
   chat/[id].tsx        conversation (Header + list + composer); chat/thread.tsx
-  dm/{new,info,requests}.tsx · conversation/info.tsx · user/[id].tsx · report.tsx
+  dm/{new,info,requests}.tsx · conversation/{info,pins}.tsx · user/[id].tsx · report.tsx
   media.tsx            full-screen attachment viewer (#1248): zoom/swipe, video, audio, save/share
   self/*               preferences, user-settings, security, blocked, saved, …
 components/
@@ -927,7 +927,7 @@ Sub-screens are stack pushes outside `(tabs)`.
 
 iPad (regular width, `hooks/useLayoutClass`): Groups and Direct are a
 two-pane (`components/MasterDetail.tsx`) — list left, conversation right, tab
-bar visible. Conversation pages (info, members, group settings/invite/emoji/
+bar visible. Conversation pages (info, pins, members, group settings/invite/emoji/
 requests, thread, profile — `PANE_PATHS` in `components/pane/paneContext.ts`)
 push INSIDE the right pane: the tab owns a small entry stack and `DetailPane`
 renders the route's own component. Those screens read params with
@@ -1017,6 +1017,26 @@ Current state:
   to a non-prod DS); a store, APK or OTA build refuses to configure while it is
   set, so clear it in `mobile/.env` first (`docs/deployments.md`, "Dev gate"). Full
   sign-in verified end-to-end on an Android emulator against the live dev DS.
+- **Pinned messages (#1315, desktop's #99):** client-only, over the bridge's
+  existing `pin_message` / `unpin_message` / `list_pinned_messages` arms
+  (`hooks/queries/usePins.ts`, a port of desktop's). Same semantics, because
+  they live in pollis-core and the DS: any member may pin or unpin, in channels
+  and DMs, no count limit, both idempotent; a pin is a content snapshot sealed
+  under the conversation's pin key, so a later edit/delete does not change it;
+  a device still waiting for that key gets desktop's "not available yet" copy.
+  Pin / Unpin is a row in the message sheet (main timeline only, as desktop),
+  the list is `app/conversation/pins.tsx` behind the chat header's pin button
+  (a pane page on iPad), and there is no per-row pin marker (desktop has none).
+  Pins carry no realtime event, so the list refetches every time it opens
+  (`usePinnedMessages(id, { fresh: true })`); the sheet's label reads the
+  chat screen's 30 s-cached copy.
+  A list row taps back to the conversation scrolled to the message: the same
+  `resolve_message_permalink` as the permalink route, then
+  `stores/messageJumpStore.ts` (desktop's store, same shape) — the chat screen
+  pages back until the row is rendered (`lib/messageJump.ts`, ≤ 20 pages) and
+  tints it. Saved and `pollis://m/…` links now jump the same way. Maestro:
+  `flows/pins.yaml` and, across members, `scripts/maestro-pins.sh` (dev-DS
+  peer `pollis-tui/examples/pins_peer.rs`).
 - **Keystore-at-rest (Android + iOS):** the file-backed keystore (the only
   backend on mobile) envelope-encrypts its contents with an AES-256-GCM master
   key held in the platform secure store — same on-disk blob (`iv(12)||gcm-ct`,

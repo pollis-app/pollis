@@ -26,7 +26,7 @@ function copyColor(state: CopyState) {
  * Long-press action sheet for a message (Actions.dc.html): the message
  * quoted in a plain card, quick reactions, then grouped 52pt rows — reply in
  * thread, add reaction, copy text / copy link (verified feedback; the sheet
- * stays open so the outcome shows where the tap happened), save — and a
+ * stays open so the outcome shows where the tap happened), save, pin — and a
  * separate group for edit/delete on the sender's own messages or report on
  * anyone else's.
  */
@@ -36,11 +36,13 @@ export function MessageActionsSheet({
   quoteTime,
   isOwn,
   isSaved,
+  isPinned,
   onReact,
   onOpenPicker,
   onReply,
   onReplyInThread,
   onToggleSave,
+  onTogglePin,
   onCopyText,
   onCopyLink,
   onEdit,
@@ -54,12 +56,17 @@ export function MessageActionsSheet({
   quoteTime: string;
   isOwn: boolean;
   isSaved: boolean;
+  /** Pinned in its conversation for every member (#99, #1315). */
+  isPinned: boolean;
   onReact: (emoji: string) => void;
   onOpenPicker: () => void;
   // Quote reply in the composer (#1270), desktop's "Reply".
   onReply: () => void;
   onReplyInThread: () => void;
   onToggleSave: () => void;
+  /** Pin / unpin for everyone; any member may do either. Omitted where the
+   *  surface has no pins (desktop pins from the main timeline only). */
+  onTogglePin?: () => void;
   onCopyText: () => Promise<boolean>;
   onCopyLink: () => Promise<boolean>;
   onEdit: () => void;
@@ -224,6 +231,20 @@ export function MessageActionsSheet({
             name={isSaved ? t("actions.removeBookmark") : t("actions.save")}
             onPress={onToggleSave}
           />
+          {onTogglePin ? (
+            <ListRow
+              testID="btn-pin"
+              glyph={
+                isPinned ? (
+                  <Icon.pinOff size={GLYPH} color={semantic.text} />
+                ) : (
+                  <Icon.pin size={GLYPH} color={semantic.text} />
+                )
+              }
+              name={isPinned ? t("actions.unpin") : t("actions.pin")}
+              onPress={onTogglePin}
+            />
+          ) : null}
         </Group>
 
         {isOwn ? (

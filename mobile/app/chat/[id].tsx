@@ -38,6 +38,8 @@ import {
   useThreadSummaries,
   useSavedMessageIds,
   useToggleSavedMessage,
+  usePinnedMessageIds,
+  useTogglePinnedMessage,
   useUserGroupsWithChannels,
   useGroupMembers,
   flattenPages,
@@ -60,6 +62,8 @@ import { useOpenMediaViewer } from "../../hooks/useOpenMediaViewer";
 import { useIsRegular } from "../../hooks/useLayoutClass";
 import { selectConversation } from "../../hooks/useOpenConversation";
 import { haptic } from "../../lib/haptics";
+import { messageJumpStore } from "../../stores/messageJumpStore";
+import { nextJumpStep } from "../../lib/messageJump";
 
 // Props let this screen double as an embedded right-pane conversation on the
 // two-pane (regular/iPad) layout. Route usage passes NO props, so every value
@@ -291,6 +295,10 @@ function TextChat(props: ChatViewProps = {}) {
   // Saved messages (#887): one query feeds every row's saved state.
   const savedIds = useSavedMessageIds();
   const toggleSaved = useToggleSavedMessage();
+  // Pinned messages (#99, #1315): one query feeds the sheet's Pin / Unpin.
+  // Keyed on the channel or DM id, which is this screen's `conversationId`.
+  const pinnedIds = usePinnedMessageIds(conversationId);
+  const togglePin = useTogglePinnedMessage();
 
   // #897: copy is VERIFIED — the boolean comes from the clipboard call, and
   // a thrown write reads as failure, never assumed success.
@@ -400,6 +408,47 @@ function TextChat(props: ChatViewProps = {}) {
     },
     [],
   );
+
+  // A jump queued by the pinned list, Saved or a permalink
+  // (stores/messageJumpStore.ts): page back until the row is rendered, then
+  // scroll to it, tint it, and claim the jump so it fires once.
+  const jumpConversationId = messageJumpStore.conversationId;
+  const jumpMessageId = messageJumpStore.messageId;
+  const pageCount = data?.pages.length ?? 0;
+  useEffect(() => {
+    if (!jumpMessageId || jumpConversationId !== conversationId) {
+      return;
+    }
+    const step = nextJumpStep({
+      index: items.findIndex((i) => i.type === "msg" && i.key === jumpMessageId),
+      loaded: messages.some((m) => m.id === jumpMessageId),
+      isLoading,
+      isFetchingNextPage,
+      hasNextPage: !!hasNextPage,
+      pageCount,
+    });
+    if (step.kind === "scroll") {
+      messageJumpStore.claim(jumpMessageId);
+      // On the next frame: the list has no layout for a just-rendered row.
+      requestAnimationFrame(() => scrollToMessage(jumpMessageId));
+    } else if (step.kind === "loadOlder") {
+      void fetchNextPage();
+    } else if (step.kind === "giveUp") {
+      messageJumpStore.reset();
+    }
+  }, [
+    jumpConversationId,
+    jumpMessageId,
+    conversationId,
+    items,
+    messages,
+    isLoading,
+    isFetchingNextPage,
+    hasNextPage,
+    pageCount,
+    fetchNextPage,
+    scrollToMessage,
+  ]);
 
   const onEndReached = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) {
@@ -616,6 +665,24 @@ function TextChat(props: ChatViewProps = {}) {
         actions={
           <>
             <IconButton
+              testID="btn-pins"
+              accessibilityLabel={
+                kind === "dm"
+                  ? t("dms:conversation.pinsLabel")
+                  : t("channels:channel.pinsLabel")
+              }
+              icon={<Icon.pin size={22} color={semantic.text} />}
+              onPress={
+                conversationId && kind
+                  ? () =>
+                      router.push({
+                        pathname: "/conversation/pins",
+                        params: { id: conversationId, kind, name: title },
+                      })
+                  : undefined
+              }
+            />
+            <IconButton
               testID="btn-members"
               accessibilityLabel={t("nav:panel.ariaLabel")}
               icon={<Icon.users size={22} color={semantic.text} />}
@@ -805,6 +872,19 @@ function TextChat(props: ChatViewProps = {}) {
             toggleSaved.mutate(actionTarget.id);
             setActionTarget(null);
           }}
+          isPinned={pinnedIds.has(actionTarget.id)}
+          onTogglePin={
+            conversationId
+              ? () => {
+                  togglePin.mutate({
+                    conversationId,
+                    messageId: actionTarget.id,
+                    isPinned: pinnedIds.has(actionTarget.id),
+                  });
+                  setActionTarget(null);
+                }
+              : undefined
+          }
           onCopyText={() => copyToClipboard(actionTarget.content)}
           onCopyLink={() =>
             copyToClipboard(

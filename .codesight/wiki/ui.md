@@ -680,7 +680,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **MediaGrid** — props: attachments — `frontend/src/components/Layout/RightPanel/MediaGrid.tsx`
 - **MemberRow** — props: userId, label, avatarKey, isAdmin — `frontend/src/components/Layout/RightPanel/MemberRow.tsx`
 - **MembersPanel** — props: groupId, channelId, conversationId — `frontend/src/components/Layout/RightPanel/MembersPanel.tsx`
-- **PinnedPanel** — props: channelId, conversationId — `frontend/src/components/Layout/RightPanel/PinnedPanel.tsx`
+- **PinnedPanel** — props: channelId, conversationId — `frontend/src/components/Layout/RightPanel/PinnedPanel.tsx`. Mobile counterpart (#1315): `mobile/app/conversation/pins.tsx`, a pushed page (iPad: a detail-pane page) behind the chat header's pin button — same rows (author, time, snapshot text + attachments, Unpin), plus a row tap that returns to the conversation scrolled to the message via `resolve_message_permalink` + `mobile/stores/messageJumpStore.ts`.
 - **RightPanel** — `frontend/src/components/Layout/RightPanel/RightPanel.tsx`. The generic slot.
 - **ThreadMessageRow** — props: message, isRoot — `frontend/src/components/Layout/RightPanel/ThreadMessageRow.tsx`
 - **ThreadPanel** — props: threadId, channelId, conversationId — `frontend/src/components/Layout/RightPanel/ThreadPanel.tsx`

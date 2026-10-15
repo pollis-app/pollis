@@ -1,0 +1,138 @@
+appId: com.pollis.mobile
+tags:
+  - parity
+---
+# PINS (#1315, desktop #99) — pin from the message sheet, the pinned list from
+# the conversation header, tap a pin to jump back to the message, unpin.
+# Self-contained: creates a group (→ #General) so there is a conversation
+# without a peer. A pin from ANOTHER member showing up here is the two-client
+# half: two-client/pins/ (scripts/maestro-pins.sh).
+#
+# What it proves on a device: the sheet offers "Pin message"; the pin round
+# trip (snapshot sealed under the conversation's pin key, minted on this first
+# pin, stored on the DS, listed and opened again) lands a row in the list; the
+# sheet then offers "Unpin message"; a row tap returns to the conversation
+# with the message on screen; the list's Unpin empties it.
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-groups"
+- assertVisible:
+    id: "screen-groups"
+
+- tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Pins Group"
+- tapOn:
+    id: "btn-submit-group"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "E2E Pins Group, .*"
+    timeout: 15000
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"
+
+# Empty list first: the header button is there before anything is pinned.
+- tapOn:
+    id: "btn-pins"
+- extendedWaitUntil:
+    visible:
+      id: "pins-empty"
+    timeout: 15000
+- tapOn:
+    id: "btn-back"
+- assertVisible:
+    id: "screen-chat"
+
+# The message to pin. Keyboard stays up for the send tap (messaging.yaml,
+# #1194); hide it only if Gboard's mic prompt took the tap.
+- tapOn:
+    id: "input-composer"
+- inputText: "pin target"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*: pin target, .*"
+    timeout: 10000
+- hideKeyboard
+# A row can be long-pressed only once it is no longer pending, and the first
+# message of a fresh group pays for MLS group setup (messaging.yaml has the
+# numbers). No queryable "settled" signal, so a deliberate flat wait.
+- extendedWaitUntil:
+    visible:
+      id: "__never_matches__"
+    timeout: 30000
+    optional: true
+
+# ── Pin from the message sheet ──────────────────────────────────────────
+- runFlow: ../subflows/long-press-message.yaml
+- assertVisible:
+    id: "btn-pin"
+    text: "Pin message"
+- takeScreenshot: pins-01-sheet-pin
+- tapOn:
+    id: "btn-pin"
+- assertNotVisible:
+    id: "btn-edit"
+
+# ── The list, from the header ───────────────────────────────────────────
+- tapOn:
+    id: "btn-pins"
+- assertVisible:
+    id: "screen-pins"
+# First pin mints the conversation's pin key, then a DS write + a read.
+- extendedWaitUntil:
+    visible:
+      id: "row-pin-.*"
+    timeout: 30000
+- assertVisible: ".*, .*: pin target"
+- takeScreenshot: pins-02-list
+
+# ── Tap a pin: back to the conversation, on the message ─────────────────
+- tapOn:
+    id: "row-pin-.*"
+- extendedWaitUntil:
+    visible:
+      id: "screen-chat"
+    timeout: 10000
+- assertNotVisible:
+    id: "screen-pins"
+- assertVisible: ".*: pin target, .*"
+- takeScreenshot: pins-03-jumped
+
+# ── The sheet now offers Unpin ──────────────────────────────────────────
+- runFlow: ../subflows/long-press-message.yaml
+- assertVisible:
+    id: "btn-pin"
+    text: "Unpin message"
+- takeScreenshot: pins-04-sheet-unpin
+- tapOn:
+    id: "btn-action-cancel"
+- assertNotVisible:
+    id: "btn-edit"
+
+# ── Unpin from the list ─────────────────────────────────────────────────
+- tapOn:
+    id: "btn-pins"
+- extendedWaitUntil:
+    visible:
+      id: "btn-unpin-.*"
+    timeout: 15000
+- tapOn:
+    id: "btn-unpin-.*"
+- extendedWaitUntil:
+    visible:
+      id: "pins-empty"
+    timeout: 15000
+- takeScreenshot: pins-05-unpinned

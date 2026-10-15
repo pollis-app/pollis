@@ -33,6 +33,7 @@ import { appStore } from "../../stores/appStore";
 export const PANE_PATHS = [
   "/chat/thread",
   "/conversation/info",
+  "/conversation/pins",
   "/dm/info",
   "/user/[id]",
   "/group/settings",

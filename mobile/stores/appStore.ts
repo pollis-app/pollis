@@ -22,6 +22,7 @@ import type {
   DMConversation,
   MessageQueueItem,
 } from "../types";
+import { messageJumpStore } from "./messageJumpStore";
 
 class AppStore implements AppState {
   // ── Core / user ────────────────────────────────────────────────────────
@@ -202,6 +203,8 @@ class AppStore implements AppState {
     this.error = null;
     this.unreadCounts = {};
     this.isLocked = false;
+    // A jump queued in this session points into this session's history.
+    messageJumpStore.reset();
   }
 }
 

@@ -420,6 +420,15 @@ can never fork the key. See `.codesight/wiki/mls.md` § "Pinned-message key stat
   unwrap the current wrap yet (a fresh external joiner); that heals when any
   key-holding member's next pass re-wraps.
 
+All three are dispatched by the mobile bridge (`pollis-core/src/bridge.rs`) as
+well. Desktop's UI is the message menu's Pin / Unpin plus `PinnedPanel` in the
+right panel; mobile's (#1315) is the message sheet's `btn-pin` plus
+`mobile/app/conversation/pins.tsx` behind the chat header's `btn-pins`, whose
+rows jump back to the message (`mobile/stores/messageJumpStore.ts`). Proofs:
+`src-tauri/tests/flows/pinning.rs`; on a device `mobile/.maestro/flows/pins.yaml`
+and the two-member `mobile/scripts/maestro-pins.sh` (dev-DS peer
+`pollis-tui/examples/pins_peer.rs`: each side sees the other's pin and unpin).
+
 ## vault (`commands/vault.rs`)
 
 The Vault (#107): a personal encrypted space that presents as a chat with yourself

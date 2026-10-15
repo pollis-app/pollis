@@ -10,6 +10,7 @@ import {
 } from "./pane/paneContext";
 import ThreadScreen from "../app/chat/thread";
 import ConversationInfo from "../app/conversation/info";
+import PinnedMessages from "../app/conversation/pins";
 import DMInfo from "../app/dm/info";
 import UserProfile from "../app/user/[id]";
 import GroupSettings from "../app/group/settings";
@@ -29,6 +30,7 @@ import JoinRequests from "../app/group/requests";
 const PANE_SCREENS: Record<PanePath, ComponentType> = {
   "/chat/thread": ThreadScreen,
   "/conversation/info": ConversationInfo,
+  "/conversation/pins": PinnedMessages,
   "/dm/info": DMInfo,
   "/user/[id]": UserProfile,
   "/group/settings": GroupSettings,

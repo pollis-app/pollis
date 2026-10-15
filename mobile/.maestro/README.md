@@ -193,6 +193,15 @@ couldn't be decrypted" placeholder between them, whose link opens Diagnostics
 (`2-see-placeholder.yaml`). The dev gate
 key is read from Doppler `dev_personal` when `POLLIS_DEV_ACCESS_KEY` is unset.
 
+**Pins across members (automated, #1315):** `mobile/scripts/maestro-pins.sh <device>`
+— the lost-message shape with `pollis-tui`'s `pins_peer` example: the device
+opens a DM with a fresh peer (`two-client/pins/1-open-dm.yaml`), the peer sends
+a message and pins it, then the device must list the peer's pin, offer "Unpin
+message" on it, pin its own message and unpin the peer's
+(`2-pin-across-members.yaml`); the script passes only when the peer has seen
+the device's pin and unpin in its own list. The one-device half (pin, list,
+jump, unpin) is `flows/pins.yaml`.
+
 **QR device link (automated, #1207):** `mobile/scripts/maestro-qr-link.sh <existing-device> <new-device>`
 — the existing device shows a code from Security (PIN first), the script reads
 the code's text off its UI tree, the new device signs in with it from "Sign in

@@ -316,6 +316,11 @@
     "opening": "Opening message…",
     "title": "Message link"
   },
+  "pins": {
+    "openA11y": "Shows the message in the conversation",
+    "rowLabel": "{{author}}, {{when}}: {{text}}",
+    "unpinA11y": "Unpin message from {{author}}"
+  },
   "push": {
     "channelMessages": "Messages"
   },

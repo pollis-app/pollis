@@ -1,0 +1,117 @@
+appId: com.pollis.mobile
+tags:
+  - two-client
+---
+# PINS (#1315), part 2 of 2. The peer has sent "peer pinned this" and pinned
+# it. Pins are conversation state every member shares, so this device must:
+# list the peer's pin, offer "Unpin message" on it (any member may unpin),
+# pin its own message, and unpin the peer's. The script then waits for the
+# peer to see both changes in its own list.
+# No relaunch: the session from part 1 is still on screen.
+
+# Leave and re-open the conversation so its ingest runs whether or not a
+# realtime wake arrived.
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "tab-direct"
+- extendedWaitUntil:
+    visible:
+      text: ".*${MAESTRO_PEER_HANDLE}.*"
+    timeout: 30000
+- tapOn:
+    text: ".*${MAESTRO_PEER_HANDLE}.*"
+- extendedWaitUntil:
+    visible: ".*: peer pinned this, .*"
+    timeout: 60000
+
+# ── The peer's pin is in this device's list ─────────────────────────────
+- tapOn:
+    id: "btn-pins"
+- extendedWaitUntil:
+    visible: ".*, .*: peer pinned this"
+    timeout: 60000
+- takeScreenshot: pins-two-client-01-peer-pin
+- tapOn:
+    id: "btn-back"
+
+# ── …and the sheet on the peer's message offers Unpin ───────────────────
+- longPressOn: ".*: peer pinned this, .*"
+- extendedWaitUntil:
+    visible:
+      id: "btn-pin"
+    timeout: 4000
+    optional: true
+- runFlow:
+    when:
+      notVisible:
+        id: "btn-pin"
+    commands:
+      - longPressOn: ".*: peer pinned this, .*"
+      - extendedWaitUntil:
+          visible:
+            id: "btn-pin"
+          timeout: 4000
+- assertVisible:
+    id: "btn-pin"
+    text: "Unpin message"
+- takeScreenshot: pins-two-client-02-sheet-unpin
+- tapOn:
+    id: "btn-action-cancel"
+- assertNotVisible:
+    id: "btn-pin"
+
+# ── This device pins its own message ────────────────────────────────────
+- tapOn:
+    id: "input-composer"
+- inputText: "pin from the phone"
+- hideKeyboard
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*: pin from the phone, .*"
+    timeout: 15000
+# Settles (no longer pending) before it can be long-pressed.
+- extendedWaitUntil:
+    visible:
+      id: "__never_matches__"
+    timeout: 15000
+    optional: true
+- longPressOn: ".*: pin from the phone, .*"
+- extendedWaitUntil:
+    visible:
+      id: "btn-pin"
+    timeout: 4000
+    optional: true
+- runFlow:
+    when:
+      notVisible:
+        id: "btn-pin"
+    commands:
+      - longPressOn: ".*: pin from the phone, .*"
+      - extendedWaitUntil:
+          visible:
+            id: "btn-pin"
+          timeout: 4000
+- assertVisible:
+    id: "btn-pin"
+    text: "Pin message"
+- tapOn:
+    id: "btn-pin"
+
+# ── Both pins listed; unpin the peer's (older, so second) ───────────────
+- tapOn:
+    id: "btn-pins"
+- extendedWaitUntil:
+    visible: ".*, .*: pin from the phone"
+    timeout: 30000
+- assertVisible: ".*, .*: peer pinned this"
+- takeScreenshot: pins-two-client-03-both
+- tapOn:
+    id: "btn-unpin-.*"
+    index: 1
+- extendedWaitUntil:
+    notVisible: ".*, .*: peer pinned this"
+    timeout: 15000
+- assertVisible: ".*, .*: pin from the phone"
+- takeScreenshot: pins-two-client-04-unpinned-peer

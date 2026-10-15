@@ -150,6 +150,7 @@ export default function RootLayout() {
               <Stack.Screen name="dm/info" />
               <Stack.Screen name="dm/requests" />
               <Stack.Screen name="conversation/info" />
+              <Stack.Screen name="conversation/pins" />
               <Stack.Screen name="chat/[id]" />
               <Stack.Screen name="chat/thread" />
               {/* Full-screen attachment viewer (#1248): a page, not a modal. */}
