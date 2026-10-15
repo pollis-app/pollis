@@ -28,7 +28,7 @@ import type { MessageAttachment } from "../../types";
 import { searchQueryKeys } from "./useSearch";
 import { aliasAttachment } from "../../lib/media/viewer";
 import {
-  buildMessageContent,
+  outgoingAttachments,
   type PickedAttachment,
 } from "../../lib/attachments";
 import {
@@ -344,19 +344,15 @@ export function useSendMessage(
           );
         }
       }
-      // Upload first (Rust does encrypt + dedup + register), then send the
-      // envelope string — same sequence as desktop's send handlers. An upload
-      // that fails never reached the outbox.
-      const content = await buildMessageContent(
-        vars.attachments ?? [],
-        vars.content,
-      ).catch((e) => {
-        throw new NotQueuedError(String(e));
-      });
+      // Attachments go to the core un-uploaded (#1335): it reads the picked
+      // files into its encrypted local database together with the row, before
+      // any network work, and the outbox uploads them — after a restart if
+      // the OS killed the app mid-upload. `content` is then the caption.
       const raw = await invoke<RawChannelMessage>("send_message", {
         conversationId,
         senderId: currentUser.id,
-        content,
+        content: vars.content,
+        attachments: outgoingAttachments(vars.attachments ?? []),
         replyToId: vars.replyToId ?? null,
         threadId: vars.threadId ?? null,
         senderUsername: currentUser.username ?? null,

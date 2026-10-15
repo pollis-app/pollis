@@ -82,6 +82,28 @@ CREATE INDEX IF NOT EXISTS idx_message_thread ON message(thread_id, sent_at);
 -- without a schema-version bump (which would wipe history).
 CREATE INDEX IF NOT EXISTS idx_message_received_at ON message(received_at);
 
+-- Attachment bytes an unsent message still has to upload (#1335). A send with
+-- attachments stores them here, in the same transaction as its `message` row
+-- and BEFORE any network work, so a process killed mid-upload loses nothing:
+-- the outbox drain uploads them, rewrites the row's content to the final `_att`
+-- envelope, deletes these rows, and only then posts. The bytes are plaintext
+-- only inside this SQLCipher database (encrypted under the session's db_key) —
+-- never a file on disk (#1000). Deleted once uploaded, with their message on a
+-- discard (CASCADE), and on sign-out.
+CREATE TABLE IF NOT EXISTS outbox_attachment (
+    message_id   TEXT NOT NULL REFERENCES message(id) ON DELETE CASCADE,
+    position     INTEGER NOT NULL CHECK (position >= 0),
+    filename     TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    data         BLOB NOT NULL,
+    -- Renderer-computed metadata (a video's poster blurhash and size); the
+    -- upload's own values win when it produces them, as on the renderer path.
+    blurhash     TEXT,
+    width        INTEGER,
+    height       INTEGER,
+    PRIMARY KEY (message_id, position)
+);
+
 -- The outbox drain's scan (#1335): only unsent rows, which are few.
 CREATE INDEX IF NOT EXISTS idx_message_send_state ON message(sent_at) WHERE send_state IS NOT NULL;
 

@@ -820,7 +820,7 @@ pub(crate) fn spawn_attachment_ref_backfill(state: &Arc<AppState>, user_id: &str
             }
             let mut stmt = match db.conn().prepare(
                 "SELECT id, content FROM message \
-                 WHERE sender_id = ?1 AND deleted_at IS NULL \
+                 WHERE sender_id = ?1 AND deleted_at IS NULL AND send_state IS NULL \
                    AND content IS NOT NULL AND content LIKE '{%\"_att\"%'",
             ) {
                 Ok(s) => s,

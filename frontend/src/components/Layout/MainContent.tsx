@@ -18,7 +18,7 @@ import { transformChannelMessage, type RawChannelMessage, useThreadSummaries } f
 import { useRightPanel } from "./RightPanel/useRightPanel";
 import { useGroupMembers, useDeleteChannel } from "../../hooks/queries/useGroups";
 import type { Message, MessageAttachment } from "../../types";
-import { buildMessageContent } from "../../utils/attachmentEnvelope";
+import { outgoingAttachments, releaseStaged, type OutgoingAttachment } from "../../utils/attachmentEnvelope";
 import { useTypingPublisher } from "../../hooks/useTypingPublisher";
 import { messageNavStore } from "../../stores/messageNavStore";
 import { messageJumpStore } from "../../stores/messageJumpStore";
@@ -840,15 +840,18 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     // The core names the message before anything else (#1335): the row it
     // stores ahead of any network work carries this id, so a refetch that
     // reads that row drops the stub instead of showing the message twice.
-    // A failure before `send_message` (no id, a failed upload) never reached
-    // the outbox — the stub is all there is, so it can only be discarded.
+    // Attachments go to the core un-uploaded — it stores their bytes with the
+    // row and the outbox uploads them, so a kill mid-upload loses nothing. A
+    // failure before `send_message` never reached the outbox: the stub is all
+    // there is, so it can only be discarded.
     let messageId: string;
-    let content: string;
+    let outgoing: OutgoingAttachment[];
     try {
       messageId = await invoke<string>("new_message_id");
       patchStub({ outbox_id: messageId });
-      content = await buildMessageContent(attachments, contentText);
+      outgoing = await outgoingAttachments(attachments);
     } catch (error) {
+      await releaseStaged(attachments);
       patchStub({ status: 'failed', retryable: false });
       console.error("Failed to send message:", error);
       return;
@@ -858,12 +861,16 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
       await sendMessageMutation.mutateAsync({
         channelId: selectedChannelId || "",
         conversationId: selectedConversationId || "",
-        content,
+        content: contentText,
+        attachments: outgoing,
         replyToMessageId: replyToMessageId ?? undefined,
         optimisticId,
         messageId,
       });
     } catch (error) {
+      // Bytes the core took are released already; ones it never took are
+      // released here.
+      await releaseStaged(attachments);
       // The core kept the message and marked it failed; the stub says so
       // until the refetch swaps in the stored row, which offers Retry.
       patchStub({ status: 'failed' });

@@ -4,7 +4,7 @@ use ulid::Ulid;
 use crate::error::Result;
 use crate::state::AppState;
 
-use super::outbox::Queued;
+use super::outbox::{OutgoingAttachment, Queued};
 use super::types::Message;
 
 /// Non-identifying placeholder written into the still-NOT-NULL
@@ -33,6 +33,7 @@ pub async fn send_message(
         conversation_id,
         sender_id,
         content,
+        Vec::new(),
         reply_to_id,
         thread_id,
         sender_username,
@@ -55,12 +56,19 @@ pub async fn send_message(
 /// `new_message_id`), so its optimistic row and the stored row are the same
 /// message. A second call with the same id is idempotent: an unsent row is
 /// delivered (never duplicated), a delivered one is returned as it stands.
+///
+/// `attachments` makes the outbox own the upload too: their bytes are read and
+/// stored with the row before anything touches the network, `content` is then
+/// the caption, and delivery uploads them and builds the `_att` envelope. A
+/// caller that uploaded already (an older renderer, the TUI) passes none and
+/// the finished envelope as `content`, exactly as before.
 #[allow(clippy::too_many_arguments)]
 pub async fn send_message_with_id(
     message_id: Option<String>,
     conversation_id: String,
     sender_id: String,
     content: String,
+    attachments: Vec<OutgoingAttachment>,
     reply_to_id: Option<String>,
     thread_id: Option<String>,
     sender_username: Option<String>,
@@ -79,7 +87,7 @@ pub async fn send_message_with_id(
         thread_id,
     };
     if let super::outbox::Enqueued::AlreadySent(message) =
-        super::outbox::enqueue(state, &queued).await?
+        super::outbox::enqueue(state, &queued, attachments).await?
     {
         return Ok(message);
     }
@@ -714,6 +722,21 @@ pub mod test_hooks {
         }
         let _ = at;
         false
+    }
+
+    #[cfg(feature = "test-harness")]
+    static STUB_UPLOADS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+    /// Answer outbox attachment uploads without R2, which the flows world does
+    /// not have (#1335). Stays set until cleared.
+    #[cfg(feature = "test-harness")]
+    pub fn stub_attachment_uploads(on: bool) {
+        STUB_UPLOADS.store(on, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[cfg(feature = "test-harness")]
+    pub(crate) fn uploads_stubbed() -> bool {
+        STUB_UPLOADS.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     const SIMULATED_CRASH: &str = "simulated process death (test harness)";

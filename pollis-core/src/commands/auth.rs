@@ -1327,6 +1327,18 @@ pub async fn logout(state: &Arc<AppState>, delete_data: bool) -> Result<()> {
         }
     }
 
+    // An unsent message still holding attachment bytes cannot go out without
+    // them, and those bytes are the user's files: they end with the session,
+    // like a staged paste (#1335). Unsent text stays queued for the next unlock.
+    {
+        let guard = state.local_db.lock().await;
+        if let Some(db) = guard.as_ref() {
+            if let Err(e) = crate::commands::messages::drop_unsent_attachment_messages_on(db.conn()) {
+                crate::diag!("[auth] logout: dropping unsent attachments failed (non-fatal): {e}");
+            }
+        }
+    }
+
     // Now tear down local state.
     *state.device_id.lock().await = None;
     state.unload_user_db().await;

@@ -160,6 +160,50 @@ test("a send that fails now is kept as failed, and Retry sends it", async ({ pag
   await expect(page.getByText("sent while offline")).toHaveCount(1);
 });
 
+test("an attachment message whose upload never finished is shown, pending, with Retry", async ({ page }) => {
+  // What the core stores before any network work for an attachment send: the
+  // files without a `key` (nothing uploaded yet), and the caption.
+  const preload = preloadState("refined", "failed", true);
+  const unsent = preload.messages[CHANNEL_ID][1] as Record<string, unknown>;
+  unsent.content = JSON.stringify({
+    _att: [{ name: "shot.png", ct: "image/png", size: 1024 }],
+    _txt: "the screenshot",
+  });
+  const errors: string[] = [];
+  // The browser build's event-listener shim throws on teardown in every spec;
+  // that noise is not this row's doing.
+  page.on("pageerror", (e) => {
+    if (!String(e).includes("unregisterListener")) {
+      errors.push(String(e));
+    }
+  });
+  await boot(page, preload);
+  await openChannel(page);
+
+  const row = page.getByTestId(`message-${MSG_UNSENT}`);
+  await expect(row).toContainText("the screenshot");
+  await expect(row.getByTestId("attachment-uploading-0")).toBeVisible();
+  await expect(row).toContainText("[failed]");
+  await expect(page.getByTestId(`message-retry-${MSG_UNSENT}`)).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("a send with attachments hands them to the core un-uploaded", async ({ page }) => {
+  await boot(page, preloadState("refined", "pending", false));
+  await openChannel(page);
+  const src = await page.evaluate(async () => {
+    const mod = await import("/src/utils/attachmentEnvelope.ts");
+    return mod.outgoingAttachments([
+      { id: "a", name: "notes.txt", mimeType: "text/plain", size: 3, source: { kind: "staged", id: "S1" } },
+      { id: "b", name: "photo.jpg", mimeType: "image/jpeg", size: 9, source: { kind: "path", path: "/u/photo.jpg" } },
+    ] as never);
+  });
+  expect(src).toEqual([
+    { stagedId: "S1", filename: "notes.txt", contentType: "text/plain" },
+    { path: "/u/photo.jpg", filename: "photo.jpg", contentType: "image/jpeg" },
+  ]);
+});
+
 test("Discard removes an unsent message", async ({ page }) => {
   await boot(page, preloadState("terminal", "failed", true));
   await openChannel(page);

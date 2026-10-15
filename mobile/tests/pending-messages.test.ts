@@ -118,9 +118,30 @@ test("retry and discard act on every row standing for the message", () => {
 test("every send names its message and every surface drains the outbox", () => {
   const s = readFileSync(new URL("../hooks/queries/useMessages.ts", import.meta.url), "utf8");
   // The id comes from the core, before the upload, and rides on the send.
-  assert.match(s, /invoke<string>\("new_message_id"\)[\s\S]*buildMessageContent\([\s\S]*messageId,\n\s*\}\);/);
+  assert.match(s, /invoke<string>\("new_message_id"\)[\s\S]*attachments: outgoingAttachments\(vars\.attachments \?\? \[\]\)[\s\S]*messageId,\n\s*\}\);/);
+  // The upload belongs to the outbox now (#1335): the send never uploads itself.
+  assert.doesNotMatch(s.slice(s.indexOf("export function useSendMessage"), s.indexOf("export function useRetryMessage")), /buildMessageContent\(/);
   const inbox = readFileSync(new URL("../hooks/useInboxRealtime.ts", import.meta.url), "utf8");
   // Sign-in, resume and reconnect each drain; none of them is a timer.
   assert.equal(inbox.match(/flushOutbox\(/g)?.length, 3);
   assert.doesNotMatch(inbox, /setInterval/);
+});
+
+test("an attachment the outbox has not uploaded yet is drawn pending, never fetched", async () => {
+  const { parseContent } = await import("../lib/messageContent.ts");
+  const provisional = JSON.stringify({ _att: [{ name: "shot.png", ct: "image/png", size: 5 }], _txt: "look" });
+  const { text, attachments } = parseContent(provisional);
+  assert.equal(text, "look");
+  assert.equal(attachments.length, 1);
+  // No key: nothing to fetch, and still a stable id for the list.
+  assert.equal(attachments[0].object_key, "");
+  assert.equal(attachments[0].id, "uploading-0");
+  assert.equal(attachments[0].filename, "shot.png");
+  const media = readFileSync(new URL("../components/Media.tsx", import.meta.url), "utf8");
+  assert.match(media, /const isPending = !attachment\.object_key;/);
+});
+
+test("picked attachments go to the core as paths, un-uploaded", () => {
+  const s = readFileSync(new URL("../lib/attachments.ts", import.meta.url), "utf8");
+  assert.match(s, /export function outgoingAttachments[\s\S]*path: att\.uri,[\s\S]*filename: att\.name,[\s\S]*contentType: att\.mimeType/);
 });

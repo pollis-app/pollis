@@ -4,6 +4,7 @@ import { invoke } from "../../bridge";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
 import type { Message, DMConversation } from "../../types";
+import type { OutgoingAttachment } from "../../utils/attachmentEnvelope";
 import {
   carryStubs,
   mapOutboxRows,
@@ -129,10 +130,12 @@ export function parseContent(raw: string | undefined): { text: string; attachmen
     }
     return {
       text: parsed._txt ?? '',
-      attachments: (parsed._att as AttachmentWire[]).map((a) => ({
-        id: a.key,
-        object_key: a.key,
-        content_hash: a.hash,
+      // An entry with no `key` is one the outbox has not uploaded yet (#1335):
+      // drawn like an optimistic stub's attachment, pending.
+      attachments: (parsed._att as AttachmentWire[]).map((a, i) => ({
+        id: a.key ?? `uploading-${i}`,
+        object_key: a.key ?? '',
+        content_hash: a.hash ?? '',
         filename: a.name,
         content_type: a.ct,
         file_size: a.size,
@@ -312,6 +315,7 @@ export function useSendMessage() {
       replyToMessageId,
       threadId,
       messageId,
+      attachments,
     }: {
       channelId: string;
       conversationId: string;
@@ -325,6 +329,9 @@ export function useSendMessage() {
       // caller that drew a stub passes it so stub and stored row are one
       // message; otherwise one is asked for here.
       messageId?: string;
+      // Attachments for the outbox to upload (#1335); `content` is then the
+      // caption.
+      attachments?: OutgoingAttachment[];
     }) => {
       if (!currentUser) {
         throw new Error("No current user");
@@ -340,6 +347,7 @@ export function useSendMessage() {
         threadId: threadId ?? null,
         senderUsername: currentUser.username ?? null,
         messageId: id,
+        attachments: attachments ?? [],
       });
     },
     onSuccess: (newMessage, variables) => {

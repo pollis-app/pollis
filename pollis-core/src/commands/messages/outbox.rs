@@ -32,7 +32,7 @@
 use std::sync::Arc;
 
 use rusqlite::OptionalExtension;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
 use crate::error::{Error, Result};
@@ -54,6 +54,223 @@ pub(super) struct Queued {
     pub content: String,
     pub reply_to_id: Option<String>,
     pub thread_id: Option<String>,
+}
+
+/// One attachment a send hands to the outbox before it is uploaded (#1335).
+///
+/// Exactly one source: `path`, a file the user chose (a picker selection or a
+/// drop — the shell has already checked it against its path scope), or
+/// `staged_id`, bytes the renderer staged in memory (a paste). Either way the
+/// bytes are read and stored in the local SQLCipher database with the message
+/// row, before any network work, so a process killed during the upload loses
+/// nothing; the staging entry is released once they are.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutgoingAttachment {
+    pub path: Option<String>,
+    pub staged_id: Option<String>,
+    pub filename: String,
+    pub content_type: String,
+    /// Renderer-computed (a video's poster frame); the upload's own value wins.
+    pub blurhash: Option<String>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+}
+
+/// An [`OutgoingAttachment`] with its bytes in hand, as `outbox_attachment`
+/// stores it.
+#[derive(Debug, Clone)]
+pub(super) struct HeldAttachment {
+    pub filename: String,
+    pub content_type: String,
+    pub data: Vec<u8>,
+    pub blurhash: Option<String>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+}
+
+/// Read every attachment's bytes, refusing anything the upload would refuse
+/// anyway (over the R2 cap) before a row is written for it.
+async fn hold_attachments(
+    attachments: &[OutgoingAttachment],
+) -> Result<Vec<HeldAttachment>> {
+    let mut held = Vec::with_capacity(attachments.len());
+    for att in attachments {
+        let data = match (&att.path, &att.staged_id) {
+            (Some(path), None) => tokio::fs::read(path).await.map_err(|e| {
+                Error::Other(anyhow::anyhow!("read attachment {}: {e}", att.filename))
+            })?,
+            (None, Some(id)) => crate::commands::staging::peek_staged(id)
+                .map(|bytes| bytes.to_vec())
+                .ok_or_else(|| {
+                    Error::Other(anyhow::anyhow!(
+                        "no staged attachment {id}: it was already sent, discarded, or the \
+                         session ended"
+                    ))
+                })?,
+            _ => {
+                return Err(Error::Other(anyhow::anyhow!(
+                    "an attachment needs exactly one of path or stagedId"
+                )))
+            }
+        };
+        if data.len() as u64 > pollis_api::broker::R2_MEDIA_MAX_BYTES {
+            return Err(Error::Other(anyhow::anyhow!(
+                "attachment is {} bytes; the limit is {} bytes",
+                data.len(),
+                pollis_api::broker::R2_MEDIA_MAX_BYTES
+            )));
+        }
+        held.push(HeldAttachment {
+            filename: att.filename.clone(),
+            content_type: att.content_type.clone(),
+            data,
+            blurhash: att.blurhash.clone(),
+            width: att.width,
+            height: att.height,
+        });
+    }
+    Ok(held)
+}
+
+/// One `_att` entry exactly as the renderers encode it
+/// (`frontend/src/utils/attachmentEnvelope.ts`, `mobile/lib/attachments.ts`):
+/// same keys, same order, absent values omitted — so a message whose upload
+/// the outbox finished is indistinguishable on the wire from one the renderer
+/// uploaded itself.
+#[derive(Serialize)]
+struct AttWire<'a> {
+    key: &'a str,
+    url: &'a str,
+    name: &'a str,
+    ct: &'a str,
+    size: usize,
+    hash: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bh: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    w: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    h: Option<u32>,
+}
+
+/// An entry the outbox has not uploaded yet: what to draw while it waits. No
+/// `key`, which is how both renderers tell an attachment still uploading.
+#[derive(Serialize)]
+struct PendingAttWire<'a> {
+    name: &'a str,
+    ct: &'a str,
+    size: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bh: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    w: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    h: Option<u32>,
+}
+
+#[derive(Serialize)]
+struct Envelope<'a, A> {
+    #[serde(rename = "_att")]
+    att: Vec<A>,
+    /// Omitted, not `""`, when there is no caption — as the renderers do.
+    #[serde(rename = "_txt", skip_serializing_if = "Option::is_none")]
+    txt: Option<&'a str>,
+}
+
+fn caption(text: &str) -> Option<&str> {
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+/// The content an unsent attachment message holds until its upload is done.
+fn provisional_content(text: &str, held: &[HeldAttachment]) -> String {
+    let env = Envelope {
+        att: held
+            .iter()
+            .map(|a| PendingAttWire {
+                name: &a.filename,
+                ct: &a.content_type,
+                size: a.data.len(),
+                bh: a.blurhash.as_deref(),
+                w: a.width,
+                h: a.height,
+            })
+            .collect(),
+        txt: caption(text),
+    };
+    serde_json::to_string(&env).expect("an envelope always serializes")
+}
+
+/// The finished envelope, once every attachment is uploaded.
+fn final_content(
+    text: &str,
+    held: &[HeldAttachment],
+    uploaded: &[crate::commands::r2::MediaUploadResult],
+) -> String {
+    let env = Envelope {
+        att: held
+            .iter()
+            .zip(uploaded)
+            .map(|(a, r)| AttWire {
+                key: &r.key,
+                url: &r.url,
+                name: &r.filename,
+                ct: &r.content_type,
+                size: r.size_bytes,
+                hash: &r.content_hash,
+                bh: r.blurhash.as_deref().or(a.blurhash.as_deref()),
+                w: r.width.or(a.width),
+                h: r.height.or(a.height),
+            })
+            .collect(),
+        txt: caption(text),
+    };
+    serde_json::to_string(&env).expect("an envelope always serializes")
+}
+
+/// The caption a provisional envelope carries.
+fn caption_of(content: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(content)
+        .ok()
+        .and_then(|v| v.get("_txt").and_then(|t| t.as_str()).map(str::to_string))
+        .unwrap_or_default()
+}
+
+fn held_attachments_on(conn: &rusqlite::Connection, id: &str) -> Result<Vec<HeldAttachment>> {
+    let mut stmt = conn.prepare(
+        "SELECT filename, content_type, data, blurhash, width, height
+         FROM outbox_attachment WHERE message_id = ?1 ORDER BY position",
+    )?;
+    let rows = stmt
+        .query_map(rusqlite::params![id], |row| {
+            Ok(HeldAttachment {
+                filename: row.get(0)?,
+                content_type: row.get(1)?,
+                data: row.get(2)?,
+                blurhash: row.get(3)?,
+                width: row.get(4)?,
+                height: row.get(5)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+/// Sign-out (#1335): an unsent message still holding attachment bytes cannot
+/// be delivered without them, and the bytes are the user's files — they go
+/// with the session, like staged pastes. Its row goes too (CASCADE takes the
+/// bytes), so nothing is left behind half-sendable. Unsent TEXT stays queued
+/// and goes out after the next unlock. Returns how many messages were dropped.
+pub(crate) fn drop_unsent_attachment_messages_on(conn: &rusqlite::Connection) -> Result<usize> {
+    Ok(conn.execute(
+        "DELETE FROM message WHERE send_state IS NOT NULL
+           AND id IN (SELECT message_id FROM outbox_attachment)",
+        [],
+    )?)
 }
 
 /// What [`enqueue`] found.
@@ -117,7 +334,11 @@ fn load(conn: &rusqlite::Connection, id: &str) -> Result<Option<(Message, Option
 /// repeated call (a renderer retrying its own invoke) is harmless. It must be
 /// the same message, though: an id already used by another conversation or
 /// author is refused rather than silently merged.
-pub(super) fn enqueue_on(conn: &rusqlite::Connection, queued: &Queued) -> Result<Enqueued> {
+pub(super) fn enqueue_on(
+    conn: &rusqlite::Connection,
+    queued: &Queued,
+    attachments: &[HeldAttachment],
+) -> Result<Enqueued> {
     if let Some((existing, send_state)) = load(conn, &queued.id)? {
         if existing.conversation_id != queued.conversation_id
             || existing.sender_id != queued.sender_id
@@ -129,27 +350,69 @@ pub(super) fn enqueue_on(conn: &rusqlite::Connection, queued: &Queued) -> Result
             None => Enqueued::AlreadySent(existing),
         });
     }
-    conn.execute(
+    // The row and its attachment bytes land together or not at all: a row
+    // whose bytes were lost would be an attachment message that can never be
+    // sent.
+    let content = if attachments.is_empty() {
+        queued.content.clone()
+    } else {
+        provisional_content(&queued.content, attachments)
+    };
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
         "INSERT INTO message (id, conversation_id, sender_id, ciphertext, content, reply_to_id, thread_id, sent_at, send_state)
          VALUES (?1, ?2, ?3, X'', ?4, ?5, ?6, ?7, ?8)",
         rusqlite::params![
             queued.id,
             queued.conversation_id,
             queued.sender_id,
-            queued.content,
+            content,
             queued.reply_to_id,
             queued.thread_id,
             super::envelope_sent_at(),
             PENDING,
         ],
     )?;
+    for (position, att) in attachments.iter().enumerate() {
+        tx.execute(
+            "INSERT INTO outbox_attachment
+               (message_id, position, filename, content_type, data, blurhash, width, height)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                queued.id,
+                position as i64,
+                att.filename,
+                att.content_type,
+                att.data,
+                att.blurhash,
+                att.width,
+                att.height,
+            ],
+        )?;
+    }
+    tx.commit()?;
     Ok(Enqueued::Unsent)
 }
 
-pub(super) async fn enqueue(state: &Arc<AppState>, queued: &Queued) -> Result<Enqueued> {
-    let guard = state.local_db.lock().await;
-    let db = guard.as_ref().ok_or_else(not_signed_in)?;
-    enqueue_on(db.conn(), queued)
+pub(super) async fn enqueue(
+    state: &Arc<AppState>,
+    queued: &Queued,
+    attachments: Vec<OutgoingAttachment>,
+) -> Result<Enqueued> {
+    // Read the bytes before taking the database lock: a 100 MB file read
+    // should not hold up every other query.
+    let held = hold_attachments(&attachments).await?;
+    let outcome = {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(not_signed_in)?;
+        enqueue_on(db.conn(), queued, &held)?
+    };
+    // The bytes are stored (or this id was already queued with its own), so
+    // the in-memory copy has done its job.
+    for id in attachments.iter().filter_map(|a| a.staged_id.as_deref()) {
+        crate::commands::staging::discard_staged(id);
+    }
+    Ok(outcome)
 }
 
 /// Mark a message delivered; returns the `sent_at` it settled with.
@@ -296,20 +559,76 @@ async fn deliver_locked(
         )
     };
 
+    let queued = match finish_uploads(state, queued).await {
+        Ok(queued) => queued,
+        Err(e) => {
+            mark_failed(state, id).await;
+            return Err(e);
+        }
+    };
+
     match super::send::deliver_queued(&queued, sender_username, state).await {
         Ok(message) => Ok(message),
         Err(e) => {
             if !super::send::test_hooks::is_simulated_crash(&e) {
-                let guard = state.local_db.lock().await;
-                if let Some(db) = guard.as_ref() {
-                    if let Err(mark) = mark_failed_on(db.conn(), id) {
-                        crate::diag!("[outbox] could not mark {id} failed: {mark}");
-                    }
-                }
+                mark_failed(state, id).await;
             }
             Err(e)
         }
     }
+}
+
+async fn mark_failed(state: &Arc<AppState>, id: &str) {
+    let guard = state.local_db.lock().await;
+    if let Some(db) = guard.as_ref() {
+        if let Err(mark) = mark_failed_on(db.conn(), id) {
+            crate::diag!("[outbox] could not mark {id} failed: {mark}");
+        }
+    }
+}
+
+/// Upload whatever attachment bytes the outbox holds for this message, then
+/// swap the row's provisional content for the finished `_att` envelope and drop
+/// the bytes — one transaction, so a kill at any point leaves either the bytes
+/// (upload again; the convergent upload dedupes) or the finished content.
+async fn finish_uploads(state: &Arc<AppState>, mut queued: Queued) -> Result<Queued> {
+    let held = {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(not_signed_in)?;
+        held_attachments_on(db.conn(), &queued.id)?
+    };
+    if held.is_empty() {
+        return Ok(queued);
+    }
+    let mut uploaded = Vec::with_capacity(held.len());
+    for att in &held {
+        uploaded.push(
+            crate::commands::r2::upload_outbox_bytes(
+                att.data.clone(),
+                att.filename.clone(),
+                att.content_type.clone(),
+                state,
+            )
+            .await?,
+        );
+    }
+    let content = final_content(&caption_of(&queued.content), &held, &uploaded);
+    {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(not_signed_in)?;
+        let tx = db.conn().unchecked_transaction()?;
+        tx.execute(
+            "UPDATE message SET content = ?1 WHERE id = ?2",
+            rusqlite::params![content, queued.id],
+        )?;
+        tx.execute(
+            "DELETE FROM outbox_attachment WHERE message_id = ?1",
+            rusqlite::params![queued.id],
+        )?;
+        tx.commit()?;
+    }
+    queued.content = content;
+    Ok(queued)
 }
 
 /// Deliver one unsent message again — the renderer's Retry (#1335).
@@ -424,7 +743,7 @@ mod tests {
         let db = LocalDb::open_in_memory().unwrap();
         let conn = db.conn();
         let id = new_message_id();
-        assert!(matches!(enqueue_on(conn, &queued(&id, "hello")).unwrap(), Enqueued::Unsent));
+        assert!(matches!(enqueue_on(conn, &queued(&id, "hello"), &[]).unwrap(), Enqueued::Unsent));
         assert_eq!(send_state(conn, &id).as_deref(), Some(PENDING));
         let (row, _) = load(conn, &id).unwrap().unwrap();
         assert_eq!(row.content.as_deref(), Some("hello"));
@@ -440,15 +759,15 @@ mod tests {
         let db = LocalDb::open_in_memory().unwrap();
         let conn = db.conn();
         let id = new_message_id();
-        enqueue_on(conn, &queued(&id, "hello")).unwrap();
-        assert!(matches!(enqueue_on(conn, &queued(&id, "hello")).unwrap(), Enqueued::Unsent));
+        enqueue_on(conn, &queued(&id, "hello"), &[]).unwrap();
+        assert!(matches!(enqueue_on(conn, &queued(&id, "hello"), &[]).unwrap(), Enqueued::Unsent));
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM message WHERE id = ?1", [&id], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 1);
 
         conn.execute("UPDATE message SET send_state = NULL WHERE id = ?1", [&id]).unwrap();
-        match enqueue_on(conn, &queued(&id, "hello")).unwrap() {
+        match enqueue_on(conn, &queued(&id, "hello"), &[]).unwrap() {
             Enqueued::AlreadySent(m) => assert_eq!(m.id, id),
             Enqueued::Unsent => panic!("a delivered message must not be queued again"),
         }
@@ -461,10 +780,10 @@ mod tests {
         let db = LocalDb::open_in_memory().unwrap();
         let conn = db.conn();
         let id = new_message_id();
-        enqueue_on(conn, &queued(&id, "hello")).unwrap();
+        enqueue_on(conn, &queued(&id, "hello"), &[]).unwrap();
         let mut other = queued(&id, "hello");
         other.conversation_id = "c2".to_string();
-        assert!(enqueue_on(conn, &other).is_err());
+        assert!(enqueue_on(conn, &other, &[]).is_err());
     }
 
     /// Failing only ever applies to an unsent row; a delivered one stays
@@ -474,8 +793,8 @@ mod tests {
         let db = LocalDb::open_in_memory().unwrap();
         let conn = db.conn();
         let (a, b) = (new_message_id(), new_message_id());
-        enqueue_on(conn, &queued(&a, "a")).unwrap();
-        enqueue_on(conn, &queued(&b, "b")).unwrap();
+        enqueue_on(conn, &queued(&a, "a"), &[]).unwrap();
+        enqueue_on(conn, &queued(&b, "b"), &[]).unwrap();
         conn.execute("UPDATE message SET send_state = NULL WHERE id = ?1", [&b]).unwrap();
         mark_failed_on(conn, &a).unwrap();
         mark_failed_on(conn, &b).unwrap();
@@ -502,6 +821,91 @@ mod tests {
         let mut expected = ids.clone();
         expected.reverse();
         assert_eq!(unsent_ids_on(conn).unwrap(), expected);
+    }
+
+    fn held(name: &str, bytes: &[u8]) -> HeldAttachment {
+        HeldAttachment {
+            filename: name.to_string(),
+            content_type: "image/png".to_string(),
+            data: bytes.to_vec(),
+            blurhash: Some("LKO2".to_string()),
+            width: Some(4),
+            height: Some(3),
+        }
+    }
+
+    /// The bytes are stored with the row, in one go, before any network — so
+    /// a kill during the upload still has everything the upload needs.
+    #[test]
+    fn an_attachment_send_stores_its_bytes_with_the_row() {
+        let db = LocalDb::open_in_memory().unwrap();
+        let conn = db.conn();
+        let id = new_message_id();
+        let atts = [held("a.png", b"first"), held("b.png", b"second")];
+        enqueue_on(conn, &queued(&id, "look"), &atts).unwrap();
+
+        let back = held_attachments_on(conn, &id).unwrap();
+        assert_eq!(back.len(), 2);
+        assert_eq!(back[0].data, b"first");
+        assert_eq!(back[1].filename, "b.png");
+        // While it waits the row draws the files, with no key to fetch.
+        let (row, state) = load(conn, &id).unwrap().unwrap();
+        assert_eq!(state.as_deref(), Some(PENDING));
+        let content = row.content.unwrap();
+        assert_eq!(
+            content,
+            r#"{"_att":[{"name":"a.png","ct":"image/png","size":5,"bh":"LKO2","w":4,"h":3},{"name":"b.png","ct":"image/png","size":6,"bh":"LKO2","w":4,"h":3}],"_txt":"look"}"#
+        );
+        assert_eq!(caption_of(&content), "look");
+    }
+
+    /// Discarding the message takes its bytes with it.
+    #[test]
+    fn discarding_an_attachment_send_drops_its_bytes() {
+        let db = LocalDb::open_in_memory().unwrap();
+        let conn = db.conn();
+        let id = new_message_id();
+        enqueue_on(conn, &queued(&id, ""), &[held("a.png", b"x")]).unwrap();
+        conn.execute("DELETE FROM message WHERE id = ?1", [&id]).unwrap();
+        assert!(held_attachments_on(conn, &id).unwrap().is_empty());
+    }
+
+    /// Sign-out drops an attachment send it cannot finish, and keeps text.
+    #[test]
+    fn sign_out_drops_only_unsent_attachment_messages() {
+        let db = LocalDb::open_in_memory().unwrap();
+        let conn = db.conn();
+        let (text, file) = (new_message_id(), new_message_id());
+        enqueue_on(conn, &queued(&text, "words"), &[]).unwrap();
+        enqueue_on(conn, &queued(&file, ""), &[held("a.png", b"x")]).unwrap();
+        assert_eq!(drop_unsent_attachment_messages_on(conn).unwrap(), 1);
+        assert_eq!(unsent_ids_on(conn).unwrap(), vec![text]);
+        let left: i64 = conn
+            .query_row("SELECT COUNT(*) FROM outbox_attachment", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(left, 0);
+    }
+
+    /// The finished envelope is the renderers' byte for byte: same key order,
+    /// no `_txt` without a caption, the upload's metadata over the renderer's.
+    #[test]
+    fn the_finished_envelope_matches_the_renderers() {
+        let atts = [held("clip.mp4", b"v")];
+        let uploaded = [crate::commands::r2::MediaUploadResult {
+            key: "media/abc.enc".to_string(),
+            url: "https://r2/media/abc.enc".to_string(),
+            filename: "clip.mp4".to_string(),
+            content_type: "video/mp4".to_string(),
+            size_bytes: 1,
+            content_hash: "abc".to_string(),
+            blurhash: None,
+            width: Some(640),
+            height: None,
+        }];
+        assert_eq!(
+            final_content("", &atts, &uploaded),
+            r#"{"_att":[{"key":"media/abc.enc","url":"https://r2/media/abc.enc","name":"clip.mp4","ct":"video/mp4","size":1,"hash":"abc","bh":"LKO2","w":640,"h":3}]}"#
+        );
     }
 
     #[test]

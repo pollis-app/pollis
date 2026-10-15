@@ -725,11 +725,25 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             // Optional (#1335): a renderer that predates the outbox sends none
             // and the core mints one.
             let message_id: Option<String> = arg_opt(&args, "messageId")?;
+            // Attachments the outbox uploads itself (#1335). Expo pickers hand
+            // out `file://` URIs; the core reads bare paths.
+            let attachments: Vec<messages::OutgoingAttachment> =
+                arg_opt::<Vec<messages::OutgoingAttachment>>(&args, "attachments")?
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|mut a| {
+                        a.path = a
+                            .path
+                            .map(|p| p.strip_prefix("file://").unwrap_or(&p).to_string());
+                        a
+                    })
+                    .collect();
             ok(messages::send_message_with_id(
                 message_id,
                 conversation_id,
                 sender_id,
                 content,
+                attachments,
                 reply_to_id,
                 thread_id,
                 sender_username,
@@ -1285,6 +1299,10 @@ mod tests {
             "delete_account",
             "wipe_local_data",
             "upload_media",
+            "new_message_id",
+            "retry_message",
+            "discard_unsent_message",
+            "flush_outbox",
             "pin_message",
             "unpin_message",
             "list_pinned_messages",

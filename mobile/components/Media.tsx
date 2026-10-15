@@ -30,7 +30,9 @@ export function MediaImage({
   const { t } = useTranslation("mobile");
   // While an optimistic send is still uploading there's no object key to
   // fetch — render the local preview directly and skip the transport.
-  const isPending = !attachment.object_key && !!attachment.localPreviewUri;
+  // The same holds for a row the outbox has not uploaded yet (#1335), which
+  // has no local preview either — it waits on its blurhash.
+  const isPending = !attachment.object_key;
   const { uri, error } = useMediaUri(isPending ? null : attachment);
 
   const displayUri = isPending ? attachment.localPreviewUri ?? null : uri;

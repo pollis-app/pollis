@@ -750,6 +750,37 @@ pub async fn upload_media_staged(
     result
 }
 
+/// Upload bytes the durable outbox kept for an unsent message (#1335) — the
+/// same core as [`upload_media`], for plaintext that lives in the local
+/// SQLCipher database rather than in a file or the staging area.
+pub(crate) async fn upload_outbox_bytes(
+    data: Vec<u8>,
+    filename: String,
+    content_type: String,
+    state: &Arc<AppState>,
+) -> Result<MediaUploadResult> {
+    // Test-harness only: the flows world has no R2, so a test that drives an
+    // attachment send through the outbox gets the result an upload of these
+    // bytes would produce, without the PUT.
+    #[cfg(feature = "test-harness")]
+    if crate::commands::messages::test_hooks::uploads_stubbed() {
+        let content_hash = hex::encode(sha256_bytes(&data));
+        let key = format!("media/{content_hash}.enc");
+        return Ok(MediaUploadResult {
+            url: format!("{}/{key}", state.config.r2_endpoint.trim_end_matches('/')),
+            key,
+            filename,
+            content_type,
+            size_bytes: data.len(),
+            content_hash,
+            blurhash: None,
+            width: None,
+            height: None,
+        });
+    }
+    upload_plaintext(Plaintext::Owned(data), filename, content_type, state).await
+}
+
 /// The shared upload core.
 ///
 /// Convergent encryption: SHA-256(plaintext) → deterministic AES-256-GCM key

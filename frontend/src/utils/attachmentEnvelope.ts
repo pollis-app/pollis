@@ -16,6 +16,69 @@ export type MediaUploadResult = {
 };
 
 /**
+ * An attachment as `send_message` takes it when the durable outbox uploads it
+ * itself (#1335). Mirrors `pollis_core::commands::messages::OutgoingAttachment`:
+ * exactly one of `path` / `stagedId`.
+ */
+export type OutgoingAttachment = {
+  path?: string;
+  stagedId?: string;
+  filename: string;
+  contentType: string;
+  blurhash?: string;
+  width?: number;
+  height?: number;
+};
+
+/**
+ * Hand a composer's attachments to the outbox instead of uploading them here
+ * (#1335). The message row is on screen from the moment the user sends, so
+ * the upload has to be as durable as the send: the core reads the bytes (a
+ * file the user chose, or the staged paste) into its encrypted local database
+ * together with the row, before any network work, and the outbox uploads them
+ * — after a restart if it has to. Only a video's poster blurhash is still
+ * worked out here, because only the renderer has the poster frame.
+ */
+export async function outgoingAttachments(
+  attachments: Attachment[],
+): Promise<OutgoingAttachment[]> {
+  const out: OutgoingAttachment[] = [];
+  for (const att of attachments) {
+    if (!att.source) {
+      throw new Error(`attachment ${att.name} has no bytes to send yet`);
+    }
+    const meta =
+      att.mimeType.startsWith("video/") && att.preview
+        ? await blurhashFromUrl(att.preview).catch(() => null)
+        : null;
+    out.push({
+      ...(att.source.kind === "staged" ? { stagedId: att.source.id } : { path: att.source.path }),
+      filename: att.name,
+      contentType: att.mimeType,
+      blurhash: meta?.hash,
+      width: meta?.width,
+      height: meta?.height,
+    });
+  }
+  return out;
+}
+
+/**
+ * Release the staged bytes of a send the core never took (it failed before
+ * storing them). Once stored they are already released; a second discard is a
+ * no-op.
+ */
+export async function releaseStaged(attachments: Attachment[]): Promise<void> {
+  await Promise.all(
+    attachments.map((att) =>
+      att.source?.kind === "staged"
+        ? discardStagedAttachment(att.source.id).catch(() => false)
+        : Promise.resolve(false),
+    ),
+  );
+}
+
+/**
  * Upload a composer's attachments and encode them into the message body.
  *
  * This is the ENCODE half of the `_att` envelope that

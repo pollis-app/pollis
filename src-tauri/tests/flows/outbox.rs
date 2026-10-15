@@ -231,3 +231,93 @@ async fn a_failed_send_is_kept_as_failed_and_retry_or_discard_settles_it() {
     assert_eq!(not_discarded, false);
     drop((alice, bob));
 }
+
+/// Clears the upload stub however the test ends, so no other test inherits it.
+struct StubbedUploads;
+
+impl StubbedUploads {
+    fn on() -> Self {
+        test_hooks::stub_attachment_uploads(true);
+        StubbedUploads
+    }
+}
+
+impl Drop for StubbedUploads {
+    fn drop(&mut self) {
+        test_hooks::stub_attachment_uploads(false);
+    }
+}
+
+/// The attachment half of the ticket: the row is on screen from the moment the
+/// user sends, so a kill during the UPLOAD is the same bug. The outbox takes the
+/// bytes with the row, before any network work, and the drain after unlock
+/// uploads them, builds the envelope and posts it.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn an_attachment_send_killed_before_its_upload_is_delivered_after_unlock() {
+    let (alice, bob, channel_id) = pair().await;
+    let _stub = StubbedUploads::on();
+
+    // A paste: bytes staged in memory, as desktop holds them.
+    let bytes = b"\x89PNG not really, but bytes all the same".to_vec();
+    let staged = pollis_core::commands::staging::stage_attachment(bytes.clone())
+        .expect("stage")
+        .id;
+    let id: String = alice.invoke_json("new_message_id", json!({})).await
+        .as_str().expect("id").to_string();
+
+    test_hooks::crash_next_send(Crash::AfterEnqueue);
+    alice
+        .invoke_try(
+            "send_message",
+            json!({
+                "conversationId": channel_id,
+                "senderId": alice.user_id(),
+                "content": "the screenshot",
+                "replyToId": null,
+                "senderUsername": null,
+                "messageId": id,
+                "attachments": [{
+                    "stagedId": staged,
+                    "filename": "shot.png",
+                    "contentType": "image/png",
+                }],
+            }),
+        )
+        .await
+        .expect_err("the simulated kill ends the send before the upload");
+
+    // The bytes moved into the outbox; the in-memory copy is gone.
+    assert!(pollis_core::commands::staging::peek_staged(&staged).is_none());
+    let row = own_row(&alice, &channel_id, &id).await.expect("stored before the upload");
+    assert_eq!(row["send_state"], "pending");
+    let provisional = row["content"].as_str().expect("content");
+    assert!(provisional.contains("\"name\":\"shot.png\""), "{provisional}");
+    assert!(!provisional.contains("\"key\""), "nothing uploaded yet: {provisional}");
+    assert_eq!(envelopes_with_id(&id).await, 0);
+
+    restart(&alice).await;
+    alice.invoke_json("flush_outbox", json!({})).await;
+
+    let row = own_row(&alice, &channel_id, &id).await.expect("still there");
+    assert!(row.get("send_state").is_none(), "delivered: {row}");
+    let content = row["content"].as_str().expect("content").to_string();
+    let envelope: serde_json::Value = serde_json::from_str(&content).expect("an _att envelope");
+    let att = &envelope["_att"][0];
+    assert_eq!(att["name"], "shot.png");
+    assert_eq!(att["size"], bytes.len());
+    let hash = att["hash"].as_str().expect("uploaded: has a content hash");
+    assert_eq!(att["key"], format!("media/{hash}.enc"));
+    assert_eq!(envelope["_txt"], "the screenshot");
+
+    // Bob received exactly the finished envelope, once.
+    let got: Vec<_> = bob
+        .fetch_channel_messages(&channel_id)
+        .await
+        .into_iter()
+        .filter(|m| m["id"] == id.as_str())
+        .collect();
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0]["content"].as_str(), Some(content.as_str()));
+    drop((alice, bob));
+}

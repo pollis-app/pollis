@@ -1427,13 +1427,33 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
         messageId?: string | null;
       };
       const id = messageId ?? generateId();
+      // Attachments the outbox would upload: the mock "uploads" them at once
+      // and stores the finished envelope, keyed by a fake content hash.
+      const attachments = (args.attachments ?? []) as Array<{
+        filename: string;
+        contentType: string;
+      }>;
+      const body =
+        attachments.length === 0
+          ? content
+          : JSON.stringify({
+              _att: attachments.map((a, i) => ({
+                key: `media/mock-${id}-${i}.enc`,
+                url: `https://r2.mock/media/mock-${id}-${i}.enc`,
+                name: a.filename,
+                ct: a.contentType,
+                size: 0,
+                hash: `mock-${id}-${i}`,
+              })),
+              ...(content ? { _txt: content } : {}),
+            });
       let message = findMessage(id);
       if (!message) {
         message = {
           id,
           conversation_id: conversationId,
           sender_id: senderId,
-          content,
+          content: body,
           reply_to_id: replyToId ?? undefined,
           thread_id: threadId ?? undefined,
           sent_at: nowIso(),
