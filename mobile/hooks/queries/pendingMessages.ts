@@ -23,6 +23,8 @@ export interface StubLike {
   /** The core's message id for this send (#1335): the stored outbox row's
    *  id, which Retry and Discard name. Set on stubs and on unsent rows. */
   outboxId?: string;
+  /** False on a failed stub the core never stored: Discard only. */
+  retryable?: boolean;
 }
 
 /** A local-only optimistic row: still sending, or labelled failed. */
@@ -39,7 +41,11 @@ export type Order = "newestFirst" | "oldestFirst";
 /**
  * The rows a refetch read, with the stubs the cache held carried over at the
  * new end, in their cached order. A stub whose message the store now holds
- * (by `outboxId`) is dropped: the stored row is the same message.
+ * (by `outboxId`) is dropped: the stored row is that message. A FAILED stub the
+ * store does not hold failed before the core stored anything (an attachment
+ * over the size limit, a paste no longer staged): it comes back with
+ * `retryable: false`, so it offers Discard only — a Retry would name a message
+ * the core has never heard of.
  */
 export function carryStubs<M extends StubLike>(
   fetched: M[],
@@ -47,9 +53,9 @@ export function carryStubs<M extends StubLike>(
   order: Order = "newestFirst",
 ): M[] {
   const stored = new Set(fetched.map((m) => m.id));
-  const stubs = (cached ?? []).filter(
-    (m) => isLocalStub(m) && !(m.outboxId && stored.has(m.outboxId)),
-  );
+  const stubs = (cached ?? [])
+    .filter((m) => isLocalStub(m) && !(m.outboxId && stored.has(m.outboxId)))
+    .map((m) => (m.failed === true ? { ...m, retryable: false } : m));
   if (stubs.length === 0) {
     return fetched;
   }
@@ -107,7 +113,7 @@ export function unsentFlags(
  * core could retry: the row is not failed, or the send failed before the core
  * stored it (an attachment upload) — Discard is the only way out of that one.
  */
-export function retryTarget(m: StubLike & { retryable?: boolean }): string | null {
+export function retryTarget(m: StubLike): string | null {
   if (m.failed !== true || !m.outboxId || m.retryable === false) {
     return null;
   }

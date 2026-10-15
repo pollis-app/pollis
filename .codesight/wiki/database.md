@@ -1244,19 +1244,21 @@ envelope, so the loss shows in the conversation instead of vanishing. See
 [MLS → Lost messages are visible](mls.md#lost-messages-are-visible-1312).
 
 ### outbox_attachment (#1335)
-- `message_id` TEXT NOT NULL → `message(id)` ON DELETE CASCADE
+- `message_id` TEXT NOT NULL — the message these bytes belong to (no foreign key: the bytes are written BEFORE the row, which is the commit point)
 - `position` INTEGER NOT NULL CHECK ≥ 0 — PK is (`message_id`, `position`)
 - `filename`, `content_type` TEXT NOT NULL
 - `data` BLOB NOT NULL — the attachment's plaintext bytes
 - `blurhash` TEXT, `width` / `height` INTEGER — renderer-computed metadata (a video's poster); the upload's own values win
 
-Attachment bytes an unsent message still has to upload, written in the same
-transaction as its row and before any network work, so a kill mid-upload loses
-nothing. Plaintext only inside this SQLCipher database (under the session's
-`db_key`) — never a file on disk (#1000). Deleted once uploaded (in the same
+Attachment bytes an unsent message still has to upload, each written in its own
+short insert before the message row and before any network work, so a kill
+mid-upload loses nothing; bytes whose row never landed are swept when the
+database opens. Plaintext only inside this SQLCipher database (under the
+session's `db_key`) — never a file on disk (#1000). At most
+`MAX_OUTBOX_BYTES_PER_MESSAGE` per message. Deleted once uploaded (in the same
 transaction that swaps the row's provisional `_att` content for the finished
-envelope), with the message on a discard (CASCADE), and on sign-out together
-with the unsent message they belong to.
+envelope) and with the message on a discard; kept, like the rest of the outbox,
+across a keep-data sign-out.
 
 ### known_envelope (#1312)
 - `id` TEXT PK — an envelope id

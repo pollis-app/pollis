@@ -52,18 +52,22 @@ export function outboxFields(
 }
 
 /**
- * The rows a refetch read, with the cached stubs it could not have read
- * carried over at the end (the log is oldest-first). A stub whose message the
- * store now holds (by `outbox_id`) is dropped: the stored row is that message.
+ * The rows a refetch read, with the stubs the cache held carried over at the
+ * end (the log is oldest-first). A stub whose message the store now holds
+ * (by `outbox_id`) is dropped: the stored row is that message. A FAILED stub the
+ * store does not hold failed before the core stored anything (an attachment
+ * over the size limit, a paste no longer staged): it comes back with
+ * `retryable: false`, so it offers Discard only — a Retry would name a message
+ * the core has never heard of.
  */
 export function carryStubs<M extends OutgoingLike>(
   fetched: M[],
   cached: ReadonlyArray<M> | undefined,
 ): M[] {
   const stored = new Set(fetched.map((m) => m.id));
-  const stubs = (cached ?? []).filter(
-    (m) => isLocalStub(m) && !(m.outbox_id && stored.has(m.outbox_id)),
-  );
+  const stubs = (cached ?? [])
+    .filter((m) => isLocalStub(m) && !(m.outbox_id && stored.has(m.outbox_id)))
+    .map((m) => (m.status === "failed" ? { ...m, retryable: false } : m));
   return stubs.length === 0 ? fetched : [...fetched, ...stubs];
 }
 

@@ -168,7 +168,7 @@ pub use send::test_hooks;
 pub use outbox::{
     discard_unsent_message, flush_outbox, new_message_id, retry_message, OutboxReport,
 };
-pub(crate) use outbox::{drop_unsent_attachment_messages_on, spawn_outbox_flush};
+pub(crate) use outbox::{spawn_outbox_flush, sweep_orphan_attachments_on};
 pub use outbox::OutgoingAttachment;
 
 // ── Read / list / search ─────────────────────────────────────────────────────

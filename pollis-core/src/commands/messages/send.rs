@@ -236,7 +236,7 @@ pub(super) async fn deliver_queued(
         None => super::framing::pad(content.as_bytes()),
     };
 
-    let sealed = {
+    let (sealed, sent_at) = {
         // #1079: serialize behind any committer on this device before sealing —
         // see `seal::seal_under_lock`. Taken before `local_db` (reconcile's and
         // self_update's order) and dropped with this block, before the post's
@@ -254,14 +254,23 @@ pub(super) async fn deliver_queued(
             &held,
         )?;
 
-        // The outbox row (#1335) already holds everything but the ciphertext
-        // — its `sent_at` included, which stays the moment the user sent it.
+        // The outbox row (#1335) already holds everything but the ciphertext.
+        // Its `sent_at`: refreshed by every attempt until the first seal (a
+        // message queued offline lands at the time it went out, not when it
+        // was typed), then fixed — this seal may post, and every later
+        // attempt must post the same stamp the DS may already hold.
+        let never_sealed: bool = db.conn().query_row(
+            "SELECT length(ciphertext) = 0 FROM message WHERE id = ?1",
+            rusqlite::params![id],
+            |row| row.get(0),
+        )?;
+        let sent_at = if never_sealed { super::envelope_sent_at() } else { sent_at };
         db.conn().execute(
-            "UPDATE message SET ciphertext = ?1 WHERE id = ?2",
-            rusqlite::params![sealed.bytes, id],
+            "UPDATE message SET ciphertext = ?1, sent_at = ?2 WHERE id = ?3",
+            rusqlite::params![sealed.bytes, sent_at, id],
         )?;
 
-        sealed
+        (sealed, sent_at)
     };
 
     // Sealed sender (issue #331, `docs/metadata-minimization-design.md` §2) —

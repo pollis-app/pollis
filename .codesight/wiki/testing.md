@@ -507,13 +507,17 @@ world does not have), that a re-post after a landed envelope is answered as a
 replay and arrives exactly once with the sender's `sent_at` matching the
 recipient's, that a failed send is kept as `failed` until Retry delivers it or
 Discard removes it, that Discarding a send that reached the DS withdraws it from
-the recipient too, that an overlapping drain waits for the running one instead
-of re-attempting (`test_hooks::delivery_attempts`), and that a non-member's send
-is `rejected` and left alone by the drain while an explicit Retry still tries.
+the recipient too, that an overlapping drain is coalesced into a rerun rather
+than overlapping or being dropped (`test_hooks::delivery_attempts`, the
+`EnvelopeBeforePost` rendezvous), that a non-member's send is `rejected` and
+left alone by the drain while an explicit Retry still tries, that a sealed
+`rejected` message whose sender was removed can still be discarded, and that a
+message queued offline lands with the time it went out.
 Unit coverage: `commands::messages::outbox::tests` (the row and its attachment
 bytes are stored before anything else, idempotent per id, never demoted once
 delivered, drained oldest first, the finished envelope matches the renderers',
-sign-out drops only attachment sends, permanent vs transient refusals, a remote
+bytes are stored before the row and read back one at a time, orphan bytes are
+swept, permanent vs transient refusals, a remote
 delete settles an unsent row, discard knows whether a row was sealed),
 `db::local::tests::send_state_admits_only_unsent_real_messages` /
 `eviction_spares_unsent_messages`, and the DS's `epoch_gate_tests`

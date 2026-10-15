@@ -86,15 +86,20 @@ CREATE INDEX IF NOT EXISTS idx_message_thread ON message(thread_id, sent_at);
 CREATE INDEX IF NOT EXISTS idx_message_received_at ON message(received_at);
 
 -- Attachment bytes an unsent message still has to upload (#1335). A send with
--- attachments stores them here, in the same transaction as its `message` row
--- and BEFORE any network work, so a process killed mid-upload loses nothing:
--- the outbox drain uploads them, rewrites the row's content to the final `_att`
--- envelope, deletes these rows, and only then posts. The bytes are plaintext
--- only inside this SQLCipher database (encrypted under the session's db_key) —
--- never a file on disk (#1000). Deleted once uploaded, with their message on a
--- discard (CASCADE), and on sign-out.
+-- attachments stores them here BEFORE its `message` row and before any network
+-- work — one row per attachment, each in its own short insert so a large
+-- message never holds the database lock across all its files — and then writes
+-- the message row, which is the commit point. So a process killed mid-upload
+-- loses nothing: the outbox drain uploads them, rewrites the row's content to
+-- the final `_att` envelope, deletes these rows, and only then posts. Bytes
+-- whose message row was never written (killed between the two) are swept when
+-- the database opens. No foreign key, for that reason: the bytes exist before
+-- the row. The bytes are plaintext only inside this SQLCipher database
+-- (encrypted under the session's db_key) — never a file on disk (#1000).
+-- Deleted once uploaded and with their message on a discard; kept across a
+-- keep-data sign-out like the rest of the outbox.
 CREATE TABLE IF NOT EXISTS outbox_attachment (
-    message_id   TEXT NOT NULL REFERENCES message(id) ON DELETE CASCADE,
+    message_id   TEXT NOT NULL,
     position     INTEGER NOT NULL CHECK (position >= 0),
     filename     TEXT NOT NULL,
     content_type TEXT NOT NULL,

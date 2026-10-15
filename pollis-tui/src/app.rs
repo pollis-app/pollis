@@ -1526,7 +1526,6 @@ impl App {
         }
     }
 
-    /// Delete one of the user's own messages, then re-read so it disappears.
     /// Retry one unsent message and report how it went; the refresh shows the
     /// row settled, or still marked not sent.
     async fn do_retry(&mut self, message_id: &str) {
@@ -1537,6 +1536,8 @@ impl App {
         self.refresh_open().await;
     }
 
+    /// Delete one of the user's own messages (or discard an unsent one), then
+    /// re-read so it disappears.
     async fn do_delete(&mut self, message_id: &str) {
         // A message the outbox still holds is discarded, not deleted (#1335):
         // the core withdraws it from everyone first if it may have landed.

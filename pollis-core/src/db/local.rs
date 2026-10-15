@@ -182,6 +182,9 @@ impl LocalDb {
         // existing DB has not gained yet would fail the whole batch.
         add_missing_columns(&conn)?;
         apply_local_schema(&conn)?;
+        // Attachment bytes stored for a send whose message row was never
+        // written (#1335): nothing can be mid-send while the database opens.
+        crate::commands::messages::sweep_orphan_attachments_on(&conn)?;
         conn.execute(
             "INSERT OR REPLACE INTO kv (key, value) VALUES ('schema_version', ?1)",
             rusqlite::params![LOCAL_SCHEMA_VERSION],

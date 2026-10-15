@@ -377,37 +377,77 @@ async fn discarding_a_message_that_reached_the_ds_withdraws_it_from_everyone() {
 }
 
 /// Overlapping drains (unlock, the launch catch-up, a reconnect and an online
-/// event can all fire at once) are single-flight: a drain that arrives while
-/// one runs waits for it and shares its report instead of re-attempting.
+/// event can all fire at once) are single-flight — but a trigger that arrives
+/// while a drain runs is never dropped: the running drain goes round once
+/// more, or, if it already finished its last pass, the waiting caller drains.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-async fn an_overlapping_drain_waits_for_the_running_one() {
+async fn an_overlapping_drain_is_coalesced_into_a_rerun() {
+    use pollis_lib::commands::mls::rendezvous::{self, Point};
     let (alice, bob, channel_id) = pair().await;
-    let id: String = alice.invoke_json("new_message_id", json!({})).await
-        .as_str().expect("id").to_string();
-    test_hooks::crash_next_send(Crash::AfterEnqueue);
-    send_with_id(&alice, &channel_id, &id, "queued once", None)
-        .await
-        .expect_err("the simulated kill ends the send");
+    let queue = |text: &'static str| {
+        let alice = &alice;
+        let channel_id = channel_id.clone();
+        async move {
+            let id: String = alice.invoke_json("new_message_id", json!({})).await
+                .as_str().expect("id").to_string();
+            test_hooks::crash_next_send(Crash::AfterEnqueue);
+            send_with_id(alice, &channel_id, &id, text, None)
+                .await
+                .expect_err("the simulated kill ends the send");
+            id
+        }
+    };
 
-    // A drain is running (its lock is held); a second one arrives.
-    let running = alice.state.outbox_drain.clone().lock_owned().await;
+    // ── The running drain goes round again ──
+    let first = queue("queued first").await;
+    let mut before_post = rendezvous::arm(Point::EnvelopeBeforePost);
     let before = test_hooks::delivery_attempts();
-    let state = alice.state.clone();
-    let second = tokio::spawn(async move {
-        pollis_core::commands::messages::flush_outbox(&state).await
-    });
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    assert!(!second.is_finished(), "the second drain waits");
-    drop(running);
-    let report = second.await.unwrap().expect("flush");
-    assert!(report.delivered.is_empty() && report.failed.is_empty(), "{report:?}");
-    assert_eq!(test_hooks::delivery_attempts(), before, "it did not drain again");
+    let running = {
+        let state = alice.state.clone();
+        tokio::spawn(async move { pollis_core::commands::messages::flush_outbox(&state).await })
+    };
+    let release = tokio::time::timeout(std::time::Duration::from_secs(30), before_post.recv())
+        .await
+        .expect("the drain never reached its post")
+        .expect("rendezvous closed");
+    rendezvous::disarm(Point::EnvelopeBeforePost);
 
-    // The message is still queued; the next drain on its own delivers it.
-    alice.invoke_json("flush_outbox", json!({})).await;
-    assert!(own_row(&alice, &channel_id, &id).await.expect("row").get("send_state").is_none());
-    assert_eq!(copies(&bob, &channel_id, "queued once").await, 1);
+    // Mid-drain: a second message is queued (after the drain listed what to
+    // send) and a second trigger arrives.
+    let second = queue("queued mid-drain").await;
+    let trigger = {
+        let state = alice.state.clone();
+        tokio::spawn(async move { pollis_core::commands::messages::flush_outbox(&state).await })
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert!(!trigger.is_finished(), "the trigger waits for the running drain");
+    let _ = release.send(());
+
+    running.await.unwrap().expect("drain");
+    let report = trigger.await.unwrap().expect("trigger");
+    assert_eq!(report.delivered, vec![second.clone()], "the rerun pass took the new message");
+    assert_eq!(test_hooks::delivery_attempts(), before + 2, "one attempt each, no overlap");
+    for id in [&first, &second] {
+        assert!(own_row(&alice, &channel_id, id).await.expect("row").get("send_state").is_none());
+    }
+
+    // ── A trigger that finds the last pass already over drains itself ──
+    let third = queue("queued while held").await;
+    let held = alice.state.outbox_drain.clone().lock_owned().await;
+    let waiting = {
+        let state = alice.state.clone();
+        tokio::spawn(async move { pollis_core::commands::messages::flush_outbox(&state).await })
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert!(!waiting.is_finished(), "it waits rather than overlapping");
+    drop(held);
+    let report = waiting.await.unwrap().expect("flush");
+    assert_eq!(report.delivered, vec![third.clone()], "its trigger was not dropped");
+
+    for text in ["queued first", "queued mid-drain", "queued while held"] {
+        assert_eq!(copies(&bob, &channel_id, text).await, 1, "{text}");
+    }
     drop((alice, bob));
 }
 
@@ -444,5 +484,86 @@ async fn a_permanent_refusal_is_rejected_and_not_drained_again() {
         .expect_err("still not a member");
     assert_eq!(test_hooks::delivery_attempts(), before + 1);
     assert_eq!(own_row(&alice, &channel_id, &id).await.expect("kept")["send_state"], "rejected");
+    drop((alice, bob));
+}
+
+/// A sealed message that became `rejected` — membership lost between the
+/// resolve and the post — can still be discarded: the withdrawal fails for
+/// good, and there is nothing left the sender could ever withdraw.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_sealed_rejected_message_can_still_be_discarded() {
+    wipe().await;
+    let mut alice = TestClient::new().await;
+    let alice_profile = alice.sign_up("outbox-gone-alice@test.local").await;
+    let mut bob = TestClient::new().await;
+    bob.sign_up("outbox-gone-bob@test.local").await;
+    // Bob's group; Alice joins it.
+    let group_id = bob.create_group("Leaving").await;
+    let channel_id = bob.general_channel_id(&group_id).await;
+    bob.invite(&group_id, &alice_profile.username).await;
+    let invite = alice.first_pending_invite().await.expect("alice has an invite");
+    alice.accept_invite(invite["id"].as_str().expect("invite id")).await;
+    alice.poll().await;
+    bob.process_commits_for(&channel_id).await;
+
+    // Sealed and posted, then the process died before recording it.
+    let id: String = alice.invoke_json("new_message_id", json!({})).await
+        .as_str().expect("id").to_string();
+    test_hooks::crash_next_send(Crash::AfterPost);
+    send_with_id(&alice, &channel_id, &id, "sent, then removed", None)
+        .await
+        .expect_err("the simulated kill ends the send");
+
+    // Bob removes her; her retry is now refused for good.
+    bob.remove_member(&group_id, alice.user_id()).await;
+    alice
+        .invoke_try("retry_message", json!({ "messageId": id }))
+        .await
+        .expect_err("not a member any more");
+    assert_eq!(own_row(&alice, &channel_id, &id).await.expect("kept")["send_state"], "rejected");
+
+    let discarded = alice
+        .invoke_try("discard_unsent_message", json!({ "messageId": id }))
+        .await
+        .expect("a discard that can no longer withdraw still removes the row");
+    assert_eq!(discarded, true);
+    assert!(own_row(&alice, &channel_id, &id).await.is_none());
+    drop((alice, bob));
+}
+
+/// A message queued offline for a long time lands with the time it actually
+/// went out: until an attempt seals it, every attempt refreshes its stamp.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_long_queued_message_lands_with_the_time_it_went_out() {
+    let (alice, bob, channel_id) = pair().await;
+    let id: String = alice.invoke_json("new_message_id", json!({})).await
+        .as_str().expect("id").to_string();
+    test_hooks::crash_next_send(Crash::AfterEnqueue);
+    send_with_id(&alice, &channel_id, &id, "typed offline", None)
+        .await
+        .expect_err("the simulated kill ends the send");
+    let queued_at = own_row(&alice, &channel_id, &id).await.expect("row")["sent_at"]
+        .as_str()
+        .expect("sent_at")
+        .to_string();
+
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    restart(&alice).await;
+    alice.invoke_json("flush_outbox", json!({})).await;
+
+    let row = own_row(&alice, &channel_id, &id).await.expect("row");
+    assert!(row.get("send_state").is_none(), "delivered: {row}");
+    let landed_at = row["sent_at"].as_str().expect("sent_at").to_string();
+    assert!(landed_at > queued_at, "{landed_at} should be after {queued_at}");
+    let theirs: Vec<_> = bob
+        .fetch_channel_messages(&channel_id)
+        .await
+        .into_iter()
+        .filter(|m| m["id"] == id.as_str())
+        .collect();
+    assert_eq!(theirs.len(), 1);
+    assert_eq!(theirs[0]["sent_at"], landed_at.as_str(), "sender and recipient agree");
     drop((alice, bob));
 }

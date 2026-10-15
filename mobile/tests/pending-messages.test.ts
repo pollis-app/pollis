@@ -9,6 +9,7 @@ import {
   settleSend,
   unsentFlags,
   withoutOutboxRows,
+  type StubLike,
 } from "../hooks/queries/pendingMessages.ts";
 
 const row = (id: string, extra: { pending?: boolean; failed?: boolean } = {}) => ({ id, ...extra });
@@ -67,9 +68,16 @@ test("a stub steps aside once the store holds its message", () => {
   const failedStub = { id: "pending-9", failed: true, outboxId: "01MSG" };
   const storedFailed = [{ id: "01MSG", failed: true, outboxId: "01MSG" }];
   assert.deepEqual(carryStubs(storedFailed, [failedStub]).map((m) => m.id), ["01MSG"]);
-  // A stub the store never got (an upload failed first) is still carried.
+  // A stub the store never got (the send failed before the core stored it)
+  // is still carried — as Discard-only, since there is nothing to retry.
   const orphan = { id: "pending-7", failed: true, outboxId: "01GONE" };
-  assert.deepEqual(carryStubs([row("a")], [orphan]).map((m) => m.id), ["pending-7", "a"]);
+  const carried = carryStubs<StubLike>([row("a")], [orphan]);
+  assert.deepEqual(carried.map((m) => m.id), ["pending-7", "a"]);
+  assert.equal(carried[0].retryable, false);
+  assert.equal(retryTarget(carried[0]), null);
+  // An in-flight stub is carried as it is.
+  const inFlight = { id: "pending-8", pending: true, outboxId: "01SENDING" };
+  assert.equal(carryStubs<StubLike>([row("a")], [inFlight])[0].retryable, undefined);
 });
 
 test("a settling send replaces a stored pending row instead of duplicating it", () => {

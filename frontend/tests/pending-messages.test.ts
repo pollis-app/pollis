@@ -34,9 +34,15 @@ test("a refetch keeps a stub the store does not hold, and drops one it does", ()
   // Stored (pending) under the stub's id: one row, the stored one.
   const stored = row("01A", outboxFields("01A", "pending"));
   assert.deepEqual(carryStubs([row("a"), stored], [row("a"), inFlight]).map((m) => m.id), ["a", "01A"]);
-  // An upload failed before the core stored anything: the failed stub stays.
-  const orphan = row("pending-2", { status: "failed", outbox_id: "01B", retryable: false });
-  assert.deepEqual(carryStubs([row("a")], [orphan]).map((m) => m.id), ["a", "pending-2"]);
+  // The send failed before the core stored anything (size limit, a paste no
+  // longer staged): the failed stub stays, but as Discard-only.
+  const orphan = row("pending-2", { status: "failed", outbox_id: "01B" });
+  const carried = carryStubs([row("a")], [orphan]);
+  assert.deepEqual(carried.map((m) => m.id), ["a", "pending-2"]);
+  assert.equal(carried[1].retryable, false);
+  assert.equal(retryTarget(carried[1]), null);
+  // An in-flight stub is carried as it is.
+  assert.equal(carryStubs([row("a")], [inFlight])[1].retryable, undefined);
   assert.equal(isLocalStub(stored), false);
 });
 
