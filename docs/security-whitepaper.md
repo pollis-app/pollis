@@ -440,7 +440,7 @@ Source: `pollis-core/src/db/local.rs`.
 
 - **Library:** `rusqlite` 0.37 linking SQLCipher 4 (via `bundled-sqlcipher` features on Linux, macOS and mobile; via the `pollis-sqlcipher` crate on Windows, §7.0). Page-level AES-256-CBC with per-page HMAC-SHA512.
 - **Key:** `PRAGMA key = "x'{hex}'"` with the 32-byte raw key, which bypasses SQLCipher's PBKDF2. Appropriate because the key is 32 CSPRNG bytes, not a passphrase.
-- **Path:** `pollis_{user_id}.db` under the platform data dir (Linux `~/.local/share/pollis`, macOS `~/Library/Application Support/com.pollis.app`, Windows `%APPDATA%\pollis`; mobile passes `POLLIS_DATA_DIR`). `journal_mode=WAL`, `foreign_keys=ON`.
+- **Path:** `pollis_{user_id}.db` under the platform data dir (Linux `~/.local/share/pollis`, macOS `~/Library/Application Support/com.pollis.app`, Windows `%APPDATA%\pollis`; iOS `Library/Application Support/pollis` in the app container, excluded from backup; Android passes `POLLIS_DATA_DIR`). `journal_mode=WAL`, `foreign_keys=ON`.
 - **Schema version:** on a `LOCAL_SCHEMA_VERSION` mismatch the DB and its sidecars are destroyed and recreated. This triggers only on a missing version row, a version mismatch, or `NotADatabase` (wrong key); any other error surfaces rather than deleting the database.
 
 ### 7.0 Where SQLCipher's crypto comes from, per platform (#992)

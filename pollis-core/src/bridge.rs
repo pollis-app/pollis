@@ -147,6 +147,8 @@ async fn init_pollis_inner(config_json: String) -> Result<(), BridgeError> {
             let parsed: InitConfig = serde_json::from_str(&config_json)?;
             #[cfg(target_os = "android")]
             android_bootstrap(parsed.data_dir.as_deref())?;
+            #[cfg(target_os = "ios")]
+            ios_bootstrap()?;
             // On-device diagnostics log (#1305), under the same data directory
             // the local DB uses. A failure leaves logging on stderr only.
             let log_dir = crate::diag::log_dir(&crate::db::local::dirs_path());
@@ -193,6 +195,15 @@ fn android_bootstrap(data_dir: Option<&str>) -> Result<(), BridgeError> {
         std::env::set_var("POLLIS_DATA_DIR", &path);
     }
     Ok(())
+}
+
+/// Create the data directory and exclude it from backup before anything writes
+/// there. Failing hard beats starting on a directory iCloud would copy.
+#[cfg(target_os = "ios")]
+fn ios_bootstrap() -> Result<(), BridgeError> {
+    let dir = crate::db::local::dirs_path();
+    crate::ios_storage::prepare(&dir)
+        .map_err(|e| BridgeError::Bridge(format!("ios data dir at {}: {e}", dir.display())))
 }
 
 fn state() -> Result<Arc<AppState>, BridgeError> {
