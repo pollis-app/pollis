@@ -237,6 +237,19 @@ full detail: `docs/metadata-retention-policy.md` §3.
   circuit maps hold only `IpKey`s.
 - **LiveKit.** Needs the IP to route media; keeps no logs (`livekit/DEPLOY.md`
   → "No client IPs in logs").
+- **LiveKit client info (#1320).** Every join carries a `ClientInfo`: SDK
+  (`rust`) and version, protocol numbers, SDK capability flags, OS name and OS
+  version (`os_info`), and — new in livekit 0.9 — a device model (the SMBIOS
+  product name, e.g. a motherboard model). The SDK has no switch for the model,
+  so the workspace `[patch.crates-io]`s the crate it reads it from with
+  `patches/device-info`, a stand-in that reports nothing (it never reads the
+  hostname either); the field goes out empty, which protobuf drops.
+  `pollis-core/tests/livekit_join_sends_no_device_model.rs` runs a real
+  `Room::connect` against a loopback fake SFU and decodes both join forms
+  (`/rtc/v1` protobuf and the `/rtc` v0 query string). Bump the stand-in's
+  version with any livekit upgrade that moves `device-info`, or the patch stops
+  applying (the test then fails). Mobile's JS SDK (`livekit-client`) sends only
+  SDK, protocol and OS name — no model.
 - **Device names.** Clients register `util::device_label()` ("macOS desktop"),
   not the hostname; the DS redacts IP-shaped tokens in device names and
   security-event notes (`util::redact_ip_literals`); migration 000034 scrubbed

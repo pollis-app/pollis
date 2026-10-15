@@ -82,6 +82,7 @@ Still visible, and irreducible for a store-and-forward server: which conversatio
 - `typing` and `voice_joined` / `voice_left` carry no `user_id` / `username` / `display_name`; recipients attribute them from the publishing participant (#836).
 - Room names are opaque per-conversation pseudonyms derived server-side (#828, `pollis-delivery/src/room_id.rs`), and participant identities are per-room encrypted handles with no username in the JWT (#836, `participant_id.rs`). The SFU cannot map a participant to an account or link one account across rooms. It can count participants in a room and recognise a returning participant within one room. 1:1 call rooms (`call-<ulid>`) are per-call.
 - Voice audio is frame-encrypted with AES-128-GCM before it leaves the device (§10.2). LiveKit sees RTP routing metadata, not audio.
+- Each join reports the LiveKit SDK name and version, protocol and capability numbers, and the OS name and version. It does not report the device's hardware model: the Rust SDK collects one with no option to stop it, so the workspace replaces the crate it reads it from with a stand-in that reports nothing (#1320, `patches/device-info`; held by `pollis-core/tests/livekit_join_sends_no_device_model.rs`). The mobile JS SDK sends the SDK, protocol and OS name only.
 
 **R2** sees opaque AEAD ciphertext at content-hash-derived keys (§9.2). It never sees the plaintext or the AEAD key.
 

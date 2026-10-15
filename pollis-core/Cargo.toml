@@ -429,6 +429,12 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["ring",
 # database through `open_for_user` and then read the bytes it left on disk.
 # Already in the workspace lockfile via src-tauri's test harness.
 tempfile = "3"
+# `livekit_join_sends_no_device_model` decodes the join request the LiveKit SDK
+# puts on the wire (#1320). All three are already in the lockfile via livekit
+# (whose `livekit::proto` keeps the protocol types private).
+livekit-protocol = "0.8"
+prost = "0.14"
+url = "2"
 
 # Picks up `[workspace.lints]` from the root Cargo.toml, which declares the
 # `kani` cfg the proof harnesses in this crate are gated on.

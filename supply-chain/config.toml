@@ -589,11 +589,6 @@ criteria = "safe-to-deploy"
 version = "2.1.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.device-info]]
-version = "0.1.1"
-criteria = "safe-to-deploy"
-notes = "No independent review performed. Small OS/device-description helper pulled by livekit 0.9 for the client-info it reports to the SFU (#1303). Exempted as a transitive dependency of the livekit family, not a source read."
-
 [[exemptions.digest]]
 version = "0.10.7"
 criteria = "safe-to-deploy"
