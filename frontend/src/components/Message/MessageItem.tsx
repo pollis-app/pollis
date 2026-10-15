@@ -13,6 +13,7 @@ import { MessageActions } from "./MessageActions";
 import { MessageReactions } from "./MessageReactions";
 import { ReceiptIndicator } from "./ReceiptIndicator";
 import { UndecryptableMessage } from "./UndecryptableMessage";
+import { UnsentMessageActions } from "./UnsentMessageActions";
 import { probeRender } from "../../utils/renderProbe";
 import type { MessageRenderContext } from "./messageRenderContext";
 import type { Message, MessageReceipts } from "../../types";
@@ -104,6 +105,10 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
     return <UndecryptableMessage message={message} skin={skin} />;
   }
   const isOwn = message.sender_id === currentUserId;
+  // Not delivered yet (#1335) — an optimistic stub or an outbox row. Nothing
+  // to reply to, react to, pin or edit until it is; a failed one shows Retry
+  // / Discard instead.
+  const isUnsent = !!message.outbox_id || message.id.startsWith("pending-");
   // Falls back to the same placeholder the default prop used to supply, but
   // resolved at render so it follows the active language.
   const displayName = authorUsername ?? t("message.unknownAuthor");
@@ -279,6 +284,10 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
                 [{t(`status.${message.status}`)}]
               </span>
             )}
+            {/* A failed send's way out (#1335): Retry / Discard. */}
+            {message.status === "failed" && isOwn && (
+              <UnsentMessageActions message={message} />
+            )}
             <ReceiptIndicator
               receipts={receipt}
               peerCount={peerCount}
@@ -305,7 +314,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
         </div>
 
         {/* Floating hover action toolbar */}
-        {!isDeleted && (
+        {!isDeleted && !isUnsent && (
           <MessageActions
             messageId={message.id}
             variant="refined"
@@ -425,6 +434,10 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
               [{t(`status.${message.status}`)}]
             </span>
           )}
+          {/* A failed send's way out (#1335): Retry / Discard. */}
+          {message.status === "failed" && isOwn && (
+            <UnsentMessageActions message={message} />
+          )}
           <ReceiptIndicator
             receipts={receipt}
             peerCount={peerCount}
@@ -433,7 +446,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
         </span>
 
         {/* Action buttons — only visible on hover */}
-        {!isDeleted && (
+        {!isDeleted && !isUnsent && (
           <MessageActions
             messageId={message.id}
             variant="terminal"

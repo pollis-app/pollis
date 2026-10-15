@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
 import { PresenceAvatar } from "../../ui/PresenceAvatar";
 import { AttachmentDisplay } from "../../Message/AttachmentDisplay";
+import { UnsentMessageActions } from "../../Message/UnsentMessageActions";
 import { useSkin } from "../../../hooks/queries/usePreferences";
 import { formatClockTime, toMs } from "../../../utils/format";
 import type { Message } from "../../../types";
@@ -35,6 +36,7 @@ interface ThreadMessageRowProps {
 export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
   ({ message, isRoot = false }) => {
     const { t } = useTranslation("nav");
+    const { t: tChat } = useTranslation("chat");
     const skin = useSkin();
     const isTerminal = skin !== "refined";
     const author = message.sender_username ?? message.sender_id;
@@ -58,6 +60,16 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
             }`}
           >
             {message.content_decrypted}
+            {/* A reply that did not send (#1335) is labelled, with its way out
+                — only our own messages can be in this state. */}
+            {message.status === "failed" && (
+              <>
+                <span className="ms-1 text-xs text-muted">
+                  [{tChat("status.failed")}]
+                </span>
+                <UnsentMessageActions message={message} />
+              </>
+            )}
           </p>
         ) : (
           <p

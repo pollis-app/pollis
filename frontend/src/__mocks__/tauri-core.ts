@@ -46,6 +46,8 @@ interface MockMessage {
   sent_at: string | number;
   edited_at?: string;
   thread_id?: string;
+  /** The durable outbox (#1335): our own message not delivered yet. */
+  send_state?: 'pending' | 'failed';
 }
 
 /** Mirrors `ThreadSummary` in `pollis-core/src/commands/messages/types.rs`. */
@@ -257,6 +259,12 @@ interface MockStore {
   // On-device export (#856). What the OS save dialog "returns"; `null` is the
   // user cancelling. A preload sets it; the default is a plausible path.
   exportSavePath: string | null;
+  /**
+   * Durable outbox (#1335): while true every delivery attempt fails the way an
+   * offline send does — the message is kept, marked failed. Preload
+   * `failSends`, or flip it with `window.__tauriFailSends(bool)`.
+   */
+  failSends: boolean;
 }
 
 // Only `@tauri-apps/api/core` and `/event` are vite-aliased to these mocks.
@@ -342,10 +350,31 @@ const store: MockStore = {
     preload.exportSavePath === undefined
       ? '/Users/alice/Downloads/pollis-archive.json'
       : preload.exportSavePath,
+  failSends: preload.failSends === true,
 };
 
 // Expose for test inspection via page.evaluate(() => window.__tauriMock)
 (window as any).__tauriMock = store;
+(window as any).__tauriFailSends = (fail: boolean) => {
+  store.failSends = fail;
+};
+
+/** Every unsent message in the store, oldest first — what `flush_outbox` walks. */
+function unsentMessages(): MockMessage[] {
+  return Object.values(store.messages)
+    .flat()
+    .filter((m) => m.send_state !== undefined);
+}
+
+/** One delivery attempt for a stored outgoing message (#1335). */
+function deliverMock(message: MockMessage): MockMessage {
+  if (store.failSends) {
+    message.send_state = 'failed';
+    throw new Error('network unreachable');
+  }
+  delete message.send_state;
+  return message;
+}
 
 /**
  * #1338: revoke this device from another one. From here every command rejects
@@ -1385,26 +1414,77 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return null;
     }
 
+    // Mirrors the durable outbox (#1335): the message is stored first (as
+    // pending) under the id the renderer named it with, and only then
+    // delivered — so a failing attempt leaves a failed row, never nothing.
     case 'send_message': {
-      const { conversationId, senderId, content, replyToId } = args as {
+      const { conversationId, senderId, content, replyToId, threadId, messageId } = args as {
         conversationId: string;
         senderId: string;
         content: string;
         replyToId?: string | null;
+        threadId?: string | null;
+        messageId?: string | null;
       };
-      const message: MockMessage = {
-        id: generateId(),
-        conversation_id: conversationId,
-        sender_id: senderId,
-        content,
-        reply_to_id: replyToId ?? undefined,
-        sent_at: nowIso(),
-      };
-      if (!store.messages[conversationId]) {
-        store.messages[conversationId] = [];
+      const id = messageId ?? generateId();
+      let message = findMessage(id);
+      if (!message) {
+        message = {
+          id,
+          conversation_id: conversationId,
+          sender_id: senderId,
+          content,
+          reply_to_id: replyToId ?? undefined,
+          thread_id: threadId ?? undefined,
+          sent_at: nowIso(),
+          send_state: 'pending',
+        };
+        if (!store.messages[conversationId]) {
+          store.messages[conversationId] = [];
+        }
+        store.messages[conversationId].push(message);
       }
-      store.messages[conversationId].push(message);
-      return message;
+      if (message.send_state === undefined) {
+        return message;
+      }
+      return deliverMock(message);
+    }
+
+    case 'new_message_id':
+      return generateId();
+
+    case 'retry_message': {
+      const message = findMessage(args.messageId as string);
+      if (!message) {
+        throw new Error('Message not found');
+      }
+      if (message.send_state === undefined) {
+        return message;
+      }
+      return deliverMock(message);
+    }
+
+    case 'discard_unsent_message': {
+      const message = findMessage(args.messageId as string);
+      if (!message || message.send_state === undefined) {
+        return false;
+      }
+      const list = store.messages[message.conversation_id];
+      store.messages[message.conversation_id] = list.filter((m) => m.id !== message.id);
+      return true;
+    }
+
+    case 'flush_outbox': {
+      const report = { delivered: [] as string[], failed: [] as string[] };
+      for (const message of unsentMessages()) {
+        try {
+          deliverMock(message);
+          report.delivered.push(message.id);
+        } catch {
+          report.failed.push(message.id);
+        }
+      }
+      return report;
     }
 
     // `useEditMessage` applies an optimistic cache update and then invalidates,

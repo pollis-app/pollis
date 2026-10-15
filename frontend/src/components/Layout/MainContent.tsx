@@ -823,18 +823,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     });
     setReplyToMessageId(null);
 
-    try {
-      const content = await buildMessageContent(attachments, contentText);
-
-      await sendMessageMutation.mutateAsync({
-        channelId: selectedChannelId || "",
-        conversationId: selectedConversationId || "",
-        content,
-        replyToMessageId: replyToMessageId ?? undefined,
-        optimisticId,
-      });
-    } catch (error) {
-      // Mark the optimistic stub as failed so the user can see it.
+    const patchStub = (patch: Partial<Message>) => {
       queryClient.setQueryData<MessagesQueryData>(queryKey, (old) => {
         if (!old) {
           return { messages: [], nextCursor: null };
@@ -842,10 +831,42 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
         return {
           ...old,
           messages: old.messages.map((m) =>
-            m.id === optimisticId ? { ...m, status: 'failed' as const } : m
+            m.id === optimisticId ? { ...m, ...patch } : m
           ),
         };
       });
+    };
+
+    // The core names the message before anything else (#1335): the row it
+    // stores ahead of any network work carries this id, so a refetch that
+    // reads that row drops the stub instead of showing the message twice.
+    // A failure before `send_message` (no id, a failed upload) never reached
+    // the outbox — the stub is all there is, so it can only be discarded.
+    let messageId: string;
+    let content: string;
+    try {
+      messageId = await invoke<string>("new_message_id");
+      patchStub({ outbox_id: messageId });
+      content = await buildMessageContent(attachments, contentText);
+    } catch (error) {
+      patchStub({ status: 'failed', retryable: false });
+      console.error("Failed to send message:", error);
+      return;
+    }
+
+    try {
+      await sendMessageMutation.mutateAsync({
+        channelId: selectedChannelId || "",
+        conversationId: selectedConversationId || "",
+        content,
+        replyToMessageId: replyToMessageId ?? undefined,
+        optimisticId,
+        messageId,
+      });
+    } catch (error) {
+      // The core kept the message and marked it failed; the stub says so
+      // until the refetch swaps in the stored row, which offers Retry.
+      patchStub({ status: 'failed' });
       console.error("Failed to send message:", error);
     }
   };

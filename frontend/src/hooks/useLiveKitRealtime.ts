@@ -10,7 +10,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useObserver } from 'mobx-react-lite';
 import { appStore } from '../stores/appStore';
 import { useTauriReady } from './useTauriReady';
-import { lastMessageQueryKeys, messageQueryKeys, useDMConversations, markIngested } from './queries/useMessages';
+import { flushOutbox, lastMessageQueryKeys, messageQueryKeys, useDMConversations, markIngested } from './queries/useMessages';
 import { receiptQueryKeys } from './queries/useReceipts';
 import { invalidateVoiceRoom, voiceQueryKeys } from './queries/useVoiceParticipants';
 import { usePreferences } from './queries/usePreferences';
@@ -559,6 +559,9 @@ export function useLiveKitRealtime() {
         // Wipe stale presence for the reconnected room — Rust will re-emit
         // a fresh participant snapshot right after.
         presenceStore.resetRoom(event.room_id);
+        // The link healed, so a send that failed while it was down goes out
+        // now (#1335). Fire-and-forget: the drain refreshes what it settles.
+        void flushOutbox(queryClientRef.current);
         // Catch up on welcomes AND pending commits that may have arrived
         // during the outage. Issue #371 scenario 4: this handler previously
         // only polled welcomes, missing every commit posted to existing

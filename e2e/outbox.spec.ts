@@ -1,0 +1,174 @@
+/*
+ * The durable outbox (#1335): a message the user saw accepted is either
+ * delivered or visibly unsent — never silently gone.
+ *
+ * Runs against the browser build with the Tauri IPC mock, which mirrors the
+ * core's outbox: `send_message` stores the message first (pending) under the id
+ * the renderer named it with, and a failing attempt (`failSends`) leaves it
+ * failed. Covers, in both skins where it is drawn differently:
+ *
+ *   - a message a killed process left unsent is delivered by the launch drain;
+ *   - one that still cannot go is shown failed, with Retry and Discard;
+ *   - a send that fails now is kept, labelled, and Retry delivers it once;
+ *   - Discard removes an unsent message.
+ *
+ *   pnpm --filter @pollis/e2e exec playwright test -c playwright.config.js outbox
+ */
+
+import { test, expect, type Page } from "@playwright/test";
+
+const USER = { id: "u-alice", email: "alice@example.com", username: "alice" };
+const BOB = { id: "u-bob", username: "bob" };
+
+const GROUP_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0GRP";
+const CHANNEL_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0XCB";
+const MSG_BOB = "01HQ7Z3K9M2P5R8T1V4W6Y0BOB";
+const MSG_UNSENT = "01HQ7Z3K9M2P5R8T1V4W6Y0UNS";
+
+const SKINS = ["terminal", "refined"] as const;
+type Skin = (typeof SKINS)[number];
+
+function preloadState(skin: Skin, unsent: "pending" | "failed", failSends: boolean) {
+  return {
+    session: USER,
+    profile: { id: USER.id, username: USER.username },
+    preferences: JSON.stringify({ skin }),
+    failSends,
+    groups: [
+      { id: GROUP_ID, name: "Acme", owner_id: USER.id, created_at: new Date().toISOString() },
+    ],
+    channels: {
+      [GROUP_ID]: [{ id: CHANNEL_ID, group_id: GROUP_ID, name: "general" }],
+    },
+    messages: {
+      [CHANNEL_ID]: [
+        {
+          id: MSG_BOB,
+          conversation_id: CHANNEL_ID,
+          sender_id: BOB.id,
+          sender_username: BOB.username,
+          content: "are you around?",
+          sent_at: "2026-10-14T15:02:00.000Z",
+        },
+        {
+          id: MSG_UNSENT,
+          conversation_id: CHANNEL_ID,
+          sender_id: USER.id,
+          sender_username: USER.username,
+          content: "typed just before the app was killed",
+          sent_at: "2026-10-14T15:04:00.000Z",
+          send_state: unsent,
+        },
+      ],
+    },
+  };
+}
+
+async function boot(page: Page, preload: ReturnType<typeof preloadState>) {
+  await page.addInitScript((state) => {
+    (window as unknown as Record<string, unknown>).__POLLIS_PRELOAD__ = state;
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
+      metadata: {
+        currentWindow: { label: "main" },
+        currentWebview: { windowLabel: "main", label: "main" },
+      },
+      plugins: {},
+      transformCallback: () => 0,
+      convertFileSrc: (path: string) => path,
+      registerListener: () => {},
+      unregisterListener: () => {},
+      runCallback: () => {},
+      invoke: () => Promise.resolve(null),
+    };
+  }, preload);
+  await page.goto("/");
+  await expect(page.getByTestId("sidebar")).toBeVisible();
+}
+
+/** The router uses memory history; reach the channel through a permalink. */
+async function openChannel(page: Page) {
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+KeyK" : "Control+KeyK");
+  await expect(page.getByTestId("search-panel")).toBeVisible();
+  await page.getByTestId("search-panel-input").fill(`pollis://m/${CHANNEL_ID}/${MSG_BOB}`);
+  await expect(page.getByTestId(`message-${MSG_BOB}`)).toBeVisible();
+}
+
+const sendState = (page: Page, id: string) =>
+  page.evaluate(
+    ([channel, msg]) =>
+      (window as any).__tauriMock.messages[channel].find((m: { id: string }) => m.id === msg)
+        ?.send_state ?? null,
+    [CHANNEL_ID, id],
+  );
+
+test("a message a killed process left unsent is delivered by the launch drain", async ({ page }) => {
+  await boot(page, preloadState("refined", "pending", false));
+  await openChannel(page);
+  const row = page.getByTestId(`message-${MSG_UNSENT}`);
+  await expect(row).toContainText("typed just before the app was killed");
+  await expect.poll(() => sendState(page, MSG_UNSENT)).toBeNull();
+  // Delivered: no failure label, nothing to retry.
+  await expect(row).not.toContainText("[failed]");
+  await expect(page.getByTestId(`message-retry-${MSG_UNSENT}`)).toHaveCount(0);
+});
+
+for (const skin of SKINS) {
+  test(`an unsent message that cannot go is failed, and Retry delivers it (${skin})`, async ({ page }) => {
+    await boot(page, preloadState(skin, "pending", true));
+    await openChannel(page);
+    const row = page.getByTestId(`message-${MSG_UNSENT}`);
+    // The launch drain tried and failed: labelled, with its way out.
+    await expect(row).toContainText("[failed]");
+    await expect(page.getByTestId(`message-retry-${MSG_UNSENT}`)).toBeVisible();
+    await expect(page.getByTestId(`message-discard-${MSG_UNSENT}`)).toBeVisible();
+    await page.screenshot({ path: test.info().outputPath(`outbox-failed-${skin}.png`) });
+
+    // Back online: Retry delivers it — the same message, once.
+    await page.evaluate(() => (window as any).__tauriFailSends(false));
+    await page.getByTestId(`message-retry-${MSG_UNSENT}`).click();
+    await expect(row).not.toContainText("[failed]");
+    await expect(page.getByTestId(`message-retry-${MSG_UNSENT}`)).toHaveCount(0);
+    expect(await sendState(page, MSG_UNSENT)).toBeNull();
+    const copies = await page.evaluate(
+      (channel) =>
+        (window as any).__tauriMock.messages[channel].filter(
+          (m: { content?: string }) => m.content === "typed just before the app was killed",
+        ).length,
+      CHANNEL_ID,
+    );
+    expect(copies).toBe(1);
+  });
+}
+
+test("a send that fails now is kept as failed, and Retry sends it", async ({ page }) => {
+  await boot(page, preloadState("refined", "pending", false));
+  await openChannel(page);
+  await page.evaluate(() => (window as any).__tauriFailSends(true));
+
+  await page.getByTestId("message-input").click();
+  await page.keyboard.type("sent while offline");
+  await page.keyboard.press("Enter");
+
+  const retry = page.locator("[data-testid^='message-retry-']");
+  await expect(retry).toHaveCount(1);
+  const failedRow = page.locator("[data-testid^='message-']", { hasText: "sent while offline" }).first();
+  await expect(failedRow).toContainText("[failed]");
+
+  await page.evaluate(() => (window as any).__tauriFailSends(false));
+  await retry.click();
+  await expect(page.locator("[data-testid^='message-retry-']")).toHaveCount(0);
+  await expect(page.getByText("sent while offline")).toHaveCount(1);
+});
+
+test("Discard removes an unsent message", async ({ page }) => {
+  await boot(page, preloadState("terminal", "failed", true));
+  await openChannel(page);
+  await expect(page.getByTestId(`message-${MSG_UNSENT}`)).toBeVisible();
+  await page.getByTestId(`message-discard-${MSG_UNSENT}`).click();
+  await expect(page.getByTestId(`message-${MSG_UNSENT}`)).toHaveCount(0);
+  const left = await page.evaluate(
+    (channel) => (window as any).__tauriMock.messages[channel].map((m: { id: string }) => m.id),
+    CHANNEL_ID,
+  );
+  expect(left).toEqual([MSG_BOB]);
+});
