@@ -24,3 +24,4 @@ export * from "./useReceipts";
 export * from "./useBookmarks";
 export * from "./usePins";
 export * from "./useExport";
+export * from "./useVault";

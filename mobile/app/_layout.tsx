@@ -155,6 +155,8 @@ export default function RootLayout() {
               <Stack.Screen name="chat/thread" />
               {/* Full-screen attachment viewer (#1248): a page, not a modal. */}
               <Stack.Screen name="media" />
+              {/* The Vault (#107/#1316): reached from the top of Direct. */}
+              <Stack.Screen name="vault" />
               <Stack.Screen name="user/[id]" />
               <Stack.Screen name="report" options={settingsPage} />
               {/* Personal settings pages (settingsPage = drillIn since the

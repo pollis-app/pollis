@@ -1,0 +1,245 @@
+appId: com.pollis.mobile
+tags:
+  - parity
+---
+# VAULT (#1316, desktop #107) — the personal encrypted space, end to end
+# against the dev DS on a Release build:
+#   Direct → Vault row → empty state; save two entries; pin; edit; search
+#   filters; the media view (empty, then — best effort — an image entry that
+#   opens the full-screen viewer from the grid); delete asks first, then
+#   removes; leaving and re-opening the screen re-syncs from the DS (the core
+#   replaces its cache with the server's copy), and the entries are still there.
+# Self-contained: a fresh disposable account, no peer.
+#
+# Rows are ONE accessibility node ("<text>, <time>[, Pinned][, (edited)]"),
+# so entries are matched by `.*…*` regexes on that label, and actions are
+# reached through the long-press entry sheet.
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-direct"
+- assertVisible:
+    id: "screen-direct"
+- tapOn:
+    id: "row-vault"
+- assertVisible:
+    id: "screen-vault"
+- extendedWaitUntil:
+    visible:
+      id: "vault-empty"
+    timeout: 15000
+- takeScreenshot: vault-01-empty
+
+# --- Save two entries (each is a DS round trip: seal, POST, then cache) ---
+- tapOn:
+    id: "input-composer"
+- inputText: "vault note from maestro"
+- hideKeyboard
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*vault note from maestro.*"
+    timeout: 20000
+- tapOn:
+    id: "input-composer"
+- inputText: "second entry"
+- hideKeyboard
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*second entry.*"
+    timeout: 20000
+
+# --- Pin the first ---
+- longPressOn: ".*vault note from maestro.*"
+- extendedWaitUntil:
+    visible:
+      id: "btn-vault-pin"
+    timeout: 5000
+- takeScreenshot: vault-02-entry-sheet
+- tapOn:
+    id: "btn-vault-pin"
+- extendedWaitUntil:
+    visible: ".*vault note from maestro, .*Pinned.*"
+    timeout: 20000
+
+# --- Edit it: the caption changes, the pin and its place stay ---
+- longPressOn: ".*vault note from maestro.*"
+- extendedWaitUntil:
+    visible:
+      id: "btn-vault-edit"
+    timeout: 5000
+- tapOn:
+    id: "btn-vault-edit"
+- assertVisible:
+    id: "input-edit-composer"
+- inputText: " edited"
+- hideKeyboard
+- tapOn:
+    id: "btn-edit-save"
+- extendedWaitUntil:
+    visible: ".*vault note from maestro edited, .*Pinned, \\(edited\\).*"
+    timeout: 20000
+- takeScreenshot: vault-03-items
+
+# --- Search filters client-side over the decrypted entries ---
+- tapOn:
+    id: "input-vault-search"
+- inputText: "second"
+- hideKeyboard
+- assertVisible: ".*second entry.*"
+- assertNotVisible: ".*vault note from maestro.*"
+- takeScreenshot: vault-04-search
+- tapOn:
+    id: "input-vault-search"
+- eraseText: 20
+- inputText: "no such thing"
+- hideKeyboard
+- assertVisible:
+    id: "vault-empty"
+- tapOn:
+    id: "input-vault-search"
+- eraseText: 20
+- hideKeyboard
+- assertVisible: ".*vault note from maestro edited.*"
+
+# --- Media view: nothing yet ---
+- tapOn:
+    id: "chip-vault-view-media"
+- assertVisible:
+    id: "vault-media-empty"
+- takeScreenshot: vault-05-media-empty
+- tapOn:
+    id: "chip-vault-view-chat"
+
+# --- Best effort: an image entry, shown in the grid, opens the viewer. The
+# attach step drives the SYSTEM photo picker (seeded by addMedia), exactly as
+# media-viewer.yaml does; if it cannot, this half is skipped, not failed. ---
+- addMedia:
+    - "../fixtures/media-viewer.png"
+- tapOn:
+    id: "btn-attach"
+- waitForAnimationToEnd:
+    timeout: 5000
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - tapOn:
+          text: "Photo, .*"
+          index: 0
+          optional: true
+# Android's photo picker labels each thumbnail "Photo taken on <date>"; the
+# seeded image is the first one in "Recent".
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - tapOn:
+          text: "Photo taken on.*"
+          index: 0
+          optional: true
+- tapOn:
+    text: "(?i)(add|done).*"
+    optional: true
+# A picker that is still up (nothing could be picked) is cancelled, so the
+# rest of the flow runs against the Vault.
+- runFlow:
+    when:
+      notVisible:
+        id: "btn-attach"
+    commands:
+      - tapOn:
+          text: "Cancel"
+          optional: true
+- runFlow:
+    when:
+      notVisible:
+        id: "btn-attach"
+    commands:
+      - back
+- extendedWaitUntil:
+    visible:
+      id: "strip-attachments"
+    timeout: 10000
+    optional: true
+- runFlow:
+    when:
+      visible:
+        id: "strip-attachments"
+    commands:
+      - tapOn:
+          id: "btn-send"
+      - extendedWaitUntil:
+          visible:
+            id: "btn-attachment-.*"
+          timeout: 60000
+      - takeScreenshot: vault-06-image-entry
+      - tapOn:
+          id: "chip-vault-view-media"
+      - extendedWaitUntil:
+          visible:
+            id: "tile-vault-media-.*"
+          timeout: 10000
+      - takeScreenshot: vault-07-media-grid
+      - tapOn:
+          id: "tile-vault-media-.*"
+          index: 0
+      - extendedWaitUntil:
+          visible:
+            id: "screen-media-viewer"
+          timeout: 10000
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - takeScreenshot: vault-08-viewer
+      - tapOn:
+          id: "btn-media-close"
+      - assertVisible:
+          id: "screen-vault"
+      - tapOn:
+          id: "chip-vault-view-chat"
+
+# --- Delete asks first, then removes ---
+- longPressOn: ".*second entry.*"
+- extendedWaitUntil:
+    visible:
+      id: "btn-vault-delete"
+    timeout: 5000
+- tapOn:
+    id: "btn-vault-delete"
+- assertVisible:
+    id: "vault-delete-bar"
+- takeScreenshot: vault-09-delete-confirm
+# Cancel backs out with the entry intact.
+- tapOn:
+    id: "btn-vault-delete-cancel"
+- assertVisible:
+    id: "input-composer"
+- assertVisible: ".*second entry.*"
+- longPressOn: ".*second entry.*"
+- extendedWaitUntil:
+    visible:
+      id: "btn-vault-delete"
+    timeout: 5000
+- tapOn:
+    id: "btn-vault-delete"
+- tapOn:
+    id: "btn-vault-delete-confirm"
+- extendedWaitUntil:
+    notVisible: ".*second entry.*"
+    timeout: 20000
+- assertVisible:
+    id: "input-composer"
+
+# --- Re-open: the list is re-synced from the DS, and what was saved is there ---
+- tapOn:
+    id: "btn-back"
+- assertVisible:
+    id: "screen-direct"
+- tapOn:
+    id: "row-vault"
+- extendedWaitUntil:
+    visible: ".*vault note from maestro edited, .*Pinned, \\(edited\\).*"
+    timeout: 20000
+- assertNotVisible: ".*second entry.*"
+- takeScreenshot: vault-10-reopened

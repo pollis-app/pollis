@@ -148,6 +148,30 @@ async fn a_resave_replaces_the_blob_and_keeps_created_at() {
     );
 }
 
+/// Both apps render "(edited)" when `updated_at != created_at`. A row that was
+/// only ever created must therefore read back with the two EQUAL — the column
+/// default (`datetime('now')`, a different format and clock) used to make
+/// every synced entry look edited (#1316). A rewrite still stamps a new value.
+#[tokio::test]
+async fn an_unedited_entry_reads_back_with_updated_at_equal_to_created_at() {
+    let db = fresh().await;
+    let conn = db.conn().await.unwrap();
+    apply_save_vault_message(&conn, Some("alice"), &save("alice", "v1", CIPHERTEXT, &[]))
+        .await
+        .unwrap();
+    let resp = read_vault(&db, "alice").await;
+    assert_eq!(resp.messages[0].updated_at, resp.messages[0].created_at);
+
+    apply_save_vault_message(&conn, Some("alice"), &save("alice", "v1", &[0x11], &[]))
+        .await
+        .unwrap();
+    let resp = read_vault(&db, "alice").await;
+    assert_ne!(
+        resp.messages[0].updated_at, resp.messages[0].created_at,
+        "a rewrite (edit or pin) is visible as one"
+    );
+}
+
 /// The cross-user overwrite: mallory saves under alice's ULID. The row must
 /// stand untouched and the answer must be Forbidden.
 #[tokio::test]

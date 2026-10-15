@@ -902,6 +902,7 @@ app/
   chat/[id].tsx        conversation (Header + list + composer); chat/thread.tsx
   dm/{new,info,requests}.tsx · conversation/{info,pins}.tsx · user/[id].tsx · report.tsx
   media.tsx            full-screen attachment viewer (#1248): zoom/swipe, video, audio, save/share
+  vault.tsx            the Vault (#1316): chat-with-yourself + media grid, opened from the top of Direct
   self/*               preferences, user-settings, security, blocked, saved, …
 components/
   ui.tsx               primitives: Txt, Screen, Header, IconButton, SectionTitle,
@@ -1037,6 +1038,19 @@ Current state:
   tints it. Saved and `pollis://m/…` links now jump the same way. Maestro:
   `flows/pins.yaml` and, across members, `scripts/maestro-pins.sh` (dev-DS
   peer `pollis-tui/examples/pins_peer.rs`).
+- **Vault (#1316, desktop parity for #107):** `app/vault.tsx`, reached from a row
+  at the top of the Direct tab (desktop puts it first in the DM list) and from the
+  Search tab's page quick-jumps. Same core commands as desktop
+  (`get_vault_messages` / `send_vault_message` / `edit_vault_message` /
+  `set_vault_message_pinned` / `delete_vault_message` — `bridge.rs` already had the
+  arms, so no native change), hooks in `hooks/queries/useVault.ts`, pure rules in
+  `lib/vault.ts` (search over caption + filenames, the media roll, an edit that keeps
+  an entry's files). Long press → entry sheet (pin/unpin, edit, delete); edit
+  reuses the chat's `EditBar`, delete arms `VaultDeleteBar` in place of the
+  composer (desktop's confirm, "on every device, cannot be undone"); the Media chip
+  shows a grid that opens `app/media.tsx` with `source=vault`. Attachments come
+  from the photo library, as in chat — desktop's arbitrary-file drop has no mobile
+  picker yet (no `expo-document-picker`). Maestro: `.maestro/flows/vault.yaml`.
 - **Keystore-at-rest (Android + iOS):** the file-backed keystore (the only
   backend on mobile) envelope-encrypts its contents with an AES-256-GCM master
   key held in the platform secure store — same on-disk blob (`iv(12)||gcm-ct`,

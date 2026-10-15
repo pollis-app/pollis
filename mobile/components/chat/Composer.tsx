@@ -58,6 +58,7 @@ export function Composer({
   onRemoveAttachment,
   canSendEmptyText = false,
   focusRequest = 0,
+  placeholder,
 }: {
   draft: string;
   onChangeDraft: (text: string) => void;
@@ -74,6 +75,8 @@ export function Composer({
   canSendEmptyText?: boolean;
   // Each increase focuses the field (a reply starting, #1270). 0 never does.
   focusRequest?: number;
+  // The field's hint; the chat's own when omitted (the Vault passes its own).
+  placeholder?: string;
 }) {
   const { t } = useTranslation("common");
   const [caret, setCaret] = useState(0);
@@ -333,7 +336,7 @@ export function Composer({
           value={draft}
           onChangeText={handleChangeText}
           onSelectionChange={(e) => setCaret(e.nativeEvent.selection.end)}
-          placeholder={t("composer.placeholder")}
+          placeholder={placeholder ?? t("composer.placeholder")}
           // Return inserts a newline (the Slack/Discord mobile convention,
           // #1247); only the send button sends. The field grows with its
           // lines up to `layout.composerInputMax`, then scrolls inside.

@@ -99,6 +99,7 @@ IOS_DEVICE="iPhone 17 Pro" mobile/scripts/maestro-run.sh auth ios   # an Xcode 2
 | `search` | #1202 desktop parity: a seeded message hit with highlighted snippet + "About N results", sort toggle, corpus footer, opening a hit, settings-page quick-jump, and the "why no results" explanation | no |
 | `security` | device list + blocked-list entry | no |
 | `media-viewer` | #1248 tap an image attachment → full-screen viewer: double-tap zoom, Save to photos with feedback, Share reachable, Close. The attach step drives the SYSTEM photo picker (seeded by `addMedia` from `fixtures/`) best-effort; if it can't, the viewer half is skipped (no `media-viewer-03+` shots), not failed | no |
+| `vault` | #1316 Direct → Vault: empty state, save two entries, pin, edit (pin survives), search filters, media view, a best-effort image entry opening the viewer from the grid, delete asks first (cancel keeps it, confirm removes it), re-open re-syncs from the DS | no |
 | `export` | #856 on-device archive from Security: summary renders, share button reachable, no network offer on an attachment-free account | no |
 | `ipad-two-pane` | #622 list+detail side-by-side (run on **iPad**) | no |
 | `dms` | start a DM with the seeded peer (initiator side) | yes |

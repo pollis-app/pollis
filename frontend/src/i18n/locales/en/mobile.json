@@ -495,5 +495,11 @@
     "title": "User",
     "unblockUser": "Unblock user",
     "verified": "◆ Verified"
+  },
+  "vault": {
+    "rowSub": "Private notes and files, just for you",
+    "sheetTitle": "Vault entry",
+    "loadFailed": "Couldn't load your vault.",
+    "saveFailed": "Couldn't save to your vault. Your draft is back in the composer."
   }
 }

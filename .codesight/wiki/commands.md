@@ -447,7 +447,9 @@ the remote is the source of truth (sync replaces the cache).
 
 - `get_vault_messages(user_id)` → `VaultMessage[]` — oldest first (chat order). Pulls
   and replaces the local cache when the DS is reachable; serves the last synced state
-  when not. An entry this build cannot decrypt is hidden, never deleted.
+  when not. An entry this build cannot decrypt is hidden, never deleted. A row the
+  DS has only ever inserted carries `updated_at == created_at`; a rewrite (edit or
+  pin) stamps the server clock, which is what both UIs' "(edited)" keys on.
 - `send_vault_message(user_id, content)` → `VaultMessage`
 - `edit_vault_message(id, new_content, user_id)` → `VaultMessage` — keeps `pinned` and
   `created_at`.
@@ -456,6 +458,19 @@ the remote is the source of truth (sync replaces the cache).
   entry's attachment references.
 - `search_vault_messages(query, user_id)` → `VaultMessage[]` — case-insensitive
   substring over the local cache; the server cannot search what it cannot read.
+
+Both apps use the same commands (mobile through the `bridge.rs` arms, #1316). Desktop
+is `frontend/src/pages/Vault.tsx` (sidebar row at the top of the DM list, Cmd+K
+"Vault"); mobile is `mobile/app/vault.tsx` (a row at the top of the Direct tab, and a
+Search-tab quick-jump), with `mobile/hooks/queries/useVault.ts` and the pure rules in
+`mobile/lib/vault.ts` (`tests/vault.test.ts`). Neither UI calls
+`search_vault_messages`: both filter the loaded entries client-side on the caption
+and attachment filenames. An edit of an entry with files rebuilds the same `_att`
+envelope around the new caption, so files survive a text edit. Mobile reaches pin /
+edit / delete through a long-press sheet, edit and delete replace the composer as on
+desktop, and the media view's grid opens the shared full-screen viewer
+(`app/media.tsx`, `source=vault`). Mobile attaches photos from the library only (the
+chat composer's picker); desktop takes any file. Maestro: `mobile/.maestro/flows/vault.yaml`.
 
 ## mls (`commands/mls/`)
 Only three MLS commands are registered (`src-tauri/src/commands/mls.rs`):

@@ -14,6 +14,7 @@ import {
 } from "../../components/ui";
 import { ConversationRow } from "../../components/direct/ConversationRow";
 import { RequestsRow } from "../../components/direct/RequestsRow";
+import { VaultRow } from "../../components/direct/VaultRow";
 import { conversationTime } from "../../components/direct/conversationTime";
 import { Icon } from "../../components/icons";
 import { semantic, space } from "../../theme/tokens";
@@ -126,6 +127,16 @@ function Direct() {
         </View>
       ) : null}
       <Body contentContainerStyle={{ paddingHorizontal: space.sm, gap: 2 }}>
+        {/* The Vault (#1316) — a chat with yourself heads the list, as on
+            desktop. Hidden while a search filters the conversations. */}
+        {!needle ? (
+          <>
+            <VaultRow onPress={() => router.push("/vault")} />
+            <Divider
+              style={{ marginVertical: space.sm, marginHorizontal: space.sm }}
+            />
+          </>
+        ) : null}
         {requests.length > 0 ? (
           <>
             <RequestsRow

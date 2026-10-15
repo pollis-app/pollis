@@ -24,8 +24,10 @@ import {
   flattenPages,
   useMessages,
   useThreadMessages,
+  useVaultMessages,
   type ConversationKind,
 } from "../hooks/queries";
+import { vaultViewerMessages } from "../lib/vault";
 import {
   mediaCacheGeneration,
   releaseNamedMediaUri,
@@ -61,7 +63,10 @@ export default function MediaViewerScreen() {
     kind?: string;
     attachmentId?: string;
     threadId?: string;
+    // "vault": walk the Vault's entries (#1316) instead of a conversation.
+    source?: string;
   }>();
+  const fromVault = params.source === "vault";
   const conversationId = params.conversationId ?? null;
   const kind: ConversationKind | null =
     params.kind === "channel" || params.kind === "dm" ? params.kind : null;
@@ -71,7 +76,11 @@ export default function MediaViewerScreen() {
   // The same caches the chat and thread screens fill — no new reads.
   const { data: conversationData } = useMessages(conversationId, kind);
   const { data: replies } = useThreadMessages(threadId);
+  const { data: vaultEntries } = useVaultMessages(fromVault);
   const messages = useMemo(() => {
+    if (fromVault) {
+      return vaultViewerMessages(vaultEntries ?? []);
+    }
     const conversation = flattenPages(conversationData);
     if (!threadId) {
       return conversation;
@@ -80,7 +89,7 @@ export default function MediaViewerScreen() {
     // out of the main timeline).
     const root = conversation.find((m) => m.id === threadId);
     return [...(root ? [root] : []), ...(replies ?? [])];
-  }, [conversationData, replies, threadId]);
+  }, [conversationData, replies, threadId, fromVault, vaultEntries]);
 
   // Both ids follow a pending → confirmed swap (`currentAttachmentId`): the
   // viewer may open on a just-sent attachment before its send settles. The

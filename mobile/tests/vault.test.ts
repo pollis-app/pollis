@@ -1,0 +1,128 @@
+// The Vault's pure rules (#1316) — each a port of the same rule in desktop's
+// frontend/src/pages/Vault.tsx, pinned so the two apps cannot drift.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+
+import {
+  editedVaultContent,
+  filterVaultEntries,
+  isVaultEntryEdited,
+  vaultAttachments,
+  vaultViewerMessages,
+  type VaultMessage,
+} from "../lib/vault.ts";
+import { parseContent } from "../lib/messageContent.ts";
+
+const src = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), "utf8");
+
+const T0 = "2026-10-01T09:00:00.000Z";
+const T1 = "2026-10-02T09:00:00.000Z";
+
+function entry(id: string, content: string, extra: Partial<VaultMessage> = {}): VaultMessage {
+  return { id, content, pinned: false, created_at: T0, updated_at: T0, ...extra };
+}
+
+function envelope(files: { key: string; name: string; ct: string }[], txt?: string): string {
+  return JSON.stringify({
+    _att: files.map((f) => ({ key: f.key, url: "", name: f.name, ct: f.ct, size: 10, hash: `h-${f.key}` })),
+    ...(txt ? { _txt: txt } : {}),
+  });
+}
+
+test("search matches the caption and filenames, case-insensitively, and keeps order", () => {
+  const entries = [
+    entry("a", "Passport number is in the safe"),
+    entry("b", envelope([{ key: "media/1", name: "Tax-Return.pdf", ct: "application/pdf" }])),
+    entry("c", envelope([{ key: "media/2", name: "dog.jpg", ct: "image/jpeg" }], "the PASSPORT photo")),
+  ];
+  assert.deepEqual(filterVaultEntries(entries, "passport").map((e) => e.id), ["a", "c"]);
+  assert.deepEqual(filterVaultEntries(entries, "  tax-return ").map((e) => e.id), ["b"]);
+  assert.deepEqual(filterVaultEntries(entries, "nothing like it"), []);
+});
+
+test("a blank search keeps every entry", () => {
+  const entries = [entry("a", "one"), entry("b", "two")];
+  assert.deepEqual(filterVaultEntries(entries, "   ").map((e) => e.id), ["a", "b"]);
+});
+
+test("the media view lists every attachment newest entry first, each object once", () => {
+  const entries = [
+    entry("old", envelope([{ key: "media/x", name: "x.png", ct: "image/png" }])),
+    entry("mid", "text only"),
+    entry("new", envelope([
+      { key: "media/y", name: "y.png", ct: "image/png" },
+      { key: "media/x", name: "x-again.png", ct: "image/png" },
+    ])),
+  ];
+  assert.deepEqual(vaultAttachments(entries).map((a) => a.id), ["media/y", "media/x"]);
+});
+
+test("a text edit of a text-only entry saves the trimmed text, and an empty one saves nothing", () => {
+  assert.equal(editedVaultContent("old", "  new words \n"), "new words");
+  assert.equal(editedVaultContent("old", "   "), null);
+});
+
+test("a text edit keeps an entry's files, rebuilding desktop's envelope", () => {
+  const original = JSON.stringify({
+    _att: [{ key: "media/1", url: "https://x", name: "a.png", ct: "image/png", size: 42, hash: "abc", bh: "LKO2", w: 4, h: 3 }],
+    _txt: "caption",
+  });
+  const edited = editedVaultContent(original, " new caption ");
+  assert.ok(edited);
+  assert.deepEqual(JSON.parse(edited), {
+    _att: [{ key: "media/1", url: "", name: "a.png", ct: "image/png", size: 42, hash: "abc", bh: "LKO2", w: 4, h: 3 }],
+    _txt: "new caption",
+  });
+  // The rebuilt envelope reads back as the same files.
+  assert.deepEqual(
+    parseContent(edited).attachments.map((a) => [a.object_key, a.content_hash, a.filename]),
+    [["media/1", "abc", "a.png"]],
+  );
+});
+
+test("clearing the caption of an entry with files keeps the files and drops _txt", () => {
+  const original = envelope([{ key: "media/1", name: "a.png", ct: "image/png" }], "caption");
+  const edited = editedVaultContent(original, "");
+  assert.ok(edited);
+  const parsed = JSON.parse(edited);
+  assert.equal(parsed._att.length, 1);
+  assert.equal("_txt" in parsed, false);
+});
+
+test("an entry is edited once it was rewritten (pinning counts, as on desktop)", () => {
+  assert.equal(isVaultEntryEdited(entry("a", "x")), false);
+  assert.equal(isVaultEntryEdited(entry("a", "x", { updated_at: T1 })), true);
+});
+
+test("the viewer walks vault entries by creation time", () => {
+  const messages = vaultViewerMessages([
+    entry("a", envelope([{ key: "media/1", name: "a.png", ct: "image/png" }]), { created_at: T1 }),
+    entry("b", "no files"),
+  ]);
+  assert.deepEqual(
+    messages.map((m) => [m.id, m.created_at, m.attachments.map((a) => a.id)]),
+    [
+      ["a", new Date(T1).getTime(), ["media/1"]],
+      ["b", new Date(T0).getTime(), []],
+    ],
+  );
+});
+
+test("the screen is reachable from Direct and from Search, and registered on the root stack", () => {
+  assert.match(src("app/(tabs)/direct.tsx"), /<VaultRow onPress=\{\(\) => router\.push\("\/vault"\)\}/);
+  assert.match(src("app/(tabs)/search.tsx"), /to: "\/vault" as const/);
+  assert.match(src("app/_layout.tsx"), /<Stack\.Screen name="vault" \/>/);
+});
+
+test("the media viewer reads the vault only when opened from it", () => {
+  const viewer = src("app/media.tsx");
+  assert.match(viewer, /useVaultMessages\(fromVault\)/);
+  assert.match(viewer, /params\.source === "vault"/);
+});
+
+test("delete asks first: the sheet arms the bar, with the confirm haptic", () => {
+  const screen = src("app/vault.tsx");
+  assert.match(screen, /haptic\("confirmArm"\);\s*setPendingDeleteId\(entry\.id\)/);
+  assert.match(screen, /<VaultDeleteBar/);
+});

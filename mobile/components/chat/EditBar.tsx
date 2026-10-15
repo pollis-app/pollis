@@ -15,15 +15,19 @@ export function EditBar({
   onCancel,
   onSave,
   savePending,
+  canSaveEmpty = false,
 }: {
   draft: string;
   onChangeDraft: (text: string) => void;
   onCancel: () => void;
   onSave: () => void;
   savePending: boolean;
+  // True when an empty draft is still a valid edit (a Vault entry with files
+  // keeps them and drops its caption).
+  canSaveEmpty?: boolean;
 }) {
   const { t } = useTranslation("chat");
-  const saveDisabled = !draft.trim() || savePending;
+  const saveDisabled = (!draft.trim() && !canSaveEmpty) || savePending;
   return (
     <View
       style={{
