@@ -104,6 +104,8 @@ pub enum Action {
     DeleteMessage(String),
     /// Open the thread rooted at this message in the message pane.
     OpenThread(String),
+    /// Deliver one unsent message again (#1335), under the same id.
+    RetryMessage(String),
 
     // ── M4b: multi-device enrollment / recovery ──────────────────────────────
     /// New device: kick off a sibling-approval enrollment request.
@@ -670,6 +672,8 @@ impl App {
             KeyCode::Char('x') | KeyCode::Delete => self.begin_delete(),
             KeyCode::Char('+') => self.begin_react(),
             KeyCode::Char('t') => self.begin_open_thread(),
+            // `R`: retry a message the outbox could not deliver (#1335).
+            KeyCode::Char('R') => self.begin_retry(),
             // `E` opens the pending device-enrollments list (approve/reject a
             // second device requesting to join this account).
             KeyCode::Char('E') => {
@@ -925,6 +929,31 @@ impl App {
             preview,
         };
         None
+    }
+
+    /// `R`: send the selected message again, if the outbox could not deliver
+    /// it (#1335). A message that went out has nothing to retry.
+    fn begin_retry(&mut self) -> Option<Action> {
+        let picked = self
+            .home
+            .open
+            .as_ref()
+            .and_then(|o| o.selected_message())
+            .map(|m| (m.id.clone(), m.send_state.is_some()));
+        match picked {
+            None => {
+                self.selected_message_or_hint();
+                None
+            }
+            Some((_, false)) => {
+                self.status = Some("That message was sent — nothing to retry.".to_string());
+                None
+            }
+            Some((id, true)) => {
+                self.status = Some("Sending again…".to_string());
+                Some(Action::RetryMessage(id))
+            }
+        }
     }
 
     /// `+`: react to the selected message (emoji or `:shortcode:` prompt).
@@ -1285,6 +1314,7 @@ impl App {
             Action::SubmitPrompt => return self.do_submit_prompt().await,
             Action::DeleteMessage(id) => self.do_delete(&id).await,
             Action::OpenThread(id) => self.do_open_thread(&id).await,
+            Action::RetryMessage(id) => self.do_retry(&id).await,
             Action::RequestEnrollment => self.do_request_enrollment().await,
             Action::PollEnrollment(request_id) => return self.do_poll_enrollment(&request_id).await,
             Action::Recover => self.do_recover().await,
@@ -1497,7 +1527,38 @@ impl App {
     }
 
     /// Delete one of the user's own messages, then re-read so it disappears.
+    /// Retry one unsent message and report how it went; the refresh shows the
+    /// row settled, or still marked not sent.
+    async fn do_retry(&mut self, message_id: &str) {
+        self.status = Some(match send::retry(&self.state, message_id).await {
+            Ok(()) => "Sent.".to_string(),
+            Err(e) => format!("Still not sent: {e}"),
+        });
+        self.refresh_open().await;
+    }
+
     async fn do_delete(&mut self, message_id: &str) {
+        // A message the outbox still holds is discarded, not deleted (#1335):
+        // the core withdraws it from everyone first if it may have landed.
+        let unsent = self
+            .home
+            .open
+            .as_ref()
+            .and_then(|o| o.selected_message())
+            .is_some_and(|m| m.id == message_id && m.send_state.is_some());
+        if unsent {
+            match send::discard(&self.state, message_id).await {
+                Ok(_) => {
+                    self.status = Some("Discarded.".to_string());
+                    if let Some(open) = self.home.open.as_mut() {
+                        open.selected = None;
+                    }
+                    self.refresh_open().await;
+                }
+                Err(e) => self.status = Some(format!("Discard failed: {e}")),
+            }
+            return;
+        }
         let user_id = self.user_id();
         match send::delete(&self.state, message_id, &user_id).await {
             Ok(()) => {

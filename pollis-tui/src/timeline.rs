@@ -316,6 +316,17 @@ fn message_block(m: &ChannelMessage, ctx: &Context<'_>, width: usize) -> Block {
     finish(m, ctx, lines, width)
 }
 
+/// What a message the durable outbox could not deliver says under itself
+/// (#1335) — the apps' "failed" label with their Retry / Discard, as keys. A
+/// `pending` one is drawn like a sent one, as in the apps; `rejected` (no
+/// retry can fix it, so the outbox stopped trying) reads the same as `failed`.
+pub const UNSENT_MARK: &str = "✗ not sent — R retry · x discard";
+
+/// Whether `m` is one of ours the outbox failed to deliver.
+pub fn is_unsent_failure(m: &ChannelMessage) -> bool {
+    matches!(m.send_state.as_deref(), Some("failed") | Some("rejected"))
+}
+
 /// Reactions + thread count + selection highlight — the tail every message
 /// block gets, deleted or not.
 fn finish(
@@ -324,6 +335,16 @@ fn finish(
     mut lines: Vec<Line<'static>>,
     width: usize,
 ) -> Block {
+    if is_unsent_failure(m) {
+        lines.extend(wrap(
+            vec![
+                (" ".repeat(INDENT), Style::default()),
+                (UNSENT_MARK.to_string(), Style::default().fg(Color::Red)),
+            ],
+            width,
+            INDENT,
+        ));
+    }
     if let Some(reactions) = ctx.reactions.get(&m.id) {
         let mut segments = vec![(" ".repeat(INDENT), Style::default())];
         for (n, r) in reactions.iter().filter(|r| r.count > 0).enumerate() {
@@ -702,6 +723,30 @@ mod tests {
             "{lines:?}"
         );
         assert!(lines[3].contains("↪ 3 replies"), "{lines:?}");
+    }
+
+    /// A message the outbox failed to deliver says so, with its keys; one
+    /// still on its way (pending) and a delivered one do not (#1335).
+    #[test]
+    fn an_unsent_failure_is_marked_with_its_keys() {
+        let f = Fixture::new();
+        let mut failed = msg("1", "alice", "offline");
+        failed.send_state = Some("failed".into());
+        let mut rejected = msg("2", "alice", "not a member");
+        rejected.send_state = Some("rejected".into());
+        let mut pending = msg("3", "alice", "on its way");
+        pending.send_state = Some("pending".into());
+        let sent = msg("4", "alice", "delivered");
+        let lines = all_text(&f.layout(&[&failed, &rejected, &pending, &sent], None, 80));
+        let marks = lines.iter().filter(|l| l.contains(UNSENT_MARK)).count();
+        assert_eq!(marks, 2, "{lines:?}");
+        let after = |text: &str| {
+            let at = lines.iter().position(|l| l.contains(text)).expect(text);
+            lines.get(at + 1).cloned().unwrap_or_default()
+        };
+        assert!(after("offline").contains(UNSENT_MARK), "{lines:?}");
+        assert!(after("not a member").contains(UNSENT_MARK), "{lines:?}");
+        assert!(!after("on its way").contains(UNSENT_MARK), "{lines:?}");
     }
 
     #[test]

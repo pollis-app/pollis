@@ -752,10 +752,10 @@ pub fn home_help(home: &HomeState) -> &'static str {
             "↑/↓ move · Enter open · Tab messages · d DM · g group · c channel · v invite · a accept · E devices · q quit"
         }
         (HomeMode::Navigate, Focus::Messages) if in_thread => {
-            "↑/↓ select · r reply · e edit · x delete · + react · i reply in thread · Esc close thread · q quit"
+            "↑/↓ select · r reply · e edit · x delete · + react · R retry · i reply in thread · Esc close thread · q quit"
         }
         (HomeMode::Navigate, Focus::Messages) => {
-            "↑/↓ select · r reply · e edit · x delete · + react · t thread · i write · Esc back · Tab conversations · q quit"
+            "↑/↓ select · r reply · e edit · x delete · + react · R retry · t thread · i write · Esc back · Tab conversations · q quit"
         }
         (HomeMode::Compose, _) => "Enter send · Alt-Enter new line · Esc cancel",
         (HomeMode::Prompt(_), _) => "Enter submit · Esc cancel",
@@ -789,7 +789,7 @@ mod tests {
         assert!(home_help(&home).contains("Enter open"));
         assert!(home_help(&home).contains("d DM"));
         home.focus = Focus::Messages;
-        for key in ["r reply", "e edit", "x delete", "+ react", "t thread"] {
+        for key in ["r reply", "e edit", "x delete", "+ react", "R retry", "t thread"] {
             assert!(home_help(&home).contains(key), "{key}: {}", home_help(&home));
         }
         home.open = Some(OpenConversation {
