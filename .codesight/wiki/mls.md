@@ -696,7 +696,46 @@ Both peers compute the same 32-byte key because both hold the same exporter secr
 2. For a TEXT message, pad the plaintext to a size bucket (`messages::framing::pad`) so the ciphertext length no longer leaks the message length (metadata minimization, issue #331 v2, `docs/metadata-minimization-design.md` §4.1). Attachment envelopes are left unpadded. Then `try_mls_encrypt(local_db, group_id, plaintext)` → MLS ciphertext
    - **Threads (#825):** a reply into a thread uses `messages::framing::pad_threaded`, which appends a `0xF7` trailer carrying the thread root's ULID **after** the plaintext, inside the same `0xF5` frame. `thread_id` therefore never reaches the DS or Turso — the server has no notion of a thread and cannot paginate one. A threaded send always takes the padded frame, attachment envelope or not, because the trailer has nowhere else to live; an unthreaded send is byte-for-byte what it was before threads.
    - The trailer sits after the plaintext, and the header + length prefix are untouched, **so a client that predates threads reads the same length prefix and recovers exactly the same plaintext**. A thread reply degrades to an ordinary channel message on an old client rather than to mojibake — which a new marker byte would have caused, since `strip` returns unrecognised frames verbatim.
-3. Store ciphertext in `message_envelope` (remote) and `message` (local)
+3. Store ciphertext in `message_envelope` (remote) and `message` (local) — the
+   local row was written BEFORE step 1, as the outbox entry (below), so this
+   step fills its ciphertext and clears its `send_state`
+
+### The durable outbox (#1335)
+
+A send used to write its local row only after the slow part — resolve, catch-up,
+seal — and post after that. The first send in a fresh group can take a minute
+while the renderer already shows the message as sent, so a process killed in
+that window lost it with no trace: no row, nothing unsent, nothing to retry.
+
+Now `send_message` writes the local `message` row first, `send_state =
+'pending'` with an empty ciphertext, under the id the renderer named it with
+(`new_message_id`), and only then delivers (`messages/outbox.rs` →
+`send::deliver_queued`). The row IS the outbox, so every read path — pages,
+previews, threads, search — shows the message across restarts with no second
+copy to keep in step. A confirmed DS post clears the state; any failed attempt
+sets `'failed'` (the renderers show Retry / Discard). An unsent row cannot be
+edited (there is no envelope to target); deleting it discards it locally.
+
+**Drained, event-driven.** `unlock` (every cold start) spawns `flush_outbox`;
+the renderers call it after launch, on a realtime reconnect, on the browser
+`online` event (desktop) and on resume (mobile). It delivers oldest first. No
+timer.
+
+**Idempotent.** A retry reuses the message id — the envelope id. One attempt
+per message runs at a time (`AppState::outbox_locks`), and an attempt re-reads
+the row once it holds the lock, so a drain behind an in-flight send finds it
+settled. If an earlier attempt's envelope DID land (the process died before
+recording it), the DS answers the re-post as a replay —
+`pollis_delivery::messages::send_envelope_once`: 200, nothing stored, no second
+push, checked before the epoch gate so its clean-up can never delete the
+delivered row. Before this the re-post hit the `message_envelope.id` primary key
+(a 500) and would have marked a delivered message failed forever. A recipient
+that somehow fetches the id twice keeps its one row (`loss::has_real_row`).
+
+**Not covered:** the attachment UPLOAD before `send_message` — desktop's
+in-memory staged bytes cannot outlive the process by design (#1000, no
+plaintext temp files). A failed upload is labelled with Discard only (nothing
+was stored to retry); a kill during the upload loses that send, as before.
 
 **Receive** (`get_channel_messages` / `get_dm_messages`):
 1. Poll welcomes

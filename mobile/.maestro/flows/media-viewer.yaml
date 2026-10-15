@@ -83,8 +83,10 @@ tags:
     timeout: 60000
 - takeScreenshot: media-viewer-03-sent
 # The thumbnail above is the optimistic row; the send itself (the first MLS
-# send in a fresh group) can take a minute. Restarting before it lands kills
-# the send, and the channel comes back empty. Wait for the stub to be replaced.
+# send in a fresh group) can take a minute. Restarting before it lands used to
+# lose it outright; since #1335 the outbox re-sends it after the unlock
+# (`flows/outbox.yaml` proves that), but this flow asserts on the R2 copy right
+# after the restart, so it still waits for the stub to be replaced.
 - extendedWaitUntil:
     notVisible:
       id: "row-message-pending-.*"

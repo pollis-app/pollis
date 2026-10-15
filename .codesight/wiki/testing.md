@@ -493,6 +493,27 @@ uses the same hook against the dev DS for the Maestro flow
 (`mobile/scripts/maestro-lost-message.sh`). Desktop rendering in both skins is
 `e2e/lost-messages.spec.ts`.
 
+## Killing a send part-way (#1335)
+
+`test_hooks::crash_next_send(Crash::AfterEnqueue | Crash::AfterPost)` (only in a
+`test-harness` build) ends the next send at that point WITHOUT marking anything
+— exactly what a dead process leaves behind: after the outbox row is written but
+before any network work, or after the DS took the envelope but before this
+device recorded it. `flows/outbox.rs` uses it with `lock` + `unlock` as the
+restart to prove a message the user saw accepted is delivered after the next
+unlock (a thread reply included), that a re-post after a landed envelope is
+answered as a replay and arrives exactly once, and that a failed send is kept as
+`failed` until Retry delivers it or Discard removes it. Unit coverage:
+`commands::messages::outbox::tests` (the row is stored before anything else,
+idempotent per id, never demoted once delivered, drained oldest first),
+`db::local::tests::send_state_admits_only_unsent_real_messages` /
+`eviction_spares_unsent_messages`, and the DS's
+`epoch_gate_tests::a_replayed_envelope_is_success_and_stores_nothing_new`. The
+renderer halves are `frontend/tests/pending-messages.test.ts` and
+`mobile/tests/pending-messages.test.ts`; the UI is `e2e/outbox.spec.ts` (desktop)
+and `mobile/.maestro/flows/outbox.yaml` (mobile: a real `stopApp` mid-send, and
+on Android an airplane-mode send that fails and is retried).
+
 ## The `DsFault` seam — injecting DS-side faults
 
 `/v1/commits` is the ONE path the harness serves itself, mounted on an outer

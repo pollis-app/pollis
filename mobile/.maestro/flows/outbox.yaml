@@ -1,0 +1,124 @@
+appId: com.pollis.mobile
+tags:
+  - parity
+---
+# OUTBOX (#1335) — a message the user saw accepted is either delivered or
+# visibly unsent, never silently gone.
+#
+# Part 1 (both platforms) is the ticket's scenario: the app is killed while a
+# send is still in flight — the first send in a fresh group can take a minute,
+# so stopping the app right after Send lands inside that window. The core
+# stored the message before any network work, so after the relaunch + unlock
+# it is still in the conversation and the outbox delivers it: it must end up
+# on screen, settled (no Retry), not vanish.
+#
+# Part 2 (Android only — Maestro can switch airplane mode only there) is the
+# failed state: a send made offline is kept and labelled with Retry / Discard;
+# back online, Retry delivers it.
+#
+# Self-contained, like messaging.yaml: creates its own group.
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-groups"
+- assertVisible:
+    id: "screen-groups"
+- tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Outbox Group"
+- tapOn:
+    id: "btn-submit-group"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "E2E Outbox Group, .*"
+    timeout: 15000
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"
+
+# ── Part 1: killed mid-send ─────────────────────────────────────────────────
+# Send with the keyboard up (see messaging.yaml, #1194), then kill the app
+# before the first send in this fresh group can have finished.
+- tapOn:
+    id: "input-composer"
+- inputText: "sent then killed"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*sent then killed.*"
+    timeout: 10000
+- stopApp
+- launchApp
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 30000
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    text: "E2E Outbox Group.*"
+    index: 0
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"
+# Still there after the kill — the outbox kept it.
+- extendedWaitUntil:
+    visible: ".*sent then killed.*"
+    timeout: 15000
+# And delivered by the drain after unlock: no failure, no Retry. The first send
+# in a fresh group may still be paying for MLS setup, hence the long wait.
+- extendedWaitUntil:
+    notVisible:
+      id: "btn-retry-message-.*"
+    timeout: 120000
+- takeScreenshot: outbox-01-delivered-after-kill
+
+# ── Part 2: offline send → failed → Retry (Android) ─────────────────────────
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - setAirplaneMode: enabled
+      - tapOn:
+          id: "input-composer"
+      - inputText: "sent while offline"
+      - tapOn:
+          id: "btn-send"
+      # Kept and labelled, with its way out.
+      - extendedWaitUntil:
+          visible:
+            id: "btn-retry-message-.*"
+          timeout: 60000
+      - assertVisible:
+          id: "btn-discard-message-.*"
+      - assertVisible: ".*sent while offline.*"
+      - takeScreenshot: outbox-02-failed-offline
+      - setAirplaneMode: disabled
+      # The reconnect may drain it before the tap; either way it must settle.
+      - tapOn:
+          id: "btn-retry-message-.*"
+          optional: true
+      - extendedWaitUntil:
+          notVisible:
+            id: "btn-retry-message-.*"
+          timeout: 60000
+      - assertVisible: ".*sent while offline.*"
+      - takeScreenshot: outbox-03-retried

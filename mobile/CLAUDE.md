@@ -1099,6 +1099,20 @@ Current state:
   confirmed row if a refetch lost it — then refetches once the row is stored
   (`hooks/queries/pendingMessages.ts`; the same for thread replies). Without
   this a just-sent message blinked out to "No messages yet".
+- **Durable outbox (#1335):** the core stores every outgoing message
+  (`send_state: "pending"`) BEFORE any network work, under an id the send asks
+  for first (`new_message_id`) and tags its stub with (`outboxId`), so a
+  refetch that reads the stored row drops the stub instead of doubling it. A
+  send the OS killed mid-flight is still there after relaunch and is delivered
+  by the drain: core spawns it after `unlock`, and `useInboxRealtime` calls
+  `flush_outbox` on sign-in, on resume and on a LiveKit `Reconnected` — never
+  on a timer. A failed send is a stored `failed` row: `MessageRow` shows
+  Retry / Discard (`components/chat/UnsentActions.tsx`, `btn-retry-message-<id>`
+  / `btn-discard-message-<id>`; `useRetryMessage` / `useDiscardUnsent`). A send
+  whose attachment upload failed never reached the core: Discard only. Pure
+  rules + tests: `pendingMessages.ts`, `tests/pending-messages.test.ts`;
+  device tier: `.maestro/flows/outbox.yaml`. A core change, so phones get it
+  with the next store build.
 - **Push (client wired):** `lib/push/` + `usePushNotifications` — contextual
   permission (asked on first conversation open, not at login), token registration
   (`register_push_token`, best-effort), content-free tap/data handlers, and a
