@@ -880,13 +880,24 @@ pub async fn send_envelope(
 /// is still a replay, and `apply_at_head`'s post-check deletes the row `id`
 /// names when the head moved — which, for a replay, would be the already
 /// delivered envelope.
+///
+/// **One post per envelope id at a time.** The epoch gate is insert-then-verify:
+/// a post's row is visible before its post-check, and the post-check may still
+/// delete it. A retry that looked in that window would find the row, answer
+/// "replay, delivered" — and then lose it to the first post's clean-up, whose
+/// own client has already given up. So every post of an id holds that id's
+/// lock across the replay check AND the whole gated write: a retry waits for
+/// the first post to settle and then sees either the surviving row (a real
+/// replay) or no row (and writes its own). The DS runs as one instance, so a
+/// process-local lock covers every post; after a restart nothing is mid-write.
 pub async fn send_envelope_once(
     main: &Connection,
     log: &Connection,
     authed: Option<&str>,
     body: &SendMessageBody,
 ) -> anyhow::Result<(WriteOutcome, bool)> {
-    if let Some(replay) = replayed_send(main, authed, body).await? {
+    let _one_at_a_time = EnvelopeIdLock::acquire(&body.id).await;
+    if let Some(replay) = replayed_send(main, body).await? {
         return Ok((replay, true));
     }
     let outcome = apply_at_head(
@@ -901,35 +912,95 @@ pub async fn send_envelope_once(
     Ok((outcome, false))
 }
 
-/// `Some(outcome)` when `body.id` is already a stored envelope: `Ok` for the
-/// same message in the same conversation (a replay), `Invalid` for an id some
-/// other envelope holds, `Forbidden` for a caller who could not send here
-/// anyway (checked first, so a non-member learns nothing about which ids
-/// exist). `None` for a new envelope.
+/// `Some(outcome)` when `body.id` is already a stored envelope, `None` for a
+/// new one.
+///
+/// A replay is answered `Ok` only when it is provably the SAME message from the
+/// SAME author: the stored row is a `message` in this conversation and its
+/// deletion-capability hash equals the one this body carries. That hash is an
+/// HMAC of the id under a key only the author's devices hold (#1086), so it is
+/// identical on every retry and impossible for anyone else to produce — which
+/// is what lets a replay be answered without consulting CURRENT membership: a
+/// sender removed after a delivered-but-unrecorded post was a member when it
+/// landed, and their retry must settle rather than fail forever.
+///
+/// Anything else — another conversation's id, a non-message envelope, a hash
+/// that does not match, a row with no hash — is answered `Forbidden`, the same
+/// answer a non-member gets, so the response reveals neither that the id
+/// exists nor where.
 async fn replayed_send(
     main: &Connection,
-    authed: Option<&str>,
     body: &SendMessageBody,
 ) -> anyhow::Result<Option<WriteOutcome>> {
+    use subtle::ConstantTimeEq;
     let mut rows = main
         .query(
-            "SELECT conversation_id, type FROM message_envelope WHERE id = ?1 LIMIT 1",
+            "SELECT conversation_id, type, delete_token_hash FROM message_envelope \
+             WHERE id = ?1 LIMIT 1",
             libsql::params![body.id.clone()],
         )
         .await?;
     let Some(row) = rows.next().await? else {
         return Ok(None);
     };
-    let (conversation_id, kind): (String, String) = (row.get(0)?, row.get(1)?);
-    if let Some(user) = authed {
-        if !is_member(main, &body.conversation_id, user).await? {
-            return Ok(Some(WriteOutcome::Forbidden));
+    let conversation_id: String = row.get(0)?;
+    let kind: String = row.get(1)?;
+    let stored_hash: Option<String> = row.get(2)?;
+    let same_author = match (stored_hash.as_deref(), body.delete_token_hash.as_deref()) {
+        (Some(stored), Some(sent)) if !stored.is_empty() => {
+            bool::from(stored.as_bytes().ct_eq(sent.as_bytes()))
+        }
+        _ => false,
+    };
+    if conversation_id == body.conversation_id && kind == "message" && same_author {
+        return Ok(Some(WriteOutcome::Ok));
+    }
+    Ok(Some(WriteOutcome::Forbidden))
+}
+
+/// The per-envelope-id lock [`send_envelope_once`] holds (see there). Entries
+/// are removed when the last holder lets go, so the map stays as small as the
+/// number of posts in flight.
+struct EnvelopeIdLock {
+    id: String,
+    entry: std::sync::Arc<tokio::sync::Mutex<()>>,
+    guard: Option<tokio::sync::OwnedMutexGuard<()>>,
+}
+
+type EnvelopeIdLocks =
+    std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>;
+
+fn envelope_id_locks() -> &'static EnvelopeIdLocks {
+    static LOCKS: std::sync::OnceLock<EnvelopeIdLocks> = std::sync::OnceLock::new();
+    LOCKS.get_or_init(Default::default)
+}
+
+impl EnvelopeIdLock {
+    async fn acquire(id: &str) -> Self {
+        let entry = envelope_id_locks()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(id.to_string())
+            .or_default()
+            .clone();
+        let guard = entry.clone().lock_owned().await;
+        Self {
+            id: id.to_string(),
+            entry,
+            guard: Some(guard),
         }
     }
-    if conversation_id != body.conversation_id || kind != "message" {
-        return Ok(Some(WriteOutcome::Invalid("envelope id is already in use")));
+}
+
+impl Drop for EnvelopeIdLock {
+    fn drop(&mut self) {
+        self.guard.take();
+        let mut map = envelope_id_locks().lock().unwrap_or_else(|e| e.into_inner());
+        // Ours and the map's are the only references: nobody holds or awaits it.
+        if std::sync::Arc::strong_count(&self.entry) <= 2 {
+            map.remove(&self.id);
+        }
     }
-    Ok(Some(WriteOutcome::Ok))
 }
 
 /// [`apply_edit_message`] under the epoch gate — what `/v1/messages/edit` runs.
@@ -4498,19 +4569,74 @@ mod epoch_gate_tests {
         );
     }
 
-    /// An id another conversation's envelope holds is refused, never treated
-    /// as a replay.
+    /// An id another conversation's envelope holds is refused with the same
+    /// answer a non-member gets, never treated as a replay — and so is the
+    /// same id and conversation from someone who cannot produce the author's
+    /// capability hash.
     #[tokio::test]
-    async fn an_envelope_id_used_elsewhere_is_refused() {
+    async fn a_replay_is_bound_to_its_conversation_and_its_author() {
         let c = conn().await;
         let ok = send_envelope(&c, &c, None, &send("m1", "dm", None, None))
             .await
             .unwrap();
         assert!(matches!(ok, WriteOutcome::Ok), "{ok:?}");
-        let out = send_envelope(&c, &c, None, &send("m1", "other-dm", None, None))
+        let elsewhere = send_envelope(&c, &c, None, &send("m1", "other-dm", None, None))
             .await
             .unwrap();
-        assert!(matches!(out, WriteOutcome::Invalid(_)), "{out:?}");
+        assert!(matches!(elsewhere, WriteOutcome::Forbidden), "{elsewhere:?}");
+        let mut impostor = send("m1", "dm", None, None);
+        impostor.delete_token_hash = Some("not-the-authors-hash".to_string());
+        let (out, replayed) = send_envelope_once(&c, &c, None, &impostor).await.unwrap();
+        assert!(matches!(out, WriteOutcome::Forbidden) && replayed, "{out:?}");
+    }
+
+    /// A delivered-but-unrecorded post replays as delivered even after its
+    /// author left the conversation: they were a member when it landed.
+    #[tokio::test]
+    async fn a_replay_settles_even_after_the_author_was_removed() {
+        let c = conn().await;
+        let (first, _) = send_envelope_once(&c, &c, None, &send("m1", "dm", None, None))
+            .await
+            .unwrap();
+        assert!(matches!(first, WriteOutcome::Ok), "{first:?}");
+        // Authenticated as someone with no membership row at all.
+        let (again, replayed) =
+            send_envelope_once(&c, &c, Some("removed-user"), &send("m1", "dm", None, None))
+                .await
+                .unwrap();
+        assert!(matches!(again, WriteOutcome::Ok) && replayed, "{again:?}");
+    }
+
+    /// The race the per-id lock closes: a retry must not answer "replay" while
+    /// the first post can still be rolled back by its own epoch post-check.
+    /// Holding the id's lock stands in for that post mid-write; its row
+    /// vanishing stands in for the post-check deleting it. The retry, released
+    /// only then, must write its own envelope — not report the vanished one.
+    #[tokio::test]
+    async fn a_retry_waits_for_the_first_post_to_settle() {
+        let c = conn().await;
+        send_envelope(&c, &c, None, &send("m1", "dm", None, None))
+            .await
+            .unwrap();
+        let first_post = EnvelopeIdLock::acquire("m1").await;
+
+        let c2 = c.clone();
+        let retry = tokio::spawn(async move {
+            send_envelope_once(&c2, &c2, None, &send("m1", "dm", None, None)).await
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(!retry.is_finished(), "the retry must wait for the first post");
+
+        // The first post's post-check finds the head moved and deletes its row.
+        c.execute("DELETE FROM message_envelope WHERE id = 'm1'", ())
+            .await
+            .unwrap();
+        drop(first_post);
+
+        let (out, replayed) = retry.await.unwrap().unwrap();
+        assert!(matches!(out, WriteOutcome::Ok), "{out:?}");
+        assert!(!replayed, "the row it would have replayed is gone");
+        assert!(stored(&c, "m1").await, "the retry stored its own envelope");
     }
 
     #[tokio::test]

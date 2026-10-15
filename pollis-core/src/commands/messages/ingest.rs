@@ -675,11 +675,7 @@ async fn ingest_group_envelopes_interleaved(
                 // retry). `Some(n)` = n rows redacted now.
                 let applied_rows: Option<usize> = db
                     .conn()
-                    .execute(
-                        "UPDATE message SET content = NULL, deleted_at = ?1
-                         WHERE id = ?2 AND deleted_at IS NULL",
-                        rusqlite::params![now, tid],
-                    )
+                    .execute(super::outbox::SOFT_DELETE_SQL, rusqlite::params![now, tid])
                     .ok();
                 // Only meaningful on the zero-row path: does a row with this id
                 // exist at all (already redacted → present; genuinely absent →
@@ -953,8 +949,7 @@ fn decrypt_and_persist_one(
                     if author.as_deref() == Some(cred_sender.as_str()) {
                         let now = chrono::Utc::now().to_rfc3339();
                         let _ = conn.execute(
-                            "UPDATE message SET content = NULL, deleted_at = ?1
-                             WHERE id = ?2 AND deleted_at IS NULL",
+                            super::outbox::SOFT_DELETE_SQL,
                             rusqlite::params![now, target_message_id],
                         );
                     }

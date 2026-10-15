@@ -489,10 +489,41 @@ async fn reject_non_2xx(
         return Ok(resp);
     }
     let txt = resp.text().await.unwrap_or_default();
-    Err(Error::Other(anyhow::anyhow!(
-        "{label} {path} {status}: {txt}"
-    )))
+    Err(DsRefused::error(label, path, status, txt))
 }
+
+/// A non-2xx answer from the DS, kept typed inside `Error::Other` so a caller
+/// can ask for the status (`downcast_ref::<DsRefused>()`) instead of parsing a
+/// message. Its `Display` is byte-identical to the string these errors always
+/// carried (`"{label} {path} {status}: {body}"`), so nothing that reads the
+/// text changes. The durable outbox (#1335) uses the status to tell a refusal
+/// no retry can fix from one that may pass next time.
+#[derive(Debug)]
+pub struct DsRefused {
+    pub label: String,
+    pub path: String,
+    pub status: reqwest::StatusCode,
+    pub body: String,
+}
+
+impl DsRefused {
+    fn error(label: &str, path: &str, status: reqwest::StatusCode, body: String) -> Error {
+        Error::Other(anyhow::Error::new(DsRefused {
+            label: label.to_string(),
+            path: path.to_string(),
+            status,
+            body,
+        }))
+    }
+}
+
+impl std::fmt::Display for DsRefused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {} {}: {}", self.label, self.path, self.status, self.body)
+    }
+}
+
+impl std::error::Error for DsRefused {}
 
 /// Decode a 2xx body into the endpoint's declared response type.
 ///
@@ -518,9 +549,8 @@ pub async fn ds_post_ok<B: ClientRequest>(state: &Arc<AppState>, body: &B) -> Re
     let resp = ds_post(state, body).await?;
     if !resp.status().is_success() {
         let s = resp.status();
-        let path = B::PATH;
         let txt = resp.text().await.unwrap_or_default();
-        return Err(Error::Other(anyhow::anyhow!("ds_post {path} {s}: {txt}")));
+        return Err(DsRefused::error("ds_post", B::PATH, s, txt));
     }
     Ok(())
 }
@@ -567,7 +597,7 @@ pub async fn ds_post_envelope<B: ClientRequest>(
             }
         }
     }
-    Err(Error::Other(anyhow::anyhow!("ds_post {path} {status}: {txt}")))
+    Err(DsRefused::error("ds_post", path, status, txt))
 }
 
 /// [`ds_post`] when this device can sign (local DB open, device key enrolled);
@@ -624,9 +654,8 @@ pub async fn ds_post_signed_or_session_ok<B: ClientRequest>(
     let resp = ds_post_signed_or_session(state, body).await?;
     if !resp.status().is_success() {
         let s = resp.status();
-        let path = B::PATH;
         let txt = resp.text().await.unwrap_or_default();
-        return Err(Error::Other(anyhow::anyhow!("ds_post {path} {s}: {txt}")));
+        return Err(DsRefused::error("ds_post", B::PATH, s, txt));
     }
     Ok(())
 }

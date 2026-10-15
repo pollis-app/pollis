@@ -85,6 +85,7 @@ pub async fn send_message_with_id(
         content,
         reply_to_id,
         thread_id,
+        sent_at: super::envelope_sent_at(),
     };
     if let super::outbox::Enqueued::AlreadySent(message) =
         super::outbox::enqueue(state, &queued, attachments).await?
@@ -118,6 +119,7 @@ pub(super) async fn deliver_queued(
         content,
         reply_to_id,
         thread_id,
+        sent_at,
     } = queued.clone();
     state.check_not_outdated()?;
 
@@ -130,6 +132,11 @@ pub(super) async fn deliver_queued(
     // #987, and the peer list was itself a query per peer.
     let resolved =
         crate::commands::ds_reads::catch_up(state, &conversation_id, false, true).await?;
+    // Not (or no longer) a member: no attempt will ever get further, so say so
+    // in a way the outbox records as `rejected` rather than retrying (#1335).
+    if !resolved.authorized {
+        return Err(super::outbox::not_a_member());
+    }
     let is_channel = resolved.kind == pollis_api::directory::ConversationKind::Channel;
     let mls_group_id = resolved.mls_group_id.clone();
 
@@ -247,10 +254,11 @@ pub(super) async fn deliver_queued(
             &held,
         )?;
 
-        // The outbox row (#1335) already holds everything but the ciphertext.
+        // The outbox row (#1335) already holds everything but the ciphertext
+        // — its `sent_at` included, which stays the moment the user sent it.
         db.conn().execute(
-            "UPDATE message SET ciphertext = ?1, sent_at = ?2 WHERE id = ?3",
-            rusqlite::params![sealed.bytes, sealed.sent_at, id],
+            "UPDATE message SET ciphertext = ?1 WHERE id = ?2",
+            rusqlite::params![sealed.bytes, id],
         )?;
 
         sealed
@@ -336,8 +344,9 @@ pub(super) async fn deliver_queued(
     let delete_token_hash =
         super::delete_capability::envelope_delete_token_hash(state, &id).await;
 
-    // epoch, rewrites our own local copy to match, and posts again.
-    let sealed = super::seal::post_resealing(
+    // epoch, rewrites our own local copy to match, and posts again. What landed
+    // is not needed past here: the row keeps the send's own `sent_at` (#1335).
+    super::seal::post_resealing(
         state,
         super::seal::Target {
             mls_group_id: &mls_group_id,
@@ -353,7 +362,9 @@ pub(super) async fn deliver_queued(
             sender_id: Some(SEALED_SENDER_SENTINEL.to_string()),
             ciphertext: test_hooks::maybe_corrupt(sealed.wire()),
             reply_to_id: reply_to_id.clone(),
-            sent_at: sealed.sent_at.clone(),
+            // The send's own stamp, not the seal's (#1335): identical on every
+            // attempt, so a replay and its retry agree.
+            sent_at: sent_at.clone(),
             sealed: 1,
             generation: Some(sealed.generation),
             epoch: Some(sealed.epoch),
@@ -362,8 +373,8 @@ pub(super) async fn deliver_queued(
         },
         |conn, sealed| {
             conn.execute(
-                "UPDATE message SET ciphertext = ?1, sent_at = ?2 WHERE id = ?3",
-                rusqlite::params![sealed.bytes, sealed.sent_at, id],
+                "UPDATE message SET ciphertext = ?1 WHERE id = ?2",
+                rusqlite::params![sealed.bytes, id],
             )?;
             Ok(())
         },
@@ -379,7 +390,7 @@ pub(super) async fn deliver_queued(
     // Delivered: the DS holds the envelope, so the outbox entry is done.
     // Everything below is best-effort signalling that never fails a send.
     super::outbox::settle(state, &id).await?;
-    let now = sealed.sent_at;
+    let now = sent_at;
 
     // Register a server-side reference for each attachment this message carries
     // (#690), keyed by the message id. The DS reference-counts the shared,
@@ -737,6 +748,21 @@ pub mod test_hooks {
     #[cfg(feature = "test-harness")]
     pub(crate) fn uploads_stubbed() -> bool {
         STUB_UPLOADS.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    #[cfg(feature = "test-harness")]
+    static ATTEMPTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    /// Delivery attempts this process has run (#1335) — how a test tells one
+    /// drain from two.
+    #[cfg(feature = "test-harness")]
+    pub fn delivery_attempts() -> usize {
+        ATTEMPTS.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    #[cfg(feature = "test-harness")]
+    pub(crate) fn count_attempt() {
+        ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
 
     const SIMULATED_CRASH: &str = "simulated process death (test harness)";

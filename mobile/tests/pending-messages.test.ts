@@ -87,6 +87,9 @@ test("a settling send replaces a stored pending row instead of duplicating it", 
 test("a stored row's send_state maps to the stub flags", () => {
   assert.deepEqual(unsentFlags("01A", "pending"), { pending: true, outboxId: "01A" });
   assert.deepEqual(unsentFlags("01A", "failed"), { failed: true, outboxId: "01A" });
+  // A refusal no retry fixes is shown like any failure, Retry included.
+  assert.deepEqual(unsentFlags("01A", "rejected"), { failed: true, outboxId: "01A" });
+  assert.equal(retryTarget({ id: "01A", ...unsentFlags("01A", "rejected") }), "01A");
   assert.deepEqual(unsentFlags("01A", undefined), {});
   assert.deepEqual(unsentFlags("01A", null), {});
   // A stored unsent row is never mistaken for a local stub (it is in the store).

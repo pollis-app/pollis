@@ -163,14 +163,26 @@ async fn a_send_killed_after_the_post_is_not_delivered_twice() {
     assert_eq!(envelopes_with_id(&id).await, 1, "the envelope had landed");
     let row = own_row(&alice, &channel_id, &id).await.expect("stored");
     assert_eq!(row["send_state"], "pending", "this device never recorded the post");
+    let sent_at = row["sent_at"].clone();
 
     restart(&alice).await;
     let report = alice.invoke_json("flush_outbox", json!({})).await;
     assert!(report["failed"].as_array().expect("failed").is_empty(), "{report}");
 
     assert_eq!(envelopes_with_id(&id).await, 1, "the replay stored nothing new");
-    assert!(own_row(&alice, &channel_id, &id).await.expect("stored").get("send_state").is_none());
-    assert_eq!(copies(&bob, &channel_id, "landed, then the kill").await, 1);
+    let row = own_row(&alice, &channel_id, &id).await.expect("stored");
+    assert!(row.get("send_state").is_none());
+    // The retry re-sealed, but the sender's copy keeps the stamp the DS kept
+    // from the first post — the one every recipient shows.
+    assert_eq!(row["sent_at"], sent_at, "the retry must not move the message");
+    let theirs: Vec<_> = bob
+        .fetch_channel_messages(&channel_id)
+        .await
+        .into_iter()
+        .filter(|m| m["id"] == id.as_str())
+        .collect();
+    assert_eq!(theirs.len(), 1, "delivered exactly once");
+    assert_eq!(theirs[0]["sent_at"], sent_at, "sender and recipient agree on when");
     drop((alice, bob));
 }
 
@@ -319,5 +331,118 @@ async fn an_attachment_send_killed_before_its_upload_is_delivered_after_unlock()
         .collect();
     assert_eq!(got.len(), 1);
     assert_eq!(got[0]["content"].as_str(), Some(content.as_str()));
+    drop((alice, bob));
+}
+
+/// Discarding an unsent message that DID reach the DS (killed after the post,
+/// then an attempt that failed for another reason) must withdraw it from
+/// everyone — not just drop the sender's copy and leave them no way to delete
+/// what the recipients have.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn discarding_a_message_that_reached_the_ds_withdraws_it_from_everyone() {
+    let (alice, bob, channel_id) = pair().await;
+    let outdated = alice.state.update_required.clone();
+    let id: String = alice.invoke_json("new_message_id", json!({})).await
+        .as_str().expect("id").to_string();
+
+    test_hooks::crash_next_send(Crash::AfterPost);
+    send_with_id(&alice, &channel_id, &id, "landed, then discarded", None)
+        .await
+        .expect_err("the simulated kill ends the send");
+    // Bob already has it.
+    assert_eq!(copies(&bob, &channel_id, "landed, then discarded").await, 1);
+
+    // The next attempt fails for another reason, so the row reads failed.
+    outdated.store(true, std::sync::atomic::Ordering::SeqCst);
+    alice
+        .invoke_try("retry_message", json!({ "messageId": id }))
+        .await
+        .expect_err("an outdated client cannot send");
+    outdated.store(false, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(own_row(&alice, &channel_id, &id).await.expect("kept")["send_state"], "failed");
+
+    let discarded = alice
+        .invoke_json("discard_unsent_message", json!({ "messageId": id }))
+        .await;
+    assert_eq!(discarded, true);
+    assert!(own_row(&alice, &channel_id, &id).await.is_none(), "gone here");
+    assert_eq!(envelopes_with_id(&id).await, 0, "gone from the DS");
+    assert_eq!(
+        copies(&bob, &channel_id, "landed, then discarded").await,
+        0,
+        "and redacted for the recipient who already had it"
+    );
+    drop((alice, bob));
+}
+
+/// Overlapping drains (unlock, the launch catch-up, a reconnect and an online
+/// event can all fire at once) are single-flight: a drain that arrives while
+/// one runs waits for it and shares its report instead of re-attempting.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn an_overlapping_drain_waits_for_the_running_one() {
+    let (alice, bob, channel_id) = pair().await;
+    let id: String = alice.invoke_json("new_message_id", json!({})).await
+        .as_str().expect("id").to_string();
+    test_hooks::crash_next_send(Crash::AfterEnqueue);
+    send_with_id(&alice, &channel_id, &id, "queued once", None)
+        .await
+        .expect_err("the simulated kill ends the send");
+
+    // A drain is running (its lock is held); a second one arrives.
+    let running = alice.state.outbox_drain.clone().lock_owned().await;
+    let before = test_hooks::delivery_attempts();
+    let state = alice.state.clone();
+    let second = tokio::spawn(async move {
+        pollis_core::commands::messages::flush_outbox(&state).await
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert!(!second.is_finished(), "the second drain waits");
+    drop(running);
+    let report = second.await.unwrap().expect("flush");
+    assert!(report.delivered.is_empty() && report.failed.is_empty(), "{report:?}");
+    assert_eq!(test_hooks::delivery_attempts(), before, "it did not drain again");
+
+    // The message is still queued; the next drain on its own delivers it.
+    alice.invoke_json("flush_outbox", json!({})).await;
+    assert!(own_row(&alice, &channel_id, &id).await.expect("row").get("send_state").is_none());
+    assert_eq!(copies(&bob, &channel_id, "queued once").await, 1);
+    drop((alice, bob));
+}
+
+/// A refusal no retry fixes (the sender is not a member of the conversation)
+/// is `rejected`: still shown, still the user's to Retry or Discard, but never
+/// re-attempted by a drain.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_permanent_refusal_is_rejected_and_not_drained_again() {
+    let (alice, bob, _) = pair().await;
+    // A group Bob owns and Alice is not in.
+    let theirs = bob.create_group("Not yours").await;
+    let channel_id = bob.general_channel_id(&theirs).await;
+    let id: String = alice.invoke_json("new_message_id", json!({})).await
+        .as_str().expect("id").to_string();
+    let err = send_with_id(&alice, &channel_id, &id, "nobody can take this", None)
+        .await
+        .expect_err("a non-member cannot send");
+    assert_eq!(
+        own_row(&alice, &channel_id, &id).await.expect("kept")["send_state"],
+        "rejected",
+        "refused with: {err}"
+    );
+
+    let before = test_hooks::delivery_attempts();
+    let report = alice.invoke_json("flush_outbox", json!({})).await;
+    assert!(report["failed"].as_array().expect("failed").is_empty(), "{report}");
+    assert_eq!(test_hooks::delivery_attempts(), before, "the drain left it alone");
+
+    // An explicit Retry still tries.
+    alice
+        .invoke_try("retry_message", json!({ "messageId": id }))
+        .await
+        .expect_err("still not a member");
+    assert_eq!(test_hooks::delivery_attempts(), before + 1);
+    assert_eq!(own_row(&alice, &channel_id, &id).await.expect("kept")["send_state"], "rejected");
     drop((alice, bob));
 }

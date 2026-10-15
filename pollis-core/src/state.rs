@@ -172,6 +172,10 @@ pub struct AppState {
     /// asked for and the drain that runs after unlock or a reconnect can never
     /// post the same message twice at once. See `messages::outbox`.
     pub outbox_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+    /// Held for the length of an outbox drain, carrying the last drain's
+    /// report: `flush_outbox` is single-flight, and a call that finds it held
+    /// waits and answers with that report rather than draining again (#1335).
+    pub outbox_drain: Arc<Mutex<Option<crate::commands::messages::OutboxReport>>>,
     /// Fan-out of decoded remote screenshare frames (packed I420, the same
     /// `pack_frame_bytes` wire format the legacy Tauri `Channel` carried) to
     /// the loopback media server's `/screenshare/<token>` WebSocket route.
@@ -253,6 +257,7 @@ impl AppState {
             shutdown_signal: Arc::new(Notify::new()),
             mls_group_locks: Arc::new(Mutex::new(HashMap::new())),
             outbox_locks: Arc::new(Mutex::new(HashMap::new())),
+            outbox_drain: Arc::new(Mutex::new(None)),
             // Receiver dropped immediately; subscribers are created per
             // WebSocket connection via `screenshare_frame_tx.subscribe()`.
             screenshare_frame_tx: tokio::sync::broadcast::channel(8).0,

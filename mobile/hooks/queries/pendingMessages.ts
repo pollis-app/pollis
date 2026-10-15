@@ -80,7 +80,7 @@ export function settleSend<M extends StubLike>(
 }
 
 /** The core's `send_state` for an unsent row of ours (#1335). */
-export type SendState = "pending" | "failed";
+export type SendState = "pending" | "failed" | "rejected";
 
 /**
  * The flags a stored row's `send_state` maps to. A pending row is drawn like
@@ -94,7 +94,9 @@ export function unsentFlags(
   if (sendState === "pending") {
     return { pending: true, outboxId: id };
   }
-  if (sendState === "failed") {
+  // `rejected` (a refusal no retry fixes — the outbox stops retrying it on its
+  // own) is shown exactly like `failed`: the user's Retry or Discard decides.
+  if (sendState === "failed" || sendState === "rejected") {
     return { failed: true, outboxId: id };
   }
   return {};

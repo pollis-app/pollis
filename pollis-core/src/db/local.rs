@@ -687,7 +687,7 @@ const ADDITIVE_COLUMNS: &[(&str, &str, &str)] = &[
         "send_state",
         "ALTER TABLE message ADD COLUMN send_state TEXT CHECK (
             send_state IS NULL
-            OR (send_state IN ('pending', 'failed') AND undecryptable IS NULL AND content IS NOT NULL)
+            OR (send_state IN ('pending', 'failed', 'rejected') AND undecryptable IS NULL AND content IS NOT NULL)
         )",
     ),
 ];

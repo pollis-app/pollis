@@ -471,9 +471,11 @@ export function useRetryMessage() {
 }
 
 /**
- * Throw away one unsent message (#1335) — it reached nobody, so this only
- * removes it here. Also clears a stub whose upload failed before the core
- * stored anything.
+ * Throw away one unsent message (#1335). If an earlier attempt may have reached
+ * the server (it was ever sealed), the core withdraws it from everyone first —
+ * and refuses the discard if it cannot, so the row stays rather than leaving a
+ * delivered copy the sender cannot delete. Also clears a stub the core never
+ * stored.
  */
 export function useDiscardUnsent() {
   const queryClient = useQueryClient();

@@ -22,6 +22,9 @@ test("a stored row's send_state maps to the row's status", () => {
   assert.deepEqual(outboxFields("01A", "pending"), { status: "sending", outbox_id: "01A", delivered: false });
   assert.deepEqual(outboxFields("01A", "failed"), { status: "failed", outbox_id: "01A", delivered: false });
   assert.deepEqual(outboxFields("01A", undefined), { status: "sent", delivered: true });
+  // A refusal no retry fixes is shown like any failure, Retry included.
+  assert.deepEqual(outboxFields("01A", "rejected"), { status: "failed", outbox_id: "01A", delivered: false });
+  assert.equal(retryTarget(row("01A", outboxFields("01A", "rejected"))), "01A");
 });
 
 test("a refetch keeps a stub the store does not hold, and drops one it does", () => {

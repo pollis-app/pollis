@@ -42,8 +42,53 @@ use super::types::Message;
 
 /// `message.send_state` for a stored message not yet confirmed by the DS.
 pub(crate) const PENDING: &str = "pending";
-/// `message.send_state` once a delivery attempt has failed.
+/// `message.send_state` once a delivery attempt has failed in a way a later
+/// one may not (offline, a 5xx, an outdated client).
 pub(crate) const FAILED: &str = "failed";
+/// `message.send_state` once the DS refused it in a way no retry fixes — not a
+/// member any more, the conversation is gone, a malformed body. The drain
+/// leaves these alone; the user's Retry or Discard decides.
+pub(crate) const REJECTED: &str = "rejected";
+
+/// Whether `e` is a refusal no retry can fix (see [`REJECTED`]): a DS answer of
+/// 400, 403, 404, 410 or 422. Everything else — transport errors, 5xx, 429, an
+/// outdated client, a local MLS problem — may pass next time.
+pub(super) fn is_permanent(e: &Error) -> bool {
+    let Error::Other(any) = e else {
+        return false;
+    };
+    any.downcast_ref::<NotAMember>().is_some()
+        || any
+            .downcast_ref::<crate::commands::mls::ds_client::DsRefused>()
+            .is_some_and(|r| matches!(r.status.as_u16(), 400 | 403 | 404 | 410 | 422))
+}
+
+/// The DS's conversation resolve answered that the sender is not (or no longer)
+/// a member — the commonest refusal no retry fixes. Typed so
+/// [`is_permanent`] need not read a message.
+#[derive(Debug)]
+pub(super) struct NotAMember;
+
+impl std::fmt::Display for NotAMember {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("you are not a member of this conversation")
+    }
+}
+
+impl std::error::Error for NotAMember {}
+
+pub(super) fn not_a_member() -> Error {
+    Error::Other(anyhow::Error::new(NotAMember))
+}
+
+/// The one way a row is soft-deleted (a redaction, an admin tombstone, the
+/// admin's own copy). It also settles `send_state`: a delete can only target
+/// an envelope that exists, so a message of ours that is deleted for everyone
+/// was delivered — and an unsent row must keep its content (the CHECK), so a
+/// redaction that left the state set would fail, and the ingest would hold its
+/// cursor on it forever (#1335). Binds `?1` = deleted_at, `?2` = id.
+pub(crate) const SOFT_DELETE_SQL: &str = "UPDATE message SET content = NULL, deleted_at = ?1, send_state = NULL
+     WHERE id = ?2 AND deleted_at IS NULL";
 
 /// An outgoing message as the outbox stores it.
 #[derive(Debug, Clone)]
@@ -54,6 +99,11 @@ pub(super) struct Queued {
     pub content: String,
     pub reply_to_id: Option<String>,
     pub thread_id: Option<String>,
+    /// Stamped once, when the user sent it, and posted unchanged by every
+    /// attempt — so a retry after a crash-after-post (which the DS answers as a
+    /// replay of the FIRST post) leaves the sender's copy where every
+    /// recipient's is, not at the retry's time.
+    pub sent_at: String,
 }
 
 /// One attachment a send hands to the outbox before it is uploaded (#1335).
@@ -369,7 +419,7 @@ pub(super) fn enqueue_on(
             content,
             queued.reply_to_id,
             queued.thread_id,
-            super::envelope_sent_at(),
+            queued.sent_at,
             PENDING,
         ],
     )?;
@@ -430,22 +480,23 @@ pub(super) async fn settle(state: &Arc<AppState>, id: &str) -> Result<String> {
     )?)
 }
 
-/// Record a failed attempt. Only an unsent row can fail — a delivered message
-/// is never demoted.
-fn mark_failed_on(conn: &rusqlite::Connection, id: &str) -> Result<()> {
+/// Record a failed attempt — `rejected` when no retry can fix it, `failed`
+/// otherwise. Only an unsent row can fail: a delivered message is never
+/// demoted.
+fn mark_failed_on(conn: &rusqlite::Connection, id: &str, permanent: bool) -> Result<()> {
     conn.execute(
         "UPDATE message SET send_state = ?1 WHERE id = ?2 AND send_state IS NOT NULL",
-        rusqlite::params![FAILED, id],
+        rusqlite::params![if permanent { REJECTED } else { FAILED }, id],
     )?;
     Ok(())
 }
 
-/// The ids of every unsent message, oldest first — the order they were
-/// written, so a drain delivers a conversation's backlog in the order it was
-/// typed.
+/// The ids of every unsent message the drain should try, oldest first — the
+/// order they were written, so a drain delivers a conversation's backlog in
+/// the order it was typed. A `rejected` one is not among them.
 pub(super) fn unsent_ids_on(conn: &rusqlite::Connection) -> Result<Vec<String>> {
     let mut stmt = conn.prepare(
-        "SELECT id FROM message WHERE send_state IS NOT NULL ORDER BY sent_at, id",
+        "SELECT id FROM message WHERE send_state IN ('pending', 'failed') ORDER BY sent_at, id",
     )?;
     let ids = stmt
         .query_map([], |row| row.get::<_, String>(0))?
@@ -554,15 +605,19 @@ async fn deliver_locked(
                 content,
                 reply_to_id: row.reply_to_id,
                 thread_id: row.thread_id,
+                sent_at: row.sent_at,
             },
             sender_username,
         )
     };
 
+    #[cfg(feature = "test-harness")]
+    super::send::test_hooks::count_attempt();
+
     let queued = match finish_uploads(state, queued).await {
         Ok(queued) => queued,
         Err(e) => {
-            mark_failed(state, id).await;
+            mark_failed(state, id, is_permanent(&e)).await;
             return Err(e);
         }
     };
@@ -571,17 +626,17 @@ async fn deliver_locked(
         Ok(message) => Ok(message),
         Err(e) => {
             if !super::send::test_hooks::is_simulated_crash(&e) {
-                mark_failed(state, id).await;
+                mark_failed(state, id, is_permanent(&e)).await;
             }
             Err(e)
         }
     }
 }
 
-async fn mark_failed(state: &Arc<AppState>, id: &str) {
+async fn mark_failed(state: &Arc<AppState>, id: &str, permanent: bool) {
     let guard = state.local_db.lock().await;
     if let Some(db) = guard.as_ref() {
-        if let Err(mark) = mark_failed_on(db.conn(), id) {
+        if let Err(mark) = mark_failed_on(db.conn(), id, permanent) {
             crate::diag!("[outbox] could not mark {id} failed: {mark}");
         }
     }
@@ -638,28 +693,66 @@ pub async fn retry_message(message_id: String, state: &Arc<AppState>) -> Result<
 
 /// Throw away one of this device's unsent messages — the renderer's Discard.
 ///
-/// Waits out any attempt in flight, so it never races a post. Returns `false`
-/// when there was nothing to discard: the id is unknown, or the message was
-/// delivered (a delivered message is deleted with `delete_message`, which also
-/// removes it for everyone else).
+/// Waits out any attempt in flight, so it never races a post. A message that
+/// was never sealed never left this device, and only the local row goes. One
+/// that WAS sealed may have reached the DS — a process that died after its post
+/// landed but before it recorded that, followed by an attempt that failed for
+/// another reason, leaves exactly that — so it is first withdrawn from everyone
+/// the way a self-delete is (redaction + envelope removal, a no-op when nothing
+/// landed), and only then removed here. If that withdrawal fails (offline),
+/// nothing is removed and the error is returned: discarding must never leave a
+/// delivered message the sender can no longer delete.
+///
+/// Returns `false` when there was nothing to discard: the id is unknown, or the
+/// message was delivered (a delivered message is deleted with `delete_message`).
 pub async fn discard_unsent_message(message_id: String, state: &Arc<AppState>) -> Result<bool> {
     let lock = OutboxLock::acquire(state, &message_id).await;
-    let removed = {
+    let result = discard_locked(state, &message_id).await;
+    lock.release().await;
+    result
+}
+
+/// The facts a discard decides on: whose message, where, and whether it was
+/// ever sealed (a non-empty ciphertext is written only by a seal, right before
+/// the post).
+fn unsent_row_on(
+    conn: &rusqlite::Connection,
+    id: &str,
+) -> Result<Option<(String, String, bool)>> {
+    Ok(conn
+        .query_row(
+            "SELECT conversation_id, sender_id, length(ciphertext) > 0
+             FROM message WHERE id = ?1 AND send_state IS NOT NULL",
+            rusqlite::params![id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()?)
+}
+
+async fn discard_locked(state: &Arc<AppState>, id: &str) -> Result<bool> {
+    let row = {
         let guard = state.local_db.lock().await;
         match guard.as_ref() {
-            Some(db) => db.conn().execute(
-                "DELETE FROM message WHERE id = ?1 AND send_state IS NOT NULL",
-                rusqlite::params![message_id],
-            ),
-            None => Ok(0),
+            Some(db) => unsent_row_on(db.conn(), id)?,
+            None => return Ok(false),
         }
     };
-    lock.release().await;
-    Ok(removed? > 0)
+    let Some((conversation_id, sender_id, sealed)) = row else {
+        return Ok(false);
+    };
+    if sealed {
+        super::edit_delete::retract_for_everyone(state, &conversation_id, id, &sender_id).await?;
+    }
+    let guard = state.local_db.lock().await;
+    let db = guard.as_ref().ok_or_else(not_signed_in)?;
+    Ok(db.conn().execute(
+        "DELETE FROM message WHERE id = ?1 AND send_state IS NOT NULL",
+        rusqlite::params![id],
+    )? > 0)
 }
 
 /// What one drain did.
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Clone, Serialize)]
 pub struct OutboxReport {
     /// Ids now delivered.
     pub delivered: Vec<String>,
@@ -669,11 +762,31 @@ pub struct OutboxReport {
 
 /// Deliver every unsent message, oldest first (#1335).
 ///
-/// Run after unlock and on reconnect / resume. Each message goes through
-/// [`deliver`], so a drain that overlaps a send in flight — or another drain —
-/// waits for it and then finds that message settled. Nothing here retries in a
-/// loop: a message that fails stays `'failed'` until the next drain or a Retry.
+/// Run after unlock and on reconnect / resume — triggers that often fire
+/// together (an unlock, the launch catch-up, a reconnect and an `online`
+/// event within seconds). So it is SINGLE-FLIGHT: a call that arrives while a
+/// drain runs does not start a second one, which would re-attempt (a catch-up
+/// and a fresh seal each) every message the first just failed; it waits for
+/// the running drain and returns that drain's report. Each message still goes
+/// through [`deliver`], so a drain that overlaps a send in flight waits for it
+/// and then finds that message settled. Nothing here retries in a loop: a
+/// message that fails stays `failed` until the next drain or a Retry, and a
+/// `rejected` one is left to the user.
 pub async fn flush_outbox(state: &Arc<AppState>) -> Result<OutboxReport> {
+    match state.outbox_drain.try_lock() {
+        Ok(mut last) => {
+            let report = drain(state).await?;
+            *last = Some(report.clone());
+            Ok(report)
+        }
+        Err(_) => {
+            let last = state.outbox_drain.lock().await;
+            Ok(last.clone().unwrap_or_default())
+        }
+    }
+}
+
+async fn drain(state: &Arc<AppState>) -> Result<OutboxReport> {
     let ids = {
         let guard = state.local_db.lock().await;
         match guard.as_ref() {
@@ -724,6 +837,7 @@ mod tests {
             content: content.to_string(),
             reply_to_id: None,
             thread_id: Some("root".to_string()),
+            sent_at: super::super::envelope_sent_at(),
         }
     }
 
@@ -796,8 +910,8 @@ mod tests {
         enqueue_on(conn, &queued(&a, "a"), &[]).unwrap();
         enqueue_on(conn, &queued(&b, "b"), &[]).unwrap();
         conn.execute("UPDATE message SET send_state = NULL WHERE id = ?1", [&b]).unwrap();
-        mark_failed_on(conn, &a).unwrap();
-        mark_failed_on(conn, &b).unwrap();
+        mark_failed_on(conn, &a, false).unwrap();
+        mark_failed_on(conn, &b, false).unwrap();
         assert_eq!(send_state(conn, &a).as_deref(), Some(FAILED));
         assert_eq!(send_state(conn, &b), None);
         // A failed message is still queued — the drain retries it.
@@ -906,6 +1020,82 @@ mod tests {
             final_content("", &atts, &uploaded),
             r#"{"_att":[{"key":"media/abc.enc","url":"https://r2/media/abc.enc","name":"clip.mp4","ct":"video/mp4","size":1,"hash":"abc","bh":"LKO2","w":640,"h":3}]}"#
         );
+    }
+
+    /// A redaction or tombstone that reaches a row the outbox still holds
+    /// applies (no CHECK failure that would hold the ingest's cursor) and
+    /// settles it, so the drain never re-posts a deleted message.
+    #[test]
+    fn a_remote_delete_of_an_unsent_row_applies_and_settles_it() {
+        let db = LocalDb::open_in_memory().unwrap();
+        let conn = db.conn();
+        let id = new_message_id();
+        enqueue_on(conn, &queued(&id, "landed, then the kill"), &[]).unwrap();
+        let n = conn
+            .execute(SOFT_DELETE_SQL, rusqlite::params!["2026-10-15T00:00:00Z", id])
+            .expect("the soft delete must not trip the send_state CHECK");
+        assert_eq!(n, 1);
+        assert_eq!(send_state(conn, &id), None);
+        assert!(unsent_ids_on(conn).unwrap().is_empty());
+    }
+
+    /// Discard withdraws from the DS only what may have reached it: a row the
+    /// seal never touched is local-only; a sealed one may have landed.
+    #[test]
+    fn a_discard_knows_whether_the_message_may_have_left() {
+        let db = LocalDb::open_in_memory().unwrap();
+        let conn = db.conn();
+        let (fresh, sealed) = (new_message_id(), new_message_id());
+        enqueue_on(conn, &queued(&fresh, "a"), &[]).unwrap();
+        enqueue_on(conn, &queued(&sealed, "b"), &[]).unwrap();
+        conn.execute("UPDATE message SET ciphertext = X'01' WHERE id = ?1", [&sealed]).unwrap();
+        assert_eq!(unsent_row_on(conn, &fresh).unwrap().unwrap().2, false);
+        assert_eq!(unsent_row_on(conn, &sealed).unwrap().unwrap().2, true);
+        // A delivered message is not the discard's to touch.
+        conn.execute("UPDATE message SET send_state = NULL WHERE id = ?1", [&sealed]).unwrap();
+        assert!(unsent_row_on(conn, &sealed).unwrap().is_none());
+    }
+
+    /// A refusal no retry fixes is `rejected`, and the drain leaves it alone;
+    /// it stays unsent (Retry / Discard), never dropped.
+    #[test]
+    fn a_permanent_refusal_is_not_drained_again() {
+        let db = LocalDb::open_in_memory().unwrap();
+        let conn = db.conn();
+        let (gone, flaky) = (new_message_id(), new_message_id());
+        enqueue_on(conn, &queued(&gone, "a"), &[]).unwrap();
+        enqueue_on(conn, &queued(&flaky, "b"), &[]).unwrap();
+        mark_failed_on(conn, &gone, true).unwrap();
+        mark_failed_on(conn, &flaky, false).unwrap();
+        assert_eq!(send_state(conn, &gone).as_deref(), Some(REJECTED));
+        assert_eq!(unsent_ids_on(conn).unwrap(), vec![flaky]);
+        assert!(matches!(load(conn, &gone).unwrap(), Some((_, Some(_)))));
+    }
+
+    /// Which errors are permanent: DS refusals of the request itself, never a
+    /// transient failure.
+    #[test]
+    fn only_a_definite_ds_refusal_is_permanent() {
+        use crate::commands::mls::ds_client::DsRefused;
+        let refused = |code: u16| {
+            Error::Other(anyhow::Error::new(DsRefused {
+                label: "ds_post".to_string(),
+                path: "/v1/messages/send".to_string(),
+                status: reqwest::StatusCode::from_u16(code).unwrap(),
+                body: String::new(),
+            }))
+        };
+        for code in [400, 403, 404, 410, 422] {
+            assert!(is_permanent(&refused(code)), "{code}");
+        }
+        for code in [401, 409, 429, 500, 502, 503] {
+            assert!(!is_permanent(&refused(code)), "{code}");
+        }
+        assert!(is_permanent(&not_a_member()));
+        assert!(!is_permanent(&Error::ClientOutdated));
+        assert!(!is_permanent(&Error::Other(anyhow::anyhow!("connection reset"))));
+        // The text is what it always was.
+        assert_eq!(refused(403).to_string(), "ds_post /v1/messages/send 403 Forbidden: ");
     }
 
     #[test]

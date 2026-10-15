@@ -24,7 +24,7 @@ export interface OutgoingLike {
 }
 
 /** The core's `send_state` on our own not-yet-delivered message. */
-export type SendState = "pending" | "failed";
+export type SendState = "pending" | "failed" | "rejected";
 
 /** A local-only optimistic row. */
 export function isLocalStub(m: OutgoingLike): boolean {
@@ -43,7 +43,9 @@ export function outboxFields(
   if (sendState === "pending") {
     return { status: "sending", outbox_id: id, delivered: false };
   }
-  if (sendState === "failed") {
+  // `rejected` (a refusal no retry fixes — the outbox stops retrying it on its
+  // own) is shown exactly like `failed`: the user's Retry or Discard decides.
+  if (sendState === "failed" || sendState === "rejected") {
     return { status: "failed", outbox_id: id, delivered: false };
   }
   return { status: "sent", delivered: true };

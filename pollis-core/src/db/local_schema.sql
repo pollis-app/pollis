@@ -45,14 +45,17 @@ CREATE TABLE IF NOT EXISTS message (
     ),
     -- The durable outbox (#1335). NULL for every delivered or received row.
     -- 'pending' = this device's own message, stored BEFORE any network work and
-    -- not yet confirmed by the DS; 'failed' = its last delivery attempt failed.
-    -- Both are retried by the outbox drain (after unlock, on reconnect, on
-    -- resume) and by an explicit retry; delivery clears it. An unsent row is
+    -- not yet confirmed by the DS; 'failed' = its last delivery attempt failed
+    -- in a way a later attempt may not; 'rejected' = the DS refused it in a way
+    -- no retry fixes (not a member, conversation gone, malformed). The outbox
+    -- drain (after unlock, on reconnect, on resume) retries pending and failed,
+    -- never rejected; an explicit Retry tries any of them; delivery clears it.
+    -- The renderers show failed and rejected alike. An unsent row is
     -- always a real message — never a placeholder. Also added to existing DBs
     -- by `add_missing_columns`.
     send_state TEXT CHECK (
         send_state IS NULL
-        OR (send_state IN ('pending', 'failed') AND undecryptable IS NULL AND content IS NOT NULL)
+        OR (send_state IN ('pending', 'failed', 'rejected') AND undecryptable IS NULL AND content IS NOT NULL)
     )
 );
 
