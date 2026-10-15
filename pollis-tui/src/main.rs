@@ -8,6 +8,8 @@
 // (the real crossterm raw-mode / alt-screen guard) stays binary-only here.
 mod terminal;
 
+use std::io::IsTerminal;
+use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -19,17 +21,68 @@ use tokio::sync::mpsc;
 
 use crate::terminal::TerminalGuard;
 use pollis_tui::app::{Action, App, Screen};
-use pollis_tui::ui;
+use pollis_tui::{cli, ui};
 
 /// How often the UI re-reads local state to surface what the background sync
 /// loop wrote. Deliberately shorter than the sync cadence so a synced message
 /// appears within a frame or so of landing in the local DB.
 const UI_REFRESH: Duration = Duration::from_millis(750);
 
-// Multi-thread runtime is mandatory: pollis-core's DB/keystore paths use
-// spawn_blocking, so a current-thread runtime deadlocks (spec §2).
-#[tokio::main(flavor = "multi_thread")]
-async fn main() -> Result<()> {
+/// Arguments first, then the terminal check, then the client — in that order,
+/// so `--help` / `--version` work with no TTY and no environment at all (a dev
+/// build without its env used to die on `missing env var: R2_S3_ENDPOINT`
+/// before it could say anything), and running without a terminal says so on
+/// stderr instead of exiting 1 with the reason only in the log (#1337).
+fn main() -> ExitCode {
+    match cli::parse(std::env::args().skip(1)) {
+        cli::Command::Help => {
+            println!("{}", cli::help_text());
+            return ExitCode::SUCCESS;
+        }
+        cli::Command::Version => {
+            println!("{}", cli::version_text());
+            return ExitCode::SUCCESS;
+        }
+        cli::Command::Invalid(msg) => {
+            eprintln!("pollis: {msg}");
+            return ExitCode::from(2);
+        }
+        cli::Command::Run => {}
+    }
+
+    // Checked before stderr is redirected into the log, so the user sees it.
+    let stdin_tty = std::io::stdin().is_terminal();
+    let stdout_tty = std::io::stdout().is_terminal();
+    if !stdin_tty || !stdout_tty {
+        eprintln!("{}", cli::not_a_terminal_text(stdin_tty, stdout_tty));
+        return ExitCode::FAILURE;
+    }
+
+    // Multi-thread runtime is mandatory: pollis-core's DB/keystore paths use
+    // spawn_blocking, so a current-thread runtime deadlocks (spec §2).
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt,
+        Err(e) => {
+            eprintln!("pollis: starting the async runtime: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match runtime.block_on(run_client()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            // Lands on the terminal for a failure before the log redirect (bad
+            // config), in the log after it — `run_client` has then already put
+            // it on stdout too.
+            eprintln!("pollis: {e:#}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+async fn run_client() -> Result<()> {
     // Build the client the same way AppState::new does for the desktop app:
     // Config::from_env + the local DB + the device keystore, which picks the OS
     // keychain or the machine-bound encrypted file at runtime (#882) — so this
@@ -69,15 +122,21 @@ async fn main() -> Result<()> {
     drop(guard);
 
     if let Some(path) = log_path {
+        // stderr is the log now, so a failure would otherwise be invisible.
+        if let Err(e) = &result {
+            println!("pollis: {e:#}");
+        }
         println!("logs: {}", path.display());
     }
 
     result
 }
 
-/// Point fd 2 at `$POLLIS_DATA_DIR/pollis-tui.log` (fallback: the OS temp dir)
-/// for the lifetime of the process. Returns the log path, or `None` if the file
-/// couldn't be opened — in that case stderr is left alone rather than lost.
+/// Point fd 2 at `pollis-tui.log` in this device's data dir — `POLLIS_DATA_DIR`,
+/// else the platform default `pollis_core` keeps the database and keystore in
+/// (`db::local::dirs_path`) — for the lifetime of the process. Returns the log
+/// path, or `None` if the file couldn't be opened — in that case stderr is left
+/// alone rather than lost.
 ///
 /// Unix only: it dup2's onto fd 2. On Windows this is a no-op stub (stderr left
 /// as-is) until a ConPTY-based redirect is wired, mirroring `terminal_windows.rs`.
@@ -90,18 +149,18 @@ fn redirect_stderr_to_log() -> Option<std::path::PathBuf> {
 fn redirect_stderr_to_log() -> Option<std::path::PathBuf> {
     use std::os::fd::AsRawFd;
 
-    let dir = std::env::var_os("POLLIS_DATA_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
+    // The same directory the local DB and keystore live in. It used to fall
+    // back to the shared OS temp dir when `POLLIS_DATA_DIR` was unset, which
+    // put the log somewhere world-writable and nowhere near the device it
+    // belongs to (#1337).
+    let dir = pollis_core::db::local::dirs_path();
     // First run: the data dir may not exist yet (pollis-core creates it later,
     // during identity setup) — without this the redirect would silently no-op
     // and the whole first session would render over log spam.
     pollis_core::private_fs::create_dir_all(&dir).ok();
     let path = dir.join("pollis-tui.log");
     // Owner-only, and created that way rather than chmod-ed afterwards. Every
-    // line this file receives is one some code path wrote to stderr, and `dir`
-    // is the OS temp directory whenever `POLLIS_DATA_DIR` is unset — a
-    // world-readable log in a world-writable directory.
+    // line this file receives is one some code path wrote to stderr.
     let file = {
         use std::os::unix::fs::OpenOptionsExt;
         std::fs::OpenOptions::new()

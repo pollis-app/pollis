@@ -8,6 +8,7 @@
 //!
 //! Data/sync/auth modules:
 //! - [`auth`] — the order-enforcing signup/unlock wrappers (M1).
+//! - [`cli`] — `--help` / `--version` and the no-terminal message (#1337).
 //! - [`data`] — the conversation + message READ layer (M2, §8 command→screen map).
 //! - [`enroll`] — multi-device enrollment + Secret-Key recovery wrappers (M4).
 //! - [`send`] — the conversation + group WRITE layer (M3, §8 command→screen map).
@@ -25,6 +26,7 @@
 //! - [`enroll_flow`] — the pure multi-device enrollment/recovery screen model.
 
 pub mod auth;
+pub mod cli;
 pub mod data;
 pub mod enroll;
 pub mod send;

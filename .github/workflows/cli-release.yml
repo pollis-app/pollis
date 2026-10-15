@@ -120,6 +120,16 @@ jobs:
           echo "LIVEKIT_URL=${{ secrets.LIVEKIT_URL }}" >> $GITHUB_ENV
           echo "POLLIS_DELIVERY_URL=${{ secrets.POLLIS_DELIVERY_URL }}" >> $GITHUB_ENV
 
+      # #1337: `pollis --version` prints CARGO_PKG_VERSION, and the committed
+      # workspace version is a placeholder, so stamp the resolved release
+      # version in before building — the same script desktop-release.yml uses.
+      # Through env:, never interpolated into the script.
+      - name: Stamp version
+        shell: bash
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: ./scripts/bump-version.sh "$VERSION"
+
       - name: Build CLI (Linux)
         run: cargo build -p pollis-tui --release
 
@@ -169,6 +179,16 @@ jobs:
           echo "R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}" >> $GITHUB_ENV
           echo "LIVEKIT_URL=${{ secrets.LIVEKIT_URL }}" >> $GITHUB_ENV
           echo "POLLIS_DELIVERY_URL=${{ secrets.POLLIS_DELIVERY_URL }}" >> $GITHUB_ENV
+
+      # #1337: `pollis --version` prints CARGO_PKG_VERSION, and the committed
+      # workspace version is a placeholder, so stamp the resolved release
+      # version in before building — the same script desktop-release.yml uses.
+      # Through env:, never interpolated into the script.
+      - name: Stamp version
+        shell: bash
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: ./scripts/bump-version.sh "$VERSION"
 
       - name: Build CLI (macOS aarch64)
         run: cargo build -p pollis-tui --release --target aarch64-apple-darwin
@@ -227,6 +247,16 @@ jobs:
       # Windows with `+crt-static`, so any build that genuinely pulled libcrypto
       # failed on `__imp__strdup` / `__imp__stat64i32`. Nothing pulled it until
       # #988, which is why it went unnoticed here too.
+
+      # #1337: `pollis --version` prints CARGO_PKG_VERSION, and the committed
+      # workspace version is a placeholder, so stamp the resolved release
+      # version in before building — the same script desktop-release.yml uses.
+      # Through env:, never interpolated into the script.
+      - name: Stamp version
+        shell: bash
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: ./scripts/bump-version.sh "$VERSION"
 
       - name: Build CLI (Windows)
         run: cargo build -p pollis-tui --release
