@@ -190,8 +190,41 @@ jobs:
           VERSION: ${{ needs.resolve-version.outputs.version }}
         run: ./scripts/bump-version.sh "$VERSION"
 
+      # #1337: the macOS CLI ships Developer ID signed and notarized, with the
+      # same Apple secrets desktop-release.yml signs the .app with. Fail on an
+      # empty secret BEFORE the build, exactly as the desktop job does — an empty
+      # APPLE_SIGNING_IDENTITY must never turn into a quietly ad-hoc binary.
+      - name: Preflight macOS signing secrets
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          scripts/verify-signed-artifact.sh preflight "macOS CLI" \
+            APPLE_SIGNING_IDENTITY APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD \
+            APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
+
       - name: Build CLI (macOS aarch64)
         run: cargo build -p pollis-tui --release --target aarch64-apple-darwin
+
+      # Developer ID sign (hardened runtime, secure timestamp) and notarize,
+      # BEFORE the upload, so provenance-cli attests and cosign-signs the bytes
+      # users get. The secrets are step-scoped — never $GITHUB_ENV — and the
+      # certificate lives in a throwaway keychain the script deletes on exit.
+      # A bare Mach-O cannot be stapled; Gatekeeper fetches the ticket online
+      # (see the script's header).
+      - name: Sign and notarize macOS CLI (Developer ID)
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: scripts/sign-macos-cli.sh target/aarch64-apple-darwin/release/pollis
 
       - name: Upload macOS CLI artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
