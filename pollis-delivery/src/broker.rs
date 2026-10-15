@@ -901,6 +901,13 @@ pub async fn room_send_data(
             let text = r.text().await.unwrap_or_default();
             // #1337: nobody is in the room, so there is nobody to nudge.
             if send_data_room_is_empty(status, &text) {
+                // LiveKit gives this same answer when the node hosting a LIVE
+                // room is down, so keep it countable: one line per occurrence,
+                // naming the route only — no room, user, device or address.
+                tracing::info!(
+                    route = "livekit.RoomService/SendData",
+                    "livekit: no server for room (empty or unhosted); nudge treated as delivered"
+                );
                 return Ok(());
             }
             Err(format!("SendData {status}: {text}"))
