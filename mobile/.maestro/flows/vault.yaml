@@ -34,7 +34,6 @@ tags:
 - tapOn:
     id: "input-composer"
 - inputText: "vault note from maestro"
-- hideKeyboard
 - tapOn:
     id: "btn-send"
 - extendedWaitUntil:
@@ -43,7 +42,6 @@ tags:
 - tapOn:
     id: "input-composer"
 - inputText: "second entry"
-- hideKeyboard
 - tapOn:
     id: "btn-send"
 - extendedWaitUntil:
@@ -74,7 +72,6 @@ tags:
 - assertVisible:
     id: "input-edit-composer"
 - inputText: " edited"
-- hideKeyboard
 - tapOn:
     id: "btn-edit-save"
 - extendedWaitUntil:
@@ -86,7 +83,6 @@ tags:
 - tapOn:
     id: "input-vault-search"
 - inputText: "second"
-- hideKeyboard
 - assertVisible: ".*second entry.*"
 - assertNotVisible: ".*vault note from maestro.*"
 - takeScreenshot: vault-04-search
@@ -94,13 +90,11 @@ tags:
     id: "input-vault-search"
 - eraseText: 20
 - inputText: "no such thing"
-- hideKeyboard
 - assertVisible:
     id: "vault-empty"
 - tapOn:
     id: "input-vault-search"
 - eraseText: 20
-- hideKeyboard
 - assertVisible: ".*vault note from maestro edited.*"
 
 # --- Media view: nothing yet ---

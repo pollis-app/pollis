@@ -82,6 +82,13 @@ tags:
       id: "btn-attachment-.*"
     timeout: 60000
 - takeScreenshot: media-viewer-03-sent
+# The thumbnail above is the optimistic row; the send itself (the first MLS
+# send in a fresh group) can take a minute. Restarting before it lands kills
+# the send, and the channel comes back empty. Wait for the stub to be replaced.
+- extendedWaitUntil:
+    notVisible:
+      id: "row-message-pending-.*"
+    timeout: 120000
 
 # Cold restart: no local preview survives it, so what renders next was
 # downloaded from R2 and decrypted to the sandbox.
