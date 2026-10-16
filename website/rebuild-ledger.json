@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-16T05:38:59Z",
+  "generated_at": "2026-10-16T06:31:33Z",
   "workflow": "rebuild-verify.yml",
   "false_red_fix": {
     "commit": "564353ae",
@@ -12,7 +12,7 @@
       "created_at": "2026-10-16T04:37:12Z",
       "event": "workflow_run",
       "run_id": "38851554692",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/38851554692",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/38851554692",
       "classification": null,
       "evidence": null
     },
@@ -22,7 +22,7 @@
       "created_at": "2026-10-15T20:28:43Z",
       "event": "workflow_run",
       "run_id": "38802259837",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/38802259837",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/38802259837",
       "classification": null,
       "evidence": null
     },
@@ -32,7 +32,7 @@
       "created_at": "2026-10-14T21:41:45Z",
       "event": "workflow_run",
       "run_id": "38642214292",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/38642214292",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/38642214292",
       "classification": null,
       "evidence": null
     },
@@ -42,7 +42,7 @@
       "created_at": "2026-10-14T04:34:44Z",
       "event": "workflow_run",
       "run_id": "38512112849",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/38512112849",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/38512112849",
       "classification": null,
       "evidence": null
     },
@@ -52,7 +52,7 @@
       "created_at": "2026-10-13T19:50:58Z",
       "event": "workflow_run",
       "run_id": "38458104115",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/38458104115",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/38458104115",
       "classification": null,
       "evidence": null
     },
@@ -62,7 +62,7 @@
       "created_at": "2026-10-13T16:17:44Z",
       "event": "workflow_run",
       "run_id": "38429316069",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/38429316069",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/38429316069",
       "classification": null,
       "evidence": null
     },
@@ -72,7 +72,7 @@
       "created_at": "2026-10-03T22:28:22Z",
       "event": "workflow_run",
       "run_id": "37158557473",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/37158557473",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/37158557473",
       "classification": null,
       "evidence": null
     },
@@ -82,7 +82,7 @@
       "created_at": "2026-10-03T16:14:28Z",
       "event": "workflow_run",
       "run_id": "37136119100",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/37136119100",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/37136119100",
       "classification": null,
       "evidence": null
     },
@@ -92,7 +92,7 @@
       "created_at": "2026-10-02T20:27:24Z",
       "event": "workflow_run",
       "run_id": "37060690510",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/37060690510",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/37060690510",
       "classification": null,
       "evidence": null
     },
@@ -102,7 +102,7 @@
       "created_at": "2026-10-01T20:33:39Z",
       "event": "workflow_run",
       "run_id": "36922466484",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/36922466484",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/36922466484",
       "classification": null,
       "evidence": null
     },
@@ -112,7 +112,7 @@
       "created_at": "2026-09-19T06:52:30Z",
       "event": "workflow_run",
       "run_id": "35427788869",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/35427788869",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/35427788869",
       "classification": null,
       "evidence": null
     },
@@ -122,7 +122,7 @@
       "created_at": "2026-09-18T07:47:42Z",
       "event": "workflow_run",
       "run_id": "35321158058",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/35321158058",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/35321158058",
       "classification": null,
       "evidence": null
     },
@@ -132,7 +132,7 @@
       "created_at": "2026-09-15T00:51:16Z",
       "event": "workflow_run",
       "run_id": "34914881206",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/34914881206",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/34914881206",
       "classification": null,
       "evidence": null
     },
@@ -142,7 +142,7 @@
       "created_at": "2026-09-04T06:01:42Z",
       "event": "workflow_run",
       "run_id": "33842697784",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/33842697784",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/33842697784",
       "classification": null,
       "evidence": null
     },
@@ -152,7 +152,7 @@
       "created_at": "2026-09-04T01:50:20Z",
       "event": "workflow_run",
       "run_id": "33827265061",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/33827265061",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/33827265061",
       "classification": null,
       "evidence": null
     },
@@ -162,7 +162,7 @@
       "created_at": "2026-09-03T22:06:27Z",
       "event": "workflow_run",
       "run_id": "33811427970",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/33811427970",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/33811427970",
       "classification": null,
       "evidence": null
     },
@@ -172,7 +172,7 @@
       "created_at": "2026-09-03T17:18:36Z",
       "event": "workflow_run",
       "run_id": "33783789041",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/33783789041",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/33783789041",
       "classification": "environment_drift",
       "evidence": "v1.11.1, and the narrowest drift on record — the workflow classified it itself while it ran and printed \"verdict: environment_drift\". Logged payload b0c238ce…, rebuilt 66293998…; the release (desktop-release build-linux) ran on ubuntu22@20260824.273.3, this rebuild twenty-two hours later on ubuntu22@20260831.284.1 — a re-imaged ubuntu-22.04 label, rolled out gradually as always — with the identical helper image ubuntu24@20260831.293.1 on both. The run’s own split by origin settles it: \"vendored host libraries (usr/lib/, copied off the runner by linuxdeploy): 4\" and \"everything else (built from Pollis source): 0\", printing \"ONLY vendored host libraries differ. Nothing built from Pollis source\". The four are libblkid.so.1, libbz2.so.1.0, libmount.so.1 and libp11-kit.so.0 — util-linux, bzip2 and p11-kit as shipped by the two images, none of them produced by this repository. Not one byte built from Pollis source differed: unlike v1.9.3 (§6a) the CSP hash order inside usr/bin/pollis is identical too, so the frontend bundle and the Rust binary both reproduced exactly. The 83,943,733 differing bytes are compression smear across a squashfs, not the size of the change. Still red, because an inconclusive rebuild is not a passing one, and a rerun can only converge once the pool hands out the release’s 20260824 image again. Full write-up: docs/reproducible-builds-residuals.md §6."
     },
@@ -182,7 +182,7 @@
       "created_at": "2026-08-31T08:20:06Z",
       "event": "workflow_run",
       "run_id": "33372419587",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/33372419587",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/33372419587",
       "classification": null,
       "evidence": null
     },
@@ -192,7 +192,7 @@
       "created_at": "2026-08-27T21:48:36Z",
       "event": "workflow_run",
       "run_id": "33119829575",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/33119829575",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/33119829575",
       "classification": "environment_drift",
       "evidence": "The workflow's own #944 verdict, confirmed by hand — and the strongest drift case yet: ZERO member files differ. v1.10.4's release (33117720048 build-linux) built on ubuntu22@20260824.273.3; this rebuild landed on the older ubuntu22@20260817.266.1 (mixed pool during GitHub's gradual image roll), same helper image ubuntu24@20260823.283.1 on both. Logged payload a3260af3…, rebuilt d43b090e… — but the unpacked AppImage diff by origin reports 0 differing vendored host libraries AND 0 differing files built from Pollis source: every byte of content is identical, and the only divergence is a handful of bytes in the squashfs container itself (offsets 932112, 107124192–95), i.e. the packaging tool between the two ubuntu22 images, not the code. The rebuild is internally deterministic: rerun 2026-08-27 22:26 reproduced d43b090e… byte-for-byte again on the same 20260817 image. Reruns cannot currently converge because the pool no longer hands out the release's 20260824 image alongside; the moment one does, this row can be upgraded to byte-for-byte the way v1.10.0's was."
     },
@@ -202,7 +202,7 @@
       "created_at": "2026-08-25T19:02:06Z",
       "event": "workflow_run",
       "run_id": "32887256490",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/32887256490",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/32887256490",
       "classification": null,
       "evidence": null
     },
@@ -212,7 +212,7 @@
       "created_at": "2026-08-24T18:16:47Z",
       "event": "workflow_run",
       "run_id": "32761505491",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/32761505491",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/32761505491",
       "classification": null,
       "evidence": null
     },
@@ -222,7 +222,7 @@
       "created_at": "2026-08-24T17:00:51Z",
       "event": "workflow_run",
       "run_id": "32754159778",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/32754159778",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/32754159778",
       "classification": null,
       "evidence": null
     },
@@ -232,7 +232,7 @@
       "created_at": "2026-08-21T21:08:50Z",
       "event": "workflow_run",
       "run_id": "32527089694",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/32527089694",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/32527089694",
       "classification": null,
       "evidence": null
     },
@@ -242,7 +242,7 @@
       "created_at": "2026-08-20T04:21:25Z",
       "event": "workflow_run",
       "run_id": "32331586990",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/32331586990",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/32331586990",
       "classification": null,
       "evidence": null
     },
@@ -252,7 +252,7 @@
       "created_at": "2026-08-19T16:33:23Z",
       "event": "workflow_run",
       "run_id": "32276578948",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/32276578948",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/32276578948",
       "classification": "environment_drift",
       "evidence": "v1.9.9, and the cleanest example of §6 yet — unlike v1.9.3 this one needed no diagnosis, because the post-#944 workflow classified it itself while it ran. It recorded: logged payload 6e76b988…, rebuilt c4f06c33…, release on ubuntu22@20260810.260.1+helper:ubuntu24@20260810.271.1, rebuild on ubuntu22@20260817.266.1+helper:ubuntu24@20260810.271.1 — a re-imaged ubuntu-22.04 label a week later — and printed \"verdict: environment_drift\". The run's own vendored/Pollis-built split is the part that settles it: \"vendored host libraries (usr/lib/, copied off the runner by linuxdeploy): 1\" and \"ONLY vendored host libraries differ. Nothing built from Pollis source\". The single differing library is libpng16, and the ELF diff shows shifted symbol addresses (png_set_cHRM 0x1ef20 → 0x1eec0, png_write_rows 0x27560 → 0x27500) — a genuinely different upstream build of libpng vendored off a different image, not a rebuilt Pollis artifact. Nothing built from Pollis source differed at all, so this is a strictly narrower drift than v1.9.3, which also permuted the CSP hash order inside usr/bin/pollis (§6a). Still red, because an inconclusive rebuild is not a passing one. Full write-up: docs/reproducible-builds-residuals.md §6."
     },
@@ -262,7 +262,7 @@
       "created_at": "2026-08-17T19:36:36Z",
       "event": "workflow_run",
       "run_id": "32061295629",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/32061295629",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/32061295629",
       "classification": null,
       "evidence": null
     },
@@ -272,7 +272,7 @@
       "created_at": "2026-08-17T13:41:23Z",
       "event": "workflow_dispatch",
       "run_id": "32036282718",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/32036282718",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/32036282718",
       "classification": null,
       "evidence": null
     },
@@ -282,7 +282,7 @@
       "created_at": "2026-08-16T08:38:44Z",
       "event": "workflow_run",
       "run_id": "31936974636",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31936974636",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/31936974636",
       "classification": null,
       "evidence": null
     },
@@ -292,7 +292,7 @@
       "created_at": "2026-08-15T22:47:50Z",
       "event": "workflow_run",
       "run_id": "31913067561",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31913067561",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/31913067561",
       "classification": null,
       "evidence": null
     },
@@ -302,7 +302,7 @@
       "created_at": "2026-08-15T19:17:08Z",
       "event": "workflow_run",
       "run_id": "31903478733",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31903478733",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/31903478733",
       "classification": "false_red",
       "evidence": "The tag was not yet in the binaries tree (found: false) and 0 bytes differed. v1.9.5 reproduced byte-identically; the red was the wait-loop bug."
     },
@@ -312,7 +312,7 @@
       "created_at": "2026-08-15T05:04:37Z",
       "event": "workflow_run",
       "run_id": "31866040326",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31866040326",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/31866040326",
       "classification": "false_red",
       "evidence": "The tag was not yet in the binaries tree (found: false) and 0 bytes differed. v1.9.4 reproduced byte-identically; the red was the wait-loop bug."
     },
@@ -322,7 +322,7 @@
       "created_at": "2026-08-13T23:25:34Z",
       "event": "workflow_run",
       "run_id": "31753766171",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31753766171",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/31753766171",
       "classification": "environment_drift",
       "evidence": "Explained by #944, and not a finding against the shipped binary. The tag was published and the log verified (found: true), and the AppImage genuinely differed: logged 07bccca8…, rebuilt a6767a4c…. The cause is that the two builds ran on different CI machine images — the release on ubuntu22@20260810.260.1, the rebuild 36 minutes later on ubuntu22@20260720.234.2, because GitHub rolls a re-imaged ubuntu-22.04 label out gradually. (Both read from the two runs' own logs; this tag's leaf predates #939 and records runner_image \"unknown\", which is why the workflow could not tell at the time.) An AppImage vendors the app's system libraries off the build machine, and seven differed in real code — libgssapi_krb5, libk5crypto, libkrb5, libkrb5support, libsqlite3, libsystemd, libudev — with changed .text sizes and shifted symbol addresses, not merely new build ids. The 105,863,272 differing bytes are compression smear across a squashfs, not the size of the change. The only difference in anything built from Pollis source was the ORDER of the twelve CSP content hashes inside usr/bin/pollis: the same twelve values, permuted, because tauri-codegen emits them in filesystem readdir order. That the twelve digests are identical is itself proof the frontend bundle reproduced byte-for-byte. Nothing indicates the shipped binary differs from the tagged source. Proven, not merely argued: re-running the identical rebuild on 2026-08-17 landed on ubuntu22@20260810.260.1 — the exact image the release built on — and reproduced 07bccca8… byte-for-byte (run 32036282718). Same source, same tag, one variable changed, and the bytes match. Full write-up: docs/reproducible-builds-residuals.md §6 and §6a."
     },
@@ -332,7 +332,7 @@
       "created_at": "2026-08-13T16:05:41Z",
       "event": "workflow_run",
       "run_id": "31718909914",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31718909914",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/31718909914",
       "classification": null,
       "evidence": null
     },
@@ -342,7 +342,7 @@
       "created_at": "2026-08-13T07:02:45Z",
       "event": "workflow_run",
       "run_id": "31676165075",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31676165075",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/31676165075",
       "classification": null,
       "evidence": null
     },
@@ -352,7 +352,7 @@
       "created_at": "2026-08-12T19:07:58Z",
       "event": "workflow_run",
       "run_id": "31631140154",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31631140154",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/31631140154",
       "classification": null,
       "evidence": null
     },
@@ -362,7 +362,7 @@
       "created_at": "2026-08-12T19:06:01Z",
       "event": "workflow_run",
       "run_id": "31630974720",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31630974720",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/31630974720",
       "classification": null,
       "evidence": null
     },
@@ -372,7 +372,7 @@
       "created_at": "2026-08-11T05:03:20Z",
       "event": "workflow_run",
       "run_id": "31460411482",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31460411482",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/31460411482",
       "classification": null,
       "evidence": null
     },
@@ -382,7 +382,7 @@
       "created_at": "2026-08-10T13:16:27Z",
       "event": "workflow_run",
       "run_id": "31392058335",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31392058335",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/31392058335",
       "classification": null,
       "evidence": null
     },
@@ -392,7 +392,7 @@
       "created_at": "2026-08-10T06:18:25Z",
       "event": "workflow_dispatch",
       "run_id": "31361471279",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31361471279",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/31361471279",
       "classification": null,
       "evidence": null
     },
@@ -402,7 +402,7 @@
       "created_at": "2026-08-10T04:54:00Z",
       "event": "workflow_dispatch",
       "run_id": "31356925574",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31356925574",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/31356925574",
       "classification": "environment_drift",
       "evidence": "Recipe drift, not image drift — and not a finding against the shipped binary. The comparison was real: logged AppImage payload 1a4213a1…, rebuilt a5ee8d5e…, and the release (31335834158 build-linux) and this rebuild both ran on ubuntu22@20260720.234.2, so the runner image is ruled out. What differed is the build recipe: the log records LOG_DB_TOKEN empty in the build env, while the release baked that token into usr/bin/pollis — cause (5) of the v1.8.4 diagnosis in docs/reproducible-builds-residuals.md, whose recipe vars were being stood up that very morning. The diff matches exactly: the only differing file in the unpacked AppImage was usr/bin/pollis itself, with .text 64 bytes (0x40) smaller and every later section shifted — the documented signature of one absent baked constant (the 105,674,021 differing bytes are compression smear across the squashfs). Proven, not merely argued: run 31361471279, 84 minutes later — same tag, same workflow commit 226cc7a9, same ubuntu22@20260720.234.2 image, recipe var now populated — reproduced 1a4213a1… byte-for-byte. The source was never in question; the rebuild ran with an incomplete build environment. #987 has since removed LOG_DB_TOKEN from the client entirely."
     },
@@ -412,7 +412,7 @@
       "created_at": "2026-08-09T21:03:22Z",
       "event": "push",
       "run_id": "31335833629",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31335833629",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/31335833629",
       "classification": "false_red",
       "evidence": "Same parse failure as 31335810940, from the same push of b48b6f0c — this is the run created at 21:03:22, the same second as the tag-triggered desktop-release run for v1.8.4 (31335834158). Zero jobs, run name fell back to the workflow path, no log exists, no build or comparison ever happened. Fixed by #798 (226cc7a9); v1.8.4 was subsequently proven to reproduce byte-identically (run 31361471279, payload 1a4213a1…)."
     },
@@ -422,7 +422,7 @@
       "created_at": "2026-08-09T21:02:50Z",
       "event": "push",
       "run_id": "31335810940",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31335810940",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/31335810940",
       "classification": "false_red",
       "evidence": "No comparison was ever performed — no job even started. v1.8.4 tags b48b6f0c, the very commit that introduced rebuild-verify.yml, and that first version of the file was unparseable by GitHub: the run has zero jobs (the Actions API reports total_count 0) and its name fell back to the raw workflow path .github/workflows/rebuild-verify.yml, which is also why gh run view finds no log. This run fired for the push of main at 21:02:50; a sibling (31335833629) fired 32 seconds later for the tag push. #798 (226cc7a9) repaired the unparseable workflow that night. Nothing was built and nothing was compared, so the red says nothing about the shipped bytes — and v1.8.4 in fact reproduces: run 31361471279 later rebuilt the Linux AppImage payload byte-for-byte (1a4213a1…) on the same runner image the release built on."
     }

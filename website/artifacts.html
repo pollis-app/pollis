@@ -425,10 +425,10 @@
         Everything below is fetched on load from our verification API, and every verdict is
         <strong>computed by the server</strong>. Your browser checks one thing: that the served signing key matches
         the key pinned in this page. To check the rest yourself, run the
-        <a href="https://github.com/actuallydan/pollis/tree/main/verifiable-log-serve" target="_blank"
+        <a href="https://github.com/pollis-app/pollis/tree/main/verifiable-log-serve" target="_blank"
           rel="noopener noreferrer"><code>pollis-verify</code> command-line tool</a> (source-available; see the
         <a href="faq.html">FAQ</a> on licensing) or query the
-        <a href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md" target="_blank"
+        <a href="https://github.com/pollis-app/pollis/blob/main/docs/transparency.md" target="_blank"
           rel="noopener noreferrer">public verification API</a> directly (rate limits apply). Only the CLI gives a
         verdict that doesn't depend on trusting us.
         <br /><br />
@@ -480,10 +480,10 @@
           </ul>
           <div class="art-links" style="margin-top: 1rem;">
             <a class="art-link-pill"
-              href="https://github.com/actuallydan/pollis/tree/main/verifiable-log-serve" target="_blank"
+              href="https://github.com/pollis-app/pollis/tree/main/verifiable-log-serve" target="_blank"
               rel="noopener noreferrer">Source &amp; README</a>
             <a class="art-link-pill"
-              href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md" target="_blank"
+              href="https://github.com/pollis-app/pollis/blob/main/docs/transparency.md" target="_blank"
               rel="noopener noreferrer">Verification docs</a>
           </div>
         </div>
@@ -498,10 +498,10 @@
           republishes their signed tree heads, which let anyone holding the pinned log key check that each log is
           append-only and unforked. This section only displays the current heads; it cannot prove consistency in
           your browser. The
-          <a class="art-inline" href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md"
+          <a class="art-inline" href="https://github.com/pollis-app/pollis/blob/main/docs/transparency.md"
             target="_blank" rel="noopener noreferrer">verification docs</a> and the
           <a class="art-inline"
-            href="https://github.com/actuallydan/pollis/blob/main/.github/workflows/transparency-publish.yml"
+            href="https://github.com/pollis-app/pollis/blob/main/.github/workflows/transparency-publish.yml"
             target="_blank" rel="noopener noreferrer">transparency-publish workflow / run logs</a> show how to check
           it yourself.
         </p>
@@ -582,15 +582,18 @@
           </p>
           <ul class="art-cmds">
             <li>
-              <code class="art-cmd">BASE=https://cdn.pollis.com/releases/v1.9.7
-ART=pollis-v1.9.7-windows.exe
+              <code class="art-cmd">BASE=https://cdn.pollis.com/releases/v1.17.2
+ART=pollis-v1.17.2-windows.exe
+REPO=actuallydan/pollis                 # the signer: pollis-app/pollis after v1.17.2
 curl -sSLO "$BASE/$ART"                 # the artifact
 curl -sSLO "$BASE/$ART.sig"             # cosign detached signature
 curl -sSLO "$BASE/$ART.pem"             # cosign signing certificate
 curl -sSLO "$BASE/$ART.intoto.jsonl"    # SLSA build-provenance attestation</code>
               <span class="art-cmd-note">Substitute any released tag and any of
                 <code>-macos.dmg</code>, <code>-windows.exe</code>, <code>-linux.AppImage</code>,
-                <code>-linux.deb</code>, <code>-linux.rpm</code>.</span>
+                <code>-linux.deb</code>, <code>-linux.rpm</code>. <code>REPO</code> is the repository that built
+                the tag: the project moved from <code>actuallydan/pollis</code> to <code>pollis-app/pollis</code>
+                after v1.17.2, and a release's certificate names the repository it was built in.</span>
             </li>
           </ul>
 
@@ -598,7 +601,7 @@ curl -sSLO "$BASE/$ART.intoto.jsonl"    # SLSA build-provenance attestation</cod
           <ul class="art-cmds">
             <li>
               <code class="art-cmd">cosign verify-blob \
-  --certificate-identity-regexp '^https://github\.com/actuallydan/pollis/\.github/workflows/desktop-release\.yml@refs/tags/v.*$' \
+  --certificate-identity-regexp "^https://github\.com/$REPO/\.github/workflows/desktop-release\.yml@refs/tags/v.*$" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --signature   "$ART.sig" \
   --certificate "$ART.pem" \
@@ -614,8 +617,8 @@ curl -sSLO "$BASE/$ART.intoto.jsonl"    # SLSA build-provenance attestation</cod
             <li>
               <code class="art-cmd">gh attestation verify "$ART" \
   --bundle "$ART.intoto.jsonl" \
-  --repo actuallydan/pollis \
-  --cert-identity-regex '^https://github\.com/actuallydan/pollis/\.github/workflows/desktop-release\.yml@refs/tags/v.*$' \
+  --repo "$REPO" \
+  --cert-identity-regex "^https://github\.com/$REPO/\.github/workflows/desktop-release\.yml@refs/tags/v.*$" \
   --cert-oidc-issuer https://token.actions.githubusercontent.com</code>
               <span class="art-cmd-note">Prints <code>✓ Verification succeeded!</code> and names the workflow and
                 tag. <code>gh</code> prints that banner only to a terminal, so in a script check for exit status
@@ -624,8 +627,8 @@ curl -sSLO "$BASE/$ART.intoto.jsonl"    # SLSA build-provenance attestation</cod
             <li>
               <code class="art-cmd">slsa-verifier verify-artifact "$ART" \
   --provenance-path "$ART.intoto.jsonl" \
-  --source-uri github.com/actuallydan/pollis \
-  --source-tag v1.9.7</code>
+  --source-uri "github.com/$REPO" \
+  --source-tag v1.17.2</code>
               <span class="art-cmd-note">The same check with a standalone verifier, if you'd rather not have
                 GitHub's CLI grade GitHub's attestation.</span>
             </li>
@@ -640,7 +643,7 @@ curl -sSLO "$BASE/$ART.intoto.jsonl"    # SLSA build-provenance attestation</cod
           </p>
           <ul class="art-cmds">
             <li>
-              <code class="art-cmd">curl -sSL "$BASE/pollis-v1.9.7.cdx.json" | jq '.components | length'</code>
+              <code class="art-cmd">curl -sSL "$BASE/pollis-v1.17.2.cdx.json" | jq '.components | length'</code>
               <span class="art-cmd-note">SBOMs begin at the first release after 16 August 2026; earlier tags have
                 no <code>.cdx.json</code> and the URL returns 404. See the limits below.</span>
             </li>
@@ -682,7 +685,7 @@ curl -sSLO "$BASE/$ART.intoto.jsonl"    # SLSA build-provenance attestation</cod
             append-only log. They do not show that every platform reproduces byte-for-byte from source. Linux payload
             reproduction is documented
             (<a class="art-inline"
-              href="https://github.com/actuallydan/pollis/blob/main/docs/reproducible-builds-residuals.md"
+              href="https://github.com/pollis-app/pollis/blob/main/docs/reproducible-builds-residuals.md"
               target="_blank" rel="noopener noreferrer">reproducible-builds-residuals.md</a>); macOS and Windows are
             published-bytes-match only.
           </p>
@@ -714,7 +717,7 @@ curl -sSLO "$BASE/$ART.intoto.jsonl"    # SLSA build-provenance attestation</cod
         <a href="continuity.html" class="footer-link">Continuity</a>
         <a href="https://status.pollis.com/" class="footer-link" target="_blank" rel="noopener noreferrer">Status</a>
         <a href="learn.html" class="footer-link">Learn</a>
-        <a href="https://github.com/actuallydan/pollis" class="footer-link" target="_blank" rel="noopener noreferrer">
+        <a href="https://github.com/pollis-app/pollis" class="footer-link" target="_blank" rel="noopener noreferrer">
           <svg viewBox="0 0 20 20" fill="currentColor" width="20" height="20" aria-hidden="true">
             <g transform="translate(-140,-7559)">
               <g transform="translate(56,160)">

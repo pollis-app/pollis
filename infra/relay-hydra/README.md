@@ -423,7 +423,7 @@ eval "$(aws configure export-credentials --format env)"   # see Prerequisites
 # 1. Enable the CI OIDC role. Set the repo + (if the account has NO GitHub OIDC
 #    provider yet) create one. Then apply.
 cat >> terraform.tfvars <<'EOF'
-github_repository           = "actuallydan/pollis"
+github_repositories         = ["pollis-app/pollis"]
 manage_github_oidc_provider = false   # true ONLY if the account has no GitHub OIDC provider yet
 EOF
 terraform apply

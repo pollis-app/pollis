@@ -268,7 +268,7 @@
           '<p class="doc-loading">Could not load the rebuild ledger (' +
           esc(err.message) +
           "). The verdicts are still readable directly in " +
-          '<a href="https://github.com/actuallydan/pollis/actions/workflows/rebuild-verify.yml" ' +
+          '<a href="https://github.com/pollis-app/pollis/actions/workflows/rebuild-verify.yml" ' +
           'target="_blank" rel="noopener noreferrer">the workflow run history</a>.</p>';
       }
     });

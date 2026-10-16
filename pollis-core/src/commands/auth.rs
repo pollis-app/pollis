@@ -1394,7 +1394,7 @@ pub async fn logout(state: &Arc<AppState>, delete_data: bool) -> Result<()> {
 /// This ensures forward secrecy: the deleted user's key material cannot decrypt
 /// any messages sent after the rotation.
 ///
-/// See: https://github.com/actuallydan/pollis/issues/103
+/// See: https://github.com/pollis-app/pollis/issues/103
 pub async fn delete_account(
     state: &Arc<AppState>,
     user_id: String,

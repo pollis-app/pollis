@@ -631,7 +631,7 @@ fn key_rotation_across_multiple_membership_changes() {
 /// each before deleting DB rows.  This test verifies the underlying MLS
 /// removal + epoch advance works across multiple groups.
 ///
-/// See: https://github.com/actuallydan/pollis/issues/103
+/// See: https://github.com/pollis-app/pollis/issues/103
 #[test]
 fn account_deletion_rotates_keys_for_remaining_members() {
     let group1 = "01JTEST000000000000ACCTDEL1";

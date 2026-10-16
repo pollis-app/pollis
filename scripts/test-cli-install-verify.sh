@@ -31,7 +31,7 @@ eval "$fn"
 LINUX="633d7cafa4793028be2db4f29328daecbb858ac62a42f18684a24c9a61c25ec8"
 MACOS="b7d619bdee486db0dafc5bd76f312322d13fb90c37a8efdc2b375b183db8158f"
 OTHER="31d4e41bc66b4762d64819c51945d2617cb1a9238ff20a7837612c1ba69c9505"
-REPO="https://github.com/actuallydan/pollis"
+REPO="https://github.com/pollis-app/pollis"
 WORKFLOW=".github/workflows/cli-release.yml"
 VERSION="1.17.1"
 TAG="refs/tags/v${VERSION}"
@@ -104,6 +104,8 @@ expect 1 "a tag that only starts with the version" \
 # Same subject, built by something else.
 expect 1 "another repository's workflow" \
     "$(response "$(statement "$all" "https://github.com/mallory/pollis" "$WORKFLOW")")" pollis-macos "$MACOS"
+expect 1 "the pre-transfer owner (#1265), whose store this endpoint never serves" \
+    "$(response "$(statement "$all" "https://github.com/actuallydan/pollis" "$WORKFLOW")")" pollis-macos "$MACOS"
 expect 1 "another workflow in this repository" \
     "$(response "$(statement "$all" "$REPO" ".github/workflows/ci.yml")")" pollis-macos "$MACOS"
 expect 1 "not a SLSA provenance statement" \

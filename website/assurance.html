@@ -99,7 +99,7 @@
             check re-run on 17 August (same tag, same source) landed on the CI machine image the release had used
             and produced a payload byte-identical to the one in the log
             (<code>07bccca8…</code>,
-            <a href="https://github.com/actuallydan/pollis/actions/runs/32036282718">run 32036282718</a>).
+            <a href="https://github.com/pollis-app/pollis/actions/runs/32036282718">run 32036282718</a>).
           </p>
           <p>
             <strong>Why the August run differed.</strong> An AppImage is not purely a function of our source: the
@@ -186,13 +186,13 @@
         </p>
         <p>
           Every run publishes a summary and a downloadable artifact:
-          <a href="https://github.com/actuallydan/pollis/actions/workflows/tla.yml" target="_blank"
+          <a href="https://github.com/pollis-app/pollis/actions/workflows/tla.yml" target="_blank"
             rel="noopener noreferrer">TLA+ runs</a> ·
-          <a href="https://github.com/actuallydan/pollis/actions/workflows/kani.yml" target="_blank"
+          <a href="https://github.com/pollis-app/pollis/actions/workflows/kani.yml" target="_blank"
             rel="noopener noreferrer">Kani runs</a> ·
-          <a href="https://github.com/actuallydan/pollis/blob/main/docs/machine-checked-correctness-design.md"
+          <a href="https://github.com/pollis-app/pollis/blob/main/docs/machine-checked-correctness-design.md"
             target="_blank" rel="noopener noreferrer">design doc</a> ·
-          <a href="https://github.com/actuallydan/pollis/tree/main/specs/tla" target="_blank"
+          <a href="https://github.com/pollis-app/pollis/tree/main/specs/tla" target="_blank"
             rel="noopener noreferrer">the specs themselves</a>.
         </p>
 
@@ -307,11 +307,11 @@
         </div>
         <p style="margin-top: 1rem;">
           Read the policy directly:
-          <a href="https://github.com/actuallydan/pollis/blob/main/deny.toml" target="_blank"
+          <a href="https://github.com/pollis-app/pollis/blob/main/deny.toml" target="_blank"
             rel="noopener noreferrer"><code>deny.toml</code></a> ·
-          <a href="https://github.com/actuallydan/pollis/tree/main/supply-chain" target="_blank"
+          <a href="https://github.com/pollis-app/pollis/tree/main/supply-chain" target="_blank"
             rel="noopener noreferrer"><code>supply-chain/</code></a> ·
-          <a href="https://github.com/actuallydan/pollis/actions/workflows/supply-chain.yml" target="_blank"
+          <a href="https://github.com/pollis-app/pollis/actions/workflows/supply-chain.yml" target="_blank"
             rel="noopener noreferrer">gate runs</a>.
         </p>
       </section>
@@ -391,11 +391,11 @@
           </p>
         </div>
         <p style="margin-top: 1rem;">
-          <a href="https://github.com/actuallydan/pollis/blob/main/docs/signing-key-compromise-runbook.md"
+          <a href="https://github.com/pollis-app/pollis/blob/main/docs/signing-key-compromise-runbook.md"
             target="_blank" rel="noopener noreferrer">Compromise runbook</a> ·
-          <a href="https://github.com/actuallydan/pollis/blob/main/docs/sth-signing-key-custody.md"
+          <a href="https://github.com/pollis-app/pollis/blob/main/docs/sth-signing-key-custody.md"
             target="_blank" rel="noopener noreferrer">Custody &amp; rotation design</a> ·
-          <a href="https://github.com/actuallydan/pollis/blob/main/key-set.json" target="_blank"
+          <a href="https://github.com/pollis-app/pollis/blob/main/key-set.json" target="_blank"
             rel="noopener noreferrer">The signed key set</a>.
         </p>
       </section>
@@ -418,31 +418,31 @@
                 <td>Static review of the client, Delivery Service and release pipeline, plus an OWASP ZAP run
                   (~47,000 requests) against a locally built Delivery Service</td>
                 <td>9 High, 13 Medium, 1 Low</td>
-                <td><span class="doc-badge doc-badge--pass">all fixed</span><br /><a href="https://github.com/actuallydan/pollis/pull/1091" target="_blank" rel="noopener noreferrer">#1091</a>, <a href="https://github.com/actuallydan/pollis/pull/1102" target="_blank" rel="noopener noreferrer">#1102</a>, <a href="https://github.com/actuallydan/pollis/issues/1113" target="_blank" rel="noopener noreferrer">#1113</a></td>
+                <td><span class="doc-badge doc-badge--pass">all fixed</span><br /><a href="https://github.com/pollis-app/pollis/pull/1091" target="_blank" rel="noopener noreferrer">#1091</a>, <a href="https://github.com/pollis-app/pollis/pull/1102" target="_blank" rel="noopener noreferrer">#1102</a>, <a href="https://github.com/pollis-app/pollis/issues/1113" target="_blank" rel="noopener noreferrer">#1113</a></td>
               </tr>
               <tr>
                 <td>18 September 2026, second<br />v1.13.0, commit <code>62db0805</code></td>
                 <td>Six parallel audits across the MLS client, Delivery Service authorization, enrollment and
                   key material, and the supply chain, plus two documentation-versus-code sweeps</td>
                 <td>2 Critical, 5 High, 8 Medium, 4 Low</td>
-                <td><span class="doc-badge doc-badge--pass">fixed</span><br /><a href="https://github.com/actuallydan/pollis/issues/1161" target="_blank" rel="noopener noreferrer">#1161</a></td>
+                <td><span class="doc-badge doc-badge--pass">fixed</span><br /><a href="https://github.com/pollis-app/pollis/issues/1161" target="_blank" rel="noopener noreferrer">#1161</a></td>
               </tr>
             </tbody>
           </table>
         </div>
         <p>
           Every fixed finding ships with a regression test confirmed to fail against the pre-fix code. Two of the
-          second review's findings were addressed differently from the audit's suggestion, with the reasoning on <a href="https://github.com/actuallydan/pollis/issues/1161" target="_blank" rel="noopener noreferrer">#1161</a>. One, two identity columns (who reacted with which emoji, who pinned a
+          second review's findings were addressed differently from the audit's suggestion, with the reasoning on <a href="https://github.com/pollis-app/pollis/issues/1161" target="_blank" rel="noopener noreferrer">#1161</a>. One, two identity columns (who reacted with which emoji, who pinned a
           message) stored in the clear, is an accepted exposure rather than a fixed defect: no document claims they
           are protected, and whether to seal them is an open product decision. The repository-settings finding (no
-          required checks, unprotected release tags) was closed separately on <a href="https://github.com/actuallydan/pollis/issues/1101" target="_blank" rel="noopener noreferrer">#1101</a>.
+          required checks, unprotected release tags) was closed separately on <a href="https://github.com/pollis-app/pollis/issues/1101" target="_blank" rel="noopener noreferrer">#1101</a>.
         </p>
         <div class="doc-limit">
           <span class="doc-limit-title">Where this guarantee ends</span>
           <p>
             Both reviews were mostly static. Live testing of TLS configuration, signed-request replay, adversarial
             two-client MLS behaviour, updater tampering and the voice SFU has been scoped but not run by an
-            independent human tester. An independent human audit is welcome, and the <a href="https://github.com/actuallydan/pollis/blob/main/docs/security-whitepaper.md"
+            independent human tester. An independent human audit is welcome, and the <a href="https://github.com/pollis-app/pollis/blob/main/docs/security-whitepaper.md"
             target="_blank" rel="noopener noreferrer">whitepaper</a> is written for that reader.
           </p>
         </div>
@@ -465,11 +465,11 @@
         <h2 class="doc-section-title">Reporting a vulnerability</h2>
         <p>
           Report privately through a
-          <a href="https://github.com/actuallydan/pollis/security/advisories/new" target="_blank"
+          <a href="https://github.com/pollis-app/pollis/security/advisories/new" target="_blank"
             rel="noopener noreferrer">GitHub security advisory</a>, not a public issue. The machine-readable
           policy is at <a href="/.well-known/security.txt"><code>/.well-known/security.txt</code></a> and the
           terms are in the
-          <a href="https://github.com/actuallydan/pollis/security/policy" target="_blank"
+          <a href="https://github.com/pollis-app/pollis/security/policy" target="_blank"
             rel="noopener noreferrer">disclosure policy</a>.
         </p>
         <p>

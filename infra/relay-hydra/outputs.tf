@@ -65,7 +65,7 @@ output "revocations_param" {
 }
 
 output "relay_image_oidc_role_arn" {
-  description = "ARN of the GitHub-OIDC role relay-image.yml assumes to record the intended build. Add it to the repo as the RELAY_IMAGE_OIDC_ROLE_ARN Actions VARIABLE (not a secret). Empty when github_repository is unset (record the param by hand instead)."
+  description = "ARN of the GitHub-OIDC role relay-image.yml assumes to record the intended build. Add it to the repo as the RELAY_IMAGE_OIDC_ROLE_ARN Actions VARIABLE (not a secret). Empty when github_repositories is empty (record the param by hand instead)."
   value       = local.ci_oidc_enabled ? aws_iam_role.ci_record_image[0].arn : ""
 }
 

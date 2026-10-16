@@ -17,7 +17,7 @@ interface BuildVerifyLineProps {
 // in-app check proves inclusion + hash match, NOT that the payload reproduces
 // from source. That step is the independent rebuilders'.
 const VERIFY_DOCS_URL =
-  "https://github.com/actuallydan/pollis/blob/main/docs/verify-transparency-log.md";
+  "https://pollis.com/artifacts.html";
 
 // Terse copy + tone per status, mirroring AccountKeyAuditLine. Quiet and
 // advisory — these alert, they never block launch/update. `mismatch` is the only

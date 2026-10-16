@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-REPO="${REPO:-actuallydan/pollis}"
+REPO="${REPO:-pollis-app/pollis}"
 DOC="docs/path-to-launch-epic.md"
 DRY=0
 [[ "${1:-}" == "--dry-run" ]] && DRY=1

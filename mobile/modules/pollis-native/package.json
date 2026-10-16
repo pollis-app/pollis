@@ -10,10 +10,10 @@
   },
   "author": "Dan <dankral01@gmail.com> (https://github.com/actuallydan)",
   "license": "UNLICENSED",
-  "homepage": "https://github.com/actuallydan/pollis#readme",
+  "homepage": "https://github.com/pollis-app/pollis#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/actuallydan/pollis.git"
+    "url": "git+https://github.com/pollis-app/pollis.git"
   },
   "create-react-native-library": {
     "type": "turbo-module",

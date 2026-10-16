@@ -25,7 +25,7 @@
 
 set -uo pipefail
 
-REPO_SLUG="${POLLIS_REPO:-actuallydan/pollis}"
+REPO_SLUG="${POLLIS_REPO:-pollis-app/pollis}"
 REF="origin/main"
 MODE="full"
 PR=""

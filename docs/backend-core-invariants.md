@@ -306,7 +306,7 @@ the invariant that makes it unrepresentable.
 
 ## Roadmap (phased)
 
-> Tracked in **[#397](https://github.com/actuallydan/pollis/issues/397)**.
+> Tracked in **[#397](https://github.com/pollis-app/pollis/issues/397)**.
 
 
 - **Phase 0 (done):** stop the bleeding — append-only in code (`adfe518`: no

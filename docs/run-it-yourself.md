@@ -52,7 +52,7 @@ and confirm none of it is intelligible without the client-held MLS keys.
   Arch and Fedora ship a new enough clang.
 
 ```bash
-git clone https://github.com/actuallydan/pollis.git
+git clone https://github.com/pollis-app/pollis.git
 cd pollis
 pnpm install
 ```

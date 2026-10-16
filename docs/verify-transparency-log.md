@@ -25,7 +25,7 @@ only you can set it. Leave it unset for production.
 The CLI is `pollis-verify`. It needs no credentials.
 
 **Download.** Prebuilt binaries for Linux x86_64 and macOS (arm64 and x86_64) are on
-[GitHub Releases](https://github.com/actuallydan/pollis/releases) under tags
+[GitHub Releases](https://github.com/pollis-app/pollis/releases) under tags
 `pollis-verify-v*`. Check the checksum and make it executable:
 
 ```bash
@@ -342,7 +342,7 @@ curl -sSLO "$BASE/$ART.intoto.jsonl"    # SLSA build-provenance attestation
 
 ```bash
 cosign verify-blob \
-  --certificate-identity-regexp '^https://github.com/actuallydan/pollis/\.github/workflows/desktop-release\.yml@refs/tags/v.*$' \
+  --certificate-identity-regexp '^https://github.com/pollis-app/pollis/\.github/workflows/desktop-release\.yml@refs/tags/v.*$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --signature   "$ART.sig" \
   --certificate "$ART.pem" \
@@ -362,16 +362,21 @@ subject. Verify it with the GitHub CLI:
 ```bash
 gh attestation verify "$ART" \
   --bundle "$ART.intoto.jsonl" \
-  --repo actuallydan/pollis \
-  --cert-identity-regex '^https://github.com/actuallydan/pollis/\.github/workflows/desktop-release\.yml@refs/tags/v.*$' \
+  --repo pollis-app/pollis \
+  --cert-identity-regex '^https://github.com/pollis-app/pollis/\.github/workflows/desktop-release\.yml@refs/tags/v.*$' \
   --cert-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
 This confirms the artifact's digest is a subject of a provenance statement signed
 by that workflow and logged in Rekor, and prints the source repo, commit and
 workflow. `slsa-verifier verify-artifact --provenance-path "$ART.intoto.jsonl"
---source-uri github.com/actuallydan/pollis --source-tag vX.Y.Z "$ART"` is an
+--source-uri github.com/pollis-app/pollis --source-tag vX.Y.Z "$ART"` is an
 alternative.
+
+Releases up to and including `v1.17.2` were built before the repository moved
+from `actuallydan/pollis` to `pollis-app/pollis`: their certificates and
+provenance name `actuallydan/pollis`, so substitute that in the three commands
+above.
 
 **What this does not prove.** cosign and SLSA show that the Pollis release workflow
 built these bytes at a specific commit. They do not show that the bytes rebuild

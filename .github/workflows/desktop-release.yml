@@ -1261,7 +1261,7 @@ jobs:
           body: |
             ## What changed
 
-            See [CHANGELOG.md](https://github.com/actuallydan/pollis/blob/${{ github.ref_name }}/CHANGELOG.md)
+            See [CHANGELOG.md](${{ github.server_url }}/${{ github.repository }}/blob/${{ github.ref_name }}/CHANGELOG.md)
             for this release's entry, written for the person installing it.
 
             ## Verify what you downloaded

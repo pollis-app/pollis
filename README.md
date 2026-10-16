@@ -97,7 +97,7 @@ Pinned public key (ML-DSA-44, 1312 bytes):
 `pollis-verify` has this key compiled in and refuses a log that serves a different
 one: any key can sign a self-consistent forged tree.
 
-Download `pollis-verify` from [Releases](https://github.com/actuallydan/pollis/releases)
+Download `pollis-verify` from [Releases](https://github.com/pollis-app/pollis/releases)
 (tags `pollis-verify-v*`; Linux x86_64 and macOS; the release notes repeat the key)
 or build it with `cargo build -p verifiable-log-serve --release`. Then:
 
@@ -150,7 +150,7 @@ rely on. Full reference: [docs/transparency.md](docs/transparency.md).
 ### 3. Read the publish logs
 
 The public
-[`transparency-publish`](https://github.com/actuallydan/pollis/actions/workflows/transparency-publish.yml)
+[`transparency-publish`](https://github.com/pollis-app/pollis/actions/workflows/transparency-publish.yml)
 workflow builds and signs the bundles, syncs them to R2, then runs
 `pollis-verify remote` against the live `verify.pollis.com` and compares the new
 heads with the previous run's, so an equivocating or rolled-back head fails the run.

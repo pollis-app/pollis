@@ -144,13 +144,14 @@ while IFS=$'\t' read -r run_id created_at conclusion event head_sha head_branch 
     --arg created_at "$created_at" \
     --arg event "$event" \
     --arg run_id "$run_id" \
+    --arg runs_base "${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-pollis-app/pollis}/actions/runs/" \
     '. += [{
        tag: $tag,
        conclusion: $conclusion,
        created_at: $created_at,
        event: $event,
        run_id: $run_id,
-       run_url: ("https://github.com/actuallydan/pollis/actions/runs/" + $run_id)
+       run_url: ($runs_base + $run_id)
      }]')"
 done < <(printf '%s' "$runs" | jq -r '.[] | [
   (.databaseId|tostring), .createdAt, .conclusion, .event, .headSha,

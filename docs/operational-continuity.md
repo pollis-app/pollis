@@ -40,7 +40,7 @@ Every row is held by one person. The last column is what a *user* loses, not wha
 
 | Asset | Where it lives | What it does | If it is lost |
 |---|---|---|---|
-| GitHub `actuallydan/pollis` | GitHub | Source, all CI, releases, the published status + incident record | No releases, no CI gates, no published record. The source already in the world stays (PolyForm Noncommercial) |
+| GitHub `pollis-app/pollis` | GitHub | Source, all CI, releases, the published status + incident record | No releases, no CI gates, no published record. The source already in the world stays (PolyForm Noncommercial) |
 | Doppler (`pollis/prd`) | Doppler | Source of truth for service secrets; synced to GitHub Actions and the Wrangler Secrets Store | Every secret below must be reissued from its own provider |
 | `TAURI_SIGNING_PRIVATE_KEY` (+ password) | GitHub secret | Signs the auto-updater manifests | **The worst single loss.** The matching public key is compiled into every shipped client (`src-tauri/tauri.conf.json` → `plugins.updater.pubkey`), so no future build can ever be accepted as an update by an already-installed app. Every user would have to reinstall by hand |
 | `STH_SIGNING_KEY` | GitHub secret, backed up in Doppler | Signs all three transparency trees | The log cannot be republished. Rotating to a new key is **not** cleanly recoverable — see §5 |

@@ -908,7 +908,7 @@
       <div class="ln-intro">
         Each topic also says what its mechanism does not prove. These pages are the introductory
         version; each links to the auditor-facing
-        <a href="https://github.com/actuallydan/pollis/tree/main/docs" target="_blank"
+        <a href="https://github.com/pollis-app/pollis/tree/main/docs" target="_blank"
           rel="noopener noreferrer">design docs</a> for the precise one.
       </div>
 
@@ -1137,10 +1137,10 @@ A readable message, then a sealed one, then the delivery details on the outside 
 
         <p class="ln-deeper">
           The rigorous version: <a
-            href="https://github.com/actuallydan/pollis/blob/main/docs/security-whitepaper.md"
+            href="https://github.com/pollis-app/pollis/blob/main/docs/security-whitepaper.md"
             target="_blank" rel="noopener noreferrer">docs/security-whitepaper.md</a> §1.1, and the
           trusted/untrusted split in <a
-            href="https://github.com/actuallydan/pollis/blob/main/CLAUDE.md" target="_blank"
+            href="https://github.com/pollis-app/pollis/blob/main/CLAUDE.md" target="_blank"
             rel="noopener noreferrer">CLAUDE.md</a> → "Security model".
         </p>
       </section>
@@ -1309,11 +1309,11 @@ Four short scenes, no formulas: the size of a key, a lock with no "almost", the 
 
         <p class="ln-deeper">
           The rigorous version: the ML-DSA-44 keys and OS-keystore storage in <a
-            href="https://github.com/actuallydan/pollis/blob/main/pollis-core/src/commands/auth.rs"
+            href="https://github.com/pollis-app/pollis/blob/main/pollis-core/src/commands/auth.rs"
             target="_blank" rel="noopener noreferrer">auth.rs</a>, the device-signed writes in <a
-            href="https://github.com/actuallydan/pollis/blob/main/pollis-core/src/commands/mls/ds_client.rs"
+            href="https://github.com/pollis-app/pollis/blob/main/pollis-core/src/commands/mls/ds_client.rs"
             target="_blank" rel="noopener noreferrer">ds_client.rs</a>, and the SHA-256 hashing in <a
-            href="https://github.com/actuallydan/pollis/blob/main/verifiable-log/src/merkle.rs"
+            href="https://github.com/pollis-app/pollis/blob/main/verifiable-log/src/merkle.rs"
             target="_blank" rel="noopener noreferrer">merkle.rs</a>.
         </p>
       </section>
@@ -1379,9 +1379,9 @@ The copy-per-person approach piling up, then the tree being built, then one smal
         <p class="ln-deeper">
           The rigorous version: <a href="https://www.rfc-editor.org/rfc/rfc9420.html" target="_blank"
             rel="noopener noreferrer">RFC 9420</a> itself, our OpenMLS usage in <a
-            href="https://github.com/actuallydan/pollis/tree/main/pollis-core/src/commands/mls"
+            href="https://github.com/pollis-app/pollis/tree/main/pollis-core/src/commands/mls"
             target="_blank" rel="noopener noreferrer">commands/mls/</a>, and the ordering invariant in <a
-            href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md"
+            href="https://github.com/pollis-app/pollis/blob/main/docs/transparency.md"
             target="_blank" rel="noopener noreferrer">docs/transparency.md</a>.
         </p>
       </section>
@@ -1442,10 +1442,10 @@ Lockboxes left in advance, a welcome that carries only today's keys, earlier mes
 
         <p class="ln-deeper">
           The rigorous version: the enrollment and GroupInfo flows in <a
-            href="https://github.com/actuallydan/pollis/blob/main/.codesight/wiki/mls.md"
+            href="https://github.com/pollis-app/pollis/blob/main/.codesight/wiki/mls.md"
             target="_blank" rel="noopener noreferrer">the MLS wiki article</a>, and the three-acceptable-losses
           policy stated verbatim in <a
-            href="https://github.com/actuallydan/pollis/blob/main/CLAUDE.md" target="_blank"
+            href="https://github.com/pollis-app/pollis/blob/main/CLAUDE.md" target="_blank"
             rel="noopener noreferrer">CLAUDE.md</a> → "Messages must work; history is bounded, not
           flaky".
         </p>
@@ -1504,9 +1504,9 @@ Time runs left to right: a one-way key chain, the caveat about an unlocked scree
           The rigorous version: the key schedule in <a
             href="https://www.rfc-editor.org/rfc/rfc9420.html#section-8" target="_blank"
             rel="noopener noreferrer">RFC 9420 §8</a>, the epoch advance in <a
-            href="https://github.com/actuallydan/pollis/blob/main/.codesight/wiki/mls.md"
+            href="https://github.com/pollis-app/pollis/blob/main/.codesight/wiki/mls.md"
             target="_blank" rel="noopener noreferrer">the MLS wiki article</a>, and the local-storage
-          caveat in <a href="https://github.com/actuallydan/pollis/blob/main/CLAUDE.md"
+          caveat in <a href="https://github.com/pollis-app/pollis/blob/main/CLAUDE.md"
             target="_blank" rel="noopener noreferrer">CLAUDE.md</a> → "Storage".
         </p>
       </section>
@@ -1560,10 +1560,10 @@ Time runs left to right: a one-way key chain, the caveat about an unlocked scree
 
         <p class="ln-deeper">
           The rigorous version: the upload, convergent key derivation, and cross-user dedup in <a
-            href="https://github.com/actuallydan/pollis/blob/main/pollis-core/src/commands/r2.rs"
+            href="https://github.com/pollis-app/pollis/blob/main/pollis-core/src/commands/r2.rs"
             target="_blank" rel="noopener noreferrer">r2.rs</a>, and the loopback media server that
           decrypts on demand in <a
-            href="https://github.com/actuallydan/pollis/blob/main/pollis-core/src/media_server.rs"
+            href="https://github.com/pollis-app/pollis/blob/main/pollis-core/src/media_server.rs"
             target="_blank" rel="noopener noreferrer">media_server.rs</a>.
         </p>
       </section>
@@ -1615,10 +1615,10 @@ Time runs left to right: a one-way key chain, the caveat about an unlocked scree
 
         <p class="ln-deeper">
           The rigorous version: the SQLite FTS5 index and the triggers that keep it honest in <a
-            href="https://github.com/actuallydan/pollis/blob/main/pollis-core/src/db/local_schema.sql"
+            href="https://github.com/pollis-app/pollis/blob/main/pollis-core/src/db/local_schema.sql"
             target="_blank" rel="noopener noreferrer">local_schema.sql</a>, and the query parser,
           ranking and snippets in <a
-            href="https://github.com/actuallydan/pollis/blob/main/pollis-core/src/commands/messages/search.rs"
+            href="https://github.com/pollis-app/pollis/blob/main/pollis-core/src/commands/messages/search.rs"
             target="_blank" rel="noopener noreferrer">search.rs</a>.
         </p>
       </section>
@@ -1676,10 +1676,10 @@ A message read in the middle while both screens show a padlock, safety numbers m
 
         <p class="ln-deeper">
           The rigorous version: the safety-number derivation and TOFU pin store in <a
-            href="https://github.com/actuallydan/pollis/blob/main/.codesight/wiki/safety.md"
+            href="https://github.com/pollis-app/pollis/blob/main/.codesight/wiki/safety.md"
             target="_blank" rel="noopener noreferrer">the safety wiki article</a>, and the account-key
           self-audit in <a
-            href="https://github.com/actuallydan/pollis/blob/main/pollis-core/src/commands/transparency.rs"
+            href="https://github.com/pollis-app/pollis/blob/main/pollis-core/src/commands/transparency.rs"
             target="_blank" rel="noopener noreferrer">transparency.rs</a>.
         </p>
       </section>
@@ -1765,10 +1765,10 @@ A message read in the middle while both screens show a padlock, safety numbers m
 
         <p class="ln-deeper">
           The rigorous version: the recovery and device-enrollment flows in <a
-            href="https://github.com/actuallydan/pollis/blob/main/pollis-core/src/commands/auth.rs"
+            href="https://github.com/pollis-app/pollis/blob/main/pollis-core/src/commands/auth.rs"
             target="_blank" rel="noopener noreferrer">auth.rs</a>, and the account-key and
           device-certificate model in <a
-            href="https://github.com/actuallydan/pollis/blob/main/docs/security-whitepaper.md"
+            href="https://github.com/pollis-app/pollis/blob/main/docs/security-whitepaper.md"
             target="_blank" rel="noopener noreferrer">the security whitepaper</a>.
         </p>
       </section>
@@ -1843,10 +1843,10 @@ Building the tree from the bottom up, then changing one entry and watching the r
 
         <p class="ln-deeper">
           The rigorous version: <a
-            href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md"
+            href="https://github.com/pollis-app/pollis/blob/main/docs/transparency.md"
             target="_blank" rel="noopener noreferrer">docs/transparency.md</a> and the RFC 6962
           hashing in <a
-            href="https://github.com/actuallydan/pollis/blob/main/verifiable-log/src/merkle.rs"
+            href="https://github.com/pollis-app/pollis/blob/main/verifiable-log/src/merkle.rs"
             target="_blank" rel="noopener noreferrer">verifiable-log/src/merkle.rs</a>. See the
           live roots on the <a href="artifacts.html">artifacts page</a>.
         </p>
@@ -1938,12 +1938,12 @@ Climbing an audit path, watching a made-up entry miss the root, a rewrite that c
 
         <p class="ln-deeper">
           The rigorous version: <a
-            href="https://github.com/actuallydan/pollis/blob/main/verifiable-log/src/proof.rs"
+            href="https://github.com/pollis-app/pollis/blob/main/verifiable-log/src/proof.rs"
             target="_blank" rel="noopener noreferrer">verifiable-log/src/proof.rs</a> for both proof
-          checks, <a href="https://github.com/actuallydan/pollis/blob/main/verifiable-log/src/sth.rs"
+          checks, <a href="https://github.com/pollis-app/pollis/blob/main/verifiable-log/src/sth.rs"
             target="_blank" rel="noopener noreferrer">sth.rs</a> for signed heads and the
           equivocation test, and <a
-            href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md"
+            href="https://github.com/pollis-app/pollis/blob/main/docs/transparency.md"
             target="_blank" rel="noopener noreferrer">docs/transparency.md</a> → "Trust model". The
           live signed head is on the <a href="artifacts.html">artifacts page</a>.
         </p>
@@ -2002,10 +2002,10 @@ Each log and the problem it protects against, an attempted split being refused, 
 
         <p class="ln-deeper">
           The rigorous version: <a
-            href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md"
+            href="https://github.com/pollis-app/pollis/blob/main/docs/transparency.md"
             target="_blank" rel="noopener noreferrer">docs/transparency.md</a> → "Three
           domain-separated trees" and "The commit-log invariant", plus the per-tree contexts in <a
-            href="https://github.com/actuallydan/pollis/tree/main/verifiable-log-builder/src"
+            href="https://github.com/pollis-app/pollis/tree/main/verifiable-log-builder/src"
             target="_blank" rel="noopener noreferrer">verifiable-log-builder/src</a>.
         </p>
       </section>
@@ -2065,13 +2065,13 @@ A valid signature on a tampered app, the three levels a release is recorded at, 
 
         <p class="ln-deeper">
           The rigorous version: <a
-            href="https://github.com/actuallydan/pollis/blob/main/docs/verifiable-builds-design.md"
+            href="https://github.com/pollis-app/pollis/blob/main/docs/verifiable-builds-design.md"
             target="_blank" rel="noopener noreferrer">docs/verifiable-builds-design.md</a>, the residual
           list in <a
-            href="https://github.com/actuallydan/pollis/blob/main/docs/reproducible-builds-residuals.md"
+            href="https://github.com/pollis-app/pollis/blob/main/docs/reproducible-builds-residuals.md"
             target="_blank" rel="noopener noreferrer">reproducible-builds-residuals.md</a>, and the
           independent <a
-            href="https://github.com/actuallydan/pollis/blob/main/.github/workflows/rebuild-verify.yml"
+            href="https://github.com/pollis-app/pollis/blob/main/.github/workflows/rebuild-verify.yml"
             target="_blank" rel="noopener noreferrer">rebuild-verify workflow</a> you can run from a
           fork. Live release hashes are on the <a href="artifacts.html">artifacts page</a>.
         </p>
@@ -2247,13 +2247,13 @@ The folder of plain files, a command-line fetch, real verifier output ending in 
 
         <p class="ln-deeper">
           The rigorous version: <a
-            href="https://github.com/actuallydan/pollis/blob/main/verifiable-log-serve/src/bin/pollis-verify.rs"
+            href="https://github.com/pollis-app/pollis/blob/main/verifiable-log-serve/src/bin/pollis-verify.rs"
             target="_blank" rel="noopener noreferrer">pollis-verify.rs</a> (the CLI you just ran), the
           shared verification path in <a
-            href="https://github.com/actuallydan/pollis/tree/main/verifiable-log-serve/src"
+            href="https://github.com/pollis-app/pollis/tree/main/verifiable-log-serve/src"
             target="_blank" rel="noopener noreferrer">verifiable-log-serve</a>, and the static API
           layout in <a
-            href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md"
+            href="https://github.com/pollis-app/pollis/blob/main/docs/transparency.md"
             target="_blank" rel="noopener noreferrer">docs/transparency.md</a>.
         </p>
       </section>
@@ -2312,10 +2312,10 @@ Both dashboards labelled, one release row taken apart, the same root in three pl
 
         <p class="ln-deeper">
           The rigorous version: the page itself, the <a href="artifacts.html">artifacts</a> page, plus <a
-            href="https://github.com/actuallydan/pollis/blob/main/website/artifacts.js"
+            href="https://github.com/pollis-app/pollis/blob/main/website/artifacts.js"
             target="_blank" rel="noopener noreferrer">artifacts.js</a> for how the proofs are rendered
           and <a
-            href="https://github.com/actuallydan/pollis/blob/main/frontend/src/components/Security/BuildVerifyLine.tsx"
+            href="https://github.com/pollis-app/pollis/blob/main/frontend/src/components/Security/BuildVerifyLine.tsx"
             target="_blank" rel="noopener noreferrer">BuildVerifyLine.tsx</a> for the four verdicts.
         </p>
       </section>

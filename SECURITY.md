@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Report vulnerabilities privately via [GitHub private vulnerability reporting](https://github.com/actuallydan/pollis/security/advisories/new).
+Report vulnerabilities privately via [GitHub private vulnerability reporting](https://github.com/pollis-app/pollis/security/advisories/new).
 Please do not open public issues for security problems.
 
 A useful report names the affected component, the impact, and steps to

@@ -144,7 +144,7 @@ Security release.
 ## Earlier releases
 
 Versions before v1.9.0 predate this file. Their contents are in the
-[GitHub releases](https://github.com/actuallydan/pollis/releases), which carry
+[GitHub releases](https://github.com/pollis-app/pollis/releases), which carry
 the auto-generated pull-request list, and every one of them has its hashes in
 the public transparency log regardless of how its notes were written.
 

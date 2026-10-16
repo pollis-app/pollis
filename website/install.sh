@@ -106,7 +106,7 @@ cosign_verify() {
         --certificate "$pem" \
         --signature "$sig" \
         --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-        --certificate-identity-regexp '^https://github\.com/actuallydan/pollis/\.github/workflows/desktop-release\.yml@refs/tags/' \
+        --certificate-identity-regexp '^https://github\.com/(actuallydan|pollis-app)/pollis/\.github/workflows/desktop-release\.yml@refs/tags/' \
         "$file" >/dev/null 2>&1
     then
         rm -rf "$tmp"
@@ -178,7 +178,7 @@ verify_download() {
   The file downloaded from the CDN hashes to ${sha}, and the transparency log at
   ${VERIFY_BASE} does not record that hash for ${VERSION}.
   The download has been deleted. Do not install it. Please report this at
-  https://github.com/actuallydan/pollis/security/advisories/new"
+  https://github.com/pollis-app/pollis/security/advisories/new"
     fi
 
     case "$report" in

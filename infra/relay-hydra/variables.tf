@@ -347,15 +347,16 @@ variable "alarm_email_addresses" {
 # and adds the role ARN to the repo as a GitHub Actions VARIABLE (not a secret, and
 # never committed — see the README runbook).
 
-variable "github_repository" {
+variable "github_repositories" {
   description = <<-EOT
-    "owner/repo" of the repository whose Actions may assume the CI OIDC role (e.g.
-    "actuallydan/pollis"). The trust policy scopes the role to this repo's workflows
-    on `github_oidc_ref` only. Empty disables the CI OIDC role entirely (the loop is
+    "owner/repo" of each repository whose Actions may assume the CI OIDC role (e.g.
+    ["pollis-app/pollis"]; list both the old and new name across a repo transfer,
+    #1265). The trust policy scopes the role to these repos' workflows on
+    `github_oidc_ref` only. Empty disables the CI OIDC role entirely (the loop is
     then closed by the operator running the put-parameter by hand — see the runbook).
   EOT
-  type        = string
-  default     = ""
+  type        = list(string)
+  default     = []
 }
 
 variable "github_oidc_ref" {
@@ -374,7 +375,7 @@ variable "manage_github_oidc_provider" {
     (token.actions.githubusercontent.com). An AWS account may hold only ONE provider
     for that URL, so set this false if the account already has one (common) — the
     role's trust policy references the provider by its conventional ARN either way.
-    Ignored when github_repository is empty.
+    Ignored when github_repositories is empty.
   EOT
   type        = bool
   default     = false

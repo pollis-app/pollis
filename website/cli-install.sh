@@ -61,7 +61,7 @@ json_field() {
 #   2. GitHub's attestation store (no extra tool needed). The same release job
 #      records a SLSA build-provenance attestation for each binary with
 #      actions/attest-build-provenance, and GitHub serves it, keyed by the
-#      binary's SHA-256, at api.github.com/repos/actuallydan/pollis/attestations.
+#      binary's SHA-256, at api.github.com/repos/pollis-app/pollis/attestations.
 #      Only a workflow running in this repository can put an attestation there.
 #      We look the download's SHA-256 up and require an attestation whose
 #      subject is THIS platform's file name with THIS digest, built by THIS
@@ -84,7 +84,7 @@ json_field() {
 # through to the attestation check, which then decides.
 # POLLIS_REQUIRE_VERIFY=1, the old opt-in, is now the default and still accepted.
 
-REPO_SLUG="actuallydan/pollis"
+REPO_SLUG="pollis-app/pollis"
 ATTESTATIONS_API="https://api.github.com/repos/${REPO_SLUG}/attestations"
 
 # SHA-256 of a file, hex. sha256sum on Linux, shasum on macOS.
@@ -123,7 +123,10 @@ b64decode() {
 attestation_matches() {
     local json="$1" name="$2" sha="$3" version="$4" payload statement readable=0
     local subject="\"name\":\"${name}\",\"digest\":{\"sha256\":\"${sha}\"}"
-    local builder="\"ref\":\"refs/tags/v${version}\",\"repository\":\"https://github.com/actuallydan/pollis\",\"path\":\".github/workflows/cli-release.yml\""
+    # pollis-app/pollis only: attestations made before the transfer from
+    # actuallydan/pollis (#1265) stayed in that user's store, so this repo's
+    # endpoint never serves one naming the old owner.
+    local builder="\"ref\":\"refs/tags/v${version}\",\"repository\":\"https://github.com/pollis-app/pollis\",\"path\":\".github/workflows/cli-release.yml\""
     while IFS= read -r payload; do
         # Drop any JSON escaping of the base64 ('\/'); octal 134 is a backslash.
         statement=$(printf '%s' "$payload" | tr -d '\134' | b64decode) || continue
@@ -202,7 +205,7 @@ verify_with_cosign() {
         --certificate "$pem" \
         --signature "$sig" \
         --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-        --certificate-identity-regexp "^https://github\\.com/actuallydan/pollis/\\.github/workflows/cli-release\\.yml@refs/tags/v${version_re}\$" \
+        --certificate-identity-regexp "^https://github\\.com/(actuallydan|pollis-app)/pollis/\\.github/workflows/cli-release\\.yml@refs/tags/v${version_re}\$" \
         "$file" >/dev/null 2>&1
     then
         rm -rf "$tmp"

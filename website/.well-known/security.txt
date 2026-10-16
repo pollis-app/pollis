@@ -15,11 +15,11 @@
 # cannot see and a human has to guess at. No `mailto:` is listed because no
 # monitored security mailbox exists; naming one that bounces would be worse than
 # naming none.
-Contact: https://github.com/actuallydan/pollis/security/advisories/new
+Contact: https://github.com/pollis-app/pollis/security/advisories/new
 Expires: 2027-08-01T00:00:00.000Z
 Preferred-Languages: en
 Canonical: https://pollis.com/.well-known/security.txt
-Policy: https://github.com/actuallydan/pollis/security/policy
+Policy: https://github.com/pollis-app/pollis/security/policy
 
 # Please report vulnerabilities privately via a GitHub security advisory (the
 # first Contact link) rather than a public issue. The disclosure policy behind
@@ -33,6 +33,6 @@ Policy: https://github.com/actuallydan/pollis/security/policy
 # within that permission.
 #
 # The transparency tooling and the independent verifier are at
-# https://github.com/actuallydan/pollis — `pollis-verify` checks our published
+# https://github.com/pollis-app/pollis — `pollis-verify` checks our published
 # Merkle trees against a pinned ML-DSA-44 key with nothing of ours on the trust
 # path.

@@ -109,7 +109,7 @@
           <a href="transparency.html">the served log</a> cannot tell them apart.
         </p>
         <p>The publisher's run history separates them, and anyone can read it without credentials:</p>
-        <code class="doc-cmd">gh run list --repo actuallydan/pollis --workflow=transparency-publish.yml --limit 5 --json conclusion,createdAt,url</code>
+        <code class="doc-cmd">gh run list --repo pollis-app/pollis --workflow=transparency-publish.yml --limit 5 --json conclusion,createdAt,url</code>
         <p><strong>How to read a stall:</strong></p>
         <ul>
           <li>A stalled publisher says nothing about honesty. The supported claim is "the log is not currently
@@ -136,9 +136,9 @@
           <li><strong>Log-key loss is not cleanly recoverable.</strong> The same key signs the binaries tree,
             and a new log key can only reach users in a client update verified by that tree. Splitting the two
             anchors is designed and tracked in
-            <a href="https://github.com/actuallydan/pollis/issues/754" target="_blank" rel="noopener noreferrer">#754</a>.</li>
+            <a href="https://github.com/pollis-app/pollis/issues/754" target="_blank" rel="noopener noreferrer">#754</a>.</li>
           <li><strong>Nobody independent watches the log.</strong> Witness and gossip monitoring is designed but
-            unbuilt (<a href="https://github.com/actuallydan/pollis/issues/763" target="_blank" rel="noopener noreferrer">#763</a>).
+            unbuilt (<a href="https://github.com/pollis-app/pollis/issues/763" target="_blank" rel="noopener noreferrer">#763</a>).
             Until it exists, "no alarm" means "nobody looked".</li>
           <li><strong>No legal succession.</strong> Ownership, inheritance and escrow need a legal entity to
             hold them. A timer that publishes a key automatically would be worse than nothing, since it is an
@@ -146,7 +146,7 @@
         </ul>
         <p>
           The engineering plan, with the full asset register and handover order, is in
-          <a href="https://github.com/actuallydan/pollis/blob/main/docs/operational-continuity.md" target="_blank"
+          <a href="https://github.com/pollis-app/pollis/blob/main/docs/operational-continuity.md" target="_blank"
             rel="noopener noreferrer"><code>docs/operational-continuity.md</code></a>.
         </p>
       </section>

@@ -116,4 +116,4 @@ If we switch from the current individual identity to a business-entity validatio
 - [Artifact Signing quickstart](https://learn.microsoft.com/en-us/azure/artifact-signing/quickstart)
 - [SignTool integration](https://learn.microsoft.com/en-us/azure/artifact-signing/how-to-signing-integrations)
 - [Resources and roles reference](https://learn.microsoft.com/en-us/azure/artifact-signing/concept-resources-roles)
-- Original issue: [#118](https://github.com/actuallydan/pollis/issues/118)
+- Original issue: [#118](https://github.com/pollis-app/pollis/issues/118)

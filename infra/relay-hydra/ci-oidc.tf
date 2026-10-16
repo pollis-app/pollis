@@ -7,7 +7,7 @@
 # ssm:PutParameter, and it authenticates with a short-lived GitHub OIDC token —
 # there is no long-lived access key anywhere in CI.
 #
-# Everything here is gated on var.github_repository: leave it empty and no CI role
+# Everything here is gated on var.github_repositories: leave it empty and no CI role
 # exists (the loop is then closed by the operator running the put-parameter by
 # hand — see the README runbook). The role ARN is an OUTPUT; the owner adds it to
 # the repo as a GitHub Actions VARIABLE (not a secret, never committed). No account
@@ -20,7 +20,7 @@ locals {
   # outlive the thing it exists to roll. relay-image.yml keeps BUILDING and
   # PUBLISHING the image either way (it launches nothing); its record step simply
   # skips, exactly as it does today with the repo variable unset.
-  ci_oidc_enabled  = var.hydra_enabled && var.github_repository != ""
+  ci_oidc_enabled  = var.hydra_enabled && length(var.github_repositories) > 0
   github_oidc_host = "token.actions.githubusercontent.com"
   github_oidc_arn  = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/${local.github_oidc_host}"
 }
@@ -70,7 +70,7 @@ data "aws_iam_policy_document" "ci_assume" {
     condition {
       test     = "StringEquals"
       variable = "${local.github_oidc_host}:sub"
-      values   = ["repo:${var.github_repository}:${var.github_oidc_ref}"]
+      values   = [for r in var.github_repositories : "repo:${r}:${var.github_oidc_ref}"]
     }
   }
 
