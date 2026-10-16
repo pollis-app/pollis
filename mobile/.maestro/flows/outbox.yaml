@@ -51,11 +51,11 @@ tags:
 # before the first send in this fresh group can have finished.
 - tapOn:
     id: "input-composer"
-- inputText: "sent then killed"
+- inputText: "ob1335 killed"
 - tapOn:
     id: "btn-send"
 - extendedWaitUntil:
-    visible: ".*sent then killed.*"
+    visible: ".*ob1335 killed.*"
     timeout: 10000
 - stopApp
 - launchApp
@@ -81,7 +81,7 @@ tags:
     id: "screen-chat"
 # Still there after the kill — the outbox kept it.
 - extendedWaitUntil:
-    visible: ".*sent then killed.*"
+    visible: ".*ob1335 killed.*"
     timeout: 15000
 # And delivered by the drain after unlock: no failure, no Retry. The first send
 # in a fresh group may still be paying for MLS setup, hence the long wait.
@@ -99,7 +99,7 @@ tags:
       - setAirplaneMode: enabled
       - tapOn:
           id: "input-composer"
-      - inputText: "sent while offline"
+      - inputText: "ob1335 offline"
       - tapOn:
           id: "btn-send"
       # Kept and labelled, with its way out.
@@ -109,7 +109,7 @@ tags:
           timeout: 60000
       - assertVisible:
           id: "btn-discard-message-.*"
-      - assertVisible: ".*sent while offline.*"
+      - assertVisible: ".*ob1335 offline.*"
       - takeScreenshot: outbox-02-failed-offline
       - setAirplaneMode: disabled
       # The reconnect may drain it before the tap; either way it must settle.
@@ -120,5 +120,5 @@ tags:
           notVisible:
             id: "btn-retry-message-.*"
           timeout: 60000
-      - assertVisible: ".*sent while offline.*"
+      - assertVisible: ".*ob1335 offline.*"
       - takeScreenshot: outbox-03-retried
