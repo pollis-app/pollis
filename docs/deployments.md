@@ -367,6 +367,17 @@ or media.
 
 ## Post-merge release checklist — did anything downstream go stale?
 
+**Automated half (#1347):** `scripts/release-impact.sh` reads what is live for
+every target below and lists what main has that it lacks (`--pr <N>` for one
+PR's blast radius, `--brief` for stale targets only).
+`node scripts/feature-parity.mjs [--since <ref>]` lists core commands one client
+uses and another doesn't, minus the documented exemptions and known debt in
+`scripts/feature-parity.json`. In Claude Code, `/release-check`
+(`.claude/skills/release-check/`) runs both and walks the decisions. A project
+hook (`.claude/hooks/release-check.sh`) adds the result as context after
+`gh pr merge` and before any deploy dispatch or release-tag push. All of it is
+advisory: nothing blocks. The tables below remain the policy.
+
 **Run this after every merge that lands a real feature or fix — not just the ones
 you plan to deploy.** The failure mode this prevents: you fix something in a
 shared crate, ship *one* consumer (say the desktop app), and leave the DS, the
@@ -386,7 +397,7 @@ you edited. Use this, not intuition:
 | `pollis-core/` | **Desktop** (`src-tauri`+`frontend`), **CLI** (`pollis-tui`), **Mobile** (uniffi) — store builds + sideload APK only, never OTA: `pollis-core`, its `path =` crates and the workspace `Cargo.toml`/`Cargo.lock` are in the mobile fingerprint, so even a dependency bump needs a new store build (#1299). If you changed a **wire contract** — canonical signing, `livekit_jwt`, `r2` presign, DS request/response shapes, MLS envelope encoding — **also the DS**: `pollis-delivery` re-implements that scheme **by hand** and does *not* compile against `pollis-core`, so the compiler will **not** catch drift. Mirror the change into `pollis-delivery` and redeploy it. |
 | `verifiable-log*` | `pollis-core` depends on `verifiable-log-serve`, so the change ripples into **every client** (desktop/CLI/mobile) **and** the **`pollis-verify` CLI** (`verifier-release.yml`) **and** the published **transparency tree** (`transparency-publish.yml`). |
 | `pollis-delivery/` | **DS** only (dev → verify → prod). |
-| `pollis-relay/` / `pollis-device-cert/` | **Relay pool** only — rebuild the GHCR image (`relay-image.yml`), then roll the pool nodes. `pollis-device-cert` is shared with `pollis-core` (it mints the certs the relay verifies), so a change there also fans out to every **client** — keep the mint/verify halves in lockstep (golden vector). |
+| `pollis-relay/` / `pollis-device-cert/` | **Relay pool**: rebuild the GHCR image (`relay-image.yml`), then roll the pool nodes. **Also every client and `pollis-verify`**: `pollis-core` and `verifiable-log-serve` both depend on `pollis-relay`, so a relay change reaches desktop, CLI and the mobile store builds too. `pollis-device-cert` is shared with `pollis-core` (it mints the certs the relay verifies), so a change there also fans out to every **client** — keep the mint/verify halves in lockstep (golden vector). |
 | `frontend/` / `src-tauri/` | **Desktop** only. |
 | `pollis-tui/` | **CLI** only. |
 | a DB migration in `pollis-schema/migrations/` | Applied by whichever prod deploy runs first (a DS deploy **or** `desktop-release.yml`) — migrate-then-ship, idempotent. If the merge ships **neither** a client release nor a DS deploy, prod has **not** run the migration yet; note it as pending. Dev auto-applies via `db-migrate-dev.yml`. |

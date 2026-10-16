@@ -1096,3 +1096,11 @@ Five things to know before writing one:
   still re-render" case, or a component that has stopped updating entirely will
   sail through. Assert the probe is non-zero first, or the whole file can pass
   vacuously against a counter that was never wired up.
+
+## Release impact and client parity (#1347)
+
+Not tests, but the same kind of guard, and advisory only:
+
+- `scripts/release-impact.sh`: per deploy target, the live version (DS `/version`, release manifests on cdn.pollis.com, tags, last green run, deployment records) diffed against main over the paths that feed it. Rows read `current`, `STALE` (commits listed), `DEPS?` (only `Cargo.lock` moved) or `UNKNOWN`. It also reports pending prod migrations and the last `website-verify.yml` result. `--pr <N>` gives one PR's blast radius.
+- `scripts/feature-parity.mjs`: the core commands each client calls. Desktop is registered handlers referenced in `frontend/src`; mobile is `bridge.rs` arms referenced in mobile JS; the CLI is `pollis_core::commands` calls in `pollis-tui/src`. It reports differences that aren't exempt (`scripts/feature-parity.json`: reasons, regex families, `known_debt` baseline from 2026-10-16). `--since <ref>` shows only gaps new since that ref, which is the "shipped on one client only" detector.
+- `/release-check` skill and `.claude/hooks/release-check.sh` (PostToolUse after `gh pr merge`, PreToolUse before deploy dispatches and release-tag pushes) put both in front of Claude Code. See `docs/deployments.md` → "Post-merge release checklist".

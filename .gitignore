@@ -85,7 +85,12 @@ node_modules/
 **/node_modules/
 
 temp/
-.claude/
+# Shared Claude Code config is committed (#1347); everything else (worktrees,
+# local settings) stays out.
+.claude/*
+!.claude/settings.json
+!.claude/skills/
+!.claude/hooks/
 .mcp.json
 
 src-tauri/target/
