@@ -378,9 +378,6 @@
       "signOutConfirmTitle": "Se déconnecter de Pollis sur cet appareil ?"
     },
     "identityHeading": "Identité",
-    "linkDevice": {
-      "codeTitle": "Connectez-vous avec un code"
-    },
     "preferences": {
       "accentA11y": "Accentuation {{name}}",
       "accentHeading": "Accentuation",
@@ -449,6 +446,22 @@
       "handleHint": "Les autres membres peuvent vous trouver et vous écrire avec @handle.",
       "handleInvalid": "Le nom d'utilisateur doit compter de 3 à 32 caractères : minuscules, chiffres, '_', '.' ou '-'.",
       "save": "Enregistrer les modifications"
+    },
+    "scanDevice": {
+      "heading": "Scanner pour connecter un appareil",
+      "rowSub": "Connectez un ordinateur ou un téléphone en scannant le code qu'il affiche",
+      "scanTitle": "Scannez le code",
+      "scanIntro": "Sur l'appareil à connecter, choisissez Se connecter avec un autre appareil. Pointez l'appareil photo vers le code affiché.",
+      "codeIntro": "Saisissez ou collez le code affiché sous le QR sur l'autre appareil.",
+      "warning": "Ne scannez que le code d'un appareil devant vous que vous connectez vous-même. Il pourra lire vos messages.",
+      "continue": "Continuer",
+      "wrongDirection": "Ce code connecte un appareil dans l'autre sens. Sur le nouvel appareil, choisissez Se connecter avec un autre appareil pour voir le bon code.",
+      "confirmTitle": "Connecter cet appareil ?",
+      "confirmBody": "Saisissez votre code PIN pour connecter l'appareil qui affiche le code.",
+      "linking": "Connexion de {{name}}…",
+      "linkingBody": "Gardez Pollis ouvert sur les deux appareils un instant.",
+      "notFinished": "L'autre appareil n'a pas terminé sa connexion. Affichez-y un nouveau code et scannez à nouveau.",
+      "scanAgain": "Scanner à nouveau"
     }
   },
   "tabs": {

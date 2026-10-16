@@ -24,7 +24,7 @@ const { getPrebuildConfigAsync } = require("@expo/prebuild-config");
 const { compileModsAsync } = require("@expo/config-plugins/build/plugins/mod-compiler.js");
 
 const CAMERA = "android.permission.CAMERA";
-const PAIRING_COPY = "Pollis needs your camera to scan the pairing QR code from your desktop.";
+const PAIRING_COPY = "Pollis needs your camera to scan sign-in QR codes from your other devices.";
 
 type UsesPermission = { $: Record<string, string> };
 

@@ -512,7 +512,13 @@ fn classify(method: &Method, path: &str, cfg: &RateLimitConfig) -> Option<(&'sta
         // admin, so any account could walk the username and email space at the
         // generic write rate. The guessable input, not the verb, is what decides
         // the tier.
-        "/v1/directory/group-by-slug" | "/v1/auth/account-probe" | "/v1/invites/create" => {
+        // `/v1/link/offer` (#1361) is pre-credential and holds memory until it
+        // lapses, so it is bounded per client like the guessable-input probes;
+        // a screen re-offering every two minutes stays far under it.
+        "/v1/directory/group-by-slug"
+        | "/v1/auth/account-probe"
+        | "/v1/invites/create"
+        | "/v1/link/offer" => {
             Some(("probe", cfg.probe_max, cfg.probe_window_secs))
         }
         // Every other read (#987). They are POSTs, so without this they would
@@ -520,7 +526,9 @@ fn classify(method: &Method, path: &str, cfg: &RateLimitConfig) -> Option<(&'sta
         // a user ever issues writes.
         // `/v1/link/status` is polled by the device showing a QR (#1207): a
         // read, not a write, whatever its path family.
-        "/v1/link/status" => Some(("read", cfg.read_max, cfg.read_window_secs)),
+        // `/v1/link/poll-offer` (#1361) is the new device's wait on its QR; its
+        // secret is 32 random bytes, so the bound is about volume, not guessing.
+        "/v1/link/status" | "/v1/link/poll-offer" => Some(("read", cfg.read_max, cfg.read_window_secs)),
         p if is_read_path(p) => Some(("read", cfg.read_max, cfg.read_window_secs)),
         _ => Some(("write", cfg.write_max, cfg.write_window_secs)),
     }

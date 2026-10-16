@@ -1,7 +1,26 @@
-# QR device link — sign a new phone in from a signed-in desktop (#1207)
+# QR device link — sign a device in by QR, in either direction
 
-Status: implemented in the #1207 PR. This is the reference for the protocol;
-the code comments point here.
+Status: v1 (#1207, the signed-in device shows the QR) and v2 (#1361, the NEW
+device shows the QR, the signed-in phone scans it) are both implemented. This
+is the reference for both protocols; the code comments point here. v1 is
+described first, as it shipped; [v2](#v2--the-new-device-shows-the-qr-1361)
+follows.
+
+## Which one a person meets
+
+| New device | Signed-in device | Flow |
+|---|---|---|
+| desktop | phone | **v2**: the desktop's "Sign in with another device" shows a QR; the phone scans it under Security → Scan to sign in a device |
+| phone | phone | **v2**: the new phone taps "Show a code instead"; the signed-in phone scans it |
+| phone | desktop | **v1**: the desktop shows a QR under Security → Link a new device; the new phone scans it |
+| desktop | desktop | **v1**: the new desktop pastes the code shown under the signed-in desktop's QR (desktops have no scanner) |
+
+#1207 asked for the Steam model, in which the device being signed in shows the
+code and the signed-in phone scans it, and built the opposite. On a desktop that
+left only pasting a ~70-character code read off a phone. v2 is the Steam
+direction. The phone no longer *shows* a v1 code: a phone scans far better than
+it is scanned, and the only way its code ever reached a desktop was by being
+retyped.
 
 ## What it replaces
 
@@ -21,12 +40,12 @@ same thing, and the camera is a better out-of-band channel than a typed code.
 
 ## Who plays which role
 
-Both apps play both roles, as device linking already did: an enrolled
-**desktop or phone** shows the QR (Settings → Security → Link a new device),
-and a new **phone** scans it (or enters the code) while a new **desktop** pastes
-the code shown under the QR — desktops have no camera scanner. The creator waits
-with `await_device_link` (one awaited call, Rust-side backoff), never a renderer
-poll.
+An enrolled **desktop** shows the QR (Settings → Security → Link a new device).
+A new **phone** scans it, or enters the code, and a new **desktop** pastes the
+code shown under the QR, since desktops have no camera scanner. Until #1361 an
+enrolled phone could show one too; that screen is now the v2 scanner. The
+creator waits with `await_device_link` (one awaited call, Rust-side backoff),
+never a renderer poll.
 
 ## Threat model
 
@@ -146,3 +165,98 @@ Links live in the DS's in-memory `LinkStore` (the DS is single-container, like
 the OTP and session stores). A claimed link stays readable until its enrollment
 request resolves or the session TTL passes, then is swept. A container restart
 drops open links; the user scans a fresh QR. No migration.
+
+## v2 — the new device shows the QR (#1361)
+
+### Threat model, additionally
+
+Everything above still holds. v2 also has to keep these true:
+
+- A photo of the new device's QR must grant nothing: not a session, and not a
+  way to be the device the account key is wrapped to.
+- Someone who gets a signed-in user to scan a QR from *their* device
+  (QR-login phishing, the attack Discord's QR login is known for) is the risk
+  this direction adds. The approving side's PIN and the explicit confirmation
+  copy are the defence; see the tradeoff below.
+
+### Protocol
+
+`E = (e, E_pub)` is a fresh X25519 keypair. `p` is a fresh 32-byte **poll
+secret**. Neither the private key nor the poll secret is ever in the QR.
+
+1. **New device offers** (`create_device_offer`). It generates `E`, `p`, a link
+   id and a device id, and sends `POST /v1/link/offer` (pre-credential, rate-limited in the
+   `probe` tier) `{link_id, poll_verifier = H(p), device_id, device_name}`. The
+   DS sets `expires_at = now + 120 s` itself and caps how many unaccepted
+   offers it holds. The device shows
+   `pollis-link:v2:<link_id>:<base64url(E_pub)>`, and when the code lapses it
+   shows a fresh one (five times on its own, then on a tap).
+2. **Signed-in device accepts** (`accept_device_offer`). It scans the code and
+   parses `link_id` and `E_pub`, then requires the **PIN**
+   (`pin::verify_pin`, same counter and lockout as unlock) before anything is
+   sent. `POST /v1/link/accept-offer` (device-signed) binds the offer to the
+   signer's account, **once**: a second accept, from any account, is refused,
+   so an offer can never be moved between accounts. The device keeps `E_pub`
+   in memory (`device_offer_accepts`).
+3. **New device collects** (`await_device_offer`, one awaited Rust call with
+   backoff, bounded by the offer's lifetime). It polls `POST /v1/link/poll-offer`
+   `{link_id, p}` (pre-credential, `read` tier). Until the offer is accepted the
+   answer is "waiting". Once it is accepted, the DS mints a **`DeviceOffer`-scoped
+   session** for the accepting account and the offered `device_id`, exactly
+   once. The device signs in with it (`register-device`), then
+   `start_device_enrollment` files its request with **`E`, the key from the
+   QR**, and no link tag.
+4. **Signed-in device wraps** (`finish_device_offer`). It follows the link on
+   the existing `/v1/link/status` until the request is there, reads it, and
+   wraps `account_id_key` only if the request's `new_device_ephemeral_pub` is
+   **byte for byte `E_pub` as scanned** (constant-time). That check takes the
+   place of v1's link tag. It runs the same `wrap_and_approve` as every other
+   approval, and records `device_enrolled` with `via=qr_scan`. There is no
+   separate Approve tap: the person already decided when they scanned the
+   device in front of them and entered their PIN, and only the holder of `e`
+   can open the wrap.
+5. **New device finishes** as in every other flow: unwrap, check against
+   `account_id_pub`, set the PIN, finalize.
+
+### Why this is at least as strong as v1
+
+| Property | v1 | v2 |
+|---|---|---|
+| Key substitution by the DS | Prevented by the MAC; the DS never sees `t` | Prevented outright: the wrap goes only to the key the camera read |
+| DS plus someone who photographed the QR | **Can** substitute: the photo gives `t`, so the pair can forge the tag | Cannot: the photo gives `E_pub`, which only the real device can use |
+| Photo of the QR → session | No: claiming needs `t`, and the claim is single use | No: collecting needs `p`, which the QR does not carry |
+| Session powers | `DeviceLink`, enrollment-only | `DeviceOffer`, enrollment-only, and refused by the same OTP gates |
+| Who must prove presence | The QR's creator (PIN before the QR exists) | The scanner (PIN before the accept is sent) |
+| Single use and TTL | Server-enforced | Server-enforced: one accept, one session delivery, 120 s to accept |
+
+### The tradeoff, stated
+
+v1's risk is someone persuading a user to *show* them a QR. v2's risk is
+someone persuading a user to *scan* one, for example a phishing page that
+relays a QR from the attacker's own desktop. That pairing is easier to stage,
+and it is the known weakness of every scan-to-log-in scheme (WhatsApp Web,
+Discord). It is mitigated here, not removed:
+
+- the PIN is required before the accept is sent;
+- the scanner says to scan only a code on a device in front of you that you
+  are signing in yourself, and that it will be able to read your messages;
+- a code is good for two minutes and one accept;
+- the new device appears in the device list and the security events
+  (`via=qr_scan`), and it can be revoked from there.
+
+The direction is the owner's explicit choice (#1361), and it is the model
+Signal and WhatsApp use for linked devices. Email sign-in, v1, and the typed
+SAS all remain.
+
+### Scope and storage
+
+- `SessionScope::DeviceOffer` is accepted by `register-device`,
+  `enrollment-request` and the enrollment read, like `DeviceLink`. Its request
+  must carry no tag, and a tag is a 400, just as a missing tag is on a v1 link.
+- Offers live in the same `LinkStore`, in `Offered`, then `Accepted` (bound to
+  an account), then `Claimed` (session collected), then `Requested`. A record's
+  direction (`Kind`) is fixed when it is created. Unaccepted offers belong to
+  no account, so `/v1/link/status` answers `expired` for them. A request bound
+  to a live offer is left out of `pending_enrollments`, like a v1 one.
+- Each side refuses the other direction's code with a message naming the right
+  device (`parse_payload` / `parse_offer_payload`).

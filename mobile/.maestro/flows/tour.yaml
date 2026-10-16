@@ -346,19 +346,11 @@ tags:
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000
-- takeScreenshot: tour-32-link-device-pin
-- runFlow: ../subflows/enter-pin.yaml
-- extendedWaitUntil:
-    visible:
-      id: "link-device-qr"
-    timeout: 15000
-    optional: true
-- waitForAnimationToEnd:
-    timeout: 3000
-- takeScreenshot: tour-33-link-device-qr
+# Scan to sign in a device (#1361): the scanner, then its manual-entry field.
+- takeScreenshot: tour-32-scan-device
 - tapOn:
-    id: "chip-link-code"
+    id: "btn-scan-toggle-manual"
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000
-- takeScreenshot: tour-34-link-device-code
+- takeScreenshot: tour-33-scan-device-code

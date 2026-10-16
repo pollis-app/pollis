@@ -385,10 +385,21 @@ pub async fn start_device_enrollment(
         .clone()
         .ok_or_else(|| anyhow::anyhow!("device_id not set — login incomplete"))?;
 
-    // Generate ephemeral X25519 keypair for this request.
-    let mut rng = OsRng;
+    // Generate ephemeral X25519 keypair for this request — unless this device
+    // was signed in by SHOWING a QR (#1361): then the key is the one whose
+    // public half that QR carried, because the device that scanned it wraps
+    // the account key only to that exact key.
+    let offered_secret = match state.device_link_pending.lock().await.as_ref().map(|l| &l.kind) {
+        Some(crate::commands::device_link::PendingLinkKind::Offered { ephemeral_secret }) => {
+            Some(**ephemeral_secret)
+        }
+        _ => None,
+    };
     let mut private_bytes = [0u8; 32];
-    rng.fill_bytes(&mut private_bytes);
+    match offered_secret {
+        Some(secret) => private_bytes = secret,
+        None => OsRng.fill_bytes(&mut private_bytes),
+    }
     let ephemeral_secret = StaticSecret::from(private_bytes);
     let ephemeral_public = PublicKey::from(&ephemeral_secret);
 
@@ -433,14 +444,18 @@ pub async fn start_device_enrollment(
             // QR device link (#1207): a device signed in by a claimed link tags
             // its request with the QR-secret-keyed MAC the approver verifies in
             // place of a typed code. Absent for an email-OTP sign-in.
-            let link_tag = state.device_link_pending.lock().await.as_ref().map(|link| {
-                b64.encode(crate::commands::device_link::link_tag(
-                    &link.mac_key,
-                    &link.link_id,
-                    &request_id,
-                    &device_id,
-                    ephemeral_public.as_bytes(),
-                ))
+            // A v2 offer (#1361) carries no tag: its approver compares the key.
+            let link_tag = state.device_link_pending.lock().await.as_ref().and_then(|link| match &link.kind {
+                crate::commands::device_link::PendingLinkKind::Claimed { mac_key } => {
+                    Some(b64.encode(crate::commands::device_link::link_tag(
+                        mac_key,
+                        &link.link_id,
+                        &request_id,
+                        &device_id,
+                        ephemeral_public.as_bytes(),
+                    )))
+                }
+                crate::commands::device_link::PendingLinkKind::Offered { .. } => None,
             });
             let body = pollis_api::bootstrap::EnrollmentRequestBody {
                 request_id: request_id.clone(),

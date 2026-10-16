@@ -162,6 +162,114 @@ async fn a_link_session_registers_its_device_and_files_a_tagged_request() {
     assert_eq!(st.device_name.as_deref(), Some("Pixel 9"));
 }
 
+// ── v2: the new device shows the QR (#1361) ──────────────────────────────────
+
+const DESKTOP: &str = "desktop-device-1";
+
+/// Offer a code the way the new device does (pre-credential, over HTTP).
+async fn offer(state: &AppState, link_id: &str, poll_secret: &[u8; 32]) -> StatusCode {
+    let verifier: [u8; 32] = Sha256::digest(poll_secret).into();
+    let (status, _) = send(
+        state,
+        "/v1/link/offer",
+        serde_json::json!({ "link_id": link_id, "poll_verifier": b64(&verifier), "device_id": DESKTOP, "device_name": "Mac 10.0.0.1" }),
+        None,
+    )
+    .await;
+    status
+}
+
+async fn poll(state: &AppState, link_id: &str, poll_secret: &[u8]) -> (StatusCode, serde_json::Value) {
+    send(
+        state,
+        "/v1/link/poll-offer",
+        serde_json::json!({ "link_id": link_id, "poll_secret": b64(poll_secret) }),
+        None,
+    )
+    .await
+}
+
+#[tokio::test]
+async fn an_offer_yields_one_enrollment_only_session_after_it_is_accepted() {
+    let (_db, state) = fresh_state().await;
+    let secret = [3u8; 32];
+    assert_eq!(offer(&state, "offer-a", &secret).await, StatusCode::OK);
+
+    // Nobody has scanned it: waiting, and a wrong secret is the generic 401.
+    let (waiting, body) = poll(&state, "offer-a", &secret).await;
+    assert_eq!(waiting, StatusCode::OK);
+    assert!(body["session"].is_null());
+    let (guess, _) = poll(&state, "offer-a", &[4u8; 32]).await;
+    assert_eq!(guess, StatusCode::UNAUTHORIZED);
+
+    // The scanner's device-signed accept (signing is exercised elsewhere).
+    assert!(matches!(
+        state.links.accept("offer-a", USER, pollis_delivery::util::now_unix()),
+        pollis_delivery::links::AcceptOutcome::Accepted { .. }
+    ));
+    // The device name had its IP-shaped text redacted before anyone saw it.
+    let st = state.links.status("offer-a", USER, pollis_delivery::util::now_unix());
+    assert!(!st.device_name.as_deref().unwrap_or_default().contains("10.0.0.1"), "{:?}", st.device_name);
+
+    let (ok, body) = poll(&state, "offer-a", &secret).await;
+    assert_eq!(ok, StatusCode::OK);
+    assert_eq!(body["session"]["user_id"], USER);
+    let session = body["session"]["session_token"].as_str().unwrap().to_string();
+    // Delivered once.
+    let (again, _) = poll(&state, "offer-a", &secret).await;
+    assert_eq!(again, StatusCode::UNAUTHORIZED);
+
+    // Enrollment-only: the OTP-only gates refuse it…
+    for path in ["/v1/account/rotate-identity", "/v1/account/reset-recover", "/v1/auth/establish-identity"] {
+        let (status, _) = send(&state, path, serde_json::json!({}), Some(&session)).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{path}: a device-offer session must be refused at the gate");
+    }
+    // …and it registers its device and files a request WITHOUT a tag.
+    let (reg, _) = send(
+        &state,
+        "/v1/auth/register-device",
+        serde_json::json!({ "device_id": DESKTOP, "device_name": "Mac" }),
+        Some(&session),
+    )
+    .await;
+    assert_eq!(reg, StatusCode::OK);
+    let now = chrono::Utc::now();
+    let request = |tag: Option<&str>| {
+        let mut b = serde_json::json!({
+            "request_id": "req-v2",
+            "new_device_ephemeral_pub": b64(&[9u8; 32]),
+            "verification_code": "ABCDEFGH",
+            "created_at": now.to_rfc3339(),
+            "expires_at": (now + chrono::Duration::minutes(10)).to_rfc3339(),
+        });
+        if let Some(t) = tag {
+            b["link_tag"] = serde_json::json!(t);
+        }
+        b
+    };
+    let (tagged, _) = send(&state, "/v1/auth/enrollment-request", request(Some("dGFn")), Some(&session)).await;
+    assert_eq!(tagged, StatusCode::BAD_REQUEST, "a device-offer request carries no tag");
+    let (untagged, _) = send(&state, "/v1/auth/enrollment-request", request(None), Some(&session)).await;
+    assert_eq!(untagged, StatusCode::OK);
+
+    let st = state.links.status("offer-a", USER, pollis_delivery::util::now_unix());
+    assert_eq!(st.state, pollis_delivery::links::LinkState::Requested);
+    assert_eq!(st.request_id.as_deref(), Some("req-v2"));
+    assert_eq!(st.link_tag, None);
+    // Kept out of the typed-code approval list.
+    assert!(state.links.bound_request_ids(USER, pollis_delivery::util::now_unix()).contains("req-v2"));
+}
+
+#[tokio::test]
+async fn an_offer_id_cannot_be_reused_while_live() {
+    let (_db, state) = fresh_state().await;
+    assert_eq!(offer(&state, "offer-b", &[1u8; 32]).await, StatusCode::OK);
+    assert_eq!(offer(&state, "offer-b", &[2u8; 32]).await, StatusCode::TOO_MANY_REQUESTS);
+    // The original secret still governs it.
+    let (st, _) = poll(&state, "offer-b", &[2u8; 32]).await;
+    assert_eq!(st, StatusCode::UNAUTHORIZED);
+}
+
 #[tokio::test]
 async fn an_otp_session_cannot_smuggle_a_link_tag() {
     let (_db, state) = fresh_state().await;

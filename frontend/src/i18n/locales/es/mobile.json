@@ -378,9 +378,6 @@
       "signOutConfirmTitle": "¿Cerrar sesión de Pollis en este dispositivo?"
     },
     "identityHeading": "Identidad",
-    "linkDevice": {
-      "codeTitle": "Inicia sesión con un código"
-    },
     "preferences": {
       "accentA11y": "Acento {{name}}",
       "accentHeading": "Acento",
@@ -449,6 +446,22 @@
       "handleHint": "Los demás miembros pueden encontrarte y escribirte con @handle.",
       "handleInvalid": "El nombre de usuario debe tener entre 3 y 32 caracteres: minúsculas, dígitos, '_', '.' o '-'.",
       "save": "Guardar cambios"
+    },
+    "scanDevice": {
+      "heading": "Escanear para iniciar sesión en un dispositivo",
+      "rowSub": "Inicia sesión en un ordenador o teléfono escaneando el código que muestra",
+      "scanTitle": "Escanea el código",
+      "scanIntro": "En el dispositivo en el que vas a iniciar sesión, elige Iniciar sesión con otro dispositivo. Apunta la cámara al código que muestra.",
+      "codeIntro": "Escribe o pega el código que aparece bajo el QR en el otro dispositivo.",
+      "warning": "Escanea solo un código de un dispositivo que tengas delante y en el que estés iniciando sesión tú. Podrá leer tus mensajes.",
+      "continue": "Continuar",
+      "wrongDirection": "Ese código sirve para iniciar sesión en el sentido contrario. En el dispositivo nuevo, elige Iniciar sesión con otro dispositivo para ver el correcto.",
+      "confirmTitle": "¿Iniciar sesión en este dispositivo?",
+      "confirmBody": "Introduce tu PIN para iniciar sesión en el dispositivo que muestra el código.",
+      "linking": "Iniciando sesión en {{name}}…",
+      "linkingBody": "Mantén Pollis abierto en ambos dispositivos un momento.",
+      "notFinished": "El otro dispositivo no terminó de iniciar sesión. Muestra un código nuevo en él y vuelve a escanear.",
+      "scanAgain": "Escanear de nuevo"
     }
   },
   "tabs": {

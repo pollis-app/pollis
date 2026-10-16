@@ -130,7 +130,11 @@ fn the_endpoint_table_covers_the_whole_write_surface() {
         //
         // 110 since #1213 added abuse reports: `/v1/reports` (device-signed;
         // ids and a reason, never content).
-        110,
+        //
+        // 113 since #1361 added the reverse QR sign-in, shown by the NEW
+        // device: `/v1/link/offer` and `/v1/link/poll-offer` (pre-credential)
+        // and `/v1/link/accept-offer` (device-signed, from the scanner).
+        113,
         "the DS write surface changed — update this count deliberately, and make \
          sure the new endpoint is routed in BOTH pollis-delivery and the flows harness"
     );

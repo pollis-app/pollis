@@ -506,15 +506,23 @@ Every path that produces a fresh `account_id_key` (signup, approval, Secret-Key 
 - `reset_identity(user_id)` → new secret key. **Not a registered Tauri command** as of 2026-08-03 (#714): it is `pollis_core::commands::account_identity::reset_identity`, reached from the registered `reset_identity_and_recover`.
 - Also registered in this module but undocumented here: `list_security_events`. See Appendix A.
 
-## device_link (`commands/device_link.rs`) — QR device link (#1207)
+## device_link (`commands/device_link.rs`) — QR device link (#1207, #1361)
 
-Sign a new device in by scanning a QR an enrolled device shows, instead of the email OTP plus a typed SAS. Protocol, threat model and guardrails: `docs/qr-device-link-design.md`. Both apps play both roles (desktop claims by pasting the code — no camera scanner).
+Sign a new device in by QR instead of the email OTP plus a typed SAS, in either direction: v1, an enrolled device shows the QR and the new device scans it (desktop pastes its code, having no scanner), or v2, the NEW device shows the QR and a signed-in phone scans it. Protocol, threat model and guardrails: `docs/qr-device-link-design.md`. Mobile no longer shows a v1 code; its Security screen is the v2 scanner.
 
 - `create_device_link(user_id, pin)` → `DeviceLinkHandle { link_id, qr_payload, expires_at }`. **Requires the PIN** (`pin::verify_pin`, same attempt counter and lockout as unlock). Holds the link token in memory only; the DS gets `SHA-256(HKDF(t, "pollis-link-claim-v1"))` and a server-set 60 s expiry.
 - `await_device_link(user_id, link_id, since)` → `DeviceLinkStatus` (`open | claimed | ready_to_approve | tampered | expired`). One awaited call with Rust-side backoff — the renderer never polls. `ready_to_approve` means the request's **link tag verified** against the QR-derived MAC key the DS never sees; `tampered` means it did not, and is never approvable. `poll_device_link` is the one-shot read.
 - `approve_device_link(user_id, link_id)` — re-verifies the tag, then runs the same wrap as typed-code approval (`device_enrollment::wrap_and_approve`); security event `device_enrolled` with `via=qr_link`.
 - `cancel_device_link(link_id)` — forget the token locally.
-- `claim_device_link(payload, device_name)` → `UserProfile` (`enrollment_required = true`). Signs in with a **`DeviceLink`-scoped session**: the DS's OTP-only gates (soft reset, reset-and-recover, establish-identity) refuse it; it can only register the device and file its enrollment request, which `start_device_enrollment` then tags. Clears on finalize and on any email sign-in.
+- `claim_device_link(payload, device_name)` → `UserProfile` (`enrollment_required = true`). Signs in with a **`DeviceLink`-scoped session**: the DS's OTP-only gates (soft reset, reset-and-recover, establish-identity) refuse it; it can only register the device and file its enrollment request, which `start_device_enrollment` then tags. Clears on finalize and on any email sign-in. Refuses a v2 code with "scan it with your signed-in phone".
+
+**v2, the NEW device shows the QR (#1361)** — `docs/qr-device-link-design.md` § v2:
+
+- `create_device_offer(device_name)` → `DeviceOfferHandle { link_id, qr_payload, expires_at }`. New device, no credential. `qr_payload` = `pollis-link:v2:<link_id>:<base64url(ephemeral X25519 pub)>`, **no secret**. The poll secret and the private key stay in memory (`state.device_offer`); the DS gets `SHA-256(poll_secret)` and sets a 120 s expiry. Replaces any earlier offer.
+- `await_device_offer(link_id)` → `DeviceOfferWait` (`signed_in { profile } | expired`). One awaited call with Rust-side backoff, bounded by the offer's lifetime. On `signed_in` the device holds a **`DeviceOffer`-scoped session** (enrollment-only, like `DeviceLink`), and `start_device_enrollment` files its request with the QR's key and no tag.
+- `cancel_device_offer()` — forget the offer locally.
+- `accept_device_offer(user_id, pin, payload)` → `AcceptedDeviceOffer { link_id, new_device_id, device_name }`. Signed-in scanner. **Requires the PIN** (`pin::verify_pin`) before anything is sent; binds the offer to this account, once. Refuses a v1 code with "enter it on the device you're signing in".
+- `finish_device_offer(user_id, link_id)` → `DeviceOfferOutcome` (`linked { device_name } | tampered | expired`). Waits for the request and wraps the account key only if the request's ephemeral key is **byte for byte the scanned one**; otherwise it reports `tampered` and wraps nothing. Security event `device_enrolled` with `via=qr_scan`.
 
 ## livekit (`commands/livekit/`)
 - Tokens are minted by the DS now (#393) — no on-device signer. `get_livekit_token` and friends call `ds_livekit_token` (`POST /v1/livekit/token`); server-side fan-out/roster go through `ds_livekit_send_data` / `ds_livekit_participants`. The client holds no LiveKit API secret.
@@ -696,7 +704,7 @@ than hand-edit.
 
 **`device_enrollment`** (10) — `approve_device_enrollment`, `await_enrollment_approval`, `finalize_device_enrollment`, `list_pending_enrollment_requests`, `list_security_events`, `poll_enrollment_status`, `recover_with_secret_key`, `reject_device_enrollment`, `reset_identity_and_recover`, `start_device_enrollment`
 
-**`device_link`** (6) — `approve_device_link`, `await_device_link`, `cancel_device_link`, `claim_device_link`, `create_device_link`, `poll_device_link`
+**`device_link`** (11) — `accept_device_offer`, `approve_device_link`, `await_device_link`, `await_device_offer`, `cancel_device_link`, `cancel_device_offer`, `claim_device_link`, `create_device_link`, `create_device_offer`, `finish_device_offer`, `poll_device_link`
 
 **`safety`** (3) — `get_safety_number`, `list_peer_verifications`, `set_contact_verified`
 

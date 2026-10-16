@@ -9,6 +9,12 @@ import { InputOtp } from '../ui/InputOtp';
 import { AuthError } from './AuthError';
 import { TextInput } from '../ui/TextInput';
 import { shellOpen } from '../../bridge';
+import { OfferCode } from './OfferCode';
+
+/// What the signed-in device is told this one is called.
+function desktopDeviceName(): string {
+  return isMac ? 'Pollis on macOS' : isWindows ? 'Pollis on Windows' : isLinux ? 'Pollis on Linux' : 'Pollis desktop';
+}
 
 interface EmailOTPAuthProps {
   onSuccess: (result: api.AuthResult) => void | Promise<void>;
@@ -34,8 +40,9 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const hasAutoSubmittedRef = useRef(false);
-  // "Sign in with another device" (#1207): paste the code a signed-in device
-  // shows under its QR. Desktop has no camera scanner, so this is its way in.
+  // "Sign in with another device": this device shows a QR for a signed-in
+  // phone to scan (#1361), or takes the code a signed-in device shows under
+  // its own QR, pasted (#1207 — desktop has no camera scanner).
   const [linkMode, setLinkMode] = useState(false);
   const [linkCode, setLinkCode] = useState('');
 
@@ -47,8 +54,7 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
     setIsLoading(true);
     setError(null);
     try {
-      const deviceName = isMac ? 'Pollis on macOS' : isWindows ? 'Pollis on Windows' : isLinux ? 'Pollis on Linux' : 'Pollis desktop';
-      const result = await api.claimDeviceLink(linkCode.trim(), deviceName);
+      const result = await api.claimDeviceLink(linkCode.trim(), desktopDeviceName());
       await onSuccess(result);
     } catch (err) {
       setError(errorMessage(err) || t('link.failed'));
@@ -192,8 +198,12 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
   if (linkMode) {
     return (
       <div data-testid="link-form-container" className="flex flex-col gap-6">
-        <div className="flex flex-col gap-2">
-          <h2 className="text-base text-fg">{t('link.scanTitle')}</h2>
+        <h2 className="text-base text-fg">{t('link.scanTitle')}</h2>
+        {/* #1361: this device shows a code and a signed-in phone scans it. */}
+        <OfferCode deviceName={desktopDeviceName()} onSignedIn={onSuccess} />
+        {/* The fallback (#1207): a code shown by a signed-in device. */}
+        <div className="flex flex-col gap-2 pt-4 border-t border-line">
+          <h3 className="text-sm text-fg">{t('link.pasteHeading')}</h3>
           <p className="text-sm text-muted leading-relaxed">{t('link.codeIntro')}</p>
         </div>
         {error && <AuthError message={error} />}

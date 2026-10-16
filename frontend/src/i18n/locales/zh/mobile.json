@@ -368,9 +368,6 @@
       "signOutConfirmTitle": "要在此设备上退出 Pollis 吗？"
     },
     "identityHeading": "身份",
-    "linkDevice": {
-      "codeTitle": "使用代码登录"
-    },
     "preferences": {
       "accentA11y": "强调色 {{name}}",
       "accentHeading": "强调色",
@@ -436,6 +433,22 @@
       "handleHint": "其他成员可以通过 @handle 找到你并发私信。",
       "handleInvalid": "用户名为 3–32 个字符：小写字母、数字、'_'、'.' 或 '-'。",
       "save": "保存更改"
+    },
+    "scanDevice": {
+      "heading": "扫码登录设备",
+      "rowSub": "扫描电脑或手机上显示的二维码来登录它",
+      "scanTitle": "扫描二维码",
+      "scanIntro": "在要登录的设备上选择“使用其他设备登录”，然后将相机对准它显示的二维码。",
+      "codeIntro": "输入或粘贴另一台设备上二维码下方显示的代码。",
+      "warning": "只扫描你面前、由你本人登录的设备上的二维码。该设备将能读取你的消息。",
+      "continue": "继续",
+      "wrongDirection": "这个代码用于反方向登录。请在新设备上选择“使用其他设备登录”以显示正确的二维码。",
+      "confirmTitle": "要登录这台设备吗？",
+      "confirmBody": "输入你的 PIN 码以登录显示二维码的设备。",
+      "linking": "正在登录 {{name}}…",
+      "linkingBody": "请让两台设备上的 Pollis 保持打开片刻。",
+      "notFinished": "另一台设备未完成登录。请在其上显示新的二维码并重新扫描。",
+      "scanAgain": "重新扫描"
     }
   },
   "tabs": {

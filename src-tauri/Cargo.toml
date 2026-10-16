@@ -141,6 +141,9 @@ tokio = { version = "1", features = ["full", "test-util"] }
 dotenvy = "0.15"
 serial_test = "3"
 tempfile = "3"
+# The QR-link guardrail tests (tests/flows/device_link.rs) forge the pending
+# link state, whose key fields are `Zeroizing`.
+zeroize = "1"
 # Model-based property fuzzer for the adversarial MLS recovery suite
 # (tests/flows/model.rs): generates random op/fault/offline sequences, forces
 # convergence, and asserts the bulletproof-membership invariant for all of them.

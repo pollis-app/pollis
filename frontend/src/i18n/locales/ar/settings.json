@@ -418,7 +418,6 @@
     "codeSubtitle": "انسخ هذا الرمز والصقه على الجهاز الجديد.",
     "tabQr": "رمز QR",
     "tabCode": "الرمز",
-    "copyHint": "اضغط للنسخ",
     "clickToCopy": "انقر للنسخ",
     "copied": "تم النسخ",
     "expiresIn": "ينتهي خلال {{time}}",

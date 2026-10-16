@@ -366,7 +366,6 @@
     "codeSubtitle": "Copia este código y pégalo en el dispositivo nuevo.",
     "tabQr": "Código QR",
     "tabCode": "Código",
-    "copyHint": "Toca para copiar",
     "clickToCopy": "Haz clic para copiar",
     "copied": "Copiado",
     "expiresIn": "Caduca en {{time}}",

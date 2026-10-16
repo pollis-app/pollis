@@ -389,9 +389,6 @@
       "signOutConfirmTitle": "Sign out of Pollis on this device?"
     },
     "identityHeading": "Identity",
-    "linkDevice": {
-      "codeTitle": "Sign in with a code"
-    },
     "preferences": {
       "accentA11y": "Accent {{name}}",
       "accentHeading": "Accent",
@@ -460,6 +457,22 @@
       "handleHint": "Other members can find and DM you with @handle.",
       "handleInvalid": "Handles are 3–32 characters: lowercase letters, digits, '_', '.' or '-'.",
       "save": "Save changes"
+    },
+    "scanDevice": {
+      "heading": "Scan to sign in a device",
+      "rowSub": "Sign in a computer or phone by scanning the code it shows",
+      "scanTitle": "Scan the code",
+      "scanIntro": "On the device you're signing in, choose Sign in with another device. Point the camera at the code it shows.",
+      "codeIntro": "Type or paste the code shown under the QR on the other device.",
+      "warning": "Only scan a code on a device in front of you that you're signing in yourself. It will be able to read your messages.",
+      "continue": "Continue",
+      "wrongDirection": "That code signs in this kind of device the other way. On the new device, choose Sign in with another device to see the right one.",
+      "confirmTitle": "Sign in this device?",
+      "confirmBody": "Enter your PIN to sign in the device showing the code.",
+      "linking": "Signing in {{name}}…",
+      "linkingBody": "Keep Pollis open on both devices for a moment.",
+      "notFinished": "The other device didn't finish signing in. Show a new code on it and scan again.",
+      "scanAgain": "Scan again"
     }
   },
   "tabs": {

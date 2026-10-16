@@ -1,0 +1,24 @@
+appId: com.pollis.mobile
+tags:
+  - two-client
+---
+# #1361, NEW device: no email — "Sign in with another device" → "Show a code
+# instead". The script reads the v2 code (`link-offer-payload`) off the UI tree
+# and hands it to the signed-in device, standing in for its camera.
+- clearState
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-email"
+    timeout: 20000
+- tapOn:
+    id: "btn-sign-in-with-device"
+- tapOn:
+    id: "btn-link-show-code"
+- extendedWaitUntil:
+    visible:
+      id: "link-offer-qr"
+    timeout: 20000
+- assertVisible:
+    id: "link-offer-payload"
+- takeScreenshot: qr-link-01-new-shows-code

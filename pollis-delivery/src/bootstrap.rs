@@ -549,12 +549,20 @@ pub async fn enrollment_request(
     // QR device link (#1207): a device-link session files exactly the request
     // its link expects, carrying the tag the approver will verify; an OTP
     // session never carries one. Either mismatch is a malformed request.
-    let link = match (&claims.scope, &parsed.link_tag) {
+    //
+    // A v2 offer session (#1361) files a request with NO tag: its approver
+    // checks the request's key against the one it read off the QR. A tag there
+    // is as malformed as a missing one on a v1 link.
+    let link: Option<(String, Option<String>)> = match (&claims.scope, &parsed.link_tag) {
         (SessionScope::DeviceLink { link_id }, Some(tag)) if !tag.is_empty() => {
-            Some((link_id.clone(), tag.clone()))
+            Some((link_id.clone(), Some(tag.clone())))
         }
         (SessionScope::DeviceLink { .. }, _) => {
             return bad_request("link_tag is required on a device-link session")
+        }
+        (SessionScope::DeviceOffer { link_id }, None) => Some((link_id.clone(), None)),
+        (SessionScope::DeviceOffer { .. }, Some(_)) => {
+            return bad_request("link_tag is not valid on a device-offer session")
         }
         (SessionScope::Otp, Some(_)) => {
             return bad_request("link_tag is only valid on a device-link session")
@@ -586,7 +594,7 @@ pub async fn enrollment_request(
             // already attached, which is fine.
             if let Some((link_id, tag)) = &link {
                 let now = crate::util::now_unix();
-                if !state.links.record_request(link_id, &claims.device_id, &parsed.request_id, tag, now) {
+                if !state.links.record_request(link_id, &claims.device_id, &parsed.request_id, tag.as_deref(), now) {
                     tracing::info!("enrollment-request: link {link_id} not attachable (expired or already attached)");
                 }
             }

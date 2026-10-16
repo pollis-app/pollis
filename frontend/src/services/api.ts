@@ -158,6 +158,42 @@ export async function cancelDeviceLink(linkId: string): Promise<void> {
   await invoke('cancel_device_link', { linkId });
 }
 
+// ── QR sign-in shown by THIS (new) device (#1361) ──────────────────────────
+
+export interface DeviceOfferHandle {
+  link_id: string;
+  /// `pollis-link:v2:<link_id>:<ephemeral public key>` — no secret.
+  qr_payload: string;
+  /// Unix seconds, server-set. Show a fresh code after this.
+  expires_at: number;
+}
+
+export type DeviceOfferWait =
+  | { state: 'signed_in'; profile: RawUserProfile }
+  | { state: 'expired' };
+
+/// Offer a code for a signed-in phone to scan. Replaces any earlier offer.
+export async function createDeviceOffer(deviceName: string): Promise<DeviceOfferHandle> {
+  return invoke<DeviceOfferHandle>('create_device_offer', { deviceName });
+}
+
+/// Resolve when a signed-in device accepts the code (signed in, enrollment
+/// still to do) or when it lapses. One awaited call; the backoff and the
+/// deadline live in Rust.
+export async function awaitDeviceOffer(linkId: string): Promise<
+  { state: 'signed_in'; result: AuthResult } | { state: 'expired' }
+> {
+  const wait = await invoke<DeviceOfferWait>('await_device_offer', { linkId });
+  if (wait.state === 'signed_in') {
+    return { state: 'signed_in', result: { ...rawProfileToAuthResult(wait.profile, false), linked: true } };
+  }
+  return { state: 'expired' };
+}
+
+export async function cancelDeviceOffer(): Promise<void> {
+  await invoke('cancel_device_offer');
+}
+
 /// Sign in by a code from another device's QR — pasted, on desktop.
 export async function claimDeviceLink(payload: string, deviceName: string): Promise<AuthResult> {
   const profile = await invoke<RawUserProfile>('claim_device_link', { payload, deviceName });

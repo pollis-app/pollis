@@ -163,6 +163,8 @@ async fn verify_otp_ds(
     // left from an abandoned QR attempt, or its tag would ride on this OTP
     // session's enrollment request and the DS would rightly refuse it (#1207).
     *state.device_link_pending.lock().await = None;
+    // Nor is it the QR this device may still be showing (#1361).
+    *state.device_offer.lock().await = None;
     let candidate_device_id = stable_device_id_for_reenrollment(state, &email)
         .await
         .unwrap_or_else(|| Ulid::new().to_string());

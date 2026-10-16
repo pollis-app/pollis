@@ -50,7 +50,7 @@ delete/remove/revoke), the record id is appended to keep the selector unique
 | Route | `screen-*` | Key testIDs |
 | --- | --- | --- |
 | `(auth)/email` | `screen-auth-email` | `input-email`, `btn-submit-email`, `btn-sign-in-with-device` (→ `(auth)/link`), `text-legal`, `text-session-notice` (why the last session ended — e.g. this device was removed from the account, #1338) |
-| `(auth)/link` | `screen-auth-link` | `link-camera`, `btn-link-allow-camera`, `btn-link-toggle-manual`, `input-link-code`, `btn-link-submit`, `link-claiming`, `link-error`; the top back chevron is `btn-link-use-email` (back to email sign-in), not `btn-back` |
+| `(auth)/link` | `screen-auth-link` | `link-camera`, `btn-link-allow-camera`, `btn-link-toggle-manual`, `input-link-code`, `btn-link-submit`, `link-claiming`, `link-error`; show this phone's own code (#1361): `btn-link-show-code`, `link-offer`, `link-offer-qr`, `link-offer-payload` (the v2 code as text, zero-width spaces between characters), `link-offer-status`, `btn-link-offer-refresh`, `link-offer-error`; the top back chevron is `btn-link-use-email` (back to email sign-in), not `btn-back` |
 | `(auth)/otp` | `screen-auth-otp` | `input-otp`, `btn-submit-otp` |
 | `(auth)/pin` | `screen-auth-pin` | keypad `btn-pin-0`…`btn-pin-9`, `btn-pin-back`, `btn-pin-signout` |
 | `(auth)/initializing` | `screen-auth-initializing` | `btn-continue` |
@@ -95,7 +95,7 @@ delete/remove/revoke), the record id is appended to keep the selector unique
 | `self/blocked` | `screen-self-blocked` | `row-blocked-<id>`, `btn-unblock-<id>` |
 | `self/change-email` | `screen-self-change-email` | `input-email` (enter-email stage), `input-otp` + `input-current-otp` (enter-code stage — two codes since #1161: one to the new address, one to the address being left), `btn-request-otp` (enter-email stage) / `btn-submit` (enter-code stage, enabled only once BOTH codes are six digits), `btn-use-different-email` (in the body, under the code fields). A complete first code moves focus to `input-current-otp` on its own and scrolls it into view (#1231), so a flow can type the second code without tapping the field. |
 | `self/saved` | `screen-saved` | `list-saved`, `row-saved-<msgId>`, `btn-unsave-<msgId>`, `saved-unavailable-<msgId>`, `saved-unresolved-notice` |
-| `self/link-device` | `screen-link-device` | PIN first (`btn-pin-<digit>`), then `chip-link-qr` / `chip-link-code`, `link-device-qr`, `link-device-payload`, `link-device-copy`, `link-device-status`, `link-device-showing`, `link-device-claimed`, `link-device-approve-card`, `btn-link-device-approve`, `btn-link-device-reject`, `link-device-done`, `btn-link-device-done`, `link-device-pin-error` |
+| `self/link-device` | `screen-link-device` | Scan to sign in a device (#1361): `scan-device-camera`, `btn-scan-allow-camera`, `btn-scan-toggle-manual`, `input-scan-code`, `btn-scan-code-continue`, `scan-device-error` (a v1 code scanned the wrong way round); then the PIN (`scan-device-confirm`, `btn-pin-<digit>`, `link-device-pin-error`); `link-device-linking`, `link-device-done`, `btn-link-device-done`; `link-device-failed`, `btn-scan-again` |
 | `self/delete-account` | `screen-self-delete-account` | `input-delete-confirm`, `btn-delete-account`, `text-delete-error` |
 
 ### Direct messages

@@ -1185,6 +1185,18 @@ Current state:
     a store-signed build (PL-24).
 - **webrtc Expo config plugin** + an AndroidManifest mic/camera **removal** rule
   so the data-only realtime path adds no voice/video permission.
+- **QR sign-in, both directions (#1207, #1361).** Self → Security → "Scan to
+  sign in a device" (`app/self/link-device.tsx`) is a **scanner**. It reads the
+  v2 code a new desktop or phone shows (`pollis-link:v2:`, the new device's
+  ephemeral key, no secret), takes the PIN, then `accept_device_offer` +
+  `finish_device_offer`; Rust wraps only to the scanned key. It used to SHOW a
+  v1 code, which only ever reached a desktop by being retyped; desktop still
+  shows v1 for a new phone. On sign-in, `app/(auth)/link.tsx` scans a desktop's
+  v1 code (or takes it as text), or with "Show a code instead" shows this
+  phone's own v2 code (`components/auth/OfferCodeView`). `lib/linkCodes.ts`
+  tells the two apart. Maestro: `scripts/maestro-qr-link.sh` (phone ↔ phone)
+  and `scripts/maestro-qr-scan.sh` (phone ↔ desktop peer). Design:
+  `docs/qr-device-link-design.md`.
 - **A new device's approval request comes to the user (#1360).** Desktop's
   "Approve from another device" files a request; the DS nudges
   `inbox-<user>` with `enrollment_requested` (honoured only with no publishing

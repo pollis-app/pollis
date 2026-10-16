@@ -228,6 +228,14 @@ interface MockStore {
   deviceLinkPin: string;
   deviceLinkScript: unknown[];
   deviceLinkApprovals: string[];
+  /**
+   * The reverse QR sign-in (#1361): how many codes this device offered, what
+   * successive `await_device_offer` calls resolve to, and how many offers the
+   * UI cancelled.
+   */
+  deviceOffers: number;
+  deviceOfferScript: unknown[];
+  deviceOfferCancels: number;
   /** Abuse reports filed through `report_user` (#1213), args verbatim. */
   reports: Record<string, unknown>[];
   enrollmentWait: 'none' | 'pending';
@@ -329,6 +337,9 @@ const store: MockStore = {
   deviceLinkPin: (preload.deviceLinkPin as string | undefined) ?? '1234',
   deviceLinkScript: (preload.deviceLinkScript as unknown[] | undefined) ?? [],
   deviceLinkApprovals: [],
+  deviceOffers: 0,
+  deviceOfferScript: (preload.deviceOfferScript as unknown[] | undefined) ?? [],
+  deviceOfferCancels: 0,
   reports: [],
   enrollmentWait: (preload.enrollmentWait as 'none' | 'pending' | undefined) ?? 'none',
   voiceGate: {
@@ -1026,6 +1037,23 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return null;
     case 'report_user':
       store.reports.push({ ...args });
+      return null;
+    // The reverse direction (#1361): this (new) device shows a code. Each
+    // offer is a fresh code; `deviceOfferScript` holds what successive
+    // `await_device_offer` calls resolve to, and an empty script waits forever
+    // ("nobody has scanned it yet"), like the Rust wait.
+    case 'create_device_offer': {
+      store.deviceOffers += 1;
+      return {
+        link_id: `offer_mock_${store.deviceOffers}`,
+        qr_payload: `pollis-link:v2:offer_mock_${store.deviceOffers}:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc`,
+        expires_at: Math.floor(Date.now() / 1000) + 120,
+      };
+    }
+    case 'await_device_offer':
+      return store.deviceOfferScript.length > 0 ? store.deviceOfferScript.shift() : new Promise(() => {});
+    case 'cancel_device_offer':
+      store.deviceOfferCancels += 1;
       return null;
     case 'claim_device_link': {
       const payload = args.payload as string;

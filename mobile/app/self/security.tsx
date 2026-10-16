@@ -336,12 +336,12 @@ export default function Security() {
 
         <View style={sectionGap} onLayout={sectionLayout("devices")}>
           <Group title={t("security.devicesHeading")}>
-            {/* Link a new device by QR (#1207): its own screen, one step at a time. */}
+            {/* Sign in another device by scanning the code it shows (#1361). */}
             <ListRow
               testID="row-link-device"
               glyph={<Icon.plus size={22} color={semantic.text} />}
-              name={t("linkDevice.heading")}
-              sub={t("linkDevice.rowSub")}
+              name={t("mobile:self.scanDevice.heading")}
+              sub={t("mobile:self.scanDevice.rowSub")}
               chevron
               onPress={() => router.push("/self/link-device")}
             />

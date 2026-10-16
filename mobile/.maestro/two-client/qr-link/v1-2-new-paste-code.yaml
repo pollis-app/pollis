@@ -1,7 +1,7 @@
 appId: com.pollis.mobile
 ---
-# New device, already on the manual-entry field (3a-new-open-manual.yaml):
-# enter the code the existing device is showing.
+# New device, already on the manual-entry field (v1-1-new-open-manual.yaml):
+# enter the v1 code a signed-in desktop is showing (#1207).
 - tapOn:
     id: "input-link-code"
 - inputText: ${PAYLOAD}

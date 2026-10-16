@@ -116,7 +116,7 @@ they need the two-device setup below and a Mac shakedown.
 
 `flows/tour.yaml` (tag `audit`) signs up, makes a group with a message, and
 takes one numbered screenshot of every reachable screen (`tour-01-…` to
-`tour-34-…`), so a layout or copy change can be compared before and after. It
+`tour-33-…`), so a layout or copy change can be compared before and after. It
 asserts nothing; collect the shots with `--debug-output <dir>`.
 
 ## Visual before/after comparison
@@ -226,13 +226,21 @@ message" on it, pin its own message and unpin the peer's
 the device's pin and unpin in its own list. The one-device half (pin, list,
 jump, unpin) is `flows/pins.yaml`.
 
-**QR device link (automated, #1207):** `mobile/scripts/maestro-qr-link.sh <existing-device> <new-device>`
-— the existing device shows a code from Security (PIN first), the script reads
-the code's text off its UI tree, the new device signs in with it from "Sign in
-with another device" (entered as text: a simulator camera can't be aimed at
-another screen), the existing device approves the tag-verified request, and the
-new device must finish its PIN and list the group. Needs a dev DS with the
-link endpoints.
+**QR sign-in, phone to phone (automated, #1361):** `mobile/scripts/maestro-qr-link.sh <signed-in-device> <new-device>`
+— the NEW device shows its code ("Sign in with another device" → "Show a code
+instead", `two-client/qr-link/2-new-show-code.yaml`), the script reads it off
+that device's UI tree, the signed-in device scans it from Security → Scan to
+sign in a device (entered as text through the camera's own handler: a simulator
+camera can't be aimed at another screen) and confirms with its PIN, and the new
+device must finish its PIN and list the group — no Approve, no code typed on
+it. Needs a dev DS with the v2 link endpoints.
+
+**QR sign-in, phone and desktop (automated, #1361 + #1207):** `mobile/scripts/maestro-qr-scan.sh <device>`
+— `enroll_peer` plays the desktop. First the desktop is not signed in and
+offers its code (`offer` mode); the phone scans it and the peer must enroll.
+Then the other way: the peer signs up and shows a v1 code (`show` mode), the
+phone signs in with it as a new device (`v1-1-…`, `v1-2-…`), and the peer
+approves.
 
 **Device link (automated):** `mobile/scripts/maestro-device-link.sh <existing-device> <new-device>`
 runs both halves of device-linking sign-in across two devices

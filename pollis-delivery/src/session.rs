@@ -45,6 +45,12 @@ pub enum SessionScope {
     /// Minted by `link/claim`: proved possession of a QR shown by an enrolled,
     /// PIN-verified device of this account. Enrollment-only.
     DeviceLink { link_id: String },
+    /// Minted by `link/poll-offer` (#1361): this device showed a QR that an
+    /// enrolled, PIN-verified device of this account scanned and accepted.
+    /// Enrollment-only, exactly like `DeviceLink`; the difference is that its
+    /// enrollment request carries no link tag (the approver compares the key
+    /// it read off the QR instead).
+    DeviceOffer { link_id: String },
 }
 
 /// One live session. Minted on a verified OTP (or a claimed device link),
@@ -109,6 +115,21 @@ impl SessionStore {
         now: u64,
     ) -> String {
         let scope = SessionScope::DeviceLink { link_id: link_id.to_string() };
+        self.mint_scoped(user_id, email, device_id, scope, ttl_secs, now)
+    }
+
+    /// [`mint`](Self::mint) for a collected v2 offer: an enrollment-only
+    /// session for the device that showed the QR (#1361).
+    pub fn mint_device_offer(
+        &self,
+        user_id: &str,
+        email: &str,
+        device_id: &str,
+        link_id: &str,
+        ttl_secs: u64,
+        now: u64,
+    ) -> String {
+        let scope = SessionScope::DeviceOffer { link_id: link_id.to_string() };
         self.mint_scoped(user_id, email, device_id, scope, ttl_secs, now)
     }
 
@@ -259,6 +280,18 @@ mod tests {
         assert_eq!(claims.user_id, "u1");
         assert_eq!(claims.device_id, "dev2");
         assert_eq!(claims.scope, SessionScope::DeviceLink { link_id: "link-1".into() });
+    }
+
+    /// #1361: a session collected from a v2 offer is enrollment-only too.
+    #[test]
+    fn a_device_offer_session_is_refused_by_the_otp_gate() {
+        let store = SessionStore::default();
+        let token = store.mint_device_offer("u1", "u1@x.com", "desk", "offer-1", 600, 1000);
+        assert!(verify_session(&headers_with(&token), &store, 1000).is_err());
+        let claims = verify_session_for_enrollment(&headers_with(&token), &store, 1000)
+            .expect("the enrollment gate accepts it");
+        assert_eq!(claims.device_id, "desk");
+        assert_eq!(claims.scope, SessionScope::DeviceOffer { link_id: "offer-1".into() });
     }
 
     /// An OTP session passes both gates, unchanged.

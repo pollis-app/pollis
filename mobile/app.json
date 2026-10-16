@@ -19,7 +19,7 @@
       },
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSCameraUsageDescription": "Pollis needs your camera to scan the pairing QR code from your desktop.",
+        "NSCameraUsageDescription": "Pollis needs your camera to scan sign-in QR codes from your other devices.",
         "UISupportedInterfaceOrientations": [
           "UIInterfaceOrientationPortrait"
         ],
@@ -124,7 +124,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Pollis needs your camera to scan the pairing QR code from your desktop.",
+          "cameraPermission": "Pollis needs your camera to scan sign-in QR codes from your other devices.",
           "microphonePermission": false,
           "recordAudioAndroid": false
         }
@@ -139,7 +139,7 @@
         "expo-image-picker",
         {
           "photosPermission": "Pollis needs access to your photo library so you can attach images to messages and upload custom group emoji.",
-          "cameraPermission": "Pollis needs your camera to scan the pairing QR code from your desktop.",
+          "cameraPermission": "Pollis needs your camera to scan sign-in QR codes from your other devices.",
           "microphonePermission": false
         }
       ],

@@ -1,6 +1,6 @@
 appId: com.pollis.mobile
 ---
-# New device, BEFORE the existing device mints a code: no email code — reset,
+# v1 (#1207) — new device, BEFORE the signed-in desktop mints a code: no email code — reset,
 # then open "Sign in with another device" at the manual-entry field. A link
 # code lives 60 s (LINK_TTL_SECS); doing this slow part first leaves only the
 # paste inside that window (it overran it on a loaded machine).

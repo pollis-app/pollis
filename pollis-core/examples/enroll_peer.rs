@@ -15,6 +15,11 @@
 //!   (Maestro reads it off the phone's screen), then approves it with
 //!   `approve_device_enrollment`, the call desktop's approval prompt makes
 //!   (`PEER_APPROVED`).
+//! - `offer -` (#1361) — a desktop at "Sign in with another device" showing
+//!   its QR (`PEER_OFFER=<payload>`) for the phone to scan; enrolls once the
+//!   phone accepts (`PEER_ENROLLED`).
+//! - `show <email>` (#1207) — a signed-in desktop showing a v1 code
+//!   (`PEER_LINK=<payload>`) for a NEW phone to sign in with; approves it.
 //!
 //! An example of `pollis-core` rather than `pollis-tui` so it can be built
 //! with `--no-default-features`: no `os-keystore`, so the peer keeps its keys
@@ -29,7 +34,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
-use pollis_core::commands::{auth, device_enrollment, pin};
+use pollis_core::commands::{auth, device_enrollment, device_link, pin};
 use pollis_core::config::Config;
 use pollis_core::state::AppState;
 
@@ -43,8 +48,8 @@ const PEER_PIN: &str = "0000";
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
-    let mode = args.next().context("usage: enroll_peer <new|approver> <email>")?;
-    let email = args.next().context("usage: enroll_peer <new|approver> <email>")?;
+    let mode = args.next().context("usage: enroll_peer <new|approver|offer|show> <email>")?;
+    let email = args.next().context("usage: enroll_peer <new|approver|offer|show> <email>")?;
     let otp = std::env::var("POLLIS_DEV_OTP").unwrap_or_else(|_| DEFAULT_OTP.to_string());
     let config = Config::from_env().context("POLLIS_DELIVERY_URL (the dev DS) is required")?;
     let ds = config.pollis_delivery_url.clone().unwrap_or_default();
@@ -53,12 +58,74 @@ async fn main() -> Result<()> {
     }
     let state = Arc::new(AppState::new(config).await.context("AppState")?);
 
+    // A new desktop at "Sign in with another device": no email at all.
+    if mode == "offer" {
+        return offering_device(&state).await;
+    }
     auth::request_otp(&state, email.clone()).await?;
     let me = auth::verify_otp(&state, email, otp).await?;
     match mode.as_str() {
         "new" => new_device(&state, &me.id, me.enrollment_required).await,
         "approver" => approver(&state, &me.id, me.new_secret_key.is_some()).await,
+        "show" => showing_device(&state, &me.id, me.new_secret_key.is_some()).await,
         other => bail!("unknown mode {other:?}"),
+    }
+}
+
+/// `offer -` (#1361): a desktop that is NOT signed in shows its QR. Prints
+/// `PEER_OFFER=<payload>` (again, with a fresh code, whenever one lapses); a
+/// signed-in phone scans it. Then enrolls and prints `PEER_ENROLLED` once that
+/// phone has wrapped the account key to the key the code showed.
+async fn offering_device(state: &Arc<AppState>) -> Result<()> {
+    let started = Instant::now();
+    let profile = loop {
+        let handle = device_link::create_device_offer(state, Some("Pollis on macOS".into())).await?;
+        println!("PEER_OFFER={}", handle.qr_payload);
+        match device_link::await_device_offer(state, handle.link_id).await? {
+            device_link::DeviceOfferWait::SignedIn { profile } => break profile,
+            device_link::DeviceOfferWait::Expired => {}
+        }
+        if started.elapsed() > WAIT {
+            bail!("no phone accepted a code within {WAIT:?}");
+        }
+    };
+    println!("PEER_SIGNED_IN={}", profile.username);
+    new_device(state, &profile.id, profile.enrollment_required).await
+}
+
+/// `show <email>` (#1207): the account's first device shows a v1 code under
+/// Security → Link a new device; a NEW phone signs in with it. Prints
+/// `PEER_LINK=<payload>`, then approves the phone's tag-verified request
+/// (`PEER_APPROVED`).
+async fn showing_device(state: &Arc<AppState>, user_id: &str, first_device: bool) -> Result<()> {
+    if !first_device {
+        bail!("show mode signs up a fresh account; use a new email");
+    }
+    pin::set_pin(state, None, PEER_PIN.to_string()).await?;
+    auth::initialize_identity(state, user_id.to_string()).await?;
+    let started = Instant::now();
+    loop {
+        let handle = device_link::create_device_link(state, user_id.to_string(), PEER_PIN.to_string()).await?;
+        println!("PEER_LINK={}", handle.qr_payload);
+        let mut since = "open".to_string();
+        loop {
+            let status =
+                device_link::await_device_link(state, user_id.to_string(), handle.link_id.clone(), since).await?;
+            match status {
+                device_link::DeviceLinkStatus::ReadyToApprove { .. } => {
+                    device_link::approve_device_link(state, user_id.to_string(), handle.link_id).await?;
+                    println!("PEER_APPROVED");
+                    return Ok(());
+                }
+                device_link::DeviceLinkStatus::Tampered => bail!("the phone's request did not verify"),
+                device_link::DeviceLinkStatus::Expired => break,
+                device_link::DeviceLinkStatus::Open => since = "open".into(),
+                device_link::DeviceLinkStatus::Claimed { .. } => since = "claimed".into(),
+            }
+        }
+        if started.elapsed() > WAIT {
+            bail!("no phone signed in within {WAIT:?}");
+        }
     }
 }
 

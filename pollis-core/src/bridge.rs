@@ -363,6 +363,30 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             crate::commands::device_link::cancel_device_link(&state()?, link_id).await?;
             ok(())
         }
+        // QR sign-in shown by the NEW device (#1361).
+        "create_device_offer" => {
+            let device_name: Option<String> = arg_opt(&args, "deviceName")?;
+            ok(crate::commands::device_link::create_device_offer(&state()?, device_name).await?)
+        }
+        "await_device_offer" => {
+            let link_id: String = arg(&args, "linkId")?;
+            ok(crate::commands::device_link::await_device_offer(&state()?, link_id).await?)
+        }
+        "cancel_device_offer" => {
+            crate::commands::device_link::cancel_device_offer(&state()?).await?;
+            ok(())
+        }
+        "accept_device_offer" => {
+            let user_id: String = arg(&args, "userId")?;
+            let pin: String = arg(&args, "pin")?;
+            let payload: String = arg(&args, "payload")?;
+            ok(crate::commands::device_link::accept_device_offer(&state()?, user_id, pin, payload).await?)
+        }
+        "finish_device_offer" => {
+            let user_id: String = arg(&args, "userId")?;
+            let link_id: String = arg(&args, "linkId")?;
+            ok(crate::commands::device_link::finish_device_offer(&state()?, user_id, link_id).await?)
+        }
         "claim_device_link" => {
             let payload: String = arg(&args, "payload")?;
             let device_name: Option<String> = arg_opt(&args, "deviceName")?;

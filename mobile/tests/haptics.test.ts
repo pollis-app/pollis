@@ -95,7 +95,12 @@ test("copies confirm, and a failed copy says so", () => {
   for (const f of ["app/chat/[id].tsx", "app/(auth)/emergency-kit.tsx", "components/CreatedInviteLinkCard.tsx"]) {
     assert.match(src(f), /haptic\(copied \? "success" : "error"\)/, f);
   }
-  assert.match(src("app/self/link-device.tsx"), /haptic\("success"\);\s*setCopied\(true\)/);
+});
+
+test("scanning another device's code is felt, and so is signing it in (#1361)", () => {
+  const s = src("app/self/link-device.tsx");
+  assert.match(s, /haptic\("toggle"\);\s*setStep\(\{ kind: "pin"/);
+  assert.match(s, /haptic\("success"\);\s*setStep\(\{ kind: "linked"/);
 });
 
 test("mutation haptics play from one MutationCache", () => {
@@ -118,7 +123,6 @@ const NO_HAPTIC = new Set([
   "useUnlockState",
   "useInitializeIdentity",
   "useLogout",
-  "useCreateDeviceLink",
   "useStartEnrollment",
   "useFetchExportAttachments",
   "useShareExport",

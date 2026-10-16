@@ -13,7 +13,10 @@
     "stage_attachment": "Desktop stages drag-and-drop/pasted files before send; mobile uploads straight from the picker with upload_media.",
     "upload_media_staged": "Second half of desktop staging; mobile uses upload_media.",
     "discard_staged_attachment": "Desktop staging only.",
-    "connect_rooms": "Desktop's LiveKit room connection; mobile's data-only equivalent is get_livekit_token."
+    "connect_rooms": "Desktop's LiveKit room connection; mobile's data-only equivalent is get_livekit_token.",
+    "create_device_link": "The v1 QR (#1207) is shown only by a signed-in desktop, for a new phone to scan; a signed-in phone scans the new device's v2 code instead (#1361), so it no longer shows one.",
+    "await_device_link": "The v1 QR (#1207) is shown only by a signed-in desktop, for a new phone to scan; a signed-in phone scans the new device's v2 code instead (#1361), so it no longer shows one.",
+    "approve_device_link": "The v1 QR (#1207) is shown only by a signed-in desktop, for a new phone to scan; a signed-in phone scans the new device's v2 code instead (#1361), so it no longer shows one."
   },
   "mobile_only": {
     "version": "uniffi build/version probe used by the mobile diagnostics screen; desktop reads its version from Tauri.",
@@ -22,9 +25,15 @@
     "get_media_path": "Mobile counterpart of desktop's get_media_url.",
     "get_emoji_path": "Mobile counterpart of desktop's get_emoji_url.",
     "get_livekit_token": "Mobile's LiveKit data-only connection; desktop's counterpart is connect_rooms.",
-    "bundle_export": "Mobile packages export_archive output into one file for the share sheet; desktop writes the archive to a picked folder."
+    "bundle_export": "Mobile packages export_archive output into one file for the share sheet; desktop writes the archive to a picked folder.",
+    "accept_device_offer": "Scanning a new device's QR needs a camera, and desktop has no scanner (#1361); desktop to desktop uses the pasted v1 code.",
+    "finish_device_offer": "Scanning a new device's QR needs a camera, and desktop has no scanner (#1361); desktop to desktop uses the pasted v1 code."
   },
-  "missing_from_cli": {},
+  "missing_from_cli": {
+    "create_device_offer": "The terminal client signs in by email or Secret Key; it does not show a sign-in QR (#1361).",
+    "await_device_offer": "The terminal client signs in by email or Secret Key; it does not show a sign-in QR (#1361).",
+    "cancel_device_offer": "The terminal client signs in by email or Secret Key; it does not show a sign-in QR (#1361)."
+  },
   "patterns": [
     {
       "match": "voice|camera|screen_?share|screen_sources|_call$|_ring$|mic_test|audio|video_devices|test_tone|test_playback|record_and_play_back|remote_user_volume|media_permission|revoke_media|open_privacy_settings|^connect_rooms$|^get_last_join_timings$",
@@ -78,13 +87,10 @@
     ],
     "missing_from_cli": [
       "accept_group_invite",
-      "approve_device_link",
       "approve_join_request",
-      "await_device_link",
       "block_user",
       "cancel_device_link",
       "claim_device_link",
-      "create_device_link",
       "create_group_invite_link",
       "decline_group_invite",
       "delete_account",

@@ -1,6 +1,14 @@
-//! QR device links (#1207): a signed-in desktop shows a QR, an unauthenticated
-//! phone scans it and is enrolled without the email OTP. Protocol and threat
-//! model: `docs/qr-device-link-design.md`.
+//! QR device links: a device is signed in by a QR instead of the email OTP.
+//! Protocol and threat model: `docs/qr-device-link-design.md`.
+//!
+//! Two directions share one store and one status read:
+//!
+//! - **v1 (#1207), shown by the signed-in device:** `create`, then the new
+//!   device `claim`s it with the secret the QR carries.
+//! - **v2 (#1361), shown by the NEW device:** `offer`, then a signed-in device
+//!   that scanned it `accept-offer`s, then the new device collects its session
+//!   with `poll-offer`. The QR carries the new device's ephemeral public key,
+//!   never a secret.
 //!
 //! Wire types only — no handler logic, no DB access. See
 //! `pollis-delivery/src/links.rs` for what the server does with each one.
@@ -93,5 +101,68 @@ pub struct LinkStatusResponse {
     pub request_id: Option<String>,
     /// Set once `Requested`: base64 `HMAC-SHA256(mac_key, link_id ‖ request_id ‖
     /// new_device_id ‖ ephemeral_pub)`. The approver verifies it before wrapping.
+    /// Always `None` for a v2 offer: its approver compares the request's key
+    /// with the one it read off the QR instead.
     pub link_tag: Option<String>,
+}
+
+/// `POST /v1/link/offer` — pre-credential, from the NEW device showing a v2 QR
+/// (#1361). The QR itself carries `link_id` and the device's ephemeral public
+/// key; nothing sent here lets the DS, or anyone who photographs the QR, act
+/// as that device.
+#[derive(Serialize, Deserialize)]
+pub struct OfferLinkBody {
+    /// Client-chosen id (a ULID); the QR carries it.
+    pub link_id: String,
+    /// `SHA-256(poll_secret)`, base64 (STANDARD). `poll_secret` is 32 random
+    /// bytes held only by the new device — NOT in the QR — and is what
+    /// `poll-offer` must present, so a photo of the QR cannot collect the
+    /// session.
+    pub poll_verifier: String,
+    /// The new device's id; the session it collects binds to it.
+    pub device_id: String,
+    /// Shown on the approving device. Untrusted display text.
+    #[serde(default)]
+    pub device_name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OfferLinkResponse {
+    /// Unix seconds. Server-set; the new device shows a fresh QR after this.
+    pub expires_at: i64,
+}
+
+/// `POST /v1/link/accept-offer` — device-signed, from the signed-in device that
+/// scanned a v2 QR. Binds the offer to the SIGNER's account, once. The signer
+/// then follows the link through `/v1/link/status`, as a v1 creator does.
+#[derive(Serialize, Deserialize)]
+pub struct AcceptOfferBody {
+    pub link_id: String,
+    /// Self-scope: when signed it must equal the authenticated user.
+    #[serde(default)]
+    pub user_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AcceptOfferResponse {
+    /// The device that offered the link — the one its session will name.
+    pub new_device_id: String,
+    pub device_name: Option<String>,
+}
+
+/// `POST /v1/link/poll-offer` — pre-credential, from the new device waiting on
+/// its v2 QR. Every failure (unknown, expired, wrong secret, already collected)
+/// is the same 401.
+#[derive(Serialize, Deserialize)]
+pub struct PollOfferBody {
+    pub link_id: String,
+    /// `poll_secret`, base64 (STANDARD).
+    pub poll_secret: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PollOfferResponse {
+    /// `None` while nobody has accepted the offer. Once accepted, the
+    /// enrollment-only session — delivered exactly once — in the claim's shape.
+    pub session: Option<ClaimLinkResponse>,
 }

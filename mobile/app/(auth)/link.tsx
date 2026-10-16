@@ -8,21 +8,26 @@ import { Heading } from "../../components/auth/Heading";
 import { AuthError } from "../../components/auth/AuthError";
 import { semantic, type as ty, fonts, r } from "../../theme/tokens";
 import { useClaimDeviceLink } from "../../hooks/queries";
-
-const PAYLOAD_PREFIX = "pollis-link:v1:";
+import { OfferCodeView } from "../../components/auth/OfferCodeView";
+import { isSignInCode, phoneDeviceName } from "../../lib/linkCodes";
 
 /**
- * Sign in with another device (#1207): scan the code a signed-in device shows
- * under Security → Link a new device, or paste it into the field. Laid out
- * like Sign in: a back button to email, a title, one line, then the camera (or
- * the code field).
+ * Sign in with another device. Three ways in, one screen, laid out like Sign
+ * in (a back button to email, a title, one line, then the body):
+ *
+ * - scan (#1207): the camera reads the code a signed-in desktop shows under
+ *   Security → Link a new device;
+ * - code: the same code, typed or pasted;
+ * - show (#1361): this phone shows ITS code for a signed-in phone to scan
+ *   under Security → Scan to sign in a device.
  */
 export default function LinkSignIn() {
   const { t } = useTranslation("auth");
   const router = useRouter();
   const claim = useClaimDeviceLink();
   const [permission, requestPermission] = useCameraPermissions();
-  const [manual, setManual] = useState(false);
+  const [mode, setMode] = useState<"scan" | "code" | "show">("scan");
+  const manual = mode === "code";
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   // The camera reports every frame the code is in view; claim once.
@@ -34,9 +39,8 @@ export default function LinkSignIn() {
     }
     claimed.current = true;
     setError(null);
-    const deviceName = Platform.OS === "ios" ? "Pollis on iPhone" : "Pollis on Android";
     claim.mutate(
-      { payload: payload.trim(), deviceName },
+      { payload: payload.trim(), deviceName: phoneDeviceName(Platform.OS) },
       {
         onSuccess: () => router.replace({ pathname: "/(auth)/enrollment", params: { linked: "1" } }),
         onError: (e) => {
@@ -57,9 +61,19 @@ export default function LinkSignIn() {
         backLabel={t("link.useEmail")}
       />
       <Body contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, gap: 24 }}>
-        <Heading title={t("link.scanTitle")} subtitle={manual ? t("link.codeIntro") : t("link.scanIntro")} />
+        <Heading
+          title={t("link.scanTitle")}
+          subtitle={mode === "show" ? t("link.qrIntro") : manual ? t("link.codeIntro") : t("link.scanIntro")}
+        />
 
-        {!manual && permission?.granted ? (
+        {mode === "show" ? (
+          <OfferCodeView
+            deviceName={phoneDeviceName(Platform.OS)}
+            onSignedIn={() => router.replace({ pathname: "/(auth)/enrollment", params: { linked: "1" } })}
+          />
+        ) : null}
+
+        {mode === "scan" && permission?.granted ? (
           <View
             style={{
               aspectRatio: 1,
@@ -75,7 +89,7 @@ export default function LinkSignIn() {
               facing="back"
               barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
               onBarcodeScanned={({ data }) => {
-                if (data.startsWith(PAYLOAD_PREFIX)) {
+                if (isSignInCode(data)) {
                   submit(data);
                 }
               }}
@@ -83,7 +97,7 @@ export default function LinkSignIn() {
           </View>
         ) : null}
 
-        {!manual && permission && !permission.granted ? (
+        {mode === "scan" && permission && !permission.granted ? (
           <Button
             testID="btn-link-allow-camera"
             variant="primary"
@@ -123,7 +137,7 @@ export default function LinkSignIn() {
         {error ? <AuthError testID="link-error" message={error} /> : null}
       </Body>
       <BottomAction>
-        {manual && code.trim().startsWith(PAYLOAD_PREFIX) ? (
+        {manual && isSignInCode(code) ? (
           <Button
             testID="btn-link-submit"
             variant="primary"
@@ -139,12 +153,25 @@ export default function LinkSignIn() {
           variant="secondary"
           full
           onPress={() => {
-            setManual((m) => !m);
+            setMode((m) => (m === "scan" ? "code" : "scan"));
             setError(null);
           }}
         >
-          {manual ? t("link.scanInstead") : t("link.enterCode")}
+          {mode === "scan" ? t("link.enterCode") : t("link.scanInstead")}
         </Button>
+        {mode !== "show" ? (
+          <Button
+            testID="btn-link-show-code"
+            variant="subtle"
+            full
+            onPress={() => {
+              setMode("show");
+              setError(null);
+            }}
+          >
+            {t("link.showCode")}
+          </Button>
+        ) : null}
       </BottomAction>
     </Screen>
   );

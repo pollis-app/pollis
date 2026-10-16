@@ -1,148 +1,175 @@
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
-import * as Clipboard from "expo-clipboard";
+import { CameraView, useCameraPermissions } from "expo-camera";
 import { useObserver } from "mobx-react-lite";
-import { Screen, Header, Button, BottomAction } from "../../components/ui";
-import { Icon } from "../../components/icons";
+import { Screen, Header, Button, BottomAction, Field, Body } from "../../components/ui";
 import { ErrorText } from "../../components/self/SettingsField";
 import { Heading } from "../../components/auth/Heading";
 import { useIsRegular } from "../../hooks/useLayoutClass";
 import { PinCells, PinKeypad } from "../../components/auth/PinPad";
-import { QrCode } from "../../components/QrCode";
-import { SegmentedControl } from "../../components/self/SegmentedControl";
-import { semantic, type as ty, fonts, r, space } from "../../theme/tokens";
+import { semantic, type as ty, fonts, r } from "../../theme/tokens";
 import { appStore } from "../../stores/appStore";
-import {
-  approveDeviceLink,
-  awaitDeviceLink,
-  cancelDeviceLink,
-  useCreateDeviceLink,
-  useRejectEnrollment,
-  type DeviceLinkHandle,
-  type DeviceLinkStatus,
-} from "../../hooks/queries";
+import { acceptDeviceOffer, cancelDeviceLink, finishDeviceOffer } from "../../hooks/queries";
+import { isNewDeviceCode, isSignInCode } from "../../lib/linkCodes";
 import { haptic } from "../../lib/haptics";
 
 /**
- * Link a new device (#1207), one step per screen, laid out like sign-in:
- * PIN → the code (QR or copyable text) → waiting → Approve → done. The PIN is
- * verified in Rust; the key moves only on Approve of a request whose link tag
- * Rust verified. Waiting is one awaited Rust call per state, never a poll.
+ * Scan to sign in a device (#1361): the device being signed in — a desktop at
+ * "Sign in with another device", or a new phone — shows a QR; this signed-in
+ * phone scans it, confirms with its PIN, and the other device is in, nothing
+ * typed or pasted.
+ *
+ * The code carries the new device's ephemeral public key and a link id, never
+ * a secret. The PIN is verified in Rust before anything is sent; Rust then
+ * wraps the account key ONLY to an enrollment request whose key is
+ * byte-for-byte the one scanned here, so neither the server nor anyone who
+ * photographed the code can substitute their own. Waiting is one awaited Rust
+ * call, never a poll.
+ *
+ * This replaced the QR this screen used to SHOW (#1207's direction): a phone
+ * scans better than it is scanned, a desktop cannot scan at all, and a
+ * 70-character code read off a phone and typed into a desktop was the only
+ * way that ever worked. Desktop still shows its own code for a new phone.
  */
 
 type Step =
-  | { kind: "pin" }
-  | { kind: "code"; handle: DeviceLinkHandle; status: DeviceLinkStatus }
-  | { kind: "linked"; name: string };
+  | { kind: "scan" }
+  | { kind: "pin"; payload: string }
+  | { kind: "linking"; name: string | null }
+  | { kind: "linked"; name: string | null }
+  | { kind: "failed"; title: string; message: string };
 
-export default function LinkDevice() {
+export default function ScanToSignIn() {
   const { t } = useTranslation("settings");
   const router = useRouter();
   const regular = useIsRegular();
   const userId = useObserver(() => appStore.currentUser?.id ?? null);
-  const create = useCreateDeviceLink();
-  const reject = useRejectEnrollment();
-  const [step, setStep] = useState<Step>({ kind: "pin" });
+  const [permission, requestPermission] = useCameraPermissions();
+  const [step, setStep] = useState<Step>({ kind: "scan" });
+  const [manual, setManual] = useState(false);
+  const [code, setCode] = useState("");
+  const [scanError, setScanError] = useState<string | null>(null);
   const [pin, setPin] = useState("");
   const [pinError, setPinError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // The camera reports every frame the code is in view; take it once.
+  const taken = useRef(false);
   const generation = useRef(0);
+  const linkId = useRef<string | null>(null);
 
   useEffect(() => {
     return () => {
       generation.current += 1;
+      if (linkId.current) {
+        void cancelDeviceLink(linkId.current).catch(() => undefined);
+      }
     };
   }, []);
 
-  const follow = (handle: DeviceLinkHandle, since: DeviceLinkStatus["state"]) => {
+  const take = (payload: string) => {
+    const text = payload.trim();
+    if (taken.current) {
+      return;
+    }
+    if (isSignInCode(text)) {
+      setScanError(t("mobile:self.scanDevice.wrongDirection"));
+      return;
+    }
+    if (!isNewDeviceCode(text)) {
+      return;
+    }
+    taken.current = true;
+    setScanError(null);
+    // A code was read: felt like a toggle, the way a scanner clicks.
+    haptic("toggle");
+    setStep({ kind: "pin", payload: text });
+  };
+
+  const finish = (id: string, name: string | null) => {
     if (!userId) {
       return;
     }
     generation.current += 1;
     const mine = generation.current;
+    setStep({ kind: "linking", name });
     void (async () => {
       try {
-        const next = await awaitDeviceLink(userId, handle.link_id, since);
+        const outcome = await finishDeviceOffer(userId, id);
         if (generation.current !== mine) {
           return;
         }
-        setStep({ kind: "code", handle, status: next });
-        if (next.state === "open" || next.state === "claimed") {
-          follow(handle, next.state);
+        linkId.current = null;
+        if (outcome.state === "linked") {
+          haptic("success");
+          setStep({ kind: "linked", name: outcome.device_name ?? name });
+        } else if (outcome.state === "tampered") {
+          setStep({ kind: "failed", title: t("linkDevice.tamperedTitle"), message: t("linkDevice.tampered") });
+        } else {
+          setStep({
+            kind: "failed",
+            title: t("linkDevice.expiredTitle"),
+            message: t("mobile:self.scanDevice.notFinished"),
+          });
         }
       } catch (e) {
         if (generation.current === mine) {
-          setError((e as Error).message || t("linkDevice.failed"));
+          setStep({ kind: "failed", title: t("linkDevice.failed"), message: (e as Error).message });
         }
       }
     })();
   };
 
-  const submitPin = (value: string) => {
-    setPinError(null);
-    create.mutate(value, {
-      onSuccess: (handle) => {
-        setPin("");
-        setStep({ kind: "code", handle, status: { state: "open" } });
-        follow(handle, "open");
-      },
-      onError: (e) => {
-        setPin("");
-        setPinError((e as Error).message || t("linkDevice.pinFailed"));
-      },
-    });
-  };
-
-  const pushDigit = (d: string) => {
-    if (create.isPending || pin.length >= 4) {
-      return;
-    }
-    const next = pin + d;
-    setPin(next);
-    if (next.length === 4) {
-      submitPin(next);
-    }
-  };
-
-  const leave = async () => {
-    generation.current += 1;
-    if (step.kind === "code") {
-      await cancelDeviceLink(step.handle.link_id).catch(() => undefined);
-    }
-    router.back();
-  };
-
-  const restart = () => {
-    generation.current += 1;
-    setError(null);
-    setPin("");
-    setStep({ kind: "pin" });
-  };
-
-  const approve = async (handle: DeviceLinkHandle, name: string) => {
-    if (!userId) {
+  const submitPin = async (payload: string, value: string) => {
+    if (!userId || busy) {
       return;
     }
     setBusy(true);
+    setPinError(null);
     try {
-      await approveDeviceLink(userId, handle.link_id);
-      generation.current += 1;
-      setStep({ kind: "linked", name });
+      const accepted = await acceptDeviceOffer(userId, value, payload);
+      linkId.current = accepted.link_id;
+      finish(accepted.link_id, accepted.device_name);
     } catch (e) {
-      setError((e as Error).message || t("linkDevice.failed"));
+      const message = (e as Error).message || t("linkDevice.pinFailed");
+      // A wrong PIN stays on the keypad; anything else (an expired or used
+      // code) means scanning again.
+      if (/pin/i.test(message)) {
+        setPinError(message);
+      } else {
+        setStep({ kind: "failed", title: t("linkDevice.failed"), message });
+      }
     } finally {
+      setPin("");
       setBusy(false);
     }
   };
 
-  const crumb = (
-    <Header title={t("linkDevice.heading")} backTo={t("settings:security.title")} onBack={() => void leave()} />
-  );
+  const restart = () => {
+    generation.current += 1;
+    taken.current = false;
+    linkId.current = null;
+    setCode("");
+    setPin("");
+    setPinError(null);
+    setScanError(null);
+    setStep({ kind: "scan" });
+  };
+
+  const crumb = <Header title={t("mobile:self.scanDevice.heading")} backTo={t("settings:security.title")} />;
 
   if (step.kind === "pin") {
+    const pushDigit = (d: string) => {
+      if (busy || pin.length >= 4) {
+        return;
+      }
+      const next = pin + d;
+      setPin(next);
+      if (next.length === 4) {
+        void submitPin(step.payload, next);
+      }
+    };
     return (
       <Screen testID="screen-link-device">
         {crumb}
@@ -150,7 +177,11 @@ export default function LinkDevice() {
             rather than the keypad pinned to the bottom edge. */}
         <View style={regular ? { flex: 1, justifyContent: "center", gap: 32 } : { flex: 1 }}>
           <View style={{ flex: regular ? 0 : 1, paddingHorizontal: 24, paddingTop: regular ? 0 : 32, gap: 32 }}>
-            <Heading title={t("linkDevice.pinTitle")} subtitle={t("linkDevice.pinSubtitle")} />
+            <Heading
+              testID="scan-device-confirm"
+              title={t("mobile:self.scanDevice.confirmTitle")}
+              subtitle={t("mobile:self.scanDevice.confirmBody")}
+            />
             <View style={{ gap: 14 }}>
               <PinCells length={pin.length} />
               {pinError ? (
@@ -160,97 +191,49 @@ export default function LinkDevice() {
               ) : null}
             </View>
           </View>
-          <PinKeypad onDigit={pushDigit} onBackspace={() => setPin(pin.slice(0, -1))} disabled={create.isPending} />
+          <PinKeypad onDigit={pushDigit} onBackspace={() => setPin(pin.slice(0, -1))} disabled={busy} />
         </View>
       </Screen>
     );
   }
 
-  if (step.kind === "linked") {
-    return (
-      <Screen testID="screen-link-device">
-        {crumb}
-        <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 32 }}>
-          <Heading testID="link-device-done" title={t("linkDevice.linked", { name: step.name })} />
-        </View>
-        <BottomAction>
-          <Button testID="btn-link-device-done" variant="primary" full onPress={() => router.back()}>
-            {t("linkDevice.done")}
-          </Button>
-        </BottomAction>
-      </Screen>
-    );
-  }
-
-  const { handle, status } = step;
-  const name = (status.state === "claimed" || status.state === "ready_to_approve" ? status.device_name : null) ?? t("linkDevice.unnamedDevice");
-
-  if (error || status.state === "tampered" || status.state === "expired") {
-    const tampered = status.state === "tampered";
-    return (
-      <Screen testID="screen-link-device">
-        {crumb}
-        <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 32 }}>
-          <Heading
-            testID={tampered ? "link-device-tampered" : "link-device-expired"}
-            title={tampered ? t("linkDevice.tamperedTitle") : error ? t("linkDevice.failed") : t("linkDevice.expiredTitle")}
-            subtitle={tampered ? t("linkDevice.tampered") : error ?? t("linkDevice.expired")}
-          />
-        </View>
-        <BottomAction>
-          <Button variant="primary" full onPress={restart}>
-            {t("linkDevice.newCode")}
-          </Button>
-          <Button variant="subtle" full onPress={leave}>
-            {t("common:actions.cancel")}
-          </Button>
-        </BottomAction>
-      </Screen>
-    );
-  }
-
-  if (status.state === "ready_to_approve") {
-    return (
-      <Screen testID="screen-link-device">
-        {crumb}
-        <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 32 }}>
-          <Heading
-            testID="link-device-approve-card"
-            title={t("linkDevice.wantsToSignIn", { name })}
-            subtitle={t("linkDevice.approveHint")}
-          />
-        </View>
-        <BottomAction>
-          <Button testID="btn-link-device-approve" variant="primary" full disabled={busy} onPress={() => approve(handle, name)}>
-            {t("linkDevice.approve")}
-          </Button>
-          <Button
-            testID="btn-link-device-reject"
-            variant="secondary"
-            full
-            disabled={busy}
-            onPress={() => {
-              reject.mutate(status.request_id);
-              void leave();
-            }}
-          >
-            {t("linkDevice.reject")}
-          </Button>
-        </BottomAction>
-      </Screen>
-    );
-  }
-
-  if (status.state === "claimed") {
+  if (step.kind === "linking" || step.kind === "linked") {
+    const name = step.name ?? t("linkDevice.unnamedDevice");
+    const done = step.kind === "linked";
     return (
       <Screen testID="screen-link-device">
         {crumb}
         <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 32, gap: 32 }}>
-          <Heading testID="link-device-claimed" title={t("linkDevice.claimedTitle")} subtitle={t("linkDevice.claimed", { name })} />
-          <ActivityIndicator color={semantic.accent} />
+          <Heading
+            testID={done ? "link-device-done" : "link-device-linking"}
+            title={done ? t("linkDevice.linked", { name }) : t("mobile:self.scanDevice.linking", { name })}
+            subtitle={done ? undefined : t("mobile:self.scanDevice.linkingBody")}
+          />
+          {done ? null : <ActivityIndicator color={semantic.accent} />}
+        </View>
+        {done ? (
+          <BottomAction>
+            <Button testID="btn-link-device-done" variant="primary" full onPress={() => router.back()}>
+              {t("linkDevice.done")}
+            </Button>
+          </BottomAction>
+        ) : null}
+      </Screen>
+    );
+  }
+
+  if (step.kind === "failed") {
+    return (
+      <Screen testID="screen-link-device">
+        {crumb}
+        <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 32 }}>
+          <Heading testID="link-device-failed" title={step.title} subtitle={step.message} />
         </View>
         <BottomAction>
-          <Button variant="subtle" full onPress={leave}>
+          <Button testID="btn-scan-again" variant="primary" full onPress={restart}>
+            {t("mobile:self.scanDevice.scanAgain")}
+          </Button>
+          <Button variant="subtle" full onPress={() => router.back()}>
             {t("common:actions.cancel")}
           </Button>
         </BottomAction>
@@ -258,95 +241,74 @@ export default function LinkDevice() {
     );
   }
 
-  return <ShowCode handle={handle} crumb={crumb} onCancel={leave} />;
-}
-
-// Lets a long unbroken token wrap at any character (see ShowCode).
-function breakAnywhere(text: string): string {
-  return Array.from(text).join("\u200B");
-}
-
-/** The code, as a QR (default) or as text with one-tap copy. */
-function ShowCode({ handle, crumb, onCancel }: { handle: DeviceLinkHandle; crumb: React.ReactNode; onCancel: () => void }) {
-  const { t } = useTranslation("settings");
-  const [mode, setMode] = useState<"qr" | "code">("qr");
-  const [copied, setCopied] = useState(false);
-  const [secondsLeft, setSecondsLeft] = useState(() => Math.max(0, handle.expires_at - Math.floor(Date.now() / 1000)));
-  // A display clock for the countdown; it touches no network.
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setSecondsLeft(Math.max(0, handle.expires_at - Math.floor(Date.now() / 1000)));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [handle.expires_at]);
-
-  const copy = async () => {
-    await Clipboard.setStringAsync(handle.qr_payload);
-    // A copy confirms by touch (#1286).
-    haptic("success");
-    setCopied(true);
-  };
-
   return (
     <Screen testID="screen-link-device">
       {crumb}
-      <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 32, gap: 28 }}>
+      <Body contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, gap: 24 }}>
         <Heading
-          title={mode === "qr" ? t("linkDevice.showTitle") : t("mobile:self.linkDevice.codeTitle")}
-          subtitle={mode === "qr" ? t("linkDevice.showSubtitle") : t("linkDevice.codeSubtitle")}
+          title={t("mobile:self.scanDevice.scanTitle")}
+          subtitle={manual ? t("mobile:self.scanDevice.codeIntro") : t("mobile:self.scanDevice.scanIntro")}
         />
-        <SegmentedControl
-          value={mode}
-          onChange={setMode}
-          segments={[
-            { key: "qr", label: t("linkDevice.tabQr"), testID: "chip-link-qr" },
-            { key: "code", label: t("linkDevice.tabCode"), testID: "chip-link-code" },
-          ]}
-        />
-
-        {mode === "qr" ? (
-          <View testID="link-device-showing" style={{ alignItems: "center" }}>
-            <QrCode testID="link-device-qr" value={handle.qr_payload} size={232} frame={space.lg} radius={r.lg} />
-          </View>
-        ) : (
-          <Pressable
-            testID="link-device-copy"
-            accessibilityRole="button"
-            accessibilityLabel={t("linkDevice.copyHint")}
-            onPress={copy}
-            style={({ pressed }) => ({
-              backgroundColor: pressed ? semantic.high : semantic.raised,
+        {!manual && permission?.granted ? (
+          <View
+            style={{
+              aspectRatio: 1,
+              width: "100%",
+              overflow: "hidden",
               borderRadius: r.lg,
-              padding: space.xxl,
-              gap: space.lg,
-            })}
+              backgroundColor: semantic.raised,
+            }}
           >
-            {/* A zero-width space between every character lets the line
-                break anywhere, so the code fills each line evenly instead of
-                breaking at its hyphens. Copy uses the raw payload. */}
-            <Text testID="link-device-payload" style={{ fontFamily: fonts.mono400, fontSize: 15, lineHeight: 22, color: semantic.text }}>
-              {breakAnywhere(handle.qr_payload)}
-            </Text>
-            {/* The whole card is the copy target; the hint reads as its
-                action, in accent. */}
-            <View style={{ flexDirection: "row", alignItems: "center", gap: space.xs }}>
-              {copied ? <Icon.check size={16} color={semantic.accent} /> : <Icon.copy size={16} color={semantic.accent} />}
-              <Text style={[ty.section, { color: semantic.accent }]}>
-                {copied ? t("linkDevice.copied") : t("linkDevice.copyHint")}
-              </Text>
-            </View>
-          </Pressable>
-        )}
-
-        <Text testID="link-device-status" style={[ty.secondary, { textAlign: "center" }]}>
-          {secondsLeft > 0
-            ? t("linkDevice.expiresIn", { time: `${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, "0")}` })
-            : t("linkDevice.expiredTitle")}
-        </Text>
-      </View>
+            <CameraView
+              testID="scan-device-camera"
+              style={{ flex: 1 }}
+              facing="back"
+              barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+              onBarcodeScanned={({ data }) => take(data)}
+            />
+          </View>
+        ) : null}
+        {!manual && permission && !permission.granted ? (
+          <Button testID="btn-scan-allow-camera" variant="primary" full onPress={() => void requestPermission()}>
+            {t("auth:link.allowCamera")}
+          </Button>
+        ) : null}
+        {manual ? (
+          <View style={{ gap: 8 }}>
+            <Text style={ty.section}>{t("auth:link.codeLabel")}</Text>
+            <Field
+              testID="input-scan-code"
+              accessibilityLabel={t("auth:link.codeLabel")}
+              value={code}
+              onChangeText={(next) => {
+                setScanError(null);
+                setCode(next);
+              }}
+              autoCorrect={false}
+              placeholder="pollis-link:v2:…"
+              style={{ fontFamily: fonts.mono400 }}
+            />
+          </View>
+        ) : null}
+        {scanError ? <ErrorText testID="scan-device-error">{scanError}</ErrorText> : null}
+        <Text style={[ty.meta, { color: semantic.dim }]}>{t("mobile:self.scanDevice.warning")}</Text>
+      </Body>
       <BottomAction>
-        <Button variant="subtle" full onPress={onCancel}>
-          {t("common:actions.cancel")}
+        {manual && code.trim() ? (
+          <Button testID="btn-scan-code-continue" variant="primary" full onPress={() => take(code)}>
+            {t("mobile:self.scanDevice.continue")}
+          </Button>
+        ) : null}
+        <Button
+          testID="btn-scan-toggle-manual"
+          variant="secondary"
+          full
+          onPress={() => {
+            setManual((m) => !m);
+            setScanError(null);
+          }}
+        >
+          {manual ? t("auth:link.scanInstead") : t("auth:link.enterCode")}
         </Button>
       </BottomAction>
     </Screen>

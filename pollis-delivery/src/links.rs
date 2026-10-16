@@ -1,20 +1,35 @@
-//! QR device links (#1207): an enrolled, PIN-verified device shows a QR; an
-//! unauthenticated phone scans it and is enrolled without the email OTP.
+//! QR device links: a device is signed in by a QR instead of the email OTP.
 //! Protocol, threat model and guardrails: `docs/qr-device-link-design.md`.
+//!
+//! Two directions, one store:
+//!
+//! - **v1 (#1207), shown by the signed-in device.** An enrolled, PIN-verified
+//!   device `create`s a link and shows its QR; the new device `claim`s it with
+//!   the secret the QR carries.
+//! - **v2 (#1361), shown by the NEW device.** The new device `offer`s a link
+//!   and shows a QR carrying its ephemeral public key (no secret); a signed-in,
+//!   PIN-verified device that scanned it `accept-offer`s, binding it to its own
+//!   account; the new device then collects its session with `poll-offer`, by a
+//!   poll secret only it holds.
 //!
 //! The DS's part is deliberately narrow:
 //!
-//! - It stores `SHA-256(claim)` and nothing that derives the link token `t` or
-//!   the MAC key, so it can neither forge a link tag nor substitute the key the
-//!   account identity is wrapped to — the approver verifies the tag first.
-//! - A claim mints a [`SessionScope::DeviceLink`](crate::session::SessionScope)
-//!   session, which the OTP-only gates refuse: it can register the claiming
-//!   device and file its enrollment request, nothing else.
-//! - Single use and the 60-second lifetime are enforced HERE, server-side, not
-//!   by the clients that display the QR.
+//! - It stores hashes (`SHA-256(claim)`, `SHA-256(poll_secret)`) and nothing that
+//!   derives a v1 MAC key or a v2 private key, so it can neither forge a link
+//!   tag nor substitute the key the account identity is wrapped to — the
+//!   approver checks the request against the QR first.
+//! - A claim or a collected offer mints an enrollment-only session
+//!   ([`SessionScope::DeviceLink`] / [`SessionScope::DeviceOffer`]), which the
+//!   OTP-only gates refuse: it can register that one device and file its
+//!   enrollment request, nothing else.
+//! - Lifetimes, single claim, single accept and single session delivery are
+//!   enforced HERE, server-side, not by the clients that display the QR.
 //!
 //! **Store:** in-memory, like the OTP and session stores (the DS is
 //! single-container). A restart drops open links; the user scans a fresh QR.
+//!
+//! [`SessionScope::DeviceLink`]: crate::session::SessionScope::DeviceLink
+//! [`SessionScope::DeviceOffer`]: crate::session::SessionScope::DeviceOffer
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -34,13 +49,19 @@ use crate::AppState;
 
 pub use pollis_api::links::*;
 
-/// How long a freshly created QR stays claimable. Server-set — the creating
+/// How long a freshly created v1 QR stays claimable. Server-set — the creating
 /// client cannot ask for longer.
 pub const LINK_TTL_SECS: u64 = 60;
 
-/// How long a CLAIMED link stays readable by its creator: long enough for the
-/// phone to register, file its enrollment request (10-minute TTL) and be
-/// approved, after which the record is swept.
+/// How long a v2 offer stays acceptable. Longer than v1's minute: the person
+/// has to fetch their phone and open its scanner AFTER the code appears (v1's
+/// creator is already holding the device that shows it). The new device shows
+/// a fresh QR when this passes.
+pub const OFFER_TTL_SECS: u64 = 120;
+
+/// How long a CLAIMED link (or an accepted offer) stays readable by its
+/// approver: long enough for the new device to register, file its enrollment
+/// request (10-minute TTL) and be approved, after which the record is swept.
 pub const CLAIMED_LINK_TTL_SECS: u64 = 15 * 60;
 
 /// Open (unclaimed) links one account may hold at once. Each costs memory and
@@ -48,20 +69,62 @@ pub const CLAIMED_LINK_TTL_SECS: u64 = 15 * 60;
 /// more than one or two.
 pub const MAX_OPEN_LINKS_PER_ACCOUNT: usize = 3;
 
+/// Unaccepted v2 offers the whole store may hold. An offer is made before any
+/// credential exists, so it cannot be capped per account; the per-client rate
+/// limit sheds volume, and this bounds the memory whatever gets past it.
+pub const MAX_OPEN_OFFERS: usize = 10_000;
+
 /// Sweep threshold for the map, mirroring the OTP store's amortised collector.
 const SWEEP_AT: usize = 1024;
 
+/// Which device showed the QR. Fixed for the record's life: it decides whether
+/// the new device's enrollment request must carry a link tag.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kind {
+    /// v1: the signed-in device showed it; the request carries a tag.
+    Shown,
+    /// v2: the new device showed it; the request carries no tag (the approver
+    /// compares the key it read off the QR).
+    Offered,
+}
+
 #[derive(Clone, Debug)]
 enum Phase {
-    Open,
-    Claimed { device_id: String, device_name: Option<String> },
-    Requested { device_id: String, device_name: Option<String>, request_id: String, link_tag: String },
+    /// v1: created by `user_id`'s device; waiting for a claim.
+    Open { user_id: String, claim_verifier: [u8; 32] },
+    /// v2: offered by a device that is not signed in; no account yet.
+    Offered { poll_verifier: [u8; 32], device_id: String, device_name: Option<String> },
+    /// v2: a device of `user_id` accepted it; the new device has not collected
+    /// its session yet.
+    Accepted { user_id: String, poll_verifier: [u8; 32], device_id: String, device_name: Option<String> },
+    /// Both: `device_id` holds an enrollment-only session for `user_id`.
+    Claimed { user_id: String, device_id: String, device_name: Option<String> },
+    /// Both: that device filed its enrollment request.
+    Requested {
+        user_id: String,
+        device_id: String,
+        device_name: Option<String>,
+        request_id: String,
+        link_tag: Option<String>,
+    },
+}
+
+impl Phase {
+    /// The account the link belongs to; `None` before a v2 offer is accepted.
+    fn user_id(&self) -> Option<&str> {
+        match self {
+            Phase::Open { user_id, .. }
+            | Phase::Accepted { user_id, .. }
+            | Phase::Claimed { user_id, .. }
+            | Phase::Requested { user_id, .. } => Some(user_id),
+            Phase::Offered { .. } => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
 struct LinkRecord {
-    user_id: String,
-    claim_verifier: [u8; 32],
+    kind: Kind,
     expires_at: u64,
     phase: Phase,
 }
@@ -72,6 +135,25 @@ struct LinkRecord {
 #[derive(Debug, PartialEq, Eq)]
 pub enum ClaimOutcome {
     Claimed { user_id: String },
+    Refused,
+}
+
+/// The outcome of accepting a v2 offer.
+#[derive(Debug, PartialEq, Eq)]
+pub enum AcceptOutcome {
+    Accepted { device_id: String, device_name: Option<String> },
+    /// Unknown, expired, a v1 link, or already accepted (by anyone).
+    Refused,
+}
+
+/// The outcome of a v2 poll. `Refused` covers unknown, expired, wrong secret
+/// and already collected alike.
+#[derive(Debug, PartialEq, Eq)]
+pub enum CollectOutcome {
+    /// Nobody has accepted it yet.
+    Waiting,
+    /// Accepted: mint the session now. Returned exactly once.
+    Collected { user_id: String, device_id: String },
     Refused,
 }
 
@@ -97,22 +179,25 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     diff == 0
 }
 
+fn id_is_live(map: &HashMap<String, LinkRecord>, link_id: &str, now: u64) -> bool {
+    map.get(link_id).is_some_and(|r| now <= r.expires_at)
+}
+
 impl LinkStore {
-    /// Register an open link for `user_id`. `false` when the id is taken or the
-    /// account is at [`MAX_OPEN_LINKS_PER_ACCOUNT`].
+    /// Register an open v1 link for `user_id`. `false` when the id is taken or
+    /// the account is at [`MAX_OPEN_LINKS_PER_ACCOUNT`].
     pub fn create(&self, link_id: &str, user_id: &str, claim_verifier: [u8; 32], now: u64) -> bool {
         let mut guard = self.inner.lock().expect("link store mutex poisoned");
         if guard.len() >= SWEEP_AT {
             sweep(&mut guard, now);
         }
-        if let Some(existing) = guard.get(link_id) {
-            if now <= existing.expires_at {
-                return false;
-            }
+        if id_is_live(&guard, link_id, now) {
+            return false;
         }
         let open_for_account = guard
             .values()
-            .filter(|r| r.user_id == user_id && now <= r.expires_at && matches!(r.phase, Phase::Open))
+            .filter(|r| now <= r.expires_at)
+            .filter(|r| matches!(&r.phase, Phase::Open { user_id: u, .. } if u == user_id))
             .count();
         if open_for_account >= MAX_OPEN_LINKS_PER_ACCOUNT {
             return false;
@@ -120,18 +205,17 @@ impl LinkStore {
         guard.insert(
             link_id.to_string(),
             LinkRecord {
-                user_id: user_id.to_string(),
-                claim_verifier,
+                kind: Kind::Shown,
                 expires_at: now.saturating_add(LINK_TTL_SECS),
-                phase: Phase::Open,
+                phase: Phase::Open { user_id: user_id.to_string(), claim_verifier },
             },
         );
         true
     }
 
-    /// Claim a link with the secret the QR carried. Atomic check-and-flip under
-    /// the mutex: of two concurrent claims with the right secret, exactly one
-    /// gets `Claimed`.
+    /// Claim a v1 link with the secret the QR carried. Atomic check-and-flip
+    /// under the mutex: of two concurrent claims with the right secret, exactly
+    /// one gets `Claimed`.
     pub fn claim(
         &self,
         link_id: &str,
@@ -144,26 +228,121 @@ impl LinkStore {
         let Some(rec) = guard.get_mut(link_id) else {
             return ClaimOutcome::Refused;
         };
+        let Phase::Open { user_id, claim_verifier } = &rec.phase else {
+            return ClaimOutcome::Refused;
+        };
         let presented: [u8; 32] = Sha256::digest(claim).into();
         // Compare first, unconditionally, so timing does not separate "wrong
         // secret" from "right secret on a dead link".
-        let secret_ok = constant_time_eq(&presented, &rec.claim_verifier);
-        if !secret_ok || now > rec.expires_at || !matches!(rec.phase, Phase::Open) {
+        let secret_ok = constant_time_eq(&presented, claim_verifier);
+        if !secret_ok || now > rec.expires_at {
             return ClaimOutcome::Refused;
         }
-        rec.phase = Phase::Claimed { device_id: device_id.to_string(), device_name };
+        let user_id = user_id.clone();
+        rec.phase = Phase::Claimed { user_id: user_id.clone(), device_id: device_id.to_string(), device_name };
         rec.expires_at = now.saturating_add(CLAIMED_LINK_TTL_SECS);
-        ClaimOutcome::Claimed { user_id: rec.user_id.clone() }
+        ClaimOutcome::Claimed { user_id }
     }
 
-    /// Record the enrollment request the claiming device filed, with its tag.
-    /// Only the device that claimed the link may do this, once.
+    /// Register a v2 offer from a device that is not signed in (#1361). `false`
+    /// when the id is taken or the store holds [`MAX_OPEN_OFFERS`].
+    pub fn offer(
+        &self,
+        link_id: &str,
+        poll_verifier: [u8; 32],
+        device_id: &str,
+        device_name: Option<String>,
+        now: u64,
+    ) -> bool {
+        let mut guard = self.inner.lock().expect("link store mutex poisoned");
+        if guard.len() >= SWEEP_AT {
+            sweep(&mut guard, now);
+        }
+        if id_is_live(&guard, link_id, now) {
+            return false;
+        }
+        let open_offers = guard
+            .values()
+            .filter(|r| now <= r.expires_at && matches!(r.phase, Phase::Offered { .. }))
+            .count();
+        if open_offers >= MAX_OPEN_OFFERS {
+            return false;
+        }
+        guard.insert(
+            link_id.to_string(),
+            LinkRecord {
+                kind: Kind::Offered,
+                expires_at: now.saturating_add(OFFER_TTL_SECS),
+                phase: Phase::Offered { poll_verifier, device_id: device_id.to_string(), device_name },
+            },
+        );
+        true
+    }
+
+    /// Bind a v2 offer to `user_id`, the account of the signed-in device that
+    /// scanned it. Once: a second accept — by the same account or another —
+    /// is refused, so an offer can never be moved between accounts.
+    pub fn accept(&self, link_id: &str, user_id: &str, now: u64) -> AcceptOutcome {
+        let mut guard = self.inner.lock().expect("link store mutex poisoned");
+        let Some(rec) = guard.get_mut(link_id) else {
+            return AcceptOutcome::Refused;
+        };
+        if now > rec.expires_at {
+            return AcceptOutcome::Refused;
+        }
+        let Phase::Offered { poll_verifier, device_id, device_name } = &rec.phase else {
+            return AcceptOutcome::Refused;
+        };
+        let outcome = AcceptOutcome::Accepted { device_id: device_id.clone(), device_name: device_name.clone() };
+        rec.phase = Phase::Accepted {
+            user_id: user_id.to_string(),
+            poll_verifier: *poll_verifier,
+            device_id: device_id.clone(),
+            device_name: device_name.clone(),
+        };
+        rec.expires_at = now.saturating_add(CLAIMED_LINK_TTL_SECS);
+        outcome
+    }
+
+    /// The new device's poll on its v2 offer, by the secret only it holds.
+    /// Hands out the session exactly once: collecting flips the link to
+    /// `Claimed`, after which the same secret is refused.
+    pub fn collect(&self, link_id: &str, poll_secret: &[u8], now: u64) -> CollectOutcome {
+        let mut guard = self.inner.lock().expect("link store mutex poisoned");
+        let Some(rec) = guard.get_mut(link_id) else {
+            return CollectOutcome::Refused;
+        };
+        let verifier = match &rec.phase {
+            Phase::Offered { poll_verifier, .. } | Phase::Accepted { poll_verifier, .. } => *poll_verifier,
+            _ => return CollectOutcome::Refused,
+        };
+        let presented: [u8; 32] = Sha256::digest(poll_secret).into();
+        // Compare first, unconditionally, as `claim` does.
+        let secret_ok = constant_time_eq(&presented, &verifier);
+        if !secret_ok || now > rec.expires_at {
+            return CollectOutcome::Refused;
+        }
+        let Phase::Accepted { user_id, device_id, device_name, .. } = &rec.phase else {
+            return CollectOutcome::Waiting;
+        };
+        let (user_id, device_id) = (user_id.clone(), device_id.clone());
+        rec.phase = Phase::Claimed {
+            user_id: user_id.clone(),
+            device_id: device_id.clone(),
+            device_name: device_name.clone(),
+        };
+        CollectOutcome::Collected { user_id, device_id }
+    }
+
+    /// Record the enrollment request the linked device filed. Only the device
+    /// the link names may do this, once, and the tag must match the link's
+    /// direction: required on a v1 link, absent on a v2 offer.
     pub fn record_request(
         &self,
         link_id: &str,
         device_id: &str,
         request_id: &str,
-        link_tag: &str,
+        link_tag: Option<&str>,
         now: u64,
     ) -> bool {
         let mut guard = self.inner.lock().expect("link store mutex poisoned");
@@ -173,39 +352,48 @@ impl LinkStore {
         if now > rec.expires_at {
             return false;
         }
-        let Phase::Claimed { device_id: claimed_by, device_name } = &rec.phase else {
+        let tag_matches_kind = match rec.kind {
+            Kind::Shown => link_tag.is_some_and(|t| !t.is_empty()),
+            Kind::Offered => link_tag.is_none(),
+        };
+        if !tag_matches_kind {
+            return false;
+        }
+        let Phase::Claimed { user_id, device_id: claimed_by, device_name } = &rec.phase else {
             return false;
         };
         if claimed_by != device_id {
             return false;
         }
         rec.phase = Phase::Requested {
+            user_id: user_id.clone(),
             device_id: claimed_by.clone(),
             device_name: device_name.clone(),
             request_id: request_id.to_string(),
-            link_tag: link_tag.to_string(),
+            link_tag: link_tag.map(str::to_string),
         };
         true
     }
 
     /// Enrollment requests of `user_id` currently bound to a live link — the
-    /// typed-code approval list leaves these out (they are approved on the
-    /// link tag by the device showing the QR).
+    /// typed-code approval list leaves these out (they are approved by the
+    /// device at the other end of the QR).
     pub fn bound_request_ids(&self, user_id: &str, now: u64) -> std::collections::HashSet<String> {
         let guard = self.inner.lock().expect("link store mutex poisoned");
         guard
             .values()
-            .filter(|r| r.user_id == user_id && now <= r.expires_at)
+            .filter(|r| now <= r.expires_at)
             .filter_map(|r| match &r.phase {
-                Phase::Requested { request_id, .. } => Some(request_id.clone()),
+                Phase::Requested { user_id: u, request_id, .. } if u == user_id => Some(request_id.clone()),
                 _ => None,
             })
             .collect()
     }
 
-    /// The creator's view. `None` when the link is not `user_id`'s (or does not
-    /// exist) — the handler answers that with the same `Expired` an absent
-    /// link gets, so status is not an existence oracle across accounts.
+    /// The approver's view (the v1 creator, or the device that accepted a v2
+    /// offer). Answers `Expired` when the link is not `user_id`'s or does not
+    /// exist, so status is not an existence oracle across accounts — and an
+    /// unaccepted offer belongs to nobody.
     pub fn status(&self, link_id: &str, user_id: &str, now: u64) -> LinkStatusResponse {
         let guard = self.inner.lock().expect("link store mutex poisoned");
         let expired = LinkStatusResponse {
@@ -218,25 +406,42 @@ impl LinkStore {
         let Some(rec) = guard.get(link_id) else {
             return expired;
         };
-        if rec.user_id != user_id || now > rec.expires_at {
+        if rec.phase.user_id() != Some(user_id) || now > rec.expires_at {
             return expired;
         }
         match &rec.phase {
-            Phase::Open => LinkStatusResponse { state: LinkState::Open, ..expired },
-            Phase::Claimed { device_id, device_name } => LinkStatusResponse {
-                state: LinkState::Claimed,
-                new_device_id: Some(device_id.clone()),
-                device_name: device_name.clone(),
-                ..expired
-            },
-            Phase::Requested { device_id, device_name, request_id, link_tag } => LinkStatusResponse {
+            Phase::Offered { .. } => expired,
+            Phase::Open { .. } => LinkStatusResponse { state: LinkState::Open, ..expired },
+            Phase::Accepted { device_id, device_name, .. } | Phase::Claimed { device_id, device_name, .. } => {
+                LinkStatusResponse {
+                    state: LinkState::Claimed,
+                    new_device_id: Some(device_id.clone()),
+                    device_name: device_name.clone(),
+                    ..expired
+                }
+            }
+            Phase::Requested { device_id, device_name, request_id, link_tag, .. } => LinkStatusResponse {
                 state: LinkState::Requested,
                 new_device_id: Some(device_id.clone()),
                 device_name: device_name.clone(),
                 request_id: Some(request_id.clone()),
-                link_tag: Some(link_tag.clone()),
+                link_tag: link_tag.clone(),
             },
         }
+    }
+}
+
+/// A device name the new device chose: capped, IP-shaped text redacted, blank
+/// dropped — before it is held or shown to the approving device.
+fn clean_device_name(name: Option<String>) -> Option<String> {
+    name.map(|n| crate::util::redact_ip_literals(&n.chars().take(64).collect::<String>()))
+        .filter(|n| !n.trim().is_empty())
+}
+
+fn decode_32(b64: &str) -> Option<[u8; 32]> {
+    match crate::util::b64_decode(b64) {
+        Ok(v) if v.len() == 32 => v.try_into().ok(),
+        _ => None,
     }
 }
 
@@ -251,9 +456,8 @@ pub async fn create_link(State(state): State<AppState>, req: RawRequest) -> Resu
         Ok(a) => a,
         Err(_) => return Ok(AuthRejection::Forbidden.into_response()),
     };
-    let verifier: [u8; 32] = match crate::util::b64_decode(&parsed.claim_verifier) {
-        Ok(v) if v.len() == 32 => v.try_into().expect("checked length"),
-        _ => return Ok(bad_request("claim_verifier must be 32 bytes")),
+    let Some(verifier) = decode_32(&parsed.claim_verifier) else {
+        return Ok(bad_request("claim_verifier must be 32 bytes"));
     };
     if parsed.link_id.is_empty() || parsed.link_id.len() > 64 {
         return Ok(bad_request("invalid link_id"));
@@ -285,12 +489,7 @@ pub async fn claim_link(State(state): State<AppState>, _headers: HeaderMap, body
     if parsed.device_id.trim().is_empty() || parsed.device_id.len() > 64 {
         return bad_request("invalid device_id");
     }
-    // Free text the claiming device chose: redact anything IP-shaped before it
-    // is held or shown to the approving device.
-    let device_name = parsed
-        .device_name
-        .map(|n| crate::util::redact_ip_literals(&n.chars().take(64).collect::<String>()))
-        .filter(|n| !n.trim().is_empty());
+    let device_name = clean_device_name(parsed.device_name);
     let now = crate::util::now_unix();
     let user_id = match state.links.claim(&parsed.link_id, &claim, &parsed.device_id, device_name, now) {
         ClaimOutcome::Claimed { user_id } => user_id,
@@ -318,6 +517,97 @@ pub async fn claim_link(State(state): State<AppState>, _headers: HeaderMap, body
         account_id_pub: account.account_id_pub,
         session_token,
         session_expires_at: now.saturating_add(ttl) as i64,
+    })
+}
+
+// ── POST /v1/link/offer (#1361) ──────────────────────────────────────────────
+
+pub async fn offer_link(State(state): State<AppState>, _headers: HeaderMap, body: Bytes) -> Response {
+    let parsed: OfferLinkBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return bad_request("invalid body"),
+    };
+    let Some(verifier) = decode_32(&parsed.poll_verifier) else {
+        return bad_request("poll_verifier must be 32 bytes");
+    };
+    if parsed.link_id.is_empty() || parsed.link_id.len() > 64 {
+        return bad_request("invalid link_id");
+    }
+    if parsed.device_id.trim().is_empty() || parsed.device_id.len() > 64 {
+        return bad_request("invalid device_id");
+    }
+    let device_name = clean_device_name(parsed.device_name);
+    let now = crate::util::now_unix();
+    if !state.links.offer(&parsed.link_id, verifier, &parsed.device_id, device_name, now) {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(serde_json::json!({ "error": "cannot hold another sign-in code right now" })),
+        )
+            .into_response();
+    }
+    ok_response::<OfferLinkBody>(OfferLinkResponse { expires_at: now.saturating_add(OFFER_TTL_SECS) as i64 })
+}
+
+// ── POST /v1/link/accept-offer (#1361) ───────────────────────────────────────
+
+pub async fn accept_offer(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
+    let (authed, parsed) = match gate_and_parse::<AcceptOfferBody>(&state, &req).await? {
+        Ok(v) => v,
+        Err(resp) => return Ok(resp),
+    };
+    let actor = match resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
+        Ok(a) => a,
+        Err(_) => return Ok(AuthRejection::Forbidden.into_response()),
+    };
+    match state.links.accept(&parsed.link_id, &actor, crate::util::now_unix()) {
+        AcceptOutcome::Accepted { device_id, device_name } => Ok(ok_response::<AcceptOfferBody>(
+            AcceptOfferResponse { new_device_id: device_id, device_name },
+        )),
+        AcceptOutcome::Refused => Ok(refused()),
+    }
+}
+
+// ── POST /v1/link/poll-offer (#1361) ─────────────────────────────────────────
+
+pub async fn poll_offer(State(state): State<AppState>, _headers: HeaderMap, body: Bytes) -> Response {
+    let parsed: PollOfferBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return bad_request("invalid body"),
+    };
+    let secret = match crate::util::b64_decode(&parsed.poll_secret) {
+        Ok(s) if s.len() == 32 => s,
+        _ => return refused(),
+    };
+    let now = crate::util::now_unix();
+    let (user_id, device_id) = match state.links.collect(&parsed.link_id, &secret, now) {
+        CollectOutcome::Waiting => return ok_response::<PollOfferBody>(PollOfferResponse { session: None }),
+        CollectOutcome::Collected { user_id, device_id } => (user_id, device_id),
+        CollectOutcome::Refused => return refused(),
+    };
+
+    let conn = match state.db.conn().await {
+        Ok(c) => c,
+        Err(e) => return internal(e),
+    };
+    let account = match account_for(&conn, &user_id).await {
+        Ok(Some(a)) => a,
+        Ok(None) => return refused(),
+        Err(e) => return internal(e),
+    };
+    let ttl = state.otp_config.session_ttl_secs;
+    let session_token =
+        state
+            .sessions
+            .mint_device_offer(&user_id, &account.email, &device_id, &parsed.link_id, ttl, now);
+    ok_response::<PollOfferBody>(PollOfferResponse {
+        session: Some(ClaimLinkResponse {
+            user_id,
+            username: account.username,
+            email: account.email,
+            account_id_pub: account.account_id_pub,
+            session_token,
+            session_expires_at: now.saturating_add(ttl) as i64,
+        }),
     })
 }
 
@@ -417,12 +707,14 @@ mod tests {
         let store = LinkStore::default();
         store.create("l1", "alice", verifier(b"c"), 1000);
         // Not claimed yet → nothing to attach to.
-        assert!(!store.record_request("l1", "phone", "req1", "tag", 1001));
+        assert!(!store.record_request("l1", "phone", "req1", Some("tag"), 1001));
         store.claim("l1", b"c", "phone", Some("Pixel".into()), 1002);
-        assert!(!store.record_request("l1", "other-device", "req1", "tag", 1003));
-        assert!(store.record_request("l1", "phone", "req1", "tag", 1003));
+        assert!(!store.record_request("l1", "other-device", "req1", Some("tag"), 1003));
+        // A v1 link's request must carry its tag.
+        assert!(!store.record_request("l1", "phone", "req1", None, 1003));
+        assert!(store.record_request("l1", "phone", "req1", Some("tag"), 1003));
         // Once.
-        assert!(!store.record_request("l1", "phone", "req2", "tag2", 1004));
+        assert!(!store.record_request("l1", "phone", "req2", Some("tag2"), 1004));
         assert!(store.bound_request_ids("alice", 1005).contains("req1"));
         assert!(store.bound_request_ids("mallory", 1005).is_empty());
         let st = store.status("l1", "alice", 1005);
@@ -449,5 +741,98 @@ mod tests {
         assert!(store.create("l1", "alice", verifier(b"c"), 1000));
         assert!(!store.create("l1", "mallory", verifier(b"m"), 1001));
         assert_eq!(store.claim("l1", b"m", "phone", None, 1002), ClaimOutcome::Refused);
+        // Nor by an offer.
+        assert!(!store.offer("l1", verifier(b"p"), "desk", None, 1002));
+    }
+
+    // ── v2: the new device shows the QR (#1361) ──────────────────────────────
+
+    #[test]
+    fn an_offer_signs_in_one_device_for_the_accepting_account_once() {
+        let store = LinkStore::default();
+        assert!(store.offer("o1", verifier(b"poll"), "desk", Some("Mac".into()), 1000));
+        // Nobody has accepted it: the new device waits, and it belongs to no
+        // account, so no status reveals it.
+        assert_eq!(store.collect("o1", b"poll", 1001), CollectOutcome::Waiting);
+        assert_eq!(store.status("o1", "alice", 1001).state, LinkState::Expired);
+
+        assert_eq!(
+            store.accept("o1", "alice", 1002),
+            AcceptOutcome::Accepted { device_id: "desk".into(), device_name: Some("Mac".into()) }
+        );
+        // Bound once: neither another account nor the same one can re-accept.
+        assert_eq!(store.accept("o1", "mallory", 1003), AcceptOutcome::Refused);
+        assert_eq!(store.accept("o1", "alice", 1003), AcceptOutcome::Refused);
+        assert_eq!(store.status("o1", "alice", 1003).state, LinkState::Claimed);
+        assert_eq!(store.status("o1", "mallory", 1003).state, LinkState::Expired);
+
+        // A photo of the QR holds no poll secret.
+        assert_eq!(store.collect("o1", b"guess", 1004), CollectOutcome::Refused);
+        assert_eq!(
+            store.collect("o1", b"poll", 1004),
+            CollectOutcome::Collected { user_id: "alice".into(), device_id: "desk".into() }
+        );
+        // Delivered once.
+        assert_eq!(store.collect("o1", b"poll", 1005), CollectOutcome::Refused);
+    }
+
+    #[test]
+    fn an_unaccepted_offer_dies_after_its_lifetime() {
+        let store = LinkStore::default();
+        store.offer("o1", verifier(b"poll"), "desk", None, 1000);
+        let late = 1000 + OFFER_TTL_SECS + 1;
+        assert_eq!(store.accept("o1", "alice", late), AcceptOutcome::Refused);
+        assert_eq!(store.collect("o1", b"poll", late), CollectOutcome::Refused);
+        // And its id is free again.
+        assert!(store.offer("o1", verifier(b"poll2"), "desk", None, late));
+    }
+
+    #[test]
+    fn a_v1_link_cannot_be_accepted_and_an_offer_cannot_be_claimed() {
+        let store = LinkStore::default();
+        store.create("l1", "alice", verifier(b"c"), 1000);
+        assert_eq!(store.accept("l1", "mallory", 1001), AcceptOutcome::Refused);
+        assert_eq!(store.collect("l1", b"c", 1001), CollectOutcome::Refused);
+        store.offer("o1", verifier(b"poll"), "desk", None, 1000);
+        assert_eq!(store.claim("o1", b"poll", "phone", None, 1001), ClaimOutcome::Refused);
+    }
+
+    #[test]
+    fn an_offer_request_carries_no_tag_and_only_the_offering_device_files_it() {
+        let store = LinkStore::default();
+        store.offer("o1", verifier(b"poll"), "desk", None, 1000);
+        store.accept("o1", "alice", 1001);
+        // Not collected yet: the device has no session, so nothing to attach.
+        assert!(!store.record_request("o1", "desk", "req1", None, 1002));
+        store.collect("o1", b"poll", 1002);
+        assert!(!store.record_request("o1", "other", "req1", None, 1003));
+        assert!(!store.record_request("o1", "desk", "req1", Some("tag"), 1003));
+        assert!(store.record_request("o1", "desk", "req1", None, 1003));
+        let st = store.status("o1", "alice", 1004);
+        assert_eq!(st.state, LinkState::Requested);
+        assert_eq!(st.request_id.as_deref(), Some("req1"));
+        assert_eq!(st.link_tag, None);
+        assert!(store.bound_request_ids("alice", 1004).contains("req1"));
+    }
+
+    #[test]
+    fn the_store_bounds_open_offers() {
+        let store = LinkStore::default();
+        {
+            let mut guard = store.inner.lock().unwrap();
+            for i in 0..MAX_OPEN_OFFERS {
+                guard.insert(
+                    format!("o{i}"),
+                    LinkRecord {
+                        kind: Kind::Offered,
+                        expires_at: 2000,
+                        phase: Phase::Offered { poll_verifier: [0; 32], device_id: "d".into(), device_name: None },
+                    },
+                );
+            }
+        }
+        assert!(!store.offer("one-more", verifier(b"p"), "d", None, 1000));
+        // Once they lapse there is room again.
+        assert!(store.offer("one-more", verifier(b"p"), "d", None, 2001));
     }
 }

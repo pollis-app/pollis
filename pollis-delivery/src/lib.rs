@@ -460,6 +460,13 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route(<links::CreateLinkBody as DsRequest>::PATH, post(links::create_link))
         .route(<links::ClaimLinkBody as DsRequest>::PATH, post(links::claim_link))
         .route(<links::LinkStatusBody as DsRequest>::PATH, post(links::link_status))
+        // The reverse direction (#1361): the NEW device offers (pre-credential),
+        // the signed-in device that scanned it accepts (device-signed), and the
+        // new device collects its enrollment-only session (pre-credential, by
+        // a secret the QR does not carry).
+        .route(<links::OfferLinkBody as DsRequest>::PATH, post(links::offer_link))
+        .route(<links::AcceptOfferBody as DsRequest>::PATH, post(links::accept_offer))
+        .route(<links::PollOfferBody as DsRequest>::PATH, post(links::poll_offer))
         // Email change (Goal B #419 final piece) — DEVICE-SIGNED (the user is
         // already authenticated; the OTP only proves control of the NEW mailbox).
         // request records (authed → new_email); verify requires the signed caller

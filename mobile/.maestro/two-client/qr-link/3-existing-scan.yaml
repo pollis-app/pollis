@@ -1,0 +1,46 @@
+appId: com.pollis.mobile
+tags:
+  - two-client
+---
+# #1361, SIGNED-IN device: Self → Security → Scan to sign in a device. A
+# simulator camera cannot be pointed at another screen, so the code goes in by
+# "Enter a code instead" — the same `take()` the camera calls. Then the PIN, and
+# the other device must be signed in with no Approve and no code to type.
+- tapOn:
+    id: "btn-back"
+    optional: true
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-security"
+- scrollUntilVisible:
+    element:
+      id: "row-link-device"
+    direction: DOWN
+- tapOn:
+    id: "row-link-device"
+- extendedWaitUntil:
+    visible:
+      id: "screen-link-device"
+    timeout: 10000
+- takeScreenshot: qr-scan-01-scanner
+- tapOn:
+    id: "btn-scan-toggle-manual"
+- tapOn:
+    id: "input-scan-code"
+- inputText: ${PAYLOAD}
+- tapOn:
+    id: "btn-scan-code-continue"
+- extendedWaitUntil:
+    visible:
+      id: "scan-device-confirm"
+    timeout: 10000
+- takeScreenshot: qr-scan-02-confirm-with-pin
+- runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "link-device-done"
+    timeout: 120000
+- takeScreenshot: qr-scan-03-signed-in
+- tapOn:
+    id: "btn-link-device-done"

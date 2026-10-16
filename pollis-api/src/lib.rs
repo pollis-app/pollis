@@ -348,6 +348,10 @@ endpoints! {
     Client   links::CreateLinkBody              => "/v1/link/create",                    links::CreateLinkResponse;
     Client   links::ClaimLinkBody               => "/v1/link/claim",                     links::ClaimLinkResponse;
     Client   links::LinkStatusBody              => "/v1/link/status",                    links::LinkStatusResponse;
+    // ── QR sign-in shown by the NEW device (#1361) ──────────────────────────
+    Client   links::OfferLinkBody               => "/v1/link/offer",                     links::OfferLinkResponse;
+    Client   links::AcceptOfferBody             => "/v1/link/accept-offer",              links::AcceptOfferResponse;
+    Client   links::PollOfferBody               => "/v1/link/poll-offer",                links::PollOfferResponse;
     Client   email_change::RequestEmailChangeBody => "/v1/auth/request-email-change-otp", StatusOk;
     Client   email_change::VerifyEmailChangeBody  => "/v1/auth/verify-email-change",      email_change::EmailChanged;
 

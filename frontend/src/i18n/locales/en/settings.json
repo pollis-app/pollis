@@ -388,7 +388,6 @@
     "codeSubtitle": "Copy this code and paste it on the new device.",
     "tabQr": "QR code",
     "tabCode": "Code",
-    "copyHint": "Tap to copy",
     "clickToCopy": "Click to copy",
     "copied": "Copied",
     "expiresIn": "Expires in {{time}}",

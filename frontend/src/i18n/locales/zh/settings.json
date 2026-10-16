@@ -353,7 +353,6 @@
     "codeSubtitle": "复制此代码，然后粘贴到新设备上。",
     "tabQr": "二维码",
     "tabCode": "代码",
-    "copyHint": "点按复制",
     "clickToCopy": "点击复制",
     "copied": "已复制",
     "expiresIn": "{{time}} 后过期",

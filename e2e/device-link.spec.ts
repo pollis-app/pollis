@@ -148,6 +148,64 @@ test("the page's initial focus never moves a caret the user already placed", asy
   await expect(cells.nth(1)).toHaveValue("2");
 });
 
+// ── #1361: the sign-in screen SHOWS a code for a signed-in phone to scan ────
+
+async function mockCounters(page: Page): Promise<{ deviceOffers: number; deviceOfferCancels: number }> {
+  return page.evaluate(() => {
+    const m = (window as unknown as { __tauriMock?: { deviceOffers: number; deviceOfferCancels: number } }).__tauriMock;
+    return { deviceOffers: m?.deviceOffers ?? 0, deviceOfferCancels: m?.deviceOfferCancels ?? 0 };
+  });
+}
+
+const signedOut = { session: null, profile: null, groups: [], channels: {}, messages: {}, dmChannels: [] };
+
+test("sign in with another device shows a QR for the phone, with the paste field below", async ({ page }) => {
+  await boot(page, signedOut);
+  await page.getByTestId("sign-in-with-device-button").click();
+  await expect(page.getByTestId("link-offer-qr")).toBeVisible();
+  // The code carries the new device's key, never a secret: a v2 code.
+  await expect(page.getByTestId("link-offer-payload")).toContainText(/^pollis-link:v2:offer_mock_\d+:/);
+  await expect(page.getByTestId("link-offer-status")).toContainText("Waiting for your phone");
+  // The fallback is still here.
+  await expect(page.getByTestId("link-code-input")).toBeVisible();
+
+  // Leaving stops offering the code.
+  await page.getByTestId("link-back-to-email-button").click();
+  await expect(page.getByTestId("email-input")).toBeVisible();
+  await expect.poll(async () => (await mockCounters(page)).deviceOfferCancels).toBeGreaterThan(0);
+});
+
+test("a lapsed code is replaced by a fresh one on its own", async ({ page }) => {
+  await boot(page, { ...signedOut, deviceOfferScript: [{ state: "expired" }] });
+  await page.getByTestId("sign-in-with-device-button").click();
+  // The first code lapses (the scripted answer); the screen asks for a new
+  // one without being told to, and keeps waiting on it. (The dev build's
+  // StrictMode mounts the panel twice, so count from what was shown first.)
+  await expect(page.getByTestId("link-offer-status")).toContainText("Waiting for your phone");
+  const shown = await page.getByTestId("link-offer-payload").textContent();
+  await expect.poll(async () => (await mockCounters(page)).deviceOffers).toBeGreaterThanOrEqual(2);
+  await expect(page.getByTestId("link-offer-payload")).toHaveText(
+    new RegExp(`^pollis-link:v2:offer_mock_${(await mockCounters(page)).deviceOffers}:`),
+  );
+  expect(shown).toMatch(/^pollis-link:v2:offer_mock_\d+:/);
+});
+
+test("once the phone accepts the code, the desktop waits for it to finish — no code to read", async ({ page }) => {
+  await boot(page, {
+    ...signedOut,
+    enrollmentWait: "pending",
+    deviceOfferScript: [
+      {
+        state: "signed_in",
+        profile: { id: "u_linked", email: "me@pollis.test", username: "mia", enrollment_required: true },
+      },
+    ],
+  });
+  await page.getByTestId("sign-in-with-device-button").click();
+  await expect(page.getByTestId("linked-awaiting-approval")).toBeVisible();
+  await expect(page.getByTestId("verification-code-display")).toHaveCount(0);
+});
+
 test("a pasted code signs in and waits for approval without showing a code", async ({ page }) => {
   await boot(page, { session: null, profile: null, groups: [], channels: {}, messages: {}, dmChannels: [], enrollmentWait: "pending" });
 

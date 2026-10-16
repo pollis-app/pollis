@@ -611,7 +611,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**164 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**165 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -629,13 +629,14 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **TypingIndicator** — props: channelId, conversationId — `frontend/src/components/TypingIndicator.tsx`
 - **UpdateScreen** — `frontend/src/components/UpdateScreen.tsx`
 
-### `components/Auth` (8)
+### `components/Auth` (9)
 
 - **AuthError** — props: message — `frontend/src/components/Auth/AuthError.tsx`
 - **EmailOTPAuth** — props: onSuccess, prefillEmail, prefillNonce, onStepChange — `frontend/src/components/Auth/EmailOTPAuth.tsx`
 - **EnrollmentApprovalPrompt** — props: requestId, newDeviceId, onResolved — `frontend/src/components/Auth/EnrollmentApprovalPrompt.tsx`
 - **EnrollmentGateScreen** — props: linked, userId, userEmail, onEnrolled, onCancel, onResetComplete — `frontend/src/components/Auth/EnrollmentGateScreen.tsx`
 - **LoginScreen** — props: knownAccounts, onAuthSuccess, onWipeComplete, notice — `frontend/src/components/Auth/LoginScreen.tsx`
+- **OfferCode** — props: deviceName, onSignedIn — `frontend/src/components/Auth/OfferCode.tsx`
 - **PinCreateScreen** — props: oldPin, onCreated, onCancel, headline, subline — `frontend/src/components/Auth/PinCreateScreen.tsx`
 - **PinEntryScreen** — props: userId, username, onUnlocked, onForgotPin, onSwitchAccount — `frontend/src/components/Auth/PinEntryScreen.tsx`
 - **SaveSecretKeyScreen** — props: secretKey, email, onConfirmed — `frontend/src/components/Auth/SaveSecretKeyScreen.tsx`

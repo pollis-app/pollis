@@ -101,6 +101,13 @@ pub struct AppState {
     /// The QR device link this (new) device claimed (#1207), read by
     /// `start_device_enrollment` to tag its request.
     pub device_link_pending: Arc<Mutex<Option<crate::commands::device_link::PendingDeviceLink>>>,
+    /// The code this NEW device is showing (#1361): the poll secret and the
+    /// ephemeral private key its QR does not carry. Memory only.
+    pub device_offer: Arc<Mutex<Option<crate::commands::device_link::DeviceOfferInProgress>>>,
+    /// Codes this signed-in device scanned and accepted (#1361): link_id → the
+    /// ephemeral public key the QR showed. The approval wraps only to a request
+    /// carrying exactly that key.
+    pub device_offer_accepts: Arc<Mutex<HashMap<String, [u8; 32]>>>,
     /// In-memory PIN unlock state. `Some` once the user has entered a
     /// valid PIN (or just set one via `set_pin`); dropped by `lock`.
     /// Not yet load-bearing — stage 6 flips the app over to reading the
@@ -251,6 +258,8 @@ impl AppState {
             enrollment_ephemeral_keys: Arc::new(Mutex::new(HashMap::new())),
             device_link_tokens: Arc::new(Mutex::new(HashMap::new())),
             device_link_pending: Arc::new(Mutex::new(None)),
+            device_offer: Arc::new(Mutex::new(None)),
+            device_offer_accepts: Arc::new(Mutex::new(HashMap::new())),
             unlock: Arc::new(Mutex::new(None)),
             bootstrap_session: Arc::new(Mutex::new(None)),
             enrollment_session: Arc::new(Mutex::new(None)),
