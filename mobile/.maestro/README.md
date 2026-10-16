@@ -202,6 +202,21 @@ account on the device with the key and closes the app; the peer revokes the
 device; `2-revoked.yaml` reopens and unlocks and must land on sign-in with
 `text-session-notice` ("removed from your account").
 
+**A new device's approval request comes to the phone (automated, #1360):**
+`mobile/scripts/maestro-approval-prompt.sh <device>` — `pollis-core`'s
+`enroll_peer` example plays the desktop on the desktop's own core commands
+(built `--no-default-features`, so it never touches the macOS Keychain). The
+phone signs up and sits on the Groups tab; three peer "desktops" then each
+press "Approve from another device" — while the app is open (the DS's live
+nudge must open `screen-approve-device`), while it is closed (it must appear
+after reopen + unlock) and while it is backgrounded (it must appear on resume;
+this one is rejected and the peer must see the rejection). No step opens
+Security. Then the other way: a peer signs up a second account, the phone
+signs in to it as a new device, its code is read off the screen and handed to
+the peer, which approves with `approve_device_enrollment`, and the phone must
+land in the app. `maestro-device-link.sh`'s step 3 likewise waits for the
+approval screen to open by itself.
+
 **Pins across members (automated, #1315):** `mobile/scripts/maestro-pins.sh <device>`
 — the lost-message shape with `pollis-tui`'s `pins_peer` example: the device
 opens a DM with a fresh peer (`two-client/pins/1-open-dm.yaml`), the peer sends

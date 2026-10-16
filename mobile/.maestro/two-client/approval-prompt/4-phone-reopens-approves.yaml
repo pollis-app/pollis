@@ -1,0 +1,26 @@
+appId: com.pollis.mobile
+tags:
+  - two-client
+---
+# A request filed while the app was closed: reopening and unlocking must
+# surface it — its nudge is long gone.
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-pin"
+    timeout: 20000
+- runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "screen-approve-device"
+    timeout: 60000
+- takeScreenshot: approval-prompt-02-after-reopen
+- tapOn:
+    id: "input-approve-device-code"
+- inputText: "${CODE}"
+- tapOn:
+    id: "btn-approve-device"
+- extendedWaitUntil:
+    notVisible:
+      id: "screen-approve-device"
+    timeout: 30000

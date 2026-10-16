@@ -1,0 +1,6 @@
+appId: com.pollis.mobile
+tags:
+  - two-client
+---
+# Send the app to the background (not closed).
+- pressKey: Home

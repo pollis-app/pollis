@@ -3,7 +3,7 @@
 //
 //   - the personal inbox room (`inbox-${userId}`) — per-user events: a new DM
 //     being created, group membership changes, @all/@username mentions,
-//     device revocation;
+//     device revocation, a new device asking to be approved (#1360);
 //   - every group room (named by group id) and DM room (named by
 //     conversation id) — `new_message` / `edited_message` / `deleted_message`
 //     wake-ups, which is how desktop drives unread badges and live previews
@@ -19,13 +19,14 @@
 // connect error) each subscription is a clean no-op — the lists still
 // refresh on their normal query lifecycle / screen focus.
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AppState, type AppStateStatus } from "react-native";
 import { useObserver } from "mobx-react-lite";
 import { useQueryClient } from "@tanstack/react-query";
 import { appStore } from "../stores/appStore";
 import { invoke } from "../lib/native";
-import { subscribeRealtime, type RealtimeSubscription } from "../lib/realtime/client";
+import { useSegments } from "expo-router";
+import { isRoomOpen, subscribeRealtime, type RealtimeSubscription } from "../lib/realtime/client";
 import type { RealtimeEvent } from "../lib/realtime/events";
 import {
   catchUpTargets,
@@ -43,9 +44,28 @@ import {
   useIngestConversation,
 } from "./queries/useMessages";
 import { deviceWasRevoked } from "../lib/deviceRevoked";
+import { isInSignedInApp, noticeEnrollmentRequested } from "../lib/enrollmentPrompt";
 
 export function useInboxRealtime() {
-  const userId = useObserver(() => appStore.currentUser?.id ?? null);
+  const signedInId = useObserver(() => appStore.currentUser?.id ?? null);
+  const isLocked = useObserver(() => appStore.isLocked);
+  const segments = useSegments();
+  const inApp = !!signedInId && isInSignedInApp(segments, isLocked);
+  // #1360: subscribe only once this device has landed in the signed-in app.
+  // `currentUser` is set the moment the email code verifies — before the PIN,
+  // the device cert, or (for a new device) enrollment — and a room token asked
+  // for then is refused, because the device cannot sign yet. The failed room
+  // was never retried, so the inbox (and with it every `enrollment_requested`
+  // nudge) stayed dead for the whole session. Once in, stay subscribed through
+  // a lock: a locked app still wants the nudges it will surface on unlock.
+  const [userId, setUserId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!signedInId) {
+      setUserId(null);
+    } else if (inApp) {
+      setUserId(signedInId);
+    }
+  }, [signedInId, inApp]);
   const queryClient = useQueryClient();
   const ingest = useIngestConversation();
   // The group/DM lists double as the realtime room list — the same queries
@@ -69,6 +89,8 @@ export function useInboxRealtime() {
   // One subscription per room, reconciled against the current room list —
   // rooms that persist across list changes keep their connection.
   const subsRef = useRef<Map<string, RealtimeSubscription>>(new Map());
+  // The current event handler, for re-opening a room whose connect failed.
+  const handlerRef = useRef<((event: RealtimeEvent) => void) | null>(null);
 
   const roomIds: string[] = [];
   if (userId) {
@@ -207,11 +229,20 @@ export function useInboxRealtime() {
             });
           break;
         }
+        case "enrollment_requested":
+          // A new device of this account filed its enrollment request (#1360).
+          // The DS sends this, never a client. `useEnrollmentApprovals` opens
+          // the approval screen for it (or holds it until the app is unlocked);
+          // a QR-link request is skipped there, as desktop skips it.
+          noticeEnrollmentRequested(event);
+          break;
         default:
           // Voice/typing/etc. events are not consumed on mobile; ignored.
           break;
       }
     };
+
+    handlerRef.current = handleEvent;
 
     // Reconcile: subscribe rooms that appeared, close rooms that vanished.
     const subs = subsRef.current;
@@ -254,6 +285,19 @@ export function useInboxRealtime() {
       previous = next;
       if (!resumed) {
         return;
+      }
+      // A room whose connect failed (no network, a refused token) is gone
+      // from the client; its handle here would otherwise stay dead until the
+      // room list changed. Re-open it on the way back to the foreground.
+      const handler = handlerRef.current;
+      if (handler) {
+        const subs = subsRef.current;
+        for (const [room, sub] of subs) {
+          if (!isRoomOpen(room)) {
+            sub.close();
+            subs.set(room, subscribeRealtime(room, handler));
+          }
+        }
       }
       for (const target of catchUpTargets(groupsRef.current, dmsRef.current)) {
         void ingestRef.current(target.id, target.kind);

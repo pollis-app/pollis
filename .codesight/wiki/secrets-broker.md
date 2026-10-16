@@ -63,7 +63,9 @@ with refetch nudges, blocks never consulted. Three rules now hold, all in
 Client side, `dispatch_data` (`pollis-core/src/commands/livekit/mod.rs`) attributes
 these events from the publishing participant when there is one, or from the DS
 stamp when there is none (the DS's own `SendData`), and never from the body's
-own claims; `enrollment_requested` is honoured only with no participant.
+own claims; `enrollment_requested` is honoured only with no participant. Mobile
+applies the same rule in `mobile/lib/realtime/events.ts` (`isTrustedOrigin`)
+and opens its approval screen from the nudge (#1360, `hooks/useEnrollmentApprovals`).
 
 An **empty room is success**, not a `502` (#1337): `room_send_data` accepts
 LiveKit's `404` and also the Twirp `503 {"code":"unavailable","msg":"no response

@@ -1185,6 +1185,22 @@ Current state:
     a store-signed build (PL-24).
 - **webrtc Expo config plugin** + an AndroidManifest mic/camera **removal** rule
   so the data-only realtime path adds no voice/video permission.
+- **A new device's approval request comes to the user (#1360).** Desktop's
+  "Approve from another device" files a request; the DS nudges
+  `inbox-<user>` with `enrollment_requested` (honoured only with no publishing
+  participant, as desktop does). `hooks/useEnrollmentApprovals` opens
+  `app/approve-device.tsx` (type the code off the new device, Approve / Reject)
+  from that nudge, from a `list_pending_enrollment_requests` check on landing in
+  the signed-in app (sign-in, unlock, cold start) and from one on every return
+  to the foreground — once per request per process; backing out leaves it on
+  Security. QR-link requests (`link_id`) are skipped. Rules:
+  `lib/enrollmentPrompt.ts`. The inbox subscription itself starts only once
+  the device is in the signed-in app: `currentUser` is set at email
+  verification, before the device can sign a room-token request, and a room
+  whose connect failed was never retried — so the inbox was dead for the whole
+  session after every fresh sign-in. `useInboxRealtime` also re-opens any room
+  whose connect failed when the app returns to the foreground. Maestro:
+  `scripts/maestro-approval-prompt.sh`.
 - ~~**`device_revoked`** self-sign-out on the inbox connection~~ — **DONE.**
   `useInboxRealtime` treats the event payload as advisory, confirms with
   `is_current_device_registered`, then hands off to `deviceWasRevoked()`

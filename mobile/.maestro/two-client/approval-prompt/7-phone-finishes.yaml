@@ -1,0 +1,17 @@
+appId: com.pollis.mobile
+tags:
+  - two-client
+---
+# The other direction: the phone is the NEW device, and the peer approved it
+# with the desktop's approve call. The phone sets its PIN and lands in the app.
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-pin"
+    timeout: 60000
+- runFlow: ../../subflows/enter-pin.yaml
+- runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 60000
+- takeScreenshot: approval-prompt-04-phone-approved-by-desktop

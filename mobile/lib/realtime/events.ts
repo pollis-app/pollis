@@ -77,6 +77,19 @@ export type RealtimeEvent =
       type: "device_revoked";
     }
   | {
+      // Emitted by the Delivery Service, never by a client, when a new device
+      // of this account files its enrollment request (#1360). The ids are
+      // advisory: the approval screen re-reads the request and Rust checks the
+      // code typed off the new device against the key it fetched itself.
+      // `link_id` is set when the request belongs to a QR device link, which
+      // the device on the other end of that QR approves — there is no code to
+      // type, so the typed-code approval is never offered for it.
+      type: "enrollment_requested";
+      request_id: string;
+      new_device_id: string;
+      link_id?: string | null;
+    }
+  | {
       // LOCAL, never on the wire (`decodeRealtimeEvent` refuses it): the room's
       // LiveKit connection healed after a drop. Wake-ups published meanwhile
       // are lost, so listeners catch the room up from the Delivery Service.
@@ -97,6 +110,7 @@ const KNOWN_TYPES = new Set<RealtimeEvent["type"]>([
   "member_role_changed",
   "roster_changed",
   "device_revoked",
+  "enrollment_requested",
 ]);
 
 /**
@@ -136,4 +150,18 @@ export function decodeRealtimeEvent(
     return null;
   }
   return parsed as RealtimeEvent;
+}
+
+/**
+ * Whether an event may be acted on, given who published it. The Delivery
+ * Service's own `SendData` arrives with NO participant; a packet a room member
+ * published arrives with one. `enrollment_requested` is DS-only (the DS refuses
+ * it from any client's send-data), so one with a participant is a spoof and is
+ * dropped — the rule desktop's `dispatch_data` applies.
+ */
+export function isTrustedOrigin(event: RealtimeEvent, fromParticipant: boolean): boolean {
+  if (event.type === "enrollment_requested") {
+    return !fromParticipant;
+  }
+  return true;
 }

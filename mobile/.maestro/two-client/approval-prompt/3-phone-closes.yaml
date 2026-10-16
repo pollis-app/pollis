@@ -1,0 +1,6 @@
+appId: com.pollis.mobile
+tags:
+  - two-client
+---
+# Close the app, so the next request's live nudge reaches nobody.
+- stopApp

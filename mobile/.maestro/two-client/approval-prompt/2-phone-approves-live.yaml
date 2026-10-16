@@ -1,0 +1,24 @@
+appId: com.pollis.mobile
+tags:
+  - two-client
+---
+# The peer (a new device on the desktop's commands) filed its request while the
+# phone is open: the DS's live nudge must open the approval screen.
+- extendedWaitUntil:
+    visible:
+      id: "screen-approve-device"
+    timeout: 30000
+# Nothing on this screen shows the code (#1096): it is typed off the new device.
+- assertNotVisible: "${CODE}"
+- takeScreenshot: approval-prompt-01-live
+- tapOn:
+    id: "input-approve-device-code"
+- inputText: "${CODE}"
+- tapOn:
+    id: "btn-approve-device"
+- extendedWaitUntil:
+    notVisible:
+      id: "screen-approve-device"
+    timeout: 30000
+- assertVisible:
+    id: "tab-groups"

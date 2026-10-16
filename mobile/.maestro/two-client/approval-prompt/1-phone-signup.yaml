@@ -1,0 +1,10 @@
+appId: com.pollis.mobile
+tags:
+  - two-client
+---
+# DEVICE APPROVAL PROMPT (#1360), driven by scripts/maestro-approval-prompt.sh.
+# The phone signs up a fresh account and sits on the Groups tab. Nothing in
+# these flows ever opens Self → Security: the request has to come to the user.
+- runFlow: ../../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-groups"

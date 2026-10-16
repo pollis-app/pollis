@@ -29,7 +29,7 @@
 // is set. `Room` stays a type-only import (erased at compile, no runtime eval).
 import type { Room } from "livekit-client";
 import { invoke } from "../native";
-import { decodeRealtimeEvent, type RealtimeEvent } from "./events";
+import { decodeRealtimeEvent, isTrustedOrigin, type RealtimeEvent } from "./events";
 
 // registerGlobals() installs the react-native-webrtc globals LiveKit needs.
 // It must run before a Room connects, but calling it at module load can
@@ -128,9 +128,9 @@ async function openRoom(roomName: string, entry: RoomEntry): Promise<void> {
 
   try {
     const room = new Room();
-    room.on(RoomEvent.DataReceived, (payload: Uint8Array) => {
+    room.on(RoomEvent.DataReceived, (payload: Uint8Array, participant?: unknown) => {
       const event = decodeRealtimeEvent(payload);
-      if (!event) {
+      if (!event || !isTrustedOrigin(event, participant != null)) {
         return;
       }
       for (const listener of entry.listeners) {
@@ -157,6 +157,14 @@ async function openRoom(roomName: string, entry: RoomEntry): Promise<void> {
     console.warn("[realtime] connect failed:", e);
     dropEntry(roomName, entry);
   }
+}
+
+/**
+ * Whether `roomName` is connected or connecting. False once its connect failed
+ * (the entry is dropped), so a caller holding a handle can re-subscribe.
+ */
+export function isRoomOpen(roomName: string): boolean {
+  return entries.has(roomName);
 }
 
 /**

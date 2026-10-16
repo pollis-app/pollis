@@ -1,23 +1,20 @@
 appId: com.pollis.mobile
 ---
-- tapOn:
-    id: "btn-back"
-    optional: true
-- tapOn:
-    id: "tab-self"
-- tapOn:
-    id: "row-self-security"
+# #1360: the request comes to the signed-in device by itself. The existing
+# device is still on the Groups tab from step 1 — nobody opens Security — and
+# the approval screen must open over it from the DS's live nudge.
 - extendedWaitUntil:
     visible:
-      id: "input-approval-code-.*"
+      id: "screen-approve-device"
     timeout: 30000
+- takeScreenshot: link-02-ios-approval-prompt
 - tapOn:
-    id: "input-approval-code-.*"
+    id: "input-approve-device-code"
 - inputText: ${CODE}
 - tapOn:
-    id: "btn-approve-.*"
+    id: "btn-approve-device"
 - extendedWaitUntil:
     notVisible:
-      id: "input-approval-code-.*"
+      id: "screen-approve-device"
     timeout: 30000
 - takeScreenshot: link-02-ios-approved
