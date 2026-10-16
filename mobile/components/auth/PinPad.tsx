@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { semantic, fonts, layout, currentTheme } from "../../theme/tokens";
 import { controlDisabled } from "../../theme/button";
 import { Icon } from "../icons";
+import { haptic } from "../../lib/haptics";
 
 // Key diameter and the gaps between keys. 72pt circles keep every key well
 // above the 44pt minimum and leave room for 28pt digits.
@@ -103,7 +104,14 @@ export function PinKeypad({
                 accessibilityRole="button"
                 accessibilityLabel={back ? t("keys.delete") : k}
                 accessibilityState={{ disabled: !!disabled }}
-                onPress={() => (back ? onBackspace() : onDigit(k))}
+                onPress={() => {
+                  haptic("keyTap");
+                  if (back) {
+                    onBackspace();
+                  } else {
+                    onDigit(k);
+                  }
+                }}
                 // A tap briefly fills the key with the soft accent tier: an
                 // acknowledgement without anything flashy.
                 style={({ pressed }) => ({

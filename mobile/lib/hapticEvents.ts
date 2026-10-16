@@ -22,6 +22,8 @@ export type HapticEvent =
   | "reactionRemove"
   // A message left the composer.
   | "send"
+  // A PIN keypad key (digit or delete) was tapped.
+  | "keyTap"
   // A switch flipped, or a mark toggled (saved, verified off, unblock, role).
   | "toggle"
   // The first tap of a two-tap destructive confirm: the next tap commits.
@@ -57,6 +59,7 @@ export const HAPTICS: Record<
   reactionAdd: { ios: { kind: "selection" }, android: "context-click" },
   reactionRemove: { ios: { kind: "selection" }, android: "clock-tick" },
   send: { ios: { kind: "impact", style: "light" }, android: "keyboard-tap" },
+  keyTap: { ios: { kind: "impact", style: "light" }, android: "keyboard-tap" },
   toggle: { ios: { kind: "selection" }, android: "clock-tick" },
   confirmArm: { ios: { kind: "notification", type: "warning" }, android: "context-click" },
   success: { ios: { kind: "notification", type: "success" }, android: "confirm" },

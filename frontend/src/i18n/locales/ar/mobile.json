@@ -468,8 +468,6 @@
       "hoursAgo_few": "قبل {{count}} ساعات",
       "hoursAgo_many": "قبل {{count}} ساعةً",
       "hoursAgo_other": "قبل {{count}} ساعة",
-      "identityDescription": "مفتاحك العام. يمكن للآخرين مقارنته بما يرونه للتأكد من أنك أنت.",
-      "identityMissing": "لم ينشر هذا الجهاز مفتاحًا بعد.",
       "justNow": "الآن",
       "lockNow": "القفل الآن",
       "lockNowSub": "طلب رمز PIN لإعادة فتح Pollis",

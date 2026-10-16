@@ -82,8 +82,7 @@
     ],
     "mobile_only": [
       "delete_group",
-      "get_dm_channel",
-      "get_identity"
+      "get_dm_channel"
     ],
     "missing_from_cli": [
       "accept_group_invite",

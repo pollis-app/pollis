@@ -431,8 +431,6 @@
       "eventsEmpty": "No security events yet.",
       "hoursAgo_one": "{{count}}h ago",
       "hoursAgo_other": "{{count}}h ago",
-      "identityDescription": "Your public key. People can compare it with what they see to check it's really you.",
-      "identityMissing": "This device hasn't published a key yet.",
       "justNow": "just now",
       "lockNow": "Lock now",
       "lockNowSub": "Require your PIN to reopen Pollis",

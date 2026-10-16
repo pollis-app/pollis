@@ -71,11 +71,6 @@ pub async fn initialize_identity(
     Ok(IdentityInfo { user_id, public_key: String::new(), is_new: false })
 }
 
-/// Check whether an MLS identity exists locally.
-pub async fn get_identity() -> Result<Option<IdentityInfo>> {
-    Ok(None)
-}
-
 /// Request an OTP to be sent to the given email address.
 ///
 /// The OTP is generated, stored, and emailed server-side by the Delivery

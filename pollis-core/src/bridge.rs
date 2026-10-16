@@ -285,7 +285,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
         }
 
         // ----- auth -----
-        "get_identity" => ok(auth::get_identity().await?),
         "get_session" => ok(auth::get_session(&state()?).await?),
         "request_otp" => {
             let email: String = arg(&args, "email")?;

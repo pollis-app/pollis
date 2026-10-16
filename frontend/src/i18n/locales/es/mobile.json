@@ -420,8 +420,6 @@
       "eventsEmpty": "Aún no hay eventos de seguridad.",
       "hoursAgo_one": "hace {{count}} h",
       "hoursAgo_other": "hace {{count}} h",
-      "identityDescription": "Tu clave pública. Otros pueden compararla con la que ven para comprobar que eres tú.",
-      "identityMissing": "Este dispositivo aún no ha publicado una clave.",
       "justNow": "ahora mismo",
       "lockNow": "Bloquear ahora",
       "lockNowSub": "Pedir el PIN para volver a abrir Pollis",

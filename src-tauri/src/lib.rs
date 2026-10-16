@@ -501,7 +501,6 @@ pub fn run() {
             commands::media_permissions::set_revoke_media_on_exit,
             commands::auth::initialize_identity,
             commands::diagnostics::get_diagnostics,
-            commands::auth::get_identity,
             commands::auth::request_otp,
             commands::auth::verify_otp,
             commands::auth::request_email_change_otp,

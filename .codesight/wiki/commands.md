@@ -150,7 +150,6 @@ on `pollis-core`.
 
 ## auth (`commands/auth.rs`)
 - `initialize_identity(user_id)` — ensure MLS credentials + KPs, poll welcomes. Requires the local DB to be open (post-`set_pin` / `unlock`).
-- `get_identity()` — check if MLS identity exists locally
 - `request_otp(email)` — send OTP code to email
 - `verify_otp(email, code)` → `AuthResult` — verify OTP, register the device. Does **not** open the local DB; `set_pin` (signup) or `unlock` (resume) does.
   - **The device id it sends is the one the OTP session gets bound to**, and it has to be chosen before the DS has said anything, so it is picked locally: a fresh ULID normally, or — for a returning device that is not yet enrolled — its existing stable id, looked up from the typed address by `auth::stable_device_id_for_reenrollment` (an unenrolled device cannot restart its enrollment otherwise; the enrollment-request write is session-gated).
@@ -646,7 +645,7 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 
 - **`(lib.rs, no module)`** — `hide_window`, `read_clipboard_files`, `read_clipboard_image`
 - **`autolock`** — `report_user_activity`, `set_auto_lock_timeout`
-- **`auth`** — `delete_account`, `dev_login`, `get_identity`, `get_session`, `initialize_identity`, `is_current_device_registered`, `list_known_accounts`, `list_user_devices`, `logout`, `request_email_change_otp`, `request_otp`, `revoke_device`, `verify_email_change`, `verify_otp`, `wipe_local_data`
+- **`auth`** — `delete_account`, `dev_login`, `get_session`, `initialize_identity`, `is_current_device_registered`, `list_known_accounts`, `list_user_devices`, `logout`, `request_email_change_otp`, `request_otp`, `revoke_device`, `verify_email_change`, `verify_otp`, `wipe_local_data`
 - **`blocks`** — `block_user`, `list_blocked_users`, `unblock_user`, `report_user`
 - **`bookmarks`** — `list_saved_messages`, `resolve_message_permalink`, `save_message`, `toggle_saved_message`, `unsave_message`
 - **`camera`** — `list_video_devices`, `start_camera`, `start_camera_preview`, `stop_camera`, `stop_camera_preview`, `subscribe_camera_events`
@@ -687,7 +686,7 @@ _Back to [index.md](./index.md)_
 
 ## Complete registered-command index
 
-Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **227 commands** in 34 shim modules.
+Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **226 commands** in 34 shim modules.
 Prose above covers roughly half of these; this index covers all of them, so a name that
 appears here but not above is registered and real, just undocumented. Regenerate rather
 than hand-edit.
@@ -696,7 +695,7 @@ than hand-edit.
 
 **`media_permissions`** (4) — `get_media_permission_status`, `open_privacy_settings`, `revoke_media_permissions`, `set_revoke_media_on_exit`
 
-**`auth`** (15) — `delete_account`, `dev_login`, `get_identity`, `get_session`, `initialize_identity`, `is_current_device_registered`, `list_known_accounts`, `list_user_devices`, `logout`, `request_email_change_otp`, `request_otp`, `revoke_device`, `verify_email_change`, `verify_otp`, `wipe_local_data`
+**`auth`** (14) — `delete_account`, `dev_login`, `get_session`, `initialize_identity`, `is_current_device_registered`, `list_known_accounts`, `list_user_devices`, `logout`, `request_email_change_otp`, `request_otp`, `revoke_device`, `verify_email_change`, `verify_otp`, `wipe_local_data`
 
 **`pin`** (4) — `get_unlock_state`, `lock`, `set_pin`, `unlock`
 

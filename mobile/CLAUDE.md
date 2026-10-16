@@ -29,7 +29,7 @@ The `mobile/` directory is **NOT** a pnpm workspace member. It is a standalone E
 - `expo-image` (caching, and the blurhash placeholders — there is no separate blurhash package)
 - `@livekit/react-native-webrtc` pinned to `144.1.2` + `@livekit/react-native-expo-plugin` `^1.0.3` (installed for #343, not wired — see "Voice")
 - `lucide-react-native` icons, wrapped in `components/icons.tsx` (stable `Icon.*` API, strokeWidth pinned to 1.75 — `ICON_STROKE`). `react-native-svg` is still used directly for the Initializing dot-field.
-- Geist (UI, the desktop refined skin's face) via `@expo-google-fonts/geist`, one family name per weight (`fonts.regular/medium/semibold/bold`; never pair with `fontWeight`). Monospace (crypto keys, e.g. the Security public-key line) uses the **system** mono face — `fonts.mono*` = `Platform.select({ ios: 'Menlo', android: 'monospace' })`, no bundled font.
+- Geist (UI, the desktop refined skin's face) via `@expo-google-fonts/geist`, one family name per weight (`fonts.regular/medium/semibold/bold`; never pair with `fontWeight`). Monospace (crypto material, e.g. the enrollment approval code) uses the **system** mono face — `fonts.mono*` = `Platform.select({ ios: 'Menlo', android: 'monospace' })`, no bundled font.
 - Rust core via `pollis-native` Turbo Module (uniffi-bindgen-react-native)
 
 ## Tests
@@ -969,8 +969,9 @@ Current state:
   `lib/autolock.tsx` — RN-layer deadline against the plain `lock` arm, since
   core's autolock Tauri event can't reach mobile; device-local window in
   expo-secure-store, Off/1/5/15/60 min, plus a manual "Lock now" row);
-  the **security-event audit list** (`list_security_events`) and the self
-  public-key line (`get_identity`, system mono). `bridge.rs` covers ~every
+  the **security-event audit list** (`list_security_events`). There is no
+  public-key line: the ML-DSA-44 account key is 2,624 hex characters, and the
+  stub that once fed one (`get_identity`) always answered "none". `bridge.rs` covers ~every
   command the hooks call.
 - **Chat parity set (2026-08, stacked PRs; bridge arms land in PR #967):**
   load-older paging (`useMessages` is an infinite query over `next_cursor`;
@@ -1338,8 +1339,9 @@ never the raw vibrator). Fire-and-forget, never throws into the interaction.
 - **Gestures and controls:** swipe to reply ticks crossing the threshold
   either way (the worklet hops to JS only on that frame), the double tap,
   every long press (MessageRow and `ListRow`), every `Toggle` / `ToggleRow`,
-  the first tap of every two-tap confirm (`confirmArm`), and clipboard copies
-  (success, or error if the copy failed).
+  the first tap of every two-tap confirm (`confirmArm`), every PIN keypad key
+  (`keyTap`, digits and delete), and clipboard copies (success, or error if
+  the copy failed).
 - Never add one to plain navigation (opening a screen, back, tabs).
 
 UI rules: two base colours — use `semantic.*` / `type.*`, never a hex or

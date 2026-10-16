@@ -28,7 +28,6 @@ import {
   usePendingEnrollmentRequests,
   useApproveEnrollment,
   useRejectEnrollment,
-  useIdentity,
   useSecurityEvents,
   type SecurityEvent,
 } from "../../hooks/queries";
@@ -196,12 +195,6 @@ function describeEvent(event: SecurityEvent): {
 // at 100 newest-first in the hook, so this is a display slice, not a query.
 const SECURITY_EVENTS_PAGE_SIZE = 20;
 
-// Group a key string into 4-char blocks so the mono line wraps at readable
-// boundaries instead of mid-token.
-function groupKey(key: string): string {
-  return key.replace(/(.{4})/g, "$1 ").trim();
-}
-
 export default function Security() {
   const { t } = useTranslation("settings");
   const router = useRouter();
@@ -226,7 +219,6 @@ export default function Security() {
   const { fontScale } = useWindowDimensions();
   const autoLockColumns = fontScale >= 1.6 ? 1 : fontScale >= 1.25 ? 2 : 3;
   const lockNow = useLockNow();
-  const { data: identity } = useIdentity();
   const { data: events = [], isError: eventsError } = useSecurityEvents();
   const [visibleEvents, setVisibleEvents] = useState(SECURITY_EVENTS_PAGE_SIZE);
 
@@ -399,32 +391,6 @@ export default function Security() {
           {revoke.isError ? (
             <ErrorText>{(revoke.error as Error).message || t("security.revokeFailed")}</ErrorText>
           ) : null}
-        </View>
-
-        <View onLayout={sectionLayout("identity")}>
-          <Group title={t("mobile:self.identityHeading")}>
-            <View style={{ padding: space.xxl, gap: space.md }}>
-              <Text style={ty.secondary}>{t("mobile:self.security.identityDescription")}</Text>
-              {identity && identity.public_key ? (
-                <Text
-                  testID="text-identity-key"
-                  selectable
-                  style={{
-                    fontFamily: fonts.mono400,
-                    fontSize: 13,
-                    lineHeight: 20,
-                    color: semantic.text,
-                  }}
-                >
-                  {groupKey(identity.public_key)}
-                </Text>
-              ) : (
-                <Text style={[ty.secondary, { color: semantic.muted }]}>
-                  {t("mobile:self.security.identityMissing")}
-                </Text>
-              )}
-            </View>
-          </Group>
         </View>
 
         {/* ── Part 2: what has happened to the account ── */}

@@ -444,8 +444,6 @@
       "hoursAgo_few": "{{count}} год тому",
       "hoursAgo_many": "{{count}} год тому",
       "hoursAgo_other": "{{count}} год тому",
-      "identityDescription": "Ваш відкритий ключ. Співрозмовники можуть звірити його, щоб переконатися, що це ви.",
-      "identityMissing": "Цей пристрій ще не опублікував ключ.",
       "justNow": "щойно",
       "lockNow": "Заблокувати зараз",
       "lockNowSub": "Вимагати PIN-код, щоб знову відкрити Pollis",

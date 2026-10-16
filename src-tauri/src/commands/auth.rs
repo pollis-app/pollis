@@ -14,11 +14,6 @@ pub async fn initialize_identity(state: State<'_, Arc<AppState>>, user_id: Strin
 }
 
 #[tauri::command]
-pub async fn get_identity() -> Result<Option<IdentityInfo>> {
-    pollis_core::commands::auth::get_identity().await
-}
-
-#[tauri::command]
 pub async fn request_otp(state: State<'_, Arc<AppState>>, email: String) -> Result<()> {
     pollis_core::commands::auth::request_otp(&state, email).await
 }

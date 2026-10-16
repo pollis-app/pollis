@@ -420,8 +420,6 @@
       "eventsEmpty": "Aucun événement de sécurité pour l'instant.",
       "hoursAgo_one": "il y a {{count}} h",
       "hoursAgo_other": "il y a {{count}} h",
-      "identityDescription": "Votre clé publique. Les autres peuvent la comparer avec la leur pour vérifier que c'est bien vous.",
-      "identityMissing": "Cet appareil n'a pas encore publié de clé.",
       "justNow": "à l'instant",
       "lockNow": "Verrouiller maintenant",
       "lockNowSub": "Exiger votre code PIN pour rouvrir Pollis",

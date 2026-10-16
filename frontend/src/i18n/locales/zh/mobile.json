@@ -408,8 +408,6 @@
       "enrollmentFailed": "无法处理该设备注册请求。",
       "eventsEmpty": "暂无安全事件。",
       "hoursAgo_other": "{{count}} 小时前",
-      "identityDescription": "你的公钥。别人可以核对它，确认真的是你。",
-      "identityMissing": "这台设备还没有发布密钥。",
       "justNow": "刚刚",
       "lockNow": "立即锁定",
       "lockNowSub": "重新打开 Pollis 时需要输入 PIN 码",

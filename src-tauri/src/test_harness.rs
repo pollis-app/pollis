@@ -32,7 +32,6 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
     let app = mock_builder()
         .invoke_handler(tauri::generate_handler![
             crate::commands::auth::initialize_identity,
-            crate::commands::auth::get_identity,
             crate::commands::auth::request_otp,
             crate::commands::auth::verify_otp,
             crate::commands::auth::request_email_change_otp,

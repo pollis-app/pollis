@@ -21,6 +21,7 @@ test("every event has an iOS and an Android haptic", () => {
     "reactionAdd",
     "reactionRemove",
     "send",
+    "keyTap",
     "toggle",
     "confirmArm",
     "success",
@@ -69,6 +70,10 @@ test("every long press plays a haptic: message rows and every ListRow", () => {
 test("switches tick, from the knob and from the whole row", () => {
   assert.match(src("components/ui.tsx"), /haptic\("toggle"\);\s*onPress\(\);/);
   assert.match(src("components/self/ToggleRow.tsx"), /haptic\("toggle"\);\s*onToggle\(\);/);
+});
+
+test("every PIN keypad key is felt, digits and delete alike", () => {
+  assert.match(src("components/auth/PinPad.tsx"), /onPress=\{\(\) => \{\s*haptic\("keyTap"\);/);
 });
 
 test("the first tap of every two-tap confirm warns", () => {
