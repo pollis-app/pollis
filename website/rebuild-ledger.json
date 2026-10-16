@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-16T08:22:02Z",
+  "generated_at": "2026-10-16T14:43:05Z",
   "workflow": "rebuild-verify.yml",
   "false_red_fix": {
     "commit": "564353ae",
@@ -33,8 +33,8 @@
       "event": "workflow_run",
       "run_id": "38802259837",
       "run_url": "https://github.com/pollis-app/pollis/actions/runs/38802259837",
-      "classification": null,
-      "evidence": null
+      "classification": "environment_drift",
+      "evidence": "v1.17.1, runner-image drift, and proven by its twin. The release (38798677042 build-linux) built on ubuntu22@20261004.315.1; this rebuild landed on ubuntu22@20261012.322.1, same helper image ubuntu24@20261012.334.1 on both. Logged payload 7c0789d0…, rebuilt aab3cf5b…. The unpacked AppImage diff by origin reports exactly 2 differing vendored host libraries, usr/lib/libpng16.so.16 and usr/lib/libxml2.so.2, both with grown .text sections (0x28509→0x28689 and 0x151b7b→0x151ccb), the signature of patched libpng/libxml2 packages in the newer image, and 0 differing files built from Pollis source, so usr/bin/pollis reproduced. The 43,381,682 differing bytes are compression smear across the squashfs. The mirror case confirms it: v1.17.2's first rebuild (38851554692) hit the same two images the other way round and differed in the same two libraries only; its rerun landed on the release's 20261012 image and reproduced a81f6058… byte-for-byte. Same source, one variable, matching bytes. v1.17.1's own rerun cannot converge while the pool no longer hands out 20261004. Not a finding against the shipped binary."
     },
     {
       "tag": "v1.17.0",
