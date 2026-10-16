@@ -56,6 +56,8 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
         with:
+          # Explicit, so the toolchain does not depend on which branch the pinned SHA is (#1353).
+          toolchain: 1.96.0
           targets: ${{ matrix.target }}
 
       - name: Cache cargo build

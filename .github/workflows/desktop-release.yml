@@ -76,6 +76,8 @@ jobs:
       # docs/reproducible-builds-residuals.md.)
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
         with:
+          # Explicit, so the toolchain does not depend on which branch the pinned SHA is (#1353).
+          toolchain: 1.96.0
           targets: aarch64-apple-darwin
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -263,6 +265,9 @@ jobs:
       # Pinned to rust-toolchain.toml's 1.96.0 (see the macOS job note) — never
       # float on @stable, or the same commit can produce different bytes.
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
+        with:
+          # Explicit, so the toolchain does not depend on which branch the pinned SHA is (#1353).
+          toolchain: 1.96.0
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -514,6 +519,9 @@ jobs:
       # Pinned to rust-toolchain.toml's 1.96.0 (see the macOS job note) — never
       # float on @stable, or the same commit can produce different bytes.
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
+        with:
+          # Explicit, so the toolchain does not depend on which branch the pinned SHA is (#1353).
+          toolchain: 1.96.0
 
       # NO build cache on the Linux path, deliberately (#795).
       #
@@ -632,6 +640,9 @@ jobs:
       # Pinned to rust-toolchain.toml's 1.96.0 (see the macOS job note) — never
       # float on @stable, or the same commit can produce different bytes.
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
+        with:
+          # Explicit, so the toolchain does not depend on which branch the pinned SHA is (#1353).
+          toolchain: 1.96.0
 
       # NO build cache here, deliberately (#795). A restored `target/` lets cargo
       # reuse artifacts compiled under earlier conditions, so the output stops being

@@ -131,6 +131,9 @@ jobs:
       # desktop-release Windows job. A gate that links on a different rustc
       # than the release does is not a gate.
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
+        with:
+          # Explicit, so the toolchain does not depend on which branch the pinned SHA is (#1353).
+          toolchain: 1.96.0
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:

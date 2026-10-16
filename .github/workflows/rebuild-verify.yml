@@ -109,6 +109,9 @@ jobs:
           ref: ${{ env.TAG }}
 
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
+        with:
+          # Explicit, so the toolchain does not depend on which branch the pinned SHA is (#1353).
+          toolchain: 1.96.0
 
       # Build pollis-verify FROM THE TAG'S OWN SOURCE (no prebuilt binary to
       # trust) so the verifier code is itself part of what is being verified.
@@ -278,6 +281,9 @@ jobs:
           ref: ${{ env.TAG }}
 
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
+        with:
+          # Explicit, so the toolchain does not depend on which branch the pinned SHA is (#1353).
+          toolchain: 1.96.0
 
       - name: Install PipeWire build dependencies
         run: |
@@ -397,6 +403,9 @@ jobs:
           cache: "pnpm"
 
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
+        with:
+          # Explicit, so the toolchain does not depend on which branch the pinned SHA is (#1353).
+          toolchain: 1.96.0
 
       # Mirror the release's "Stamp version from git tag" (desktop-release.yml,
       # scripts/bump-version.sh): the committed Cargo.toml / package.json /

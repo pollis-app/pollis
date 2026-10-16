@@ -172,6 +172,8 @@ jobs:
       # rust-toolchain.toml and the desktop-release refs.
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
         with:
+          # Explicit, so the toolchain does not depend on which branch the pinned SHA is (#1353).
+          toolchain: 1.96.0
           components: clippy
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -437,6 +439,9 @@ jobs:
 
       # The pinned toolchain, exactly as the `tests` job (see its comment).
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
+        with:
+          # Explicit, so the toolchain does not depend on which branch the pinned SHA is (#1353).
+          toolchain: 1.96.0
 
       # Restores the `tests` job's cache: `shared-key: tests` produces the very
       # key that job writes (rust-cache builds `v0-rust-<shared-key|job>-…`),
@@ -559,6 +564,9 @@ jobs:
       # The PINNED toolchain, like every other Rust job here: a gate that tests
       # on a different rustc than the release builds with is not a gate.
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
+        with:
+          # Explicit, so the toolchain does not depend on which branch the pinned SHA is (#1353).
+          toolchain: 1.96.0
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
