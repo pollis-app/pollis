@@ -341,6 +341,14 @@ Two steps are easy to get wrong:
 - Dispatch `transparency-publish.yml` with **`full_resync: true`**. Re-signed
   artifacts are the same byte length as the ones they replace, so the default
   `--size-only` sync skips them and the rotation silently does not take effect.
+  `full_resync` also re-signs the midpoint STHs with a new timestamp, which
+  rewrites published per-size STHs. Never use it to repair anything else.
+- Proofs and per-index entries (`proof/*` and `entries/*` in all three trees)
+  are unsigned and derived purely from the entry list, so they sync in their
+  own pass **without** `--size-only` on every run. With it, files left over
+  from the pre-re-genesis log survived at sizes the current tree later reached,
+  because a proof's length depends only on (tree size, leaf index). That broke
+  every inclusion and consistency proof at size 55 (#1348).
 - The public key is copied into several places that must all agree. The list is
   kept in `scripts/check-pinned-log-key.py`, not here: an earlier version of this
   paragraph had the wrong count and named constants that no longer existed (#945).

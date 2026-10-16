@@ -355,7 +355,45 @@ jobs:
             --exclude "v1/binaries/sth/latest.json" \
             --exclude "v1/binaries/index.json" \
             --exclude "v1/binaries/entries.json" \
-            --exclude "verify/release/*"
+            --exclude "verify/release/*" \
+            --exclude "v1/proof/*" \
+            --exclude "v1/entries/*" \
+            --exclude "v1/account-keys/proof/*" \
+            --exclude "v1/account-keys/entries/*" \
+            --exclude "v1/binaries/proof/*" \
+            --exclude "v1/binaries/entries/*"
+
+      - name: Publish proofs and entries, always overwritten (pass 1b)
+        if: steps.decide.outputs.build == 'true'
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_TRANSPARENCY_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_TRANSPARENCY_BUCKET }}
+        run: |
+          set -euo pipefail
+          # Proofs and per-index entries are NOT signed: each is a pure function
+          # of the entry list, so re-uploading one either writes identical bytes
+          # or replaces a wrong file. They therefore skip --size-only, which
+          # pass 1 keeps for the signed objects (STHs, public_key.json) so a
+          # published STH is never rewritten.
+          #
+          # #1348: --size-only on these let wrong files survive. R2 still held
+          # proofs from the pre-re-genesis (2026-08-04) log at sizes the current
+          # tree only later reached (55, 56, 58, … main; 6, 7, 8 account-keys).
+          # A proof's length depends only on (tree size, leaf index), so the
+          # correct new proof was exactly as long as the stale one at the same
+          # path and was skipped, and the self-audit then failed every inclusion
+          # and consistency check at that size. About 1,200 small files a run.
+          aws s3 sync ./site "s3://${R2_BUCKET}/" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --only-show-errors \
+            --cache-control "public, max-age=31536000, immutable" \
+            --exclude "*" \
+            --include "v1/proof/*" \
+            --include "v1/entries/*" \
+            --include "v1/account-keys/proof/*" \
+            --include "v1/account-keys/entries/*" \
+            --include "v1/binaries/proof/*" \
+            --include "v1/binaries/entries/*"
 
       - name: Publish mutable head + reports (pass 2)
         if: steps.decide.outputs.build == 'true'
