@@ -97,7 +97,7 @@ client pins the cert, never the address.
    > distribution alone takes several minutes — with only minutes left on the clock.
 2. **The relay image is published and pullable by the nodes.** Run
    `.github/workflows/relay-image.yml` (needs org `packages: write`) and make
-   `ghcr.io/actuallydan/pollis-relay` **public** (or add a pull secret to the
+   `ghcr.io/pollis-app/pollis-relay` **public** (or add a pull secret to the
    user-data). This is a prerequisite, not part of the Terraform.
 
    > **Nodes launch an IMMUTABLE, recorded build — never `:latest` (#703).** The
@@ -458,9 +458,9 @@ terraform apply
 #    /version. (CI does this automatically on future rolls once OIDC is set up.)
 PARAM="$(terraform output -raw intended_image_param)"
 SHA=<the git sha relay-image.yml built>
-DIGEST="$(docker buildx imagetools inspect ghcr.io/actuallydan/pollis-relay:$SHA --format '{{.Manifest.Digest}}')"
+DIGEST="$(docker buildx imagetools inspect ghcr.io/pollis-app/pollis-relay:$SHA --format '{{.Manifest.Digest}}')"
 aws ssm put-parameter --region us-west-2 --name "$PARAM" --type String --overwrite \
-  --value "$(printf '{"image":"ghcr.io/actuallydan/pollis-relay@%s","sha":"%s"}' "$DIGEST" "$SHA")"
+  --value "$(printf '{"image":"ghcr.io/pollis-app/pollis-relay@%s","sha":"%s"}' "$DIGEST" "$SHA")"
 
 # 3. WATCH the reconciler converge (or force a cycle now):
 aws lambda invoke --function-name "$(terraform output -raw reconciler_function_name)" /dev/stdout

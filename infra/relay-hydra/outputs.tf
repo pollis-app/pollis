@@ -55,7 +55,7 @@ output "placement_param" {
 }
 
 output "intended_image_param" {
-  description = "SSM param recording the intended relay build ({image, sha}). CI writes it on every roll; the reconciler and the nodes' user-data read it. Seed a pinned digest by hand for a fresh pool: aws ssm put-parameter --name <this> --type String --overwrite --value '{\"image\":\"ghcr.io/actuallydan/pollis-relay@sha256:...\",\"sha\":\"<gitsha>\"}'."
+  description = "SSM param recording the intended relay build ({image, sha}). CI writes it on every roll; the reconciler and the nodes' user-data read it. Seed a pinned digest by hand for a fresh pool: aws ssm put-parameter --name <this> --type String --overwrite --value '{\"image\":\"ghcr.io/pollis-app/pollis-relay@sha256:...\",\"sha\":\"<gitsha>\"}'."
   value       = aws_ssm_parameter.intended_image.name
 }
 

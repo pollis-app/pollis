@@ -416,7 +416,7 @@ DNS** — spinning up the VMs and pointing names at them is the operator's ops (
 one thing the codebase can't do for you). The relay deploys on the **VPS/host
 model** (a public UDP/QUIC port, like LiveKit — **not** a Cloudflare Worker,
 because the overlay hop is QUIC). The image is built + published by
-`.github/workflows/relay-image.yml` to `ghcr.io/actuallydan/pollis-relay`; there
+`.github/workflows/relay-image.yml` to `ghcr.io/pollis-app/pollis-relay`; there
 is **no auto-deploy**, so the roll is manual per the steps here.
 
 Reaffirming the **§11.1 posture** the whole tier rests on: v0 is
@@ -519,7 +519,7 @@ docker run -d --name pollis-relay \
   -v pollis-relay-data:/var/lib/pollis-relay \
   -v /etc/pollis-relay:/etc/pollis-relay:ro \
   -e POLLIS_RELAY_CONFIG=/etc/pollis-relay/relay.toml \
-  ghcr.io/actuallydan/pollis-relay:latest
+  ghcr.io/pollis-app/pollis-relay:latest
 ```
 
 Open the host firewall for **`9444/udp`** (the QUIC relay) and the **health TCP
@@ -531,7 +531,7 @@ you can). Mount the identity volume so a restart keeps the same pinned cert.
 > `--restart=always` never re-pulls), so a rolling `:latest` push leaves the pool
 > split across two relay generations; because the relay bumps its ALPN with
 > `PROTOCOL_VERSION`, a client that reaches a wrong-generation node just fails QUIC
-> ALPN. Pull `ghcr.io/actuallydan/pollis-relay@sha256:<digest>` (or the immutable
+> ALPN. Pull `ghcr.io/pollis-app/pollis-relay@sha256:<digest>` (or the immutable
 > `:<git-sha>` tag), roll one node at a time, and confirm each `GET /version`
 > reports the intended `sha` **and** `protocol` before moving on. The automated AWS
 > pool does this for you — see `infra/relay-hydra/README.md` → "Roll the relay

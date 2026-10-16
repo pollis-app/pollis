@@ -10,7 +10,7 @@
 set -euo pipefail
 
 REGION="${1:-us-west-2}"
-IMAGE="${2:-ghcr.io/actuallydan/pollis-relay:latest}"
+IMAGE="${2:-ghcr.io/pollis-app/pollis-relay:latest}"
 KEY_PARAM="/pollis/relay-hydra/identity-key"
 CERT_PARAM="/pollis/relay-hydra/identity-cert"
 

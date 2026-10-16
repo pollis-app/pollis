@@ -106,7 +106,7 @@ cosign_verify() {
         --certificate "$pem" \
         --signature "$sig" \
         --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-        --certificate-identity-regexp '^https://github\.com/(actuallydan|pollis-app)/pollis/\.github/workflows/desktop-release\.yml@refs/tags/' \
+        --certificate-identity-regexp '^https://github\.com/pollis-app/pollis/\.github/workflows/desktop-release\.yml@refs/tags/' \
         "$file" >/dev/null 2>&1
     then
         rm -rf "$tmp"

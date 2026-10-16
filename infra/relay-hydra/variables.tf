@@ -171,7 +171,7 @@ variable "relay_image" {
     BOOTSTRAP intended image — the seed for the `intended-image` SSM parameter that
     the reconciler and the nodes' user-data actually read (#703). Give it an
     IMMUTABLE, explicitly-versioned reference: a digest pin
-    (`ghcr.io/actuallydan/pollis-relay@sha256:...`, strongest) or the immutable
+    (`ghcr.io/pollis-app/pollis-relay@sha256:...`, strongest) or the immutable
     `:<git-sha>` tag `relay-image.yml` publishes. NEVER `:latest` — a mutable tag is
     the split-brain root cause (Docker caches by content hash and `--restart=always`
     never re-pulls, so a running node keeps whatever `:latest` meant when it

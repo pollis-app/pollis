@@ -11,8 +11,7 @@ name: Relay image
 # GHCR: it is the VPS/host model (like LiveKit), so a plain pullable image is the
 # right shape. Job 2 gates on Job 1 (green tests) before publishing.
 #
-# GHCR PUBLISH PERMISSION: publishing to ghcr.io/<owner>/pollis-relay (the repo owner,
-# pollis-app since #1265; the old ghcr.io/actuallydan package does not move) needs
+# GHCR PUBLISH PERMISSION: publishing to ghcr.io/<repo owner>/pollis-relay needs
 # `packages: write` (granted below via GITHUB_TOKEN). If the org restricts GHCR,
 # an admin must allow the repo's GITHUB_TOKEN to write packages (Org → Packages →
 # enable, or grant this repo access) — the workflow is otherwise correct; see
