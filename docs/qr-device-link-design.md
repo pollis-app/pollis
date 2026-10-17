@@ -244,6 +244,18 @@ Discord). It is mitigated here, not removed:
 - the new device appears in the device list and the security events
   (`via=qr_scan`), and it can be revoked from there.
 
+**Never a link.** What keeps this narrow is that a sign-in code is inert
+outside the app. `pollis-link:` is a plain-text payload, not a URL scheme,
+universal link or app link that either app registers, so the system camera
+shows it as text and cannot open Pollis with it. The only path to an accept
+is the user opening Pollis, going to the scanner, entering the PIN and
+scanning within two minutes, so an attacker has to talk a specific person
+through every step live. A code posted in public is dead in two minutes and
+does nothing from the camera. Do not register a handler for either code, and
+do not wrap one in an `https://` or `pollis://` URL: that turns "scan this"
+into a one-tap path. `mobile/tests/link-codes.test.ts` fails if the app config
+or a config plugin ever registers `pollis-link`.
+
 The direction is the owner's explicit choice (#1361), and it is the model
 Signal and WhatsApp use for linked devices. Email sign-in, v1, and the typed
 SAS all remain.
