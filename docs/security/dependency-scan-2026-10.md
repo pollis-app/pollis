@@ -34,6 +34,12 @@ does not contain them and they are never compiled.
 |---|---|
 | `chacha20` 0.10.1 → 0.10.2 (lockfile) | 0.10.1 was **yanked**: its SSE2 backend used an SSE4.1 intrinsic, so the RNG (`rand` 0.10 → ChaCha) faulted with SIGILL on SSE2-only x86 CPUs. We reviewed the delta and recorded it in `supply-chain/audits.toml`. |
 
+**Update 2026-10-17:** three new `zip` advisories (RUSTSEC-2026-0367/0368/0369)
+match `zip` 0.6.6, a build-only dependency of `webrtc-sys-build`. It unpacks
+LiveKit's prebuilt libwebrtc archive, which is linked into the app anyway, so
+extraction bugs grant nothing extra. No upstream release moves off `zip` 0.6
+yet, so they are ignored in `deny.toml` with that reasoning.
+
 `spin` 0.9.8 is also yanked. It comes in only via `lazy_static`'s `spin_no_std`
 path, and 0.9.8 is the last 0.9.x release, so there is nothing to move to.
 

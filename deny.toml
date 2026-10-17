@@ -100,6 +100,22 @@ ignore = [
     # If a libcrux-backed provider is ever reintroduced, every one of the six
     # must be re-argued from scratch — do not resurrect these entries.
 
+    # zip 0.6.6, reached only as a BUILD dependency: livekit -> libwebrtc ->
+    # webrtc-sys -> (build) webrtc-sys-build, whose build script unpacks
+    # LiveKit's prebuilt libwebrtc zip (github.com/livekit/rust-sdks releases,
+    # over HTTPS). All three advisories (published 2026-10-16) are about
+    # extracting an attacker-controlled archive: SUID/SGID bits kept (-0367),
+    # symlink targets outside the destination (-0368), permissions applied
+    # through symlinks (-0369). That archive IS the native code we link into
+    # every client, so whoever could tamper with it already controls the app;
+    # the extraction bugs give them nothing more. zip never reaches a shipped
+    # binary. webrtc-sys 0.3.49 / webrtc-sys-build 0.3.19 are the latest and
+    # still pin zip 0.6; drop these three when an upgrade moves it to >= 9.0
+    # (cargo-deny warns `advisory-not-detected` once they stop matching).
+    { id = "RUSTSEC-2026-0367", reason = "zip 0.6 build-time only (webrtc-sys-build unpacks LiveKit's libwebrtc, which we link anyway); no upstream fix yet" },
+    { id = "RUSTSEC-2026-0368", reason = "zip 0.6 build-time only (webrtc-sys-build unpacks LiveKit's libwebrtc, which we link anyway); no upstream fix yet" },
+    { id = "RUSTSEC-2026-0369", reason = "zip 0.6 build-time only (webrtc-sys-build unpacks LiveKit's libwebrtc, which we link anyway); no upstream fix yet" },
+
     # --- Unmaintained crates (informational RUSTSEC, no vulnerability). All are
     # transitive and forced by the desktop/GUI/media stack; no maintained
     # drop-in is adopted by the parents. Compile-time or non-security surfaces.
