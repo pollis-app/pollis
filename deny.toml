@@ -135,6 +135,21 @@ ignore = [
     { id = "RUSTSEC-2024-0419", reason = "gtk-rs GTK3 binding unmaintained; required by Tauri webkit2gtk; no GTK4 Tauri backend exists" },
     { id = "RUSTSEC-2024-0420", reason = "gtk-rs GTK3 binding unmaintained; required by Tauri webkit2gtk; no GTK4 Tauri backend exists" },
 
+    # zbus split crates: zbus 6 folded zbus_names / zvariant / zvariant_derive
+    # into itself, so the standalone crates are flagged unmaintained. Pulled by
+    # notify-rust (tauri-plugin-notification, zbus 5) and ashpd
+    # (pollis-capture-linux portal, zbus 4); neither parent is on zbus 6 yet.
+    # Linux D-Bus plumbing; status is "unmaintained", not vulnerable.
+    { id = "RUSTSEC-2026-0370", reason = "zvariant merged into zbus 6; pulled by notify-rust + ashpd on zbus 4/5; no parent on zbus 6 yet" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names merged into zbus 6; pulled by notify-rust + ashpd on zbus 4/5; no parent on zbus 6 yet" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive merged into zbus 6; pulled by notify-rust + ashpd on zbus 4/5; no parent on zbus 6 yet" },
+
+    # basic-toml unmaintained (archived upstream): pulled only by askama_derive
+    # inside uniffi_bindgen, i.e. the uniffi binding generator that parses
+    # askama template config at build time. No runtime surface; status is
+    # "unmaintained", not vulnerable. Clears when uniffi moves askama off it.
+    { id = "RUSTSEC-2026-0374", reason = "basic-toml unmaintained; build-time only via uniffi_bindgen -> askama_derive; no runtime surface" },
+
     # unic-* unmaintained: transitive unicode tables (via idna/url handling).
     # Compile/runtime static data; no security impact from unmaintained status.
     { id = "RUSTSEC-2025-0075", reason = "unic-char-range unmaintained; transitive unicode tables; no security impact" },
