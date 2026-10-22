@@ -100,7 +100,7 @@ This is the decisive factor for Pollis.
 
 The `message_envelope` table on Turso stores `ciphertext TEXT NOT NULL` — the encrypted Signal Protocol payload. The plaintext is never sent to the server. FTS on message content at the Turso layer is therefore impossible by design. Any server-side index over `message_envelope.ciphertext` would index encrypted bytes, not words.
 
-The local `message` table in the SQLite database (accessed via `rusqlite`) has a `content TEXT` column that holds the decrypted plaintext after the device has received and decrypted a message. The current `search_messages` Tauri command already searches this column with a LIKE query:
+The local `message` table in the SQLite database (accessed via `rusqlite`) has a `content TEXT` column that holds the decrypted message text after the device has received and decrypted a message (the database file itself is SQLCipher-encrypted at rest). The current `search_messages` Tauri command already searches this column with a LIKE query:
 
 ```sql
 SELECT id, conversation_id, sender_id, content, sent_at

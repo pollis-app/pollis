@@ -15,7 +15,7 @@
 //! count, no application data on Welcomes, and a device joining at epoch N
 //! unwraps with the exporter it already has.
 //!
-//! # Why the plaintext `Kpin` is cached locally
+//! # Why the unwrapped `Kpin` is cached locally
 //!
 //! `max_past_epochs = 0`: the moment a commit merges, the previous epoch's
 //! exporter is gone. So "unwrap with the old KEK, re-wrap with the new" is

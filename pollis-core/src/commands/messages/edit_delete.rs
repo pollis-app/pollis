@@ -285,7 +285,7 @@ pub async fn delete_message(
     // gone but no redaction is in flight for an in-progress fetch.
     retract_for_everyone(state, &conversation_id, &message_id, &user_id).await?;
 
-    // Read the local plaintext content before soft-deleting so we can inspect
+    // Read the local decrypted content before soft-deleting so we can inspect
     // any embedded attachment metadata. Then SOFT-delete the local row (content
     // cleared, `deleted_at` set) — the sender sees the same `[deleted]`
     // placeholder every recipient does, rather than the message silently
@@ -602,7 +602,7 @@ pub(crate) struct AttachmentRef {
     pub(crate) r2_key: String,
 }
 
-/// Parse the `_att` array out of a message's local plaintext content and
+/// Parse the `_att` array out of a message's local decrypted content and
 /// return the (content_hash, r2_key) pairs. Returns an empty Vec for plain
 /// text messages, malformed JSON, or any missing fields.
 pub(crate) fn parse_attachment_refs(raw: &str) -> Vec<AttachmentRef> {
@@ -925,7 +925,7 @@ async fn cleanup_attachment(
     }
 }
 
-/// Edit a message: updates the sender's local plaintext cache immediately and
+/// Edit a message: updates the sender's local decrypted copy immediately and
 /// publishes an encrypted edit envelope to Turso so all other group members
 /// receive the updated content on their next fetch.
 ///

@@ -619,7 +619,7 @@ async fn edit_message_across_membership_changes() {
         assert_eq!(
             now.as_deref(),
             Some("HELLO edited"),
-            "carol's cached plaintext should not regress after removal"
+            "carol's cached decrypted copy should not regress after removal"
         );
     }
 
@@ -690,7 +690,7 @@ async fn edit_message_across_membership_changes() {
 
     // Dave — like carol earlier — has no local row for the pre-join
     // message, so his fetch returns content=None and the prior edits
-    // can't "leak through" as cached plaintext. The invariant we do
+    // can't "leak through" as a cached decrypted copy. The invariant we do
     // care about is that he never observes a stale prior edit as
     // plaintext.
     let dave_msgs = dave.fetch_channel_messages(&channel_id).await;
@@ -1879,7 +1879,7 @@ async fn admin_delete_redacts_the_authors_own_copy() {
         .send_channel_message_id(&channel_id, "bob's post")
         .await;
 
-    // Bob holds his own plaintext locally, and alice has fetched it — so the
+    // Bob holds his own decrypted copy locally, and alice has fetched it — so the
     // redaction below has to reach a row that already exists on both sides.
     let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
     assert_eq!(
