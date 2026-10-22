@@ -99,7 +99,9 @@ pollis-tui (binary `pollis`)
   `#[tokio::main(flavor = "multi_thread")]`.
 - **No `media` feature; `os-keystore` ON.** The crate depends on `pollis-core`
   with `default-features = false`, so `media` (livekit/libwebrtc/cpal) is **off**
-  — voice/screenshare/camera are out of scope. `os-keystore` is deliberately
+  — voice/screenshare/camera are out of scope, and `data::load_conversations`
+  drops voice channels from the tree (as mobile does) so they never show up as
+  empty text channels. `os-keystore` is deliberately
   **on** (#879): the shipped `pollis` binary must prefer the OS keychain. Where
   no keychain answers — the server-over-SSH case that is this client's likely
   home — it falls back **at runtime** to the machine-bound encrypted file store
