@@ -294,8 +294,8 @@ CREATE INDEX IF NOT EXISTS idx_bookmark_created_at ON bookmark(created_at DESC);
 --
 -- `content=''` makes this a CONTENTLESS index: FTS5 stores the term dictionary
 -- and nothing else, which is what keeps the cost at ~11 MB per 100k messages
--- and, more importantly, keeps a second copy of every plaintext message body
--- out of the file. Snippets are cut in Rust from `message.content`, not by
+-- and, more importantly, keeps a second copy of every decrypted message body
+-- out of the file (still SQLCipher ciphertext at rest, but one copy is enough). Snippets are cut in Rust from `message.content`, not by
 -- `snippet()`, which a contentless table cannot answer anyway.
 --
 -- `remove_diacritics 2` is what makes `cafe` find `café`, `resume` find
@@ -386,10 +386,10 @@ CREATE TABLE IF NOT EXISTS conversation_cache (
 -- `in:#channel` / `in:@person` resolve a typed name back to a conversation id.
 CREATE INDEX IF NOT EXISTS idx_conversation_cache_name ON conversation_cache(name);
 
--- This device's plaintext copy of each conversation's pin master key (#99).
+-- This device's unwrapped copy of each conversation's pin master key (#99).
 --
 -- Kpin is the AES-256-GCM key every pin snapshot in a conversation is sealed
--- under. It is held HERE in the clear because this database is the same trust
+-- under. It is held HERE unwrapped because this database is the same trust
 -- domain that holds the MLS group state itself (SQLCipher at rest, key behind
 -- the PIN) — wrapping it again locally would protect it from nobody the MLS
 -- state is not already exposed to. The SERVER-side copy is always wrapped
@@ -413,8 +413,8 @@ CREATE TABLE IF NOT EXISTS pin_key_cache (
 
 -- Decrypted vault entries (#107) — the local cache of the remote
 -- `vault_message` rows, which are ciphertext under a key derived from the
--- account identity key. Plaintext here for the same reason `message.content`
--- is: this database is the trusted store. Replaced wholesale by each sync
+-- account identity key. Unwrapped here for the same reason `message.content`
+-- is decrypted: this database is the trusted store (SQLCipher at rest). Replaced wholesale by each sync
 -- (the remote is the source of truth — the vault must behave like cloud
 -- storage, surviving any single device), which is also what lets the vault
 -- render offline from the last synced state.
