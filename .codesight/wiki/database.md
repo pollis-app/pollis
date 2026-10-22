@@ -1205,7 +1205,7 @@ Rules that matter:
 
 Source: `pollis-core/src/db/local_schema.sql`
 
-File path: `pollis_{user_id}.db`, encrypted with a key from the device keystore.
+File path: `pollis_{user_id}.db`, SQLCipher-encrypted at rest on every platform. The key is 32 random bytes held only in the device keystore, sealed under the PIN (`db_key_wrapped_{uid}`, see `pin-design.md`). Columns below that hold decrypted data (`message.content`, `pin_key_cache`, vault entries) are readable only by the unlocked app — on disk the whole file is ciphertext, so a copy taken while the app is closed or locked reveals nothing.
 
 **Windows links SQLCipher differently (#992).** SQLCipher's OpenSSL cannot be linked next to the BoringSSL that `libwebrtc-sys` puts in the same image under MSVC (1,253 duplicate symbols), so Windows takes `rusqlite`'s plain `sqlcipher` (linked) feature and gets the library from the `pollis-sqlcipher` workspace crate: the stock SQLCipher amalgamation compiled with `-DSQLCIPHER_CRYPTO_LIBTOMCRYPT`, whose ~20 crypto primitives are implemented over the RustCrypto crates already in the graph. No OpenSSL enters the Windows image at all. The ciphertext is identical to every other platform's — AES-256-CBC pages, HMAC-SHA512, SQLCipher 4 defaults.
 
@@ -1227,7 +1227,7 @@ Full reasoning: the rusqlite note in `pollis-core/Cargo.toml` and `docs/security
 - `conversation_id` TEXT NOT NULL
 - `sender_id` TEXT NOT NULL
 - `ciphertext` BLOB NOT NULL
-- `content` TEXT _(decrypted plaintext, NULL if decryption failed)_
+- `content` TEXT _(decrypted message text — inside the encrypted file, never readable at rest; NULL if decryption failed)_
 - `reply_to_id` TEXT
 - `sent_at` TEXT NOT NULL
 - `received_at` TEXT NOT NULL DEFAULT now

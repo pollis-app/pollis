@@ -127,7 +127,7 @@ Media stays in Rust by design. The renderer's Chromium does have WebRTC availabl
 | Store | Stores | Never stores |
 |---|---|---|
 | **Turso** (remote) | Identity and devices (`users`, `user_device` with its cross-signing `device_cert` and PQ signature key, `account_recovery` holding the *wrapped* account-identity key, `account_key_log`); the social graph (groups, channels, DM membership, invites, blocks); delivery state (`message_envelope` — MLS ciphertext, reactions, per-device `conversation_watermark`, push tokens); public MLS material (`mls_key_package`, `mls_commit_log`, `mls_welcome`, `mls_group_info`); and `attachment_object`/`attachment_ref` mapping content hashes to R2 keys | Message plaintext, private keys |
-| **Local SQLite (SQLCipher, every platform)** | Decrypted message plaintext (`message.content`), MLS group state (`mls_kv`), preferences cache, UI state | User profiles, groups, channels (fetched from the DS) |
+| **Local SQLite (SQLCipher, every platform)** | Decrypted message text (`message.content`) — readable only inside the encrypted file, never at rest — MLS group state (`mls_kv`), preferences cache, UI state | User profiles, groups, channels (fetched from the DS) |
 | **Device keystore** — the OS keychain (Keychain / Secret Service / Credential Manager) where one exists, otherwise a machine-bound encrypted file (#882) | `device_id_{uid}`, `db_key_wrapped_{uid}` (SQLCipher key, AEAD-wrapped under PIN-derived KEK), `account_id_key_wrapped_{uid}` (Ed25519 account-identity private, same wrapping), `pin_meta_{uid}` (Argon2 params + verifier blob + attempt counter) | The unwrapped DB key or account-identity key (after PIN setup) |
 
 Turso is two databases, not one. The main DB holds user/device metadata and message
@@ -199,7 +199,7 @@ React component
       → #[tauri::command] shim                  // src-tauri/src/commands/*.rs
         → pollis_core::commands::*              // pollis-core/src/commands/*.rs
           → pollis-delivery  (POST /v1/… — every remote read AND write)
-          → SQLCipher local  (plaintext, MLS state, secrets)
+          → SQLCipher local  (encrypted at rest: decrypted messages, MLS state, secrets)
         ← Result<T>
       ← Result<T>
     ← Result<T>
