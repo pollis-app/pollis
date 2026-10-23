@@ -1,6 +1,6 @@
-import { View, Text, Pressable } from "react-native";
+import { ActivityIndicator, View, Text, Pressable } from "react-native";
 import { useTranslation } from "react-i18next";
-import { semantic, fonts, layout, currentTheme } from "../../theme/tokens";
+import { semantic, fonts, layout, currentTheme, type as ty } from "../../theme/tokens";
 import { controlDisabled } from "../../theme/button";
 import { Icon } from "../icons";
 import { haptic } from "../../lib/haptics";
@@ -54,6 +54,38 @@ export function PinCells({ length, size = 4 }: { length: number; size?: number }
           />
         );
       })}
+    </View>
+  );
+}
+
+/**
+ * What the PIN screens show under the dots the moment the fourth digit is in
+ * and the slow work starts (Argon2id key derivation, opening the encrypted
+ * database, a DS round trip): a spinner and one line saying what is
+ * happening, announced politely. Rendered until the screen navigates away or
+ * the call fails, alongside a disabled keypad.
+ */
+export function PinBusy({ label, testID = "pin-busy" }: { label: string; testID?: string }) {
+  return (
+    <View
+      testID={testID}
+      // A real native view so the e2e flows can find it by id (Fabric would
+      // otherwise flatten a background-less wrapper away).
+      collapsable={false}
+      accessible
+      accessibilityLabel={label}
+      accessibilityState={{ busy: true }}
+      accessibilityLiveRegion="polite"
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 10,
+        minHeight: layout.touchMin,
+      }}
+    >
+      <ActivityIndicator color={semantic.accent} />
+      <Text style={ty.secondary}>{label}</Text>
     </View>
   );
 }

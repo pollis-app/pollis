@@ -13,6 +13,7 @@ import {
   useRecoverWithSecretKey,
   type EnrollmentHandle,
 } from "../../hooks/queries";
+import { useSubmitLock } from "../../hooks/useSubmitLock";
 
 type Mode = "chooser" | "polling" | "recovery";
 
@@ -32,6 +33,10 @@ export default function Enrollment() {
 
   const start = useStartEnrollment();
   const recover = useRecoverWithSecretKey();
+  // Recovery unwraps the account key with the Secret Key and re-derives this
+  // device's keys before the PIN step: slow, and must not run twice.
+  const recovering = useSubmitLock();
+  const starting = useSubmitLock();
   const status = useEnrollmentStatus(
     mode === "polling" ? handle?.request_id ?? null : null,
   );
@@ -65,6 +70,9 @@ export default function Enrollment() {
   }, [isLinked]);
 
   const onStart = () => {
+    if (!starting.begin()) {
+      return;
+    }
     setError(null);
     start.mutate(undefined, {
       onSuccess: (h) => {
@@ -73,18 +81,21 @@ export default function Enrollment() {
       },
       onError: (e) =>
         setError((e as Error).message || t("auth:enroll.startFailed")),
+      onSettled: starting.end,
     });
   };
 
   const onRecover = () => {
     setError(null);
-    if (!secretKey.trim()) {
+    if (!secretKey.trim() || !recovering.begin()) {
       return;
     }
     recover.mutate(secretKey.trim(), {
       onSuccess: () => router.replace("/(auth)/pin"),
-      onError: (e) =>
-        setError((e as Error).message || t("auth:recover.failed")),
+      onError: (e) => {
+        recovering.end();
+        setError((e as Error).message || t("auth:recover.failed"));
+      },
     });
   };
 
@@ -131,10 +142,10 @@ export default function Enrollment() {
               full
               variant="primary"
               onPress={onStart}
-              disabled={start.isPending}
+              loading={starting.busy}
               icon={<Icon.device size={18} color={semantic.onAccent} />}
             >
-              {start.isPending
+              {starting.busy
                 ? t("auth.enrollment.starting")
                 : t("auth:enroll.approveFromDevice")}
             </Button>
@@ -207,10 +218,11 @@ export default function Enrollment() {
             full
             variant="primary"
             onPress={onRecover}
-            disabled={!secretKey.trim() || recover.isPending}
+            disabled={!secretKey.trim()}
+            loading={recovering.busy}
             iconRight={<Icon.arrowRight size={18} color={semantic.onAccent} />}
           >
-            {recover.isPending
+            {recovering.busy
               ? t("auth:recover.recovering")
               : t("auth.enrollment.recover")}
           </Button>
@@ -218,6 +230,7 @@ export default function Enrollment() {
             testID="btn-enroll-back"
             variant="subtle"
             full
+            disabled={recovering.busy}
             onPress={() => setMode("chooser")}
           >
             {t("common:actions.back")}

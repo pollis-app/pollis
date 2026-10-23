@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  ActivityIndicator,
   View,
   Text,
   TextInput,
@@ -673,6 +674,9 @@ export const Pill = Chip;
 // `text` label (review6 #10), so it never reads as a secondary button. Pass
 // `surface="raised"` when the button sits on a raised card, so its fill
 // steps up to `high` and still reads as a shape.
+// `loading`: the action is in flight. The button disables itself, swaps its
+// icons for a spinner and is announced as busy, so a slow call shows feedback
+// from the first frame and cannot be submitted twice by a fast double tap.
 export function Button({
   children,
   variant = "secondary",
@@ -681,6 +685,7 @@ export function Button({
   icon,
   iconRight,
   disabled,
+  loading,
   align = "center",
   testID,
   accessibilityLabel,
@@ -693,6 +698,7 @@ export function Button({
   icon?: React.ReactNode;
   iconRight?: React.ReactNode;
   disabled?: boolean;
+  loading?: boolean;
   // "left" is kept for old call sites; it means the start edge.
   align?: "center" | "start" | "left";
   // `btn-<name>` for e2e flows; accessibilityLabel defaults to the label.
@@ -701,19 +707,20 @@ export function Button({
   // What the button sits on: the screen, or a raised card / group.
   surface?: ControlSurface;
 }) {
-  const c = buttonColors(currentTheme(), variant, !!disabled, surface);
+  const off = !!disabled || !!loading;
+  const c = buttonColors(currentTheme(), variant, off, surface);
   return (
     <Pressable
-      onPress={disabled ? undefined : onPress}
-      disabled={disabled}
+      onPress={off ? undefined : onPress}
+      disabled={off}
       testID={testID}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? children}
-      accessibilityState={{ disabled: !!disabled }}
+      accessibilityState={{ disabled: off, busy: !!loading }}
       // Disabled is solid colours (theme/button.ts), never a faded button:
       // Android fades each child separately, which sank the label (#3/#4).
       style={({ pressed }) => ({
-        opacity: !disabled && pressed ? 0.85 : 1,
+        opacity: !off && pressed ? 0.85 : 1,
         flexDirection: "row",
         alignItems: "center",
         justifyContent: align === "center" ? "center" : "flex-start",
@@ -722,11 +729,15 @@ export function Button({
         paddingHorizontal: space.xxl,
         paddingVertical: space.sm,
         borderRadius: full ? r.md : layout.touchMin / 2,
-        backgroundColor: (pressed && !disabled ? c.pressedFill : c.fill) ?? "transparent",
+        backgroundColor: (pressed && !off ? c.pressedFill : c.fill) ?? "transparent",
         width: full ? "100%" : undefined,
       })}
     >
-      {tintGlyph(icon, c.label)}
+      {loading ? (
+        <ActivityIndicator testID={testID ? `${testID}-busy` : undefined} size="small" color={c.label} />
+      ) : (
+        tintGlyph(icon, c.label)
+      )}
       <Text
         style={{
           fontFamily: fonts.semibold,
@@ -736,7 +747,7 @@ export function Button({
       >
         {children}
       </Text>
-      {tintGlyph(iconRight, c.label)}
+      {loading ? null : tintGlyph(iconRight, c.label)}
     </Pressable>
   );
 }

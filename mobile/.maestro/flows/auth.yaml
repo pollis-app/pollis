@@ -75,3 +75,31 @@ tags:
       id: "screen-groups"
     timeout: 20000
 - takeScreenshot: auth-05-inbox
+
+# UNLOCK — cold relaunch lands on the PIN pad; the fourth digit must switch it
+# to its busy state at once (spinner + "Unlocking…", keys disabled) while
+# Argon2id derives the key and the encrypted database opens, never a frozen
+# pad. The last tap skips Maestro's settle wait: the busy state lasts only as
+# long as the unlock, so the assertion has to look straight away.
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-pin"
+    timeout: 20000
+- tapOn:
+    id: "btn-pin-1"
+- tapOn:
+    id: "btn-pin-2"
+- tapOn:
+    id: "btn-pin-3"
+- tapOn:
+    id: "btn-pin-4"
+    waitToSettleTimeoutMs: 0
+- assertVisible:
+    id: "pin-busy"
+- takeScreenshot: auth-06-pin-unlocking
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 30000
