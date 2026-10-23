@@ -94,7 +94,7 @@ website/             # Static marketing site (Cloudflare Pages, not part of the 
 PR. The `android-build` job in `.github/workflows/mobile-core-check.yml` runs the
 full chain on `ubuntu-latest` — uniffi binding gen + a 3-ABI `cargo-ndk`
 cross-compile of `pollis-core`, `expo prebuild`, then
-`gradlew :app:assembleRelease` — and uploads the APK artifact. It uses
+`gradlew :app:assembleRelease` for arm64-v8a — and uploads the APK artifact. It uses
 `expo prebuild` + Gradle directly (never `eas build`, so the job needs no
 account, token or queue) and signs with the throwaway debug keystore.
 

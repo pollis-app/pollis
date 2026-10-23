@@ -124,6 +124,28 @@ data-dir section](#the-process-wide-data-dir--never-set_var)).
 
 Every step after the first carries `if: ${{ !cancelled() }}`, so one failure still lets the rest report.
 
+**Where the PR wall-clock actually goes (measured Oct 2026, last ~30 PRs).** Not
+in test execution: the whole flows harness runs in ~3 min of test time (the
+longest test is `model_based_convergence_is_bulletproof` at ~56 s), the DS suite
+in ~2 s, and every other Rust step is compile. A warm `tests` job is ~8 min, a
+cold one ~28 — and 22 of 27 PR runs were cold, because rust-cache hashed every
+installed toolchain into its key, including the runner image's own `stable`,
+which differs between images mid-rollout, so a PR on a different image than
+the one `main` saved on got "No cache found". Every Rust PR-gate cache
+(`mls-tests`, `windows-link`, `mobile-core-check`) now sets
+`add-rust-environment-hash-key: false` (the pinned toolchain is in
+`rust-toolchain.toml`, which is already in the lockfile hash), and `mls-tests`
+also runs on Rust pushes to `main` so its cache is rewritten on merge rather than
+once a night. The other fixed sinks: the unconditional "Free disk space" step
+(2-6 min per Linux job; `scripts/ci-free-disk.sh` now cleans only below 40 GB
+free, and the runners have ~90 GB), stalled apt mirror fetches (33 min on one
+flows shard; `scripts/ci-apt-retries.sh` sets a 30 s timeout with retries), and
+PRs that cannot affect a suite running it anyway — `mobile/**`, the root
+`package.json` / `pnpm-lock.yaml` / `pnpm-workspace.yaml` are now exempt from
+`mls-tests` and `windows-link` (nothing Rust builds or reads lives there), while
+`docs/ds-operator-endpoints.md` and `scripts/emoji-shortcodes.json` are
+*un*-exempted, because `pollis-api` and `pollis-tui` `include_str!` them.
+
 The workflow has a second heavy job, `macos-at-rest` (#998), gated on the same
 `changes` decision and reported by the same `gate`. It runs
 `cargo test -p pollis-core --lib --no-default-features -- db::local::tests::` on
@@ -993,8 +1015,12 @@ pnpm --filter @pollis/e2e e2e:ui                             # all specs
 pnpm --filter @pollis/e2e e2e:ui bookmarks                   # one file (substring match)
 ```
 
-**CI:** `.github/workflows/e2e-browser.yml` runs the whole tier on every PR and
-every push to `main` (#1059). It ran nowhere from #843 until then, which is how
+**CI:** `.github/workflows/e2e-browser.yml` runs the whole tier on every push to
+`main` and on every PR that touches `frontend/**`, `e2e/**`, the root
+`package.json` / `pnpm-lock.yaml` / `pnpm-workspace.yaml` or the workflow
+itself (#1059). The IPC is mocked, so nothing else can change a result; on
+any other PR a `changes` job skips the shards and the `playwright` check still
+reports green (fail-closed on anything but a genuine pass or a genuine skip). It ran nowhere from #843 until then, which is how
 the bookmarks copy-link paint assertion sat red on `main` from #990 onward
 without anyone noticing — the WebDriver tier's `e2e-*.yml` are dispatch-only
 by design, but this tier is seconds-per-spec and needs no backend, so there is

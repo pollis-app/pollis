@@ -10,6 +10,14 @@ name: Browser UI specs
 #
 # It is NOT the WebDriver tier: `e2e-*.yml` drive the real Tauri binary and
 # stay dispatch-only by design (docs/deployments.md → "On-demand E2E").
+#
+# Path-gated the way mls-tests.yml is (#698 pattern): a seconds-cheap `changes`
+# job decides, the shards run only when it says so, and the `playwright` check
+# ALWAYS reports. The suite runs the browser build against mocked IPC, so only
+# the renderer, the specs and the JS dependency graph can change its outcome —
+# a Rust, mobile, website, docs or workflow-only PR cannot. Before this, every
+# such PR (about half of them) paid four runners for ~4 min each, and up to
+# ~15 when the Chromium apt step stalled. `main` always runs the whole suite.
 
 on:
   pull_request:
@@ -19,12 +27,49 @@ on:
 
 permissions:
   contents: read
+  # dorny/paths-filter reads the PR's changed-file list via the API (no checkout).
+  pull-requests: read
 
 concurrency:
   group: e2e-browser-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Allow-list, not ignore-list (the opposite of mls-tests.yml): the suite's
+  # whole input is small and closed — the renderer it serves, the specs it runs,
+  # the lockfile/workspace that resolve both, and this workflow.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      run_ui: ${{ steps.decide.outputs.run_ui }}
+    steps:
+      - name: Detect renderer / spec changes (PRs only)
+        id: filter
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: |
+            ui:
+              - 'frontend/**'
+              - 'e2e/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - '.github/workflows/e2e-browser.yml'
+              - 'scripts/ci-apt-retries.sh'
+      - name: Decide whether the browser suite must run
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          UI: ${{ steps.filter.outputs.ui }}
+        run: |
+          if [ "$EVENT" = "pull_request" ] && [ "$UI" != "true" ]; then
+            echo "run_ui=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_ui=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "event=$EVENT ui=$UI"
+
   # Sharded across runners, NOT across workers. The config stays `workers: 1`
   # (the composer specs are keystroke-driven and must not share a CPU with a
   # second browser), so the only way to cut the ~11 min serial run is more
@@ -33,6 +78,8 @@ jobs:
   # as the unsharded job did. Playwright's shard split is by file and is
   # complete by construction — every spec lands in exactly one shard.
   playwright-shard:
+    needs: changes
+    if: ${{ needs.changes.outputs.run_ui == 'true' }}
     name: playwright (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
     strategy:
@@ -60,6 +107,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --filter ./frontend... --filter ./e2e...
 
+      # `--with-deps` below runs apt, whose mirror stalled one shard's Chromium
+      # install for 11 minutes; fail a stalled fetch fast and retry it instead.
+      - name: Fail fast on a stalled apt mirror
+        run: bash scripts/ci-apt-retries.sh
+
       # One browser only; the config's single project is Desktop Chrome.
       # `--with-deps` pulls the runner's shared-library set (fonts, GTK bits)
       # that headless Chromium still needs on a stock ubuntu image.
@@ -86,19 +138,31 @@ jobs:
           retention-days: 7
 
   # One stable check name for the whole suite, whatever the shard count: green
-  # only when every shard passed, red on any failure, cancel or skip. Keeps the
-  # check called `playwright`, as it was before sharding.
+  # only when every shard passed or the PR was legitimately exempt; red on any
+  # failure or cancel, or a skip the decision did not ask for. Fail-closed.
+  # Keeps the check called `playwright`, as it was before sharding.
   playwright:
-    needs: playwright-shard
+    needs: [changes, playwright-shard]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
       - name: Evaluate shards
         env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          RUN_UI: ${{ needs.changes.outputs.run_ui }}
           RESULT: ${{ needs.playwright-shard.result }}
         run: |
-          echo "playwright shards: $RESULT"
-          if [ "$RESULT" != "success" ]; then
-            echo "::error::Playwright shards did not all pass ($RESULT)."
+          echo "changes=$CHANGES_RESULT run_ui=$RUN_UI playwright shards: $RESULT"
+          if [ "$CHANGES_RESULT" != "success" ]; then
+            echo "::error::Decision job did not succeed ($CHANGES_RESULT) — failing closed."
             exit 1
           fi
+          if [ "$RESULT" = "success" ]; then
+            exit 0
+          fi
+          if [ "$RUN_UI" = "false" ] && [ "$RESULT" = "skipped" ]; then
+            echo "Exempt PR — no renderer/spec/dependency change, browser suite correctly skipped."
+            exit 0
+          fi
+          echo "::error::Playwright shards did not all pass ($RESULT)."
+          exit 1

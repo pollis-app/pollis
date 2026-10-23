@@ -85,6 +85,13 @@ jobs:
               - '!learn/**'
               - '!specs/**'
               - '!e2e/**'
+              # The mobile app and the root JS manifests: nothing under them is
+              # compiled into, or read by, the pollis-core Windows build (see the
+              # same list in mls-tests.yml).
+              - '!mobile/**'
+              - '!package.json'
+              - '!pnpm-lock.yaml'
+              - '!pnpm-workspace.yaml'
             # ...but a change to THIS workflow, or to the release workflow whose
             # Windows job this one mirrors, must still run it.
             # One pattern per filter, deliberately: `predicate-quantifier: every`
@@ -117,6 +124,8 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.run_link == 'true' }}
     runs-on: windows-latest
+    # A cold link + test build is ~24 min.
+    timeout-minutes: 45
     env:
       # A dev-profile link is what we need — it resolves the same native
       # libraries against the same CRT as the release build, and it references
@@ -138,6 +147,13 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: windows-link
+          # No rustc-environment hash in the key: rust-cache hashes every
+          # installed toolchain, including the runner image's own `stable`,
+          # which differs between images mid-rollout, so PRs on a different
+          # image than `main` saved on found no cache at all and linked cold
+          # (~22 min instead of ~5). The pinned toolchain is set above and
+          # rust-toolchain.toml is already part of the lockfile hash.
+          add-rust-environment-hash-key: false
           # Only `main` WRITES the cache; PR branches restore from it and get
           # the same speedup without each branch storing its own copy (the repo
           # has been over GitHub's 10 GiB cache budget before — #759).

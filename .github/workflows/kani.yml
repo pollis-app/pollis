@@ -45,11 +45,17 @@ concurrency:
 jobs:
   kani:
     runs-on: ubuntu-24.04
+    # ~4 min normally; a stalled apt mirror once held it 31.
+    timeout-minutes: 30
     env:
       # ONE place, so the two proof invocations cannot drift apart.
       KANI_VERSION: '0.68.0'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Fail a stalled apt mirror fetch fast and retry it (scripts/ci-apt-retries.sh).
+      - name: Fail fast on a stalled apt mirror
+        run: bash scripts/ci-apt-retries.sh
 
       # Building pollis-core (even headless) pulls glib-sys / gtk / openssl via
       # transitive deps — the box hides this behind a gtk stub-sysroot, but CI

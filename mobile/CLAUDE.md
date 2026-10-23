@@ -282,8 +282,10 @@ carries is a stale prior artifact.
 **CI builds a real APK** (the first thing that ever did): the `android-build`
 job in `.github/workflows/mobile-core-check.yml` runs the same chain as the
 workstation dev loop above — `ubrn build android --and-generate`, then
-`expo prebuild --platform android`, then `gradlew :app:assembleRelease` — on a
-stock `ubuntu-latest` runner, and uploads the APK as `pollis-android-apk`. It
+`expo prebuild --platform android`, then `gradlew :app:assembleRelease` (arm64-v8a
+only, `-PreactNativeArchitectures=arm64-v8a`, to keep the gate fast; the sideload
+release builds all three ABIs) — on a stock `ubuntu-latest` runner, and uploads
+the APK as `pollis-android-apk`. It
 installs the RN-pinned NDK (`27.1.12297006`) + CMake (`3.22.1`) so Gradle and
 `cargo-ndk` agree, and pins the ubrn CLI to `0.31.0-6` (CLI ↔ npm alignment, see
 "Rough edges" #1). It uses `expo prebuild` + Gradle **directly, never `eas build`** — that
