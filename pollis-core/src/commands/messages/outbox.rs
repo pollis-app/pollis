@@ -601,6 +601,7 @@ pub(super) async fn settle(state: &Arc<AppState>, id: &str) -> Result<String> {
 /// Record a failed attempt — `rejected` when no retry can fix it, `failed`
 /// otherwise. Only an unsent row can fail: a delivered message is never
 /// demoted.
+#[cfg(test)]
 fn mark_failed_on(conn: &rusqlite::Connection, id: &str, permanent: bool) -> Result<()> {
     mark_state_on(conn, id, if permanent { REJECTED } else { FAILED })
 }
