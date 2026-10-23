@@ -10,7 +10,9 @@
  *
  * Pinned: app.json points at both layers on the brand amber; every painted
  * pixel lies inside the 33dp safe radius (no stray outline, no clipping); the
- * glyph is at least 60dp tall; the monochrome layer is the same shape, in white.
+ * glyph is at least 60dp tall; the lock body's interior holds no ink but the
+ * "p" (the shackle leg stays hidden, as in the logo); the monochrome layer is
+ * the same shape, in white.
  *
  *   cd mobile && pnpm test
  */
@@ -116,6 +118,45 @@ test("foreground: every painted pixel is inside the 66dp safe zone", () => {
 test("foreground: the glyph fills the safe zone (not the old 58dp lock)", () => {
   const { heightDp } = geometry(fg);
   assert.ok(heightDp >= 60, `glyph ${heightDp.toFixed(1)}dp tall of 108dp`);
+});
+
+// The lock body's interior is clean amber in the logo: the shackle stops at
+// the body's top edge (its left leg runs on underneath, hidden by the body's
+// amber fill, so a generator that just drops the amber exposes it). Region in
+// assets/pollis-logo.svg units, mapped through the glyph's bounding box
+// (272..752 x 135.5..857.5): the interior is x 320..704 from y 425.5, and the
+// "p" starts at y 528; inset 12 units clear of the anti-aliased edges, and
+// 50 (the inner corner radius) from the sides, clear of the rounded corners.
+test("foreground: no ink inside the lock body above the p", () => {
+  const LOGO = { x0: 272, y0: 135.5, x1: 752, y1: 857.5 };
+  const REGION = { x0: 320 + 50, y0: 425.5 + 12, x1: 704 - 50, y1: 528 - 12 };
+  let left = fg.w;
+  let right = -1;
+  let top = fg.h;
+  let bottom = -1;
+  for (let y = 0; y < fg.h; y++) {
+    for (let x = 0; x < fg.w; x++) {
+      if (fg.px[(y * fg.w + x) * 4 + 3] > 0) {
+        left = Math.min(left, x);
+        right = Math.max(right, x + 1);
+        top = Math.min(top, y);
+        bottom = Math.max(bottom, y + 1);
+      }
+    }
+  }
+  const sx = (right - left) / (LOGO.x1 - LOGO.x0);
+  const sy = (bottom - top) / (LOGO.y1 - LOGO.y0);
+  const px = (u: number) => Math.round(left + (u - LOGO.x0) * sx);
+  const py = (v: number) => Math.round(top + (v - LOGO.y0) * sy);
+  let ink = 0;
+  for (let y = py(REGION.y0); y < py(REGION.y1); y++) {
+    for (let x = px(REGION.x0); x < px(REGION.x1); x++) {
+      if (fg.px[(y * fg.w + x) * 4 + 3] > 0) {
+        ink++;
+      }
+    }
+  }
+  assert.equal(ink, 0, `${ink} ink pixels inside the lock body (the shackle leg showing through?)`);
 });
 
 test("monochrome: the same shape as the foreground, in white", () => {
