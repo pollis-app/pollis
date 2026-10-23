@@ -214,8 +214,11 @@ struct Cached {
     rotation_owed: Option<(i64, i64)>,
 }
 
+/// A `file_key_cache` row as read: ring bytes, wrapped-at pair, owed pair.
+type CacheRow = (Vec<u8>, i64, i64, Option<i64>, Option<i64>);
+
 fn read_cache(conn: &Connection, mls_conversation_id: &str) -> Result<Option<Cached>> {
-    let row: Option<(Vec<u8>, i64, i64, Option<i64>, Option<i64>)> = conn
+    let row: Option<CacheRow> = conn
         .query_row(
             "SELECT keyring, wrapped_generation, wrapped_epoch, \
                     rotation_owed_generation, rotation_owed_epoch \
