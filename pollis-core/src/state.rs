@@ -179,6 +179,10 @@ pub struct AppState {
     /// asked for and the drain that runs after unlock or a reconnect can never
     /// post the same message twice at once. See `messages::outbox`.
     pub outbox_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+    /// Held while this device tops up its KeyPackage pool (#1412). Taken with
+    /// `try_lock`: a drain that finds a top-up running leaves it to fill the
+    /// whole shortfall instead of publishing a second batch beside it.
+    pub key_package_refill: Arc<Mutex<()>>,
     /// Held for the length of an outbox drain, carrying the last drain's
     /// report: `flush_outbox` is single-flight, and a call that finds it held
     /// waits and answers with that report rather than draining again (#1335).
@@ -270,6 +274,7 @@ impl AppState {
             shutdown_signal: Arc::new(Notify::new()),
             mls_group_locks: Arc::new(Mutex::new(HashMap::new())),
             outbox_locks: Arc::new(Mutex::new(HashMap::new())),
+            key_package_refill: Arc::new(Mutex::new(())),
             outbox_drain: Arc::new(Mutex::new(None)),
             outbox_rerun: Arc::new(AtomicBool::new(false)),
             // Receiver dropped immediately; subscribers are created per

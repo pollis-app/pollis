@@ -381,13 +381,16 @@ pub struct ReconcileOutcome {
     /// True if the committer's own leaf was in `to_remove` and was skipped.
     pub skipped_self_removal: bool,
     /// `(user_id, device_id)` pairs that belong on the roster but could not be
-    /// added because they have published no KeyPackage in the group's
-    /// ciphersuite — since #669 that means a device that has not republished its
-    /// pool since the group's suite stopped being the current one.
+    /// added because they have no unclaimed KeyPackage in the group's
+    /// ciphersuite: a pool that ran dry while the device was away (#1412), or —
+    /// since #669 — one not republished since the group's suite stopped being
+    /// the current one. Downgrading the group to admit them is never an option.
     ///
-    /// Reported rather than silently dropped: these devices will not receive
-    /// messages until they run a client that publishes a pool in that suite, and
-    /// downgrading the group to admit them is never an option.
+    /// Not recorded anywhere, on purpose: the sweep re-derives "a live roster
+    /// device with no leaf and a claimable KeyPackage" on every pass and
+    /// reconciles it in (`sweep::reconcile_if_tree_drifted`), and the device
+    /// external-joins on its own next catch-up. A stored "skipped" list would be
+    /// a second copy of what the tree already says.
     pub skipped_no_suite_kp: Vec<(String, String)>,
     /// The tree membership as it stood when the commit was staged — walked
     /// INSIDE `stage_reconcile_commit`, immediately after its own
@@ -1352,7 +1355,8 @@ pub async fn reconcile_group_mls_impl(
             None => {
                 crate::diag!(
                     "[mls] reconcile: no KeyPackage in suite 0x{:04x} for {uid}:{did} — \
-                     skipping (never downgrading)",
+                     skipping (never downgrading); a later sweep re-adds it once its pool \
+                     refills, or it external-joins on its next catch-up (#1412)",
                     u16::from(group_suite),
                 );
                 skipped_no_suite_kp.push((uid.clone(), did.clone()));
