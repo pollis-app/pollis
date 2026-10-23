@@ -2,7 +2,8 @@
 //!
 //! The KeyPackage pool (build + publish + replenish) that precedes any MLS
 //! group operation. `ensure_mls_key_package` rotates this device's pool on
-//! login; `replenish_key_packages` tops it up after welcomes consume packages.
+//! login; `replenish_key_packages` tops it up whenever the Welcome drain reports
+//! the pool is low (#1412).
 //! Both route owner-scoped writes through the Delivery Service.
 
 use openmls::prelude::*;
@@ -168,7 +169,7 @@ pub async fn ensure_mls_key_package(
     user_id: &str,
     device_id: &str,
 ) -> Result<()> {
-    const TARGET: i64 = 5;
+    const TARGET: i64 = POOL_TARGET;
 
     // Build TARGET fresh packages locally (their private keys live in the local
     // DB) before any remote write, so the DS replenish is a single batched call.
@@ -197,15 +198,49 @@ pub async fn ensure_mls_key_package(
     Ok(())
 }
 
-/// Top-up key packages for this device to TARGET without deleting existing ones.
-/// Called after processing welcomes (which consume KPs) so the device stays
-/// reachable for future group invites.
+/// Should a Welcome drain top this device's pool up (#1412)?
+///
+/// `reported` is the device's unclaimed count as the Delivery Service read it
+/// in the same request as the drain. When it is there, it is the whole answer:
+/// refill whenever the pool is below [`POOL_TARGET`], Welcome or no Welcome.
+/// Packages leave the pool without a Welcome ever reaching this device — a
+/// peer's claim whose commit lost its epoch race, a leaf the committer refused —
+/// and a refill keyed only on Welcomes let exactly those drain a backgrounded
+/// device to zero, after which every new conversation skipped it.
+///
+/// `None` is a Delivery Service that predates the count: keep the old rule
+/// (refill after processing a Welcome) rather than pay a separate count read on
+/// every drain, which runs on every wake-up and every conversation opened.
+pub(super) fn drain_wants_refill(had_welcomes: bool, reported: Option<i64>) -> bool {
+    match reported {
+        Some(remaining) => remaining < POOL_TARGET,
+        None => had_welcomes,
+    }
+}
+
+/// How many unclaimed KeyPackages a device keeps published: one is claimed for
+/// every conversation the device is added to while it is away.
+pub(super) const POOL_TARGET: i64 = 5;
+
+/// Top-up key packages for this device to [`POOL_TARGET`] without deleting
+/// existing ones. Called from the Welcome drain whenever the pool is low
+/// ([`drain_wants_refill`]), so the device stays addable to new conversations.
+///
+/// Single-flight per process: a foreground pass ingests every conversation at
+/// once and each ingest drains Welcomes, so several drains can see the same low
+/// count together. Only one tops up; the others return, because the one that is
+/// running re-counts and fills the whole shortfall — publishing from each would
+/// overfill the pool by the shortfall once per concurrent drain.
 pub(super) async fn replenish_key_packages(
     state: &Arc<AppState>,
     user_id: &str,
     device_id: &str,
 ) -> Result<()> {
-    const TARGET: i64 = 5;
+    const TARGET: i64 = POOL_TARGET;
+
+    let Ok(_refilling) = state.key_package_refill.try_lock() else {
+        return Ok(());
+    };
 
     let suite_code = i64::from(u16::from(current_suite()));
     // Count only packages in the CURRENT suite. A package left behind by a
@@ -282,4 +317,34 @@ pub fn validate_key_package(
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("kp hash_ref: {e}")))?;
 
     Ok(hex::encode(hash_ref.as_slice()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{drain_wants_refill, POOL_TARGET};
+
+    /// #1412: packages leave the pool with no Welcome (a lost-race claim, a
+    /// refused leaf). When the DS reports the count, a short pool is refilled
+    /// on any drain, Welcome or not.
+    #[test]
+    fn a_reported_short_pool_is_refilled_without_a_welcome() {
+        assert!(drain_wants_refill(false, Some(0)));
+        assert!(drain_wants_refill(false, Some(POOL_TARGET - 1)));
+    }
+
+    /// A full pool is left alone even right after a Welcome: the count is the
+    /// whole answer once the DS gives it.
+    #[test]
+    fn a_reported_full_pool_is_not_refilled() {
+        assert!(!drain_wants_refill(true, Some(POOL_TARGET)));
+        assert!(!drain_wants_refill(false, Some(POOL_TARGET + 3)));
+    }
+
+    /// An older DS reports nothing: fall back to the pre-#1412 rule rather than
+    /// paying a separate count read on every drain.
+    #[test]
+    fn without_a_count_only_a_processed_welcome_refills() {
+        assert!(drain_wants_refill(true, None));
+        assert!(!drain_wants_refill(false, None));
+    }
 }

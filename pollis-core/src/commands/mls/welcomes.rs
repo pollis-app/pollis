@@ -184,8 +184,10 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
     // includes the legacy device-agnostic rows (`recipient_device_id IS NULL`)
     // from before multi-device, so the selection is unchanged; what is gone is
     // the client-side credential that used to run it.
-    let items: Vec<(String, Vec<u8>)> =
-        super::ds_reads::fetch_welcomes(state, user_id, device_id).await?;
+    let super::ds_reads::FetchedWelcomes {
+        items,
+        unclaimed_key_packages,
+    } = super::ds_reads::fetch_welcomes(state, user_id, device_id).await?;
 
     let had_welcomes = !items.is_empty();
     // IDs to mark delivered. We ack even apply failures — the private key for a
@@ -246,8 +248,12 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
         }
     }
 
-    // Each processed welcome consumed a KP — top back up to TARGET.
-    if had_welcomes {
+    // Top the pool back up when it is low (#1412). Every wake-up, foreground
+    // pass, unlock sweep and conversation open drains Welcomes, and the drain
+    // carries the pool size, so this is the refill trigger on all of them at no
+    // extra round trip. See `drain_wants_refill` for why "processed a Welcome"
+    // alone was not enough.
+    if super::key_packages::drain_wants_refill(had_welcomes, unclaimed_key_packages) {
         if let Err(e) = replenish_key_packages(state, user_id, device_id).await {
             crate::diag!("[mls] KP replenishment failed (non-fatal): {e}");
         }

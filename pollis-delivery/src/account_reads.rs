@@ -199,6 +199,31 @@ pub async fn device_rows(
 
 // ── POST /v1/read/key-packages ───────────────────────────────────────────────
 
+/// Unclaimed KeyPackages `(user_id, device_id)` still has in `suite` — the
+/// replenish shortfall. The one definition behind both this endpoint's
+/// `count_for_ciphersuite` and the count the Welcome drain reports (#1412).
+///
+/// Callers pass the AUTHENTICATED identity, never a body-named one: the number
+/// decides how many packages that device publishes.
+pub async fn unclaimed_key_package_count(
+    conn: &Connection,
+    user_id: &str,
+    device_id: &str,
+    suite: i64,
+) -> anyhow::Result<i64> {
+    let mut rows = conn
+        .query(
+            "SELECT COUNT(*) FROM mls_key_package \
+             WHERE user_id = ?1 AND device_id = ?2 AND claimed = 0 AND ciphersuite = ?3",
+            libsql::params![user_id.to_string(), device_id.to_string(), suite],
+        )
+        .await?;
+    match rows.next().await? {
+        Some(row) => Ok(row.get::<i64>(0)?),
+        None => Ok(0),
+    }
+}
+
 /// POST `/v1/read/key-packages` — the replenish shortfall and the roster's
 /// claimable devices.
 ///
@@ -222,22 +247,11 @@ pub async fn key_packages(
     let conn = state.db.conn().await?;
 
     let unclaimed = match parsed.count_for_ciphersuite {
+        // Scoped to the AUTHENTICATED device, never a body-named one: this
+        // number drives how many packages that device publishes, and answering
+        // for someone else's pool would make it publish into the wrong one.
         Some(suite) => {
-            // Scoped to the AUTHENTICATED device, never a body-named one: this
-            // number drives how many packages that device publishes, and
-            // answering for someone else's pool would make it publish into the
-            // wrong one.
-            let mut rows = conn
-                .query(
-                    "SELECT COUNT(*) FROM mls_key_package \
-                     WHERE user_id = ?1 AND device_id = ?2 AND claimed = 0 AND ciphersuite = ?3",
-                    libsql::params![who.user_id.clone(), who.device_id.clone(), suite],
-                )
-                .await?;
-            match rows.next().await? {
-                Some(row) => Some(row.get::<i64>(0)?),
-                None => Some(0),
-            }
+            Some(unclaimed_key_package_count(&conn, &who.user_id, &who.device_id, suite).await?)
         }
         None => None,
     };

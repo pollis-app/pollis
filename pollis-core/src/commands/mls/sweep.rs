@@ -34,6 +34,18 @@
 //! already matches the roster — it costs only two lightweight SELECTs and a
 //! local MLS load, never the heavyweight reconcile (KP claims, account-key
 //! pinning, commit crypto).
+//!
+//! ## Missing-device re-add backstop (issue #1412)
+//!
+//! The same backstop also covers the opposite drift: a device that belongs in
+//! the tree but holds no leaf, because its KeyPackage pool was empty when the
+//! commit that should have added it was made. Reconcile skips such a device
+//! (there is nothing to claim), and before #1412 nothing revisited it, so a
+//! backgrounded phone added to more conversations than its pool held was left
+//! out of the extra ones for good. The pre-check now also looks for a leafless
+//! live device that has a claimable KeyPackage again and reconciles to add it.
+//! The device recovers on its own too: catching up a conversation it holds no
+//! group for external-joins it, and every Welcome drain refills its pool.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -95,7 +107,9 @@ pub async fn catch_up_all_mls_groups(state: &Arc<AppState>, user_id: &str) -> Re
 ///    sealed at an epoch it is about to advance past, rather than losing anything
 ///    sent before a membership change during its offline window. It still
 ///    advances to head, so the cold-launch guarantee (#371) is preserved.
-/// 2. **Reconcile backstop** — retry a dropped remove/eviction (#430 P1). Before
+/// 2. **Reconcile backstop** — retry a dropped remove/eviction (#430 P1), or
+///    add a device that was skipped because its KeyPackage pool was empty and
+///    has since refilled (#1412). Before
 ///    migration, so a roster that has just shed a member is settled before we
 ///    decide who has to come across.
 /// 3. **Migration backstop** — move to the hybrid suite if the whole roster can
@@ -121,7 +135,7 @@ async fn sweep_conversation(
     {
         crate::diag!("[mls-sweep] catch_up_mls_group for {kind} {conversation_id}: {e}");
     }
-    if let Err(e) = reconcile_if_tree_has_stale_leaf(state, conversation_id, user_id).await {
+    if let Err(e) = reconcile_if_tree_drifted(state, conversation_id, user_id).await {
         crate::diag!("[mls-sweep] reconcile backstop for {kind} {conversation_id}: {e}");
     }
     migrate_backstop(state, conversation_id, user_id, migrations).await;
@@ -297,7 +311,7 @@ async fn reconcile_if_tree_has_stale_leaf(
     conversation_id: &str,
     user_id: &str,
 ) -> Result<()> {
-    if !local_tree_has_stale_leaf(state, conversation_id).await? {
+    if local_tree_drift(state, conversation_id, false).await? == TreeDrift::Settled {
         return Ok(());
     }
 
@@ -308,16 +322,94 @@ async fn reconcile_if_tree_has_stale_leaf(
     Ok(())
 }
 
-/// Cheap pre-check for the reconcile backstop: does the LOCAL MLS ratchet tree
-/// still contain a leaf that a declarative reconcile would evict — a device whose
-/// user has left the roster, or whose `user_device` row is gone?
+/// The sweep's reconcile backstop: everything [`reconcile_if_tree_has_stale_leaf`]
+/// retries, plus the ADD half (#1412).
 ///
-/// Returns `false` (the steady-state answer) using only a local MLS load and two
-/// lightweight roster/device SELECTs — never the DS claim / account-key-pin /
-/// commit-crypto work of a full reconcile. The "stale" test mirrors
-/// `reconcile_group_mls_impl`'s roster + `valid_devices` derivation exactly, so
-/// it flags precisely the leaves reconcile would drop and never misses a pending
-/// eviction.
+/// A device that belongs in the tree but had no KeyPackage when it was due to
+/// be added — its pool ran dry while it was offline — is skipped by reconcile
+/// and was then never revisited: nothing else re-runs reconcile for a
+/// conversation whose roster has not changed. The skipped device is not
+/// recorded anywhere, deliberately; it is DERIVED, on every pass, as "a live
+/// device of a roster member that holds no leaf and now has a claimable
+/// KeyPackage" — the very set reconcile adds. A record would be a second copy of
+/// that fact, free to disagree with the tree it describes after a concurrent
+/// commit (the device external-joins, another member re-adds it, it is
+/// revoked); the derivation cannot.
+///
+/// Many members may notice the same missing device on their own sweeps. That is
+/// the ordinary reconcile race: one commit wins its epoch on the DS's
+/// compare-and-swap, the rest converge through `LostRace` and find the device
+/// already present. The device itself racing an external join is the same race.
+///
+/// Not run from the membership wake: there every member would answer the same
+/// wake at once, and each racer burns a claim from the very pool that just ran
+/// dry. The staggered sweeps (cold launch, unlock, reconnect) are enough, and
+/// the device recovers on its own whenever it next catches the conversation up.
+async fn reconcile_if_tree_drifted(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    user_id: &str,
+) -> Result<()> {
+    let drift = local_tree_drift(state, conversation_id, true).await?;
+    if drift == TreeDrift::Settled {
+        return Ok(());
+    }
+
+    crate::diag!(
+        "[mls-sweep] {conversation_id}: {drift:?} — staging a reconcile"
+    );
+    crate::commands::mls::reconcile_group_mls_impl(state, conversation_id, user_id).await?;
+    Ok(())
+}
+
+/// What the cheap pre-check found, in the order it looks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TreeDrift {
+    /// The tree is what reconcile would make it.
+    Settled,
+    /// A leaf reconcile would remove ([`has_stale_leaf`]).
+    StaleLeaf,
+    /// A device reconcile would add ([`has_addable_device`]).
+    MissingDevice,
+}
+
+/// Would reconcile ADD anyone — is a device reconcile wants in the tree, and
+/// could add right now, missing from it (#1412)?
+///
+/// Derived from [`reconcile::desired_set`] for the same reason
+/// [`has_stale_leaf`] is: one rule, so the pre-check can never predict a
+/// different add set than the reconcile it gates. `claimable` is the KeyPackage
+/// half of that rule — devices with an unclaimed package in the GROUP's suite,
+/// which is exactly what reconcile claims from — so a device with an empty pool
+/// does not wake a reconcile that could only skip it again.
+fn has_addable_device(
+    tree_members: &[(String, String)],
+    roster: &HashSet<String>,
+    valid_devices: &HashSet<(String, String)>,
+    claimable: &[(String, String)],
+) -> bool {
+    let desired = super::reconcile::desired_set(
+        claimable,
+        tree_members.iter(),
+        roster,
+        Some(valid_devices),
+    );
+    desired.iter().any(|key| !tree_members.contains(key))
+}
+
+/// Live devices of roster members that hold no leaf — the candidates
+/// [`has_addable_device`] then narrows to the ones with a KeyPackage. Empty in
+/// steady state, which is what lets the pre-check skip the KeyPackage read.
+fn has_leafless_device(
+    tree_members: &[(String, String)],
+    roster: &HashSet<String>,
+    valid_devices: &HashSet<(String, String)>,
+) -> bool {
+    valid_devices
+        .iter()
+        .any(|key| roster.contains(&key.0) && !tree_members.contains(key))
+}
+
 /// Does the local tree hold a leaf that reconcile would remove?
 ///
 /// Derived FROM [`reconcile::desired_set`] rather than restating its rule. This
@@ -359,36 +451,56 @@ fn has_stale_leaf(
     distinct.len() != tree_members.len()
 }
 
-async fn local_tree_has_stale_leaf(
+/// Cheap pre-check for the reconcile backstop: does the LOCAL MLS ratchet tree
+/// differ from what a declarative reconcile would make it?
+///
+/// * a leaf reconcile would evict — a device whose user has left the roster, or
+///   whose `user_device` row is gone ([`has_stale_leaf`]);
+/// * with `include_additions`, a device reconcile would ADD — live, on the
+///   roster, leafless, and holding a claimable KeyPackage in the group's suite
+///   ([`has_addable_device`], #1412).
+///
+/// Returns [`TreeDrift::Settled`] (the steady-state answer) using only a local
+/// MLS load and two lightweight roster/device reads — never the DS claim /
+/// account-key-pin / commit-crypto work of a full reconcile. The KeyPackage read
+/// is a third, made only when some roster device actually lacks a leaf. Both
+/// tests are derived from `desired_set`, so it flags precisely what reconcile
+/// would change and never wakes one for nothing.
+async fn local_tree_drift(
     state: &Arc<AppState>,
     conversation_id: &str,
-) -> Result<bool> {
-    // 1. Local tree membership — a local SQLite read, no network. Scope the
-    //    !Send provider/group so neither crosses an await.
-    let tree_members: Vec<(String, String)> = {
+    include_additions: bool,
+) -> Result<TreeDrift> {
+    // 1. Local tree membership and the group's suite — a local SQLite read, no
+    //    network. Scope the !Send provider/group so neither crosses an await.
+    let (tree_members, suite): (Vec<(String, String)>, _) = {
         let guard = state.local_db.lock().await;
         let db = match guard.as_ref() {
             Some(db) => db,
-            // No local group open (never joined / already forgotten): nothing to evict.
-            None => return Ok(false),
+            // No local group open (never joined / already forgotten): this
+            // device has nothing to evict and cannot commit an add.
+            None => return Ok(TreeDrift::Settled),
         };
         // Reading the tree is storage-only, so this needs no crypto backend
         // and therefore no suite dispatch.
         match load_stored_group(db.conn(), conversation_id) {
-            Some(group) => group
-                .members()
-                .map(|m| {
-                    let uid = parse_credential_user_id(&m.credential);
-                    let did = parse_credential_device_id(&m.credential).unwrap_or_default();
-                    (uid, did)
-                })
-                .collect(),
-            // Missing / unreadable local group: nothing this device can evict.
-            None => return Ok(false),
+            Some(group) => (
+                group
+                    .members()
+                    .map(|m| {
+                        let uid = parse_credential_user_id(&m.credential);
+                        let did = parse_credential_device_id(&m.credential).unwrap_or_default();
+                        (uid, did)
+                    })
+                    .collect(),
+                group.ciphersuite(),
+            ),
+            // Missing / unreadable local group: nothing this device can commit.
+            None => return Ok(TreeDrift::Settled),
         }
     };
     if tree_members.is_empty() {
-        return Ok(false);
+        return Ok(TreeDrift::Settled);
     }
 
     // 2. Desired roster: group_member + pending invitees, or dm_channel_member.
@@ -406,19 +518,35 @@ async fn local_tree_has_stale_leaf(
     // 3. Valid (user_id, device_id) pairs still registered for the roster — the
     //    same `user_device` snapshot reconcile uses to drop revoked single
     //    devices of a still-present user.
-    let valid_devices = crate::commands::ds_reads::registered_devices(
-        state,
-        &roster.iter().cloned().collect::<Vec<_>>(),
-    )
-    .await?;
+    let roster_ids: Vec<String> = roster.iter().cloned().collect();
+    let valid_devices = crate::commands::ds_reads::registered_devices(state, &roster_ids).await?;
 
     // 4. A leaf is stale iff reconcile would remove it — see [`has_stale_leaf`].
-    Ok(has_stale_leaf(&tree_members, &roster, &valid_devices))
+    if has_stale_leaf(&tree_members, &roster, &valid_devices) {
+        return Ok(TreeDrift::StaleLeaf);
+    }
+    if !include_additions || !has_leafless_device(&tree_members, &roster, &valid_devices) {
+        return Ok(TreeDrift::Settled);
+    }
+
+    // 5. Someone who belongs here has no leaf. Worth a reconcile only if it has
+    //    a KeyPackage in THIS group's suite to claim — otherwise reconcile would
+    //    skip it again. Same read, same suite scoping, as reconcile's own.
+    let claimable = crate::commands::ds_reads::claimable_devices(
+        state,
+        &roster_ids,
+        Some(i64::from(u16::from(suite))),
+    )
+    .await?;
+    if has_addable_device(&tree_members, &roster, &valid_devices, &claimable) {
+        return Ok(TreeDrift::MissingDevice);
+    }
+    Ok(TreeDrift::Settled)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::has_stale_leaf;
+    use super::{has_addable_device, has_leafless_device, has_stale_leaf};
     use std::collections::HashSet;
 
     fn key(u: &str, d: &str) -> (String, String) {
@@ -492,6 +620,59 @@ mod tests {
             &[key("alice", "a1")],
             &roster(&["alice"]),
             &valid(&[("alice", "a1")]),
+        ));
+    }
+
+    /// #1412: the device whose pool ran dry. It is live and on the roster but
+    /// holds no leaf; once it has a KeyPackage again, reconcile would add it.
+    #[test]
+    fn a_leafless_device_with_a_key_package_is_addable() {
+        let tree = [key("alice", "a1"), key("bob", "b1")];
+        let roster = roster(&["alice", "bob"]);
+        let valid = valid(&[("alice", "a1"), ("alice", "a2"), ("bob", "b1")]);
+        assert!(has_leafless_device(&tree, &roster, &valid));
+        assert!(has_addable_device(&tree, &roster, &valid, &[key("alice", "a2")]));
+    }
+
+    /// Still dry: reconcile could only skip it again, so the sweep must not
+    /// wake one (every cold launch would otherwise pay a full reconcile).
+    #[test]
+    fn a_leafless_device_without_a_key_package_is_not_addable() {
+        let tree = [key("alice", "a1"), key("bob", "b1")];
+        let roster = roster(&["alice", "bob"]);
+        let valid = valid(&[("alice", "a1"), ("alice", "a2"), ("bob", "b1")]);
+        assert!(!has_addable_device(&tree, &roster, &valid, &[]));
+    }
+
+    /// A package from a revoked device, or from a user who is not on the roster,
+    /// is not a reason to reconcile — `desired_set` would not add either (#679).
+    #[test]
+    fn revoked_or_off_roster_packages_are_not_addable() {
+        let tree = [key("alice", "a1")];
+        let roster = roster(&["alice"]);
+        let valid = valid(&[("alice", "a1")]);
+        assert!(!has_addable_device(
+            &tree,
+            &roster,
+            &valid,
+            &[key("alice", "a2"), key("mallory", "m1")],
+        ));
+        assert!(!has_leafless_device(&tree, &roster, &valid));
+    }
+
+    /// A device already in the tree keeps unclaimed packages; that is the
+    /// normal state of every member and must read as settled.
+    #[test]
+    fn a_member_with_spare_key_packages_is_not_addable() {
+        let tree = [key("alice", "a1"), key("bob", "b1")];
+        let roster = roster(&["alice", "bob"]);
+        let valid = valid(&[("alice", "a1"), ("bob", "b1")]);
+        assert!(!has_leafless_device(&tree, &roster, &valid));
+        assert!(!has_addable_device(
+            &tree,
+            &roster,
+            &valid,
+            &[key("alice", "a1"), key("bob", "b1")],
         ));
     }
 }
