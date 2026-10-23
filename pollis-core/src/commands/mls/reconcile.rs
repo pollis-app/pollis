@@ -128,6 +128,7 @@ where
         .ok_or_else(|| {
             crate::error::Error::Other(anyhow::anyhow!("group missing at merge time"))
         })?;
+    crate::commands::file_keys::keep_epoch_kek(provider, &group);
     group
         .merge_pending_commit(provider)
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("reconcile merge: {e}")))?;
@@ -821,6 +822,7 @@ where
     // If a commit was staged, merge it locally. No-op runs leave the group
     // in Operational state with no pending commit, so the merge is skipped.
     if commit_data_opt.is_some() {
+        crate::commands::file_keys::keep_epoch_kek(provider, group);
         group
             .merge_pending_commit(provider)
             .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("reconcile merge: {e}")))?;
@@ -899,6 +901,7 @@ where
     .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("signer not found in mls_kv")))?;
 
     // Resolve pending commit.
+    crate::commands::file_keys::keep_epoch_kek(provider, &group);
     group
         .merge_pending_commit(provider)
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("merge pending: {e}")))?;
