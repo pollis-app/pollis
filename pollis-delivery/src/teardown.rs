@@ -114,6 +114,7 @@ pub const CONVERSATION_PURGED_TABLES: &[&str] = &[
     "mls_commit_since",
     "mls_group_info",
     "mls_welcome",
+    "file_keystate",
     "pin_keystate",
     "pinned_message",
     "push_handle",
@@ -172,6 +173,12 @@ pub const EXEMPT_FROM_USER_PURGE: &[(&str, &str)] = &[
          its conversation (CONVERSATION_PURGED_TABLES). Server-unreadable \
          ciphertext; `updated_by_device_id` is diagnostic, and any member's next \
          re-wrap replaces the row.",
+    ),    (
+        "file_keystate",
+        "Conversation-owned, not user-owned (#1382): the wrapped attachment key \
+         ring the REMAINING members unwrap to open the conversation's files. Goes \
+         with its conversation (CONVERSATION_PURGED_TABLES). Server-unreadable \
+         ciphertext; `updated_by_device_id` is diagnostic.",
     ),
 ];
 
@@ -476,6 +483,7 @@ pub async fn purge_conversation_rows(
     // no-ops where the id kind does not match.
     conn.execute("DELETE FROM pinned_message WHERE conversation_id = ?1", cid()).await?;
     conn.execute("DELETE FROM pin_keystate WHERE conversation_id = ?1", cid()).await?;
+    conn.execute("DELETE FROM file_keystate WHERE conversation_id = ?1", cid()).await?;
     Ok(())
 }
 
@@ -525,6 +533,7 @@ pub async fn purge_group(conn: &Connection, group_id: &str) -> anyhow::Result<Ve
     // a group is the group id itself (channels' pin rows went with
     // `purge_conversation_rows` above).
     conn.execute("DELETE FROM pin_keystate WHERE conversation_id = ?1", gid()).await?;
+    conn.execute("DELETE FROM file_keystate WHERE conversation_id = ?1", gid()).await?;
 
     // The anchor row last.
     conn.execute("DELETE FROM groups WHERE id = ?1", gid()).await?;
