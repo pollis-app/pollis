@@ -858,9 +858,13 @@ pub(crate) async fn upload_outbox_bytes(
 ) -> Result<MediaUploadResult> {
     // Test-harness only: the flows world has no R2, so a test that drives an
     // attachment send through the outbox gets the result an upload of these
-    // bytes would produce, without the PUT.
+    // bytes would produce, without the PUT. The ring key is still resolved
+    // exactly as a real upload resolves it, so a send that could not get the
+    // conversation's file key fails here as it would in production.
     #[cfg(feature = "test-harness")]
     if crate::commands::messages::test_hooks::uploads_stubbed() {
+        let (key_version, _key) =
+            upload_ring_key(state, &UploadScope::Conversation(conversation_id.to_string())).await?;
         let mut file_id = [0u8; 32];
         rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut file_id);
         let content_hash = hex::encode(file_id);
@@ -872,7 +876,7 @@ pub(crate) async fn upload_outbox_bytes(
             content_type,
             size_bytes: data.len(),
             content_hash,
-            key_version: 1,
+            key_version,
             sha256: hex::encode(sha256_bytes(&data)),
             blurhash: None,
             width: None,

@@ -706,6 +706,23 @@ encryption (key = HKDF(SHA-256(plaintext)), hash stored by the DS), under which
 the bucket and the DS could decrypt every attachment. Proof:
 `src-tauri/tests/flows/file_keys.rs` (mint, late join, rotation on removal).
 
+**A device without the ring is never stranded by epoch skew.** The wrap is bound
+to one epoch and openmls keeps no past exporter, so a device that had not adopted
+the ring used to be able to open the DS's wrap only while sitting at exactly that
+epoch. Two production strands followed (a 1:1 DM photo failing with "file key is
+not available on this device yet" while text went through): (1) *behind* — the
+upload runs before the send's catch-up, so a device one commit behind the peer's
+re-wrap failed every attempt, Retry included; (2) *ahead* — one commit of its own
+(the post-join self-update, a periodic leaf rotation) before the peer re-wrapped,
+and it was locked out until the peer came online. Now `upload_key` /
+`key_at_version` catch the conversation up and look again when they find no ring
+they can open, and every device keeps the file KEK of each epoch it leaves
+(`file_kek_history`, `keep_epoch_kek` before every merge) so it opens a wrap from
+any epoch it was a member at, then re-wraps at its own epoch. What is left — a
+wrap at an epoch from before this device joined, whose holders are all offline —
+is a wait, not a failure: the outbox keeps the send `pending`
+(`file_keys::FileKeyUnavailable`) and the next drain sends it.
+
 ## Multi-Device Enrollment
 
 When a new device (deviceC) enrolls for an existing user:

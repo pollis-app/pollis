@@ -1408,6 +1408,20 @@ at merge, so a device that lost its ring cannot reopen an old server wrap — on
 this row or a peer's fresh re-wrap restores it. Only a ring that came from a DS-
 accepted write or from unwrapping the DS's row is ever cached.
 
+### file_kek_history _(#1382)_
+- `mls_group_id` TEXT _(openmls group id: the conversation id, plus `#g<n>` on a migrated generation)_
+- `epoch` INTEGER
+- `kek` BLOB NOT NULL, `CHECK (length(kek) = 32)` _(that epoch's `export_secret("pollis-file-kek")`)_
+- PK `(mls_group_id, epoch)`; the newest 64 epochs per lineage are kept
+
+The file KEK of every epoch this device has LEFT, written right before each
+merge (`file_keys::keep_epoch_kek`; `every_merge_site_keeps_the_file_kek` pins
+every merge site) and before a lineage is deleted. Lets a device that had not
+adopted the ring yet open a wrap at any epoch it was a member at, instead of
+only while sitting at exactly that epoch — without it, one commit of its own
+before a key holder re-wrapped locked it out until that holder came online.
+Opens only wraps of keys the device was entitled to at that epoch.
+
 ### vault_entry_cache _(local cache, #107)_
 - `id` TEXT PK, `content` TEXT NOT NULL _(decrypted entry body — same shape as `message.content`)_, `pinned` INTEGER, `created_at` / `updated_at` TEXT
 

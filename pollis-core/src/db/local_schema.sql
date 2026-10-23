@@ -430,6 +430,23 @@ CREATE TABLE IF NOT EXISTS file_key_cache (
     updated_at               TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- The attachment ring's KEK (`export_secret("pollis-file-kek")`) of each epoch
+-- this device has LEFT, kept per MLS lineage (`mls_group_id` is the openmls
+-- group id: the conversation id, plus `#g<n>` on a migrated generation). The
+-- ring is wrapped under one epoch's KEK and openmls keeps no exporter for a
+-- past epoch, so without this a device that was not holding the ring could
+-- open the stored wrap only while sitting at exactly that epoch — one commit
+-- of its own before a key holder re-wrapped and it was locked out until that
+-- holder came back online. Written right before every merge
+-- (`file_keys::keep_epoch_kek`), bounded per lineage. A KEK opens only a wrap
+-- of keys this device was entitled to as a member at that epoch.
+CREATE TABLE IF NOT EXISTS file_kek_history (
+    mls_group_id TEXT NOT NULL,
+    epoch        INTEGER NOT NULL,
+    kek          BLOB NOT NULL CHECK (length(kek) = 32),
+    PRIMARY KEY (mls_group_id, epoch)
+);
+
 -- Decrypted vault entries (#107) — the local cache of the remote
 -- `vault_message` rows, which are ciphertext under a key derived from the
 -- account identity key. Unwrapped here for the same reason `message.content`

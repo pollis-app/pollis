@@ -40,7 +40,10 @@ use crate::state::AppState;
 
 use super::types::Message;
 
-/// `message.send_state` for a stored message not yet confirmed by the DS.
+/// `message.send_state` for a stored message not yet confirmed by the DS —
+/// including an attachment send whose only obstacle is that its
+/// conversation's file key has not reached this device yet
+/// (`file_keys::FileKeyUnavailable`): that is a wait, not a failure.
 pub(crate) const PENDING: &str = "pending";
 /// `message.send_state` once a delivery attempt has failed in a way a later
 /// one may not (offline, a 5xx, an outdated client).
@@ -598,10 +601,17 @@ pub(super) async fn settle(state: &Arc<AppState>, id: &str) -> Result<String> {
 /// Record a failed attempt — `rejected` when no retry can fix it, `failed`
 /// otherwise. Only an unsent row can fail: a delivered message is never
 /// demoted.
+#[cfg(test)]
 fn mark_failed_on(conn: &rusqlite::Connection, id: &str, permanent: bool) -> Result<()> {
+    mark_state_on(conn, id, if permanent { REJECTED } else { FAILED })
+}
+
+/// Set an unsent row's state. A delivered row (`send_state IS NULL`) is never
+/// touched.
+fn mark_state_on(conn: &rusqlite::Connection, id: &str, send_state: &str) -> Result<()> {
     conn.execute(
         "UPDATE message SET send_state = ?1 WHERE id = ?2 AND send_state IS NOT NULL",
-        rusqlite::params![if permanent { REJECTED } else { FAILED }, id],
+        rusqlite::params![send_state, id],
     )?;
     Ok(())
 }
@@ -731,6 +741,13 @@ async fn deliver_locked(
 
     let queued = match finish_uploads(state, queued).await {
         Ok(queued) => queued,
+        Err(e) if crate::commands::file_keys::is_file_key_unavailable(&e) => {
+            // Only the conversation's file key is missing: a key holder's
+            // re-wrap brings it, nothing about the message is wrong. It stays
+            // queued — not failed, no Retry — and the next drain sends it.
+            mark_state(state, id, PENDING).await;
+            return Err(e);
+        }
         Err(e) => {
             mark_failed(state, id, is_permanent(&e)).await;
             return Err(e);
@@ -749,10 +766,14 @@ async fn deliver_locked(
 }
 
 async fn mark_failed(state: &Arc<AppState>, id: &str, permanent: bool) {
+    mark_state(state, id, if permanent { REJECTED } else { FAILED }).await;
+}
+
+async fn mark_state(state: &Arc<AppState>, id: &str, send_state: &str) {
     let guard = state.local_db.lock().await;
     if let Some(db) = guard.as_ref() {
-        if let Err(mark) = mark_failed_on(db.conn(), id, permanent) {
-            crate::diag!("[outbox] could not mark {id} failed: {mark}");
+        if let Err(mark) = mark_state_on(db.conn(), id, send_state) {
+            crate::diag!("[outbox] could not mark {id} {send_state}: {mark}");
         }
     }
 }

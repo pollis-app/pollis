@@ -35,6 +35,24 @@
 //! first but at an older epoch, the mark is still unsatisfied and this device
 //! rotates again on top of it once it can open the newer ring.
 //!
+//! # Opening a wrap from an epoch this device has left
+//!
+//! The wrap is bound to ONE epoch, and openmls keeps no exporter for a past
+//! epoch (`max_past_epochs = 0`). A device that was not holding the ring could
+//! therefore open the DS's wrap only while sitting at exactly that epoch: one
+//! commit of its own (the post-join self-update, a periodic leaf rotation)
+//! before a key-holding peer re-wrapped, and it was locked out until that peer
+//! came online — in a 1:1 DM, until the other person opened the app. So every
+//! device keeps the file KEK of each epoch it leaves (`file_kek_history`,
+//! written by [`keep_epoch_kek`] right before every local merge; a source
+//! guard pins that every merge site does) and opens a wrap from any epoch it
+//! was a member at. That reveals nothing membership did not already give it:
+//! a wrap at epoch `e` holds only keys added at or before `e`, all of which a
+//! member at `e` was entitled to, and the ring itself sits in the same
+//! encrypted database once adopted. A removed member still cannot reach the
+//! key added at its removal — that key is only ever wrapped at the
+//! post-removal epoch, which it never entered.
+//!
 //! # Forks are unrepresentable
 //!
 //! The DS sees the ring's length and refuses every write that would fork it
@@ -206,6 +224,73 @@ fn current_kek(conn: &Connection, mls_conversation_id: &str) -> Option<Kek> {
     })
 }
 
+// ── KEKs of epochs this device has left ──────────────────────────────────────
+
+/// How many past epochs' KEKs a device keeps per MLS group (lineage). A wrap
+/// is re-wrapped by every key holder whenever its epoch advances, so the epoch
+/// it sits at is almost always recent; the bound only keeps a long-lived group
+/// from growing the table without limit.
+const KEPT_KEKS_PER_GROUP: i64 = 64;
+
+/// Keep `group`'s current file KEK before a merge moves it past this epoch.
+/// Called by every site that merges a commit (`every_merge_site_keeps_the_file_kek`
+/// pins that), so this device can still open a ring wrapped at any epoch it
+/// was a member at. Best-effort: a failure here costs only the ability to open
+/// a wrap from this one epoch, and must never block the merge.
+pub(crate) fn keep_epoch_kek<C>(
+    provider: &super::mls::provider::MlsProvider<'_, C>,
+    group: &openmls::prelude::MlsGroup,
+) where
+    C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
+    let lineage = String::from_utf8_lossy(group.group_id().as_slice()).to_string();
+    let epoch = group.epoch().as_u64() as i64;
+    let kek = match group.export_secret(provider.crypto(), FILE_KEK_EXPORT_LABEL, &[], KEY_LEN) {
+        Ok(k) => Zeroizing::new(k),
+        Err(e) => {
+            crate::diag!("[file-keys] could not export the KEK of {lineage} at epoch {epoch}: {e}");
+            return;
+        }
+    };
+    if let Err(e) = remember_kek(provider.raw_conn(), &lineage, epoch, &kek) {
+        crate::diag!("[file-keys] could not keep the KEK of {lineage} at epoch {epoch}: {e}");
+    }
+}
+
+fn remember_kek(conn: &Connection, lineage: &str, epoch: i64, kek: &[u8]) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT OR IGNORE INTO file_kek_history (mls_group_id, epoch, kek) VALUES (?1, ?2, ?3)",
+        rusqlite::params![lineage, epoch, kek],
+    )?;
+    conn.execute(
+        "DELETE FROM file_kek_history WHERE mls_group_id = ?1 AND epoch NOT IN \
+             (SELECT epoch FROM file_kek_history WHERE mls_group_id = ?1 \
+              ORDER BY epoch DESC LIMIT ?2)",
+        rusqlite::params![lineage, KEPT_KEKS_PER_GROUP],
+    )?;
+    Ok(())
+}
+
+/// The KEK this device kept for `(generation, epoch)` of the conversation, if
+/// it was a member there and has not pruned it.
+fn kept_kek(
+    conn: &Connection,
+    mls_conversation_id: &str,
+    generation: i64,
+    epoch: i64,
+) -> Option<Zeroizing<Vec<u8>>> {
+    let lineage = super::mls::generation::mls_group_id_str(mls_conversation_id, generation);
+    conn.query_row(
+        "SELECT kek FROM file_kek_history WHERE mls_group_id = ?1 AND epoch = ?2",
+        rusqlite::params![lineage, epoch],
+        |row| row.get::<_, Vec<u8>>(0),
+    )
+    .optional()
+    .ok()
+    .flatten()
+    .map(Zeroizing::new)
+}
+
 // ── Local cache ──────────────────────────────────────────────────────────────
 
 struct Cached {
@@ -303,9 +388,10 @@ async fn post_ring(
 }
 
 /// Unwrap the DS's current ring into the cache when this device is at the
-/// epoch it was wrapped at. `Ok(None)` when there is no row, or the row was
-/// wrapped at an epoch this device has no exporter for (a key-holding member's
-/// next re-wrap heals that).
+/// epoch it was wrapped at, or was at it and kept that epoch's KEK. `Ok(None)`
+/// when there is no row, or the row was wrapped at an epoch this device has no
+/// KEK for: one it has not reached yet (a catch-up heals that), or one from
+/// before it joined (a key-holding member's next re-wrap heals that).
 async fn adopt_from_server(
     state: &Arc<AppState>,
     mls_conversation_id: &str,
@@ -321,19 +407,22 @@ async fn adopt_from_server(
     let db = guard
         .as_ref()
         .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
-    let Some(kek) = current_kek(db.conn(), mls_conversation_id) else {
-        return Ok(None);
+    let kek = match current_kek(db.conn(), mls_conversation_id) {
+        Some(k) if (k.generation, k.epoch) == (ks.generation, ks.epoch) => k.kek,
+        _ => match kept_kek(db.conn(), mls_conversation_id, ks.generation, ks.epoch) {
+            Some(k) => k,
+            None => return Ok(None),
+        },
     };
-    if ks.generation != kek.generation || ks.epoch != kek.epoch {
-        return Ok(None);
-    }
-    let ring = Ring::from_bytes(open(&kek.kek, &nonce, &wrapped)?)?;
+    let ring = Ring::from_bytes(open(&kek, &nonce, &wrapped)?)?;
     if ring.version() != ks.key_version {
         return Err(Error::Crypto(
             "file key ring length disagrees with the stored key_version".into(),
         ));
     }
-    write_cache(db.conn(), mls_conversation_id, &ring, kek.generation, kek.epoch)?;
+    // Marked as wrapped where the DS's copy is: a device that opened it with a
+    // kept KEK is behind, and its next re-wrap moves the DS's copy forward.
+    write_cache(db.conn(), mls_conversation_id, &ring, ks.generation, ks.epoch)?;
     Ok(read_cache(db.conn(), mls_conversation_id)?.map(|c| c.ring))
 }
 
@@ -483,6 +572,12 @@ pub async fn maybe_rewrap_file_keys(state: &Arc<AppState>, mls_conversation_id: 
     if let Err(e) = settle_owed_rotation(state, mls_conversation_id, &user_id).await {
         crate::diag!("[file-keys] owed rotation failed for {mls_conversation_id} (will retry): {e}");
     }
+    rewrap_if_behind(state, mls_conversation_id, &user_id).await;
+}
+
+/// Post the cached ring wrapped at this device's current epoch when the last
+/// wrap it knows of is older. One local SELECT when it is not.
+async fn rewrap_if_behind(state: &Arc<AppState>, mls_conversation_id: &str, user_id: &str) {
     let staged = {
         let guard = state.local_db.lock().await;
         let Some(db) = guard.as_ref() else {
@@ -505,7 +600,7 @@ pub async fn maybe_rewrap_file_keys(state: &Arc<AppState>, mls_conversation_id: 
         (cached.ring, kek)
     };
     let (ring, kek) = staged;
-    match post_ring(state, mls_conversation_id, &ring, &kek, &user_id, FileKeystateOp::Rewrap).await {
+    match post_ring(state, mls_conversation_id, &ring, &kek, user_id, FileKeystateOp::Rewrap).await {
         Ok(true) => {
             let guard = state.local_db.lock().await;
             if let Some(db) = guard.as_ref() {
@@ -517,7 +612,7 @@ pub async fn maybe_rewrap_file_keys(state: &Arc<AppState>, mls_conversation_id: 
         Ok(false) => {
             // Somebody wrapped at this epoch already, or rotated: pick up a
             // longer ring if there is one.
-            if let Err(e) = adopt_from_server(state, mls_conversation_id, &user_id).await {
+            if let Err(e) = adopt_from_server(state, mls_conversation_id, user_id).await {
                 crate::diag!("[file-keys] adopt after refused re-wrap failed for {mls_conversation_id}: {e}");
             }
         }
@@ -551,6 +646,57 @@ pub async fn mint_file_keys_for_new_group(state: &Arc<AppState>, mls_conversatio
 
 // ── What uploads and downloads call ──────────────────────────────────────────
 
+/// A send needs the conversation's file key and this device cannot reach it
+/// yet: the only wrap is at an epoch it holds no KEK for, and only a key
+/// holder's next re-wrap fixes that. Not a failure of the message — the
+/// outbox keeps it queued and its next drain sends it.
+#[derive(Debug)]
+pub struct FileKeyUnavailable;
+
+impl std::fmt::Display for FileKeyUnavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(
+            "this conversation's file key has not reached this device yet — \
+             the attachment will send as soon as it does",
+        )
+    }
+}
+
+impl std::error::Error for FileKeyUnavailable {}
+
+fn file_key_unavailable() -> Error {
+    Error::Other(anyhow::Error::new(FileKeyUnavailable))
+}
+
+/// Whether `e` is the wait for the conversation's file key, and nothing else.
+pub fn is_file_key_unavailable(e: &Error) -> bool {
+    matches!(e, Error::Other(any) if any.downcast_ref::<FileKeyUnavailable>().is_some())
+}
+
+/// [`ensure_ring`], and when that finds no ring this device can open, once
+/// more after catching the conversation up: the wrap may be at an epoch this
+/// device has not reached yet. An upload runs BEFORE the send's own catch-up,
+/// so without this a device one commit behind a peer's re-wrap failed every
+/// attempt, Retry included. Callers must hold no MLS lock (the catch-up takes
+/// it).
+async fn ensure_ring_caught_up(
+    state: &Arc<AppState>,
+    mls_conversation_id: &str,
+    user_id: &str,
+    mint_if_absent: bool,
+) -> Result<Option<Ring>> {
+    if let Some(ring) = ensure_ring(state, mls_conversation_id, user_id, mint_if_absent).await? {
+        return Ok(Some(ring));
+    }
+    if let Err(e) =
+        crate::commands::messages::catch_up_mls_group_interleaved(state, mls_conversation_id, user_id)
+            .await
+    {
+        crate::diag!("[file-keys] catch-up before re-reading the ring of {mls_conversation_id} failed: {e}");
+    }
+    ensure_ring(state, mls_conversation_id, user_id, mint_if_absent).await
+}
+
 /// The key and version a NEW upload to this conversation must use: the ring's
 /// newest key, after settling any rotation this device owes.
 pub(crate) async fn upload_key(
@@ -558,15 +704,14 @@ pub(crate) async fn upload_key(
     mls_conversation_id: &str,
     user_id: &str,
 ) -> Result<(i64, Zeroizing<[u8; KEY_LEN]>)> {
-    let ring = ensure_ring(state, mls_conversation_id, user_id, true)
+    let ring = ensure_ring_caught_up(state, mls_conversation_id, user_id, true)
         .await?
-        .ok_or_else(|| {
-            Error::Other(anyhow::anyhow!(
-                "this conversation's file key is not available on this device yet — \
-                 try again once it syncs"
-            ))
-        })?;
+        .ok_or_else(file_key_unavailable)?;
     settle_owed_rotation(state, mls_conversation_id, user_id).await?;
+    // A ring opened with a kept KEK is wrapped at an epoch this device has
+    // left: move the DS's copy to this epoch now, so every other device at it
+    // can open it too.
+    rewrap_if_behind(state, mls_conversation_id, user_id).await;
     // Prefer the latest ring after any rotation; fall back to the one we have.
     let ring = cached_ring(state, mls_conversation_id)
         .await?
@@ -585,7 +730,7 @@ pub(crate) async fn key_at_version(
     user_id: &str,
     version: i64,
 ) -> Result<Zeroizing<[u8; KEY_LEN]>> {
-    if let Some(key) = ensure_ring(state, mls_conversation_id, user_id, false)
+    if let Some(key) = ensure_ring_caught_up(state, mls_conversation_id, user_id, false)
         .await?
         .and_then(|r| r.key(version))
     {

@@ -301,6 +301,7 @@ where
 
     // A dangling pending commit from an earlier aborted pass would make
     // `commit_builder` refuse; resolve it the same way reconcile does.
+    crate::commands::file_keys::keep_epoch_kek(provider, &group);
     group
         .merge_pending_commit(provider)
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("self-update merge pending: {e}")))?;
