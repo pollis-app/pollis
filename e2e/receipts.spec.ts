@@ -12,7 +12,9 @@
  * (icon geometry and computed colour), not on the state attribute — an
  * attribute-only assertion would pass even if both states drew the same tick.
  *
- * Every test runs in BOTH skins.
+ * The tick is drawn only in the refined skin. The terminal skin shows no
+ * receipts at all — same data, same query, nothing on screen — and the last
+ * block below pins that down.
  *
  *   pnpm --filter @pollis/e2e exec playwright test -c playwright.config.js
  */
@@ -39,8 +41,7 @@ const MSG_EVERYONE = "01HQ7Z3K9M2P5R8T1V4W6Y0EVR";
 // here the DM-only rule is being enforced nowhere but in the query.
 const CHANNEL_MSG = "01HQ7Z3K9M2P5R8T1V4W6Y0CHM";
 
-const SKINS = ["terminal", "refined"] as const;
-type Skin = (typeof SKINS)[number];
+type Skin = "terminal" | "refined";
 
 const permalink = (conversationId: string, messageId: string) =>
   `pollis://m/${conversationId}/${messageId}`;
@@ -204,120 +205,141 @@ async function indicatorShape(page: Page, messageId: string) {
   }, messageId);
 }
 
-for (const skin of SKINS) {
-  test.describe(`DM receipts — ${skin} skin`, () => {
-    test("a delivered-but-unread message shows a single muted tick", async ({ page }) => {
-      await boot(page, skin);
-      await gotoViaPermalink(page, DM_ID, MSG_DELIVERED);
+const skin: Skin = "refined";
 
-      const indicator = page.getByTestId(`receipt-${MSG_DELIVERED}`);
-      await expect(indicator).toBeVisible();
+test.describe("DM receipts — refined skin", () => {
+  test("a delivered-but-unread message shows a single muted tick", async ({ page }) => {
+    await boot(page, skin);
+    await gotoViaPermalink(page, DM_ID, MSG_DELIVERED);
 
-      const shape = await indicatorShape(page, MSG_DELIVERED);
-      expect(shape?.state).toBe("delivered");
-      expect(shape?.label).toBe("Delivered to 1 of 1");
-      // A single peer needs no fraction — "1/1" beside a tick is noise.
-      expect(shape?.text).toBe("");
-      expect(shape?.strokes).toBe(1);
+    const indicator = page.getByTestId(`receipt-${MSG_DELIVERED}`);
+    await expect(indicator).toBeVisible();
 
-      await page
-        .getByTestId(`message-${MSG_DELIVERED}`)
-        .screenshot({ path: `artifacts/receipt-delivered-${skin}.png` });
-    });
+    const shape = await indicatorShape(page, MSG_DELIVERED);
+    expect(shape?.state).toBe("delivered");
+    expect(shape?.label).toBe("Delivered to 1 of 1");
+    // A single peer needs no fraction — "1/1" beside a tick is noise.
+    expect(shape?.text).toBe("");
+    expect(shape?.strokes).toBe(1);
 
-    test("a read message shows a double tick in the accent colour", async ({ page }) => {
-      await boot(page, skin);
-      await gotoViaPermalink(page, DM_ID, MSG_READ);
+    await page
+      .getByTestId(`message-${MSG_DELIVERED}`)
+      .screenshot({ path: `artifacts/receipt-delivered-${skin}.png` });
+  });
 
-      const indicator = page.getByTestId(`receipt-${MSG_READ}`);
-      await expect(indicator).toBeVisible();
+  test("a read message shows a double tick in the accent colour", async ({ page }) => {
+    await boot(page, skin);
+    await gotoViaPermalink(page, DM_ID, MSG_READ);
 
-      const shape = await indicatorShape(page, MSG_READ);
-      expect(shape?.state).toBe("read-all");
-      expect(shape?.label).toBe("Read by everyone");
-      expect(shape?.strokes).toBe(2);
+    const indicator = page.getByTestId(`receipt-${MSG_READ}`);
+    await expect(indicator).toBeVisible();
 
-      await page
-        .getByTestId(`message-${MSG_READ}`)
-        .screenshot({ path: `artifacts/receipt-read-${skin}.png` });
-    });
+    const shape = await indicatorShape(page, MSG_READ);
+    expect(shape?.state).toBe("read-all");
+    expect(shape?.label).toBe("Read by everyone");
+    expect(shape?.strokes).toBe(2);
 
-    test("delivered and read are visually distinct, not just semantically", async ({
-      page,
-    }) => {
-      await boot(page, skin);
-      await gotoViaPermalink(page, DM_ID, MSG_DELIVERED);
+    await page
+      .getByTestId(`message-${MSG_READ}`)
+      .screenshot({ path: `artifacts/receipt-read-${skin}.png` });
+  });
 
-      // Both messages are in the same DM, so both indicators are on screen at
-      // once — exactly how a user would compare them.
-      const delivered = await indicatorShape(page, MSG_DELIVERED);
-      const read = await indicatorShape(page, MSG_READ);
-      expect(delivered).not.toBeNull();
-      expect(read).not.toBeNull();
+  test("delivered and read are visually distinct, not just semantically", async ({
+    page,
+  }) => {
+    await boot(page, skin);
+    await gotoViaPermalink(page, DM_ID, MSG_DELIVERED);
 
-      // Two independent channels of difference. Either alone would be a weak
-      // signal — colour alone fails for a colour-blind user, glyph alone is
-      // easy to miss at 14px — so the feature must carry both.
-      expect(delivered!.strokes).not.toBe(read!.strokes);
-      expect(delivered!.color).not.toBe(read!.color);
-      // And the accessible name must not require the user to see either.
-      expect(delivered!.label).not.toBe(read!.label);
+    // Both messages are in the same DM, so both indicators are on screen at
+    // once — exactly how a user would compare them.
+    const delivered = await indicatorShape(page, MSG_DELIVERED);
+    const read = await indicatorShape(page, MSG_READ);
+    expect(delivered).not.toBeNull();
+    expect(read).not.toBeNull();
 
-      await page.screenshot({
-        path: `artifacts/receipt-delivered-vs-read-${skin}.png`,
-        fullPage: true,
-      });
-    });
+    // Two independent channels of difference. Either alone would be a weak
+    // signal — colour alone fails for a colour-blind user, glyph alone is
+    // easy to miss at 14px — so the feature must carry both.
+    expect(delivered!.strokes).not.toBe(read!.strokes);
+    expect(delivered!.color).not.toBe(read!.color);
+    // And the accessible name must not require the user to see either.
+    expect(delivered!.label).not.toBe(read!.label);
 
-    test("a group channel message shows no indicator at all", async ({ page }) => {
-      await boot(page, skin);
-      await openCommandPalette(page);
-      await page.getByTestId("search-panel-input").fill("general");
-      await page.keyboard.press("Enter");
-
-      const row = page.getByTestId(`message-${CHANNEL_MSG}`);
-      await expect(row).toBeVisible();
-
-      // The message is the viewer's own AND has seeded receipts, so isOwn and
-      // "receipts exist" are both true — the DM-only rule is the only thing
-      // that can be suppressing this.
-      await expect(page.getByTestId(`receipt-${CHANNEL_MSG}`)).toHaveCount(0);
-      await expect(row.locator('[data-receipt-state]')).toHaveCount(0);
-
-      await page.screenshot({
-        path: `artifacts/receipt-channel-none-${skin}.png`,
-        fullPage: true,
-      });
-    });
-
-    test("a multi-participant DM renders per-reader state, not a boolean", async ({
-      page,
-    }) => {
-      await boot(page, skin);
-      await gotoViaPermalink(page, GROUP_DM_ID, MSG_PARTIAL);
-
-      // Two of three peers have read it. A single boolean tick could only say
-      // "read" or "not read"; both would misrepresent three people.
-      const partial = await indicatorShape(page, MSG_PARTIAL);
-      expect(partial?.state).toBe("read-some");
-      expect(partial?.text).toBe("2/3");
-      expect(partial?.label).toBe("Read by 2 of 3");
-
-      // The all-read case in the same conversation reads differently, which is
-      // what proves the fraction is derived from the reader set rather than
-      // being decorative.
-      const everyone = await indicatorShape(page, MSG_EVERYONE);
-      expect(everyone?.state).toBe("read-all");
-      expect(everyone?.text).toBe("3/3");
-      expect(everyone?.label).toBe("Read by everyone");
-
-      // Partial is not dressed up as complete.
-      expect(partial?.color).not.toBe(everyone?.color);
-
-      await page.screenshot({
-        path: `artifacts/receipt-group-dm-${skin}.png`,
-        fullPage: true,
-      });
+    await page.screenshot({
+      path: `artifacts/receipt-delivered-vs-read-${skin}.png`,
+      fullPage: true,
     });
   });
-}
+
+  test("a group channel message shows no indicator at all", async ({ page }) => {
+    await boot(page, skin);
+    await openCommandPalette(page);
+    await page.getByTestId("search-panel-input").fill("general");
+    await page.keyboard.press("Enter");
+
+    const row = page.getByTestId(`message-${CHANNEL_MSG}`);
+    await expect(row).toBeVisible();
+
+    // The message is the viewer's own AND has seeded receipts, so isOwn and
+    // "receipts exist" are both true — the DM-only rule is the only thing
+    // that can be suppressing this.
+    await expect(page.getByTestId(`receipt-${CHANNEL_MSG}`)).toHaveCount(0);
+    await expect(row.locator('[data-receipt-state]')).toHaveCount(0);
+
+    await page.screenshot({
+      path: `artifacts/receipt-channel-none-${skin}.png`,
+      fullPage: true,
+    });
+  });
+
+  test("a multi-participant DM renders per-reader state, not a boolean", async ({
+    page,
+  }) => {
+    await boot(page, skin);
+    await gotoViaPermalink(page, GROUP_DM_ID, MSG_PARTIAL);
+
+    // Two of three peers have read it. A single boolean tick could only say
+    // "read" or "not read"; both would misrepresent three people.
+    const partial = await indicatorShape(page, MSG_PARTIAL);
+    expect(partial?.state).toBe("read-some");
+    expect(partial?.text).toBe("2/3");
+    expect(partial?.label).toBe("Read by 2 of 3");
+
+    // The all-read case in the same conversation reads differently, which is
+    // what proves the fraction is derived from the reader set rather than
+    // being decorative.
+    const everyone = await indicatorShape(page, MSG_EVERYONE);
+    expect(everyone?.state).toBe("read-all");
+    expect(everyone?.text).toBe("3/3");
+    expect(everyone?.label).toBe("Read by everyone");
+
+    // Partial is not dressed up as complete.
+    expect(partial?.color).not.toBe(everyone?.color);
+
+    await page.screenshot({
+      path: `artifacts/receipt-group-dm-${skin}.png`,
+      fullPage: true,
+    });
+  });
+});
+
+test.describe("DM receipts — terminal skin", () => {
+  test("no delivery or read indicator renders on any message", async ({ page }) => {
+    await boot(page, "terminal");
+
+    // Every seeded receipt state is present (delivered, read, partial, all
+    // read), so an indicator would render here if the skin gate were missing.
+    await gotoViaPermalink(page, DM_ID, MSG_DELIVERED);
+    await expect(page.getByTestId(`message-${MSG_READ}`)).toBeVisible();
+    await expect(page.locator("[data-receipt-state]")).toHaveCount(0);
+
+    await gotoViaPermalink(page, GROUP_DM_ID, MSG_PARTIAL);
+    await expect(page.getByTestId(`message-${MSG_EVERYONE}`)).toBeVisible();
+    await expect(page.locator("[data-receipt-state]")).toHaveCount(0);
+
+    await page.screenshot({
+      path: "artifacts/receipt-none-terminal.png",
+      fullPage: true,
+    });
+  });
+});
