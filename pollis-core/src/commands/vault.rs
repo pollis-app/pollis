@@ -25,8 +25,9 @@
 //! the ciphertext: pin/unpin is a re-encrypt-and-save the server cannot
 //! distinguish from an edit.
 //!
-//! Attachments ride the normal upload pipeline (`commands::r2`), which
-//! stores convergent ciphertext in the shared `media/` domain. What keeps a
+//! Attachments ride the normal upload pipeline (`commands::r2`), sealed under
+//! the Vault file key (`vault_file_root_key`, derived from the account
+//! identity key like the entry key, #1382) in the shared `media/` domain. What keeps a
 //! vault-held object from being garbage-collected out from under the entry
 //! is the `attachment_hashes` list on every save: the DS maintains
 //! `vault_attachment_ref` rows from it and its GC liveness predicate counts
@@ -99,6 +100,28 @@ fn derive_vault_key(account_seed: &[u8], user_id: &str) -> Zeroizing<[u8; 32]> {
     hk.expand(VAULT_HKDF_INFO, out.as_mut())
         .expect("HKDF-SHA256 expand 32 bytes is always valid");
     out
+}
+
+/// HKDF info for the root key Vault ATTACHMENTS are sealed under (#1382).
+/// Distinct from [`VAULT_HKDF_INFO`] so the entry key and the file key can
+/// never be confused.
+const VAULT_FILES_HKDF_INFO: &[u8] = b"pollis-vault-files-v1";
+
+/// The root key Vault attachments are sealed under: derived from the account
+/// identity key exactly like the entry key, so every enrolled device can open
+/// every Vault file and the DS, which has never held the account key, cannot.
+/// Each file then derives its own key from this and its random file id
+/// (`file_keys::derive_file_key`).
+pub(crate) async fn vault_file_root_key(
+    state: &Arc<AppState>,
+    user_id: &str,
+) -> Result<Zeroizing<[u8; 32]>> {
+    let seed = account_seed(state, user_id).await?;
+    let hk = Hkdf::<Sha256>::new(Some(user_id.as_bytes()), &seed);
+    let mut out = Zeroizing::new([0u8; 32]);
+    hk.expand(VAULT_FILES_HKDF_INFO, out.as_mut())
+        .expect("HKDF-SHA256 expand 32 bytes is always valid");
+    Ok(out)
 }
 
 /// This device's copy of the account identity key seed, as HKDF input.

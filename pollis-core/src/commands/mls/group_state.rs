@@ -788,6 +788,7 @@ async fn external_join_attempt(
     // re-wraps — but when the wrap somehow already matches (a re-join into a
     // quiet group), this picks it up now.
     crate::commands::pinned_messages::try_adopt_pin_key(state, conversation_id).await;
+    crate::commands::file_keys::try_adopt_file_keys(state, conversation_id).await;
 
     crate::diag!(
         "[mls] external_join_group: {user_id}:{device_id} joined {conversation_id} from epoch {stored_epoch}"
@@ -1235,6 +1236,7 @@ pub async fn init_mls_group(
     // Mint the conversation's pin master key while the creator is the sole
     // member at epoch 0 (#99). Best-effort: on failure the first pin mints.
     crate::commands::pinned_messages::mint_pin_key_for_new_group(state, conversation_id).await;
+    crate::commands::file_keys::mint_file_keys_for_new_group(state, conversation_id).await;
 
     Ok(())
 }
@@ -2185,6 +2187,7 @@ async fn process_one_generation<'h>(
             // Same trigger for the pin key: the successor lineage has a fresh
             // exporter, so a cached Kpin must be re-wrapped under it (#99).
             crate::commands::pinned_messages::maybe_rewrap_pin_key(state, mls_group_id).await;
+            crate::commands::file_keys::maybe_rewrap_file_keys(state, mls_group_id).await;
             return Ok(true);
         }
     }
@@ -2206,6 +2209,7 @@ async fn process_one_generation<'h>(
     // keyless device (an external joiner, a new enrollee) can unwrap at the
     // current epoch. One local SELECT in the steady state.
     crate::commands::pinned_messages::maybe_rewrap_pin_key(state, mls_group_id).await;
+    crate::commands::file_keys::maybe_rewrap_file_keys(state, mls_group_id).await;
 
     if any_applied {
         // Voice E2EE: when the epoch advances for the MLS group currently

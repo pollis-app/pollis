@@ -7,8 +7,9 @@ bytes reach the WebView **without** riding Tauri's IPC `Channel` — per-frame J
 dispatch stalls on V8 GC, so bulk media is served over loopback instead. Two
 token-gated routes (same secret, 403 on anything else):
 
-- **`GET /{token}/{hash}`** (`serve_media`) — the decrypted bytes of a cached,
-  content-addressed media file, honouring single-range `Range` requests. The
+- **`GET /{token}/{hash}`** (`serve_media`) — the decrypted bytes of a cached
+  media file (`{hash}` is the attachment's random file id since #1382; for public
+  objects and emoji it is still a content digest), honouring single-range `Range` requests. The
   decrypted plaintext is handed out as a `Bytes` (`Bytes::from(Vec)`), so a range
   slice is a zero-copy view into it.
 - **`GET /ws/screenshare/{token}`** (`ws_screenshare`) — a WebSocket that streams
@@ -39,8 +40,8 @@ avatars had to stop living at a mutable `avatars/{user_id}` key first.
 ## Saving an attachment out of the app
 
 The loopback route is for RENDERING. "Save attachment as…" does not use it:
-`commands::r2::save_media_to_path` downloads, decrypts, verifies the content
-hash, and writes the file itself, so the bytes never round-trip through the
+`commands::r2::save_media_to_path` downloads, decrypts, verifies the plaintext
+SHA-256 carried in the attachment reference (`sha256`), and writes the file itself, so the bytes never round-trip through the
 webview.
 
 That is not only a bandwidth point. An attachment is a file a stranger sent, and
@@ -214,8 +215,9 @@ read via `frame_fanout_counters()`.
 
 A sandboxed React Native app cannot serve or fetch `http://127.0.0.1`
 (App Transport Security, Android cleartext rules), so mobile takes the
-file-path route instead: the uniffi bridge's `get_media_path` decrypts the
-R2 object to `<cacheDirectory>/pollis-media/<content_hash>` and returns a
+file-path route instead: the uniffi bridge's `get_media_path(r2Key, contentHash, sha256, keyScope, destDir)`
+decrypts the R2 object to `<cacheDirectory>/pollis-media/<content_hash>` (the file
+id) and returns a
 `file://` path; `mobile/lib/media/cache.ts` ref-counts it and unlinks the
 plaintext on the last release (`useMediaUri`).
 

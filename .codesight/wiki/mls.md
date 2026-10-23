@@ -660,6 +660,33 @@ removal. Rotating `Kpin` on removal would close that at O(pins) re-encryption
 per membership change — the issue explicitly traded that away, since a removed
 member could equally have cached every plaintext it ever saw.
 
+## Attachment file key ring (#1382)
+
+Attachments are sealed under a per-conversation **file key ring**
+(`commands/file_keys.rs`), built exactly like `Kpin` above: random 32-byte keys,
+stored server-side only WRAPPED under `export_secret("pollis-file-kek", &[], 32)`
+in `file_keystate` with the same `(generation, epoch)` CAS and head ceiling, and
+cached unwrapped in the local `file_key_cache`. Its hooks sit beside the pin
+key's: `maybe_rewrap_file_keys` at every epoch-advance site (committer reconcile,
+receiver replay, self-update, suite migration) and the catch-up backstop;
+`try_adopt_file_keys` right after a Welcome or external join;
+`mint_file_keys_for_new_group` at creation (insert-only mint, `key_version = 1`).
+So every current member — including one that joined later, by external commit, or
+on a newly enrolled device — opens every file the conversation ever shared.
+
+The one difference: **the ring rotates on removal.** The device that commits a
+removal (`reconcile.rs` → `file_keys::on_member_removed`) records a durable
+"rotation owed at `(g, e)`" mark, then appends one fresh key wrapped at the
+post-removal epoch; uploads always use the newest key and record its version
+(`kv`) in the MLS-encrypted `_att` reference, so a removed member who kept the
+old ring cannot open files posted afterwards. Old files are not re-encrypted. The
+DS refuses every fork (re-wrap keeps `key_version`; rotate is exactly `+1`), and
+the mark clears only once the ring holds a key added at or after `(g, e)`, so two
+racing removals cannot leave a removal un-rotated. This replaced convergent
+encryption (key = HKDF(SHA-256(plaintext)), hash stored by the DS), under which
+the bucket and the DS could decrypt every attachment. Proof:
+`src-tauri/tests/flows/file_keys.rs` (mint, late join, rotation on removal).
+
 ## Multi-Device Enrollment
 
 When a new device (deviceC) enrolls for an existing user:
@@ -743,7 +770,9 @@ SQLCipher database, under the session's `db_key` — never a file (#1000). Until
 they are uploaded the row holds a provisional `_att` envelope with no `key`,
 which both renderers draw as pending. Delivery (`outbox::finish_uploads`)
 uploads them one at a time — each blob read just before its upload and moved
-into it (convergent, so a repeat after a kill dedupes) — swaps in the finished
+into it (a repeat after a kill uploads a NEW object under a fresh random file id
+— #1382 ended convergent dedup — and the orphaned first object is collected by the
+DS sweep once nothing references it) — swaps in the finished
 envelope, byte for byte the renderers' encoding, and drops the bytes in one
 transaction, then posts. A keep-data sign-out keeps queued attachment messages
 exactly as it keeps queued text — they sit in the per-user SQLCipher database,

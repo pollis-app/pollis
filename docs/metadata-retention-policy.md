@@ -134,8 +134,9 @@ DB, split out in #420 Goal A).
 | Abuse reports and suspensions (#1213) | `user_report` (reporter, reported account, reason, optional conversation/message ids — never content), `account_suspension` | Until the reporter or reported account is deleted (reports, both directions) / until the operator lifts it or the account is deleted (suspension) | `teardown.rs` `purge_user_rows`; operator: `scripts/suspend-account.sh` |
 | Membership and social graph | `group_member`, `dm_channel_member`, `groups`, `channels`, `dm_channel`, `user_block`, `group_invite`, `group_join_request`, `group_invite_link`, `group_invite_link_redemption`, `group_emoji`, `account_recovery`, `user_preferences`, `device_enrollment_request` | Life of the account / conversation; **explicitly deleted** on account deletion and on group/DM teardown, table by table | `teardown.rs` `purge_user_rows` / `purge_group` / `purge_dm_channel`, enumerated in `USER_PURGED_TABLES` |
 | Security events | `security_event` (`id`, `user_id`, `kind`, `device_id`, `created_at`, `metadata`) | **90 days** since #762 (`POLLIS_DS_SECURITY_EVENT_RETENTION_DAYS`, §9); also **explicitly deleted** on account deletion | `messages.rs` `sweep_aged_records`; `teardown.rs` `purge_user_rows` |
-| Attachment dedup index | `attachment_object` (`content_hash` → `r2_key`) | **Reference-counted (#690):** collected only when no still-existing message references the hash — the same predicate for every caller, with no uploader identity in it. Migration `000031` briefly recorded `uploaded_by` (and `attachment_ref.registered_by`) to grant the uploader an exemption; both columns are dead and their values cleared since `000032`, so the DS holds no "which account stored this object" linkage. | `messages.rs` `apply_delete_attachment` (conditional `NOT EXISTS (attachment_ref ⋈ message_envelope)`), `000032_attachment_ownership_retired.sql` |
-| Attachment references | `attachment_ref` (`content_hash`, `message_id`) | One declaration per (message that carries a file). The count is **derived** — a declaration counts only while its `message_envelope` exists — so a reference is released by deleting the message envelope (self/admin delete, envelope GC #689, retention #720, teardown), never by a dedicated call, and cannot outlive its message. Orphaned/forged declarations are reaped by `sweep_envelope_gc`. **New at-rest linkage — see the note below.** | `messages.rs` (`object_is_referenced`, `sweep_envelope_gc`), `000012_attachment_ref.sql` |
+| Attachment object index | `attachment_object` (`content_hash` → `r2_key`; since #1382 `content_hash` holds the object's **random per-upload file id**, not a hash of the content) | **Reference-counted (#690):** collected only when no still-existing message references the file id — the same predicate for every caller, with no uploader identity in it. Migration `000031` briefly recorded `uploaded_by` (and `attachment_ref.registered_by`) to grant the uploader an exemption; both columns are dead and their values cleared since `000032`, so the DS holds no "which account stored this object" linkage. | `messages.rs` `apply_delete_attachment` (conditional `NOT EXISTS (attachment_ref ⋈ message_envelope)`), `000032_attachment_ownership_retired.sql` |
+| Wrapped file key rings (#1382) | `file_keystate` (`conversation_id`, wrapped ring, `key_version`, `(generation, epoch)`, `updated_by_device_id`) | One mutable row per MLS conversation, overwritten on every re-wrap/rotation; the ring is ciphertext under an MLS exporter key the DS never holds. **Explicitly deleted** on group/DM teardown | `000036_file_keystate.sql`; `teardown.rs` `purge_group` / `purge_dm_channel` |
+| Attachment references | `attachment_ref` (`content_hash` = file id, `message_id`) | One declaration per (message that carries a file). The count is **derived** — a declaration counts only while its `message_envelope` exists — so a reference is released by deleting the message envelope (self/admin delete, envelope GC #689, retention #720, teardown), never by a dedicated call, and cannot outlive its message. Orphaned/forged declarations are reaped by `sweep_envelope_gc`. **New at-rest linkage — see the note below.** | `messages.rs` (`object_is_referenced`, `sweep_envelope_gc`), `000012_attachment_ref.sql` |
 | Failed DS requests (#1305) | `ds_error_log` (time, method, matched route pattern, status, the response's `error` text, the `warn!`/`error!` lines the request raised, and a random per-request id the client generated) — **no user, device, email or IP column**; text is scrubbed (`pollis_api::redact::scrub`) before the insert | **72 hours and at most 500 rows**, whichever is smaller; written at most 30 rows a minute | The table's own `AFTER INSERT` trigger (`000035_ds_error_log.sql`) on every insert — no sweep and no code path can skip it; `pollis-delivery/tests/error_log.rs` |
 | Push tokens | `push_token` | Until the device re-registers (upsert on `token`), **180 days** since last refresh (#762, `POLLIS_DS_PUSH_TOKEN_RETENTION_DAYS`, §9), or account deletion — the last of which is now an explicit delete rather than a cascade that never fired | `000006_push_token.sql`; `sweep_aged_records`; `teardown.rs` |
 
@@ -195,11 +196,15 @@ in-flight one, and `docs/metadata-minimization-design.md` says so.
 **Attachment references, stated plainly (#690).** Making attachment deletion correct required the client
 to declare each reference to the DS, because the server cannot read message content and so cannot count
 references itself. The chosen mechanism — `attachment_ref (content_hash, message_id)` — introduces a new
-piece of *at-rest* linkage the operator did not previously hold: because `content_hash` is convergent
-(SHA-256 of plaintext), joining `attachment_ref` to `message_envelope.conversation_id` tells the operator
-which messages, and therefore which conversations, **share the same file** — durably and in the clear.
-It does **not** reveal the file itself (plaintext is never seen), the filename (that already sits in the
-R2 key, §5), or the sender (sealed, above). The `message_id` is now **load-bearing**, not incidental: the
+piece of *at-rest* linkage the operator did not previously hold: joining `attachment_ref` to
+`message_envelope.conversation_id` tells the operator which messages carry which stored object. Until #1382
+`content_hash` was convergent (SHA-256 of plaintext) — which also let anyone holding the bucket and this
+table decrypt every attachment; that scheme was broken and replaced — so the join revealed which messages,
+and therefore which conversations, **shared the same file**. Since #1382 it is a random file id minted per
+upload, so identical content uploaded twice is two unrelated ids and the cross-conversation "same file"
+linkage is gone; what remains is "this message carries this object", and two messages share an id only when
+they reference the same upload. It does **not** reveal the file itself (plaintext is never seen, and nothing the DS holds is key material), the
+filename (#762 removed it from the R2 key, §5), or the sender (sealed, above). The `message_id` is now **load-bearing**, not incidental: the
 reference count is derived by joining `attachment_ref` to `message_envelope` on it (#690), which is what
 makes a reference self-releasing when its message is deleted/GC'd and unforgeable by an unauthorized
 caller. The considered alternative — an opaque, client-minted `ref_token` per reference — would expose
@@ -315,22 +320,25 @@ client IPs from the first-party services, and is opt-in and off by default. This
 
 ## 5. Media (Cloudflare R2)
 
-- Object keys are `media/{sha256-of-plaintext}.enc` (`pollis-core/src/commands/r2.rs`). The key contains
+- Object keys are `media/{random file id}.enc` (`pollis-core/src/commands/r2.rs`; #1382 — previously
+  `media/{sha256-of-plaintext}.enc`, a convergent scheme the bucket and DS could decrypt, now replaced). The key contains
   no user, device, group, or conversation identifier, and **no filename** — #762 removed the filename
   segment precisely because a distinctive name was itself metadata visible to the storage operator. See
   §9, which has described the current shape since that change.
-- Objects are client-side encrypted (AES-256-GCM) before upload; R2 holds ciphertext only.
+- Objects are client-side encrypted (AES-256-GCM) before upload under a key derived from the conversation's
+  MLS-wrapped file key ring (or, for Vault files, the account key); R2 and the DS hold ciphertext and no key
+  material.
 - Deletion is **reference-counted**, and the count is **derived** (#690): a declaration counts only while
   its `message_envelope` exists, so a reference is released by deleting the message envelope — through the
   ordinary self/admin delete, envelope GC (#689), the retention sweep (#720) or account/group teardown —
-  and the object is collected only once no still-existing message references the hash. A reference cannot
+  and the object is collected only once no still-existing message references the file id. A reference cannot
   outlive its message, and releasing is not a separately-authorized action a caller can abuse. The DS is
   the chokepoint — `/v1/r2/presign` **refuses to mint a `delete`** for an object that still has a live
   reference (`broker.rs`, `object_is_referenced`), so a client that deleted its own message cannot blow
-  away a blob another conversation still needs — not even the account that uploaded the bytes, since one
-  blob backs every copy of the same file and the gate asks only whether anything still references it.
+  away a blob another conversation still needs — not even the account that uploaded the bytes, since a
+  blob can back several messages and the gate asks only whether anything still references it.
   There is no lifecycle rule and no automatic expiry.
-  **Reclaiming the R2 blob + Turso row for a hash that no live message references (e.g. after envelope GC
+  **Reclaiming the R2 blob + Turso row for a file id that no live message references (e.g. after envelope GC
   aged the last message out) is a separable server-side sweep and is NOT built here — #690 makes such an
   object *collectable* (the reference no longer pins it); a follow-up gives the DS the R2-delete capability
   to actually reclaim it.** See the `attachment_object` / `attachment_ref` rows and the linkage note in §2.
@@ -492,7 +500,7 @@ Writing this document surfaced retention behaviour we have not decided on, only 
       a `format_version` and `pollis-verify` (bumped to `v0.6.0`) reports a too-old binary as version
       skew, not a verification failure — see §6.
 - [x] **Original filenames removed from R2 object keys** (2026-08-04, #762). Keys are now
-      `media/<content_hash>.enc`; the filename was decorative (the content hash is the uniqueness anchor)
+      `media/<content_hash>.enc` (since #1382 `media/<random file id>.enc`); the filename was decorative (the content hash was the uniqueness anchor)
       but readable by the operator from an object listing alone, without decrypting anything.
       `budget-2026.pdf` is content. No migration needed: the key is stored per object in
       `attachment_object.r2_key` and download paths take it explicitly, so objects written under the old

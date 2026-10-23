@@ -45,7 +45,7 @@ test("an attachment pin previews its caption and file names, never the envelope"
 
 test("a pin and a timeline row parse content identically", () => {
   for (const raw of ["hi", '{"_txt":"legacy"}', "{not json", '{"x":1}']) {
-    assert.equal(pinPreview(raw).text, parseContent(raw).text, raw);
+    assert.equal(pinPreview(raw).text, parseContent(raw, null).text, raw);
   }
 });
 

@@ -141,7 +141,8 @@ test("every send names its message and every surface drains the outbox", () => {
 test("an attachment the outbox has not uploaded yet is drawn pending, never fetched", async () => {
   const { parseContent } = await import("../lib/messageContent.ts");
   const provisional = JSON.stringify({ _att: [{ name: "shot.png", ct: "image/png", size: 5 }], _txt: "look" });
-  const { text, attachments } = parseContent(provisional);
+  const { text, attachments } = parseContent(provisional, { conversationId: "c1" });
+  assert.equal(attachments[0].key_scope, null, "an unuploaded entry has no key to fetch with");
   assert.equal(text, "look");
   assert.equal(attachments.length, 1);
   // No key: nothing to fetch, and still a stable id for the list.

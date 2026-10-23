@@ -47,6 +47,7 @@ pub mod messages;
 pub mod ops_log;
 pub mod otp;
 pub mod participant_id;
+pub mod file_keys;
 pub mod pins;
 pub mod profile;
 pub mod push;
@@ -409,6 +410,10 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route(<pins::UnpinMessageBody as DsRequest>::PATH, post(pins::unpin_message))
         .route(<pins::PinKeystateBody as DsRequest>::PATH, post(pins::read_keystate))
         .route(<pins::ListPinsBody as DsRequest>::PATH, post(pins::read_pins))
+        // The attachment key ring (#1382) — wrapped under the MLS exporter KEK
+        // like the pin key; the DS sees only its length.
+        .route(<file_keys::UpsertFileKeystateBody as DsRequest>::PATH, post(file_keys::upsert_keystate))
+        .route(<file_keys::FileKeystateBody as DsRequest>::PATH, post(file_keys::read_keystate))
         // The Vault (#107) — per-entry opaque blobs under the account identity
         // key, the read-cursor construction applied per entry. MAIN DB.
         .route(<vault::SaveVaultMessageBody as DsRequest>::PATH, post(vault::save_vault_message))

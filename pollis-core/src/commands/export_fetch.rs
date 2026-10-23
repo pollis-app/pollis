@@ -83,7 +83,7 @@ where
         // Already there and correct — an earlier run, or the cache step. Don't
         // download what the disk already holds.
         if let Ok(existing) = std::fs::read(&target) {
-            if sha256_hex(&existing) == att.content_hash {
+            if sha256_hex(&existing) == att.sha256 {
                 fetched += 1;
                 continue;
             }
@@ -92,7 +92,7 @@ where
             Ok(bytes) => {
                 // `download_media` verifies; a fake might not. Never vouch for
                 // bytes on disk that do not match their name.
-                if sha256_hex(&bytes) != att.content_hash {
+                if sha256_hex(&bytes) != att.sha256 {
                     failed.push(FetchFailure {
                         content_hash: att.content_hash.clone(),
                         file: att.file.clone(),
@@ -129,7 +129,13 @@ pub async fn fetch_export_attachments(
     state: &Arc<AppState>,
 ) -> Result<FetchSummary> {
     fetch_with(Path::new(&files_dir), &attachments, |att| {
-        crate::commands::r2::download_media(att.storage_key.clone(), att.content_hash.clone(), state)
+        crate::commands::r2::download_media(
+            att.storage_key.clone(),
+            att.content_hash.clone(),
+            att.sha256.clone(),
+            att.scope.clone(),
+            state,
+        )
     })
     .await
 }
@@ -140,8 +146,10 @@ mod tests {
 
     fn missing(name: &str, bytes: &[u8]) -> MissingAttachment {
         MissingAttachment {
-            content_hash: sha256_hex(bytes),
+            content_hash: format!("file-{name}"),
             storage_key: format!("r2/{name}"),
+            sha256: sha256_hex(bytes),
+            scope: crate::commands::r2::AttachmentKeyScope::Vault,
             content_type: None,
             file: name.to_string(),
         }

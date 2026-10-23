@@ -27,7 +27,7 @@ answers, like OTP with no Resend key).
 | `POST /v1/livekit/send-data` | Server-side `RoomService/SendData` — signs an admin JWT + Twirp POSTs a content-free control payload to a room. **Target authz + sender stamping** (below): own inbox always; a peer's inbox only with a shared DM / group / pending invite and no block; a conversation room only as a member; `type` must be client-publishable (`enrollment_requested` is DS-only); identity keys stripped and the verified signer stamped in | same LiveKit env |
 | `POST /v1/livekit/participants` | Server-side `RoomService/ListParticipants` (voice roster); each identity **resolved back to its user + username** server-side (#836), internal and `view` participants filtered; membership-gated | same LiveKit env |
 | `POST /v1/livekit/identities` | Resolve opaque participant pseudonyms → `{user_id, name, kind}` for a room the caller may join (#836). The per-room key never leaves the DS | same LiveKit env |
-| `POST /v1/r2/presign` | SigV4 query-string presigned URL (GET/PUT/DELETE), path-style, `UNSIGNED-PAYLOAD`. Keys are allow-listed by family; a PUT must be content-addressed and declare a bounded `content_length` (signed, so `host;content-length`); writes to an avatar/icon need the owner, writes to a referenced media/emoji object are refused (below) | `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (`R2_REGION` defaults `auto`) |
+| `POST /v1/r2/presign` | SigV4 query-string presigned URL (GET/PUT/DELETE), path-style, `UNSIGNED-PAYLOAD`. Keys are allow-listed by family; a PUT must name a `<hex64>` key (content digest, or a media object's random file id) and declare a bounded `content_length` (signed, so `host;content-length`); writes to an avatar/icon need the owner, writes to a referenced media/emoji object are refused (below) | `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (`R2_REGION` defaults `auto`) |
 
 ### `send-data` targets are authorized and the sender is stamped
 
@@ -222,10 +222,16 @@ no LiveKit or R2 secret:
 
 ## Why R2 presign has no per-object READ authz — and what it does gate
 
-Pollis media is convergent-encrypted (`pollis-core`'s `r2.rs`): the AES-256-GCM
-key is `SHA-256(plaintext)` and `attachment_object` is a global content-hash
-dedup with no conversation binding. A presigned URL only ever exposes
-**ciphertext** — confidentiality comes from MLS key distribution, not the R2 ACL.
+Pollis media is sealed under a key the DS never holds (#1382; `pollis-core`'s
+`r2.rs` and `file_keys.rs`): each file's AES-256-GCM key is HKDF over its
+conversation's **file key ring** — stored by the DS only wrapped under an MLS
+exporter KEK (`file_keystate`) — salted by the file's random id, which is also
+the object name `media/<file id>.enc`. Nothing in the bucket or in
+`attachment_object` / `attachment_ref` is key material. A presigned URL only ever
+exposes **ciphertext** — confidentiality comes from MLS key distribution, not the
+R2 ACL. (Until #1382 media was convergent-encrypted — key = HKDF(SHA-256(plaintext)),
+the same hash naming the object and stored in `attachment_object` — so the bucket
+plus that table decrypted every file. That was broken and replaced.)
 So for `get` the gate stops anonymous internet access to the bucket; an
 authenticated device is the right and sufficient gate.
 
@@ -235,7 +241,7 @@ Writes are a different question, and the answer is not "an authenticated device"
 | Rule | Why |
 | --- | --- |
 | **Key allow-list** (`parse_r2_key`): only `media/<hex64>.enc`, `emoji/<hex64>.<ext>`, `avatars/<user_id>/<hex64>.<ext>`, `group-icons/<group_id>/<hex64>.<ext>` and their legacy read-only shapes. No empty segment, no `.`/`..`, conservative charset, ≤ 512 bytes | An unrestricted key is an unrestricted object: free storage on someone else's bucket, and a chance to traverse or to smuggle a separator into the canonical request |
-| **A `put` must be content-addressed** | A legacy mutable key stays readable and stops being writable — whoever can overwrite `avatars/<uid>` replaces that user's picture everywhere, and nothing about the key says what the bytes should be |
+| **A `put` must name a fixed `<hex64>` key** — a content digest for emoji, avatars and icons; for `media/` the random file id (#1382), which is unique per upload rather than derived from the bytes | A legacy mutable key stays readable and stops being writable — whoever can overwrite `avatars/<uid>` replaces that user's picture everywhere, and nothing about the key says what the bytes should be |
 | **A `put` must declare an exact, bounded `content_length`** — media ≤ `R2_MEDIA_MAX_BYTES`, emoji ≤ `EMOJI_MAX_BYTES`, avatar/icon ≤ `R2_PUBLIC_IMAGE_MAX_BYTES` (all in `pollis-api`, one constant per bound shared with the uploader) | Only R2 counts the bytes. A size the DS is *told* at registration is a promise; a size inside the signature is a bound |
 | **Owned objects need their owner** — `avatars/<uid>` the user, `group-icons/<gid>` a group admin — and **shared objects must be unreferenced** to `put` or `delete` (#690, #848) | An avatar and a group icon have no reference count to protect them and were previously ungated entirely. The media reference gate existed but was DEAD for `media/<hex64>.enc`: the old extractor returned `"<hash>.enc"`, which matches no stored content hash, so no object written since #762 was ever protected |
 

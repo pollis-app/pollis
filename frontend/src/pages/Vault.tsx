@@ -76,7 +76,7 @@ export const VaultPage: React.FC = observer(() => {
       return entries;
     }
     return entries.filter((entry) => {
-      const parsed = parseContent(entry.content);
+      const parsed = parseContent(entry.content, "vault");
       const haystacks = [
         parsed.text,
         ...(parsed.attachments ?? []).map((a) => a.filename),
@@ -90,7 +90,7 @@ export const VaultPage: React.FC = observer(() => {
     const out: MessageAttachment[] = [];
     const seen = new Set<string>();
     for (let i = entries.length - 1; i >= 0; i--) {
-      for (const attachment of parseContent(entries[i].content).attachments ?? []) {
+      for (const attachment of parseContent(entries[i].content, "vault").attachments ?? []) {
         if (!seen.has(attachment.id)) {
           seen.add(attachment.id);
           out.push(attachment);
@@ -114,7 +114,7 @@ export const VaultPage: React.FC = observer(() => {
 
   const startEdit = useCallback((entry: VaultMessage) => {
     setPendingDeleteId(null);
-    setEditDraft(parseContent(entry.content).text);
+    setEditDraft(parseContent(entry.content, "vault").text);
     setEditingEntry(entry);
   }, []);
 
@@ -122,7 +122,7 @@ export const VaultPage: React.FC = observer(() => {
     if (!editingEntry) {
       return;
     }
-    const parsed = parseContent(editingEntry.content);
+    const parsed = parseContent(editingEntry.content, "vault");
     const attachments = parsed.attachments ?? [];
     // An entry with files keeps them across a text edit: rebuild the same
     // envelope with the new caption. The wire field names mirror
@@ -137,6 +137,8 @@ export const VaultPage: React.FC = observer(() => {
               ct: a.content_type,
               size: a.file_size,
               hash: a.content_hash,
+              kv: 0,
+              sha: a.sha256,
               bh: a.blurhash,
               w: a.width,
               h: a.height,
@@ -362,7 +364,7 @@ const VaultEntryRow: React.FC<VaultEntryRowProps> = ({
   onTogglePin,
 }) => {
   const { t } = useTranslation("vault");
-  const parsed = parseContent(entry.content);
+  const parsed = parseContent(entry.content, "vault");
   const createdMs = new Date(entry.created_at).getTime();
 
   return (

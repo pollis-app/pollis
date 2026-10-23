@@ -31,10 +31,10 @@
 //! decrypted copy is **already in this device's media cache** — still zero
 //! network, and still only what this device has already seen. The rest are
 //! reported back in `ExportSummary::attachments_missing`, so the UI can offer
-//! (and only ever *offer*) the opt-in fetch in `export_fetch.rs`. The content
-//! hash is the convergent-encryption key for the object, so an archive is also
-//! sufficient to fetch and decrypt every attachment later without any other
-//! secret.
+//! (and only ever *offer*) the opt-in fetch in `export_fetch.rs`. The archive
+//! records each attachment's file id, key version and plaintext digest — not
+//! a key: fetching later needs a device that can still open the
+//! conversation's file key ring (#1382).
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -112,8 +112,15 @@ pub struct ArchiveAttachment {
     pub name: Option<String>,
     pub content_type: Option<String>,
     pub size_bytes: Option<u64>,
+    /// The object's random file id (the `_att` `hash` field, #1382).
     pub content_hash: String,
     pub storage_key: String,
+    /// SHA-256 of the plaintext, from the encrypted reference; what a written
+    /// file is verified against. `None` for a reference from before #1382,
+    /// whose bytes can no longer be fetched.
+    pub sha256: Option<String>,
+    /// Which key of the conversation's file key ring sealed it (`0` = Vault).
+    pub key_version: Option<i64>,
     /// Where the bytes live relative to the archive's directory, when they
     /// were exported. Deterministic from the hash and name, so the same
     /// attachment referenced twice is one file, and the opt-in fetch writes to
@@ -163,6 +170,10 @@ pub struct ExportSummary {
 pub struct MissingAttachment {
     pub content_hash: String,
     pub storage_key: String,
+    /// The plaintext digest the fetched bytes must match.
+    pub sha256: String,
+    /// Which key opens it.
+    pub scope: crate::commands::r2::AttachmentKeyScope,
     pub content_type: Option<String>,
     /// Relative to `files_dir`; always a single path component.
     pub file: String,
@@ -211,6 +222,8 @@ fn split_content(raw: &str) -> (Option<String>, Vec<ArchiveAttachment>) {
                         size_bytes: a.get("size").and_then(|v| v.as_u64()),
                         content_hash,
                         storage_key,
+                        sha256: a.get("sha").and_then(|v| v.as_str()).map(str::to_string),
+                        key_version: a.get("kv").and_then(|v| v.as_i64()),
                     })
                 })
                 .collect()
@@ -453,17 +466,22 @@ pub fn write_archive(path: &Path, archive: &Archive, cached: Option<CachedBytes<
         .ok_or_else(|| Error::Other(anyhow::anyhow!("export path has no file name")))?;
     let files_dir = files_dir_for(path);
 
-    // Distinct attachments, first reference wins for the name.
-    let mut distinct: Vec<&ArchiveAttachment> = Vec::new();
+    // Distinct attachments, first reference wins for the name. Each carries
+    // the conversation it was found in, which is what names its key.
+    let mut distinct: Vec<(&ArchiveAttachment, Option<&str>)> = Vec::new();
     let mut seen = HashSet::new();
     let refs = archive
         .conversations
         .iter()
-        .flat_map(|c| c.messages.iter().flat_map(|m| m.attachments.iter()))
-        .chain(archive.vault.iter().flat_map(|v| v.attachments.iter()));
-    for att in refs {
+        .flat_map(|c| {
+            c.messages
+                .iter()
+                .flat_map(move |m| m.attachments.iter().map(move |a| (a, Some(c.id.as_str()))))
+        })
+        .chain(archive.vault.iter().flat_map(|v| v.attachments.iter().map(|a| (a, None))));
+    for (att, conversation) in refs {
         if seen.insert(att.content_hash.as_str()) {
-            distinct.push(att);
+            distinct.push((att, conversation));
         }
     }
 
@@ -473,21 +491,38 @@ pub fn write_archive(path: &Path, archive: &Archive, cached: Option<CachedBytes<
         crate::private_fs::create_dir_all(&files_dir)
             .map_err(|e| Error::Other(anyhow::anyhow!("could not create {}: {e}", files_dir.display())))?;
     }
-    for att in &distinct {
+    for (att, conversation) in &distinct {
         let written = cached
             .as_ref()
             .map(|c| write_cached_attachment(c, &files_dir, att))
             .unwrap_or(false);
         if written {
             attachments_written += 1;
-        } else {
-            attachments_missing.push(MissingAttachment {
-                content_hash: att.content_hash.clone(),
-                storage_key: att.storage_key.clone(),
-                content_type: att.content_type.clone(),
-                file: att.file.clone(),
-            });
+            continue;
         }
+        // A reference without a digest and key version predates #1382; its
+        // object was sealed under the retired scheme and cannot be fetched.
+        let Some(sha256) = att.sha256.clone() else {
+            continue;
+        };
+        let scope = match (conversation, att.key_version) {
+            (Some(conversation_id), Some(key_version)) if key_version >= 1 => {
+                crate::commands::r2::AttachmentKeyScope::Conversation {
+                    conversation_id: conversation_id.to_string(),
+                    key_version,
+                }
+            }
+            (None, Some(0)) => crate::commands::r2::AttachmentKeyScope::Vault,
+            _ => continue,
+        };
+        attachments_missing.push(MissingAttachment {
+            content_hash: att.content_hash.clone(),
+            storage_key: att.storage_key.clone(),
+            sha256,
+            scope,
+            content_type: att.content_type.clone(),
+            file: att.file.clone(),
+        });
     }
 
     let part = path.with_file_name(format!("{file_name}.part"));
@@ -540,9 +575,12 @@ fn write_cached_attachment(cached: &CachedBytes<'_>, files_dir: &Path, att: &Arc
     else {
         return false;
     };
-    // The cache entry was hash-verified when it was written, but the export is
-    // the one artefact a person will keep, so check again before vouching.
-    if hex::encode(Sha256::digest(&plaintext)) != att.content_hash {
+    // The cache entry was verified when it was written, but the export is the
+    // one artefact a person will keep, so check again before vouching.
+    let Some(expected) = att.sha256.as_deref() else {
+        return false;
+    };
+    if hex::encode(Sha256::digest(&plaintext)) != expected {
         return false;
     }
     crate::downloads::write_downloaded_file(&files_dir.join(&att.file), &plaintext).is_ok()
@@ -674,7 +712,7 @@ mod tests {
             "m2",
             "chan-1",
             "me",
-            r#"{"_att":[{"key":"r2/abc","name":"cat.png","ct":"image/png","size":123,"hash":"deadbeef"}],"_txt":"look"}"#,
+            r#"{"_att":[{"key":"r2/abc","name":"cat.png","ct":"image/png","size":123,"hash":"deadbeef","kv":1,"sha":"c47"}],"_txt":"look"}"#,
         );
         seed_message(conn, "m3", "dm-1", "alice", "secret dm");
         conn.execute(
@@ -898,10 +936,12 @@ mod tests {
         use sha2::{Digest, Sha256};
         let db = db();
         let plaintext = b"the real cat bytes".to_vec();
-        let hash = hex::encode(Sha256::digest(&plaintext));
+        // The object's name is a random file id; the digest rides separately.
+        let hash = "f1".repeat(32);
+        let sha = hex::encode(Sha256::digest(&plaintext));
         let db_key = [7u8; 32];
         let content = format!(
-            r#"{{"_att":[{{"key":"r2/cat","name":"cat.png","ct":"image/png","size":18,"hash":"{hash}"}}],"_txt":"cat"}}"#
+            r#"{{"_att":[{{"key":"r2/cat","name":"cat.png","ct":"image/png","size":18,"hash":"{hash}","kv":1,"sha":"{sha}"}}],"_txt":"cat"}}"#
         );
         seed_message(db.conn(), "m1", "c", "alice", &content);
         seed_message(db.conn(), "m2", "c", "alice", &content);
@@ -931,8 +971,9 @@ mod tests {
     fn an_unverifiable_cache_entry_is_missing_not_exported() {
         use sha2::{Digest, Sha256};
         let db = db();
-        let hash = hex::encode(Sha256::digest(b"what the sender meant"));
-        let content = format!(r#"{{"_att":[{{"key":"r2/x","name":"x.bin","hash":"{hash}"}}]}}"#);
+        let hash = "f2".repeat(32);
+        let sha = hex::encode(Sha256::digest(b"what the sender meant"));
+        let content = format!(r#"{{"_att":[{{"key":"r2/x","name":"x.bin","hash":"{hash}","kv":1,"sha":"{sha}"}}]}}"#);
         seed_message(db.conn(), "m1", "c", "alice", &content);
         let archive = build_archive(db.conn(), "me", ArchiveScope::Account).unwrap();
 

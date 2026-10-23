@@ -16,23 +16,27 @@
 //!
 //! ## Why R2 presign needs no per-object READ authz (but delete is gated)
 //!
-//! Pollis media is **convergent-encrypted** (see `pollis-core`'s `r2.rs`):
-//! the AES-256-GCM key is derived from `SHA-256(plaintext)`, and the
-//! `attachment_object` table is a **global content-hash dedup** with no
-//! conversation binding at all. A presigned URL therefore only ever exposes
-//! **ciphertext** — confidentiality comes from MLS key distribution (only a
-//! member who decrypted the message learns the content hash, and only the
-//! content hash derives the decryption key), NOT from the R2 ACL. So for `get`
-//! and `put` the presign gate exists solely to stop **anonymous internet
-//! access** to the bucket; it does not — and cannot meaningfully — enforce read
-//! authz on a per-object basis. Requiring an authenticated device is the right
-//! and sufficient gate there.
+//! Pollis media is sealed under a key the DS never holds (#1382, see
+//! `pollis-core`'s `r2.rs` and `file_keys.rs`): each file's AES-256-GCM key
+//! derives from its conversation's file key ring — which reaches this server
+//! only wrapped under an MLS exporter KEK (`file_keystate`) — salted by the
+//! file's random id, the object's name. Nothing in the bucket or in
+//! `attachment_object` / `attachment_ref` is key material. A presigned URL
+//! therefore only ever exposes **ciphertext** — confidentiality comes from MLS
+//! key distribution, NOT from the R2 ACL. So for `get` and `put` the presign
+//! gate exists solely to stop **anonymous internet access** to the bucket; it
+//! does not — and need not — enforce read authz on a per-object basis.
+//! Requiring an authenticated device is the right and sufficient gate there.
+//!
+//! (Until #1382 the key was derived from `SHA-256(plaintext)` and the object
+//! was named by that hash — so the bucket and these tables held everything
+//! needed to decrypt every attachment. The paragraph above was not true then.)
 //!
 //! `delete` is different, and NOT for confidentiality — for **integrity of a
-//! SHARED object** (#690). Because the object is a global dedup, one convergent
-//! blob backs every message that carries the file, across conversations and
-//! users. Minting a `delete` for it while another message still references it
-//! would 404 that attachment for everyone else. So the `delete` presign consults
+//! possibly SHARED object** (#690). One object backs every message whose
+//! reference names it (an edit keeps the original's reference; a re-save in the
+//! Vault keeps its files). Minting a `delete` for it while another message
+//! still references it would 404 that attachment for everyone else. So the `delete` presign consults
 //! the server-side reference count ([`crate::messages::object_is_referenced`],
 //! DERIVED by joining `attachment_ref` declarations to the still-live
 //! `message_envelope` rows — #690) and refuses to sign while any reference
@@ -1470,8 +1474,8 @@ const R2_KEY_MAX_LEN: usize = 512;
 /// [`parse_r2_key`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum R2Family {
-    /// `media/<hex64>.enc` (and the legacy `media/<hex64>/<name>`) — convergent,
-    /// reference-counted attachment ciphertext.
+    /// `media/<hex64>.enc` (and the legacy `media/<hex64>/<name>`) — reference-
+    /// counted attachment ciphertext; the hex is a random file id (#1382).
     Media,
     /// `emoji/<hex64>.<ext>` — unencrypted custom-emoji images (#848).
     Emoji,
@@ -1605,9 +1609,9 @@ fn put_max_bytes(family: R2Family) -> u64 {
 /// is enforced, [`gate_and_parse`] rejects an unsigned request with 401).
 ///
 /// There is no per-object READ authz and there does not need to be — see the
-/// module docs: the bucket holds convergently-encrypted ciphertext plus public
-/// decoration, so a `get` presign discloses nothing a member did not already
-/// hold the key for. WRITES are a different question, and the gates are:
+/// module docs: the bucket holds ciphertext under keys only MLS members can
+/// reach, plus public decoration, so a `get` presign discloses nothing a
+/// member did not already hold the key for. WRITES are a different question, and the gates are:
 ///
 ///   * **The key must be one the product writes** ([`parse_r2_key`]). An
 ///     arbitrary key is an arbitrary object, and an arbitrary object is free

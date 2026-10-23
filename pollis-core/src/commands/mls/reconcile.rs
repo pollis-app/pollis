@@ -1527,6 +1527,13 @@ pub async fn reconcile_group_mls_impl(
         // a member added by THIS commit (Welcome, at the new epoch) unwrap
         // immediately instead of waiting for a later pass.
         crate::commands::pinned_messages::maybe_rewrap_pin_key(state, &conversation_id).await;
+        crate::commands::file_keys::maybe_rewrap_file_keys(state, &conversation_id).await;
+        // #1382: a removal commit rotates the attachment key ring, so the
+        // removed member cannot open files posted from this epoch on. The
+        // owed-rotation mark it leaves survives a crash before the DS write.
+        if !outcome.removed.is_empty() {
+            crate::commands::file_keys::on_member_removed(state, &conversation_id).await;
+        }
     }
 
     // Roster-change banners. Fire only when an actual epoch bump happened

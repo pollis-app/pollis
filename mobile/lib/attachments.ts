@@ -2,9 +2,9 @@
 // frontend/src/utils/attachmentEnvelope.ts — the envelope must match
 // byte-for-byte so cross-platform messages parse everywhere).
 //
-// `upload_media` does everything heavy in Rust: read the file, SHA-256,
-// convergent AES-GCM encrypt, presigned PUT via the DS, dedup, blurhash +
-// dimensions for images. Reference registration happens inside Rust
+// `upload_media` (the Vault's path; chat attachments go through the outbox)
+// does everything heavy in Rust: read the file, seal it under the Vault file
+// key (#1382), presigned PUT via the DS, blurhash + dimensions for images. Reference registration happens inside Rust
 // `send_message` by re-parsing the `_att` JSON, so sending the same
 // envelope string keeps refcounting working for free.
 
@@ -28,7 +28,12 @@ export interface MediaUploadResult {
   filename: string;
   content_type: string;
   size_bytes: number;
+  // The object's random file id (#1382), not a content hash.
   content_hash: string;
+  // Which ring key sealed it; always 0 for these Vault uploads.
+  key_version: number;
+  // Plaintext SHA-256, carried only inside the encrypted envelope.
+  sha256: string;
   blurhash?: string | null;
   width?: number | null;
   height?: number | null;
@@ -92,6 +97,8 @@ export async function buildMessageContent(
       ct: r.content_type,
       size: r.size_bytes,
       hash: r.content_hash,
+      kv: r.key_version,
+      sha: r.sha256,
       bh: r.blurhash ?? undefined,
       w: r.width ?? undefined,
       h: r.height ?? undefined,

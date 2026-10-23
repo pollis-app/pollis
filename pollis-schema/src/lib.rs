@@ -292,6 +292,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "ds_error_log",
         include_str!("../migrations/000035_ds_error_log.sql"),
     ),
+    (
+        36,
+        "file_keystate",
+        include_str!("../migrations/000036_file_keystate.sql"),
+    ),
 ];
 
 /// Every script for the MAIN DB, in apply order (baseline first). One element

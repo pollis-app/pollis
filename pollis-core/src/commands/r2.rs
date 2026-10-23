@@ -17,10 +17,9 @@ use crate::state::AppState;
 // touch the JSON IPC.
 //
 // Per-file key derivation: HKDF-SHA256(salt = `pollis-media-cache-v1`,
-// ikm = `db_key`, info = content_hash bytes). Different salt from the
-// upload-side convergent key (`pollis-att-key`) so the two domains are
-// cryptographically separated even though both are seeded from the same
-// content hash.
+// ikm = `db_key`, info = the object's file id bytes). Keyed by this
+// device's `db_key`, so it shares nothing with the upload-side file key
+// (`file_keys::derive_file_key`, keyed by the conversation's ring).
 
 /// Hard cap on total cache size before LRU eviction kicks in.
 const MEDIA_CACHE_MAX_BYTES: u64 = 500 * 1024 * 1024;
@@ -661,7 +660,21 @@ pub async fn get_public_file_url(key: String, state: &Arc<AppState>) -> Result<S
     Ok(url)
 }
 
-// ── Media upload (convergent encryption + cross-user dedup) ───────────────
+// ── Media upload (sealed under a key only members can reach, #1382) ───────
+//
+// A file is sealed under `file_keys::derive_file_key(ring key, file_id)`,
+// where `file_id` is 32 random bytes and the ring key is either the newest key
+// of the conversation's MLS-wrapped ring or the account's Vault file root. The
+// object lives at `media/{hex file_id}.enc`. Nothing the DS or R2 holds — the
+// object name, `attachment_object`, `attachment_ref` — is key material: the
+// file id is the HKDF salt, and the ring key never leaves members' devices
+// unwrapped. The plaintext SHA-256 travels only inside the MLS-encrypted
+// attachment reference and is checked after decrypt.
+//
+// This replaced convergent encryption (key = HKDF(SHA-256(plaintext)), object
+// named by that hash), under which anyone holding the bucket or the DS
+// database could decrypt every attachment. There is no fallback to it: a
+// reference without a key version is refused.
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MediaUploadResult {
@@ -670,10 +683,91 @@ pub struct MediaUploadResult {
     pub filename: String,
     pub content_type: String,
     pub size_bytes: usize,
+    /// The object's random 32-byte file id, hex. Named `content_hash` because
+    /// that is the `_att` wire field (`hash`) every client already parses and
+    /// keys its caches by; it is NOT derived from the content.
     pub content_hash: String,
+    /// Which ring key sealed the file (`0` for a Vault file).
+    pub key_version: i64,
+    /// SHA-256 of the plaintext, hex. Carried only inside the encrypted
+    /// reference; never sent to the DS.
+    pub sha256: String,
     pub blurhash: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
+}
+
+/// Which key an existing attachment is sealed under — what a download needs
+/// besides the object's name. Built from the attachment reference and the
+/// conversation the reference was found in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AttachmentKeyScope {
+    /// A channel or DM attachment: ring key `key_version` of the MLS
+    /// conversation `conversation_id` belongs to.
+    Conversation {
+        conversation_id: String,
+        key_version: i64,
+    },
+    /// A Vault attachment, under the account's Vault file root.
+    Vault,
+}
+
+/// Where a NEW upload is going, which decides the key it is sealed under.
+pub(crate) enum UploadScope {
+    /// A channel or DM: the newest key of its MLS conversation's ring.
+    Conversation(String),
+    /// The user's own Vault.
+    Vault,
+}
+
+/// The ring key (and its version) a new upload to `scope` must use.
+async fn upload_ring_key(
+    state: &Arc<AppState>,
+    scope: &UploadScope,
+) -> Result<(i64, zeroize::Zeroizing<[u8; 32]>)> {
+    let user_id = crate::commands::mls::current_user_id(state).await?;
+    match scope {
+        UploadScope::Conversation(conversation_id) => {
+            let mls_id =
+                crate::commands::mls::ds_reads::resolve_mls_group(state, conversation_id).await?;
+            crate::commands::file_keys::upload_key(state, &mls_id, &user_id).await
+        }
+        UploadScope::Vault => Ok((
+            0,
+            crate::commands::vault::vault_file_root_key(state, &user_id).await?,
+        )),
+    }
+}
+
+/// The ring key an existing attachment was sealed under.
+async fn download_ring_key(
+    state: &Arc<AppState>,
+    scope: &AttachmentKeyScope,
+) -> Result<zeroize::Zeroizing<[u8; 32]>> {
+    let user_id = crate::commands::mls::current_user_id(state).await?;
+    match scope {
+        AttachmentKeyScope::Conversation {
+            conversation_id,
+            key_version,
+        } => {
+            let mls_id =
+                crate::commands::mls::ds_reads::resolve_mls_group(state, conversation_id).await?;
+            crate::commands::file_keys::key_at_version(state, &mls_id, &user_id, *key_version)
+                .await
+        }
+        AttachmentKeyScope::Vault => {
+            crate::commands::vault::vault_file_root_key(state, &user_id).await
+        }
+    }
+}
+
+fn parse_hex32(what: &str, value: &str) -> Result<[u8; 32]> {
+    let bytes = hex::decode(value)
+        .map_err(|e| Error::Other(anyhow::anyhow!("invalid {what}: {e}")))?;
+    bytes
+        .try_into()
+        .map_err(|_| Error::Other(anyhow::anyhow!("{what} must be 32 hex bytes")))
 }
 
 /// Where an upload's plaintext lives, and who is allowed to release it.
@@ -703,7 +797,9 @@ impl Plaintext {
     }
 }
 
-/// Upload a media file using convergent encryption.
+/// Upload a file to the user's Vault, sealed under the Vault file key (#1382).
+/// Chat attachments do not come through here: the durable outbox uploads
+/// them under their conversation's key ring (`upload_outbox_bytes`).
 ///
 /// Reads the file from the filesystem path (no bytes over IPC), so arbitrarily
 /// large files work without memory or serialisation overhead. This is the path
@@ -721,7 +817,7 @@ pub async fn upload_media(
     let data = tokio::fs::read(&path).await
         .map_err(|e| Error::Other(anyhow::anyhow!("read file {path}: {e}")))?;
 
-    upload_plaintext(Plaintext::Owned(data), filename, content_type, state).await
+    upload_plaintext(Plaintext::Owned(data), filename, content_type, UploadScope::Vault, state).await
 }
 
 /// Upload an attachment the renderer staged in memory (`commands::staging`) —
@@ -743,7 +839,7 @@ pub async fn upload_media_staged(
     })?;
 
     let result =
-        upload_plaintext(Plaintext::Staged(bytes), filename, content_type, state).await;
+        upload_plaintext(Plaintext::Staged(bytes), filename, content_type, UploadScope::Vault, state).await;
     if result.is_ok() {
         crate::commands::staging::discard_staged(&staged_id);
     }
@@ -757,6 +853,7 @@ pub(crate) async fn upload_outbox_bytes(
     data: Vec<u8>,
     filename: String,
     content_type: String,
+    conversation_id: &str,
     state: &Arc<AppState>,
 ) -> Result<MediaUploadResult> {
     // Test-harness only: the flows world has no R2, so a test that drives an
@@ -764,7 +861,9 @@ pub(crate) async fn upload_outbox_bytes(
     // bytes would produce, without the PUT.
     #[cfg(feature = "test-harness")]
     if crate::commands::messages::test_hooks::uploads_stubbed() {
-        let content_hash = hex::encode(sha256_bytes(&data));
+        let mut file_id = [0u8; 32];
+        rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut file_id);
+        let content_hash = hex::encode(file_id);
         let key = format!("media/{content_hash}.enc");
         return Ok(MediaUploadResult {
             url: format!("{}/{key}", state.config.r2_endpoint.trim_end_matches('/')),
@@ -773,26 +872,31 @@ pub(crate) async fn upload_outbox_bytes(
             content_type,
             size_bytes: data.len(),
             content_hash,
+            key_version: 1,
+            sha256: hex::encode(sha256_bytes(&data)),
             blurhash: None,
             width: None,
             height: None,
         });
     }
-    upload_plaintext(Plaintext::Owned(data), filename, content_type, state).await
+    upload_plaintext(
+        Plaintext::Owned(data),
+        filename,
+        content_type,
+        UploadScope::Conversation(conversation_id.to_string()),
+        state,
+    )
+    .await
 }
 
-/// The shared upload core.
-///
-/// Convergent encryption: SHA-256(plaintext) → deterministic AES-256-GCM key
-/// via HKDF.  Same file uploaded by any user produces identical ciphertext →
-/// identical R2 object → cross-user deduplication.
-///
-/// Dedup check against Turso's `attachment_object` table before uploading, so
-/// the second upload of the same file by any user skips the R2 PUT entirely.
+/// The shared upload core: seal under a fresh per-file key from `scope`'s
+/// ring, PUT to a random object name, register the object. See the section
+/// docs above for why nothing here is derived from the content.
 async fn upload_plaintext(
     data: Plaintext,
     filename: String,
     content_type: String,
+    scope: UploadScope,
     state: &Arc<AppState>,
 ) -> Result<MediaUploadResult> {
     let size_bytes = data.as_slice().len();
@@ -810,27 +914,23 @@ async fn upload_plaintext(
         )));
     }
 
-    // SHA-256 of plaintext — the dedup + key-derivation anchor.
-    let hash_bytes = sha256_bytes(data.as_slice());
-    let content_hash = hex::encode(hash_bytes);
+    // Fetch the key FIRST: a conversation whose ring this device cannot reach
+    // yet must fail before any bytes are encrypted or uploaded.
+    let (key_version, ring_key) = upload_ring_key(state, &scope).await?;
 
-    // Deterministic R2 key: same content → same path in R2.
-    //
-    // The original filename used to be appended here. It was decorative — the
-    // content_hash is the uniqueness anchor — but it was also metadata the
-    // operator could read at rest from the object listing alone, without
-    // decrypting anything (#762). "budget-2026.pdf" is content, and this product
-    // exists not to hold that. Dropped.
-    //
-    // Safe to change without a migration: the key is stored per object in
-    // `attachment_object.r2_key` and download paths take it explicitly, so
-    // objects written under the old format keep resolving under their stored
-    // keys. Only new uploads take this shape.
+    // A random file id names the object and salts the file key. The server
+    // learns it; that is fine, because it is not key material on its own.
+    let mut file_id = [0u8; 32];
+    rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut file_id);
+    let content_hash = hex::encode(file_id);
     let r2_key = format!("media/{content_hash}.enc");
     let r2_url = format!("{}/{}", state.config.r2_endpoint.trim_end_matches('/'), r2_key);
+    let (enc_key, enc_nonce) = crate::commands::file_keys::derive_file_key(&ring_key, &file_id);
+    drop(ring_key);
 
-    // Derive encryption key and nonce from the content hash (convergent).
-    let (enc_key, enc_nonce) = derive_attachment_key(&hash_bytes);
+    // The plaintext digest rides inside the encrypted reference so a recipient
+    // can confirm it got exactly the bytes the sender meant (#879).
+    let sha256 = hex::encode(sha256_bytes(data.as_slice()));
 
     // Compute blurhash + dimensions before data is consumed.
     let (blurhash, width, height) = if content_type.starts_with("image/") {
@@ -845,46 +945,27 @@ async fn upload_plaintext(
         (None, None, None)
     };
 
-    // Is this blob already stored? A content-addressed probe: the caller
-    // computed the hash from bytes it already holds, so the question discloses
-    // nothing it did not bring.
-    let already_uploaded = crate::commands::ds_reads::object_exists(
-        state,
-        &content_hash,
-        pollis_api::account_reads::ObjectKind::Attachment,
-    )
-    .await?;
+    // Encrypt with chunked AES-256-GCM, then upload via a DS-minted presigned
+    // PUT (the client holds no R2 credentials).
+    let ciphertext = encrypt_chunked(data.as_slice(), &enc_key, &enc_nonce);
+    drop(enc_key);
+    // Release the plaintext BEFORE the presign round trip and the upload
+    // (#915): everything derived from it was computed above, and the PUT is
+    // the longest-lived step in the function.
+    data.release();
 
-    if !already_uploaded {
-        // Encrypt with chunked AES-256-GCM, then upload via a DS-minted
-        // presigned PUT (the client holds no R2 credentials).
-        let ciphertext = encrypt_chunked(data.as_slice(), &enc_key, &enc_nonce);
-        // Release the plaintext BEFORE the presign round trip and the upload
-        // (#915). Everything derived from it — hash, key, blurhash, dimensions,
-        // size — was computed above, and the PUT is the longest-lived step in
-        // the function: holding both buffers across it doubled the resident cost
-        // of an upload for the entire duration of the transfer.
-        data.release();
+    let put_url =
+        presign_r2_with_length(state, "put", &r2_key, Some(ciphertext.len() as u64)).await?;
+    let overlay = state.overlay_handle();
+    r2_put_url(overlay.as_deref(), &put_url, ciphertext, "application/octet-stream").await?;
 
-        let put_url =
-            presign_r2_with_length(state, "put", &r2_key, Some(ciphertext.len() as u64))
-                .await?;
-        let overlay = state.overlay_handle();
-        r2_put_url(overlay.as_deref(), &put_url, ciphertext, "application/octet-stream").await?;
-
-        // Register in Turso so future uploads of the same file skip R2 — route the
-        // dedup-row write through the Delivery Service.
-        // Upload-time dedup registration: no message carries this object yet,
-        // so there is no reference to count. The send path registers the
-        // `(content_hash, message_id)` reference separately (#690), and since
-        // #925 it is a different VARIANT rather than the same body with a field
-        // left `None`.
-        let body = pollis_api::messages::AttachmentRegisterBody::ObjectOnly {
-            content_hash: content_hash.clone(),
-            r2_key: r2_key.clone(),
-        };
-        crate::commands::mls::ds_post_ok(state, &body).await?;
-    }
+    // Register the object so the DS can reference-count and collect it. The
+    // send path registers the `(file id, message_id)` reference separately.
+    let body = pollis_api::messages::AttachmentRegisterBody::ObjectOnly {
+        content_hash: content_hash.clone(),
+        r2_key: r2_key.clone(),
+    };
+    crate::commands::mls::ds_post_ok(state, &body).await?;
 
     Ok(MediaUploadResult {
         key: r2_key,
@@ -893,6 +974,8 @@ async fn upload_plaintext(
         content_type,
         size_bytes,
         content_hash,
+        key_version,
+        sha256,
         blurhash,
         width,
         height,
@@ -903,23 +986,26 @@ async fn upload_plaintext(
 
 /// Download and decrypt a media attachment.
 ///
-/// The content_hash is embedded in the MLS-encrypted message content, so only
-/// group members who can decrypt the message can derive the decryption key.
+/// `content_hash` is the object's random file id, `sha256` the plaintext
+/// digest, and `scope` names the key it was sealed under — all three from the
+/// MLS-encrypted attachment reference, so only someone who could read that
+/// reference can ask for the right key, and only a member can then reach it.
 pub async fn download_media(
     r2_key: String,
     content_hash: String,
+    sha256: String,
+    scope: AttachmentKeyScope,
     state: &Arc<AppState>,
 ) -> Result<Vec<u8>> {
-    let hash_bytes = hex::decode(&content_hash)
-        .map_err(|e| Error::Other(anyhow::anyhow!("invalid content_hash: {e}")))?;
-    let hash_array: [u8; 32] = hash_bytes.try_into()
-        .map_err(|_| Error::Other(anyhow::anyhow!("content_hash must be 32 hex bytes")))?;
+    let file_id = parse_hex32("file id", &content_hash)?;
+    let expected_sha = parse_hex32("attachment sha256", &sha256)?;
 
-    let (enc_key, enc_nonce) = derive_attachment_key(&hash_array);
+    let ring_key = download_ring_key(state, &scope).await?;
+    let (enc_key, enc_nonce) = crate::commands::file_keys::derive_file_key(&ring_key, &file_id);
+    drop(ring_key);
 
-    // DS-minted presigned GET — the client holds no R2 credentials. The URL only
-    // ever exposes convergently-encrypted ciphertext; confidentiality comes from
-    // MLS key distribution, not the R2 ACL (see broker.rs).
+    // DS-minted presigned GET — the client holds no R2 credentials. The object
+    // is ciphertext under a key the DS has never held.
     let get_url = presign_r2(state, "get", &r2_key).await?;
     let overlay = state.overlay_handle();
     // The ciphertext is buffered whole (it has to be, to decrypt and re-hash),
@@ -939,24 +1025,15 @@ pub async fn download_media(
     // first use of the result — run with two full-size copies resident.
     drop(ciphertext);
 
-    // The object is CONTENT-ADDRESSED, so verify it actually is its address.
-    //
-    // AEAD alone proves nothing here: the key is DERIVED from `content_hash`
-    // (`derive_attachment_key` above), and that hash is known to everyone the
-    // attachment was shared with. Anyone holding it can therefore produce
-    // ciphertext that decrypts cleanly — the tag only proves the writer knew the
-    // hash, not that the bytes are the ones the sender meant. Re-hashing is what
-    // closes that: a substituted payload has a different digest and is refused,
-    // whoever managed to write it into R2.
-    //
-    // Cheap, and it also catches ordinary corruption in the shared convergent
-    // object rather than rendering it as genuine.
+    // AEAD proves the bytes were sealed by someone holding the ring key — any
+    // member. The digest from the sender's own reference proves they are the
+    // bytes THIS sender meant (#879): another member who managed to write a
+    // different payload under the same file id is refused here.
     let actual = sha256_bytes(&plaintext);
-    if actual != hash_array {
+    if actual != expected_sha {
         return Err(Error::Other(anyhow::anyhow!(
-            "attachment {r2_key} failed its content-hash check — expected {content_hash}, \
-             got {}; refusing to return substituted or corrupted bytes",
-            hex::encode(actual)
+            "attachment {r2_key} does not match the digest in its reference; \
+             refusing to return substituted or corrupted bytes"
         )));
     }
     Ok(plaintext)
@@ -979,10 +1056,12 @@ pub async fn download_media(
 pub async fn save_media_to_path(
     r2_key: String,
     content_hash: String,
+    sha256: String,
+    scope: AttachmentKeyScope,
     target_path: String,
     state: &Arc<AppState>,
 ) -> Result<String> {
-    let bytes = download_media(r2_key, content_hash, state).await?;
+    let bytes = download_media(r2_key, content_hash, sha256, scope, state).await?;
     let path = std::path::PathBuf::from(&target_path);
     let marking = tokio::task::spawn_blocking(move || {
         crate::downloads::write_downloaded_file(&path, &bytes)
@@ -1013,6 +1092,8 @@ pub async fn get_media_url(
     r2_key: String,
     content_hash: String,
     content_type: String,
+    sha256: String,
+    scope: AttachmentKeyScope,
     state: &Arc<AppState>,
 ) -> Result<String> {
     let url = crate::media_server::loopback_url(state, &content_hash).await?;
@@ -1042,7 +1123,7 @@ pub async fn get_media_url(
         return Ok(url);
     }
 
-    let bytes = download_media(r2_key, content_hash.clone(), state).await?;
+    let bytes = download_media(r2_key, content_hash.clone(), sha256, scope, state).await?;
 
     // Per-file cap. Files larger than MEDIA_CACHE_MAX_FILE_BYTES skip
     // the cache entirely. Empty-string sentinel tells the frontend to
@@ -1127,9 +1208,9 @@ pub async fn get_media_url(
 // bounded by `MEDIA_CACHE_MAX_FILE_BYTES` (100 MiB), well below the
 // AES-GCM 64-GiB-per-key safety bound.
 //
-// Salt domain (`pollis-media-cache-v1`) separates this from the
-// upload-side convergent key derivation so a server compromise that
-// leaks one key class can't be replayed against the other.
+// Salt domain (`pollis-media-cache-v1`) and the `db_key` IKM keep this
+// apart from the upload-side file key, so a leak of one key class can't
+// be replayed against the other.
 
 const CACHE_HKDF_SALT: &[u8] = b"pollis-media-cache-v1";
 const CACHE_NONCE_LEN: usize = 12;
@@ -1231,25 +1312,10 @@ const CHUNK_SIZE: usize = 4 * 1024 * 1024; // 4 MiB
 /// AES-256-GCM ciphertext overhead per chunk (authentication tag).
 const TAG_SIZE: usize = 16;
 
-/// Derive a deterministic AES-256-GCM key and base nonce from the content hash
-/// using HKDF-SHA256. Convergent: same hash → same key → same ciphertext.
-fn derive_attachment_key(content_hash: &[u8; 32]) -> ([u8; 32], [u8; 12]) {
-    use hkdf::Hkdf;
-    use sha2::Sha256;
-    let hk = Hkdf::<Sha256>::new(None, content_hash);
-    let mut key = [0u8; 32];
-    hk.expand(b"pollis-att-key", &mut key)
-        .expect("HKDF expand for key should never fail");
-    let mut nonce = [0u8; 12];
-    hk.expand(b"pollis-att-nonce", &mut nonce)
-        .expect("HKDF expand for nonce should never fail");
-    (key, nonce)
-}
-
 /// Encrypt plaintext with chunked AES-256-GCM.
 /// Per-chunk nonce = base_nonce XOR little-endian chunk index (first 4 bytes).
 /// Output: flat concatenation of encrypted chunks (each = plaintext_chunk + 16-byte tag).
-fn encrypt_chunked(data: &[u8], key: &[u8; 32], base_nonce: &[u8; 12]) -> Vec<u8> {
+pub(crate) fn encrypt_chunked(data: &[u8], key: &[u8; 32], base_nonce: &[u8; 12]) -> Vec<u8> {
     use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Key, Nonce};
 
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
@@ -1273,7 +1339,7 @@ fn encrypt_chunked(data: &[u8], key: &[u8; 32], base_nonce: &[u8; 12]) -> Vec<u8
 }
 
 /// Decrypt ciphertext produced by `encrypt_chunked`.
-fn decrypt_chunked(ciphertext: &[u8], key: &[u8; 32], base_nonce: &[u8; 12]) -> Result<Vec<u8>> {
+pub(crate) fn decrypt_chunked(ciphertext: &[u8], key: &[u8; 32], base_nonce: &[u8; 12]) -> Result<Vec<u8>> {
     use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Key, Nonce};
 
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
@@ -1395,8 +1461,7 @@ fn origin_of(url: &str) -> Option<String> {
 /// [`PresignedUrl::parse`] fails closed on an empty origin, which is right for
 /// the request — but it means a build that simply never received its R2 values
 /// boots, signs in, sends text, and then refuses every attachment, one image at
-/// a time, as "Image unavailable" (a convergent re-upload of a file someone
-/// already stored even "succeeds", because it skips the PUT). The mobile bridge
+/// a time, as "Image unavailable". The mobile bridge
 /// calls this at `init_pollis` so that build fails at launch with the missing
 /// variable named, the way desktop's `Config::from_env` already refuses to start
 /// without `R2_S3_ENDPOINT` / `R2_PUBLIC_URL`.
