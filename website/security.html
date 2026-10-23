@@ -26,25 +26,30 @@
     .security-main {
       width: 100%;
       max-width: 760px;
-      padding: 4rem 2rem 2rem;
+      padding: 3.5rem 1.25rem 0;
       position: relative;
       z-index: 1;
     }
 
     .security-header {
-      text-align: center;
+      margin-bottom: 2rem;
+      padding-bottom: 2rem;
+      border-bottom: 1px solid var(--c-border);
       margin-bottom: 2rem;
     }
 
     .security-title {
-      font-size: clamp(1.75rem, 4vw, 2.5rem);
-      color: var(--c-accent);
+      font-size: clamp(2rem, 5vw, 2.75rem);
+      line-height: 1.15;
+      letter-spacing: -0.01em;
+      color: var(--c-text);
       margin-bottom: 0.75rem;
     }
 
     .security-subtitle {
       color: var(--c-text-muted);
-      font-size: 0.95rem;
+      font-size: 1.1rem;
+      line-height: 1.6;
     }
 
     .security-back {
@@ -64,10 +69,10 @@
 
     .mode-toggle {
       display: flex;
-      justify-content: center;
+      justify-content: flex-start;
       gap: 0.5rem;
-      margin-bottom: 2.5rem;
-      font-size: 0.85rem;
+      margin-bottom: 1rem;
+      font-size: 0.95rem;
       flex-wrap: wrap;
     }
 
@@ -94,23 +99,20 @@
     }
 
     .security-tier {
-      border: 1px solid var(--c-border);
-      border-radius: 8px;
-      padding: 2rem 2.25rem;
-      background: rgba(255, 255, 255, 0.02);
+      padding-top: 1rem;
     }
 
     .security-tier h1 {
-      font-size: 1.4rem;
-      color: var(--c-accent);
-      margin-bottom: 1.5rem;
+      font-size: 1.5rem;
+      color: var(--c-text);
+      margin-bottom: 1rem;
       line-height: 1.3;
     }
 
     .security-tier p {
-      font-size: 0.95rem;
-      color: var(--c-text);
-      line-height: 1.75;
+      font-size: 1.0625rem;
+      color: var(--c-text-body);
+      line-height: 1.7;
     }
 
     .security-tier p + p {
@@ -137,7 +139,7 @@
     }
 
     .security-tier strong {
-      color: var(--c-accent);
+      color: var(--c-text);
     }
 
     /* Tier visibility — simple is default, the others reveal on toggle. */
@@ -182,11 +184,20 @@
 </head>
 
 <body>
-  <div id="dot-matrix-bg"></div>
+  <header class="site-nav">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-nav-brand" aria-label="Pollis home"><img src="wordmark.svg" alt="Pollis" width="72" height="27" /></a>
+      <nav class="site-nav-links" aria-label="Primary">
+        <a href="index.html#download">Download</a>
+        <a href="security.html" aria-current="page">Security</a>
+        <a href="faq.html">FAQ</a>
+        <a href="learn.html">Learn</a>
+      </nav>
+    </div>
+  </header>
 
   <main>
     <div class="security-main reading-surface">
-      <a href="index.html" class="security-back">&larr; Back to Pollis</a>
 
       <div class="security-header">
         <h1 class="security-title">Security</h1>
@@ -297,39 +308,46 @@
 
         <p>The claims on this page are backed by checks that run continuously: an independent rebuild of every release, machine-checked proofs of the parts where a bug would lose messages, and a dependency policy enforced on every change. Their results, including the two releases that were never checked, are on the <a href="assurance.html">assurance page</a>. Who can see what, and where they run, is on the <a href="subprocessors.html">subprocessors page</a>. If a device has been lost or stolen, start at <a href="device-security.html">lost or stolen device</a>.</p>
       </article>
-
-      <div class="footer-links">
-        <a href="index.html" class="footer-link">Home</a>
-        <a href="faq.html" class="footer-link">FAQ</a>
-        <a href="transparency.html" class="footer-link">Transparency</a>
-        <a href="artifacts.html" class="footer-link">Artifacts</a>
-        <a href="device-security.html" class="footer-link">Lost device</a>
-        <a href="assurance.html" class="footer-link">Assurance</a>
-        <a href="subprocessors.html" class="footer-link">Subprocessors</a>
-        <a href="privacy.html" class="footer-link">Privacy</a>
-        <a href="terms.html" class="footer-link">Terms</a>
-        <a href="retention.html" class="footer-link">Retention</a>
-        <a href="legal-requests.html" class="footer-link">Legal requests</a>
-        <a href="continuity.html" class="footer-link">Continuity</a>
-        <a href="https://status.pollis.com/" class="footer-link" target="_blank" rel="noopener noreferrer">Status</a>
-        <a href="learn.html" class="footer-link">Learn</a>
-        <a href="https://github.com/pollis-app/pollis" class="footer-link" target="_blank" rel="noopener noreferrer">
-          <svg viewBox="0 0 20 20" fill="currentColor" width="20" height="20" aria-hidden="true">
-            <g transform="translate(-140,-7559)">
-              <g transform="translate(56,160)">
-                <path
-                  d="M94,7399 C99.523,7399 104,7403.59 104,7409.253 C104,7413.782 101.138,7417.624 97.167,7418.981 C96.66,7419.082 96.48,7418.762 96.48,7418.489 C96.48,7418.151 96.492,7417.047 96.492,7415.675 C96.492,7414.719 96.172,7414.095 95.813,7413.777 C98.04,7413.523 100.38,7412.656 100.38,7408.718 C100.38,7407.598 99.992,7406.684 99.35,7405.966 C99.454,7405.707 99.797,7404.664 99.252,7403.252 C99.252,7403.252 98.414,7402.977 96.505,7404.303 C95.706,7404.076 94.85,7403.962 94,7403.958 C93.15,7403.962 92.295,7404.076 91.497,7404.303 C89.586,7402.977 88.746,7403.252 88.746,7403.252 C88.203,7404.664 88.546,7405.707 88.649,7405.966 C88.01,7406.684 87.619,7407.598 87.619,7408.718 C87.619,7412.646 89.954,7413.526 92.175,7413.785 C91.889,7414.041 91.63,7414.493 91.54,7415.156 C90.97,7415.418 89.522,7415.871 88.63,7414.304 C88.63,7414.304 88.101,7413.319 87.097,7413.247 C87.097,7413.247 86.122,7413.234 87.029,7413.87 C87.029,7413.87 87.684,7414.185 88.139,7415.37 C88.139,7415.37 88.726,7417.2 91.508,7416.58 C91.513,7417.437 91.522,7418.245 91.522,7418.489 C91.522,7418.76 91.338,7419.077 90.839,7418.982 C86.865,7417.627 84,7413.783 84,7409.253 C84,7403.59 88.478,7399 94,7399" />
-              </g>
-            </g>
-          </svg>
-          GitHub
-        </a>
-      </div>
     </div>
   </main>
 
-  <footer>
-    <p id="year-copyright"></p>
+  <footer class="site-footer">
+    <div class="site-footer-inner">
+      <div class="site-footer-col">
+        <h2 class="site-footer-title">Get Pollis</h2>
+        <ul>
+          <li><a href="index.html#download">Desktop</a></li>
+          <li><a href="android.html">Android</a></li>
+          <li><a href="index.html#terminal">Terminal client</a></li>
+          <li><a href="https://status.pollis.com/" target="_blank" rel="noopener noreferrer">Status</a></li>
+          <li><a href="https://github.com/pollis-app/pollis" target="_blank" rel="noopener noreferrer">Source code</a></li>
+        </ul>
+      </div>
+      <div class="site-footer-col">
+        <h2 class="site-footer-title">How it works</h2>
+        <ul>
+          <li><a href="security.html" aria-current="page">Security</a></li>
+          <li><a href="learn.html">Learn</a></li>
+          <li><a href="faq.html">FAQ</a></li>
+          <li><a href="transparency.html">Key transparency</a></li>
+          <li><a href="artifacts.html">Release artifacts</a></li>
+          <li><a href="assurance.html">Assurance</a></li>
+        </ul>
+      </div>
+      <div class="site-footer-col">
+        <h2 class="site-footer-title">Policies</h2>
+        <ul>
+          <li><a href="privacy.html">Privacy</a></li>
+          <li><a href="terms.html">Terms</a></li>
+          <li><a href="retention.html">Retention</a></li>
+          <li><a href="subprocessors.html">Subprocessors</a></li>
+          <li><a href="legal-requests.html">Legal requests</a></li>
+          <li><a href="continuity.html">Continuity</a></li>
+          <li><a href="device-security.html">Lost device</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="site-footer-copy" id="year-copyright">© 2026 Pollis. All rights reserved.</p>
   </footer>
 
   <script>
