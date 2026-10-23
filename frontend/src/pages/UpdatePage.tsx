@@ -8,6 +8,7 @@ import {
 } from "../bridge";
 import { PageShell } from "../components/Layout/PageShell";
 import { Button } from "../components/ui/Button";
+import { CodeSnippet } from "../components/ui/CodeSnippet";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 import type { ManagedInstallInfo } from "../types";
@@ -100,17 +101,6 @@ export const UpdatePage: React.FC = observer(() => {
     setUpdateRequired(true);
   }, [status, setUpdateRequired]);
 
-  const handleCopyCommand = useCallback(async () => {
-    if (!managed?.update_command) {
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(managed.update_command);
-    } catch {
-      // clipboard may be unavailable; ignore
-    }
-  }, [managed]);
-
   return (
     <PageShell title={t("update.title")} scrollable>
       <div
@@ -174,31 +164,12 @@ export const UpdatePage: React.FC = observer(() => {
                       {t("update.managedNote", { manager: managed.display_name })}
                     </p>
                     {managed.update_command && (
-                      <div
-                        className="bg-bg border border-line"
-                        style={{
-                          padding: "0.75rem 1rem",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          gap: "0.75rem",
-                          marginTop: "0.5rem",
-                        }}
-                      >
-                        <code
-                          dir="ltr"
-                          className="text-xs font-mono text-fg"
+                      <div className="mt-2">
+                        <CodeSnippet
+                          value={managed.update_command}
                           data-testid="update-page-managed-command"
-                        >
-                          {managed.update_command}
-                        </code>
-                        <Button
-                          data-testid="update-page-managed-copy"
-                          size="sm"
-                          onClick={handleCopyCommand}
-                        >
-                          {t("common:actions.copy")}
-                        </Button>
+                          copyTestId="update-page-managed-copy"
+                        />
                       </div>
                     )}
                   </>

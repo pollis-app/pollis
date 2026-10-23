@@ -4,6 +4,8 @@
     "cancel": "Annuler",
     "close": "Fermer",
     "copy": "Copier",
+    "copied": "Copié",
+    "copyFailed": "Échec de la copie",
     "delete": "Supprimer",
     "forward": "Suivant",
     "goBack": "Revenir en arrière",

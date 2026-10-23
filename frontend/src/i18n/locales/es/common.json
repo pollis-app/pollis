@@ -4,6 +4,8 @@
     "cancel": "Cancelar",
     "close": "Cerrar",
     "copy": "Copiar",
+    "copied": "Copiado",
+    "copyFailed": "No se pudo copiar",
     "delete": "Eliminar",
     "forward": "Adelante",
     "goBack": "Volver",
