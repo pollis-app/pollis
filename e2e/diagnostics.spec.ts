@@ -103,6 +103,9 @@ test("the Diagnostics page shows exactly what it copies", async ({ page }) => {
   await boot(page, true);
   await expect(page.getByTestId("sidebar")).toBeVisible();
   await page.getByTestId("breadcrumb-settings-button").first().click();
+  // Diagnostics lives in the Settings hub only — the sidebar has no row for it.
+  await expect(page.getByTestId("sidebar-row-preferences")).toBeVisible();
+  await expect(page.getByTestId("sidebar-row-diagnostics")).toHaveCount(0);
   await page.getByTestId("menu-item-diagnostics").click();
   await expect(page.getByTestId("diagnostics-page")).toBeVisible();
 
