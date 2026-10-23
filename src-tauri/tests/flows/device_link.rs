@@ -74,6 +74,18 @@ async fn a_qr_link_enrolls_a_phone_without_the_email_otp() {
     // anyone typing a code.
     let ready = link_state(&primary, &link_id).await;
     assert_eq!(ready["state"], "ready_to_approve", "the tag must verify: {ready}");
+
+    // The typed-code approval never sees it: the phone shows no code, so the
+    // sign-in-time fallback that raises desktop's "a new device wants to
+    // enroll" card (and mobile's) must not list a link-bound request. The live
+    // nudge is skipped on its `link_id` instead (core `dispatch_data`).
+    let pending = primary
+        .invoke_json("list_pending_enrollment_requests", json!({ "userId": primary.user_id() }))
+        .await;
+    assert!(
+        !pending.as_array().unwrap().iter().any(|r| r["request_id"] == request_id.as_str()),
+        "a QR-link request must not reach the typed-code approval: {pending}"
+    );
     primary
         .invoke_json("approve_device_link", json!({ "userId": primary.user_id(), "linkId": link_id }))
         .await;
