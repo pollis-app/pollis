@@ -582,9 +582,9 @@
           </p>
           <ul class="art-cmds">
             <li>
-              <code class="art-cmd">BASE=https://cdn.pollis.com/releases/v1.17.2
-ART=pollis-v1.17.2-windows.exe
-REPO=actuallydan/pollis                 # the signer: pollis-app/pollis after v1.17.2
+              <code class="art-cmd">BASE=https://cdn.pollis.com/releases/v1.17.4
+ART=pollis-v1.17.4-windows.exe
+REPO=pollis-app/pollis                  # the signer: actuallydan/pollis up to v1.17.2
 curl -sSLO "$BASE/$ART"                 # the artifact
 curl -sSLO "$BASE/$ART.sig"             # cosign detached signature
 curl -sSLO "$BASE/$ART.pem"             # cosign signing certificate
@@ -628,7 +628,7 @@ curl -sSLO "$BASE/$ART.intoto.jsonl"    # SLSA build-provenance attestation</cod
               <code class="art-cmd">slsa-verifier verify-artifact "$ART" \
   --provenance-path "$ART.intoto.jsonl" \
   --source-uri "github.com/$REPO" \
-  --source-tag v1.17.2</code>
+  --source-tag v1.17.4</code>
               <span class="art-cmd-note">The same check with a standalone verifier, if you'd rather not have
                 GitHub's CLI grade GitHub's attestation.</span>
             </li>
@@ -643,7 +643,7 @@ curl -sSLO "$BASE/$ART.intoto.jsonl"    # SLSA build-provenance attestation</cod
           </p>
           <ul class="art-cmds">
             <li>
-              <code class="art-cmd">curl -sSL "$BASE/pollis-v1.17.2.cdx.json" | jq '.components | length'</code>
+              <code class="art-cmd">curl -sSL "$BASE/pollis-v1.17.4.cdx.json" | jq '.components | length'</code>
               <span class="art-cmd-note">SBOMs begin at the first release after 16 August 2026; earlier tags have
                 no <code>.cdx.json</code> and the URL returns 404. See the limits below.</span>
             </li>
