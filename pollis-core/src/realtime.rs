@@ -105,9 +105,19 @@ pub enum RealtimeEvent {
     /// whole defect: the approver must type what the NEW device shows, and
     /// `approve_device_enrollment` checks that against the code it derives from
     /// the ephemeral key it fetched itself.
+    ///
+    /// `link_id` is set when the request belongs to a QR device link (#1207 v1,
+    /// #1361 v2). Such a request is approved by the device holding that link —
+    /// on the link tag (v1) or the scanned key (v2), never a typed code — and
+    /// the new device shows no code to type, so the UI must not raise the
+    /// typed-code takeover for it. The flag can only WITHHOLD a prompt (which a
+    /// DS can always do by not sending the nudge); it approves nothing:
+    /// `approve_device_enrollment` still demands the typed code, and
+    /// `approve_device_link` wraps only after verifying the tag or key.
     EnrollmentRequested {
         request_id: String,
         new_device_id: String,
+        link_id: Option<String>,
     },
     /// Sent after a room's event stream recovers from a drop. The frontend
     /// uses this to resync state that may have changed during the outage

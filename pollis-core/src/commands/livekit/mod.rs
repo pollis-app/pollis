@@ -271,9 +271,20 @@ pub(super) fn dispatch_data(
                 data.get("request_id").and_then(|v| v.as_str()),
                 data.get("new_device_id").and_then(|v| v.as_str()),
             ) {
+                // `link_id` (#1207/#1361) marks a QR-link request, which the UI
+                // must not answer with the typed-code takeover: the new device
+                // shows no code. Dropping it here (as this dispatch did) made
+                // desktop's skip dead code, so a phone signing in from a
+                // desktop's QR raised an approval card nobody could complete.
+                let link_id = data
+                    .get("link_id")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_owned);
                 let _ = channel.send(RealtimeEvent::EnrollmentRequested {
                     request_id: request_id.to_owned(),
                     new_device_id: new_device_id.to_owned(),
+                    link_id,
                 });
             }
         }
@@ -586,11 +597,12 @@ mod tests {
             }),
             None,
         );
-        let [RealtimeEvent::EnrollmentRequested { request_id, new_device_id }] = &events[..] else {
+        let [RealtimeEvent::EnrollmentRequested { request_id, new_device_id, link_id }] = &events[..] else {
             panic!("expected exactly one EnrollmentRequested, got {} event(s)", events.len());
         };
         assert_eq!(request_id, "r1");
         assert_eq!(new_device_id, "d2");
+        assert_eq!(link_id, &None, "a typed-code request carries no link id");
         // The variant has no code field at all; this is the compile-time half of
         // the assertion. The runtime half is that a packet WITH a code still
         // dispatches, rather than being rejected as malformed — shipped DS
@@ -615,5 +627,47 @@ mod tests {
             None,
         );
         assert_eq!(events.len(), 1, "a packet with no code must still raise the takeover");
+    }
+
+    /// A QR-link request's nudge (the DS sets `link_id` on it) must reach the UI
+    /// WITH that id, or the UI cannot tell it from a typed-code request and
+    /// raises an approval card asking for a code the new device never shows —
+    /// the phone-scans-desktop's-QR sign-in then dead-ends on the desktop.
+    #[test]
+    fn a_qr_link_enrollment_nudge_keeps_its_link_id() {
+        let events = run(
+            serde_json::json!({
+                "type": "enrollment_requested",
+                "request_id": "r1",
+                "new_device_id": "d2",
+                "verification_code": "ABCD2345",
+                "link_id": "link-1",
+            }),
+            None,
+        );
+        let [RealtimeEvent::EnrollmentRequested { link_id, .. }] = &events[..] else {
+            panic!("expected exactly one EnrollmentRequested, got {} event(s)", events.len());
+        };
+        assert_eq!(link_id.as_deref(), Some("link-1"));
+        // The renderer reads it off the serialized event.
+        let serialized = serde_json::to_value(&events[0]).expect("serialize");
+        assert_eq!(serialized["link_id"], "link-1");
+
+        // A null or empty id is a typed-code request — the takeover's default.
+        for absent in [serde_json::Value::Null, serde_json::json!("")] {
+            let events = run(
+                serde_json::json!({
+                    "type": "enrollment_requested",
+                    "request_id": "r1",
+                    "new_device_id": "d2",
+                    "link_id": absent,
+                }),
+                None,
+            );
+            let [RealtimeEvent::EnrollmentRequested { link_id, .. }] = &events[..] else {
+                panic!("expected exactly one EnrollmentRequested");
+            };
+            assert_eq!(link_id, &None);
+        }
     }
 }

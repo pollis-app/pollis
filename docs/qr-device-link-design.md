@@ -139,7 +139,20 @@ showing that QR; the new device shows no code, so a typed-code approval of it
 could never complete. Two places enforce that: the DS leaves link-bound
 requests out of `pending_enrollments` (`LinkStore::bound_request_ids`), and the
 `enrollment_requested` inbox nudge carries `link_id`, on which clients skip the
-typed-code takeover.
+typed-code takeover. Desktop reads the nudge through the core's
+`dispatch_data`, which must forward `link_id` in `RealtimeEvent::EnrollmentRequested`;
+until it did, desktop's skip never fired and a phone scanning a desktop's QR
+raised "A new device wants to enroll" on that desktop, asking for a code the
+phone never shows. Mobile parses the packet itself and was unaffected.
+
+Skipping on `link_id` is not an approval bypass. The flag only withholds a
+prompt, which a DS can always do by not sending the nudge at all. It approves
+nothing: `approve_device_enrollment` still requires the typed code for every
+request it is given, and a link request is wrapped only by the device that
+holds that link, after the core checks the link tag (v1, keyed by the QR's
+secret, which the DS never sees) or the scanned key (v2). A DS that set
+`link_id` on a genuine typed-code request could hide the prompt, but could not
+get its key wrapped.
 
 ## Guardrails
 

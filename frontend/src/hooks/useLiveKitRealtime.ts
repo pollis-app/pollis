@@ -25,6 +25,7 @@ import { keyChangeStore } from '../stores/keyChangeStore';
 import { rosterChangeStore, type RosterBanner } from '../stores/rosterChangeStore';
 import { peerVerificationKeys } from './queries/useUserProfile';
 import { listPendingEnrollmentRequests } from '../services/api';
+import { isTypedCodeRequest } from '../utils/enrollmentPrompt';
 import i18n from '../i18n';
 
 // Mirrors the RealtimeEvent enum in pollis-core/src/realtime.rs.
@@ -121,9 +122,9 @@ type RealtimeEvent =
     type: 'enrollment_requested';
     request_id: string;
     new_device_id: string;
-    verification_code: string;
-    /// Set when the request belongs to a QR device link (#1207).
-    link_id?: string | null;
+    /// Set when the request belongs to a QR device link (#1207 / #1361). The
+    /// core forwards it from the DS packet; it carries no code (#1096).
+    link_id: string | null;
   }
   | {
     type: 'realtime_reconnected';
@@ -602,10 +603,11 @@ export function useLiveKitRealtime() {
       }
 
       if (event.type === 'enrollment_requested') {
-        // A QR-linked request (#1207) is approved on the device showing that
-        // QR, on the link tag — the new phone shows no code, so the typed-code
-        // takeover below could never be completed. The link screen handles it.
-        if (event.link_id) {
+        // A QR-linked request (#1207 / #1361) is approved on the device at the
+        // other end of that QR, on the link tag or the scanned key — the new
+        // device shows no code, so the typed-code takeover below could never
+        // be completed. The link screen handles it.
+        if (!isTypedCodeRequest(event)) {
           return;
         }
         // Immediate UI takeover — the user must explicitly approve or
