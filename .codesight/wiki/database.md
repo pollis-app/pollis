@@ -675,6 +675,39 @@ neither this wrap nor the pins it protects. Purged with its conversation, and
 deliberately NOT purged when a member leaves (the remaining members' pin access
 lives in this row).
 
+### file_keystate _(migration 000036, #1382)_
+- `conversation_id` TEXT PK _(the MLS conversation — group id or DM id, same key as `pin_keystate`)_
+- `wrapped_keyring` BLOB NOT NULL _(AES-256-GCM ciphertext of the serialized ring: `key_version` entries of a 32-byte key + the big-endian `(generation, epoch)` it was added at — 48 bytes each — under the KEK from `export_secret("pollis-file-kek")` at the row's `(generation, epoch)`)_
+- `nonce` BLOB NOT NULL _(12 bytes, fresh per (re-)wrap)_
+- `key_version` INTEGER NOT NULL CHECK `>= 1` _(ring length; the newest key is the one uploads use)_
+- `generation` INTEGER NOT NULL DEFAULT 0
+- `epoch` INTEGER NOT NULL
+- `updated_at` TEXT NOT NULL DEFAULT now
+- `updated_by_device_id` TEXT NOT NULL _(diagnostic; authz is the signed request)_
+
+One mutable row per MLS conversation: the CURRENT wrap of the conversation's
+**attachment file key ring** — the keys every channel/DM attachment is sealed
+under (each file: `HKDF(salt = random file id, ikm = ring key)`). It replaced
+convergent encryption (key = HKDF(SHA-256(plaintext)), hash stored in
+[attachment_object](#attachment_object)), under which the bucket plus this
+database decrypted every attachment — that scheme was broken and is gone. Same
+construction and `(generation, epoch)` CAS as [pin_keystate](#pin_keystate),
+re-wrapped by any key-holding device at every epoch advance, so every current
+member (late joiner, external joiner, new device) can open every file the
+conversation ever shared. The difference: the ring ROTATES — the device that
+commits a member removal appends one fresh key at the post-removal epoch, so the
+removed member cannot open files posted afterwards (old files are not
+re-encrypted). `key_version` is plaintext precisely so the DS can make a fork
+unrepresentable: **mint** is insert-only at `key_version = 1`; **re-wrap** must
+keep `key_version` and strictly advance `(generation, epoch)`; **rotate** must be
+exactly stored `+ 1` at a pair no older than the stored one. The written pair is
+ceilinged at the commit log's head; `key_version` is capped at 1024 and the
+wrap's length must match it. Written via `POST /v1/file-keys/keystate`, read via
+`POST /v1/read/file-keystate`, both membership-gated
+(`pollis-delivery/src/file_keys.rs`). The DS can open neither the wrap nor any
+file. Purged with its conversation (`purge_group` / `purge_dm_channel`), and —
+like `pin_keystate` — NOT purged when a member leaves.
+
 ### pinned_message _(migration 000019, #99)_
 - `id` TEXT PK _(pin ULID)_
 - `conversation_id` TEXT NOT NULL _(the channel or DM the message lives in)_
@@ -710,7 +743,7 @@ so a colliding ULID from another account is a refused write, not an overwrite.
 Hard-deleted on entry delete and purged with the account.
 
 ### vault_attachment_ref _(migration 000020, #107)_
-- `content_hash` TEXT NOT NULL
+- `content_hash` TEXT NOT NULL _(the Vault file's random file id since #1382)_
 - `vault_message_id` TEXT NOT NULL
 - `created_at` TEXT NOT NULL DEFAULT now
 - PK `(content_hash, vault_message_id)`; index on `vault_message_id`
@@ -721,8 +754,10 @@ live envelope" with "a `vault_attachment_ref` joined to a live `vault_message`",
 so a file that exists only in someone's vault survives every collect pass.
 Maintained by `/v1/vault/save` (replace-on-save — an edit that drops a file
 releases it) and `/v1/vault/delete`; reaped by `sweep_envelope_gc` if ever
-orphaned. The user→hash pairing it records is already conceded by the signed
-upload presign.
+orphaned. The user→file-id pairing it records is already conceded by the signed
+upload presign. Vault files are sealed under the account's Vault file root
+(HKDF over the account identity key, info `pollis-vault-files-v1`, #1382), so
+nothing in this row or the object opens them.
 
 ### message_reaction
 - `id` TEXT PK
@@ -733,12 +768,12 @@ upload presign.
 - UNIQUE: (`message_id`, `user_id`, `emoji`)
 
 ### attachment_object
-- `content_hash` TEXT PK _(SHA-256 of plaintext)_
-- `r2_key` TEXT NOT NULL
+- `content_hash` TEXT PK _(since #1382 the object's **random 32-byte file id**, hex — a name, not derived from the content and not key material; before #1382 it was SHA-256 of the plaintext, the convergent key)_
+- `r2_key` TEXT NOT NULL _(`media/{file id}.enc`)_
 - `created_at` TEXT NOT NULL DEFAULT now
 - `uploaded_by` TEXT _(migration `000031`; **dead since migration `000032`** — never written, never read, and existing values cleared. Not dropped because migrations here are additive only)_
 
-Global convergent-encryption dedup: one row (and one R2 blob) per unique file, shared by every message that carries it across all conversations and users. Written via the DS `/v1/attachments/register` endpoint (`apply_register_attachment`), never a client-side INSERT.
+One row (and one R2 blob) per upload, for reference counting. Until #1382 this was a global convergent-encryption dedup — one row per unique plaintext across all users, keyed by the hash that also derived the decryption key, so this table plus the bucket decrypted every attachment; that was broken and replaced. Now every upload gets a random id, there is no cross-user dedup, and the key lives only in the conversation's [file_keystate](#file_keystate) ring. Several messages share a row only when they reference the same upload (an edit keeps the original's reference; a Vault re-save keeps its files). Written via the DS `/v1/attachments/register` endpoint (`apply_register_attachment`), never a client-side INSERT.
 
 **Deletion is reference-counted server-side (#690, migration 000012).** The row — and its R2 object — is collected **only when no still-existing message references the hash**, via a single conditional predicate: `DELETE FROM attachment_object WHERE content_hash = ?1 AND NOT EXISTS (SELECT 1 FROM attachment_ref ar JOIN message_envelope me ON me.id = ar.message_id WHERE ar.content_hash = ?1)` in `apply_delete_attachment`. The count is **derived** — a declaration counts only while its [message_envelope](#message_envelope) still exists (see [attachment_ref](#attachment_ref)). The old delete was unconditional and stranded any other conversation still referencing the file (its attachment 404'd). Legacy rows predating the migration hold no references and are collectable as before (no worse than the old unconditional delete); any send from an updated client re-references the hash and promotes it to counted protection.
 
@@ -750,7 +785,7 @@ What the #1161 M5 review actually found and what stays fixed: a reference could 
 
 ### attachment_ref _(migration 000012, #690)_
 - PK: (`content_hash`, `message_id`)
-- `content_hash` TEXT NOT NULL _(the referenced [attachment_object](#attachment_object))_
+- `content_hash` TEXT NOT NULL _(the referenced [attachment_object](#attachment_object) — its random file id since #1382)_
 - `message_id` TEXT NOT NULL _(the message that carries the attachment)_
 - `created_at` TEXT NOT NULL DEFAULT now
 - `registered_by` TEXT _(migration `000031`; **dead since migration `000032`** — never written, never read, and existing values cleared. The #1165 binding is enforced at registration, so no later reader needs to know who declared a row. Not dropped because migrations here are additive only; the index `idx_attachment_ref_registrar` over it is dead too)_
@@ -763,7 +798,7 @@ One row = "message `message_id` carries the file with `content_hash`". Because t
 
 **Sealed envelopes prove authorship by capability (#1330).** Every envelope a current client writes is sealed, so its `sender_id` is the sentinel `"sealed"` and the name check alone refused every real declaration: from #331 until #1330 no sent attachment was counted, and any delete of the same bytes could collect the blob ("Image unavailable" everywhere else it was sent). The body now carries the envelope's #1086 deletion capability (`delete_token`, optional on the wire); for an envelope whose `sender_id` is not the caller, `envelope_is_authored_by` accepts the declaration only when the token hashes to the stored `delete_token_hash`. A sealed envelope from before #1086 has no hash and is refused, as before. Sends made before the fix are re-declared once per device in the background after a PIN unlock (`spawn_attachment_ref_backfill`, kv key `attachment_ref_backfill`, at most three passes).
 
-**Metadata-exposure trade-off (chosen deliberately; see `docs/metadata-retention-policy.md` §2/§5).** Storing `message_id` in the clear moves the attachment↔message linkage that previously lived only inside the MLS-encrypted payload out to the operator: joining `attachment_ref` to `message_envelope.conversation_id` reveals which messages — and thus which conversations — share a given convergent file. It does **not** reveal the file (plaintext is never seen) or the sender (sealed, #607). The opaque-`ref_token` alternative would hide that graph but leaks references forever when a device loses local state and cannot release a token an admin never held — i.e. it fails deletion, the very thing #690 exists to make correct. We chose the counted, robust option; the incremental exposure is the co-reference graph over hashes the operator already stores.
+**Metadata-exposure trade-off (chosen deliberately; see `docs/metadata-retention-policy.md` §2/§5).** Storing `message_id` in the clear moves the attachment↔message linkage that previously lived only inside the MLS-encrypted payload out to the operator: joining `attachment_ref` to `message_envelope.conversation_id` reveals which messages carry which stored object. Before #1382 that id was the convergent content hash, so it also revealed which conversations shared the same file; since #1382 ids are random per upload, so identical content uploaded twice is unlinkable. It does **not** reveal the file (plaintext is never seen, and nothing here is key material) or the sender (sealed, #607). The opaque-`ref_token` alternative would hide that graph but leaks references forever when a device loses local state and cannot release a token an admin never held — i.e. it fails deletion, the very thing #690 exists to make correct. We chose the counted, robust option; the incremental exposure is the message→object graph over ids the operator already stores.
 
 ### custom_emoji_object _(migration 000015, #848)_
 - `content_hash` TEXT PK _(SHA-256 of the **re-encoded** bytes)_
@@ -1205,7 +1240,7 @@ Rules that matter:
 
 Source: `pollis-core/src/db/local_schema.sql`
 
-File path: `pollis_{user_id}.db`, SQLCipher-encrypted at rest on every platform. The key is 32 random bytes held only in the device keystore, sealed under the PIN (`db_key_wrapped_{uid}`, see `pin-design.md`). Columns below that hold decrypted data (`message.content`, `pin_key_cache`, vault entries) are readable only by the unlocked app — on disk the whole file is ciphertext, so a copy taken while the app is closed or locked reveals nothing.
+File path: `pollis_{user_id}.db`, SQLCipher-encrypted at rest on every platform. The key is 32 random bytes held only in the device keystore, sealed under the PIN (`db_key_wrapped_{uid}`, see `pin-design.md`). Columns below that hold decrypted data (`message.content`, `pin_key_cache`, `file_key_cache`, vault entries) are readable only by the unlocked app — on disk the whole file is ciphertext, so a copy taken while the app is closed or locked reveals nothing.
 
 **Windows links SQLCipher differently (#992).** SQLCipher's OpenSSL cannot be linked next to the BoringSSL that `libwebrtc-sys` puts in the same image under MSVC (1,253 duplicate symbols), so Windows takes `rusqlite`'s plain `sqlcipher` (linked) feature and gets the library from the `pollis-sqlcipher` workspace crate: the stock SQLCipher amalgamation compiled with `-DSQLCIPHER_CRYPTO_LIBTOMCRYPT`, whose ~20 crypto primitives are implemented over the RustCrypto crates already in the graph. No OpenSSL enters the Windows image at all. The ciphertext is identical to every other platform's — AES-256-CBC pages, HMAC-SHA512, SQLCipher 4 defaults.
 
@@ -1359,6 +1394,19 @@ ciphertext — see [`read_cursor_sync`](#read_cursor_sync-migration-000018-844).
 Load-bearing, not a convenience: `max_past_epochs = 0` destroys the previous
 exporter at merge, so a device that lost `Kpin` cannot recover it from a stale
 server wrap — only from this row or a peer's fresh re-wrap.
+
+### file_key_cache _(#1382)_
+- `conversation_id` TEXT PK _(MLS conversation id)_
+- `keyring` BLOB NOT NULL _(the unwrapped file key ring, 48-byte entries: key ‖ BE generation ‖ BE epoch; entry `i` is key version `i + 1`)_
+- `wrapped_generation` / `wrapped_epoch` INTEGER _(the newest pair this device published or adopted a wrap at)_
+- `rotation_owed_generation` / `rotation_owed_epoch` INTEGER NULL _(set by the device that committed a member removal; cleared only once the ring holds a key added at or after that pair — survives a crash between the commit and the rotation)_
+- `updated_at` TEXT
+
+The local half of [file_keystate](#file_keystate). Load-bearing for the same
+reason as `pin_key_cache`: `max_past_epochs = 0` destroys the previous exporter
+at merge, so a device that lost its ring cannot reopen an old server wrap — only
+this row or a peer's fresh re-wrap restores it. Only a ring that came from a DS-
+accepted write or from unwrapping the DS's row is ever cached.
 
 ### vault_entry_cache _(local cache, #107)_
 - `id` TEXT PK, `content` TEXT NOT NULL _(decrypted entry body — same shape as `message.content`)_, `pinned` INTEGER, `created_at` / `updated_at` TEXT

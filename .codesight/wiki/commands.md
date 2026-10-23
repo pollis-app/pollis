@@ -235,7 +235,7 @@ Idle auto-lock (#851) — the timer that was missing from `pin::lock`. Rust owns
 - `get_dm_messages(user_id, dm_channel_id, limit, cursor?)` → `MessagePage`
 - `read_last_messages(conversation_ids)` → `Vec<ChannelMessage>` — the newest message in each of the given conversations, in ONE call (#874). Drives every sidebar preview row (channels, DMs, DM requests): the previous shape was one `read_channel_messages` / `read_dm_messages` per ROW, re-fired on mount, on window focus and on every `deleted_message` event. A single `ROW_NUMBER() OVER (PARTITION BY conversation_id ...)` over the local `message` table, chunked at 400 bound parameters, plus one batched username hydration. Conversations with no local messages are ABSENT from the result — the caller keys by `conversation_id`, so a null placeholder would be a second spelling of the same answer. Ordering key matches `read_local_channel_page` exactly, so a preview and the top of the opened conversation cannot disagree.
 - `edit_message(message_id, conversation_id, sender_id, new_content)`
-- `delete_message(message_id, user_id)` — hard-deletes the envelope on Turso + the sender's local row. Both branches (self and admin) build the `POST /v1/messages/delete` body through the one `delete_message_body(...)` helper so `actor_id` cannot be forgotten on either — see "Every DS write body must NAME ITS ACTOR" above; it was missing on both before #875, which made deletion 403 on any `require_auth = false` deployment. If the message had attachments (`_att` in the plaintext JSON payload), each `content_hash` is reference-counted against the sender's other non-deleted local messages; unreferenced ones have their `attachment_object` row + R2 object removed (best-effort, logged on failure). Cross-user references are invisible because attachment metadata lives inside the MLS-encrypted payload — convergent encryption means another member re-uploading the same file simply re-registers the dedup row.
+- `delete_message(message_id, user_id)` — hard-deletes the envelope on Turso + the sender's local row. Both branches (self and admin) build the `POST /v1/messages/delete` body through the one `delete_message_body(...)` helper so `actor_id` cannot be forgotten on either — see "Every DS write body must NAME ITS ACTOR" above; it was missing on both before #875, which made deletion 403 on any `require_auth = false` deployment. If the message had attachments (`_att` in the plaintext JSON payload), each `content_hash` is reference-counted against the sender's other non-deleted local messages; unreferenced ones have their `attachment_object` row + R2 object removed (best-effort, logged on failure). Cross-user references are invisible locally because attachment metadata lives inside the MLS-encrypted payload; the DS's derived reference count (`attachment_ref` ⋈ `message_envelope`) is what actually gates collection. Since #1382 every upload is its own object under a random file id, so there is no shared dedup row to re-register.
 - `read_messages_around(conversation_id, message_id, limit?)` → `MessagePage` — a page CENTRED on one message (#850), `limit` before and `limit` after, anchored on `(sent_at, id)` because that is the order the log renders in. The jump-to-message read path: a search hit or permalink almost by definition points outside the loaded window, and the renderer's windowing can only reveal a row the query already holds. A message this device does not hold yields an empty page — the same honest answer `resolve_message_permalink` gives.
 - `read_messages_after(conversation_id, cursor, limit?)` → `MessagePage` — the forward page read (#1039): the oldest `limit` (default 50, max 200) rows strictly NEWER than `cursor`, returned newest-first like every other page, with `next_cursor` = the newest row returned iff the page came back full (a short page is the tail this device holds, and an empty one never carries a continuation). Exclusive of the cursor row and tie-broken on `id` like the backward read, so walking forward from a `read_messages_around` page's head and backward from its `next_cursor` visits every row exactly once. This is what lets a jump-to-message window page toward the present until it rejoins the live tail instead of being merged with it. Local SQLite only — page reads never touch the DS.
 
@@ -330,7 +330,9 @@ A second source scan bans `std::fs::write` / `File::create` / `create_dir_all` i
 **Shape** (`format: "pollis-archive"`, `version: 1`): `account { user_id, username }`,
 `conversations[] { id, kind, name, group_id, group_name, peer_user_id, messages[] }`,
 `vault[]`. Each message carries `text`, `attachments[] { name, content_type, size_bytes,
-content_hash, storage_key }`, reply/thread ids, timestamps, `saved` (bookmark) and
+content_hash, storage_key, sha256, key_version }` (`content_hash` is the random file id,
+`sha256` the plaintext digest, `key_version` the file-key-ring version, `0` = Vault; the
+last two are `null` for a reference from before #1382), reply/thread ids, timestamps, `saved` (bookmark) and
 `receipts[]`. Names come from `conversation_cache` / `user_cache` — a conversation the
 cache never learned still exports, with `name: null`. A deleted message exports as a
 tombstone (`text: null`, `deleted_at` set), never its last body. The `{"_att","_txt"}`
@@ -350,12 +352,16 @@ name (`<hash[..16]>-<sanitised name>`, one safe path component). Bytes are writt
 the sibling `<archive>-files/` directory for every distinct attachment whose decrypted
 copy is **already in this device's media cache** — looked up for the unlocked user *by
 name* (`r2::find_cached_file_for_user`, the #1000 lesson), decrypted under `db_key` and
-re-verified against its hash before being vouched for; anything that fails is reported
+re-verified against its `sha256` before being vouched for; anything that fails is reported
 missing rather than aborting. Still zero network. The summary returns `files_dir`,
 `attachments_written` and `attachments_missing[]` (the exact list the opt-in fetch
 takes). The JSON never claims a file exists — the filesystem is the source of truth.
-The `content_hash` is the convergent-encryption key, so an archive is also sufficient
-to fetch and decrypt every attachment later without any other secret.
+The archive holds **no** key: the `content_hash` is only the object's random file id
+(#1382 — before that it was the convergent-encryption key, which made the archive alone
+enough to decrypt every file; that scheme was broken and replaced). Fetching a missing
+attachment later needs a device that can still open the conversation's file key ring
+(or, for Vault files, the account key). A pre-#1382 reference (no `sha256`/`key_version`)
+is not listed as missing — its object can no longer be opened.
 
 ## export_fetch (`commands/export_fetch.rs`)
 
@@ -363,10 +369,12 @@ The **opt-in second step** of the export, and the one place the feature touches 
 network. A separate module and command on purpose: `export.rs` stays scannable as
 strictly local, and the default path never comes here.
 
-- `fetch_export_attachments(files_dir, attachments: MissingAttachment[])` →
+- `fetch_export_attachments(files_dir, attachments: MissingAttachment[])` (each
+  `{ content_hash, storage_key, sha256, scope: AttachmentKeyScope, content_type, file }`) →
   `FetchSummary { fetched, failed[] { content_hash, file, error } }` — downloads the
   attachments an export reported missing into its files directory, via
-  `r2::download_media` (DS-minted presigned GET, decrypt, content-hash check). Only
+  `r2::download_media` (DS-minted presigned GET, decrypt under the ring key named by
+  `scope`, `sha256` check). Only
   ever reachable from the separately-worded "Download the missing attachments" button
   that appears *after* an archive is written; `frontend/tests/export-archive.test.ts`
   pins that to `ExportArchiveButton` alone. Sequential — one presigned GET at a time,
@@ -432,6 +440,41 @@ rows jump back to the message (`mobile/stores/messageJumpStore.ts`). Proofs:
 and the two-member `mobile/scripts/maestro-pins.sh` (dev-DS peer
 `pollis-tui/examples/pins_peer.rs`: each side sees the other's pin and unpin).
 
+## file_keys (`commands/file_keys.rs`, #1382)
+
+The per-conversation **attachment file key ring** — the key every channel/DM
+attachment is sealed under. Same construction as the pin key above, with one
+difference: the ring rotates. Each MLS conversation has a ring of random 32-byte
+keys (each entry also records the `(generation, epoch)` it was added at); the DS
+stores it only WRAPPED under `export_secret("pollis-file-kek")` in `file_keystate`
+(`key_version` = ring length), and the unwrapped ring is cached locally in
+`file_key_cache`. Every current member — late joiner, external joiner, newly
+enrolled device — can unwrap it and open every file the conversation ever shared,
+including files from before it joined (deliberate). Replaced convergent encryption,
+under which the bucket plus the DS's `attachment_object` rows decrypted every file.
+
+Internal hooks (not invokable commands):
+- `mint_file_keys_for_new_group` — at conversation creation, while the creator is the
+  sole member (best-effort; the first upload mints otherwise). DS mint is insert-only.
+- `maybe_rewrap_file_keys` — at every epoch-advance site next to `maybe_rewrap_pin_key`
+  (`group_state.rs`, `reconcile.rs`, `self_update.rs`, `migrate.rs`); re-wraps under the
+  new exporter and settles any owed rotation.
+- `try_adopt_file_keys` — right after a Welcome or external join.
+- `on_member_removed` — called by the device that committed a removal: records a
+  durable "rotation owed at `(g, e)`" mark (`file_key_cache.rotation_owed_*`), then
+  appends a fresh key wrapped at the post-removal epoch. New uploads use it; old files
+  are not re-encrypted. The mark clears only once the ring holds a key added at or after
+  `(g, e)`, so two racing removals are safe.
+- `upload_key` / `key_at_version` — the newest key for an upload; the key at a given
+  version for a download (refetching from the DS when the cached ring is shorter).
+- `test_file_key_version` — test harness only (`src-tauri/tests/flows/file_keys.rs`:
+  ring mint, late join, rotation on removal).
+
+DS endpoints: `POST /v1/file-keys/keystate` (mint / re-wrap / rotate; the DS refuses
+every fork — mint only at `key_version = 1`, re-wrap at the same version and a newer
+`(generation, epoch)`, rotate at exactly `+1`) and `POST /v1/read/file-keystate`.
+Both membership-gated. See `.codesight/wiki/database.md` § `file_keystate`.
+
 ## vault (`commands/vault.rs`)
 
 The Vault (#107): a personal encrypted space that presents as a chat with yourself
@@ -444,8 +487,11 @@ the ENTIRE vault: the deliberate, cryptographic inversion of accepted loss (2)
 pin/unpin is indistinguishable from an edit on the wire. Entry bodies are the same
 content string chat uses (plain text or the `_att` attachment envelope), so file
 drops ride the normal staged-upload/R2 pipeline; every save declares its attachment
-hashes so the DS's `vault_attachment_ref` rows keep the shared objects alive against
-attachment GC. Remote-first writes, local `vault_message` cache for offline reads;
+file ids so the DS's `vault_attachment_ref` rows keep the objects alive against
+attachment GC. Vault files are sealed under the account's Vault file root
+(`vault_file_root_key`: HKDF over the account identity key seed, `info =
+"pollis-vault-files-v1"`, #1382) instead of a conversation ring, so every enrolled
+device opens them and the DS cannot; their references carry `kv: 0`. Remote-first writes, local `vault_message` cache for offline reads;
 the remote is the source of truth (sync replaces the cache).
 
 - `get_vault_messages(user_id)` → `VaultMessage[]` — oldest first (chat order). Pulls
@@ -560,9 +606,9 @@ Invariant: **`deafened ⇒ self_muted`** — the gate's fields are private and u
 - `upload_public_file(prefix, data, content_type)` → `UploadResult` — uploads an avatar / group icon under a CONTENT-ADDRESSED key `{prefix}/{sha256}.{ext}` (#874). Avatars used to live at a stable `avatars/{user_id}` overwritten in place, and a mutable key is what made a local cache impossible: nothing short of re-fetching could tell you whether a cached copy was current, so every viewer re-downloaded every avatar on every launch. A new avatar is now a new key, which the profile row already publishes.
 - `get_public_file_url(key)` → URL — resolves a public object to a loopback media-server URL, caching the bytes on disk encrypted at rest under the same content-addressed scheme attachments and custom emoji use. The key IS the expected digest, so the integrity check is free and mandatory (these objects are stored unencrypted). Returns `""` — the same sentinel `get_media_url` uses — for a LEGACY key that carries no digest, or when the media server isn't up; the frontend falls back to `download_file` for those.
 - ~~`presign_upload(key, content_type)`~~ — **does not exist** under that name as of 2026-08-03 (#714). Presigning is server-side: the DS secrets broker mints URLs via `POST /v1/r2/presign` (see `delete_r2_object` below and `docs/secrets-broker.md`).
-- `get_media_url(r2_key, content_hash, content_type)` → URL — builds the loopback media-server URL (`http://127.0.0.1:<port>/<token>/<hash>`) for a cached item; errors if the server isn't started or there is no active unlock. See `pollis-core/src/media_server.rs`.
-- `upload_media(path, filename, content_type)` / `download_media(r2_key, content_hash)` — convergent-encryption media path; dedups via `attachment_object` on Turso. `path` is a file the **user** already has (picker selection, OS drag-and-drop); nothing in the app ever writes a file in order to have a path to pass here. **The shim enforces that** — see "Path-taking commands are scoped to what the user picked" below.
-- `save_media_to_path(r2_key, content_hash, target_path)` → `"marked"` | `"unsupported"` | `"failed: …"` — "save attachment as…". Downloads, decrypts, verifies the content hash and writes the file in Rust, then applies this platform's download marker (macOS `com.apple.quarantine`, Windows `Zone.Identifier`). The renderer used to `fetch` the loopback URL and `writeFile` the bytes, which left the file with no provenance marker at all — Gatekeeper and SmartScreen both treat an unmarked file as locally authored. A marker that cannot be written (FAT32, a network share) does NOT fail the save; the return value says what happened. `target_path` is gated by `PathScope`. See `.codesight/wiki/media-server.md`.
+- `get_media_url(r2_key, content_hash, content_type, sha256, key_scope)` → URL — builds the loopback media-server URL (`http://127.0.0.1:<port>/<token>/<hash>`) for a cached item; errors if the server isn't started or there is no active unlock. See `pollis-core/src/media_server.rs`.
+- `upload_media(path, filename, content_type)` / `download_media(r2_key, content_hash, sha256, key_scope)` — the sealed media path (#1382; see `file_keys` below). An upload picks a random 32-byte file id, seals the file (AES-256-GCM, 4 MiB chunks) under `HKDF(salt = file id, ikm = newest ring key of the conversation's file key ring)` — or the Vault file root for a Vault upload — PUTs it to `media/{hex file id}.enc` and registers the object with the DS (`attachment_object`, for reference counting only; nothing there is key material). `MediaUploadResult` carries `content_hash` (the file id — named for the `_att` `hash` wire field, NOT derived from content), `key_version` and `sha256`; the `_att` reference carries them as `hash`, `kv`, `sha`. `key_scope` is a tagged enum: `{ kind: "conversation", conversation_id, key_version }` or `{ kind: "vault" }`. A download refuses a reference without a key version (pre-#1382 convergent objects; no fallback) and refuses bytes whose SHA-256 differs from `sha256`. No cross-user dedup: every upload is a new object. `path` is a file the **user** already has (picker selection, OS drag-and-drop); nothing in the app ever writes a file in order to have a path to pass here. **The shim enforces that** — see "Path-taking commands are scoped to what the user picked" below.
+- `save_media_to_path(r2_key, content_hash, sha256, key_scope, target_path)` → `"marked"` | `"unsupported"` | `"failed: …"` — "save attachment as…". Downloads, decrypts, verifies `sha256` and writes the file in Rust, then applies this platform's download marker (macOS `com.apple.quarantine`, Windows `Zone.Identifier`). The renderer used to `fetch` the loopback URL and `writeFile` the bytes, which left the file with no provenance marker at all — Gatekeeper and SmartScreen both treat an unmarked file as locally authored. A marker that cannot be written (FAT32, a network share) does NOT fail the save; the return value says what happened. `target_path` is gated by `PathScope`. See `.codesight/wiki/media-server.md`.
 - `upload_media_staged(staged_id, filename, content_type)` — the same upload for bytes with no path: a paste, or a drop the webview surfaced as a `File`. Reads them from the in-memory staging registry (`commands/staging.rs`) and releases them **only on success**, so a failed upload is a retry rather than a lost paste.
 - Internal: `delete_r2_object(state, r2_key)` — DS-presigned DELETE (via `presign_r2`) used by `delete_message` to purge orphaned attachments. Treats 404 as success. The client holds no R2 credentials — every get/put/delete is presigned by the DS secrets broker (`POST /v1/r2/presign`, #393).
 

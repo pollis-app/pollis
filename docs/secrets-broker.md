@@ -258,13 +258,19 @@ secret access key is never logged.
 
 ## Why R2 presign needs no per-object READ authz
 
-Pollis media is **convergent-encrypted** (see pollis-core's `r2.rs`): the
-AES-256-GCM key is derived from `SHA-256(plaintext)`, and the
-`attachment_object` table is a **global content-hash dedup** with no
-conversation binding. A presigned URL therefore only ever exposes
-**ciphertext** — confidentiality comes from MLS key distribution (only a member
-who decrypted the message learns the content hash, and only the content hash
-derives the decryption key), **not** from the R2 ACL.
+Pollis media is sealed under a key the DS never holds (#1382; see pollis-core's
+`r2.rs` and `file_keys.rs`): each file's AES-256-GCM key derives from its
+conversation's **file key ring** — which reaches the DS only wrapped under an
+MLS exporter KEK (`file_keystate`) — salted by the file's random id, which is
+also the object's name. Nothing in the bucket or in `attachment_object` /
+`attachment_ref` is key material. A presigned URL therefore only ever exposes
+**ciphertext** — confidentiality comes from MLS key distribution (only a current
+member can unwrap the ring), **not** from the R2 ACL.
+
+(Until #1382 media was convergent-encrypted: the key derived from
+`SHA-256(plaintext)`, which also named the object and sat in
+`attachment_object`, so the bucket plus that table decrypted every attachment.
+That scheme was broken and replaced; the argument above did not hold then.)
 
 So for `get` the presign gate exists solely to stop **anonymous internet
 access** to the bucket; it does not — and cannot meaningfully — enforce read
@@ -273,7 +279,7 @@ gate there.
 
 It is NOT sufficient for a write, and the argument above does not extend to one.
 A write is about integrity and about who pays for the bytes, neither of which
-convergent encryption says anything about: an authenticated device that can name
+the encryption says anything about: an authenticated device that can name
 any key, of any size, is free storage and an overwrite primitive. Hence the key
 allow-list, the mandatory signed `content_length`, the owner check on avatars and
 group icons, and the reference check on shared media/emoji objects, all listed

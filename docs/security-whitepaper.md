@@ -63,12 +63,12 @@ Corrupt-index snapshots (`accounts.bad-<unix-ms>.json`) have the same contents a
 
 Turso sees only the Delivery Service's connections. Since #987 no client connects to it (§8).
 
-Turso cannot recover message plaintext, any private key, MLS group state or secrets, or attachment plaintext. The account identity key exists server-side only inside the `account_recovery` blob, wrapped under the user's Secret Key, which is never sent (§5.2). Attachments are encrypted on the device before upload (§9.1).
+Turso cannot recover message plaintext, any private key, MLS group state or secrets, or attachment plaintext. The account identity key exists server-side only inside the `account_recovery` blob, wrapped under the user's Secret Key, which is never sent (§5.2). Attachments are encrypted on the device before upload, under a per-conversation file key ring that Turso holds only wrapped under an MLS exporter key (`file_keystate`, §9.1).
 
 **Metadata minimization** (design and threat model: `docs/metadata-minimization-design.md`):
 
 - **Sealed sender (v1).** The `message_envelope` row stores a non-identifying sentinel with `sealed = 1` instead of the sender. Recipients attribute each message from the MLS-authenticated `{user_id}:{device_id}` credential inside the ciphertext (§2.3, §6.6). A breach, subpoena or dump of `message_envelope` no longer shows who sent what. **This is at-rest only:** the DS still authenticates every send by the sender's device signature, so a live DS operator sees the sender. Closing that needs anonymous membership proofs (v1.5), which are not built.
-- **Size padding (v2).** Text plaintext is padded to PADMÉ buckets (≈12% worst-case overhead, 256 B floor) inside the MLS ciphertext (`pollis-core/src/commands/messages/framing.rs`). Attachment blobs are not padded: their size is inherent to cross-user dedup (§9.1).
+- **Size padding (v2).** Text plaintext is padded to PADMÉ buckets (≈12% worst-case overhead, 256 B floor) inside the MLS ciphertext (`pollis-core/src/commands/messages/framing.rs`). Attachment blobs are not padded: R2 sees each file's size (plus one 16-byte tag per 4 MiB chunk) (§9.2).
 - **Signalling minimization (v2).** See LiveKit below.
 
 Still visible, and irreducible for a store-and-forward server: which conversations exist, roughly how many members each has, and when they are active. Membership rows are keyed by `user_id`; per-conversation pseudonyms (v3) and timing batching (v4) are not built.
@@ -84,7 +84,7 @@ Still visible, and irreducible for a store-and-forward server: which conversatio
 - Voice audio is frame-encrypted with AES-128-GCM before it leaves the device (§10.2). LiveKit sees RTP routing metadata, not audio.
 - Each join reports the LiveKit SDK name and version, protocol and capability numbers, and the OS name and version. It does not report the device's hardware model: the Rust SDK collects one with no option to stop it, so the workspace replaces the crate it reads it from with a stand-in that reports nothing (#1320, `patches/device-info`; held by `pollis-core/tests/livekit_join_sends_no_device_model.rs`). The mobile JS SDK sends the SDK, protocol and OS name only.
 
-**R2** sees opaque AEAD ciphertext at content-hash-derived keys (§9.2). It never sees the plaintext or the AEAD key.
+**R2** sees opaque AEAD ciphertext at random object names (§9.2). It never sees the plaintext or any key that opens it.
 
 **Resend** sees an email address and a 6-digit OTP in plaintext while delivering the message.
 
@@ -396,6 +396,8 @@ Both come from MLS (RFC 9420 §15.4–§15.6).
 
 Messages sent before a member joined are not visible to that member. That is a property of MLS. New devices start empty; there is no Megolm-style key backup. `account_recovery` restores account identity only, never message history. Anyone expecting a backup blob that also seals historical message keys should note that none exists, by design.
 
+Attachments differ: a file's bytes live in R2 under the conversation's file key ring (§9.1), which every current member can unwrap, so a member who joins later (or a new device) can open a file posted earlier — but only if they can read a message that references it, which the rule above usually prevents for pre-join messages.
+
 ### 6.9 Verifiable transparency logs (commit history + account keys)
 
 Pollis publishes append-only, ML-DSA-44-signed Merkle trees (RFC 6962 / RFC 9162) at `https://verify.pollis.com` so anyone can check that the server has not rewritten history. Each tree has its own STH context (`pollis-verifiable-log:sth:v2` for commits, `…:sth:v2:account-keys`, `…:sth:v2:binaries` for §1.1), so a head for one cannot be replayed as another.
@@ -534,18 +536,25 @@ Signal Desktop holds a per-account auth token issued at registration. Pollis hol
 
 Source: `pollis-core/src/commands/r2.rs`.
 
-### 9.1 Convergent encryption (attachments)
+### 9.1 Attachment encryption (per-conversation file key ring, #1382)
 
-- **Content hash:** SHA-256(plaintext), the dedup anchor and KDF input.
-- **Key/nonce:** HKDF-SHA256 over the content hash, no salt; `info = b"pollis-att-key"` for the 32-byte AES-256-GCM key, `info = b"pollis-att-nonce"` for a 12-byte base nonce.
+> Until #1382 attachments used convergent encryption: the key was HKDF over SHA-256(plaintext), with no secret, and that hash named the object and was stored by the DS, so anyone holding the bucket or the DS database could decrypt every attachment. That scheme was broken and has been replaced; clients refuse objects sealed under it (no fallback).
+
+Source: `pollis-core/src/commands/file_keys.rs`, `r2.rs`; DS side `pollis-delivery/src/file_keys.rs`.
+
+- **File key ring.** Every MLS conversation (a group, whose channels share one MLS group, or a DM) has a ring of random 32-byte keys. The ring reaches the DS only wrapped (AES-256-GCM) under a KEK from the current epoch's exporter, `export_secret("pollis-file-kek")`, in `file_keystate` (one row per conversation; `key_version` = ring length). Any key-holding device re-wraps it on every epoch advance, at the same sites and under the same `(generation, epoch)` CAS as the pinned-message key (`pin_keystate`). So every current member — late joiners, external joiners, newly enrolled devices — can unwrap it and open every file the conversation has shared, including files posted before they joined. This is deliberate.
+- **Rotation on removal.** The device that commits a member's removal appends a fresh key wrapped at the post-removal epoch; new uploads use the newest key. A removed member who kept older keys cannot open files posted after the removal. Existing files are not re-encrypted. A durable "rotation owed" mark on the committer survives a crash between commit and rotation.
+- **Forks are unrepresentable.** The DS refuses every write that would fork the ring: mint is insert-only at `key_version = 1`, a re-wrap must keep the same `key_version` at a strictly newer `(generation, epoch)`, a rotation must be exactly `+1`. Writes and reads are membership-gated and ceilinged at the commit log's head. Endpoints: `POST /v1/file-keys/keystate`, `POST /v1/read/file-keystate`.
+- **Per-file key.** Each upload picks a random 32-byte `file_id`. Key and base nonce = HKDF-SHA256(salt = `file_id`, ikm = ring key), `info = b"pollis-file-key-v1"` (32-byte AES-256-GCM key) and `b"pollis-file-nonce-v1"` (12-byte base nonce).
 - **AEAD:** AES-256-GCM over 4 MiB chunks. Chunk nonce = base nonce XOR the little-endian u32 chunk index in the first 4 bytes, so large files stream without buffering and nonces are unique without state.
-- **Object key:** `media/{content_hash}.enc`. The original filename is no longer part of the key (#762); objects written under the older `media/{hash}/{filename}.enc` form still resolve because each object's key is stored in `attachment_object.r2_key`. Same plaintext → same object, so cross-user dedup is automatic.
+- **Object key:** `media/{hex file_id}.enc`. Random, so identical files posted twice are two objects; there is no cross-user dedup.
+- **Reference.** The `_att` entry travels only inside the MLS ciphertext and carries `hash` (the file id, not a content hash), `kv` (the ring key version; `0` = Vault) and `sha` (SHA-256 of the plaintext). The receiver verifies `sha` after decrypt, so another member cannot substitute different bytes under the same file id.
+- **Vault attachments** are sealed under HKDF(account identity key seed, `info = b"pollis-vault-files-v1"`) instead of a ring: every enrolled device of the account opens them; the DS, which never holds the account key, cannot.
+- **Local cache.** Each device keeps the unwrapped ring in `file_key_cache` in its SQLCipher DB.
 
-### 9.2 Visibility on R2
+### 9.2 Visibility on R2 and the DS
 
-R2 sees ciphertext, the object key (which contains the content hash), the size and the upload time. It never sees the AEAD key.
-
-This is the shape of MEGA's and Tresorit's convergent schemes. The accepted trade-off is **confirmation-of-file**: someone holding a candidate plaintext can hash it and check whether that object exists. Pollis accepts this for cross-user dedup. Per-conversation key wrapping would remove it at the cost of dedup.
+R2 sees ciphertext, a random object name, the size and the upload time. The DS additionally holds the wrapped ring (`file_keystate`), its length, and the `(file id, message_id)` registrations it uses to reference-count objects (`attachment_object`, `attachment_ref`, `vault_attachment_ref`). None of that is key material: the file id is only an HKDF salt and the ring key never leaves members' devices unwrapped. Neither R2 nor the DS can decrypt a file. Because names are random, there is no confirmation-of-file attack and no cross-conversation linkage of identical content.
 
 ### 9.3 R2 transport
 
@@ -557,8 +566,7 @@ A presigned URL authorises one operation on one key for a short window, so a bin
 
 ### 9.4 Avatars and group icons
 
-These use `upload_file` / `download_file` and are **not** encrypted. Anyone with the R2 URL can fetch them. This is intentional: anyone who can see the user or group already sees the avatar. Worth flagging: whoever obtains a `users.avatar_url` or `groups.icon_url` can fetch the image without authentication. Dedup does not apply on this path.
-
+These use `upload_file` / `download_file` and are **not** encrypted. Anyone with the R2 URL can fetch them. This is intentional: anyone who can see the user or group already sees the avatar. Worth flagging: whoever obtains a `users.avatar_url` or `groups.icon_url` can fetch the image without authentication. 
 ---
 
 ## 10. Real-Time Media (LiveKit)
@@ -690,7 +698,8 @@ Every other device the user enrolled is cryptographically orphaned: its account 
 | PIN KEK | Argon2id → 32 B | Derived at unwrap time | Stored anywhere |
 | OTP | 6 digits | DS memory, as a salted hash; 10-min TTL; attempt-capped | Disk; the client |
 | Enrollment ephemeral private | X25519 (32 B) | `AppState.enrollment_ephemeral_keys` (memory) | Disk, server |
-| Attachment key | HKDF-SHA256 over content hash → 32 B | Derived on demand | Persisted; sent to R2 |
+| File key ring (per conversation) | Random 32 B keys, wrapped under MLS exporter `pollis-file-kek` | Local `file_key_cache` (SQLCipher); DS `file_keystate` wrapped only | Unwrapped off a member's device |
+| Attachment key | HKDF-SHA256(salt = random file id, ikm = ring key or Vault file root) → 32 B | Derived on demand | Persisted; sent to R2 or the DS |
 | Voice frame key | MLS exporter (32 B) → PBKDF2 → AES-128-GCM | LiveKit key provider ring, in memory | Off-device; the SFU |
 | Database credentials (`TURSO_TOKEN`, `LOG_DB_TOKEN`) | bearer | DS environment only (§8) | The client binary |
 | `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | SigV4 | DS environment only | The client binary |
