@@ -1,0 +1,53 @@
+appId: com.pollis.mobile
+tags:
+  - two-client
+---
+# OWN GROUPS, part 2 of 3. The phone creates a group while the account has
+# another device (the peer). The group must show here as soon as the create
+# returns — with another device in the account the create also adds that
+# device to the new MLS group, which is the case a lone-device run never
+# exercises. Then post in #General; the peer must read it, which proves the
+# create admitted the peer's device.
+
+# A fresh account has no groups, so the Groups tab shows its empty state with
+# btn-create-group directly.
+- tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
+    id: "btn-create-group"
+- assertVisible:
+    id: "screen-group-new"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "${MAESTRO_PHONE_GROUP}"
+- tapOn:
+    id: "btn-submit-group"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "${MAESTRO_PHONE_GROUP}, .*"
+    timeout: 30000
+- assertVisible: "General"
+- takeScreenshot: own-groups-02-phone-created
+
+- tapOn: "General"
+- assertVisible:
+    id: "screen-chat"
+- tapOn:
+    id: "input-composer"
+- inputText: "hello from the phone"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*hello from the phone.*"
+    timeout: 20000
+- takeScreenshot: own-groups-03-phone-posted
+# Back to the Groups tab, where part 3 waits. Going back refetches nothing:
+# the tab stayed mounted under the chat.
+- tapOn:
+    id: "btn-back"
+- assertVisible:
+    id: "screen-groups"

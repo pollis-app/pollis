@@ -91,7 +91,7 @@ pub async fn remove_member_from_group(
 
     // Notify group members so they refetch the member list.
     if let Err(e) = crate::commands::livekit::publish_membership_changed_to_room(
-        &state.livekit,
+        state,
         &group_id,
     ).await {
         crate::diag!("[realtime] remove_member_from_group: notify group {group_id}: {e}");
@@ -179,7 +179,7 @@ pub async fn set_member_role(
     // Best-effort realtime push; routed through the livekit boundary so this
     // call site stays platform-agnostic (no-op on mobile, see issue #185).
     if let Err(e) = crate::commands::livekit::publish_member_role_changed_to_room(
-        &state.livekit,
+        state,
         &group_id,
     )
     .await

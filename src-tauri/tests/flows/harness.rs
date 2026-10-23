@@ -538,7 +538,8 @@ async fn spawn_in_process_delivery(main: Arc<Db>, log: Arc<Db>) -> String {
                         axum::routing::post(delivery_submit),
                     )
                     .with_state(fault_state)
-                    .fallback_service(pollis_delivery::build_router_with_state(real_state));
+                    .fallback_service(pollis_delivery::build_router_with_state(real_state))
+                    .layer(axum::middleware::from_fn(record_send_data));
                 // Bind :0 so the OS hands us a free port; read it back before serving.
                 let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
                     .await
@@ -555,7 +556,74 @@ async fn spawn_in_process_delivery(main: Arc<Db>, log: Arc<Db>) -> String {
     rx.recv().expect("delivery: receive url")
 }
 
+/// One realtime wake-up a client asked the DS to fan out
+/// (`POST /v1/livekit/send-data`), as the in-process DS saw it.
+#[derive(Clone, Debug)]
+pub(crate) struct SentWakeUp {
+    /// The logical room (`inbox-<user>`, a group id, …).
+    pub(crate) room: String,
+    pub(crate) payload: serde_json::Value,
+    /// The real handler's answer. The suite has no LiveKit, so a request that
+    /// passes authz ends in 503 "not configured"; a refused one is a 4xx.
+    pub(crate) status: u16,
+}
+
+static SENT_WAKE_UPS: std::sync::Mutex<Vec<SentWakeUp>> = std::sync::Mutex::new(Vec::new());
+
+/// Observe every `send-data` request on its way to the REAL handler, which
+/// still decides it. There is no LiveKit in the suite, so this log is the only
+/// place a test can see that a wake-up was asked for at all — the publish is
+/// fire-and-forget on the client.
+async fn record_send_data(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let path = <pollis_api::broker::LivekitSendDataBody as pollis_api::DsRequest>::PATH;
+    if req.uri().path() != path {
+        return next.run(req).await;
+    }
+    let (parts, body) = req.into_parts();
+    let bytes = match axum::body::to_bytes(body, usize::MAX).await {
+        Ok(b) => b,
+        Err(e) => return ds_internal_error(format!("send-data body: {e}")),
+    };
+    let parsed: Option<pollis_api::broker::LivekitSendDataBody> = serde_json::from_slice(&bytes).ok();
+    let resp = next
+        .run(axum::extract::Request::from_parts(parts, axum::body::Body::from(bytes)))
+        .await;
+    if let Some(p) = parsed {
+        SENT_WAKE_UPS.lock().expect("wake-up log").push(SentWakeUp {
+            room: p.room,
+            payload: p.payload,
+            status: resp.status().as_u16(),
+        });
+    }
+    resp
+}
+
+/// Wait (bounded) for a wake-up to `room` matching `pred`. Publishes are
+/// spawned, so the request can land a moment after the command returns.
+pub(crate) async fn await_wake_up(
+    room: &str,
+    pred: impl Fn(&serde_json::Value) -> bool,
+) -> Option<SentWakeUp> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let hit = SENT_WAKE_UPS
+            .lock()
+            .expect("wake-up log")
+            .iter()
+            .find(|w| w.room == room && pred(&w.payload))
+            .cloned();
+        if hit.is_some() || std::time::Instant::now() >= deadline {
+            return hit;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+}
+
 pub(crate) async fn wipe() {
+    SENT_WAKE_UPS.lock().expect("wake-up log").clear();
     let w = world().await;
     wipe_remote(
         &w.remote.conn().await.expect("main conn"),
