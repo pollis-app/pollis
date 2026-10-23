@@ -133,17 +133,33 @@ pub(crate) async fn fetch_welcomes(
     state: &Arc<AppState>,
     user_id: &str,
     device_id: &str,
-) -> Result<Vec<(String, Vec<u8>)>> {
+) -> Result<FetchedWelcomes> {
     let body = FetchWelcomesBody {
         user_id: Some(user_id.to_string()),
         device_id: Some(device_id.to_string()),
+        // #1412: ask for this device's pool size in the suite it publishes in,
+        // so the drain doubles as the "pool is low" signal.
+        count_key_packages_in_suite: Some(i64::from(u16::from(super::provider::current_suite()))),
     };
     let resp = ds_post_json(state, &body).await?;
-    resp.welcomes
+    let items = resp
+        .welcomes
         .into_iter()
         .map(|w| {
             let bytes = decode_b64("welcome", &w.welcome)?;
             Ok((w.id, bytes))
         })
-        .collect()
+        .collect::<Result<Vec<_>>>()?;
+    Ok(FetchedWelcomes {
+        items,
+        unclaimed_key_packages: resp.unclaimed_key_packages,
+    })
+}
+
+/// One Welcome drain: the `(welcome_id, blob)` rows, plus this device's
+/// remaining KeyPackage count when the Delivery Service reports it (#1412).
+pub(crate) struct FetchedWelcomes {
+    pub items: Vec<(String, Vec<u8>)>,
+    /// `None` from a Delivery Service that predates the field.
+    pub unclaimed_key_packages: Option<i64>,
 }
