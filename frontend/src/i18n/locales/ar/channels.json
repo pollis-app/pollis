@@ -167,7 +167,6 @@
   },
   "inviteLinks": {
     "heading": "رابط الدعوة",
-    "headingTerminal": "> رابط الدعوة",
     "blurb": "يمكن لأي شخص لديه الرابط الانضمام إلى هذه المجموعة. ولا يزال يحتاج إلى حساب Pollis.",
     "expiresAfter": "تنتهي الصلاحية بعد",
     "maximumUses": "الحد الأقصى للاستخدامات",
@@ -192,19 +191,13 @@
     "usesOption_other": "{{count}} استخدام",
     "usesUnlimited": "غير محدود",
     "create": "إنشاء رابط دعوة",
-    "createTerminal": "[إنشاء رابط دعوة]",
     "creating": "جارٍ الإنشاء…",
-    "creatingTerminal": "جارٍ الإنشاء…",
     "existing": "الروابط الحالية",
-    "existingTerminal": "> الروابط الحالية",
     "created": "أُنشئ رابط الدعوة",
-    "createdTerminal": "> أُنشئ رابط الدعوة",
     "copyNotice": "انسخه الآن — هذه هي المرة الوحيدة التي يمكن عرضه فيها.",
     "copyLabel": "نسخ رابط الدعوة",
     "copy": "نسخ",
     "copied": "تم النسخ",
-    "copyTerminal": "[نسخ]",
-    "copiedTerminal": "[تم النسخ]",
     "unbounded": "بلا انتهاء صلاحية · استخدامات غير محدودة",
     "maxUses_zero": "{{count}} استخدام",
     "maxUses_one": "{{count}} استخدام",
@@ -230,8 +223,7 @@
     "statusRevoked": "مُبطَل",
     "statusActive": "نشط",
     "statusExpired": "منتهي الصلاحية",
-    "revoke": "إبطال",
-    "revokeTerminal": "[إبطال]"
+    "revoke": "إبطال"
   },
   "notify": {
     "inviteTitle": "دعوة مجموعة جديدة",

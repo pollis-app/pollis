@@ -121,12 +121,14 @@ for (const skin of SKINS) {
       // The two bound controls still show what this link was created under.
       // These are the entire control surface of an admission boundary, so
       // "which one is chosen" has to be readable, not inferred from the card.
-      await expect(page.getByTestId("expiry-option-24")).toHaveClass(
-        /border-line-strong/,
+      await expect(page.getByTestId("expiry-option-24")).toHaveAttribute(
+        "aria-pressed",
+        "true",
       );
-      await expect(page.getByTestId("uses-option-1")).toHaveClass(/border-line-strong/);
-      await expect(page.getByTestId("uses-option-unlimited")).not.toHaveClass(
-        /border-line-strong/,
+      await expect(page.getByTestId("uses-option-1")).toHaveAttribute("aria-pressed", "true");
+      await expect(page.getByTestId("uses-option-unlimited")).toHaveAttribute(
+        "aria-pressed",
+        "false",
       );
 
       // The card is emphatic that this is the only viewing. That warning is
@@ -143,6 +145,17 @@ for (const skin of SKINS) {
       const row = page.getByTestId("invite-link-row");
       await expect(row).toHaveCount(1);
       await expect(row).toContainText(/active/i);
+
+      // Plain library styling in both skins: no `> HEADING` prompts and no
+      // `[LABEL]` brackets anywhere in the section.
+      const manager = page.getByTestId("invite-link-manager");
+      await expect(manager).not.toContainText("[");
+      await expect(manager).not.toContainText(">");
+      // The link wraps instead of growing a horizontal scrollbar.
+      const overflows = await page
+        .getByTestId("created-invite-link-url")
+        .evaluate((el) => el.scrollWidth > el.clientWidth);
+      expect(overflows).toBe(false);
 
       await page.screenshot({ path: `artifacts/invite-link-created-${skin}.png` });
     });

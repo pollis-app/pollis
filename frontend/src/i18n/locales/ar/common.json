@@ -4,6 +4,8 @@
     "cancel": "إلغاء",
     "close": "إغلاق",
     "copy": "نسخ",
+    "copied": "تم النسخ",
+    "copyFailed": "تعذر النسخ",
     "delete": "حذف",
     "forward": "للأمام",
     "goBack": "العودة",

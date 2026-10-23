@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { Button } from "../ui/Button";
 import { CreatedInviteLinkCard } from "./CreatedInviteLinkCard";
 import { InviteLinkRow } from "./InviteLinkRow";
-import { useSkin } from "../../hooks/queries/usePreferences";
 import { errorMessage } from "../../utils/errorMessage";
 import {
   useCreateGroupInviteLink,
@@ -54,7 +53,6 @@ const USES_OPTIONS: (PresetOption & { uses: number | null })[] = [
  */
 export const InviteLinkManager: React.FC<InviteLinkManagerProps> = ({ groupId }) => {
   const { t } = useTranslation("channels");
-  const skin = useSkin();
   const [expiryHours, setExpiryHours] = useState<number | null>(24 * 7);
   const [maxUses, setMaxUses] = useState<number | null>(null);
   const [created, setCreated] = useState<CreatedInviteLink | null>(null);
@@ -92,13 +90,6 @@ export const InviteLinkManager: React.FC<InviteLinkManagerProps> = ({ groupId })
     }
   };
 
-  const isRefined = skin === "refined";
-  const optionBase = isRefined
-    ? "rounded-md border px-2.5 py-1 text-xs transition-colors"
-    : "border px-2.5 py-1 text-xs transition-colors";
-  const selectedClass = "border-line-strong bg-surface-high text-accent";
-  const unselectedClass = "border-line text-dim hover:bg-hover";
-
   // A preset with no number ("Never", "Unlimited") has no plural form to pick.
   const presetLabel = (opt: PresetOption): string => {
     if (opt.count == null) {
@@ -110,48 +101,62 @@ export const InviteLinkManager: React.FC<InviteLinkManagerProps> = ({ groupId })
   return (
     <div data-testid="invite-link-manager" className="flex flex-col gap-4">
       <div>
-        <h3 className={isRefined ? "text-sm font-semibold text-fg" : "text-sm text-accent"}>
-          {isRefined ? t("inviteLinks.heading") : t("inviteLinks.headingTerminal")}
-        </h3>
+        <h3 className="text-sm font-semibold text-fg">{t("inviteLinks.heading")}</h3>
         <p className="mt-1 text-xs text-dim">{t("inviteLinks.blurb")}</p>
       </div>
 
       <div className="flex flex-col gap-3">
         <div>
           <p className="mb-1.5 text-xs text-muted">{t("inviteLinks.expiresAfter")}</p>
-          <div className="flex flex-wrap gap-1.5">
-            {EXPIRY_OPTIONS.map((opt) => (
-              <button
-                key={opt.id}
-                type="button"
-                onClick={() => setExpiryHours(opt.hours)}
-                data-testid={`expiry-option-${opt.hours ?? "never"}`}
-                className={`${optionBase} ${
-                  expiryHours === opt.hours ? selectedClass : unselectedClass
-                }`}
-              >
-                {presetLabel(opt)}
-              </button>
-            ))}
+          <div
+            role="radiogroup"
+            aria-label={t("inviteLinks.expiresAfter")}
+            className="flex gap-2 flex-wrap"
+          >
+            {EXPIRY_OPTIONS.map((opt) => {
+              const selected = expiryHours === opt.hours;
+              const label = presetLabel(opt);
+              return (
+                <Button
+                  key={opt.id}
+                  variant={selected ? "primary" : "secondary"}
+                  size="sm"
+                  aria-label={label}
+                  aria-pressed={selected}
+                  data-testid={`expiry-option-${opt.hours ?? "never"}`}
+                  onClick={() => setExpiryHours(opt.hours)}
+                >
+                  {label}
+                </Button>
+              );
+            })}
           </div>
         </div>
 
         <div>
           <p className="mb-1.5 text-xs text-muted">{t("inviteLinks.maximumUses")}</p>
-          <div className="flex flex-wrap gap-1.5">
-            {USES_OPTIONS.map((opt) => (
-              <button
-                key={opt.id}
-                type="button"
-                onClick={() => setMaxUses(opt.uses)}
-                data-testid={`uses-option-${opt.uses ?? "unlimited"}`}
-                className={`${optionBase} ${
-                  maxUses === opt.uses ? selectedClass : unselectedClass
-                }`}
-              >
-                {presetLabel(opt)}
-              </button>
-            ))}
+          <div
+            role="radiogroup"
+            aria-label={t("inviteLinks.maximumUses")}
+            className="flex gap-2 flex-wrap"
+          >
+            {USES_OPTIONS.map((opt) => {
+              const selected = maxUses === opt.uses;
+              const label = presetLabel(opt);
+              return (
+                <Button
+                  key={opt.id}
+                  variant={selected ? "primary" : "secondary"}
+                  size="sm"
+                  aria-label={label}
+                  aria-pressed={selected}
+                  data-testid={`uses-option-${opt.uses ?? "unlimited"}`}
+                  onClick={() => setMaxUses(opt.uses)}
+                >
+                  {label}
+                </Button>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -160,12 +165,10 @@ export const InviteLinkManager: React.FC<InviteLinkManagerProps> = ({ groupId })
         <Button
           onClick={handleCreate}
           isLoading={createMutation.isPending}
-          loadingText={
-            isRefined ? t("inviteLinks.creating") : t("inviteLinks.creatingTerminal")
-          }
+          loadingText={t("inviteLinks.creating")}
           data-testid="create-invite-link"
         >
-          {isRefined ? t("inviteLinks.create") : t("inviteLinks.createTerminal")}
+          {t("inviteLinks.create")}
         </Button>
       </div>
 
@@ -179,9 +182,7 @@ export const InviteLinkManager: React.FC<InviteLinkManagerProps> = ({ groupId })
 
       {links.length > 0 && (
         <div className="flex flex-col gap-2">
-          <p className="text-xs text-muted">
-            {isRefined ? t("inviteLinks.existing") : t("inviteLinks.existingTerminal")}
-          </p>
+          <p className="text-xs text-muted">{t("inviteLinks.existing")}</p>
           {links.map((link) => (
             <InviteLinkRow
               key={link.id}
