@@ -10,7 +10,7 @@
 # the mobile Expo assets, and the web/in-app favicons. A future logo swap is
 # "drop the new export in, run this."
 #
-# Requires: ImageMagick (`magick`) and the Tauri CLI (`pnpm tauri`).
+# Requires: ImageMagick (`magick`), the Tauri CLI (`pnpm tauri`) and `uv`.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -33,11 +33,12 @@ cp "$MASTER" "$WORK/mark.png"
 magick "$WORK/mark.png" -background "$AMBER" -flatten -alpha off "$WORK/fullbleed.png"
 # Key out the amber → just the dark lock glyph on transparency.
 magick "$WORK/mark.png" -fuzz 25% -transparent "$AMBER" "$WORK/fg.png"
-# Trimmed + safe-zone-padded foreground for Android adaptive (≈64% fill).
-magick "$WORK/fg.png" -trim +repage -resize 660x660 \
-  -background none -gravity center -extent 1024x1024 "$WORK/fg-adaptive.png"
-# Monochrome layers (keep alpha, recolor the glyph).
-magick "$WORK/fg-adaptive.png" -channel RGB -fill white -colorize 100 +channel "$WORK/mono-white.png"
+# Android adaptive foreground + monochrome, rendered from the SVG so the glyph
+# fills the 66dp safe zone. Not from $MASTER: keying the amber out of a bitmap
+# leaves the tile's anti-aliased edge, which a -trim then keeps (#1406).
+uv run -q --with resvg-py --with pillow scripts/gen-android-adaptive-icon.py \
+  assets/pollis-logo.svg "$WORK/fg-adaptive.png" "$WORK/mono-white.png"
+# Monochrome tray glyph (keep alpha, recolor the glyph).
 magick "$WORK/fg.png"          -channel RGB -fill black -colorize 100 +channel "$WORK/mono-black.png"
 # Solid amber background layer for Android adaptive.
 magick -size 1024x1024 "xc:$AMBER" "$WORK/android-bg.png"
