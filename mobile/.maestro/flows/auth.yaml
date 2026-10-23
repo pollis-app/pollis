@@ -25,6 +25,13 @@ tags:
 # input-otp is an opacity:0 proxy over the 6 visual boxes, autoFocus'd on
 # mount — Maestro can't tapOn a non-hittable element, but it's already
 # focused, so inputText alone reaches it.
+# Regression: dismissing the keyboard (Android back leaves the input focused)
+# used to strand the user — a tap on the boxes must bring it back. Tapping the
+# field's centre lands on the boxes, and the typed code proves the keyboard
+# reached input-otp again.
+- hideKeyboard
+- tapOn:
+    id: "otp-code-field"
 - inputText: "${MAESTRO_OTP}"
 - tapOn:
     id: "btn-submit-otp"
