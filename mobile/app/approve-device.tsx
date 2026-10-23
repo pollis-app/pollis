@@ -7,6 +7,7 @@ import { ErrorText } from "../components/self/SettingsField";
 import { semantic, type as ty, fonts, space } from "../theme/tokens";
 import { useApproveEnrollment, useRejectEnrollment } from "../hooks/queries";
 import { SAS_LENGTH, normalizeSasInput } from "../lib/enrollmentSas";
+import { useSubmitLock } from "../hooks/useSubmitLock";
 
 /**
  * A new device of this account asks to be approved (#1360) — mobile's twin of
@@ -30,21 +31,27 @@ export default function ApproveDevice() {
   const reject = useRejectEnrollment();
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const busy = approve.isPending || reject.isPending;
+  // One lock for both choices: approving wraps the account key for the new
+  // device, and neither may run twice or race the other.
+  const submit = useSubmitLock();
+  const busy = submit.busy;
+  const [acting, setActing] = useState<"approve" | "reject">("approve");
   const deviceId = newDeviceId ?? "";
   const shortDeviceId =
     deviceId.length > 12 ? `${deviceId.slice(0, 6)}…${deviceId.slice(-4)}` : deviceId;
 
   const onApprove = () => {
-    if (!requestId || code.length !== SAS_LENGTH || busy) {
+    if (!requestId || code.length !== SAS_LENGTH || !submit.begin()) {
       return;
     }
+    setActing("approve");
     setError(null);
     approve.mutate(
       { requestId, verificationCode: code },
       {
         onSuccess: () => router.back(),
         onError: (e) => {
+          submit.end();
           // A wrong code is the signal to re-read the other screen, not to
           // nudge one character and retry.
           setCode("");
@@ -55,13 +62,17 @@ export default function ApproveDevice() {
   };
 
   const onReject = () => {
-    if (!requestId || busy) {
+    if (!requestId || !submit.begin()) {
       return;
     }
+    setActing("reject");
     setError(null);
     reject.mutate(requestId, {
       onSuccess: () => router.back(),
-      onError: (e) => setError((e as Error).message || t("approval.rejectFailed")),
+      onError: (e) => {
+        submit.end();
+        setError((e as Error).message || t("approval.rejectFailed"));
+      },
     });
   };
 
@@ -116,11 +127,18 @@ export default function ApproveDevice() {
           full
           testID="btn-approve-device"
           disabled={code.length !== SAS_LENGTH || busy}
+          loading={busy && acting === "approve"}
           onPress={onApprove}
         >
-          {approve.isPending ? t("approval.approving") : t("approval.approve")}
+          {busy && acting === "approve" ? t("approval.approving") : t("approval.approve")}
         </Button>
-        <Button full testID="btn-reject-device" disabled={busy} onPress={onReject}>
+        <Button
+          full
+          testID="btn-reject-device"
+          disabled={busy}
+          loading={busy && acting === "reject"}
+          onPress={onReject}
+        >
           {t("approval.reject")}
         </Button>
       </BottomAction>
