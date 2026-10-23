@@ -1343,6 +1343,10 @@ pub(super) async fn forget_local_mls_group_at(
     })?;
     // Deleting is storage-only — no crypto backend, so no suite dispatch.
     if let Some(mut group) = load_stored_group_at(db.conn(), group_id, generation) {
+        // Leaving a lineage (a generation hop, a rebuild) leaves its epoch too:
+        // keep the file KEK, as every merge does, so a ring still wrapped there
+        // stays openable.
+        crate::commands::file_keys::keep_epoch_kek(&PollisProvider::new(db.conn()), &group);
         group.delete(&store_only(db.conn()))
             .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("mls delete group: {e}")))?;
     }
@@ -2610,6 +2614,7 @@ where
     match group.process_message(provider, protocol_msg) {
         Ok(processed) => match processed.into_content() {
             ProcessedMessageContent::StagedCommitMessage(staged) => {
+                crate::commands::file_keys::keep_epoch_kek(provider, &group);
                 if let Err(e) = group.merge_staged_commit(provider, *staged) {
                     crate::diag!("[mls] process_pending_commits: merge failed for {mls_group_id} at epoch {commit_epoch}: {e} — recovering via external-join");
                     let _ = group.delete(provider.storage());
@@ -2656,6 +2661,7 @@ where
                     let _ = group.delete(provider.storage());
                     return CommitApply::Recover(RecoverReason::OwnCommitMergeFailed);
                 }
+                crate::commands::file_keys::keep_epoch_kek(provider, &group);
                 if let Err(merge_err) = group.merge_pending_commit(provider) {
                     crate::diag!(
                         "[mls] process_pending_commits: own commit at epoch {commit_epoch} for {mls_group_id} but merge_pending failed ({merge_err}) — recovering via external-join"

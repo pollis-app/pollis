@@ -226,6 +226,64 @@ mod merge_site_tests {
         }
     }
 
+    /// Every merge leaves an epoch, and with it the only exporter that opens a
+    /// file key ring wrapped there (#1382). A merge site that does not keep
+    /// the epoch's file KEK first strands a device that had not adopted the
+    /// ring yet: it can then open the stored wrap only once a key holder comes
+    /// online and re-wraps — in a 1:1 DM, never while the other person is
+    /// away. So each merge must be preceded, within its function, by
+    /// `file_keys::keep_epoch_kek`.
+    #[test]
+    fn every_merge_site_keeps_the_file_kek() {
+        let src_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        collect_rs(&src_root, &mut files);
+        let needles = [concat!("merge_pending", "_commit("), concat!("merge_staged", "_commit(")];
+        let keep = concat!("keep_epoch", "_kek(");
+        let mut checked = 0;
+        let mut offenders = Vec::new();
+        for file in &files {
+            let rel = file
+                .strip_prefix(&src_root)
+                .unwrap_or(file)
+                .to_string_lossy()
+                .replace('\\', "/");
+            if rel.ends_with("tests.rs") {
+                continue;
+            }
+            let Ok(src) = std::fs::read_to_string(file) else {
+                continue;
+            };
+            let lines: Vec<&str> = src.lines().collect();
+            for (i, line) in lines.iter().enumerate() {
+                let t = line.trim_start();
+                if t.starts_with("//") || !needles.iter().any(|n| line.contains(n)) {
+                    continue;
+                }
+                checked += 1;
+                let Some(fun) = enclosing_fn(&lines, i) else {
+                    continue;
+                };
+                // Walk back to the enclosing fn's declaration line.
+                let kept = lines[..i]
+                    .iter()
+                    .rev()
+                    .take_while(|l| enclosing_fn(&[l], 0).as_deref() != Some(fun.as_str()))
+                    .any(|l| l.contains(keep));
+                if !kept {
+                    offenders.push(format!("{rel}:{} in fn {fun}", i + 1));
+                }
+            }
+        }
+        assert!(checked >= 5, "found only {checked} merge sites — the walk is broken, not clean");
+        assert!(
+            offenders.is_empty(),
+            "these merges leave an epoch without keeping its file KEK \
+             (`crate::commands::file_keys::keep_epoch_kek`):\n  {}",
+            offenders.join("\n  ")
+        );
+    }
+
     /// The name of the nearest `fn` at or above `line`. Textual, matching the
     /// declaration forms this crate actually uses.
     fn enclosing_fn(lines: &[&str], line: usize) -> Option<String> {
