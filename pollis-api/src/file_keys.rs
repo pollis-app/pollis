@@ -35,7 +35,8 @@ pub enum FileKeystateOp {
 pub struct UpsertFileKeystateBody {
     /// The MLS conversation — a group id or DM channel id.
     pub conversation_id: String,
-    /// base64 — AES-256-GCM ciphertext of the ring (`key_version` × 32 bytes)
+    /// base64 — AES-256-GCM ciphertext of the ring (`key_version` entries of a
+    /// 32-byte key plus the big-endian `(generation, epoch)` it was added at)
     /// under the epoch's exporter-derived KEK.
     pub wrapped_keyring: String,
     /// base64 — the 12-byte AES-256-GCM nonce of the wrap.

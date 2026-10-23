@@ -29,7 +29,8 @@
 -- previously shipped client neither reads nor writes it.
 CREATE TABLE IF NOT EXISTS file_keystate (
     conversation_id      TEXT PRIMARY KEY,
-    -- AES-256-GCM ciphertext of the serialized ring (key_version × 32 bytes),
+    -- AES-256-GCM ciphertext of the serialized ring: key_version entries of a
+    -- 32-byte key plus the big-endian (generation, epoch) it was added at,
     -- under the KEK exported from the MLS (generation, epoch) below. Opaque.
     wrapped_keyring      BLOB NOT NULL,
     -- 12-byte AES-256-GCM nonce for the wrap, fresh per (re-)wrap.

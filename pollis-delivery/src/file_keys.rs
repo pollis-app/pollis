@@ -24,6 +24,11 @@
 //! epoch)` a write names is ceilinged at the commit log's head, like
 //! `pin_keystate`, so nobody can freeze the row with an epoch that does not
 //! exist yet.
+//!
+//! Each ring entry is a key plus the `(generation, epoch)` it was added at
+//! (48 bytes before the wrap's tag). The DS checks only that the wrap's length
+//! matches `key_version`; the epochs inside let a client tell whether a
+//! rotation owed for a removal has already happened.
 
 use axum::{
     extract::State,
@@ -43,8 +48,9 @@ pub use pollis_api::file_keys::*;
 /// AES-256-GCM nonce length.
 const NONCE_LEN: usize = 12;
 
-/// One ring key.
-const RING_KEY_LEN: usize = 32;
+/// One ring entry: a 32-byte key plus the `(generation, epoch)` it was added
+/// at, two big-endian i64s. Mirrors `pollis_core::commands::file_keys`.
+const RING_ENTRY_LEN: usize = 48;
 
 /// AES-256-GCM tag.
 const TAG_LEN: usize = 16;
@@ -112,7 +118,7 @@ pub async fn apply_upsert_keystate(
     };
     // The wrap is exactly the ring plus a tag: a length that disagrees with
     // `key_version` is a client bug or a lie, and either way not a ring.
-    if wrapped.len() != body.key_version as usize * RING_KEY_LEN + TAG_LEN {
+    if wrapped.len() != body.key_version as usize * RING_ENTRY_LEN + TAG_LEN {
         return Ok(FileKeystateOutcome::Invalid(
             "wrapped_keyring length does not match key_version",
         ));

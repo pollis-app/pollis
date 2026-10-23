@@ -48,7 +48,7 @@ async fn fresh() -> common::TempDb {
 fn body(actor: &str, op: FileKeystateOp, key_version: i64, epoch: i64) -> UpsertFileKeystateBody {
     UpsertFileKeystateBody {
         conversation_id: "g1".into(),
-        wrapped_keyring: b64(&vec![7u8; key_version as usize * 32 + 16]),
+        wrapped_keyring: b64(&vec![7u8; key_version as usize * 48 + 16]),
         nonce: b64(&[1u8; 12]),
         key_version,
         generation: 0,
@@ -147,7 +147,7 @@ async fn a_rewrap_never_moves_the_epoch_backwards() {
 async fn a_wrap_whose_length_disagrees_with_key_version_is_refused() {
     let db = fresh().await;
     let mut b = body("alice", FileKeystateOp::Mint, 1, 2);
-    b.wrapped_keyring = b64(&[7u8; 64 + 16]);
+    b.wrapped_keyring = b64(&[7u8; 96 + 16]);
     assert!(matches!(apply(&db, &b).await, FileKeystateOutcome::Invalid(_)));
 }
 
