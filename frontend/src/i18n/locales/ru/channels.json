@@ -163,7 +163,6 @@
   },
   "inviteLinks": {
     "heading": "Ссылка-приглашение",
-    "headingTerminal": "> ССЫЛКА-ПРИГЛАШЕНИЕ",
     "blurb": "Вступить в группу сможет любой, у кого есть эта ссылка. Аккаунт Pollis всё равно нужен.",
     "expiresAfter": "Истекает через",
     "maximumUses": "Максимум использований",
@@ -182,19 +181,13 @@
     "usesOption_other": "{{count}} раза",
     "usesUnlimited": "Без ограничений",
     "create": "Создать ссылку-приглашение",
-    "createTerminal": "[СОЗДАТЬ ССЫЛКУ]",
     "creating": "Создание…",
-    "creatingTerminal": "СОЗДАНИЕ…",
     "existing": "Существующие ссылки",
-    "existingTerminal": "> СУЩЕСТВУЮЩИЕ ССЫЛКИ",
     "created": "Ссылка-приглашение создана",
-    "createdTerminal": "> ССЫЛКА-ПРИГЛАШЕНИЕ СОЗДАНА",
     "copyNotice": "Скопируйте её сейчас — показать её второй раз будет нельзя.",
     "copyLabel": "Копировать ссылку-приглашение",
     "copy": "Копировать",
     "copied": "Скопировано",
-    "copyTerminal": "[КОПИРОВАТЬ]",
-    "copiedTerminal": "[СКОПИРОВАНО]",
     "unbounded": "Без срока · без ограничений",
     "maxUses_one": "{{count}} раз",
     "maxUses_few": "{{count}} раза",
@@ -214,8 +207,7 @@
     "statusRevoked": "Отозвана",
     "statusActive": "Активна",
     "statusExpired": "Истекла",
-    "revoke": "Отозвать",
-    "revokeTerminal": "[ОТОЗВАТЬ]"
+    "revoke": "Отозвать"
   },
   "notify": {
     "inviteTitle": "Новое приглашение в группу",

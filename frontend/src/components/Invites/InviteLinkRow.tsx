@@ -1,9 +1,8 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../ui/Button";
-import { useSkin } from "../../hooks/queries/usePreferences";
+import { Card } from "../ui/Card";
 import { activeLocale } from "../../utils/format";
-import { localeUpperCase } from "../../i18n/languages";
 import type { InviteLinkSummary } from "../../hooks/queries/useGroups";
 
 interface InviteLinkRowProps {
@@ -25,14 +24,13 @@ export const InviteLinkRow: React.FC<InviteLinkRowProps> = ({
   isRevoking,
 }) => {
   const { t } = useTranslation("channels");
-  const skin = useSkin();
 
   const usesLabel =
     link.max_uses != null
       ? t("inviteLinks.rowUsesOfMax", { used: link.uses, count: link.max_uses })
       : t("inviteLinks.rowUses", { count: link.uses });
 
-  // `is_live` is computed server-side so this badge cannot disagree with what
+  // `is_live` is computed server-side so this status cannot disagree with what
   // redemption will actually do.
   let status: string;
   if (link.revoked_at) {
@@ -42,10 +40,6 @@ export const InviteLinkRow: React.FC<InviteLinkRowProps> = ({
   } else {
     status = t("inviteLinks.statusExpired");
   }
-  // The terminal skin's upper-case badge, cased BY THE APP LANGUAGE rather
-  // than by the invariant mapping a bare `.toUpperCase()` would apply to copy
-  // that has already been through `t()` (#911).
-  const statusTerminal = localeUpperCase(status, activeLocale());
 
   const detail = [
     usesLabel,
@@ -63,51 +57,27 @@ export const InviteLinkRow: React.FC<InviteLinkRowProps> = ({
 
   const statusClass = link.is_live ? "text-accent" : "text-muted";
 
-  if (skin === "refined") {
-    return (
-      <div
-        data-testid="invite-link-row"
-        className="flex items-center justify-between gap-3 rounded-lg border border-line bg-surface px-3 py-2.5"
-      >
-        <div className="min-w-0">
-          <p className={`text-sm font-medium ${statusClass}`}>{status}</p>
-          <p className="truncate text-xs text-dim">{detail}</p>
-        </div>
-        {link.is_live && (
-          <Button
-            onClick={() => onRevoke(link.id)}
-            variant="danger"
-            size="xs"
-            isLoading={isRevoking}
-            data-testid="revoke-invite-link"
-          >
-            {t("inviteLinks.revoke")}
-          </Button>
-        )}
-      </div>
-    );
-  }
-
   return (
-    <div
+    <Card
+      padding="sm"
       data-testid="invite-link-row"
-      className="flex items-center justify-between gap-3 border border-line bg-surface px-3 py-2"
+      className="flex items-center justify-between gap-3"
     >
       <div className="min-w-0">
-        <p className={`text-sm ${statusClass}`}>[{statusTerminal}]</p>
+        <p className={`text-sm font-medium ${statusClass}`}>{status}</p>
         <p className="truncate text-xs text-dim">{detail}</p>
       </div>
       {link.is_live && (
         <Button
           onClick={() => onRevoke(link.id)}
           variant="danger"
-          size="xs"
+          size="sm"
           isLoading={isRevoking}
           data-testid="revoke-invite-link"
         >
-          {t("inviteLinks.revokeTerminal")}
+          {t("inviteLinks.revoke")}
         </Button>
       )}
-    </div>
+    </Card>
   );
 };

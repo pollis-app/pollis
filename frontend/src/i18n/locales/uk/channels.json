@@ -163,7 +163,6 @@
   },
   "inviteLinks": {
     "heading": "Посилання-запрошення",
-    "headingTerminal": "> ПОСИЛАННЯ-ЗАПРОШЕННЯ",
     "blurb": "Будь-хто з цим посиланням може приєднатися до групи. Обліковий запис Pollis усе одно потрібен.",
     "expiresAfter": "Діє протягом",
     "maximumUses": "Максимум використань",
@@ -182,19 +181,13 @@
     "usesOption_other": "{{count}} використання",
     "usesUnlimited": "Без обмежень",
     "create": "Створити посилання-запрошення",
-    "createTerminal": "[СТВОРИТИ ПОСИЛАННЯ]",
     "creating": "Створення…",
-    "creatingTerminal": "СТВОРЕННЯ…",
     "existing": "Наявні посилання",
-    "existingTerminal": "> НАЯВНІ ПОСИЛАННЯ",
     "created": "Посилання-запрошення створено",
-    "createdTerminal": "> ПОСИЛАННЯ СТВОРЕНО",
     "copyNotice": "Скопіюйте його зараз — більше воно не показуватиметься.",
     "copyLabel": "Копіювати посилання-запрошення",
     "copy": "Копіювати",
     "copied": "Скопійовано",
-    "copyTerminal": "[КОПІЮВАТИ]",
-    "copiedTerminal": "[СКОПІЙОВАНО]",
     "unbounded": "Без терміну дії · без обмежень",
     "maxUses_one": "{{count}} використання",
     "maxUses_few": "{{count}} використання",
@@ -214,8 +207,7 @@
     "statusRevoked": "Відкликано",
     "statusActive": "Активне",
     "statusExpired": "Прострочене",
-    "revoke": "Відкликати",
-    "revokeTerminal": "[ВІДКЛИКАТИ]"
+    "revoke": "Відкликати"
   },
   "notify": {
     "inviteTitle": "Нове запрошення до групи",
