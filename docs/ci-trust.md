@@ -111,7 +111,7 @@ run. Workflows where a hand-fired run publishes or mutates something real:
 only when dispatched on a `mobile-v*` tag ref), `mobile-ota-release.yml` (publishes,
 republishes or rolls back — always behind the `ota-signing` reviewer), `attest-release.yml`,
 `transparency-publish.yml`, `aur-republish.yml`, `website-deploy.yml`,
-`delivery-deploy-{dev,prod}.yml`, `db-migrate-dev.yml`, `livekit-deploy.yml`,
+`delivery-deploy-{dev,prod}.yml`, `db-migrate-dev.yml`, `livekit-deploy.yml`, `livekit-restart.yml`,
 `relay-image.yml`. (`desktop-release.yml` already self-refuses a dispatch.)
 
 ### 5. Fork-PR and runner settings

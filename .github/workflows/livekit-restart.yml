@@ -1,0 +1,108 @@
+# Bring the LiveKit + nginx stack on the VPS back up, without deploying.
+#
+# The recovery button for "Couldn't reach the voice server". On 2026-10-17 the
+# box rebooted for a kernel update; LiveKit came back but the nginx container
+# (TLS/443 in front of LiveKit) exited 255 and stayed down for six days despite
+# `restart: unless-stopped`. `docker compose up -d` in /root/livekit starts any
+# stopped service of the project and is otherwise a no-op: it syncs no config,
+# renders no keys and pulls nothing, so it is safe to press at any time. That is
+# what separates it from livekit-deploy.yml, which ships `livekit/` from git.
+#
+# `restart: true` additionally runs `docker compose restart`, for a container
+# that is running but hung (it drops every live call — off by default).
+#
+# Also dispatchable from archon (archon.pollis.com → Overview → voice server).
+name: Restart LiveKit + nginx
+
+on:
+  workflow_dispatch:
+    inputs:
+      restart:
+        description: Also `docker compose restart` both containers (for a hung-but-running one). Drops every live call.
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+# One box serves both environments, so never race a deploy: queue behind an
+# in-flight prod LiveKit deploy instead of restarting under it.
+concurrency:
+  group: livekit-deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  restart:
+    runs-on: ubuntu-latest
+    # Same repo-level VPS_SSH_KEY / VPS_HOST / VPS_USER as livekit-deploy.yml.
+    # Deliberately NO `environment: livekit-prod`: that would record a GitHub
+    # deployment at this run's SHA, and scripts/release-impact.sh reads the
+    # latest livekit-prod deployment as "the config that is live" — a restart
+    # ships no config, so it must not claim to have deployed any.
+    env:
+      VPS_HOST: ${{ vars.VPS_HOST }}
+      VPS_USER: ${{ vars.VPS_USER }}
+      REMOTE_DIR: /root/livekit
+    steps:
+      - name: Preflight — required secrets/vars present
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "${VPS_HOST}" ] || missing+=("vars.VPS_HOST")
+          [ -n "${VPS_USER}" ] || missing+=("vars.VPS_USER")
+          [ -n "${{ secrets.VPS_SSH_KEY }}" ] || missing+=("secrets.VPS_SSH_KEY")
+          if [ "${#missing[@]}" -ne 0 ]; then
+            printf '::error::Missing required config: %s\n' "${missing[*]}"
+            exit 1
+          fi
+
+      - name: Set up SSH
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "${VPS_HOST}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Bring the stack up
+        env:
+          RESTART: ${{ inputs.restart }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/id_deploy "${VPS_USER}@${VPS_HOST}" REMOTE_DIR="${REMOTE_DIR}" RESTART="${RESTART}" 'bash -seuo pipefail' <<'REMOTE'
+            cd "${REMOTE_DIR}"
+            # Every docker command reads </dev/null: this script arrives on ssh's
+            # stdin, and a docker command that forwards stdin would swallow the
+            # rest of it (see the same note in livekit-deploy.yml).
+            echo "--- before ---"
+            docker compose ps -a < /dev/null
+
+            # Starts whatever is stopped; leaves running containers alone.
+            docker compose up -d < /dev/null
+
+            if [ "${RESTART}" = "true" ]; then
+              echo "--- restarting both containers ---"
+              docker compose restart < /dev/null
+            fi
+
+            echo "--- after ---"
+            docker compose ps -a < /dev/null
+
+            # Every service in the project must be running, not merely created.
+            want="$(docker compose config --services < /dev/null | sort)"
+            have="$(docker compose ps --status running --services < /dev/null | sort)"
+            if [ "${want}" != "${have}" ]; then
+              printf '::error::Not every service is running. Expected:\n%s\nRunning:\n%s\n' "${want}" "${have}"
+              exit 1
+            fi
+          REMOTE
+
+      - name: Validate — LiveKit up
+        run: |
+          set -euo pipefail
+          # Same check as livekit-deploy.yml: LiveKit answers GET / with "OK",
+          # but needs a few seconds after a (re)start to bind :7880, during
+          # which nginx returns 502 — retry rather than race the boot.
+          echo "rtc.pollis.com:"
+          curl -fsS --retry 10 --retry-delay 3 --retry-all-errors --retry-connrefused --max-time 20 https://rtc.pollis.com ; echo
