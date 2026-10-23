@@ -264,6 +264,7 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
     // is about to make.
     for (conversation_id, _) in &joined {
         crate::commands::pinned_messages::try_adopt_pin_key(state, conversation_id).await;
+        crate::commands::file_keys::try_adopt_file_keys(state, conversation_id).await;
     }
 
     self_update_joined_groups(state, user_id, &joined).await;

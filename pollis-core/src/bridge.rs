@@ -1244,6 +1244,8 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
         "get_media_path" => {
             let r2_key: String = arg(&args, "r2Key")?;
             let content_hash: String = arg(&args, "contentHash")?;
+            let sha256: String = arg(&args, "sha256")?;
+            let key_scope: crate::commands::r2::AttachmentKeyScope = arg(&args, "keyScope")?;
             let dest_dir: String = arg(&args, "destDir")?;
             // expo's cacheDirectory comes through as a `file://` URI; Rust's
             // PathBuf needs a bare path (same strip as init's data_dir).
@@ -1252,8 +1254,14 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             // with no detail on screen — so the reason goes to the on-device
             // diagnostics log, where Self → Diagnostics can show it.
             let bytes =
-                match crate::commands::r2::download_media(r2_key, content_hash.clone(), &state()?)
-                    .await
+                match crate::commands::r2::download_media(
+                    r2_key,
+                    content_hash.clone(),
+                    sha256,
+                    key_scope,
+                    &state()?,
+                )
+                .await
                 {
                     Ok(bytes) => bytes,
                     Err(e) => {

@@ -242,6 +242,7 @@ pub async fn self_update_group(
             crate::commands::voice_e2ee::on_mls_epoch_changed(state, conversation_id).await;
             // And the pin key's wrap moves to the new exporter too (#99).
             crate::commands::pinned_messages::maybe_rewrap_pin_key(state, conversation_id).await;
+            crate::commands::file_keys::maybe_rewrap_file_keys(state, conversation_id).await;
             Ok(true)
         }
         PublishOutcome::LostRace => {

@@ -554,6 +554,22 @@ pub(crate) async fn read_pins(
     ds_post_json(state, &body).await
 }
 
+// ── Attachment key ring (#1382) ──────────────────────────────────────────────
+
+/// The conversation's current wrapped file key ring, or `None` when nobody has
+/// minted one.
+pub(crate) async fn read_file_keystate(
+    state: &Arc<AppState>,
+    mls_conversation_id: &str,
+    user_id: &str,
+) -> Result<pollis_api::file_keys::FileKeystateResponse> {
+    let body = pollis_api::file_keys::FileKeystateBody {
+        conversation_id: mls_conversation_id.to_string(),
+        user_id: Some(user_id.to_string()),
+    };
+    ds_post_json(state, &body).await
+}
+
 // ── Vault (#107) ─────────────────────────────────────────────────────────────
 
 /// Every vault entry this account holds, as the DS stores them — opaque until

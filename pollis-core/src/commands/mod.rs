@@ -61,6 +61,7 @@ pub mod overlay;
 // Push-notification backend (#344): token registration + the content-free
 // send_message fanout. Pure libsql + reqwest, so it compiles on every target.
 // Pinned messages (#99). NOT `pin` — that module is the device-unlock PIN.
+pub mod file_keys;
 pub mod pinned_messages;
 pub mod push;
 pub mod r2;
