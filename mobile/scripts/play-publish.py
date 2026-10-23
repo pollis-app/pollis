@@ -249,12 +249,17 @@ def cmd_upload(args):
     aab = os.path.abspath(args.aab)
     if not os.path.isfile(aab):
         die(f"{aab} not found — build it first (mobile/CLAUDE.md → Store builds → Android)")
-    token = access_token(service_account())
-    with Edit(token) as e:
+    sa = service_account()
+    with Edit(access_token(sa)) as e:
         print(f"uploading {os.path.basename(aab)} ({os.path.getsize(aab) / 1e6:.0f} MB)…")
         bundle = e.upload_bundle(aab)
         vc = str(bundle["versionCode"])
         print(f"uploaded versionCode {vc}")
+        # The access token lives an hour; a ~180 MB bundle on a slow link
+        # outlasts it, and the track update then 401s and discards an edit
+        # that already holds the upload. The edit is not bound to the token,
+        # so continue it under a fresh one.
+        e.token = access_token(sa)
         release = {"name": args.name or vc, "versionCodes": [vc], "status": args.status}
         if args.notes:
             release["releaseNotes"] = [{"language": "en-US", "text": args.notes}]
