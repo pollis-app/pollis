@@ -18,8 +18,7 @@
     "close": "Close sidebar ({{shortcut}})",
     "resize": "Resize sidebar (drag; double-click to reset)",
     "searchMessages": "Search Messages",
-    "vault": "Vault",
-    "diagnostics": "Diagnostics"
+    "vault": "Vault"
   },
   "profile": {
     "you": "You",
