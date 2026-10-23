@@ -116,6 +116,44 @@ test("a scanned, verified request is approved only on an explicit tap", async ({
   expect(await approvals(page)).toEqual(["link_mock_1"]);
 });
 
+test("the phone's link request never raises the typed-code approval card", async ({ page }) => {
+  await boot(
+    page,
+    signedIn({
+      deviceLinkScript: [
+        { state: "claimed", device_name: "Pixel 9" },
+        { state: "ready_to_approve", device_name: "Pixel 9", new_device_id: "dev_phone", request_id: "req_1" },
+      ],
+    }),
+  );
+  await gotoSecurity(page);
+  await showCode(page, "1234");
+  await expect(page.getByTestId("link-device-approve-card")).toBeVisible();
+
+  // The DS nudges the inbox when the phone files its request; for a QR link the
+  // nudge carries `link_id`. The phone shows no code, so "a new device wants to
+  // enroll — code shown on the new device" must not appear.
+  const nudge = (linkId: string | null, requestId: string) =>
+    page.evaluate(
+      ({ linkId, requestId }) =>
+        (window as unknown as { __emitRealtimeEvent: (e: unknown) => number }).__emitRealtimeEvent({
+          type: "enrollment_requested",
+          request_id: requestId,
+          new_device_id: "dev_phone",
+          link_id: linkId,
+        }),
+      { linkId, requestId },
+    );
+  await nudge("link_mock_1", "req_1");
+  await page.waitForTimeout(300);
+  await expect(page.getByTestId("enrollment-approval-prompt")).toHaveCount(0);
+  await expect(page.getByTestId("link-device-approve-card")).toBeVisible();
+
+  // A request with no link is a typed-code one, and still interrupts.
+  await nudge(null, "req_typed");
+  await expect(page.getByTestId("enrollment-approval-prompt")).toBeVisible();
+});
+
 test("a tampered request offers no Approve", async ({ page }) => {
   await boot(page, signedIn({ deviceLinkScript: [{ state: "tampered" }] }));
   await gotoSecurity(page);
