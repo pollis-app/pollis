@@ -294,6 +294,37 @@ interface MockStore {
   runCallback: () => {},
 };
 
+/**
+ * This module can be evaluated twice in one page. Vite pre-bundles the lazily
+ * imported Tauri plugins (updater, shell, process, fs) and the alias inlines a
+ * second copy of this file into their shared chunk, which runs the first time
+ * one of them loads — e.g. on the Software Update page. The app keeps talking
+ * to the first copy, so the second must not take over: it forwards every
+ * `invoke` to the first, and puts back the first's test hooks, which its own
+ * top-level code has just overwritten with a fresh, unused store.
+ *
+ * Vite does not re-optimize when this file changes, so a local pre-bundle can
+ * carry a stale copy; `rm -rf frontend/node_modules/.vite` refreshes it.
+ */
+const PRIMARY_HOOKS = [
+  '__tauriMock',
+  '__tauriFailSends',
+  '__tauriRevokeDevice',
+  '__tauriRejectWith',
+  '__tauriInvokeCounts',
+  '__resetTauriInvokeCounts',
+  '__tauriLastArgs',
+  '__tauriHold',
+  '__tauriRelease',
+  '__emitRealtimeEvent',
+] as const;
+const primaryInvoke = (window as any).__tauriMockInvoke as
+  | ((command: string, args?: Record<string, unknown>) => Promise<unknown>)
+  | undefined;
+const primaryHooks: Record<string, unknown> | null = primaryInvoke
+  ? Object.fromEntries(PRIMARY_HOOKS.map((name) => [name, (window as any)[name]]))
+  : null;
+
 const preload = (window as any).__POLLIS_PRELOAD__ ?? {};
 
 /**
@@ -972,8 +1003,10 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'is_current_device_registered':
       return true;
 
+    // A preload may set `managedInstall` to render the package-manager branch
+    // of the Software Update page; absent, the install is self-updating.
     case 'detect_managed_install':
-      return null;
+      return preload.managedInstall ?? null;
 
     case 'detect_read_only_location':
       return null;
@@ -2066,6 +2099,9 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
 let stagedAttachmentCount = 0;
 
 export function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  if (primaryInvoke) {
+    return primaryInvoke(command, args) as Promise<T>;
+  }
   // Settled on the microtask queue, not through `setTimeout`. Real IPC hands
   // its reply back as a resolved promise, so a caller that fires a command
   // without awaiting it (e.g. `void copyPermalink(...)` behind a click) has
@@ -2210,3 +2246,11 @@ export async function requestPermissions<T>(_plugin: string): Promise<T> {
 }
 
 export const SERIALIZE_TO_IPC_FN = "__TAURI_TO_IPC_KEY__";
+
+// The first evaluation owns the window hooks; a later one restores them (see
+// `PRIMARY_HOOKS`).
+if (primaryHooks) {
+  Object.assign(window, primaryHooks);
+} else {
+  (window as any).__tauriMockInvoke = invoke;
+}

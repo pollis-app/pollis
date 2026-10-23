@@ -157,7 +157,6 @@
   },
   "inviteLinks": {
     "heading": "邀请链接",
-    "headingTerminal": "> 邀请链接",
     "blurb": "任何拿到链接的人都能加入此群组，但仍需要一个 Pollis 账户。",
     "expiresAfter": "有效期",
     "maximumUses": "最大使用次数",
@@ -167,19 +166,13 @@
     "usesOption_other": "{{count}} 次",
     "usesUnlimited": "不限次数",
     "create": "创建邀请链接",
-    "createTerminal": "[创建邀请链接]",
     "creating": "创建中…",
-    "creatingTerminal": "创建中…",
     "existing": "现有链接",
-    "existingTerminal": "> 现有链接",
     "created": "邀请链接已创建",
-    "createdTerminal": "> 邀请链接已创建",
     "copyNotice": "请立即复制 — 它只会显示这一次。",
     "copyLabel": "复制邀请链接",
     "copy": "复制",
     "copied": "已复制",
-    "copyTerminal": "[复制]",
-    "copiedTerminal": "[已复制]",
     "unbounded": "永不过期 · 不限次数",
     "maxUses_other": "{{count}} 次",
     "expiresOn": "{{date}} 过期",
@@ -190,8 +183,7 @@
     "statusRevoked": "已撤销",
     "statusActive": "有效",
     "statusExpired": "已过期",
-    "revoke": "撤销",
-    "revokeTerminal": "[撤销]"
+    "revoke": "撤销"
   },
   "notify": {
     "inviteTitle": "新的群组邀请",

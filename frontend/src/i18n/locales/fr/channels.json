@@ -159,7 +159,6 @@
   },
   "inviteLinks": {
     "heading": "Lien d'invitation",
-    "headingTerminal": "> LIEN D'INVITATION",
     "blurb": "Toute personne disposant du lien peut rejoindre ce groupe. Un compte Pollis reste nécessaire.",
     "expiresAfter": "Expire après",
     "maximumUses": "Utilisations maximum",
@@ -172,19 +171,13 @@
     "usesOption_other": "{{count}} utilisations",
     "usesUnlimited": "Illimité",
     "create": "Créer un lien d'invitation",
-    "createTerminal": "[CRÉER UN LIEN]",
     "creating": "Création…",
-    "creatingTerminal": "CRÉATION…",
     "existing": "Liens existants",
-    "existingTerminal": "> LIENS EXISTANTS",
     "created": "Lien d'invitation créé",
-    "createdTerminal": "> LIEN D'INVITATION CRÉÉ",
     "copyNotice": "Copiez-le maintenant — c'est la seule fois où il peut être affiché.",
     "copyLabel": "Copier le lien d'invitation",
     "copy": "Copier",
     "copied": "Copié",
-    "copyTerminal": "[COPIER]",
-    "copiedTerminal": "[COPIÉ]",
     "unbounded": "Sans expiration · utilisations illimitées",
     "maxUses_one": "{{count}} utilisation",
     "maxUses_other": "{{count}} utilisations",
@@ -198,8 +191,7 @@
     "statusRevoked": "Révoqué",
     "statusActive": "Actif",
     "statusExpired": "Expiré",
-    "revoke": "Révoquer",
-    "revokeTerminal": "[RÉVOQUER]"
+    "revoke": "Révoquer"
   },
   "notify": {
     "inviteTitle": "Nouvelle invitation de groupe",
