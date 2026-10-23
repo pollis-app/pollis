@@ -89,10 +89,17 @@ pub async fn publish_new_message_to_room(
 // ── Connected-room pushes — still no-op on mobile ───────────────────────────
 //
 // These ride a `Room` this process has already joined. Mobile holds no
-// Rust-side `Room`, and (unlike new_message above) edits/deletes/membership
-// changes still propagate durably through Turso and refresh on the next
-// ingest — so they stay no-ops for now. They could move to the SendData path
-// too if live edit/delete propagation from mobile becomes a priority (#185).
+// Rust-side `Room`, and (unlike new_message above) edits/deletes still
+// propagate durably through the DS and refresh on the next ingest — so they
+// stay no-ops for now. They could move to the SendData path too if live
+// edit/delete propagation from mobile becomes a priority (#185).
+//
+// Group-structure wake-ups are NOT in that set, and must not be: nothing
+// "ingests" a channel list, a group name or a roster. A device learns those
+// changed only from the wake-up, so a no-op here meant a channel created,
+// renamed or deleted, a group renamed, a member removed or re-roled, or a join
+// request filed on a phone stayed invisible on the user's desktop (and every
+// other member's) until a hard refresh. They go through SendData below.
 
 pub async fn publish_edited_message_to_room(
     _livekit: &LiveKit,
@@ -114,23 +121,40 @@ pub async fn publish_deleted_message_to_room(
     Ok(())
 }
 
+// ── Group-structure wake-ups — real on mobile, via SendData ─────────────────
+
+/// A group's channels, name or roster changed. Same routing-only payload as
+/// desktop's `publish_membership_changed_to_room`, to the group's room.
 pub async fn publish_membership_changed_to_room(
-    _livekit: &LiveKit,
-    _group_id: &str,
+    state: &Arc<AppState>,
+    group_id: &str,
 ) -> Result<()> {
-    Ok(())
+    let payload = crate::commands::livekit_signalling::membership_changed_payload(group_id);
+    send_data_to_room(state, group_id.to_string(), payload).await
 }
 
+/// A join request arrived for the group. Desktop sends this through SendData
+/// as well (the requester is not in the room); same payload.
 pub async fn publish_join_requests_changed_to_room(
-    _state: &Arc<AppState>,
-    _group_id: &str,
+    state: &Arc<AppState>,
+    group_id: &str,
 ) -> Result<()> {
-    Ok(())
+    let payload = serde_json::json!({
+        "type": "join_requests_changed",
+        "group_id": group_id,
+    });
+    send_data_to_room(state, group_id.to_string(), payload).await
 }
 
+/// A member's role changed. Same wire shape as desktop, which serializes the
+/// `MemberRoleChanged` event itself.
 pub async fn publish_member_role_changed_to_room(
-    _livekit: &LiveKit,
-    _group_id: &str,
+    state: &Arc<AppState>,
+    group_id: &str,
 ) -> Result<()> {
-    Ok(())
+    let payload = serde_json::to_value(crate::realtime::RealtimeEvent::MemberRoleChanged {
+        group_id: group_id.to_owned(),
+    })
+    .map_err(crate::error::Error::Serde)?;
+    send_data_to_room(state, group_id.to_string(), payload).await
 }

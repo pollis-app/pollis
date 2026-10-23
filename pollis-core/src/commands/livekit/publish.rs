@@ -172,11 +172,11 @@ pub async fn publish_deleted_message_to_room(
 /// Broadcasts a `membership_changed` event to a group's LiveKit room so
 /// existing members refetch the member list (e.g. after a join-request approval).
 pub async fn publish_membership_changed_to_room(
-    livekit: &Arc<tokio::sync::Mutex<crate::realtime::LiveKitState>>,
+    state: &Arc<AppState>,
     group_id: &str,
 ) -> Result<()> {
     let room = {
-        let lk = livekit.lock().await;
+        let lk = state.livekit.lock().await;
         lk.rooms.get(group_id).map(|(r, _)| Arc::clone(r))
     };
 
@@ -228,11 +228,11 @@ pub async fn publish_join_requests_changed_to_room(
 /// changes. Non-fatal — callers log errors. Silently no-ops if the process
 /// isn't connected to the group's room.
 pub async fn publish_member_role_changed_to_room(
-    livekit: &Arc<tokio::sync::Mutex<crate::realtime::LiveKitState>>,
+    state: &Arc<AppState>,
     group_id: &str,
 ) -> Result<()> {
     let room = {
-        let lk = livekit.lock().await;
+        let lk = state.livekit.lock().await;
         lk.rooms.get(group_id).map(|(r, _)| Arc::clone(r))
     };
 

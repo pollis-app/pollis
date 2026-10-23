@@ -65,7 +65,7 @@ pub async fn create_channel(
     // everyone else until they happened to refocus the window — which is what
     // the sidebar's blanket `refetchOnWindowFocus` was silently paying for.
     if let Err(e) = crate::commands::livekit::publish_membership_changed_to_room(
-        &state.livekit,
+        state,
         &group_id,
     ).await {
         crate::diag!("[realtime] create_channel: notify group {group_id}: {e}");
@@ -118,7 +118,7 @@ pub async fn update_channel(
     // Same reasoning as `create_channel` (#874): a rename other members can't
     // see until they refocus is a stale sidebar, not a saved round trip.
     if let Err(e) = crate::commands::livekit::publish_membership_changed_to_room(
-        &state.livekit,
+        state,
         &group_id,
     ).await {
         crate::diag!("[realtime] update_channel: notify group {group_id}: {e}");
@@ -158,7 +158,7 @@ pub async fn delete_channel(
     crate::commands::mls::ds_post_ok(state, &body).await?;
 
     if let Err(e) = crate::commands::livekit::publish_membership_changed_to_room(
-        &state.livekit,
+        state,
         &group_id,
     ).await {
         crate::diag!("[realtime] delete_channel: notify group {group_id}: {e}");

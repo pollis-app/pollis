@@ -202,6 +202,16 @@ account on the device with the key and closes the app; the peer revokes the
 device; `2-revoked.yaml` reopens and unlocks and must land on sign-in with
 `text-session-notice` ("removed from your account").
 
+**A group reaches the user's other device, both ways (automated):** `mobile/scripts/maestro-own-groups.sh <device>`
+— `pollis-tui`'s `own_groups_peer` example signs up a fresh account as its
+first device (the stand-in for the user's desktop) and prints the recovery
+key; `two-client/own-groups/1-enroll.yaml` joins that account on the device.
+`2-phone-creates.yaml` creates a group with #General — which must show on the
+phone with another device in the account — and posts in it; the peer must list
+the group and read the post (the create admitted its device). The peer then
+creates a group, and `3-peer-group-live.yaml`, which never touches the phone,
+must see its pill appear: only `create_group`'s inbox wake-up can do that.
+
 **A new device's approval request comes to the phone (automated, #1360):**
 `mobile/scripts/maestro-approval-prompt.sh <device>` — `pollis-core`'s
 `enroll_peer` example plays the desktop on the desktop's own core commands

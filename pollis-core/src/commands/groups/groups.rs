@@ -139,6 +139,24 @@ pub async fn create_group(
         Err(e) => crate::diag!("[mls] create_group: mls group init failed (non-fatal): {e}"),
     }
 
+    // Wake the creator's OTHER devices. They are not in this group's room —
+    // they do not know it exists — so the inbox is the only room that reaches
+    // them, and without this the group showed up there only after a hard
+    // refresh. A bare `membership_changed` (no `kind`, so no invite alert) is
+    // what every client already answers by pulling its Welcomes and refetching
+    // the group list. Sent after the reconcile above so the Welcomes it queued
+    // are there to pull. Best-effort, like every wake-up: a device that misses
+    // it catches up on its next launch or reconnect.
+    if let Err(e) = crate::commands::livekit::publish_to_user_inbox(
+        state,
+        &owner_id,
+        crate::commands::livekit_signalling::membership_changed_payload(&id),
+    )
+    .await
+    {
+        crate::diag!("[inbox] create_group: notify own devices of {id} failed: {e}");
+    }
+
     Ok(Group { id, name, description, owner_id, created_at: now })
 }
 
@@ -175,7 +193,7 @@ pub async fn update_group(
     // only thing that refreshed another member's sidebar was a window-focus
     // refetch — a poll wearing an event's clothes.
     if let Err(e) = crate::commands::livekit::publish_membership_changed_to_room(
-        &state.livekit,
+        state,
         &group_id,
     ).await {
         crate::diag!("[realtime] update_group: notify group {group_id}: {e}");
