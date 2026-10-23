@@ -83,7 +83,8 @@ impl ConversationTree {
 /// list" and "DM list" rows). One call fans out to the three core list functions
 /// so the caller never forgets the DM-requests leg.
 pub async fn load_conversations(state: &Arc<AppState>, user_id: &str) -> Result<ConversationTree> {
-    let groups = list_user_groups_with_channels(user_id.to_string(), state).await?;
+    let mut groups = list_user_groups_with_channels(user_id.to_string(), state).await?;
+    drop_voice_channels(&mut groups);
     let dm_channels = list_dm_channels(user_id.to_string(), state).await?;
     let dm_requests = list_dm_requests(user_id.to_string(), state).await?;
     Ok(ConversationTree {
@@ -157,6 +158,16 @@ pub async fn thread_counts(state: &Arc<AppState>, conv_id: &str) -> Result<HashM
         .collect())
 }
 
+/// The TUI is built without `media`, so a voice channel has nothing to open —
+/// drop them from the tree entirely, exactly as mobile does
+/// (`mobile/hooks/queries/useUserGroups.ts`). Voice channels carry no messages,
+/// so the sync loop loses nothing by not enumerating them.
+fn drop_voice_channels(groups: &mut [GroupWithChannels]) {
+    for group in groups {
+        group.channels.retain(|c| c.channel_type != "voice");
+    }
+}
+
 /// One thread's replies, oldest first (local, #825). The root is not included.
 pub async fn thread_replies(state: &Arc<AppState>, root_id: &str) -> Result<Vec<ChannelMessage>> {
     Ok(read_thread_messages(root_id.to_string(), state).await?)
@@ -178,5 +189,42 @@ mod tests {
         assert!(tree.is_empty());
         assert_eq!(tree.len(), 0);
         assert!(tree.conversation_ids().is_empty());
+    }
+
+    // Voice channels never reach the tree — neither the sidebar nor the sync
+    // loop's conversation ids — while text channels survive untouched.
+    #[test]
+    fn voice_channels_are_dropped_from_the_tree() {
+        use pollis_core::commands::groups::Channel;
+        let channel = |id: &str, kind: &str| Channel {
+            id: id.to_string(),
+            group_id: "g1".to_string(),
+            name: id.to_string(),
+            description: None,
+            channel_type: kind.to_string(),
+        };
+        let mut groups = vec![GroupWithChannels {
+            id: "g1".to_string(),
+            name: "g".to_string(),
+            description: None,
+            owner_id: "o".to_string(),
+            created_at: "t".to_string(),
+            current_user_role: "member".to_string(),
+            channels: vec![
+                channel("general", "text"),
+                channel("voice-chat", "voice"),
+                channel("dev", "text"),
+            ],
+        }];
+        drop_voice_channels(&mut groups);
+        let tree = ConversationTree {
+            groups,
+            dm_channels: vec![],
+            dm_requests: vec![],
+        };
+        assert_eq!(
+            tree.conversation_ids(),
+            vec!["general".to_string(), "dev".to_string()]
+        );
     }
 }

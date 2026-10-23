@@ -2221,9 +2221,9 @@ version = "0.1.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls-webpki]]
-version = "0.103.15"
+version = "0.103.16"
 criteria = "safe-to-deploy"
-notes = "No independent review performed. This is the fixed, non-stale line this app's direct TLS usage resolves to (paired with rustls 0.23.45 above); no open RUSTSEC advisory applies to it. Exempted on webpki's provenance, not a source read."
+notes = "No independent review performed. This is the fixed, non-stale line this app's direct TLS usage resolves to (paired with rustls 0.23.46 above); 0.103.16 carries the RUSTSEC-2026-0382 fix (rejects the distrusted emSign intermediates). Exempted on webpki's provenance, not a source read."
 
 [[exemptions.rustversion]]
 version = "1.0.22"
@@ -2938,16 +2938,18 @@ version = "2.0.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.webpki-root-certs]]
-version = "1.0.7"
+version = "1.0.10"
 criteria = "safe-to-deploy"
+notes = "No independent review performed. Mozilla root bundle data crate; 1.0.10 drops emSign ECC Root CA - G3 (RUSTSEC-2026-0381/0383). Exempted on rustls-org provenance, not a source read."
 
 [[exemptions.webpki-roots]]
 version = "0.26.11"
 criteria = "safe-to-deploy"
 
 [[exemptions.webpki-roots]]
-version = "1.0.7"
+version = "1.0.10"
 criteria = "safe-to-deploy"
+notes = "No independent review performed. Mozilla root bundle data crate; 1.0.10 drops emSign ECC Root CA - G3 (RUSTSEC-2026-0381/0383). Exempted on rustls-org provenance, not a source read."
 
 [[exemptions.webrtc-audio-processing]]
 version = "2.0.4"
