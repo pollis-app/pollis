@@ -57,7 +57,7 @@
     .kt-main {
       width: 100%;
       max-width: 760px;
-      padding: 4rem 2rem 2rem;
+      padding: 3.5rem 1.25rem 0;
       position: relative;
       z-index: 1;
     }
@@ -78,31 +78,36 @@
     }
 
     .kt-header {
-      text-align: center;
-      margin-bottom: 1.5rem;
+      margin-bottom: 2rem;
+      padding-bottom: 2rem;
+      border-bottom: 1px solid var(--c-border);
     }
 
     .kt-title {
-      font-size: clamp(1.75rem, 4vw, 2.5rem);
-      color: var(--c-accent);
+      font-size: clamp(2rem, 5vw, 2.75rem);
+      line-height: 1.15;
+      letter-spacing: -0.01em;
+      color: var(--c-text);
       margin-bottom: 0.75rem;
     }
 
     .kt-subtitle {
-      color: var(--c-accent);
-      font-size: 0.95rem;
+      color: var(--c-text-muted);
+      font-size: 1.1rem;
+      line-height: 1.6;
       line-height: 1.6;
     }
 
     .kt-explainer {
-      border: 2px solid var(--c-accent);
+      border: 1px solid var(--c-border);
+      border-left: 3px solid var(--c-accent);
       border-radius: 8px;
       padding: 1.25rem 1.5rem;
       margin-bottom: 2rem;
-      font-size: 0.9rem;
+      font-size: 1.0625rem;
       line-height: 1.7;
-      color: var(--c-text);
-      background: #000;
+      color: var(--c-text-body);
+      background: var(--c-surface);
     }
 
     .kt-explainer strong {
@@ -131,8 +136,8 @@
       gap: 0.75rem;
       flex-wrap: wrap;
       margin-bottom: 2rem;
-      background: #000;
-      border: 2px solid var(--c-accent);
+      background: var(--c-surface);
+      border: 1px solid var(--c-border);
       border-radius: 8px;
       padding: 1.25rem;
     }
@@ -166,8 +171,8 @@
 
     .kt-result.is-visible {
       display: block;
-      background: #000;
-      border: 2px solid var(--c-accent);
+      background: var(--c-surface);
+      border: 1px solid var(--c-border);
       border-radius: 8px;
       padding: 1.5rem;
     }
@@ -309,12 +314,20 @@
 </head>
 
 <body>
-  <!-- Dot matrix background -->
-  <div id="dot-matrix-bg"></div>
+  <header class="site-nav">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-nav-brand" aria-label="Pollis home"><img src="wordmark.svg" alt="Pollis" width="72" height="27" /></a>
+      <nav class="site-nav-links" aria-label="Primary">
+        <a href="index.html#download">Download</a>
+        <a href="security.html">Security</a>
+        <a href="faq.html">FAQ</a>
+        <a href="learn.html">Learn</a>
+      </nav>
+    </div>
+  </header>
 
   <main>
     <div class="kt-main reading-surface">
-      <a href="index.html" class="kt-back">&larr; Back to Pollis</a>
 
       <div class="kt-header">
         <h1 class="kt-title">Key Transparency</h1>
@@ -347,28 +360,46 @@
       </form>
 
       <section class="kt-result" id="kt-result" aria-live="polite"></section>
-
-      <div class="footer-links">
-        <a href="index.html" class="footer-link">Home</a>
-        <a href="security.html" class="footer-link">Security</a>
-        <a href="faq.html" class="footer-link">FAQ</a>
-        <a href="artifacts.html" class="footer-link">Artifacts</a>
-        <a href="device-security.html" class="footer-link">Lost device</a>
-        <a href="assurance.html" class="footer-link">Assurance</a>
-        <a href="subprocessors.html" class="footer-link">Subprocessors</a>
-        <a href="privacy.html" class="footer-link">Privacy</a>
-        <a href="terms.html" class="footer-link">Terms</a>
-        <a href="retention.html" class="footer-link">Retention</a>
-        <a href="legal-requests.html" class="footer-link">Legal requests</a>
-        <a href="continuity.html" class="footer-link">Continuity</a>
-        <a href="https://status.pollis.com/" class="footer-link" target="_blank" rel="noopener noreferrer">Status</a>
-        <a href="learn.html" class="footer-link">Learn</a>
-      </div>
     </div>
   </main>
 
-  <footer>
-    <p id="year-copyright"></p>
+  <footer class="site-footer">
+    <div class="site-footer-inner">
+      <div class="site-footer-col">
+        <h2 class="site-footer-title">Get Pollis</h2>
+        <ul>
+          <li><a href="index.html#download">Desktop</a></li>
+          <li><a href="android.html">Android</a></li>
+          <li><a href="index.html#terminal">Terminal client</a></li>
+          <li><a href="https://status.pollis.com/" target="_blank" rel="noopener noreferrer">Status</a></li>
+          <li><a href="https://github.com/pollis-app/pollis" target="_blank" rel="noopener noreferrer">Source code</a></li>
+        </ul>
+      </div>
+      <div class="site-footer-col">
+        <h2 class="site-footer-title">How it works</h2>
+        <ul>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="learn.html">Learn</a></li>
+          <li><a href="faq.html">FAQ</a></li>
+          <li><a href="transparency.html" aria-current="page">Key transparency</a></li>
+          <li><a href="artifacts.html">Release artifacts</a></li>
+          <li><a href="assurance.html">Assurance</a></li>
+        </ul>
+      </div>
+      <div class="site-footer-col">
+        <h2 class="site-footer-title">Policies</h2>
+        <ul>
+          <li><a href="privacy.html">Privacy</a></li>
+          <li><a href="terms.html">Terms</a></li>
+          <li><a href="retention.html">Retention</a></li>
+          <li><a href="subprocessors.html">Subprocessors</a></li>
+          <li><a href="legal-requests.html">Legal requests</a></li>
+          <li><a href="continuity.html">Continuity</a></li>
+          <li><a href="device-security.html">Lost device</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="site-footer-copy" id="year-copyright">© 2026 Pollis. All rights reserved.</p>
   </footer>
 
   <script src="script.js"></script>

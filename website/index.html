@@ -27,12 +27,23 @@
 </head>
 
 <body>
-  <!-- Dot matrix background -->
-  <div id="dot-matrix-bg"></div>
+  <header class="site-nav">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-nav-brand" aria-label="Pollis home"><img src="wordmark.svg" alt="Pollis" width="72" height="27" /></a>
+      <nav class="site-nav-links" aria-label="Primary">
+        <a href="index.html#download">Download</a>
+        <a href="security.html">Security</a>
+        <a href="faq.html">FAQ</a>
+        <a href="learn.html">Learn</a>
+      </nav>
+    </div>
+  </header>
 
   <!-- Main content -->
   <main>
     <div class="hero">
+      <div id="dot-matrix-bg"></div>
+      <p class="status">Open preview: expect rough edges in the app, not in delivery.</p>
       <svg class="brand-logo" viewBox="0 0 913 348" fill="currentColor" xmlns="http://www.w3.org/2000/svg"
         aria-label="Pollis">
         <path
@@ -49,19 +60,18 @@
           d="M852.385009765625,275.26202392578125L741.1390380859375,275.26202392578125L741.1390380859375,226.77001953125L852.385009765625,226.77001953125C855.7130126953125,226.77001953125,858.5659790039062,225.58197021484375,860.9429931640625,223.20501708984375C863.3200073242188,220.8280029296875,864.5079956054688,217.9749755859375,864.5079956054688,214.64801025390625C864.5079956054688,211.20098876953125,863.3200073242188,208.9429931640625,860.9429931640625,207.87298583984375C858.5659790039062,206.802978515625,855.7130126953125,206.26800537109375,852.385009765625,206.26800537109375L801.7540283203125,206.26800537109375C793.3160400390625,206.26800537109375,785.4119873046875,204.66400146484375,778.04296875,201.45501708984375C770.6740112304688,198.2459716796875,764.2559814453125,193.90802001953125,758.7890014648438,188.4410400390625C753.322021484375,182.85498046875,748.9840087890625,176.376953125,745.7750244140625,169.008056640625C742.6849975585938,161.6390380859375,741.1390380859375,153.7359619140625,741.1390380859375,145.2969970703125C741.1390380859375,136.8590087890625,742.6849975585938,128.9549560546875,745.7750244140625,121.5860595703125C748.9840087890625,114.217041015625,753.322021484375,107.7989501953125,758.7890014648438,102.33203125C764.2559814453125,96.86474609375,770.6740112304688,92.5860595703125,778.04296875,89.495849609375C785.4119873046875,86.286865234375,793.3160400390625,84.682373046875,801.7540283203125,84.682373046875L900.3419799804688,84.682373046875L900.3419799804688,133.1739501953125L801.7540283203125,133.1739501953125C798.426025390625,133.1739501953125,795.573974609375,134.363037109375,793.197021484375,136.739990234375C790.8200073242188,139.116943359375,789.6309814453125,141.968994140625,789.6309814453125,145.2969970703125C789.6309814453125,148.7440185546875,790.8200073242188,151.7149658203125,793.197021484375,154.2110595703125C795.573974609375,156.5880126953125,798.426025390625,157.7769775390625,801.7540283203125,157.7769775390625L852.385009765625,157.7769775390625C860.7050170898438,157.7769775390625,868.5490112304688,159.2030029296875,875.91796875,162.0550537109375C883.2869873046875,164.7889404296875,889.7050170898438,168.6519775390625,895.1719970703125,173.6429443359375C900.6390380859375,178.635009765625,904.9769897460938,184.636962890625,908.18603515625,191.6500244140625C911.39599609375,198.6619873046875,913,206.3280029296875,913,214.64801025390625C913,223.08599853515625,911.39599609375,230.989990234375,908.18603515625,238.3590087890625C904.9769897460938,245.6090087890625,900.6390380859375,252.0269775390625,895.1719970703125,257.61297607421875C889.7050170898438,263.08001708984375,883.2869873046875,267.41802978515625,875.91796875,270.62701416015625C868.5490112304688,273.71697998046875,860.7050170898438,275.26202392578125,852.385009765625,275.26202392578125Z" />
       </svg>
 
-      <p class="tagline">End Unencrypted Messaging</p>
+      <h1 class="tagline">End Unencrypted Messaging</h1>
 
       <p class="description">
         Secure, private communication for teams and individuals.
-        <br />
         Messages, files, and voice calls are end-to-end encrypted with MLS (Messaging Layer Security). Our servers store and forward only ciphertext.
       </p>
 
       <div class="cta-group">
         <a href="#download" class="btn btn-primary">Download</a>
+        <a href="security.html" class="btn btn-secondary">How it works</a>
       </div>
 
-      <p class="status">Open preview: expect rough edges in the app, not in delivery.</p>
       <p class="small-print">
         Every message reaches every device that was in the conversation when it was sent.
       </p>
@@ -127,13 +137,36 @@
         </a>
       </div>
 
+      <div class="install-group">
+        <h3 class="install-group-title">Or install from a terminal <span class="install-group-os">macOS &amp; Linux</span></h3>
+        <div class="install-block">
+          <code id="install-cmd" class="install-cmd">curl -fsSL https://cdn.pollis.com/releases/install.sh | bash</code>
+        <button class="install-copy" id="install-copy-btn" aria-label="Copy install command" title="Copy">
+          <svg id="icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" aria-hidden="true">
+            <rect x="9" y="9" width="13" height="13" rx="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+          <svg id="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" aria-hidden="true" style="display:none">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+        </button>
+      </div>
+        <!-- Arch is called out here, not only on the download card: this block is
+           what a Linux user copies, and on Arch the packaged build is the right
+           answer. install.sh detects pacman and redirects rather than laying
+           down an AppImage that would shadow /usr/bin/pollis, but saying so is
+           better than relying on the script to correct the reader. -->
+        <p class="install-note">
+          On Arch, install the package instead: <code>yay -S pollis</code>.
+        </p>
+      </div>
+
       <!-- Every release's hash is already public in the transparency log; this puts
            it next to the download so checking is one command, not a research task. -->
+      <details class="verify-disclosure">
+        <summary>Check what you downloaded <span class="verify-tag" data-verify-tag></span></summary>
       <section class="verify-downloads" aria-labelledby="verify-downloads-heading">
-        <h3 class="verify-heading" id="verify-downloads-heading">
-          Check what you downloaded
-          <span class="verify-tag" data-verify-tag></span>
-        </h3>
+        <h3 class="visually-hidden" id="verify-downloads-heading">Check what you downloaded</h3>
         <p class="verify-intro">
           The SHA-256 of every release is published to a public, append-only
           transparency log. Hash your download and compare it with the value below.
@@ -147,29 +180,9 @@
           reproduces from source, see <a href="/artifacts">artifacts</a>.
         </p>
       </section>
+      </details>
     </section>
 
-      <!-- Arch is called out here, not only on the download card: this block is
-           what a Linux user copies, and on Arch the packaged build is the right
-           answer. install.sh detects pacman and redirects rather than laying
-           down an AppImage that would shadow /usr/bin/pollis, but saying so is
-           better than relying on the script to correct the reader. -->
-      <p class="install-note">
-        On Arch, install the package instead: <code>yay -S pollis</code>.
-      </p>
-      <div class="install-block">
-        <span class="install-label">macOS &amp; Linux</span>
-        <code id="install-cmd" class="install-cmd">curl -fsSL https://cdn.pollis.com/releases/install.sh | bash</code>
-        <button class="install-copy" id="install-copy-btn" aria-label="Copy install command" title="Copy">
-          <svg id="icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" aria-hidden="true">
-            <rect x="9" y="9" width="13" height="13" rx="2"/>
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-          </svg>
-          <svg id="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" aria-hidden="true" style="display:none">
-            <polyline points="20 6 9 17 4 12"/>
-          </svg>
-        </button>
-      </div>
 
     <!-- Terminal client -->
     <section id="terminal" class="terminal-section">
@@ -179,8 +192,8 @@
         Same MLS encryption, same conversations, no desktop app or WebView.
         Sign in, browse channels and DMs, read and send over SSH, in a tmux pane, or on a headless box.
       </p>
+      <span class="install-label">macOS &amp; Linux</span>
       <div class="install-block">
-        <span class="install-label">macOS &amp; Linux</span>
         <code id="install-cmd-cli" class="install-cmd">curl -fsSL https://cdn.pollis.com/releases/cli-install.sh | bash</code>
         <button class="install-copy" id="install-copy-btn-cli" aria-label="Copy install command" title="Copy">
           <svg id="icon-copy-cli" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" aria-hidden="true">
@@ -196,41 +209,45 @@
         Windows: grab the <a id="cli-windows-link" href="https://cdn.pollis.com/releases/cli/latest.json" class="aur-link" data-cli-platform="windows">standalone <code>pollis.exe</code></a>.
       </p>
     </section>
-
-    <!-- Footer links -->
-    <div class="footer-links">
-      <a href="#terminal" class="footer-link">Terminal</a>
-      <a href="android.html" class="footer-link">Android</a>
-      <a href="faq.html" class="footer-link">FAQ</a>
-      <a href="security.html" class="footer-link">Security</a>
-      <a href="transparency.html" class="footer-link">Transparency</a>
-      <a href="artifacts.html" class="footer-link">Artifacts</a>
-      <a href="device-security.html" class="footer-link">Lost device</a>
-      <a href="assurance.html" class="footer-link">Assurance</a>
-      <a href="subprocessors.html" class="footer-link">Subprocessors</a>
-      <a href="privacy.html" class="footer-link">Privacy</a>
-      <a href="terms.html" class="footer-link">Terms</a>
-      <a href="retention.html" class="footer-link">Retention</a>
-      <a href="legal-requests.html" class="footer-link">Legal requests</a>
-      <a href="continuity.html" class="footer-link">Continuity</a>
-      <a href="https://status.pollis.com/" class="footer-link" target="_blank" rel="noopener noreferrer">Status</a>
-      <a href="learn.html" class="footer-link">Learn</a>
-      <a href="https://github.com/pollis-app/pollis" class="footer-link" target="_blank" rel="noopener noreferrer">
-        <svg viewBox="0 0 20 20" fill="currentColor" width="20" height="20" aria-hidden="true">
-          <g transform="translate(-140,-7559)">
-            <g transform="translate(56,160)">
-              <path
-                d="M94,7399 C99.523,7399 104,7403.59 104,7409.253 C104,7413.782 101.138,7417.624 97.167,7418.981 C96.66,7419.082 96.48,7418.762 96.48,7418.489 C96.48,7418.151 96.492,7417.047 96.492,7415.675 C96.492,7414.719 96.172,7414.095 95.813,7413.777 C98.04,7413.523 100.38,7412.656 100.38,7408.718 C100.38,7407.598 99.992,7406.684 99.35,7405.966 C99.454,7405.707 99.797,7404.664 99.252,7403.252 C99.252,7403.252 98.414,7402.977 96.505,7404.303 C95.706,7404.076 94.85,7403.962 94,7403.958 C93.15,7403.962 92.295,7404.076 91.497,7404.303 C89.586,7402.977 88.746,7403.252 88.746,7403.252 C88.203,7404.664 88.546,7405.707 88.649,7405.966 C88.01,7406.684 87.619,7407.598 87.619,7408.718 C87.619,7412.646 89.954,7413.526 92.175,7413.785 C91.889,7414.041 91.63,7414.493 91.54,7415.156 C90.97,7415.418 89.522,7415.871 88.63,7414.304 C88.63,7414.304 88.101,7413.319 87.097,7413.247 C87.097,7413.247 86.122,7413.234 87.029,7413.87 C87.029,7413.87 87.684,7414.185 88.139,7415.37 C88.139,7415.37 88.726,7417.2 91.508,7416.58 C91.513,7417.437 91.522,7418.245 91.522,7418.489 C91.522,7418.76 91.338,7419.077 90.839,7418.982 C86.865,7417.627 84,7413.783 84,7409.253 C84,7403.59 88.478,7399 94,7399" />
-            </g>
-          </g>
-        </svg>
-        GitHub
-      </a>
-    </div>
   </main>
 
-  <footer>
-    <p id="year-copyright"></p>
+  <footer class="site-footer">
+    <div class="site-footer-inner">
+      <div class="site-footer-col">
+        <h2 class="site-footer-title">Get Pollis</h2>
+        <ul>
+          <li><a href="index.html#download">Desktop</a></li>
+          <li><a href="android.html">Android</a></li>
+          <li><a href="index.html#terminal">Terminal client</a></li>
+          <li><a href="https://status.pollis.com/" target="_blank" rel="noopener noreferrer">Status</a></li>
+          <li><a href="https://github.com/pollis-app/pollis" target="_blank" rel="noopener noreferrer">Source code</a></li>
+        </ul>
+      </div>
+      <div class="site-footer-col">
+        <h2 class="site-footer-title">How it works</h2>
+        <ul>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="learn.html">Learn</a></li>
+          <li><a href="faq.html">FAQ</a></li>
+          <li><a href="transparency.html">Key transparency</a></li>
+          <li><a href="artifacts.html">Release artifacts</a></li>
+          <li><a href="assurance.html">Assurance</a></li>
+        </ul>
+      </div>
+      <div class="site-footer-col">
+        <h2 class="site-footer-title">Policies</h2>
+        <ul>
+          <li><a href="privacy.html">Privacy</a></li>
+          <li><a href="terms.html">Terms</a></li>
+          <li><a href="retention.html">Retention</a></li>
+          <li><a href="subprocessors.html">Subprocessors</a></li>
+          <li><a href="legal-requests.html">Legal requests</a></li>
+          <li><a href="continuity.html">Continuity</a></li>
+          <li><a href="device-security.html">Lost device</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="site-footer-copy" id="year-copyright">© 2026 Pollis. All rights reserved.</p>
   </footer>
   <script>
     document.getElementById("year-copyright").textContent = `© ${new Date().getFullYear()} Pollis. All rights reserved.`;

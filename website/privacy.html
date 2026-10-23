@@ -26,12 +26,20 @@
 </head>
 
 <body>
-  <!-- Dot matrix background -->
-  <div id="dot-matrix-bg"></div>
+  <header class="site-nav">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-nav-brand" aria-label="Pollis home"><img src="wordmark.svg" alt="Pollis" width="72" height="27" /></a>
+      <nav class="site-nav-links" aria-label="Primary">
+        <a href="index.html#download">Download</a>
+        <a href="security.html">Security</a>
+        <a href="faq.html">FAQ</a>
+        <a href="learn.html">Learn</a>
+      </nav>
+    </div>
+  </header>
 
   <main>
     <div class="doc-main reading-surface">
-      <a href="index.html" class="doc-back">&larr; Back to Pollis</a>
 
       <div class="doc-header">
         <h1 class="doc-title">Privacy Policy</h1>
@@ -242,28 +250,46 @@
           <a href="https://github.com/pollis-app/pollis" target="_blank" rel="noopener noreferrer">repository</a>.
         </p>
       </section>
-
-      <div class="footer-links">
-        <a href="index.html" class="footer-link">Home</a>
-        <a href="security.html" class="footer-link">Security</a>
-        <a href="subprocessors.html" class="footer-link">Subprocessors</a>
-        <a href="terms.html" class="footer-link">Terms</a>
-        <a href="faq.html" class="footer-link">FAQ</a>
-        <a href="transparency.html" class="footer-link">Transparency</a>
-        <a href="artifacts.html" class="footer-link">Artifacts</a>
-        <a href="device-security.html" class="footer-link">Lost device</a>
-        <a href="assurance.html" class="footer-link">Assurance</a>
-        <a href="retention.html" class="footer-link">Retention</a>
-        <a href="legal-requests.html" class="footer-link">Legal requests</a>
-        <a href="continuity.html" class="footer-link">Continuity</a>
-        <a href="https://status.pollis.com/" class="footer-link" target="_blank" rel="noopener noreferrer">Status</a>
-        <a href="learn.html" class="footer-link">Learn</a>
-      </div>
     </div>
   </main>
 
-  <footer>
-    <p id="year-copyright"></p>
+  <footer class="site-footer">
+    <div class="site-footer-inner">
+      <div class="site-footer-col">
+        <h2 class="site-footer-title">Get Pollis</h2>
+        <ul>
+          <li><a href="index.html#download">Desktop</a></li>
+          <li><a href="android.html">Android</a></li>
+          <li><a href="index.html#terminal">Terminal client</a></li>
+          <li><a href="https://status.pollis.com/" target="_blank" rel="noopener noreferrer">Status</a></li>
+          <li><a href="https://github.com/pollis-app/pollis" target="_blank" rel="noopener noreferrer">Source code</a></li>
+        </ul>
+      </div>
+      <div class="site-footer-col">
+        <h2 class="site-footer-title">How it works</h2>
+        <ul>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="learn.html">Learn</a></li>
+          <li><a href="faq.html">FAQ</a></li>
+          <li><a href="transparency.html">Key transparency</a></li>
+          <li><a href="artifacts.html">Release artifacts</a></li>
+          <li><a href="assurance.html">Assurance</a></li>
+        </ul>
+      </div>
+      <div class="site-footer-col">
+        <h2 class="site-footer-title">Policies</h2>
+        <ul>
+          <li><a href="privacy.html" aria-current="page">Privacy</a></li>
+          <li><a href="terms.html">Terms</a></li>
+          <li><a href="retention.html">Retention</a></li>
+          <li><a href="subprocessors.html">Subprocessors</a></li>
+          <li><a href="legal-requests.html">Legal requests</a></li>
+          <li><a href="continuity.html">Continuity</a></li>
+          <li><a href="device-security.html">Lost device</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="site-footer-copy" id="year-copyright">© 2026 Pollis. All rights reserved.</p>
   </footer>
 
   <script src="script.js"></script>
