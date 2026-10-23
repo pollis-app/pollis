@@ -12,6 +12,22 @@ truth — **do not hand-edit on the box**; deploys go through a button.
 renders the LiveKit keys from secrets, and runs `docker compose up -d` + a
 graceful nginx reload. No manual SSH. See "Workflow requirements" below.
 
+## Restart (the other button)
+
+**Actions tab → "Restart LiveKit + nginx" → Run workflow**, or archon's
+**Restart voice server** (Overview → voice server).
+
+`.github/workflows/livekit-restart.yml` SSHes in with the same key and host vars
+and runs `docker compose up -d` in `/root/livekit`: it starts any
+stopped container and touches nothing else (no config sync, no keys, no pull).
+It fails unless every compose service is running and `https://rtc.pollis.com/`
+answers. Tick `restart` to also `docker compose restart` both containers, for
+one that is running but hung — that drops every live call.
+
+Reach for it when joins fail with "Couldn't reach the voice server". After the
+2026-10-17 kernel-update reboot, LiveKit came back but nginx exited 255 and
+stayed down for six days despite `restart: unless-stopped`.
+
 ## Stack
 
 | Service | Image (pinned) | Managed by |

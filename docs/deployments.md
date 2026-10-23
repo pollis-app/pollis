@@ -247,6 +247,7 @@ stop someone moving the tag that fires it.
 - **From:** `livekit/` (compose + nginx ingress; runs **upstream** LiveKit images, not our build)
 - **Versions:** `livekit/livekit-server:v1.13.9` + `nginx:1.30-alpine`, digest-pinned in `livekit/docker-compose.yml`; `e2e/scripts/start-livekit.sh` pins the same LiveKit tag so the two-client e2e runs exercise it. Before a bump, `trivy image --severity HIGH,CRITICAL <image>` the candidate (the 2026-10 scan, `docs/security/dependency-scan-2026-10.md`, found 1.10.0 carrying a critical OpenSSL).
 - **Pipeline:** `.github/workflows/livekit-deploy.yml` — `workflow_dispatch` (env choice prod/dev). SSH + compose on the VPS.
+- **Restart (no deploy):** `.github/workflows/livekit-restart.yml` — `workflow_dispatch`, also a button in archon (Overview → voice server). Same SSH key and host vars as the deploy (but no `livekit-prod` environment, so it never records a deployment that `release-impact.sh` would read as live config); runs `docker compose up -d` in `/root/livekit` (starts any stopped container, changes no config, renders no keys), fails unless every service is running and `https://rtc.pollis.com/` answers. `restart: true` also runs `docker compose restart` for a hung-but-running container (drops live calls). Use it when voice/video joins fail with "Couldn't reach the voice server" — e.g. 2026-10-17, when nginx exited 255 after a kernel-update reboot and stayed down six days.
 - **Runs at:** VPS. Frames are E2EE (the SFU forwards ciphertext).
 - **Ingress:** everything on **443**, split by TLS SNI in nginx's `stream` block —
   `rtc.pollis.com` → HTTPS/WSS → `livekit:7880`; `turn.pollis.com` → TURNS,
@@ -355,6 +356,7 @@ or media.
 | `pollis-delivery/` (or `pollis-core` DS paths) | `delivery-deploy-dev.yml` → verify → `delivery-deploy-prod.yml` |
 | `pollis-relay/` (or `pollis-device-cert`) | `relay-image.yml` (build + publish the GHCR image); then an operator rolls the pool nodes per `docs/relay-operations.md` — no auto-deploy |
 | `livekit/` config | `livekit-deploy.yml` |
+| nothing — voice server down (stopped/hung container) | `livekit-restart.yml` |
 | `pollis-core` / `src-tauri` / `frontend` (desktop-facing, user-visible) | tag a new `v*` → `desktop-release.yml` (also releases the DB migrations) |
 | `pollis-tui` / `pollis-core` (CLI-facing) | `cli-release.yml` |
 | `mobile/` / `pollis-core` (mobile-facing, user-visible) | bump `mobile/package.json` `version`, merge; build + upload the store builds by hand (TestFlight; Play internal + `alpha` — `mobile/CLAUDE.md` → "Store builds"); tag `mobile-v<version>` → `mobile-apk-release.yml`. Required for any `pollis-core` / native change: the fingerprint keeps it out of OTA |
