@@ -8,6 +8,7 @@ import { Heading } from "../../components/auth/Heading";
 import { AuthError } from "../../components/auth/AuthError";
 import { semantic, type as ty } from "../../theme/tokens";
 import { useRequestOtp } from "../../hooks/queries/useAuth";
+import { useSubmitLock } from "../../hooks/useSubmitLock";
 import { getSessionNotice, setSessionNotice, subscribeSessionNotice } from "../../lib/deviceRevoked";
 
 export default function AuthEmail() {
@@ -15,12 +16,13 @@ export default function AuthEmail() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const requestOtp = useRequestOtp();
+  const submit = useSubmitLock();
   // Why the last session ended, when the user did not end it (#1338).
   const notice = useSyncExternalStore(subscribeSessionNotice, getSessionNotice);
 
   const onSubmit = () => {
     const trimmed = email.trim();
-    if (!trimmed) {
+    if (!trimmed || !submit.begin()) {
       return;
     }
     requestOtp.mutate(trimmed, {
@@ -28,6 +30,7 @@ export default function AuthEmail() {
         setSessionNotice(null);
         router.push({ pathname: "/(auth)/otp", params: { email: trimmed } });
       },
+      onError: submit.end,
     });
   };
 
@@ -74,10 +77,11 @@ export default function AuthEmail() {
           variant="primary"
           full
           onPress={onSubmit}
-          disabled={requestOtp.isPending || !email.trim()}
+          disabled={!email.trim()}
+          loading={submit.busy}
           iconRight={<Icon.arrowRight size={18} color={semantic.onAccent} />}
         >
-          {requestOtp.isPending ? t("otp.sending") : t("otp.continue")}
+          {submit.busy ? t("otp.sending") : t("otp.continue")}
         </Button>
         {/* Agreeing to the terms is part of creating the account (#1213; App
             Store 1.2): the terms say abusive content is not tolerated. */}

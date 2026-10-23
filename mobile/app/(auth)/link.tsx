@@ -123,7 +123,9 @@ export default function LinkSignIn() {
           </View>
         ) : null}
 
-        {claim.isPending ? (
+        {/* Held through success until the enrollment screen replaces this
+            one, so the spinner never blinks off before navigation. */}
+        {claim.isPending || claim.isSuccess ? (
           <View
             style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10 }}
             accessibilityLiveRegion="polite"
@@ -142,7 +144,7 @@ export default function LinkSignIn() {
             testID="btn-link-submit"
             variant="primary"
             full
-            disabled={claim.isPending}
+            loading={claim.isPending || claim.isSuccess}
             onPress={() => submit(code)}
           >
             {t("link.signIn")}

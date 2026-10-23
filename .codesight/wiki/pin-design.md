@@ -330,7 +330,7 @@ Migration deadline: keep the migration code in the tree for two minor versions, 
 
 Screens (existing where named, new otherwise). Living in `frontend/src/pages/` or `frontend/src/components/auth/`.
 
-- **PIN entry** — shown when `get_unlock_state` returns `{ last_active_user, is_unlocked: false, pin_set: true }`. Numeric keypad, 4 boxes, "forgot?" link. Calls `unlock`. On `PinIncorrect` shows remaining attempts. On `PinLockedOut` (or when remaining hits 0) routes to the Secret Key recovery screen.
+- **PIN entry** — shown when `get_unlock_state` returns `{ last_active_user, is_unlocked: false, pin_set: true }`. Numeric keypad, 4 boxes, "forgot?" link. Calls `unlock`. The digit that completes the PIN switches the pad to a busy state at once (spinner + "Unlocking…", keys disabled) and holds it until the screen navigates or the call fails: `unlock` / `set_pin` run Argon2id and open the SQLCipher DB, which is a perceptible wait on a phone. Mobile: `PinBusy` (`mobile/components/auth/PinPad.tsx`) + the single-flight `mobile/hooks/useSubmitLock.ts`; the bridge runs commands off the JS thread, so the busy frame is never blocked. On `PinIncorrect` shows remaining attempts. On `PinLockedOut` (or when remaining hits 0) routes to the Secret Key recovery screen.
 - **PIN setup** — shown right after `verify_otp` returns `pin_required_to_complete_signup: true`, and at the end of Secret Key recovery, and during one-time migration. Two passes (enter + confirm). Calls `set_pin(None, pin)` or `migrate_set_initial_pin(pin)` depending on context.
 - **PIN change** — Settings page. Two passes plus old-PIN pass. Calls `set_pin(Some(old), new)`.
 - **PIN failure lockout warning** — interstitial when attempts remaining hits 3, 2, 1. Explains what happens on 10.

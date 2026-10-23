@@ -8,7 +8,7 @@ import { Screen, Header, Button, BottomAction, Field, Body } from "../../compone
 import { ErrorText } from "../../components/self/SettingsField";
 import { Heading } from "../../components/auth/Heading";
 import { useIsRegular } from "../../hooks/useLayoutClass";
-import { PinCells, PinKeypad } from "../../components/auth/PinPad";
+import { PinBusy, PinCells, PinKeypad } from "../../components/auth/PinPad";
 import { semantic, type as ty, fonts, r } from "../../theme/tokens";
 import { appStore } from "../../stores/appStore";
 import { acceptDeviceOffer, cancelDeviceLink, finishDeviceOffer } from "../../hooks/queries";
@@ -54,6 +54,9 @@ export default function ScanToSignIn() {
   const [pin, setPin] = useState("");
   const [pinError, setPinError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Synchronous twin of `busy`: a second tap in the same frame as the fourth
+  // digit must not submit the PIN twice.
+  const submitting = useRef(false);
   // The camera reports every frame the code is in view; take it once.
   const taken = useRef(false);
   const generation = useRef(0);
@@ -122,9 +125,10 @@ export default function ScanToSignIn() {
   };
 
   const submitPin = async (payload: string, value: string) => {
-    if (!userId || busy) {
+    if (!userId || submitting.current) {
       return;
     }
+    submitting.current = true;
     setBusy(true);
     setPinError(null);
     try {
@@ -143,6 +147,7 @@ export default function ScanToSignIn() {
     } finally {
       setPin("");
       setBusy(false);
+      submitting.current = false;
     }
   };
 
@@ -184,7 +189,9 @@ export default function ScanToSignIn() {
             />
             <View style={{ gap: 14 }}>
               <PinCells length={pin.length} />
-              {pinError ? (
+              {busy ? (
+                <PinBusy label={t("security.verifying")} />
+              ) : pinError ? (
                 <View style={{ alignSelf: "center" }}>
                   <ErrorText testID="link-device-pin-error">{pinError}</ErrorText>
                 </View>

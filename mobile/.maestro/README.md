@@ -90,7 +90,7 @@ IOS_DEVICE="iPhone 17 Pro" mobile/scripts/maestro-run.sh auth ios   # an Xcode 2
 
 | Flow | What it proves | Peer? |
 | --- | --- | --- |
-| `auth` | email→OTP→PIN→inbox (also the smoke test: bridge + dev DS + keystore live) | no |
+| `auth` | email→OTP→PIN→inbox (also the smoke test: bridge + dev DS + keystore live), then a cold relaunch and PIN unlock whose fourth digit must show `pin-busy` at once (no frozen pad) | no |
 | `groups` | create group, open, channel visible | no |
 | `messaging` | send / edit / delete / react in a self-owned channel | no |
 | `outbox` | #1335 a message whose send is killed mid-flight (`stopApp` right after Send in a fresh group) is still there after relaunch + unlock and is delivered by the outbox drain (no `btn-retry-message-*` left); Android only: a send made in airplane mode is kept as failed with `btn-retry-message-<id>` / `btn-discard-message-<id>`, and back online Retry settles it | no |

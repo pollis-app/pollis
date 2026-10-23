@@ -8,6 +8,7 @@ import { Heading } from "../../components/auth/Heading";
 import { AuthError } from "../../components/auth/AuthError";
 import { semantic, fonts, r } from "../../theme/tokens";
 import { useVerifyOtp } from "../../hooks/queries/useAuth";
+import { useSubmitLock } from "../../hooks/useSubmitLock";
 
 const CODE_LENGTH = 6;
 // Zero-width U+2060 after the address: forbids a line break between it and the
@@ -24,9 +25,12 @@ export default function AuthOTP() {
   const input = useRef<TextInput>(null);
   const cells = Array.from({ length: CODE_LENGTH });
   const verifyOtp = useVerifyOtp();
+  // verify_otp is the slow sign-in step: a DS round trip and, for a new
+  // account, generating the identity and MLS keys.
+  const submit = useSubmitLock();
 
   const onSubmit = () => {
-    if (code.length !== CODE_LENGTH || !email) {
+    if (code.length !== CODE_LENGTH || !email || !submit.begin()) {
       return;
     }
     verifyOtp.mutate(
@@ -42,6 +46,7 @@ export default function AuthOTP() {
           }
           router.push("/(auth)/pin");
         },
+        onError: submit.end,
       },
     );
   };
@@ -142,10 +147,11 @@ export default function AuthOTP() {
           variant="primary"
           full
           onPress={onSubmit}
-          disabled={code.length !== CODE_LENGTH || verifyOtp.isPending}
+          disabled={code.length !== CODE_LENGTH}
+          loading={submit.busy}
           iconRight={<Icon.arrowRight size={18} color={semantic.onAccent} />}
         >
-          {verifyOtp.isPending ? t("otp.verifying") : t("otp.verify")}
+          {submit.busy ? t("otp.verifying") : t("otp.verify")}
         </Button>
       </BottomAction>
     </Screen>
