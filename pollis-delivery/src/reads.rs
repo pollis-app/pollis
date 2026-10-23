@@ -677,8 +677,38 @@ pub async fn fetch_welcomes(
 
     let conn = state.log_db.conn().await?;
     let welcomes = pending_welcomes(&conn, &who.user_id, &who.device_id).await?;
+
+    // #1412: the signing device's own pool size, when asked. Best-effort by
+    // design: the drain is the payload and must never fail on this, and `None`
+    // only sends the client back to its pre-#1412 refill rule. Scoped to the
+    // VERIFIED device, like the drain itself.
+    let unclaimed_key_packages = match parsed.count_key_packages_in_suite {
+        Some(suite) => {
+            let counted = async {
+                let main = state.db.conn().await?;
+                crate::account_reads::unclaimed_key_package_count(
+                    &main,
+                    &who.user_id,
+                    &who.device_id,
+                    suite,
+                )
+                .await
+            }
+            .await;
+            match counted {
+                Ok(n) => Some(n),
+                Err(e) => {
+                    tracing::warn!("fetch_welcomes: key-package count failed: {e}");
+                    None
+                }
+            }
+        }
+        None => None,
+    };
+
     Ok(ok_response::<FetchWelcomesBody>(FetchWelcomesResponse {
         welcomes,
+        unclaimed_key_packages,
     }))
 }
 

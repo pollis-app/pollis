@@ -247,11 +247,32 @@ pub struct FetchWelcomesBody {
     pub user_id: Option<String>,
     #[serde(default)]
     pub device_id: Option<String>,
+    /// Also report how many unclaimed KeyPackages the SIGNING device still has
+    /// in this suite (#1412), on [`FetchWelcomesResponse::unclaimed_key_packages`].
+    ///
+    /// Rides on the Welcome drain because that is the call every wake-up,
+    /// foreground and sweep already makes: the device learns its pool is low
+    /// with no extra round trip, and refills it before a peer's claim finds it
+    /// empty. Packages are drained WITHOUT a Welcome too — a claim whose commit
+    /// lost its epoch race, or a leaf the committer refused — so "I processed
+    /// a Welcome" was never a sufficient refill trigger.
+    ///
+    /// ADDITIVE in both directions: a Delivery Service that predates it ignores
+    /// the field and answers without a count; `None` asks for no count.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub count_key_packages_in_suite: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FetchWelcomesResponse {
     pub welcomes: Vec<PendingWelcome>,
+    /// The signing device's unclaimed KeyPackages in the suite the request
+    /// named in `count_key_packages_in_suite`. `None` when the request did not
+    /// ask, when the count could not be read (the drain itself never fails on
+    /// it), or when the server predates the field — the client then falls back
+    /// to refilling only after it processes a Welcome.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unclaimed_key_packages: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

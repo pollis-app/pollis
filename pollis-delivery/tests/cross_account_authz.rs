@@ -415,6 +415,57 @@ async fn a_fetched_welcome_names_the_conversation_it_was_filed_under() {
     );
 }
 
+/// #1412: the drain reports the SIGNING device's own unclaimed KeyPackages in
+/// the asked suite, so a device learns its pool is low on the call every wake-up
+/// already makes. Scoped to the verified device — another device's pool, or a
+/// claimed or other-suite package, never counts — and absent unless asked, so
+/// an older client sees the response it always did.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_welcome_drain_reports_the_signing_devices_own_pool() {
+    let db = fresh_db().await;
+    let dave = seed_account(&db, "dave").await;
+    let conn = db.conn().await.unwrap();
+    for (i, device, suite, claimed) in [
+        (0, dave.device_id.as_str(), 7, 0),
+        (1, dave.device_id.as_str(), 7, 0),
+        (2, dave.device_id.as_str(), 7, 1),
+        (3, dave.device_id.as_str(), 1, 0),
+        (4, "dave-other-device", 7, 0),
+    ] {
+        conn.execute(
+            "INSERT INTO mls_key_package \
+                 (ref_hash, user_id, key_package, device_id, ciphersuite, claimed) \
+             VALUES (?1, 'dave', X'00', ?2, ?3, ?4)",
+            libsql::params![format!("kp-{i}"), device, suite, claimed],
+        )
+        .await
+        .unwrap();
+    }
+
+    let (status, body) = post_json(
+        &db,
+        &dave,
+        "/v1/welcomes/fetch",
+        serde_json::json!({ "device_id": dave.device_id, "count_key_packages_in_suite": 7 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["unclaimed_key_packages"], 2, "{body}");
+
+    let (status, body) = post_json(
+        &db,
+        &dave,
+        "/v1/welcomes/fetch",
+        serde_json::json!({ "device_id": dave.device_id }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body.get("unclaimed_key_packages").is_none(),
+        "a request that does not ask must get the pre-#1412 shape: {body}"
+    );
+}
+
 // ── cross-account 403s: enrollment ───────────────────────────────────────────
 
 async fn seed_enrollment_request(db: &Db, id: &str, user_id: &str) {
