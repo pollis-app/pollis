@@ -27,7 +27,7 @@
 import * as FileSystem from "expo-file-system/legacy";
 import { invoke } from "../native";
 import { exportFilename } from "./viewer";
-import type { MessageAttachment } from "../../types";
+import type { AttachmentKeyScope, MessageAttachment } from "../../types";
 
 // Decrypted media lives under the app sandbox cache dir, in a dedicated
 // subfolder so a cache wipe (or our own teardown) can't touch anything
@@ -35,12 +35,14 @@ import type { MessageAttachment } from "../../types";
 // content-addressed, re-fetchable media.
 export const MEDIA_DIR = `${FileSystem.cacheDirectory ?? ""}pollis-media/`;
 
-// Args for the Rust `get_media_path` command. Snake/camel mix mirrors the
-// desktop `get_media_url` call exactly (`r2Key`, `contentHash`,
-// `contentType`) so the dispatch arm can be shared 1:1 when it's written.
+// Args for the Rust `get_media_path` command. Mirrors desktop's `get_media_url`
+// (`r2Key`, `contentHash`, `sha256`, `keyScope`, `contentType`).
 interface GetMediaPathArgs {
   r2Key: string;
   contentHash: string;
+  // The digest the decrypted bytes must match, and which key sealed them (#1382).
+  sha256: string;
+  keyScope: AttachmentKeyScope;
   contentType: string;
   // Absolute sandbox dir Rust should decrypt into. Passing it from JS
   // keeps the cache location owned by the platform layer (Expo decides
@@ -101,16 +103,16 @@ function ensureDir(): Promise<void> {
 export async function resolveMediaUri(
   attachment: Pick<
     MessageAttachment,
-    "object_key" | "content_hash" | "content_type"
+    "object_key" | "content_hash" | "content_type" | "sha256" | "key_scope"
   >,
 ): Promise<string> {
-  const { object_key, content_hash, content_type } = attachment;
+  const { object_key, content_hash, content_type, sha256, key_scope } = attachment;
 
   // Optimistic sends with no object key yet can't be fetched — callers
-  // should use `localPreviewUri` for those. Guard so a half-built
-  // attachment doesn't reach Rust.
-  if (!object_key || !content_hash) {
-    throw new Error("resolveMediaUri: attachment has no object_key/content_hash");
+  // should use `localPreviewUri` for those — and a reference with no key
+  // scope (pre-#1382) cannot be opened. Guard so neither reaches Rust.
+  if (!object_key || !content_hash || !key_scope) {
+    throw new Error("resolveMediaUri: attachment is not available to fetch");
   }
 
   const existing = inFlight.get(content_hash);
@@ -126,6 +128,8 @@ export async function resolveMediaUri(
     const uri = await invoke<string>("get_media_path", {
       r2Key: object_key,
       contentHash: content_hash,
+      sha256,
+      keyScope: key_scope,
       contentType: content_type,
       destDir: MEDIA_DIR,
     } satisfies GetMediaPathArgs);
@@ -218,7 +222,7 @@ const namedBaseRefs = new Map<string, number>();
 export async function resolveNamedMediaUri(
   attachment: Pick<
     MessageAttachment,
-    "object_key" | "content_hash" | "content_type" | "filename" | "localPreviewUri"
+    "object_key" | "content_hash" | "content_type" | "filename" | "localPreviewUri" | "sha256" | "key_scope"
   >,
 ): Promise<string> {
   const { object_key, content_hash, content_type, filename } = attachment;

@@ -30,6 +30,8 @@ function att(id: string, content_type: string, filename = `${id}.bin`) {
     id,
     object_key: `k-${id}`,
     content_hash: `h-${id}`,
+    sha256: `s-${id}`,
+    key_scope: { kind: "vault" } as const,
     filename,
     content_type,
     file_size: 10,

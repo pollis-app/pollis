@@ -127,7 +127,7 @@ export interface DecodedPage {
 export type MessagesData = InfiniteData<DecodedPage, MessageCursor | null>;
 
 function transform(raw: RawChannelMessage): Message {
-  const parsed = parseContent(raw.content);
+  const parsed = parseContent(raw.content, { conversationId: raw.conversation_id });
   return {
     id: raw.id,
     conversation_id: raw.conversation_id,
@@ -379,6 +379,8 @@ export function useSendMessage(
           id: att.id,
           object_key: "",
           content_hash: "",
+          sha256: "",
+          key_scope: null,
           filename: att.name,
           content_type: att.mimeType,
           file_size: 0,

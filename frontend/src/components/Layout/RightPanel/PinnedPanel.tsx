@@ -61,7 +61,7 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = observer(
       body = (
         <ul className="flex flex-col">
           {pins.map((pin) => {
-            const parsed = parseContent(pin.content);
+            const parsed = parseContent(pin.content, { conversationId: pin.conversation_id });
             const author = pin.sender_username ?? pin.sender_id;
             return (
               <li

@@ -28,7 +28,7 @@ export interface MediaUriState {
 export function useMediaUri(
   attachment: Pick<
     MessageAttachment,
-    "object_key" | "content_hash" | "content_type"
+    "object_key" | "content_hash" | "content_type" | "sha256" | "key_scope"
   > | null,
 ): MediaUriState {
   const [state, setState] = useState<MediaUriState>({

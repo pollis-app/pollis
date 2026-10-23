@@ -36,7 +36,7 @@ export function filterVaultEntries(
     return [...entries];
   }
   return entries.filter((entry) => {
-    const parsed = parseContent(entry.content);
+    const parsed = parseContent(entry.content, "vault");
     const haystacks = [parsed.text, ...parsed.attachments.map((a) => a.filename)];
     return haystacks.some((h) => h.toLowerCase().includes(needle));
   });
@@ -48,7 +48,7 @@ export function vaultAttachments(entries: readonly VaultMessage[]): MessageAttac
   const out: MessageAttachment[] = [];
   const seen = new Set<string>();
   for (let i = entries.length - 1; i >= 0; i--) {
-    for (const attachment of parseContent(entries[i].content).attachments) {
+    for (const attachment of parseContent(entries[i].content, "vault").attachments) {
       if (!seen.has(attachment.id)) {
         seen.add(attachment.id);
         out.push(attachment);
@@ -66,7 +66,7 @@ export function vaultAttachments(entries: readonly VaultMessage[]): MessageAttac
  */
 export function editedVaultContent(original: string, draft: string): string | null {
   const text = draft.trim();
-  const attachments = parseContent(original).attachments;
+  const attachments = parseContent(original, "vault").attachments;
   if (attachments.length === 0) {
     return text || null;
   }
@@ -77,6 +77,8 @@ export function editedVaultContent(original: string, draft: string): string | nu
     ct: a.content_type,
     size: a.file_size,
     hash: a.content_hash,
+    kv: 0,
+    sha: a.sha256,
     bh: a.blurhash,
     w: a.width,
     h: a.height,
@@ -92,7 +94,7 @@ export function vaultViewerMessages(entries: readonly VaultMessage[]): {
 }[] {
   return entries.map((entry) => ({
     id: entry.id,
-    attachments: parseContent(entry.content).attachments,
+    attachments: parseContent(entry.content, "vault").attachments,
     created_at: new Date(entry.created_at).getTime(),
   }));
 }

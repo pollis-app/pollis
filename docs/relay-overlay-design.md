@@ -292,7 +292,7 @@ A relay peer **only ever forwards bytes that are already inside a TLS (or WebRTC
 ```
 
 - The relay terminates **only the outer relay-hop transport.** Inside it is an opaque TLS record stream destined for a first-party host. The relay forwards those bytes; it holds no key to them.
-- The relay **never sees plaintext** of any kind — not message content (MLS-encrypted end to end), not `user_id`-level application payloads (those are inside the TLS-to-Turso session), not voice (frame-level AES-GCM *and* DTLS-SRTP), not attachment bytes (convergent-AEAD ciphertext even before TLS, `whitepaper` §9).
+- The relay **never sees plaintext** of any kind — not message content (MLS-encrypted end to end), not `user_id`-level application payloads (those are inside the TLS-to-Turso session), not voice (frame-level AES-GCM *and* DTLS-SRTP), not attachment bytes (AES-256-GCM ciphertext under a per-conversation MLS-wrapped file key even before TLS, `whitepaper` §9).
 - The **most** a relay learns: *"a client is exchanging encrypted traffic with `<one of four known first-party hosts>`,"* plus — **only if it is hop 1** — that client's source IP. In multi-hop, no single relay gets both facts (§4.3).
 - A relay **cannot inject or alter** content: the inner TLS to the service provides integrity end-to-end through the relay. Tampering degrades to denial (drop/delay), which the client routes around.
 

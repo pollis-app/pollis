@@ -39,6 +39,8 @@ mod messages;
 mod model;
 #[path = "flows/outbox.rs"]
 mod outbox;
+#[path = "flows/file_keys.rs"]
+mod file_keys;
 #[path = "flows/pinning.rs"]
 mod pinning;
 #[path = "flows/pq_key_packages.rs"]

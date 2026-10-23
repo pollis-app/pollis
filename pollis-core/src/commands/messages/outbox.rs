@@ -280,7 +280,13 @@ struct AttWire<'a> {
     name: &'a str,
     ct: &'a str,
     size: usize,
+    /// The object's random file id (not a content hash, #1382).
     hash: &'a str,
+    /// Which key of the conversation's file key ring sealed it.
+    kv: i64,
+    /// SHA-256 of the plaintext, checked after decrypt. Only ever inside the
+    /// MLS-encrypted message.
+    sha: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     bh: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -357,6 +363,8 @@ fn final_content(
                 ct: &r.content_type,
                 size: r.size_bytes,
                 hash: &r.content_hash,
+                kv: r.key_version,
+                sha: &r.sha256,
                 bh: r.blurhash.as_deref().or(a.blurhash.as_deref()),
                 w: r.width.or(a.width),
                 h: r.height.or(a.height),
@@ -753,7 +761,8 @@ async fn mark_failed(state: &Arc<AppState>, id: &str, permanent: bool) {
 /// at a time, each blob read from the database just before its upload and
 /// moved into it — then swap the row's provisional content for the finished
 /// `_att` envelope and drop the bytes in one transaction, so a kill at any
-/// point leaves either the bytes (upload again; the convergent upload dedupes)
+/// point leaves either the bytes (upload again; the orphaned first object is
+/// collected by the DS sweep once nothing references it)
 /// or the finished content.
 async fn finish_uploads(state: &Arc<AppState>, mut queued: Queued) -> Result<Queued> {
     let metas = {
@@ -776,6 +785,7 @@ async fn finish_uploads(state: &Arc<AppState>, mut queued: Queued) -> Result<Que
                 data,
                 meta.filename.clone(),
                 meta.content_type.clone(),
+                &queued.conversation_id,
                 state,
             )
             .await?,
@@ -1173,13 +1183,15 @@ mod tests {
             content_type: "video/mp4".to_string(),
             size_bytes: 1,
             content_hash: "abc".to_string(),
+            key_version: 2,
+            sha256: "d1g".to_string(),
             blurhash: None,
             width: Some(640),
             height: None,
         }];
         assert_eq!(
             final_content("", &atts, &uploaded),
-            r#"{"_att":[{"key":"media/abc.enc","url":"https://r2/media/abc.enc","name":"clip.mp4","ct":"video/mp4","size":1,"hash":"abc","bh":"LKO2","w":640,"h":3}]}"#
+            r#"{"_att":[{"key":"media/abc.enc","url":"https://r2/media/abc.enc","name":"clip.mp4","ct":"video/mp4","size":1,"hash":"abc","kv":2,"sha":"d1g","bh":"LKO2","w":640,"h":3}]}"#
         );
     }
 

@@ -8,14 +8,19 @@
 // (frontend/src/hooks/queries/useMessages.ts) and the writer in
 // lib/attachments.ts.
 
-import type { MessageAttachment } from "../types";
+import type { AttachmentKeyScope, ContentOrigin, MessageAttachment } from "../types";
 
 // Wire shape of a single attachment inside the `_att` array.
 export interface AttachmentWire {
   // Absent on an entry the outbox has not uploaded yet (#1335).
   key?: string;
   url?: string;
+  // The object's random file id (#1382).
   hash?: string;
+  // Which key of the conversation's file key ring sealed it; 0 in the Vault.
+  kv?: number;
+  // Plaintext SHA-256, verified after decrypt.
+  sha?: string;
   name: string;
   ct: string;
   size: number;
@@ -24,9 +29,23 @@ export interface AttachmentWire {
   h?: number;
 }
 
+/** The key an attachment reference names, or null when it cannot be opened
+ *  from here: uploading, a pre-#1382 reference, or a preview-only origin. */
+function keyScopeFor(a: AttachmentWire, origin: ContentOrigin): AttachmentKeyScope | null {
+  if (origin === null || !a.key || !a.sha || typeof a.kv !== "number") {
+    return null;
+  }
+  if (origin === "vault") {
+    return a.kv === 0 ? { kind: "vault" } : null;
+  }
+  return a.kv >= 1
+    ? { kind: "conversation", conversation_id: origin.conversationId, key_version: a.kv }
+    : null;
+}
+
 /** Split a content string into its caption and attachments. Plain-text
- *  content passes through as-is. */
-export function parseContent(raw: string | undefined): {
+ *  content passes through as-is. `origin` names each attachment's key. */
+export function parseContent(raw: string | undefined, origin: ContentOrigin): {
   text: string;
   attachments: MessageAttachment[];
 } {
@@ -50,6 +69,8 @@ export function parseContent(raw: string | undefined): {
         id: a.key ?? `uploading-${i}`,
         object_key: a.key ?? "",
         content_hash: a.hash ?? "",
+        sha256: a.sha ?? "",
+        key_scope: keyScopeFor(a, origin),
         filename: a.name,
         content_type: a.ct,
         file_size: a.size,

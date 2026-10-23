@@ -52,12 +52,29 @@ export interface DMConversation {
 // `frontend/src/types/index.ts` and the Rust struct in `pollis-core`.
 // `object_key` + `content_hash` are what the media transport (see
 // `lib/media`) needs to fetch + decrypt the bytes.
+/**
+ * Which key an attachment is sealed under (#1382). Mirrors
+ * `pollis_core::commands::r2::AttachmentKeyScope` and desktop's type.
+ */
+export type AttachmentKeyScope =
+  | { kind: "conversation"; conversation_id: string; key_version: number }
+  | { kind: "vault" };
+
+/** Where a content string came from, which decides its attachments' key
+ *  scope; `null` for a surface that only previews and never fetches. */
+export type ContentOrigin = { conversationId: string } | "vault" | null;
+
 export interface MessageAttachment {
   id: string;
   // R2 object key — empty string while an upload is still in progress.
   object_key: string;
-  // SHA-256(plaintext) hex — used to derive the decryption key via HKDF.
+  // The object's random file id (#1382). NOT derived from the content: the
+  // key comes from the conversation's MLS-wrapped key ring (or the Vault key).
   content_hash: string;
+  // Plaintext SHA-256, verified after decrypt.
+  sha256: string;
+  // null while uploading, for a pre-#1382 reference, or from a preview-only origin.
+  key_scope: AttachmentKeyScope | null;
   filename: string;
   content_type: string;
   file_size: number;

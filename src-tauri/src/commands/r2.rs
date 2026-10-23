@@ -27,9 +27,9 @@ pub async fn upload_media(path: String, filename: String, content_type: String, 
 // `target_path` is where the attachment lands on the user's disk, so it has to
 // be a location they picked in the save panel — see `crate::pathscope`.
 #[tauri::command]
-pub async fn save_media_to_path(r2_key: String, content_hash: String, target_path: String, scope: State<'_, PathScope>, state: State<'_, Arc<AppState>>) -> Result<String> {
+pub async fn save_media_to_path(r2_key: String, content_hash: String, sha256: String, key_scope: AttachmentKeyScope, target_path: String, scope: State<'_, PathScope>, state: State<'_, Arc<AppState>>) -> Result<String> {
     scope.require(std::path::Path::new(&target_path), "save_media_to_path")?;
-    pollis_core::commands::r2::save_media_to_path(r2_key, content_hash, target_path, &state).await
+    pollis_core::commands::r2::save_media_to_path(r2_key, content_hash, sha256, key_scope, target_path, &state).await
 }
 
 #[tauri::command]
@@ -53,11 +53,11 @@ pub async fn download_file(key: String, state: State<'_, Arc<AppState>>) -> Resu
 }
 
 #[tauri::command]
-pub async fn download_media(r2_key: String, content_hash: String, state: State<'_, Arc<AppState>>) -> Result<Vec<u8>> {
-    pollis_core::commands::r2::download_media(r2_key, content_hash, &state).await
+pub async fn download_media(r2_key: String, content_hash: String, sha256: String, key_scope: AttachmentKeyScope, state: State<'_, Arc<AppState>>) -> Result<Vec<u8>> {
+    pollis_core::commands::r2::download_media(r2_key, content_hash, sha256, key_scope, &state).await
 }
 
 #[tauri::command]
-pub async fn get_media_url(r2_key: String, content_hash: String, content_type: String, state: State<'_, Arc<AppState>>) -> Result<String> {
-    pollis_core::commands::r2::get_media_url(r2_key, content_hash, content_type, &state).await
+pub async fn get_media_url(r2_key: String, content_hash: String, content_type: String, sha256: String, key_scope: AttachmentKeyScope, state: State<'_, Arc<AppState>>) -> Result<String> {
+    pollis_core::commands::r2::get_media_url(r2_key, content_hash, content_type, sha256, key_scope, &state).await
 }

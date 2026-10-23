@@ -410,10 +410,10 @@
         <div class="faq-question">Where do my files go when I attach something?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>Files are encrypted on your device before upload. The storage provider sees only encrypted bytes, and only people in the group can decrypt them.</p>
+            <p>Files are encrypted on your device before they're uploaded, under a key that belongs to the conversation. Only the conversation's members can unlock that key. The storage provider and Pollis hold only encrypted bytes and can't decrypt them. People who join later can open files posted before they joined; someone who is removed can't open files posted after their removal. Files in your Vault are encrypted under your own account key, so only your devices can open them.</p>
           </div>
           <div class="dev">
-            <p>Attachments are encrypted client-side and uploaded to Cloudflare R2. The decryption key travels inside the MLS-encrypted message, so R2 only ever holds ciphertext. Recipients fetch by key and decrypt locally.</p>
+            <p>Each conversation (group or DM) has a ring of random 32-byte file keys. The server stores the ring only wrapped (AES-256-GCM) under a key exported from the conversation's current MLS epoch (<code>export_secret("pollis-file-kek")</code>), re-wrapped by members on every epoch change, so any current member, including a late joiner or a newly added device, can unwrap it and the server cannot. Each upload gets a random 32-byte file id; the file's AES-256-GCM key and nonce are HKDF-SHA256 of the newest ring key salted with that id, and the file is sealed in 4 MiB chunks and stored in Cloudflare R2 as <code>media/&lt;file id&gt;.enc</code>. The file id, ring key version and plaintext SHA-256 travel only inside the MLS-encrypted message; recipients fetch, decrypt locally and check the digest. Removing a member appends a new key to the ring, so later uploads are out of their reach (older files are not re-encrypted). Vault files use a key derived from your account identity key. Object names are random, so identical files are not deduplicated across users and R2 can't tell that two uploads are the same file. Source: <code>pollis-core/src/commands/file_keys.rs</code>, <code>r2.rs</code>.</p>
           </div>
         </div>
       </div>

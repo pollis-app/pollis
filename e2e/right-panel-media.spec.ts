@@ -36,9 +36,9 @@ const MESSAGES = [
     ciphertext: "",
     content: JSON.stringify({
       _att: [
-        { key: IMAGE_KEY, hash: "h_photo", name: "photo.png", ct: "image/png", size: 1024, bh: BLURHASH, w: 400, h: 300 },
-        { key: VIDEO_KEY, hash: "h_clip", name: "clip.mp4", ct: "video/mp4", size: 4096, bh: BLURHASH, w: 640, h: 360 },
-        { key: AUDIO_KEY, hash: "h_voice", name: "voice.ogg", ct: "audio/ogg", size: 2048 },
+        { key: IMAGE_KEY, hash: "h_photo", kv: 1, sha: "s_photo", name: "photo.png", ct: "image/png", size: 1024, bh: BLURHASH, w: 400, h: 300 },
+        { key: VIDEO_KEY, hash: "h_clip", kv: 1, sha: "s_clip", name: "clip.mp4", ct: "video/mp4", size: 4096, bh: BLURHASH, w: 640, h: 360 },
+        { key: AUDIO_KEY, hash: "h_voice", kv: 1, sha: "s_voice", name: "voice.ogg", ct: "audio/ogg", size: 2048 },
       ],
       _txt: "holiday",
     }),

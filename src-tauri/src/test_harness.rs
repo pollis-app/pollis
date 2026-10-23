@@ -140,6 +140,8 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::pinned_messages::pin_message,
             crate::commands::pinned_messages::unpin_message,
             crate::commands::pinned_messages::list_pinned_messages,
+            // Attachment key ring probe (#1382)
+            crate::commands::file_keys::test_file_key_version,
             // Vault (#107)
             crate::commands::vault::get_vault_messages,
             crate::commands::vault::send_vault_message,

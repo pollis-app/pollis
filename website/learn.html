@@ -1523,47 +1523,56 @@ Time runs left to right: a one-way key chain, the caveat about an unlocked scree
         <div class="ln-prose">
           <p>Photos, voice clips, and PDFs follow the same rule as text: the operator never sees
             the contents. They take a slightly different path, though.</p>
-          <p>Before anything leaves your device, it takes a <strong>fingerprint</strong> of the file
-            (a SHA-256 <a href="#vocabulary">hash</a> of the exact bytes), <strong>derives a key from that fingerprint</strong>,
-            encrypts the file with AES-256-GCM, and uploads only the encrypted result to Cloudflare R2,
-            an S3-style object store. Your device never holds storage credentials: it asks the
+          <p>Every conversation has its own small <strong>ring of file keys</strong>: random keys that
+            only the conversation's members can unlock. The server keeps the ring, but only locked
+            under a secret that comes from the conversation's current MLS state, and the members
+            re-lock it every time that state moves on. Anyone who is a member right now can unlock it;
+            the server never can.</p>
+          <p>Before a file leaves your device, it gets a <strong>random id</strong>. Your device
+            derives a key for that one file from the newest ring key and the id, encrypts the file with
+            AES-256-GCM, and uploads only the encrypted result to Cloudflare R2, an S3-style object
+            store, under the random id. Your device never holds storage credentials: it asks the
             Delivery Service for a short-lived, pre-signed upload link.</p>
-          <p>The fingerprint goes <em>inside</em> the encrypted message, so MLS protects it along with
-            the text. Only people in the conversation learn which stored blob a message points at, and
-            only they can re-derive the key to open it.</p>
-          <p><strong>Why derive the key from the file?</strong> So identical files cost storage only
-            once. If two people send the same 8 MB slide deck, both uploads produce the byte-for-byte
-            identical encrypted blob, and the second upload is skipped. This is called convergent
-            encryption.</p>
+          <p>The id, which ring key was used, and a SHA-256 <a href="#vocabulary">hash</a> of the
+            original file go <em>inside</em> the encrypted message, so MLS protects them along with the
+            text. Only people in the conversation learn which stored blob a message points at, and only
+            they can unlock the key to open it. After decrypting, the app checks the hash, so nobody
+            can quietly swap in different bytes.</p>
+          <p>Files in your <strong>Vault</strong> use a key derived from your own account key instead,
+            so every one of your devices can open them and nobody else can.</p>
         </div>
 
         <dl class="ln-sees">
-          <div class="ln-sees-row"><dt>The storage (R2)</dt><dd>An encrypted blob, its size, and an
-            object name containing the file's fingerprint (not its filename). It never receives the
+          <div class="ln-sees-row"><dt>The storage (R2)</dt><dd>An encrypted blob, its size, and a
+            random object name (not the filename, not a fingerprint of the file). It never receives a
             key.</dd></div>
-          <div class="ln-sees-row"><dt>The Delivery Service</dt><dd>The fingerprint and object name,
-            so it can record the file for dedup and mint the pre-signed link. Never the key, the
+          <div class="ln-sees-row"><dt>The Delivery Service</dt><dd>The random object name, which
+            message references it (so it can clean the blob up once nothing does), and the
+            conversation's file key ring locked under a key it doesn't have. Never a usable key, the
             filename, or the plaintext.</dd></div>
-          <div class="ln-sees-row"><dt>People in the chat</dt><dd>The fingerprint and filename, inside
-            the encrypted message, so they can fetch the blob, re-derive the key, and open the
-            file.</dd></div>
+          <div class="ln-sees-row"><dt>People in the chat</dt><dd>The file's id, filename and hash,
+            inside the encrypted message, plus the unlocked key ring, so they can fetch the blob and
+            open the file.</dd></div>
           <div class="ln-sees-row"><dt>Everyone else</dt><dd>Nothing useful. The link is short-lived
             and the blob is meaningless without the key.</dd></div>
         </dl>
 
         <div class="ln-limit">
           <div class="ln-limit-label">The trade this makes</div>
-          <p>Convergent encryption is deterministic: identical files produce identical blobs. So
-            someone who <em>already has a copy of a specific file</em> can compute its fingerprint and
-            check whether that exact file was uploaded. The contents of files an observer does not
-            have stay secret; the presence of a file they can already guess does not. For ordinary
-            attachments that is a reasonable trade, but it matters if even the existence of a known
-            file would be sensitive. Separately, the on-device cache re-encrypts every file at rest
-            under a key tied to your local database.</p>
+          <p>The key ring belongs to the conversation, not to the moment a file was sent. Someone who
+            joins later can open files posted before they joined, as long as they can see a message that
+            points at them. When someone is removed, a new key is added and used for everything uploaded
+            afterwards, so later files are out of their reach; files from before the removal are not
+            re-encrypted, and they could have saved those anyway. Storage sees each file's size. Every
+            upload is stored separately, even if two people send the same file. Separately, the on-device
+            cache re-encrypts every file at rest under a key tied to your local database.</p>
         </div>
 
         <p class="ln-deeper">
-          The rigorous version: the upload, convergent key derivation, and cross-user dedup in <a
+          The rigorous version: the per-conversation key ring in <a
+            href="https://github.com/pollis-app/pollis/blob/main/pollis-core/src/commands/file_keys.rs"
+            target="_blank" rel="noopener noreferrer">file_keys.rs</a>, the upload and per-file key
+          derivation in <a
             href="https://github.com/pollis-app/pollis/blob/main/pollis-core/src/commands/r2.rs"
             target="_blank" rel="noopener noreferrer">r2.rs</a>, and the loopback media server that
           decrypts on demand in <a

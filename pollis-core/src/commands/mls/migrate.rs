@@ -335,6 +335,7 @@ pub(super) async fn migrate_to_current_suite_if_due(
     // under (successor generation, epoch) so pins cross the suite boundary
     // (#99). Content is untouched, exactly like message history.
     crate::commands::pinned_messages::maybe_rewrap_pin_key(state, conversation_id).await;
+    crate::commands::file_keys::maybe_rewrap_file_keys(state, conversation_id).await;
     drop(mls_guard);
 
     // Report our position on the NEW lineage so the retention floor follows us

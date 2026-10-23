@@ -134,7 +134,10 @@ fn the_endpoint_table_covers_the_whole_write_surface() {
         // 113 since #1361 added the reverse QR sign-in, shown by the NEW
         // device: `/v1/link/offer` and `/v1/link/poll-offer` (pre-credential)
         // and `/v1/link/accept-offer` (device-signed, from the scanner).
-        113,
+        //
+        // 115 since #1382 keyed attachments to an MLS-wrapped per-conversation
+        // ring: `/v1/file-keys/keystate` and `/v1/read/file-keystate`.
+        115,
         "the DS write surface changed — update this count deliberately, and make \
          sure the new endpoint is routed in BOTH pollis-delivery and the flows harness"
     );

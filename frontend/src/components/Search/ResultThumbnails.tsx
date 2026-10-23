@@ -26,7 +26,7 @@ export const ResultThumbnails: React.FC<{ result: SearchResult }> = ({ result })
     if (!result.has_attachment) {
       return [];
     }
-    return (parseContent(result.content).attachments ?? [])
+    return (parseContent(result.content, { conversationId: result.conversation_id }).attachments ?? [])
       .filter((a) => a.content_type.startsWith("image/"))
       .slice(0, MAX_RESULT_THUMBNAILS);
   }, [result.has_attachment, result.content]);

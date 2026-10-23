@@ -1220,10 +1220,11 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
         }
 
         // ----- media -----
-        // The attachment send path: reads the file from the sandbox path (no
-        // bytes over the JSON bridge), convergent-encrypts, uploads via a
-        // DS-minted presign, and returns the metadata the JS side folds into
-        // the message's `_att` envelope — identical to desktop.
+        // The Vault's upload path (chat attachments go through the outbox in
+        // `send_message`): reads the file from the sandbox path (no bytes over
+        // the JSON bridge), seals it under the Vault file key (#1382), uploads
+        // via a DS-minted presign, and returns the metadata the JS side folds
+        // into the entry's `_att` envelope — identical to desktop.
         "upload_media" => {
             let path: String = arg(&args, "path")?;
             let filename: String = arg(&args, "filename")?;
@@ -1244,6 +1245,8 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
         "get_media_path" => {
             let r2_key: String = arg(&args, "r2Key")?;
             let content_hash: String = arg(&args, "contentHash")?;
+            let sha256: String = arg(&args, "sha256")?;
+            let key_scope: crate::commands::r2::AttachmentKeyScope = arg(&args, "keyScope")?;
             let dest_dir: String = arg(&args, "destDir")?;
             // expo's cacheDirectory comes through as a `file://` URI; Rust's
             // PathBuf needs a bare path (same strip as init's data_dir).
@@ -1252,8 +1255,14 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             // with no detail on screen — so the reason goes to the on-device
             // diagnostics log, where Self → Diagnostics can show it.
             let bytes =
-                match crate::commands::r2::download_media(r2_key, content_hash.clone(), &state()?)
-                    .await
+                match crate::commands::r2::download_media(
+                    r2_key,
+                    content_hash.clone(),
+                    sha256,
+                    key_scope,
+                    &state()?,
+                )
+                .await
                 {
                     Ok(bytes) => bytes,
                     Err(e) => {

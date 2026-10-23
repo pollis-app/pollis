@@ -98,6 +98,7 @@ pub mod devices;
 pub mod directory;
 pub mod email_change;
 pub mod emoji;
+pub mod file_keys;
 pub mod groups;
 pub mod links;
 pub mod messages;
@@ -286,6 +287,12 @@ endpoints! {
     Client   pins::UnpinMessageBody             => "/v1/pins/unpin",                     StatusOk;
     Client   pins::PinKeystateBody              => "/v1/read/pin-keystate",              pins::PinKeystateResponse;
     Client   pins::ListPinsBody                 => "/v1/read/pins",                      pins::ListPinsResponse;
+
+    // ── Attachment key ring (#1382) ──────────────────────────────────────────
+    // The ring is wrapped under the MLS exporter KEK like Kpin; the DS sees
+    // only its length, which is what lets it refuse a forked ring.
+    Client   file_keys::UpsertFileKeystateBody  => "/v1/file-keys/keystate",             file_keys::FileKeystateUpserted;
+    Client   file_keys::FileKeystateBody        => "/v1/read/file-keystate",             file_keys::FileKeystateResponse;
 
     // ── Vault (#107) ─────────────────────────────────────────────────────────
     // Opaque per-entry blobs under a key derived from the account identity
@@ -688,6 +695,24 @@ mod tests {
                 }),
             },
             r#"{"keystate":{"wrapped_kpin":"d3JhcA","nonce":"bm9uY2U","generation":0,"epoch":7}}"#,
+        );
+        // Attachment key ring (#1382): the op is a lowercase tag, and the read
+        // shape carries the ring length next to the wrap.
+        round_trip(
+            &file_keys::FileKeystateOp::Rotate,
+            r#""rotate""#,
+        );
+        round_trip(
+            &file_keys::FileKeystateResponse {
+                keystate: Some(file_keys::StoredFileKeystate {
+                    wrapped_keyring: "d3JhcA".into(),
+                    nonce: "bm9uY2U".into(),
+                    key_version: 2,
+                    generation: 0,
+                    epoch: 7,
+                }),
+            },
+            r#"{"keystate":{"wrapped_keyring":"d3JhcA","nonce":"bm9uY2U","key_version":2,"generation":0,"epoch":7}}"#,
         );
         round_trip(
             &pins::ListPinsResponse {

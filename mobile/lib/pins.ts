@@ -30,7 +30,7 @@ export type PinPreview = {
 };
 
 export function pinPreview(content: string): PinPreview {
-  const parsed = parseContent(content);
+  const parsed = parseContent(content, null);
   return {
     text: parsed.text,
     filenames: parsed.attachments.map((a) => a.filename),

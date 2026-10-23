@@ -104,10 +104,10 @@ pub(super) async fn retract_for_everyone(
 ///
 /// Attachment cleanup: if the message had one or more attachments, each
 /// content_hash's reference is RELEASED server-side through the DS (#690). The
-/// DS reference-counts the shared, convergent `attachment_object` row and
-/// collects it — and permits the R2 object's deletion — only when NO message
-/// anywhere still references the hash, so a delete in one conversation can no
-/// longer strand a copy in another. The local ref-count pass survives as a cheap
+/// DS reference-counts the `attachment_object` row and collects it — and
+/// permits the R2 object's deletion — only when NO message anywhere still
+/// references the object, so deleting one message cannot strand another that
+/// names the same object. The local ref-count pass survives as a cheap
 /// first pass (skip the R2 round trip when this device still references the hash),
 /// but the client no longer assumes its local view is complete: the server-side
 /// count is the authority. R2 deletion is best-effort and must not fail the
@@ -689,8 +689,8 @@ fn filter_orphaned_locally(
 /// message regardless of sender. Used by admin-delete: the admin may
 /// themselves have re-sent the same attachment, or someone else's message
 /// in the admin's local cache may still reference the same hash. Cross-user
-/// references on remote devices remain invisible (convergent encryption
-/// re-creates the dedup row on re-upload, so a future re-share is safe).
+/// references on remote devices remain invisible here; the DS's derived
+/// reference count is what actually gates collection.
 fn filter_orphaned_locally_all(
     conn: &rusqlite::Connection,
     candidates: &[AttachmentRef],
@@ -718,10 +718,8 @@ fn filter_orphaned_locally_all(
 
 /// Register a server-side reference for each attachment carried by `content`,
 /// keyed by the sending message's id (#690). Called on the send path so the DS
-/// can reference-count the shared, convergent `attachment_object` row: it now
-/// refuses to collect that row — or its R2 object — while ANY message still
-/// references the hash, closing the cross-conversation stranding this ticket
-/// fixes.
+/// can reference-count the `attachment_object` row: it refuses to collect that
+/// row — or its R2 object — while ANY message still references the object.
 ///
 /// Best-effort: a failure here NEVER fails the send. The envelope is already the
 /// durable delivery; a missing reference only risks the pre-#690 status quo for

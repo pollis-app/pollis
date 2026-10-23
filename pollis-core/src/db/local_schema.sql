@@ -411,6 +411,25 @@ CREATE TABLE IF NOT EXISTS pin_key_cache (
     updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- The attachment key ring (#1382) for each MLS conversation this device has
+-- held it for: `keyring` is the unwrapped ring (48-byte entries: a 32-byte
+-- key and the big-endian (generation, epoch) it was added at). Load-bearing
+-- for the same reason as `pin_key_cache` — the previous epoch's exporter is
+-- gone after a merge, so re-wrapping needs the plaintext ring. The wrapped_*
+-- columns say which epoch this device last wrapped it at.
+-- `rotation_owed_*` is set by the device that committed a removal and cleared
+-- once the ring holds a key added at or after that point; it survives a crash
+-- between the commit and the rotation.
+CREATE TABLE IF NOT EXISTS file_key_cache (
+    conversation_id          TEXT PRIMARY KEY,
+    keyring                  BLOB NOT NULL,
+    wrapped_generation       INTEGER NOT NULL DEFAULT 0,
+    wrapped_epoch            INTEGER NOT NULL DEFAULT 0,
+    rotation_owed_generation INTEGER,
+    rotation_owed_epoch      INTEGER,
+    updated_at               TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Decrypted vault entries (#107) — the local cache of the remote
 -- `vault_message` rows, which are ciphertext under a key derived from the
 -- account identity key. Unwrapped here for the same reason `message.content`
