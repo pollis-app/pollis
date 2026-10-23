@@ -27,7 +27,7 @@ strategy**.
 | Field | Backend | Role | This slice |
 |---|---|---|---|
 | `state.remote_db` | Turso / libSQL (`RemoteDb`, `remote_db.conn()`, `libsql::params!`) | **Shared server DB.** Public metadata + encrypted envelopes. | **Writes move to the DS.** Reads stay direct (read-only). |
-| `state.local_db` | per-user SQLite (`rusqlite`, `local_db.lock()` → `db.conn()`, `rusqlite::params!`) | **Device-local secrets.** Plaintext cache, MLS group state, keys. | **Unchanged** — stays client-side. |
+| `state.local_db` | per-user SQLite (`rusqlite`, `local_db.lock()` → `db.conn()`, `rusqlite::params!`) | **Device-local secrets.** Decrypted-message cache (SQLCipher, encrypted at rest), MLS group state, keys. | **Unchanged** — stays client-side. |
 
 **How the two were told apart in the inventory below:** a write is *remote* iff it runs on
 a connection obtained from `state.remote_db.conn().await` (async, `libsql::params!`). A write

@@ -399,7 +399,7 @@ per-conversation SHARED state, so unlike bookmarks they are DS-backed: the serve
 stores a content snapshot per pin, sealed under the conversation's 32-byte pin master
 key (`Kpin`), which itself is stored server-side only WRAPPED under a KEK derived from
 the current MLS epoch's exporter secret (`export_secret("pollis-pin-kek")`). The
-plaintext `Kpin` is cached in the local encrypted DB (`pin_key_cache`) because
+unwrapped `Kpin` is cached in the local encrypted DB (`pin_key_cache`) because
 `max_past_epochs = 0` destroys the previous exporter at every merge — a device that
 holds the key re-wraps it under the new exporter after each epoch advance
 (`maybe_rewrap_pin_key`, hooked at every `voice_e2ee::on_mls_epoch_changed` site plus

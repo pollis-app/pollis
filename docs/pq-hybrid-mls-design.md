@@ -511,8 +511,8 @@ machine-checked M4 spec must be extended to the same keyed invariant before this
 ships (§8).
 
 Old messages already
-decrypted and persisted locally are unaffected (they live in the local plaintext
-`message` table, whitepaper §7.1); only *future* messages ride the hybrid group.
+decrypted and persisted locally are unaffected (they live, already decrypted, in the
+local `message` table inside the SQLCipher-encrypted database, whitepaper §7.1); only *future* messages ride the hybrid group.
 
 ### 3.3 The mixed-fleet interop rule (so nothing drops)
 
