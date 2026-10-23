@@ -23,6 +23,9 @@
  *      dwell timer elapses. B emits a READ receipt.
  *   5. A's row advances to `data-receipt-state="read-all"`.
  *
+ * A switches to the refined skin first: the terminal skin (the default) draws
+ * no receipt ticks at all, so there would be nothing on screen to assert on.
+ *
  * The step-3 assertion is deliberately ordered BEFORE step 4: if the two
  * signals were conflated, the row would jump straight to a read state and the
  * delivered wait would time out.
@@ -85,6 +88,20 @@ async function signUp(browser, email, tag) {
   await h.typeCode(browser, PIN);
   await h.waitTestId(browser, "app-ready", 60000);
   console.log(`[receipts] ${tag}: reached app-ready`);
+}
+
+/**
+ * Switch skin through the real Preferences UI, as `invite-links.js` does.
+ * Receipts render only in the refined skin.
+ */
+async function setSkin(browser, skin, tag) {
+  console.log(`[receipts] ${tag}: switching to ${skin} skin`);
+  await browser.execute(() => { window.history.pushState({}, "", "/preferences"); window.dispatchEvent(new PopStateEvent("popstate")); });
+  await h.waitTestId(browser, `pref-skin-${skin}`, 30000);
+  await h.clickTestId(browser, `pref-skin-${skin}`);
+  await h.sleep(1000);
+  await browser.execute(() => { window.history.pushState({}, "", "/"); window.dispatchEvent(new PopStateEvent("popstate")); });
+  await h.sleep(500);
 }
 
 async function startDmTo(browser, targetEmail) {
@@ -253,6 +270,7 @@ async function main() {
 
     await signUp(A.browser, emailA, "A");
     await signUp(B.browser, emailB, "B");
+    await setSkin(A.browser, "refined", "A");
 
     console.log(`[receipts] A: starting DM to ${emailB}`);
     await startDmTo(A.browser, emailB);
