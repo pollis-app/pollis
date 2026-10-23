@@ -171,7 +171,37 @@ pub async fn create_dm_channel(
         }
     }
 
+    // Wake the creator's OTHER devices too (#1410). They are not in this DM's
+    // room — they do not know it exists — so the inbox is the only room that
+    // reaches them, and without this a device left open never listed the DM,
+    // never joined its room, and so saw none of its messages until a restart.
+    // `dm_created` is what every shipped client already answers by refetching
+    // its DM lists and pulling its Welcomes; the DS stamps the sender, which is
+    // how a receiver tells its own DM from a request and stays quiet. Sent
+    // after the reconcile above so the Welcomes it queued are there to pull.
+    notify_own_devices_of_dm(state, &creator_id, &id, "create_dm_channel").await;
+
     Ok(dm)
+}
+
+/// Wake every device of `user_id` (the actor's own inbox) about a change to the
+/// DM `dm_channel_id` they made on one of them. Best-effort, like every
+/// wake-up: a device that misses it catches up on its next launch.
+async fn notify_own_devices_of_dm(
+    state: &Arc<AppState>,
+    user_id: &str,
+    dm_channel_id: &str,
+    what: &str,
+) {
+    if let Err(e) = crate::commands::livekit::publish_to_user_inbox(
+        state,
+        user_id,
+        crate::commands::livekit_signalling::dm_created_inbox_payload(dm_channel_id, None),
+    )
+    .await
+    {
+        crate::diag!("[inbox] {what}: notify own devices of {dm_channel_id} failed: {e}");
+    }
 }
 
 /// The caller's ACCEPTED DMs.
@@ -245,11 +275,17 @@ pub async fn accept_dm_request(
     // through the Delivery Service. Server-side authz binds the accept to the
     // authenticated recipient's own membership row.
     let body = pollis_api::profile::AcceptDmBody {
-        dm_channel_id,
-        user_id,
+        dm_channel_id: dm_channel_id.clone(),
+        user_id: user_id.clone(),
         accepted_at: now,
     };
     crate::commands::mls::ds_post_ok(state, &body).await?;
+
+    // #1410: the accepter's other devices still list this DM as a request — the
+    // creator's `dm_created` told them about it, and nothing told them it was
+    // accepted. Until they refetch, the DM is not in their conversation list,
+    // they are not in its room, and every message in it stays invisible there.
+    notify_own_devices_of_dm(state, &user_id, &dm_channel_id, "accept_dm_request").await;
 
     Ok(())
 }

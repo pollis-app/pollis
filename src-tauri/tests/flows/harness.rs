@@ -607,19 +607,42 @@ pub(crate) async fn await_wake_up(
     room: &str,
     pred: impl Fn(&serde_json::Value) -> bool,
 ) -> Option<SentWakeUp> {
+    await_nth_wake_up(room, pred, 1).await
+}
+
+/// Wait (bounded) for the `n`th wake-up (1-based) to `room` matching `pred`.
+/// For a scenario where the same room is woken with the same payload twice by
+/// different actions — the payload names no sender, so order is what tells
+/// them apart.
+pub(crate) async fn await_nth_wake_up(
+    room: &str,
+    pred: impl Fn(&serde_json::Value) -> bool,
+    n: usize,
+) -> Option<SentWakeUp> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         let hit = SENT_WAKE_UPS
             .lock()
             .expect("wake-up log")
             .iter()
-            .find(|w| w.room == room && pred(&w.payload))
+            .filter(|w| w.room == room && pred(&w.payload))
+            .nth(n - 1)
             .cloned();
         if hit.is_some() || std::time::Instant::now() >= deadline {
             return hit;
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
+}
+
+/// How many wake-ups to `room` matching `pred` the DS has seen so far.
+pub(crate) fn wake_up_count(room: &str, pred: impl Fn(&serde_json::Value) -> bool) -> usize {
+    SENT_WAKE_UPS
+        .lock()
+        .expect("wake-up log")
+        .iter()
+        .filter(|w| w.room == room && pred(&w.payload))
+        .count()
 }
 
 pub(crate) async fn wipe() {
