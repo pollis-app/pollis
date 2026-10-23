@@ -4,7 +4,7 @@ import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { Screen, Body, Button } from "../../components/ui";
 import { useIsRegular } from "../../hooks/useLayoutClass";
-import { PinCells, PinKeypad } from "../../components/auth/PinPad";
+import { PinBusy, PinCells, PinKeypad } from "../../components/auth/PinPad";
 import { Heading } from "../../components/auth/Heading";
 import { AuthError } from "../../components/auth/AuthError";
 import { semantic } from "../../theme/tokens";
@@ -14,6 +14,7 @@ import {
   useUnlockState,
 } from "../../hooks/queries/useAuth";
 import { useFinalizeEnrollment } from "../../hooks/queries/useEnrollment";
+import { useSubmitLock } from "../../hooks/useSubmitLock";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 
@@ -32,6 +33,10 @@ function AuthPIN() {
   const unlockMutation = useUnlock();
   const unlockState = useUnlockState();
   const finalize = useFinalizeEnrollment();
+  // Held from the fourth digit until the screen navigates away (or the call
+  // fails): unlock and set-PIN derive a key with Argon2id and open the
+  // encrypted database, which takes a noticeable moment on a phone.
+  const submit = useSubmitLock();
 
   useEffect(() => {
     unlockState.mutate(undefined, {
@@ -76,6 +81,7 @@ function AuthPIN() {
     setError(null);
     if (stage === "unlock") {
       if (!currentUser) {
+        submit.end();
         setError(t("mobile:auth.pin.noActiveUser"));
         setStage("checking");
         return;
@@ -90,6 +96,7 @@ function AuthPIN() {
           onError: (e) => {
             setError((e as Error).message || t("mobile:auth.pin.invalidPin"));
             setPin("");
+            submit.end();
           },
         },
       );
@@ -103,6 +110,7 @@ function AuthPIN() {
     }
     if (stage === "create-confirm") {
       if (entered !== firstPin) {
+        submit.end();
         setError(t("pinCreate.mismatch"));
         setFirstPin("");
         setPin("");
@@ -142,6 +150,7 @@ function AuthPIN() {
             setFirstPin("");
             setPin("");
             setStage("create-first");
+            submit.end();
           },
         },
       );
@@ -149,19 +158,31 @@ function AuthPIN() {
   };
 
   const push = (n: string) => {
-    if (pin.length >= 4 || stage === "checking") {
+    if (pin.length >= 4 || stage === "checking" || submit.busy) {
       return;
     }
     const next = pin + n;
     setPin(next);
     if (next.length === 4) {
+      // Unlock and confirm start slow work: go busy on this very tap, so the
+      // spinner and the disabled pad render before the call starts (the
+      // bridge runs it off the JS thread, so that frame is never blocked).
+      // The first entry of a new PIN only advances to the confirm step.
+      if (stage !== "create-first") {
+        if (!submit.begin()) {
+          return;
+        }
+        setError(null);
+      }
       setTimeout(() => onComplete(next), 120);
     }
   };
 
   const regular = useIsRegular();
+  const working = submit.busy;
   const busy =
     stage === "checking" ||
+    working ||
     setPinMutation.isPending ||
     unlockMutation.isPending;
 
@@ -178,7 +199,17 @@ function AuthPIN() {
 
       <View style={{ gap: 16 }}>
         <PinCells length={pin.length} />
-        {error ? <AuthError center message={error} /> : null}
+        {working ? (
+          <PinBusy
+            label={
+              stage === "unlock"
+                ? t("pinEntry.unlocking")
+                : t("pinCreate.saving")
+            }
+          />
+        ) : error ? (
+          <AuthError center message={error} />
+        ) : null}
       </View>
 
       {/* Always offer a way out of this screen — without it, an error
@@ -188,6 +219,7 @@ function AuthPIN() {
         <Button
           testID="btn-pin-signout"
           variant="subtle"
+          disabled={working}
           onPress={() => router.replace("/(auth)/email")}
         >
           {t("enroll.signInAgain")}
