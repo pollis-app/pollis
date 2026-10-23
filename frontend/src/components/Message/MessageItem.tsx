@@ -62,7 +62,8 @@ interface MessageItemProps {
   onScrollToReply?: (messageId: string) => void;
   /** Delivery / read receipts for THIS message (#857). Optional — when the
    * parent doesn't pass it no indicator renders. Wired from `MessageList`;
-   * receipts exist for DMs only, so `isDm` gates the whole affordance.
+   * receipts exist for DMs only, so `isDm` gates the whole affordance. Only
+   * the refined skin draws it; the terminal skin shows no receipts.
    * #874: this used to be the list's whole `Map`, whose identity changes on
    * any peer's receipt — which re-rendered every row in the log to update one. */
   receipt?: MessageReceipts;
@@ -438,11 +439,9 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           {message.status === "failed" && isOwn && (
             <UnsentMessageActions message={message} />
           )}
-          <ReceiptIndicator
-            receipts={receipt}
-            peerCount={peerCount}
-            visible={isOwn && isDm}
-          />
+          {/* No delivery / read ticks in the terminal skin — a product call, not
+              a privacy one: receipts are still queried, and the refined skin
+              still shows them. */}
         </span>
 
         {/* Action buttons — only visible on hover */}
