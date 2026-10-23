@@ -226,6 +226,16 @@ message" on it, pin its own message and unpin the peer's
 the device's pin and unpin in its own list. The one-device half (pin, list,
 jump, unpin) is `flows/pins.yaml`.
 
+**Store-listing screenshots:** `mobile/scripts/maestro-store-shots.sh <device> [out-dir]`
+— `pollis-tui`'s `store_shots_peer` example plays the second person (dev DS
+only). The device shoots sign-in, signs up, makes "Design Team" with #General,
+invites the peer and opens a DM (`two-client/store-shots/1-setup.yaml`), answers
+in both with a quoted reply and a reaction (`2-converse.yaml`), then takes one
+clean shot per listing screen (`3-shoot.yaml`, `docs/store-listing.md` §7). The
+script puts the status bar in Android demo mode (9:41, full battery, no
+notification icons). Play wants at most 2:1, so pad the 1080×2400 shots to
+1200×2400 before uploading.
+
 **QR sign-in, phone to phone (automated, #1361):** `mobile/scripts/maestro-qr-link.sh <signed-in-device> <new-device>`
 — the NEW device shows its code ("Sign in with another device" → "Show a code
 instead", `two-client/qr-link/2-new-show-code.yaml`), the script reads it off

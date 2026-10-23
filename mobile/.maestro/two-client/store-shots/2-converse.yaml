@@ -1,0 +1,81 @@
+appId: com.pollis.mobile
+tags:
+  - two-client
+---
+# STORE SHOTS, part 2 of 3. The peer has replied in the DM and posted in
+# #General. Answer in #General (the peer reacts to it), react to the peer's
+# post, then answer in the DM. (Its row label starts with the sender; the
+# quoted reply's starts with "Reply to".)
+
+# Part 1 ends inside the DM, where the tab bar is hidden.
+- tapOn:
+    id: "btn-back"
+    optional: true
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    text: "General"
+- extendedWaitUntil:
+    visible: ".*Onboarding mockups.*"
+    timeout: 60000
+# Answer as a quoted reply (swipe toward the start edge, as in flows/reply.yaml).
+- swipe:
+    from:
+      text: ".*Onboarding mockups.*"
+    direction: LEFT
+    duration: 450
+- extendedWaitUntil:
+    visible:
+      id: "bar-reply"
+    timeout: 4000
+- tapOn:
+    id: "input-composer"
+- inputText: "Love them. Shipping the handoff build tonight"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*handoff build.*"
+    timeout: 15000
+# React to the peer's post (best effort: a late row can miss the gesture).
+- hideKeyboard
+- longPressOn:
+    text: "bochen_.*: Morning! Onboarding mockups.*"
+    optional: true
+- tapOn:
+    id: "btn-react-0"
+    optional: true
+- tapOn:
+    id: "btn-action-cancel"
+    optional: true
+- tapOn:
+    id: "btn-back"
+    optional: true
+
+- tapOn:
+    id: "tab-direct"
+- tapOn:
+    id: "row-dm-.*"
+- extendedWaitUntil:
+    visible: ".*Not even Pollis can read it.*"
+    timeout: 60000
+- tapOn:
+    id: "input-composer"
+- inputText: "Verified your safety number, we match"
+- hideKeyboard
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*we match.*"
+    timeout: 15000
+- tapOn:
+    id: "input-composer"
+- inputText: "Design notes are in #General whenever you want them"
+- hideKeyboard
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*whenever you want them.*"
+    timeout: 15000
+- tapOn:
+    id: "btn-back"
+    optional: true

@@ -1,0 +1,96 @@
+appId: com.pollis.mobile
+tags:
+  - two-client
+---
+# STORE SHOTS, part 1 of 3 — driven by scripts/maestro-store-shots.sh.
+# Shoot the sign-in screen, sign up, make "Design Team" with #General, invite
+# the peer to it and open a DM with it. The peer (store_shots_peer) accepts
+# both and posts its half of the conversation.
+
+- clearState
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-email"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: store-06-sign-in
+
+- runFlow: ../../subflows/sign-in.yaml
+
+# The group, with #General (opt-in, off by default).
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "Design Team"
+# Creating a group can take a minute on the dev DS, and a dropped request
+# leaves the form up with an error; tap Create again until the panel shows.
+- repeat:
+    times: 3
+    while:
+      notVisible:
+        id: "btn-group-menu"
+    commands:
+      - tapOn:
+          id: "btn-submit-group"
+          optional: true
+      - extendedWaitUntil:
+          visible:
+            id: "btn-group-menu"
+          timeout: 120000
+          optional: true
+- assertVisible:
+    id: "btn-group-menu"
+
+# Invite the peer by handle.
+- tapOn:
+    id: "row-group-invite"
+- tapOn:
+    id: "input-user-search"
+- inputText: "${MAESTRO_PEER_HANDLE}"
+# The field submits on Enter; hideKeyboard is Back on Android and can close
+# the screen instead.
+- pressKey: Enter
+# A sent invite closes the screen.
+- extendedWaitUntil:
+    visible:
+      id: "row-group-invite"
+    timeout: 60000
+
+# Open a DM with the peer.
+- tapOn:
+    id: "tab-direct"
+- tapOn:
+    id: "btn-new-dm"
+- tapOn:
+    id: "input-user-search"
+- inputText: "${MAESTRO_PEER_HANDLE}"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible:
+      id: "row-user-.*"
+    timeout: 20000
+- tapOn:
+    id: "row-user-.*"
+- extendedWaitUntil:
+    visible:
+      id: "input-composer"
+    timeout: 30000
+- tapOn:
+    id: "input-composer"
+- inputText: "Hey! Found us a better place to talk"
+- hideKeyboard
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*better place to talk.*"
+    timeout: 15000
