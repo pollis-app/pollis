@@ -29,8 +29,14 @@ pub enum RealtimeEvent {
     /// pre-MLS-join event — there's no credential to re-derive the name from,
     /// unlike `NewMessage`). Public directory metadata, already returned by the
     /// DM-request query. Optional: null if the creator's user row is missing.
+    ///
+    /// `sender_id` is the verified actor (the DS stamps it). It is the
+    /// recipient's OWN id when one of their other devices created or accepted
+    /// the DM (#1410) — a refetch, never a request alert.
     DmCreated {
         conversation_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sender_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sender_username: Option<String>,
     },

@@ -177,8 +177,14 @@ export function useInboxRealtime() {
           break;
         }
         case "dm_created":
-          // A new DM (started by a peer) — refresh the DM list + requests.
+          // A new DM — started by a peer, or started or accepted on another of
+          // this user's devices (#1410) — refresh the DM list + requests, then
+          // land what it already holds: until the list refetch subscribes its
+          // room, nothing else would wake this device for those messages.
           void qc.invalidateQueries({ queryKey: dmQueryKeys.all });
+          void ingestRef.current(event.conversation_id, "dm").then(() =>
+            qc.invalidateQueries({ queryKey: lastMessageQueryKeys.all }),
+          );
           break;
         case "membership_changed":
           // Added to / removed from a group, or a join request resolved —

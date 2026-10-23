@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use crate::harness::{enroll_second_device, wipe, TestClient};
+use crate::harness::{
+    await_nth_wake_up, await_wake_up, enroll_second_device, wake_up_count, wipe, TestClient,
+};
 use pollis_lib::test_harness::invoke;
 use serde_json::json;
 use serial_test::serial;
@@ -1511,4 +1513,154 @@ async fn diagnose_missing_delivery(user_id: &str, conversation_id: &str) -> Stri
         cursors.len(),
         if cursors.is_empty() { "    (none)".to_string() } else { cursors.join("\n") },
     )
+}
+
+// ─── A user's own devices (#1410) ────────────────────────────────────────────
+
+/// The contents of `dm_id` as `client` reads them, after the same ingest a
+/// woken device runs.
+async fn dm_contents(client: &TestClient, dm_id: &str) -> Vec<String> {
+    client
+        .fetch_dm_messages(dm_id)
+        .await
+        .iter()
+        .filter_map(|m| m["content"].as_str().map(str::to_owned))
+        .collect()
+}
+
+async fn dm_ids(client: &TestClient) -> Vec<String> {
+    client
+        .list_dms()
+        .await
+        .iter()
+        .filter_map(|d| d["id"].as_str().map(str::to_owned))
+        .collect()
+}
+
+fn dm_created_for(dm_id: &str) -> impl Fn(&serde_json::Value) -> bool + '_ {
+    move |p| p["type"] == "dm_created" && p["conversation_id"] == dm_id
+}
+
+/// #1410: a DM started on one of a user's devices reaches their OTHER devices
+/// — the conversation and every message in it.
+///
+/// The other device has nothing to notice on its own. It is not in the new
+/// DM's room (it does not know the DM exists), and `create_dm_channel` used to
+/// wake only the PEER's inbox, so a desktop left open all session never listed
+/// the DM: no room, so no `new_message` wake-up either, and the whole exchange
+/// stayed invisible there until a restart. The creator has to wake its own
+/// inbox — with the `dm_created` every shipped client already answers by
+/// refetching its DM lists and pulling its Welcomes.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_dm_created_on_one_device_reaches_the_creators_other_devices() {
+    wipe().await;
+
+    let mut alice_d1 = TestClient::new().await;
+    let alice = alice_d1.sign_up("alice@test.local").await;
+    let alice_d2 = enroll_second_device(&alice_d1, "alice@test.local").await;
+    let mut bob = TestClient::new().await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+    assert!(alice_d2.list_dms().await.is_empty(), "alice_d2 starts with no DMs");
+
+    let dm_id = alice_d1.create_dm(&[alice.id.as_str(), bob_profile.id.as_str()]).await;
+
+    // The wake-up to the creator's own inbox, let through by the DS (the suite
+    // has no LiveKit, so an accepted request ends in 503; a refused one is 4xx).
+    let inbox = format!("inbox-{}", alice.id);
+    let wake = await_wake_up(&inbox, dm_created_for(&dm_id))
+        .await
+        .unwrap_or_else(|| {
+            panic!("create_dm_channel must wake the creator's other devices on {inbox}")
+        });
+    assert!(!(400..500).contains(&wake.status), "the DS refused the wake-up: {wake:?}");
+
+    bob.accept_dm_request(&dm_id).await;
+    alice_d1.send_channel_message(&dm_id, "alice-d1 one").await;
+    bob.send_channel_message(&dm_id, "bob one").await;
+    alice_d1.send_channel_message(&dm_id, "alice-d1 two").await;
+
+    // What alice_d2 does with the wake-up: refetch its DM lists, then ingest.
+    assert_eq!(
+        dm_ids(&alice_d2).await,
+        vec![dm_id.clone()],
+        "alice_d2 must list the DM alice_d1 created"
+    );
+    assert!(
+        alice_d2.list_dm_requests().await.is_empty(),
+        "the creator's own DM is never a request on their other device"
+    );
+    let got = dm_contents(&alice_d2, &dm_id).await;
+    for want in ["alice-d1 one", "bob one", "alice-d1 two"] {
+        assert!(got.iter().any(|c| c == want), "alice_d2 must read {want:?}, got {got:?}");
+    }
+
+    // And alice_d2 is a full member, not a reader: its reply reaches both.
+    alice_d2.send_channel_message(&dm_id, "alice-d2 reply").await;
+    for (client, label) in [(&alice_d1, "alice_d1"), (&bob, "bob")] {
+        let got = dm_contents(client, &dm_id).await;
+        assert!(
+            got.iter().any(|c| c == "alice-d2 reply"),
+            "{label} must read alice_d2's reply, got {got:?}"
+        );
+    }
+
+    drop(alice_d1);
+    drop(alice_d2);
+    drop(bob);
+}
+
+/// #1410, the other direction: a DM REQUEST accepted on one of a user's devices
+/// must stop being a request on their other devices.
+///
+/// The other device was told about the request (the creator's `dm_created`
+/// reaches every device of the recipient), so it lists it — as a request. The
+/// accept used to wake nobody, so that device kept showing a request, never
+/// moved the DM into its conversation list, never joined its room, and so never
+/// saw a message in it until a restart.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_dm_accepted_on_one_device_reaches_the_accepters_other_devices() {
+    wipe().await;
+
+    let mut alice_d1 = TestClient::new().await;
+    let alice = alice_d1.sign_up("alice@test.local").await;
+    let alice_d2 = enroll_second_device(&alice_d1, "alice@test.local").await;
+    let mut bob = TestClient::new().await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+
+    let dm_id = bob.create_dm(&[bob_profile.id.as_str(), alice.id.as_str()]).await;
+    let inbox = format!("inbox-{}", alice.id);
+    await_wake_up(&inbox, dm_created_for(&dm_id))
+        .await
+        .expect("bob's request wakes alice's devices");
+    assert_eq!(alice_d2.list_dm_requests().await.len(), 1, "alice_d2 sees the request");
+    assert_eq!(wake_up_count(&inbox, dm_created_for(&dm_id)), 1);
+
+    alice_d1.accept_dm_request(&dm_id).await;
+
+    // A second wake-up to alice's inbox, this one from the accept.
+    let wake = await_nth_wake_up(&inbox, dm_created_for(&dm_id), 2)
+        .await
+        .unwrap_or_else(|| {
+            panic!("accept_dm_request must wake the accepter's other devices on {inbox}")
+        });
+    assert!(!(400..500).contains(&wake.status), "the DS refused the wake-up: {wake:?}");
+
+    bob.send_channel_message(&dm_id, "bob one").await;
+    alice_d1.send_channel_message(&dm_id, "alice-d1 one").await;
+
+    assert!(
+        alice_d2.list_dm_requests().await.is_empty(),
+        "accepted on alice_d1, so no longer a request on alice_d2"
+    );
+    assert_eq!(dm_ids(&alice_d2).await, vec![dm_id.clone()], "alice_d2 must list the accepted DM");
+    let got = dm_contents(&alice_d2, &dm_id).await;
+    for want in ["bob one", "alice-d1 one"] {
+        assert!(got.iter().any(|c| c == want), "alice_d2 must read {want:?}, got {got:?}");
+    }
+
+    drop(alice_d1);
+    drop(alice_d2);
+    drop(bob);
 }
