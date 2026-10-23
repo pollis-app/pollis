@@ -68,6 +68,9 @@ type RealtimeEvent =
   | {
     type: 'dm_created';
     conversation_id: string;
+    // The verified actor. Our OWN id when another of our devices created or
+    // accepted the DM (#1410): refetch, but raise no request alert.
+    sender_id?: string | null;
     // Creator's public username, so the DM-request alert can name the requester.
     sender_username?: string | null;
   }
@@ -403,6 +406,12 @@ export function useLiveKitRealtime() {
         }).catch((err) => {
           console.warn('[realtime] dm_created: process_pending_commits failed:', err);
         });
+        // One of our own other devices started or accepted this DM (#1410):
+        // the refetch above is the whole point, and there is nobody to alert
+        // about — it is not a request.
+        if (event.sender_id && event.sender_id === currentUser.id) {
+          return;
+        }
         const dmSenderUsername = event.sender_username ?? i18n.t('nav:statusBar.someone');
         notify('dm_request', {
           roomId: event.conversation_id,

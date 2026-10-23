@@ -155,9 +155,11 @@ pub(super) fn dispatch_data(
                 .get("conversation_id")
                 .and_then(|v| v.as_str())
             {
+                let who = attributed(sender, &data);
                 let _ = channel.send(RealtimeEvent::DmCreated {
                     conversation_id: conversation_id.to_owned(),
-                    sender_username: attributed(sender, &data).and_then(|who| who.username),
+                    sender_id: who.as_ref().map(|w| w.user_id.clone()),
+                    sender_username: who.and_then(|w| w.username),
                 });
             }
         }
@@ -545,7 +547,8 @@ mod tests {
             None,
         );
         match &events[0] {
-            RealtimeEvent::DmCreated { sender_username, .. } => {
+            RealtimeEvent::DmCreated { sender_id, sender_username, .. } => {
+                assert_eq!(sender_id.as_deref(), Some("alice"));
                 assert_eq!(sender_username.as_deref(), Some("alice-name"));
             }
             _ => panic!("expected DmCreated"),
