@@ -186,10 +186,10 @@
         <div class="faq-question">What is Pollis?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>A desktop messaging app with group channels and direct messages, like Slack, but your messages are encrypted on your device before they leave it. The people running Pollis can't read them.</p>
+            <p>A messaging app with group channels and direct messages, like Slack, for Mac, Windows, Linux and Android, with iOS on the way. Your messages are encrypted on your device before they leave it, so the people running Pollis can't read them.</p>
           </div>
           <div class="dev">
-            <p>Tauri desktop client with a React UI and a Rust core for cryptography, MLS group state, and real-time media. Every remote read and write goes through the Delivery Service (an in-repo axum server); the client holds no database credential, and <code>pollis-core</code> does not link a database driver. Messages are end-to-end encrypted with MLS (RFC 9420) via <code>openmls</code>. The database and Delivery Service see ciphertext envelopes and routing metadata, never plaintext.</p>
+            <p>Tauri desktop client with a React UI, an Expo / React Native mobile app, and a terminal client, all on one Rust core (<code>pollis-core</code>; mobile reaches it through uniffi) for cryptography and MLS group state. Every database read and write goes through the Delivery Service (an in-repo axum server); the client holds no database credential, and <code>pollis-core</code> links no remote database driver, only SQLCipher for its local store. Attachment bytes go straight to R2 on presigned URLs the Delivery Service issues. Messages are end-to-end encrypted with MLS (RFC 9420) via <code>openmls</code>. The database and Delivery Service see ciphertext envelopes and routing metadata, never plaintext.</p>
           </div>
         </div>
       </div>
@@ -201,7 +201,7 @@
             <p>Slack and Discord can read your messages. Signal can't read yours either, but it's phone-number based and built for personal chats. Pollis is built for group workspaces like Slack, but with Signal-style privacy.</p>
           </div>
           <div class="dev">
-            <p>Slack/Discord: plaintext server storage. Signal: Double Ratchet, phone-number identity, optimized for 1:1 + small groups. Pollis: MLS-based group ratchet, username + email identity, Slack-style multi-channel workspaces, native desktop only.</p>
+            <p>Slack/Discord: plaintext server storage. Signal: Double Ratchet, phone-number identity, optimized for 1:1 + small groups. Pollis: MLS-based group ratchet, username + email identity, Slack-style multi-channel workspaces, native desktop and mobile apps plus a terminal client.</p>
           </div>
         </div>
       </div>
@@ -210,13 +210,13 @@
         <div class="faq-question">Is it really end-to-end encrypted?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>Yes. Messages, files, and voice are encrypted on your device, and your private keys never leave it.</p>
-            <p>The server can see <strong>who</strong> is messaging <strong>when</strong>, but not <strong>what</strong>.</p>
+            <p>Yes, for what you say. Messages and calls are encrypted on your device, and your private keys never leave your devices unencrypted.</p>
+            <p>What the server can still see: your email and username, which groups and DMs you're in and what they're called, and when each message was sent and to which conversation. Stored messages don't record who sent them, but at the moment you hit send the server does know it's you (see the next question). Emoji reactions, avatars and group icons are not encrypted.</p>
           </div>
           <div class="dev">
-            <p>Client-side MLS encryption (RFC 9420) via <code>openmls</code>. Private keys live in the OS keystore (macOS Keychain / Windows Credential Manager / Linux Secret Service) via the <code>keyring</code> crate. Where no keystore is available, they go in an encrypted file bound to the machine, never in plaintext. They are never sent anywhere.</p>
+            <p>Client-side MLS encryption (RFC 9420) via <code>openmls</code>. On desktop, private keys live in the OS keystore (macOS Keychain / Windows Credential Manager / Linux Secret Service) via the <code>keyring</code> crate. On mobile they sit in an encrypted file whose key is held by the iOS Keychain (this-device-only) or a non-exportable Android Keystore key. Where no keystore is available, they go in an encrypted file bound to the machine, never in plaintext. They are never sent anywhere.</p>
             <p>Voice: audio frames are AES-GCM encrypted by libwebrtc's <code>FrameCryptor</code> after Opus and before SRTP, keyed by a 32-byte secret from <code>MlsGroup::export_secret("pollis/voice/v1", epoch, 32)</code> on the channel's MLS group. The LiveKit SFU forwards ciphertext only, and the key rotates with every MLS epoch.</p>
-            <p>Server sees: user IDs, group/channel membership, message timestamps, sizes, public keys, voice presence and RTP routing metadata. Server does not see: message plaintext, file contents, voice audio, private keys.</p>
+            <p>Voice and video are desktop-only. Server sees: email and username; group and channel names, descriptions and membership; full-precision message timestamps and per-conversation sequence numbers; padded ciphertext sizes; the sending account and device at submit time (every request carries signed <code>X-Pollis-User</code> / <code>X-Pollis-Device</code> headers); reactions as <code>(message_id, user_id, emoji)</code>; avatars and group icons; public keys and device registrations; IP addresses, used for in-memory rate limiting and not logged. The stored message row does not record its sender (sealed sender). LiveKit sees per-room HMAC pseudonyms, not account IDs or room names. Server does not see: message text, voice or video, private keys.</p>
           </div>
         </div>
       </div>
@@ -239,10 +239,10 @@
         <div class="faq-question">Does the length of my messages give anything away?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>No. Every text message is padded to a standard size before it's sealed, so the server can't tell a one-word reply from a long paragraph. Attachments are not padded.</p>
+            <p>Very little. Every text message is padded before it's sealed: short messages all come out the same size, and longer ones are rounded up, so the server only learns a rough size range. Attachments are not padded.</p>
           </div>
           <div class="dev">
-            <p>Text plaintext is padded to fixed size buckets before MLS encryption (<code>pollis-core/src/commands/messages/framing.rs</code>), so ciphertext size does not track message length. Attachments are the exception: they use convergent encryption keyed on the real file size, so they aren't bucketed.</p>
+            <p>Text plaintext is padded before MLS encryption (<code>pollis-core/src/commands/messages/framing.rs</code>): everything up to 256 bytes collapses to one size, and above that lengths are rounded up with PADMÉ (worst-case overhead about 12%). Redactions, read receipts and thread replies are padded the same way. Attachments are not padded: their ciphertext is the file size plus a 16-byte tag per 4 MiB chunk.</p>
           </div>
         </div>
       </div>
@@ -263,11 +263,11 @@
         <div class="faq-question">What happens if someone's cryptographic key changes?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>Pollis warns you. A red shield appears next to that person's name everywhere you share (DMs, group member lists, channels), and a notice appears in the chat so you can re-verify them another way, in person or by phone.</p>
-            <p>You verify a person once, and the green shield follows them across your account. If their key changes, all those shields turn red together.</p>
+            <p>Pollis warns you. On desktop, a red shield appears next to that person's name in your DM list and in group member lists, and a notice appears in your DM with them so you can re-verify them another way, in person or by phone.</p>
+            <p>You verify a person once, and the green shield follows them across your account. If their key changes, all those shields turn red together. On mobile, you compare and verify safety numbers from the person's profile.</p>
           </div>
           <div class="dev">
-            <p>Signal-style 60-digit safety numbers derived from both parties' <code>account_id_pub</code> (SHA-512^5200, see <code>pollis-core/src/commands/safety.rs</code>). First-seen keys are pinned silently (TOFU) and surfaced on mismatch via a <code>KeyChanged</code> realtime event. Pinning runs on every DM ingest <em>and</em> on every group-reconcile commit (<code>batch_check_and_pin_account_keys</code>), so a server-side key swap is caught in any conversation type. Verification state lives in <code>contact_verification</code>, keyed by <code>peer_user_id</code> rather than per conversation, which is why the shield follows the contact.</p>
+            <p>Signal-style 60-digit safety numbers derived from both parties' <code>account_id_pub</code> (SHA-512^5200, see <code>pollis-core/src/commands/safety.rs</code>). First-seen keys are pinned silently (TOFU) and surfaced on mismatch via a <code>KeyChanged</code> realtime event. Pinning runs on every DM ingest <em>and</em> on every group-reconcile commit (<code>batch_check_and_pin_account_keys</code>), so a server-side key swap is caught in any conversation type. Verification state lives in <code>contact_verification</code>, keyed by <code>peer_user_id</code> rather than per conversation, which is why the shield follows the contact. UI surfaces: desktop shows shields in the DM list and member lists and the <code>KeyChangeBanner</code> in DMs; mobile shows the safety number and verify action on the user profile only.</p>
           </div>
         </div>
       </div>
@@ -290,10 +290,10 @@
         <div class="faq-question">Which platforms are supported?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>macOS, Windows, and Linux.</p>
+            <p>macOS, Windows, Linux and Android. iOS is in testing and not on the App Store yet. There is also a terminal client for macOS, Linux and Windows.</p>
           </div>
           <div class="dev">
-            <p>macOS (Apple Silicon), Windows x64, Linux (<code>.deb</code>, <code>.rpm</code>, <code>.AppImage</code>, AUR). Binaries are code-signed: Apple Developer ID on macOS, Azure Trusted Signing on Windows.</p>
+            <p>macOS (Apple Silicon), Windows x64, Linux (<code>.deb</code>, <code>.rpm</code>, <code>.AppImage</code>, AUR). Binaries are code-signed: Apple Developer ID (notarized) on macOS, Azure Trusted Signing on Windows. Android: a sideload APK per ABI (<code>arm64-v8a</code>, <code>armeabi-v7a</code>, <code>x86_64</code>) on <a href="android.html">pollis.com/android</a>, signed with a pinned key. Terminal client (<code>pollis</code>): Linux, macOS (Apple Silicon), Windows.</p>
           </div>
         </div>
       </div>
@@ -302,10 +302,10 @@
         <div class="faq-question">Is there an iOS or Android app?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>On Android, yes: a signed app you can <a href="android.html">download here</a>, outside Google Play. The iPhone and Google Play versions aren't on the App Store or Play Store yet.</p>
+            <p>Android, yes: download it from <a href="android.html">pollis.com/android</a>. A Google Play listing is in review. The iOS app is in testing and not on the App Store yet.</p>
           </div>
           <div class="dev">
-            <p>A React Native / Expo app in <code>mobile/</code> uses the same Rust core (<code>pollis-core</code>) through uniffi bindings. Android ships as a signed per-ABI APK on <a href="android.html">pollis.com/android</a>; the iPhone and Google Play versions aren't on the App Store or Play Store yet.</p>
+            <p>A React Native / Expo app in <code>mobile/</code> on the same Rust core (<code>pollis-core</code>) through uniffi bindings. Android ships as a signed sideload APK (<code>mobile-apk-release.yml</code>, certificate SHA-256 pinned on <a href="android.html">the Android page</a>); the Play Store build is in review and is re-signed by Google, so Play and sideload installs can't update each other. iOS is on TestFlight, not yet on the App Store. Mobile has no voice or video (by design) and is not yet in the binary transparency log.</p>
           </div>
         </div>
       </div>
@@ -338,10 +338,10 @@
             <p>Also shipped:</p>
             <ul>
               <li>a post-release workflow that rebuilds the Linux AppImage from public source and fails on any hash mismatch with the log;</li>
-              <li>SLSA build provenance and keyless <code>cosign</code> signatures on every artifact for all three platforms, anchored in Sigstore's Rekor log, so verification needs no Pollis-held key;</li>
+              <li>SLSA build provenance and keyless <code>cosign</code> signatures on every desktop artifact for all three platforms, anchored in Sigstore's Rekor log, so verification needs no Pollis-held key;</li>
               <li>an in-app "verify this build" button on the security screen, which hashes the running binary and runs the same release check as the CLI.</li>
             </ul>
-            <p>Limits: the rebuild covers the Linux AppImage only (not <code>.deb</code>/<code>.rpm</code>, macOS, or Windows), and it needs the published build recipe as well as the source, because a build-time value is baked in. Every release's verdict is recorded on the <a href="assurance.html">assurance page</a>, including two historical failures caused by a since-fixed reporting bug, and one rebuild that ran on a different CI machine image than the release (re-run on a matching image, it reproduced byte for byte). Provenance is not a release gate, and two earlier releases shipped without it. The in-app check is advisory: it proves log inclusion, not reproduction from source, and reports <code>pending</code> until the log's next daily rebuild covers a new release.</p>
+            <p>Limits: the rebuild covers the Linux AppImage only (not <code>.deb</code>/<code>.rpm</code>, macOS, or Windows), and it needs the published build recipe as well as the source, because a build-time value is baked in. Every release's verdict is recorded on the <a href="assurance.html">assurance page</a>, misses included: two red runs from a since-fixed reporting bug, three releases inconclusive because the rebuild ran on a different CI machine image than the release, and three never checked. Provenance is not a release gate, and two earlier releases shipped without it. The in-app check is advisory: it proves log inclusion, not reproduction from source, and reports <code>pending</code> until the log's next daily rebuild covers a new release.</p>
           </div>
         </div>
       </div>
@@ -377,7 +377,7 @@
             <p>Yes, we need it to send you sign-in codes. No phone number required.</p>
           </div>
           <div class="dev">
-            <p>Yes. Email OTP is the auth primitive, so the email is stored server-side to deliver the OTP and bind it to the account. Session tokens are held in the OS keystore.</p>
+            <p>Yes. Email OTP is the auth primitive, so the email is stored server-side to deliver the OTP and bind it to the account. There are no server-side sessions: every request is signed with the device's ML-DSA-44 key, which is what the keystore holds. A short-lived one-time-code token is used only while enrolling a device.</p>
           </div>
         </div>
       </div>
@@ -386,10 +386,10 @@
         <div class="faq-question">How do I create or join a group?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>Anyone can create a group inside the app. To add someone, invite them by their Pollis username, they need an account already.</p>
+            <p>Anyone can create a group inside the app. To add someone, invite them by their Pollis username or send them an invite link; people can also ask to join, and an admin approves. Everyone needs a Pollis account. Direct messages start as a request the other person accepts, and can include more than two people.</p>
           </div>
           <div class="dev">
-            <p>Groups are created via the <code>create_group</code> backend command; members are added by username via <code>send_group_invite</code>. Adding someone generates an MLS Welcome that seeds their device into the group ratchet at the current epoch. DMs are implemented as 2-person MLS groups.</p>
+            <p>Groups are created via the <code>create_group</code> backend command; members are added by username via <code>send_group_invite</code>, by invite link (<code>create_group_invite_link</code> / <code>redeem_group_invite_link</code>), or by an approved join request (<code>request_group_access</code> / <code>approve_join_request</code>). Adding someone generates an MLS Welcome that seeds their device into the group ratchet at the current epoch. Each DM is its own MLS group: one per pair for 1:1, with 3+ member DMs supported (<code>add_user_to_dm_channel</code>), gated by <code>accept_dm_request</code>.</p>
           </div>
         </div>
       </div>
@@ -398,10 +398,10 @@
         <div class="faq-question">What happens if the server goes down?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>You can't send or receive new messages until it's back, but you can still open the app and read what you already have. An outage doesn't affect privacy.</p>
+            <p>You can't send or receive messages until it's back. The app still opens and on-device search still works, but browsing your conversations needs the server today. An outage doesn't affect privacy.</p>
           </div>
           <div class="dev">
-            <p>The server is required for message delivery, MLS commit routing, and R2 uploads. Read-only operation against the local encrypted SQLite store still works during an outage. Because the server can't decrypt, downtime has no confidentiality impact.</p>
+            <p>The server is required for message delivery, MLS commit routing, and R2 uploads. Unlock and on-device search work offline against the local encrypted store, but the group list and message pages call the Delivery Service before reading locally (<code>ds_reads::bootstrap</code>, <code>catch_up</code>), so they fail during an outage instead of falling back to local data. Because the server can't decrypt, downtime has no confidentiality impact.</p>
           </div>
         </div>
       </div>
@@ -425,7 +425,7 @@
             <p>Pollis is in open preview and has not been independently audited. If your physical safety depends on unbreakable communication, use a mature, audited tool built for that threat model.</p>
           </div>
           <div class="dev">
-            <p>Open preview status, no third-party cryptographic audit yet. Protocol choices (MLS, keystore-backed identity, client-side encryption) target a Slack-style workspace threat model, not a nation-state adversary. For high-risk use, pick a tool with a documented audit history.</p>
+            <p>Open preview status. No independent human audit yet; there have been two full adversarial security reviews by teams of AI agents, with findings and fixes published on the <a href="assurance.html">assurance page</a>. Protocol choices (MLS, keystore-backed identity, client-side encryption) target a Slack-style workspace threat model, not a nation-state adversary. For high-risk use, pick a tool with a documented audit history.</p>
           </div>
         </div>
       </div>
