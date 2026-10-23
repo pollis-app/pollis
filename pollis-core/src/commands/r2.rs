@@ -17,10 +17,9 @@ use crate::state::AppState;
 // touch the JSON IPC.
 //
 // Per-file key derivation: HKDF-SHA256(salt = `pollis-media-cache-v1`,
-// ikm = `db_key`, info = content_hash bytes). Different salt from the
-// upload-side convergent key (`pollis-att-key`) so the two domains are
-// cryptographically separated even though both are seeded from the same
-// content hash.
+// ikm = `db_key`, info = the object's file id bytes). Keyed by this
+// device's `db_key`, so it shares nothing with the upload-side file key
+// (`file_keys::derive_file_key`, keyed by the conversation's ring).
 
 /// Hard cap on total cache size before LRU eviction kicks in.
 const MEDIA_CACHE_MAX_BYTES: u64 = 500 * 1024 * 1024;
@@ -798,7 +797,9 @@ impl Plaintext {
     }
 }
 
-/// Upload a media file using convergent encryption.
+/// Upload a file to the user's Vault, sealed under the Vault file key (#1382).
+/// Chat attachments do not come through here: the durable outbox uploads
+/// them under their conversation's key ring (`upload_outbox_bytes`).
 ///
 /// Reads the file from the filesystem path (no bytes over IPC), so arbitrarily
 /// large files work without memory or serialisation overhead. This is the path
@@ -1207,9 +1208,9 @@ pub async fn get_media_url(
 // bounded by `MEDIA_CACHE_MAX_FILE_BYTES` (100 MiB), well below the
 // AES-GCM 64-GiB-per-key safety bound.
 //
-// Salt domain (`pollis-media-cache-v1`) separates this from the
-// upload-side convergent key derivation so a server compromise that
-// leaks one key class can't be replayed against the other.
+// Salt domain (`pollis-media-cache-v1`) and the `db_key` IKM keep this
+// apart from the upload-side file key, so a leak of one key class can't
+// be replayed against the other.
 
 const CACHE_HKDF_SALT: &[u8] = b"pollis-media-cache-v1";
 const CACHE_NONCE_LEN: usize = 12;
@@ -1460,8 +1461,7 @@ fn origin_of(url: &str) -> Option<String> {
 /// [`PresignedUrl::parse`] fails closed on an empty origin, which is right for
 /// the request — but it means a build that simply never received its R2 values
 /// boots, signs in, sends text, and then refuses every attachment, one image at
-/// a time, as "Image unavailable" (a convergent re-upload of a file someone
-/// already stored even "succeeds", because it skips the PUT). The mobile bridge
+/// a time, as "Image unavailable". The mobile bridge
 /// calls this at `init_pollis` so that build fails at launch with the missing
 /// variable named, the way desktop's `Config::from_env` already refuses to start
 /// without `R2_S3_ENDPOINT` / `R2_PUBLIC_URL`.

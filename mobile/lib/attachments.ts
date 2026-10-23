@@ -2,9 +2,9 @@
 // frontend/src/utils/attachmentEnvelope.ts — the envelope must match
 // byte-for-byte so cross-platform messages parse everywhere).
 //
-// `upload_media` does everything heavy in Rust: read the file, SHA-256,
-// convergent AES-GCM encrypt, presigned PUT via the DS, dedup, blurhash +
-// dimensions for images. Reference registration happens inside Rust
+// `upload_media` (the Vault's path; chat attachments go through the outbox)
+// does everything heavy in Rust: read the file, seal it under the Vault file
+// key (#1382), presigned PUT via the DS, blurhash + dimensions for images. Reference registration happens inside Rust
 // `send_message` by re-parsing the `_att` JSON, so sending the same
 // envelope string keeps refcounting working for free.
 

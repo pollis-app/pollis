@@ -25,8 +25,9 @@
 //! the ciphertext: pin/unpin is a re-encrypt-and-save the server cannot
 //! distinguish from an edit.
 //!
-//! Attachments ride the normal upload pipeline (`commands::r2`), which
-//! stores convergent ciphertext in the shared `media/` domain. What keeps a
+//! Attachments ride the normal upload pipeline (`commands::r2`), sealed under
+//! the Vault file key (`vault_file_root_key`, derived from the account
+//! identity key like the entry key, #1382) in the shared `media/` domain. What keeps a
 //! vault-held object from being garbage-collected out from under the entry
 //! is the `attachment_hashes` list on every save: the DS maintains
 //! `vault_attachment_ref` rows from it and its GC liveness predicate counts

@@ -1220,10 +1220,11 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
         }
 
         // ----- media -----
-        // The attachment send path: reads the file from the sandbox path (no
-        // bytes over the JSON bridge), convergent-encrypts, uploads via a
-        // DS-minted presign, and returns the metadata the JS side folds into
-        // the message's `_att` envelope — identical to desktop.
+        // The Vault's upload path (chat attachments go through the outbox in
+        // `send_message`): reads the file from the sandbox path (no bytes over
+        // the JSON bridge), seals it under the Vault file key (#1382), uploads
+        // via a DS-minted presign, and returns the metadata the JS side folds
+        // into the entry's `_att` envelope — identical to desktop.
         "upload_media" => {
             let path: String = arg(&args, "path")?;
             let filename: String = arg(&args, "filename")?;

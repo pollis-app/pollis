@@ -2166,9 +2166,10 @@ pub async fn delete_attachment(
     outcome_response::<AttachmentDeleteBody>(apply_delete_attachment(&conn, authed.as_deref(), &parsed).await?)
 }
 
-/// Register a convergent-encryption dedup row (`content_hash → r2_key`) and,
-/// when a `message_id` is supplied, a `(content_hash, message_id)` REFERENCE
-/// declaration (#690).
+/// Register an attachment object row (`content_hash → r2_key`) and, when a
+/// `message_id` is supplied, a `(content_hash, message_id)` REFERENCE
+/// declaration (#690). `content_hash` is the object's random file id since
+/// #1382 — a name, not key material and not derived from the content.
 ///
 /// ## Authz
 ///
@@ -2210,8 +2211,8 @@ pub async fn delete_attachment(
 /// Skipped when `authed` is `None`: the no-auth (harness/dev) path has no actor
 /// to bind to, exactly as the membership gates elsewhere in this module are.
 ///
-/// The object INSERT stays `OR IGNORE` (the row is convergent — identical for
-/// every uploader). The reference INSERT is likewise `OR IGNORE`: the PK
+/// The object INSERT stays `OR IGNORE` (a retried registration of the same
+/// object writes the same row). The reference INSERT is likewise `OR IGNORE`: the PK
 /// `(content_hash, message_id)` makes a retried send idempotent rather than
 /// double-counting. Registering the reference here (rather than at upload) is
 /// deliberate — a file is uploaded once but referenced by every message that
@@ -2348,8 +2349,8 @@ async fn clear_declarations(conn: &Connection, content_hash: &str) -> anyhow::Re
     Ok(())
 }
 
-/// True when at least one STILL-EXISTING message references the convergent
-/// attachment `content_hash` (#690) — the count derived by joining
+/// True when at least one STILL-EXISTING message references the attachment
+/// object `content_hash` (#690) — the count derived by joining
 /// `attachment_ref` to `message_envelope` (see [`live_ref_exists`]), never the
 /// raw declaration rows. The single source of truth for BOTH the counted Turso
 /// collect in [`apply_delete_attachment`] and the R2 `delete`-presign gate in
@@ -3129,7 +3130,7 @@ mod gc_sql_tests {
 
     // ── #690 — the GC path releases attachment references (Blocking 2) ────────
 
-    /// Insert a convergent dedup object + a `(content_hash, message_id)`
+    /// Insert an attachment object + a `(content_hash, message_id)`
     /// declaration keyed to `msg`.
     async fn add_attachment(conn: &Connection, hash: &str, msg: &str) {
         conn.execute(

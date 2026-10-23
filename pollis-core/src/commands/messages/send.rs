@@ -402,9 +402,9 @@ pub(super) async fn deliver_queued(
     let now = sent_at;
 
     // Register a server-side reference for each attachment this message carries
-    // (#690), keyed by the message id. The DS reference-counts the shared,
-    // convergent `attachment_object` row so a later delete in ANOTHER
-    // conversation can no longer strand this one. Best-effort — never fails the
+    // (#690), keyed by the message id. The DS reference-counts the
+    // `attachment_object` row so deleting one message that names an object
+    // cannot strand another message that still does. Best-effort — never fails the
     // send (the envelope above is the durable delivery).
     if super::edit_delete::is_attachment_content(&content) {
         let _ = super::edit_delete::register_attachment_refs(state, &id, &content).await;

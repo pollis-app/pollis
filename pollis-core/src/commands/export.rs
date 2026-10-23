@@ -31,10 +31,10 @@
 //! decrypted copy is **already in this device's media cache** — still zero
 //! network, and still only what this device has already seen. The rest are
 //! reported back in `ExportSummary::attachments_missing`, so the UI can offer
-//! (and only ever *offer*) the opt-in fetch in `export_fetch.rs`. The content
-//! hash is the convergent-encryption key for the object, so an archive is also
-//! sufficient to fetch and decrypt every attachment later without any other
-//! secret.
+//! (and only ever *offer*) the opt-in fetch in `export_fetch.rs`. The archive
+//! records each attachment's file id, key version and plaintext digest — not
+//! a key: fetching later needs a device that can still open the
+//! conversation's file key ring (#1382).
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
