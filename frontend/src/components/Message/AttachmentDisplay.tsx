@@ -7,7 +7,7 @@ import { Download, Film, Check } from "lucide-react";
 import { getFileIcon } from "../../utils/fileIcon";
 import { captureVideoPoster } from "../../utils/imageProcessing";
 import { formatFileSize, formatDuration } from "../../utils/format";
-import { getMediaUrl } from "../../services/r2-upload";
+import { getMediaUrl, mediaArgs } from "../../services/r2-upload";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { InlineAudioPlayer } from "../ui/InlineAudioPlayer";
 import { AudioPlayer } from "../ui/AudioPlayer";
@@ -199,11 +199,7 @@ export const AttachmentDisplay: React.FC<AttachmentDisplayProps> = ({
 
     let mounted = true;
     setIsLoading(true);
-    const fetchUrl = getMediaUrl(
-      attachment.object_key,
-      attachment.content_hash,
-      attachment.content_type,
-    );
+    const fetchUrl = getMediaUrl(attachment);
     fetchUrl.then((url) => {
       if (mounted) { setDownloadUrl(url); }
     }).catch((err) => {
@@ -257,8 +253,7 @@ export const AttachmentDisplay: React.FC<AttachmentDisplayProps> = ({
       return false;
     }
     const marking = await invoke<string>("save_media_to_path", {
-      r2Key: attachment.object_key,
-      contentHash: attachment.content_hash,
+      ...mediaArgs(attachment),
       targetPath: target,
     });
     // The bytes are saved either way — a marker that could not be written (a
@@ -295,11 +290,7 @@ export const AttachmentDisplay: React.FC<AttachmentDisplayProps> = ({
       // Video uses the same loopback URL pattern as image/audio. The
       // server honours HTTP Range so seeking works without buffering
       // the whole file.
-      const url = await getMediaUrl(
-        attachment.object_key,
-        attachment.content_hash,
-        attachment.content_type,
-      );
+      const url = await getMediaUrl(attachment);
       setDownloadUrl(url);
       setViewerOpen(true);
     } catch (err) {

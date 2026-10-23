@@ -25,7 +25,7 @@ export interface NamedMediaUriState {
 export function useNamedMediaUri(
   attachment: Pick<
     MessageAttachment,
-    "object_key" | "content_hash" | "content_type" | "filename" | "localPreviewUri"
+    "object_key" | "content_hash" | "content_type" | "filename" | "localPreviewUri" | "sha256" | "key_scope"
   > | null,
   enabled: boolean,
 ): NamedMediaUriState {

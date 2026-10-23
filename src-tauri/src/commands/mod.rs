@@ -26,6 +26,7 @@ pub mod overlay;
 // records the result in `crate::pathscope` before handing it back.
 pub mod pathscope;
 pub mod pin;
+pub mod file_keys;
 pub mod pinned_messages;
 pub mod r2;
 pub mod relay_serving;

@@ -28,7 +28,12 @@ export interface MediaUploadResult {
   filename: string;
   content_type: string;
   size_bytes: number;
+  // The object's random file id (#1382), not a content hash.
   content_hash: string;
+  // Which ring key sealed it; always 0 for these Vault uploads.
+  key_version: number;
+  // Plaintext SHA-256, carried only inside the encrypted envelope.
+  sha256: string;
   blurhash?: string | null;
   width?: number | null;
   height?: number | null;
@@ -92,6 +97,8 @@ export async function buildMessageContent(
       ct: r.content_type,
       size: r.size_bytes,
       hash: r.content_hash,
+      kv: r.key_version,
+      sha: r.sha256,
       bh: r.blurhash ?? undefined,
       w: r.width ?? undefined,
       h: r.height ?? undefined,

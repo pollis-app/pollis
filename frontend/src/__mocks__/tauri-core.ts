@@ -1472,6 +1472,10 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
                 ct: a.contentType,
                 size: 0,
                 hash: `mock-${id}-${i}`,
+                // #1382: the ring key version and plaintext digest every real
+                // reference carries; without them the renderer refuses to fetch.
+                kv: 1,
+                sha: `sha-${id}-${i}`,
               })),
               ...(content ? { _txt: content } : {}),
             });

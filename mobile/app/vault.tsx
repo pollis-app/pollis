@@ -154,7 +154,7 @@ function VaultScreen() {
 
   const startEdit = useCallback((entry: VaultMessage) => {
     setPendingDeleteId(null);
-    setEditDraft(parseContent(entry.content).text);
+    setEditDraft(parseContent(entry.content, "vault").text);
     setEditTarget(entry);
   }, []);
 
@@ -206,7 +206,7 @@ function VaultScreen() {
         return <DaySeparator label={item.label} />;
       }
       const entry = item.entry;
-      const parsed = parseContent(entry.content);
+      const parsed = parseContent(entry.content, "vault");
       return (
         <VaultEntryRow
           entryId={entry.id}
@@ -227,9 +227,9 @@ function VaultScreen() {
   );
 
   const editHasFiles = editTarget
-    ? parseContent(editTarget.content).attachments.length > 0
+    ? parseContent(editTarget.content, "vault").attachments.length > 0
     : false;
-  const actionParsed = actionTarget ? parseContent(actionTarget.content) : null;
+  const actionParsed = actionTarget ? parseContent(actionTarget.content, "vault") : null;
 
   return (
     <Screen testID="screen-vault" wide>

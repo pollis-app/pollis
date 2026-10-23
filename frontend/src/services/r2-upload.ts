@@ -1,5 +1,5 @@
 import { invoke } from '../bridge';
-import type { PresignedUploadResponse } from '../types';
+import type { MessageAttachment, PresignedUploadResponse } from '../types';
 import { IMAGE_EXT_MIME } from '../utils/fileIcon';
 
 export async function uploadAvatar(
@@ -96,16 +96,28 @@ export async function getFileDownloadUrl(key: string): Promise<string> {
   return url;
 }
 
+/// The arguments every media command takes to locate and open an attachment:
+/// the object, the digest to verify, and which key sealed it (#1382). Throws
+/// for a reference with no key scope — still uploading, or from before #1382 —
+/// so nothing ever asks Rust to decrypt it under a guessed key.
+export function mediaArgs(attachment: MessageAttachment) {
+  if (!attachment.key_scope) {
+    throw new Error('attachment is unavailable');
+  }
+  return {
+    r2Key: attachment.object_key,
+    contentHash: attachment.content_hash,
+    sha256: attachment.sha256,
+    keyScope: attachment.key_scope,
+  };
+}
+
 /// Download an encrypted media attachment, decrypt it, and return a blob URL
-/// safe for use as <img src> or an anchor href.
-/// The content_hash is used to derive the AES-256-GCM key via HKDF on the
-/// Rust side — no key material is stored in the message or on the server.
-export async function downloadAndDecryptMedia(
-  r2Key: string,
-  contentHash: string,
-  mimeType?: string,
-): Promise<string> {
-  const bytes = await invoke<number[]>('download_media', { r2Key, contentHash });
+/// safe for use as <img src> or an anchor href. The key comes from the
+/// conversation's MLS-wrapped key ring (or the Vault key) on the Rust side.
+export async function downloadAndDecryptMedia(attachment: MessageAttachment): Promise<string> {
+  const bytes = await invoke<number[]>('download_media', mediaArgs(attachment));
+  const mimeType = attachment.content_type;
   const blob = new Blob([new Uint8Array(bytes)], mimeType ? { type: mimeType } : undefined);
   return URL.createObjectURL(blob);
 }
@@ -114,7 +126,7 @@ export async function downloadAndDecryptMedia(
 // other caller for the same hash awaits the same promise. Prevents a
 // render storm during scroll where 30 mounted MessageItems each kick
 // off identical invokes. Resolved promises stay cached for the life of
-// the document — content_hash is content-addressed, so the URL is
+// the document — an object id names one immutable object, so the URL is
 // permanently correct (the loopback server's port + token live for the
 // process; an unlock event would invalidate cached blob URLs from the
 // over-cap fallback path, but that's a fresh document anyway).
@@ -134,23 +146,19 @@ const inFlight = new Map<string, Promise<string>>();
 /// disk cache; Rust returns an empty string, and we fall back to
 /// `downloadAndDecryptMedia` which produces an in-memory Blob URL just
 /// for this render.
-export async function getMediaUrl(
-  r2Key: string,
-  contentHash: string,
-  contentType: string,
-): Promise<string> {
+export async function getMediaUrl(attachment: MessageAttachment): Promise<string> {
+  const contentHash = attachment.content_hash;
   const cached = inFlight.get(contentHash);
   if (cached) {
     return cached;
   }
   const promise = (async () => {
     const url = await invoke<string>('get_media_url', {
-      r2Key,
-      contentHash,
-      contentType,
+      ...mediaArgs(attachment),
+      contentType: attachment.content_type,
     });
     if (!url) {
-      return downloadAndDecryptMedia(r2Key, contentHash, contentType);
+      return downloadAndDecryptMedia(attachment);
     }
     return url;
   })();

@@ -791,6 +791,8 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
       id: att.id,
       object_key: '',
       content_hash: '',
+      sha256: '',
+      key_scope: null,
       filename: att.name,
       content_type: att.mimeType,
       file_size: att.size,

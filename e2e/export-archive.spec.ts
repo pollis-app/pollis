@@ -66,7 +66,7 @@ function preloadState(skin: Skin, exportSavePath: string | null = SAVE_PATH) {
           conversation_id: CHANNEL_ID,
           sender_id: USER.id,
           content: JSON.stringify({
-            _att: [{ key: "r2/cat", name: "cat.png", ct: "image/png", size: 3, hash: HASH }],
+            _att: [{ key: "r2/cat", name: "cat.png", ct: "image/png", size: 3, hash: HASH, kv: 1, sha: "s_cat" }],
             _txt: "look",
           }),
           sent_at: "2026-08-01T10:06:00.000Z",

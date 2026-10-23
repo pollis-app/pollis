@@ -65,19 +65,19 @@ test("a text edit of a text-only entry saves the trimmed text, and an empty one 
 
 test("a text edit keeps an entry's files, rebuilding desktop's envelope", () => {
   const original = JSON.stringify({
-    _att: [{ key: "media/1", url: "https://x", name: "a.png", ct: "image/png", size: 42, hash: "abc", bh: "LKO2", w: 4, h: 3 }],
+    _att: [{ key: "media/1", url: "https://x", name: "a.png", ct: "image/png", size: 42, hash: "abc", kv: 0, sha: "d1g", bh: "LKO2", w: 4, h: 3 }],
     _txt: "caption",
   });
   const edited = editedVaultContent(original, " new caption ");
   assert.ok(edited);
   assert.deepEqual(JSON.parse(edited), {
-    _att: [{ key: "media/1", url: "", name: "a.png", ct: "image/png", size: 42, hash: "abc", bh: "LKO2", w: 4, h: 3 }],
+    _att: [{ key: "media/1", url: "", name: "a.png", ct: "image/png", size: 42, hash: "abc", kv: 0, sha: "d1g", bh: "LKO2", w: 4, h: 3 }],
     _txt: "new caption",
   });
   // The rebuilt envelope reads back as the same files.
   assert.deepEqual(
-    parseContent(edited).attachments.map((a) => [a.object_key, a.content_hash, a.filename]),
-    [["media/1", "abc", "a.png"]],
+    parseContent(edited, "vault").attachments.map((a) => [a.object_key, a.content_hash, a.filename, a.key_scope]),
+    [["media/1", "abc", "a.png", { kind: "vault" }]],
   );
 });
 

@@ -163,7 +163,7 @@ const GalleryTile: React.FC<GalleryTileProps> = ({
       return;
     }
     let mounted = true;
-    getMediaUrl(attachment.object_key, attachment.content_hash, attachment.content_type)
+    getMediaUrl(attachment)
       .then((resolved) => {
         if (mounted) {
           setUrl(resolved);
@@ -247,7 +247,7 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
   useEffect(() => {
     let mounted = true;
     setUrl(null);
-    getMediaUrl(attachment.object_key, attachment.content_hash, attachment.content_type)
+    getMediaUrl(attachment)
       .then((resolved) => {
         if (mounted) {
           setUrl(resolved);

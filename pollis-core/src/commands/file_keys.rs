@@ -598,6 +598,24 @@ pub(crate) async fn key_at_version(
         })
 }
 
+/// Test harness only: the newest ring version this device can open for the
+/// MLS conversation behind `conversation_id`, after picking up any rotation
+/// from the DS. `None` when the device cannot reach the ring at all — which is
+/// exactly what a removed member must see.
+#[cfg(feature = "test-harness")]
+pub async fn test_file_key_version(
+    conversation_id: String,
+    state: &Arc<AppState>,
+) -> Result<Option<i64>> {
+    let user_id = super::mls::current_user_id(state).await?;
+    let mls_id = super::mls::ds_reads::resolve_mls_group(state, &conversation_id).await?;
+    ensure_ring(state, &mls_id, &user_id, false).await?;
+    // A refused read (removed member) surfaces as an error from the DS; report
+    // it as "cannot reach the ring" rather than failing the probe.
+    let _ = adopt_from_server(state, &mls_id, &user_id).await;
+    Ok(cached_ring(state, &mls_id).await?.map(|c| c.ring.version()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../bridge";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
-import type { Message, DMConversation } from "../../types";
+import type { AttachmentKeyScope, ContentOrigin, Message, DMConversation } from "../../types";
 import type { OutgoingAttachment } from "../../utils/attachmentEnvelope";
 import {
   carryStubs,
@@ -55,7 +55,12 @@ export const lastMessageQueryKeys = {
 // message content JSON (see parseContent).
 interface AttachmentWire {
   key: string;
+  /** The object's random file id (#1382). */
   hash: string;
+  /** Which key of the conversation's file key ring sealed it; `0` in the Vault. */
+  kv?: number;
+  /** Plaintext SHA-256, verified after decrypt. */
+  sha?: string;
   name: string;
   ct: string;
   size: number;
@@ -115,11 +120,15 @@ type RawDmChannel = {
 
 // Parses structured attachment JSON embedded in message content.
 // Plain-text messages are returned as-is. Content with attachments looks like:
-//   {"_att":[{"key":"media/…","url":"…","name":"…","ct":"…","size":N,"bh":"…","w":N,"h":N}],"_txt":"caption"}
+//   {"_att":[{"key":"media/…","url":"…","name":"…","ct":"…","size":N,"hash":"…","kv":N,"sha":"…","bh":"…","w":N,"h":N}],"_txt":"caption"}
 // Exported for the surfaces that render the SAME content-string shape from
 // other sources — pinned-message snapshots (#99) and vault entries (#107) —
-// so there is one decoder for the envelope, not three.
-export function parseContent(raw: string | undefined): { text: string; attachments: Message['attachments'] } {
+// so there is one decoder for the envelope, not three. `origin` says where
+// the content lives, which is what names each attachment's key (#1382).
+export function parseContent(
+  raw: string | undefined,
+  origin: ContentOrigin,
+): { text: string; attachments: Message['attachments'] } {
   if (!raw?.startsWith('{')) {
     return { text: raw ?? '', attachments: [] };
   }
@@ -136,6 +145,8 @@ export function parseContent(raw: string | undefined): { text: string; attachmen
         id: a.key ?? `uploading-${i}`,
         object_key: a.key ?? '',
         content_hash: a.hash ?? '',
+        sha256: a.sha ?? '',
+        key_scope: keyScopeFor(a, origin),
         filename: a.name,
         content_type: a.ct,
         file_size: a.size,
@@ -150,11 +161,28 @@ export function parseContent(raw: string | undefined): { text: string; attachmen
   }
 }
 
+/**
+ * The key an attachment reference names, or null when it cannot be opened: no
+ * object yet (uploading), or no key version and digest (a reference from
+ * before #1382, sealed under the retired scheme).
+ */
+function keyScopeFor(a: AttachmentWire, origin: ContentOrigin): AttachmentKeyScope | null {
+  if (!a.key || !a.sha || typeof a.kv !== 'number') {
+    return null;
+  }
+  if (origin === 'vault') {
+    return a.kv === 0 ? { kind: 'vault' } : null;
+  }
+  return a.kv >= 1
+    ? { kind: 'conversation', conversation_id: origin.conversationId, key_version: a.kv }
+    : null;
+}
+
 function transformMessage(m: RawMessage): Message {
   // m.content is undefined when the server returned null (e.g. decryption failure).
   // Keep content_decrypted as undefined in that case so MessageList can show
   // [encrypted] instead of silently filtering the message out.
-  const parsed = m.content !== undefined ? parseContent(m.content) : null;
+  const parsed = m.content !== undefined ? parseContent(m.content, { conversationId: m.conversation_id }) : null;
   return {
     id: m.id,
     channel_id: undefined,
@@ -177,7 +205,7 @@ export function transformChannelMessage(m: RawChannelMessage): Message {
   // m.content is undefined when the server returned null (e.g. decryption failure).
   // Keep content_decrypted as undefined in that case so MessageList can show
   // [encrypted] instead of silently filtering the message out.
-  const parsed = m.content !== undefined ? parseContent(m.content) : null;
+  const parsed = m.content !== undefined ? parseContent(m.content, { conversationId: m.conversation_id }) : null;
   return {
     id: m.id,
     channel_id: undefined,

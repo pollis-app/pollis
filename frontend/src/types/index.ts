@@ -202,10 +202,26 @@ export interface MessageReceipts {
   read_by: string[];
 }
 
+/**
+ * Which key an attachment is sealed under (#1382). Mirrors
+ * `pollis_core::commands::r2::AttachmentKeyScope` — keep the two in sync.
+ */
+export type AttachmentKeyScope =
+  | { kind: "conversation"; conversation_id: string; key_version: number }
+  | { kind: "vault" };
+
+/** Where a content string came from, which decides its attachments' key scope. */
+export type ContentOrigin = { conversationId: string } | "vault";
+
 export interface MessageAttachment {
   id: string;
   object_key: string;       // R2 object key — empty string while upload is in progress
-  content_hash: string;     // SHA-256(plaintext) hex — used to derive decryption key via HKDF
+  // The object's random file id (#1382). NOT derived from the content: the key
+  // comes from the conversation's MLS-wrapped key ring (or the Vault key).
+  content_hash: string;
+  sha256: string;           // plaintext SHA-256, verified after decrypt
+  // null while uploading, or for a pre-#1382 reference that can no longer be opened
+  key_scope: AttachmentKeyScope | null;
   filename: string;
   content_type: string;
   file_size: number;
