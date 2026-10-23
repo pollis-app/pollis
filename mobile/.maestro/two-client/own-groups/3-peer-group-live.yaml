@@ -1,0 +1,17 @@
+appId: com.pollis.mobile
+tags:
+  - two-client
+---
+# OWN GROUPS, part 3 of 3. The peer (the user's other device) just created a
+# group. The phone sits on the Groups tab and does nothing: no tap, no
+# navigation, no relaunch, nothing that refetches the list. Its pill must
+# appear anyway — the inbox `membership_changed` that `create_group` sends is
+# the only thing that can make it.
+
+- assertVisible:
+    id: "screen-groups"
+- extendedWaitUntil:
+    visible:
+      id: "row-group-${MAESTRO_PEER_GROUP_ID}"
+    timeout: 30000
+- takeScreenshot: own-groups-04-peer-group-live
