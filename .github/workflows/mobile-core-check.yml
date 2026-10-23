@@ -101,6 +101,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: android-aarch64
+          # No rustc-environment hash: the runner image's own `stable` is hashed
+          # into it and differs between images mid-rollout, which split the key
+          # and made PRs miss `main`'s cache (see mls-tests.yml).
+          add-rust-environment-hash-key: false
           # Only `main` writes; PRs restore (see the `push:` trigger above).
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -131,6 +135,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: ios-aarch64
+          # No rustc-environment hash: the runner image's own `stable` is hashed
+          # into it and differs between images mid-rollout, which split the key
+          # and made PRs miss `main`'s cache (see mls-tests.yml).
+          add-rust-environment-hash-key: false
           # Only `main` writes; PRs restore (see the `push:` trigger above).
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -243,6 +251,8 @@ jobs:
   # runner with no EAS account and no signing secret.
   android-build:
     runs-on: ubuntu-latest
+    # ~28 min cold before the single-ABI change; nothing needs six hours.
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -268,6 +278,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: android-apk
+          # No rustc-environment hash: the runner image's own `stable` is hashed
+          # into it and differs between images mid-rollout, which split the key
+          # and made PRs miss `main`'s cache (see mls-tests.yml).
+          add-rust-environment-hash-key: false
           # Only `main` writes; PRs restore (see the `push:` trigger above).
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -347,6 +361,15 @@ jobs:
       # intermittently dies of OutOfMemoryError — usually surfaced as the
       # task failing with a NULL message, because the OOM eats it. The
       # runners have 16g.
+      #
+      # ONE ABI (arm64-v8a), not three. This step was the slowest in all of PR
+      # CI (~24 min median), most of it the per-ABI CMake builds of the RN
+      # native modules — the same C++ compiled three times. One ABI exercises
+      # every source, the prebuild, the uniffi JSI glue and the Gradle
+      # packaging; the 3-ABI Rust cross-compile above still runs, and
+      # mobile-apk-release.yml builds all three ABIs for every shipped APK.
+      # Same choice as scripts/build-release-sims.sh. The PR artifact is
+      # therefore an arm64 APK, which is what nearly every phone takes.
       - name: Assemble release APK
         working-directory: mobile/android
         env:
@@ -355,7 +378,7 @@ jobs:
           # wrapper versions. Metaspace reverts to the JVM's unbounded
           # default, which is fine here.
           GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx4096m
-        run: ./gradlew :app:assembleRelease --no-daemon
+        run: ./gradlew :app:assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
 
       - name: Upload APK
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
