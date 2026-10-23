@@ -234,6 +234,27 @@ pub(super) fn dispatch_data(
                 });
             }
         }
+        // Both were published by every client and handled by the renderer, but
+        // never forwarded from here, so a delete or a role change reached other
+        // desktops only on their next refetch.
+        Some("deleted_message") => {
+            // §5: no `deleted_by` — the actor is re-derived from the tombstone
+            // envelope on ingest.
+            if let Some(message_id) = data.get("message_id").and_then(|v| v.as_str()) {
+                let _ = channel.send(RealtimeEvent::DeletedMessage {
+                    channel_id: data.get("channel_id").and_then(|v| v.as_str()).map(str::to_owned),
+                    conversation_id: data.get("conversation_id").and_then(|v| v.as_str()).map(str::to_owned),
+                    message_id: message_id.to_owned(),
+                });
+            }
+        }
+        Some("member_role_changed") => {
+            if let Some(group_id) = data.get("group_id").and_then(|v| v.as_str()) {
+                let _ = channel.send(RealtimeEvent::MemberRoleChanged {
+                    group_id: group_id.to_owned(),
+                });
+            }
+        }
         Some("enrollment_requested") => {
             // DS-originated only (`bootstrap::enrollment_request`): the DS refuses
             // this type from clients, and a participant-published copy — which
@@ -368,6 +389,29 @@ mod tests {
     fn wake(payload: serde_json::Value) -> Option<MembershipWake> {
         let sink = Recording(Mutex::new(Vec::new()));
         dispatch_data(payload.to_string().as_bytes(), None, &sink)
+    }
+
+    /// Every wake-up a client publishes reaches the renderer. A type that
+    /// falls through to `_ => {}` is published to nobody: the sender believes
+    /// it told the room, and every receiver stays stale until a refetch.
+    #[test]
+    fn every_published_wake_up_reaches_the_renderer() {
+        use crate::commands::livekit_signalling as sig;
+        let published = [
+            sig::new_message_payload(Some("c1"), Some("g1")),
+            sig::edited_message_payload(Some("c1"), Some("g1"), "m1"),
+            sig::deleted_message_payload(Some("c1"), Some("g1"), "m1"),
+            sig::membership_changed_payload("g1"),
+            serde_json::json!({ "type": "join_requests_changed", "group_id": "g1" }),
+            serde_json::to_value(RealtimeEvent::MemberRoleChanged { group_id: "g1".into() })
+                .unwrap(),
+        ];
+        for payload in published {
+            let got = run(payload.clone(), None);
+            assert_eq!(got.len(), 1, "dropped on receipt: {payload}");
+            let event = serde_json::to_value(&got[0]).unwrap();
+            assert_eq!(event["type"], payload["type"], "forwarded as the wrong event");
+        }
     }
 
     /// #1081: a leave is the one membership change with no committer, so the

@@ -313,7 +313,10 @@ Four rules, each of which had been broken somewhere and cost real round trips:
   permission state changes outside the app entirely and no event exists for it. If
   you find yourself wanting the override, the missing piece is usually a realtime
   event: #874 added `membership_changed` publishes to `create_channel`,
-  `update_channel` and `update_group`, which is what let the sidebar drop it.
+  `update_channel` and `update_group`, which is what let the sidebar drop it;
+  `create_group` sends one to the creator's own inbox, so the user's other
+  devices list a group the moment it exists (`mls.md` → "A new group has no
+  room yet").
 - **A cache key names its INPUTS, in full.** Not their count
   (`useAllPendingJoinRequests` was keyed on `adminGroupIds.length`, so two different
   sets of three groups shared one entry), and not a key already meaning something

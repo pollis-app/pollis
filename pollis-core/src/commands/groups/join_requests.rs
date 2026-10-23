@@ -182,7 +182,7 @@ pub async fn approve_join_request(
 
     // Notify existing group members so they refetch the member list.
     if let Err(e) = crate::commands::livekit::publish_membership_changed_to_room(
-        &state.livekit,
+        state,
         &group_id,
     ).await {
         crate::diag!("[realtime] approve_join_request: notify group {group_id}: {e}");

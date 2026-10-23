@@ -1,4 +1,4 @@
-use crate::harness::{wipe, TestClient};
+use crate::harness::{await_wake_up, enroll_second_device, wipe, TestClient};
 use serde_json::json;
 use serial_test::serial;
 
@@ -569,4 +569,115 @@ async fn a_non_member_can_still_find_and_join_a_group() {
 
     drop(alice);
     drop(carol);
+}
+
+// ─── Group-structure wake-ups ────────────────────────────────────────────────
+
+/// Without the media stack (the mobile build, and this headless one) the core
+/// holds no LiveKit `Room`, so a group-room wake-up must go through the DS's
+/// SendData — these used to be no-ops there, and a channel made on a phone
+/// reached nobody's sidebar live. With media on, the same publishers ride the
+/// connected room instead, which the suite has none of.
+#[cfg(not(feature = "media"))]
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn group_structure_wake_ups_leave_a_core_without_a_room() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    alice.sign_up("alice@test.local").await;
+    let mut bob = TestClient::new().await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+    let group = alice.create_group("Structure").await;
+    alice.invite(&group, &bob_profile.username).await;
+    let invite = bob.first_pending_invite().await.expect("bob's invite");
+    bob.accept_invite(invite["id"].as_str().expect("invite id")).await;
+
+    let is = |kind: &'static str| {
+        let group = group.clone();
+        move |p: &serde_json::Value| p["type"] == kind && p["group_id"] == group.as_str()
+    };
+
+    alice.create_channel(&group, "fresh").await;
+    let wake = await_wake_up(&group, is("membership_changed"))
+        .await
+        .expect("create_channel must wake the group's room");
+    assert!(!(400..500).contains(&wake.status), "refused: {wake:?}");
+
+    alice.set_member_role(&group, &bob_profile.id, "admin").await;
+    let wake = await_wake_up(&group, is("member_role_changed"))
+        .await
+        .expect("set_member_role must wake the group's room");
+    assert!(!(400..500).contains(&wake.status), "refused: {wake:?}");
+
+    drop(alice);
+    drop(bob);
+}
+
+// ─── A user's own devices ────────────────────────────────────────────────────
+
+/// A group created on one of a user's devices reaches their OTHER devices
+/// without a refresh — desktop to phone and phone to desktop alike, since both
+/// run this core.
+///
+/// The other device has nothing to notice on its own: it is not in the new
+/// group's room (it does not know the group exists), so nothing it listens to
+/// says a word about it. The creator has to wake it, on the one room every
+/// device of the account is always in — its inbox — with the
+/// `membership_changed` every client already answers by pulling its Welcomes
+/// and refetching the group list. `create_group` used to send nothing at all,
+/// so the group appeared on the other device only after a hard refresh.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_group_created_on_one_device_wakes_the_users_other_devices() {
+    wipe().await;
+
+    let mut d1 = TestClient::new().await;
+    let me = d1.sign_up("alice@test.local").await;
+    let d2 = enroll_second_device(&d1, "alice@test.local").await;
+    assert!(d2.list_group_ids().await.is_empty(), "d2 starts with no groups");
+
+    let group = d1.create_group("Made on d1").await;
+
+    // The wake-up, to the account's own inbox, naming the group — and let
+    // through by the DS's authz (the suite has no LiveKit, so an accepted
+    // request ends in 503 "not configured"; a refused one is a 4xx).
+    let inbox = format!("inbox-{}", me.id);
+    let wake = await_wake_up(&inbox, |p| {
+        p["type"] == "membership_changed" && p["group_id"] == group.as_str()
+    })
+    .await
+    .unwrap_or_else(|| panic!("create_group must wake the user's other devices on {inbox}"));
+    assert!(!(400..500).contains(&wake.status), "the DS refused the wake-up: {wake:?}");
+    // A bare wake-up: no `kind`, so no device raises an invite alert for a
+    // group its own user just made.
+    assert!(wake.payload.get("kind").map_or(true, |k| k.is_null()), "{wake:?}");
+
+    // What d2 does with it (`apply_membership_wake`, then the list refetch):
+    // the group is listed, and its Welcome was already waiting.
+    d2.poll().await;
+    assert!(
+        d2.list_group_ids().await.contains(&group),
+        "d2 must list the group d1 created"
+    );
+    let channel = d1.general_channel_id(&group).await;
+    d1.send_channel_message(&channel, "made on d1").await;
+    d2.invoke_json(
+        "ingest_channel_envelopes",
+        json!({ "userId": d2.user_id(), "channelId": channel }),
+    )
+    .await;
+    let page = d2
+        .invoke_json("read_channel_messages", json!({ "channelId": channel, "limit": 50 }))
+        .await;
+    let got: Vec<&str> = page["messages"]
+        .as_array()
+        .expect("messages array")
+        .iter()
+        .filter_map(|m| m["content"].as_str())
+        .collect();
+    assert!(got.contains(&"made on d1"), "d2 must read d1's message, got {got:?}");
+
+    drop(d1);
+    drop(d2);
 }

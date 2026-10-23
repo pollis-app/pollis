@@ -196,7 +196,7 @@ Idle auto-lock (#851) — the timer that was missing from `pin::lock`. Rust owns
 - `list_user_groups(user_id)` → `Group[]`
 - `list_user_groups_with_channels(user_id)` → `GroupWithChannels[]`
 - `list_group_channels(group_id, requester_id)` → `Channel[]` — **#917: members-only.** Took no caller until then, so any group's channel list was readable by anyone who named the group id. Channel names are content-adjacent metadata (`#general` says nothing, `#q3-layoffs` says a lot). Non-member → `you are not a member of this group`.
-- `create_group(name, description?, owner_id)` → `Group`
+- `create_group(name, description?, owner_id)` → `Group`. Also wakes the creator's other devices with a `membership_changed` to their own inbox, after the reconcile that queued their Welcomes (`mls.md` → "A new group has no room yet"). Tests: flows `groups::a_group_created_on_one_device_wakes_the_users_other_devices`, Maestro `scripts/maestro-own-groups.sh`.
 - `create_channel(group_id, name, description?, channel_type?)`
 - `send_group_invite(group_id, inviter_id, invitee_identifier)`
 - `get_pending_invites(user_id)` → `PendingInvite[]`
