@@ -11,8 +11,8 @@
 
 .doc-main {
   width: 100%;
-  max-width: 860px;
-  padding: 4rem 2rem 2rem;
+  max-width: 760px;
+  padding: 3.5rem 1.25rem 0;
   position: relative;
   z-index: 1;
 }
@@ -34,32 +34,35 @@
 
 /* ── Header ───────────────────────────────────────────────────── */
 .doc-header {
-  text-align: center;
-  margin-bottom: 1.5rem;
+  margin-bottom: 2rem;
+  padding-bottom: 2rem;
+  border-bottom: 1px solid var(--c-border);
 }
 
 .doc-title {
-  font-size: clamp(1.75rem, 4vw, 2.5rem);
-  color: var(--c-accent);
+  font-size: clamp(2rem, 5vw, 2.75rem);
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  color: var(--c-text);
   margin-bottom: 0.75rem;
 }
 
 .doc-subtitle {
   color: var(--c-text-muted);
-  font-size: 0.95rem;
+  font-size: 1.1rem;
   line-height: 1.6;
 }
 
 /* ── Lede / explainer box ─────────────────────────────────────── */
 .doc-explainer {
-  border: 2px solid var(--c-accent);
+  border: 1px solid var(--c-border);
   border-radius: 8px;
   padding: 1.25rem 1.5rem;
-  margin-bottom: 2.5rem;
-  font-size: 0.9rem;
+  margin-bottom: 3rem;
+  font-size: 1.0625rem;
   line-height: 1.7;
-  color: var(--c-text);
-  background: #000;
+  color: var(--c-text-body);
+  background: var(--c-surface);
 }
 
 .doc-explainer strong {
@@ -68,26 +71,27 @@
 
 /* ── Sections ─────────────────────────────────────────────────── */
 .doc-section {
-  margin-bottom: 2.5rem;
+  margin-bottom: 3rem;
 }
 
 .doc-section-title {
-  font-size: 1.25rem;
+  font-size: 1.5rem;
+  line-height: 1.25;
   color: var(--c-text);
-  margin-bottom: 0.35rem;
+  margin-bottom: 0.75rem;
 }
 
 .doc-sub-title {
-  font-size: 1rem;
+  font-size: 1.15rem;
   color: var(--c-text);
-  margin: 1.75rem 0 0.5rem;
+  margin: 2rem 0 0.5rem;
 }
 
 .doc-section p {
-  font-size: 0.9rem;
-  color: var(--c-text-muted);
+  font-size: 1.0625rem;
+  color: var(--c-text-body);
   line-height: 1.7;
-  margin-bottom: 0.9rem;
+  margin-bottom: 1rem;
 }
 
 .doc-section p strong,
@@ -98,20 +102,20 @@
 .doc-section ul,
 .doc-section ol {
   margin: 0 0 1rem 1.25rem;
-  font-size: 0.9rem;
-  color: var(--c-text-muted);
+  font-size: 1.0625rem;
+  color: var(--c-text-body);
   line-height: 1.7;
 }
 
 .doc-section li {
-  margin-bottom: 0.4rem;
+  margin-bottom: 0.5rem;
 }
 
 /* ── Card ─────────────────────────────────────────────────────── */
 .doc-card {
-  background: #000;
-  border: 2px solid var(--c-accent);
-  border-radius: 8px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
   padding: 1.5rem;
   margin-bottom: 1.25rem;
 }
@@ -131,14 +135,14 @@
 .doc-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.8rem;
+  font-size: 0.95rem;
   min-width: 34rem;
 }
 
 .doc-table caption {
   caption-side: top;
   text-align: left;
-  font-size: 0.78rem;
+  font-size: 0.9rem;
   color: var(--c-text-muted);
   padding-bottom: 0.5rem;
 }
@@ -172,10 +176,10 @@
 .doc-cmd {
   display: block;
   font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
-  font-size: 0.8rem;
+  font-size: 0.9rem;
   line-height: 1.6;
   color: var(--c-text);
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--c-surface);
   border: 1px solid var(--c-border);
   border-radius: 6px;
   padding: 0.75rem 0.9rem;
@@ -193,7 +197,7 @@
 
 .doc-cmd-note {
   display: block;
-  font-size: 0.78rem;
+  font-size: 0.9rem;
   color: var(--c-text-muted);
   line-height: 1.6;
   margin-bottom: 1.25rem;
@@ -202,7 +206,7 @@
 .doc-out {
   display: block;
   font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
-  font-size: 0.78rem;
+  font-size: 0.85rem;
   color: var(--c-text-muted);
   border-left: 2px solid var(--c-border);
   padding: 0.15rem 0 0.15rem 0.9rem;
@@ -255,13 +259,13 @@
   border-left: 2px solid var(--c-accent);
   padding-left: 1rem;
   margin: 1.5rem 0 0;
-  font-size: 0.85rem;
-  color: var(--c-text-muted);
+  font-size: 1rem;
+  color: var(--c-text-body);
   line-height: 1.7;
 }
 
 .doc-limit p {
-  font-size: 0.85rem;
+  font-size: 1rem;
   margin-bottom: 0.6rem;
 }
 
@@ -305,7 +309,7 @@
 
 /* ── Status line for a page whose data loads at runtime ───────── */
 .doc-loading {
-  font-size: 0.85rem;
+  font-size: 1rem;
   color: var(--c-text-muted);
   font-style: italic;
 }
