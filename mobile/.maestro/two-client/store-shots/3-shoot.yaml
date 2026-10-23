@@ -1,0 +1,58 @@
+appId: com.pollis.mobile
+tags:
+  - two-client
+---
+# STORE SHOTS, part 3 of 3: the peer has reacted and posted its last line.
+# One clean screenshot per listing screen (docs/store-listing.md §7).
+
+- tapOn:
+    id: "tab-groups"
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: store-01-groups
+
+- tapOn:
+    text: "General"
+- extendedWaitUntil:
+    visible: ".*sealed before it leaves.*"
+    timeout: 60000
+- tapOn:
+    id: "input-composer"
+- inputText: "That's the whole point. See you at standup"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*See you at standup.*"
+    timeout: 15000
+- hideKeyboard
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: store-02-channel
+- tapOn:
+    id: "btn-back"
+    optional: true
+
+- tapOn:
+    id: "tab-direct"
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: store-04-direct
+- tapOn:
+    id: "row-dm-.*"
+- extendedWaitUntil:
+    visible: ".*whenever you want them.*"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: store-03-dm
+- tapOn:
+    id: "btn-back"
+    optional: true
+
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-security"
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: store-05-security
