@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { View, Text, TextInput, Pressable } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
+import { KeyboardController } from "react-native-keyboard-controller";
 import { Trans, useTranslation } from "react-i18next";
 import { Screen, Header, Body, Button, BottomAction } from "../../components/ui";
 import { Icon } from "../../components/icons";
@@ -9,6 +10,7 @@ import { AuthError } from "../../components/auth/AuthError";
 import { semantic, fonts, r } from "../../theme/tokens";
 import { useVerifyOtp } from "../../hooks/queries/useAuth";
 import { useSubmitLock } from "../../hooks/useSubmitLock";
+import { reopenKeyboard } from "../../lib/codeFieldFocus";
 
 const CODE_LENGTH = 6;
 // Zero-width U+2060 after the address: forbids a line break between it and the
@@ -72,12 +74,13 @@ export default function AuthOTP() {
           }
         />
 
-        <View>
+        <View testID="otp-code-field">
           {/* The six boxes are a picture of the hidden input below; a tap on
-              them focuses it. Screen readers get the input itself, so the
-              boxes are hidden from them. */}
+              them reopens the keyboard, even after a dismiss that left the
+              input focused (lib/codeFieldFocus). Screen readers get the input
+              itself, so the boxes are hidden from them. */}
           <Pressable
-            onPress={() => input.current?.focus()}
+            onPress={() => reopenKeyboard(input.current, KeyboardController.isVisible())}
             accessible={false}
             importantForAccessibility="no-hide-descendants"
             accessibilityElementsHidden
@@ -115,7 +118,8 @@ export default function AuthOTP() {
             })}
           </Pressable>
           {/* input-otp is an opacity:0 proxy over the visual boxes,
-              autofocused on mount — Maestro types into it without a tap. */}
+              autofocused on mount — Maestro types into it without a tap.
+              It takes no touches, so every tap reaches the boxes' handler. */}
           <TextInput
             ref={input}
             testID="input-otp"
@@ -126,7 +130,7 @@ export default function AuthOTP() {
             onBlur={() => setFocused(false)}
             keyboardType="number-pad"
             autoFocus
-            style={{ position: "absolute", opacity: 0 }}
+            style={{ position: "absolute", opacity: 0, pointerEvents: "none" }}
           />
         </View>
 
