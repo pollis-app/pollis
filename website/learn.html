@@ -32,8 +32,8 @@
 
     .ln-main {
       width: 100%;
-      max-width: 820px;
-      padding: 4rem 2rem 2rem;
+      max-width: 800px;
+      padding: 3.5rem 1.25rem 0;
       position: relative;
       z-index: 1;
     }
@@ -54,33 +54,32 @@
     }
 
     .ln-header {
-      text-align: center;
-      margin-bottom: 1.5rem;
+      margin-bottom: 2rem;
+      padding-bottom: 2rem;
+      border-bottom: 1px solid var(--c-border);
     }
 
     .ln-title {
-      font-size: clamp(1.75rem, 4vw, 2.5rem);
-      color: var(--c-accent);
+      font-size: clamp(2rem, 5vw, 2.75rem);
+      line-height: 1.15;
+      letter-spacing: -0.01em;
+      color: var(--c-text);
       margin-bottom: 0.75rem;
     }
 
     .ln-subtitle {
-      color: var(--c-accent);
-      font-size: 0.95rem;
+      color: var(--c-text-muted);
+      font-size: 1.1rem;
+      line-height: 1.6;
       line-height: 1.6;
       max-width: 640px;
-      margin: 0 auto;
     }
 
     .ln-intro {
-      border: 2px solid var(--c-accent);
-      border-radius: 8px;
-      padding: 1.25rem 1.5rem;
-      margin: 2rem 0 2.5rem;
-      font-size: 0.9rem;
-      line-height: 1.7;
-      color: var(--c-text);
-      background: #000;
+      margin: 0 0 2.5rem;
+      font-size: 0.95rem;
+      line-height: 1.65;
+      color: var(--c-text-muted);
     }
 
     .ln-intro strong {
@@ -89,11 +88,12 @@
 
     /* ── 60-second summary ────────────────────────────────────── */
     .ln-tldr {
-      border: 2px solid var(--c-accent);
+      border: 1px solid var(--c-border);
+      border-left: 3px solid var(--c-accent);
       border-radius: 8px;
       padding: 1.25rem 1.5rem;
       margin: 2rem 0 1.5rem;
-      background: rgba(253, 186, 116, 0.05);
+      background: var(--c-surface);
     }
 
     .ln-tldr-label {
@@ -106,9 +106,9 @@
     }
 
     .ln-tldr p {
-      font-size: 0.95rem;
+      font-size: 1.0625rem;
       line-height: 1.7;
-      color: var(--c-text);
+      color: var(--c-text-body);
     }
 
     .ln-tldr-start {
@@ -215,7 +215,6 @@
       margin: 1.25rem 0;
       padding: 0.9rem 1rem;
       border: 1px solid var(--c-border);
-      border-left: 3px solid var(--c-accent);
       border-radius: 6px;
       background: rgba(255, 255, 255, 0.02);
       display: grid;
@@ -304,7 +303,7 @@
       padding: 0.9rem 1rem;
       border: 1px solid var(--c-border);
       border-radius: 8px;
-      background: #000;
+      background: var(--c-surface);
       overflow-x: auto;
     }
 
@@ -367,7 +366,6 @@
     /* ── The honest-limit callout — load-bearing, per the epic ── */
     .ln-limit {
       border: 1px solid var(--c-border);
-      border-left: 3px solid var(--c-accent);
       border-radius: 6px;
       padding: 1rem 1.25rem;
       margin: 1.75rem 0;
@@ -401,7 +399,7 @@
       display: block;
       border: 1px solid var(--c-border);
       border-radius: 8px;
-      background: #000;
+      background: var(--c-surface);
       aspect-ratio: 16 / 9;
     }
 
@@ -790,7 +788,7 @@
       padding: 0.7rem 0.85rem;
       border: 1px solid var(--c-border);
       border-radius: 6px;
-      background: #000;
+      background: var(--c-surface);
     }
 
     .ln-hash-moved {
@@ -838,7 +836,7 @@
       border: 1px solid var(--c-border);
       border-radius: 8px;
       overflow: hidden;
-      background: #000;
+      background: var(--c-surface);
     }
 
     .ln-embed-frame iframe {
@@ -879,12 +877,20 @@
 </head>
 
 <body>
-  <!-- Dot matrix background -->
-  <div id="dot-matrix-bg"></div>
+  <header class="site-nav">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-nav-brand" aria-label="Pollis home"><img src="wordmark.svg" alt="Pollis" width="72" height="27" /></a>
+      <nav class="site-nav-links" aria-label="Primary">
+        <a href="index.html#download">Download</a>
+        <a href="security.html">Security</a>
+        <a href="faq.html">FAQ</a>
+        <a href="learn.html" aria-current="page">Learn</a>
+      </nav>
+    </div>
+  </header>
 
   <main>
     <div class="ln-main reading-surface">
-      <a href="index.html" class="ln-back">&larr; Back to Pollis</a>
 
       <div class="ln-header">
         <h1 class="ln-title">Learn</h1>
@@ -2319,29 +2325,46 @@ Both dashboards labelled, one release row taken apart, the same root in three pl
             target="_blank" rel="noopener noreferrer">BuildVerifyLine.tsx</a> for the four verdicts.
         </p>
       </section>
-
-
-      <div class="footer-links">
-        <a href="index.html" class="footer-link">Home</a>
-        <a href="security.html" class="footer-link">Security</a>
-        <a href="transparency.html" class="footer-link">Transparency</a>
-        <a href="artifacts.html" class="footer-link">Artifacts</a>
-        <a href="device-security.html" class="footer-link">Lost device</a>
-        <a href="assurance.html" class="footer-link">Assurance</a>
-        <a href="subprocessors.html" class="footer-link">Subprocessors</a>
-        <a href="privacy.html" class="footer-link">Privacy</a>
-        <a href="terms.html" class="footer-link">Terms</a>
-        <a href="retention.html" class="footer-link">Retention</a>
-        <a href="legal-requests.html" class="footer-link">Legal requests</a>
-        <a href="continuity.html" class="footer-link">Continuity</a>
-        <a href="https://status.pollis.com/" class="footer-link" target="_blank" rel="noopener noreferrer">Status</a>
-        <a href="faq.html" class="footer-link">FAQ</a>
-      </div>
     </div>
   </main>
 
-  <footer>
-    <p id="year-copyright"></p>
+  <footer class="site-footer">
+    <div class="site-footer-inner">
+      <div class="site-footer-col">
+        <h2 class="site-footer-title">Get Pollis</h2>
+        <ul>
+          <li><a href="index.html#download">Desktop</a></li>
+          <li><a href="android.html">Android</a></li>
+          <li><a href="index.html#terminal">Terminal client</a></li>
+          <li><a href="https://status.pollis.com/" target="_blank" rel="noopener noreferrer">Status</a></li>
+          <li><a href="https://github.com/pollis-app/pollis" target="_blank" rel="noopener noreferrer">Source code</a></li>
+        </ul>
+      </div>
+      <div class="site-footer-col">
+        <h2 class="site-footer-title">How it works</h2>
+        <ul>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="learn.html" aria-current="page">Learn</a></li>
+          <li><a href="faq.html">FAQ</a></li>
+          <li><a href="transparency.html">Key transparency</a></li>
+          <li><a href="artifacts.html">Release artifacts</a></li>
+          <li><a href="assurance.html">Assurance</a></li>
+        </ul>
+      </div>
+      <div class="site-footer-col">
+        <h2 class="site-footer-title">Policies</h2>
+        <ul>
+          <li><a href="privacy.html">Privacy</a></li>
+          <li><a href="terms.html">Terms</a></li>
+          <li><a href="retention.html">Retention</a></li>
+          <li><a href="subprocessors.html">Subprocessors</a></li>
+          <li><a href="legal-requests.html">Legal requests</a></li>
+          <li><a href="continuity.html">Continuity</a></li>
+          <li><a href="device-security.html">Lost device</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="site-footer-copy" id="year-copyright">© 2026 Pollis. All rights reserved.</p>
   </footer>
 
   <script src="script.js"></script>
