@@ -538,6 +538,19 @@ cd android && ./gradlew :app:bundleRelease
 #   unzip -l <aab> | grep -o "base/lib/[a-z0-9_-]*" | sort -u   # 3 entries  (~180 MB, 4 ABIs)
 ```
 
+**Permissions and shrinking (1.0.13).** Release builds run R8 with resource
+shrinking (`expo-build-properties` `enableMinifyInReleaseBuilds` /
+`enableShrinkResourcesInReleaseBuilds`; Play had rated 1.0.11's 65.5 MB of DEX
+"Low"). `android.blockedPermissions` strips what libraries add but the app never
+uses: the LiveKit/WebRTC set (SYSTEM_ALERT_WINDOW, FOREGROUND_SERVICE, Bluetooth,
+MODIFY_AUDIO_SETTINGS — voice is not wired on mobile, #343), expo-secure-store's
+biometric pair (no biometric auth is requested), DUMP, and sixteen vendor
+launcher-badge permissions (no badge count is ever set). Storage stays: saving
+to the library on Android 7–9 needs WRITE_EXTERNAL_STORAGE. When voice is built,
+unblock its permissions in the same PR. `tests/android-permissions.test.ts`
+pins both lists and the R8 flags. Check the merged manifest after a dependency
+bump — Play's bundle explorer lists every permission a build carries.
+
 Verify, then upload with `scripts/play-publish.py` (Play Developer API through
 the `play-publisher@pollis.iam.gserviceaccount.com` service account; key in
 Doppler `PLAY_SERVICE_ACCOUNT_JSON`, copy in 1Password):
