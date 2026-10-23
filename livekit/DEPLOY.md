@@ -34,11 +34,11 @@ stayed down for six days despite `restart: unless-stopped`.
 |---------|----------------|------------|
 | `livekit` | `livekit/livekit-server:v1.13.9` | this compose |
 | `nginx` (shared ingress) | `nginx:1.30-alpine` | this compose |
-| `delivery` / `delivery-dev` | `ghcr.io/actuallydan/pollis-delivery:{prod,dev}` | **#407** (Watchtower) — standalone |
-| `watchtower` | `containrrr/watchtower` | **#407** — standalone |
 
-All five containers share the `livekit_default` docker network. nginx reaches
-the delivery/watchtower containers by network alias.
+These two are the only Pollis containers on the box (checked 2026-10-23). The
+Delivery Service and its Watchtower moved to Cloudflare Containers in #515, so
+`delivery`/`delivery-dev`/`watchtower` no longer run here. The one other
+container, `agent-box`, is a standalone side project unrelated to Pollis.
 
 ```
 livekit/
