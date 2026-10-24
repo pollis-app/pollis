@@ -11,7 +11,7 @@
 # The certificate is compiled into every prod build (app.config.js,
 # `updates.codeSigningCertificate`); the app then refuses any OTA manifest not
 # signed by the private key. The key lives in exactly one place that can use
-# it: the `ota-signing` GitHub environment (required reviewer), as the
+# it: the `ota-signing` GitHub environment (refs: main + mobile-ota-* tags), as the
 # environment secret OTA_CODE_SIGNING_KEY, synced from Doppler. It is never on
 # the update server (the DS Worker at api.pollis.com/updates/ only passes
 # pre-signed bytes through).
@@ -86,8 +86,8 @@ Next, in this order:
   1. Store the PRIVATE KEY in Doppler (project pollis, config prd_prod):
        doppler secrets set OTA_CODE_SIGNING_KEY -p pollis -c prd_prod < "${KEY_DIR}/private-key.pem"
      Doppler must sync it ONLY to the GitHub environment \`ota-signing\`
-     (Settings → Environments → ota-signing: required reviewer = you, deployment
-     branches/tags = main + mobile-ota-*), as the environment secret
+     (Settings → Environments → ota-signing: deployment
+     branches/tags = main + mobile-ota-*; no required reviewer), as the environment secret
      OTA_CODE_SIGNING_KEY — never as a repository secret.
   2. Keep an offline copy (1Password, like the sideload keystore), then delete
      ${KEY_DIR}/private-key.pem from this machine.
