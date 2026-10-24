@@ -13,7 +13,7 @@
 import { useCallback } from "react";
 import { useRouter, useSegments, type Href } from "expo-router";
 import { useIsRegular } from "./useLayoutClass";
-import { useUserGroupsWithChannels } from "./queries";
+import { markConversationRead, useUserGroupsWithChannels } from "./queries";
 import { appStore } from "../stores/appStore";
 
 export type ConversationTarget = {
@@ -33,14 +33,14 @@ export function selectConversation(
 ): "/(tabs)/groups" | "/(tabs)/direct" {
   if (target.kind === "dm") {
     appStore.setSelectedConversationId(target.id);
-    appStore.markRead(target.id);
+    markConversationRead(target.id);
     return "/(tabs)/direct";
   }
   if (groupIdForChannel && groupIdForChannel !== appStore.selectedGroupId) {
     appStore.setSelectedGroupId(groupIdForChannel);
   }
   appStore.setSelectedChannelId(target.id);
-  appStore.markRead(target.id);
+  markConversationRead(target.id);
   return "/(tabs)/groups";
 }
 
@@ -72,6 +72,19 @@ export function useOpenConversation() {
           null;
         goToTab(selectConversation(target, groupId));
         return;
+      }
+      // The chat screen joins a channel's realtime room by the selected
+      // group. A caller that came from outside the group (a notification
+      // tap, a permalink) has not selected it, so select it here, as the
+      // Search rows do before calling in.
+      if (target.kind === "channel") {
+        const groupId =
+          target.groupId ??
+          groups?.find((g) => g.channels.some((c) => c.id === target.id))?.id ??
+          null;
+        if (groupId && groupId !== appStore.selectedGroupId) {
+          appStore.setSelectedGroupId(groupId);
+        }
       }
       const href = {
         pathname: "/chat/[id]",

@@ -43,6 +43,7 @@ import {
   messageQueryKeys,
   useIngestConversation,
 } from "./queries/useMessages";
+import { refreshUnread } from "./queries/useUnread";
 import { deviceWasRevoked } from "../lib/deviceRevoked";
 import { isInSignedInApp, noticeEnrollmentRequested } from "../lib/enrollmentPrompt";
 
@@ -128,14 +129,20 @@ export function useInboxRealtime() {
           const kind = event.channel_id ? "channel" : "dm";
           // Unread: never for the conversation on screen. Selection is set on
           // row press and cleared when a list screen regains focus on compact
-          // layouts, so "selected" tracks "open".
+          // layouts; the chat screen also records itself as open, which covers
+          // one reached without a row press (a notification tap). The open
+          // chat advances its own read cursor as the message renders.
           const isOpen =
             appStore.selectedChannelId === id ||
-            appStore.selectedConversationId === id;
+            appStore.selectedConversationId === id ||
+            appStore.openConversationId === id;
           // Land the envelope (ingest refreshes the message cache + previews),
-          // then read the newest row back to see who wrote it.
-          void ingestRef.current(id, kind).then(async () => {
+          // then read the newest row back to see who wrote it. The bump below
+          // is the instant badge; the persisted counts are re-read after it
+          // (not by the ingest), so the two cannot add up to a double count.
+          void ingestRef.current(id, kind, { refreshUnread: false }).then(async () => {
             if (isOpen) {
+              refreshUnread(qc);
               return;
             }
             let latest: WakeLatest | null = null;
@@ -150,6 +157,7 @@ export function useInboxRealtime() {
             if (shouldCountUnread({ latest, selfId: userId, isOpen })) {
               appStore.incrementUnread(id);
             }
+            refreshUnread(qc);
           });
           break;
         }

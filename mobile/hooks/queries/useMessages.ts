@@ -26,6 +26,7 @@ import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
 import type { MessageAttachment } from "../../types";
 import { searchQueryKeys } from "./useSearch";
+import { refreshUnread } from "./useUnread";
 import { aliasAttachment } from "../../lib/media/viewer";
 import {
   outgoingAttachments,
@@ -774,12 +775,23 @@ export function useDeleteMessage(
  * in the chat screen when the screen mounts or refocuses, so the user sees
  * any messages delivered while the app was backgrounded.
  */
+export interface IngestOptions {
+  // Re-read the unread counts once the envelopes land (default true). The
+  // live wake-up passes false: it bumps the badge itself and refetches after,
+  // so a refetch landing before its bump cannot count the message twice.
+  refreshUnread?: boolean;
+}
+
 export function useIngestConversation() {
   const currentUser = useObserver(() => appStore.currentUser);
   const queryClient = useQueryClient();
 
   return useCallback(
-    async (conversationId: string, kind: ConversationKind) => {
+    async (
+      conversationId: string,
+      kind: ConversationKind,
+      opts: IngestOptions = {},
+    ) => {
       if (!currentUser) {
         return;
       }
@@ -817,6 +829,12 @@ export function useIngestConversation() {
         // And may be the newest in their conversation: refresh the list
         // previews, which read the same local store.
         queryClient.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
+        // And may be unread: the badges come from the persisted cursors, so
+        // this is what makes a message that landed while the app was away
+        // (push receipt, resume / reconnect catch-up) show where it landed.
+        if (opts.refreshUnread !== false) {
+          refreshUnread(queryClient);
+        }
       } catch (e) {
         // Best-effort — ingest is advisory. The next refetch will retry.
         console.warn("[useIngestConversation] ingest failed:", e);

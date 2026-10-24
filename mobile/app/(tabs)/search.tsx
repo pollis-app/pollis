@@ -25,6 +25,7 @@ import {
   useSearchMessages,
   useUserGroupsWithChannels,
   useUserSearch,
+  markConversationRead,
 } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
 import { useOpenConversation } from "../../hooks/useOpenConversation";
@@ -353,7 +354,7 @@ export default function Search() {
                     // Mirror the groups-tab rows: select + clear unread on open.
                     appStore.setSelectedGroupId(c.groupId);
                     appStore.setSelectedChannelId(c.id);
-                    appStore.markRead(c.id);
+                    markConversationRead(c.id);
                     openConversation({
                       id: c.id,
                       kind: "channel",
@@ -473,7 +474,7 @@ export default function Search() {
                         }
                         appStore.setSelectedChannelId(m.conversation_id);
                       }
-                      appStore.markRead(m.conversation_id);
+                      markConversationRead(m.conversation_id);
                       const name = m.conversation_name ?? info?.name;
                       openConversation({
                         id: m.conversation_id,
