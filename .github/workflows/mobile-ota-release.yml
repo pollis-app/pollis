@@ -10,7 +10,8 @@ name: Mobile OTA Release (signed JS updates)
 # An OTA replaces the code that handles plaintext and skips store review, so:
 #
 #   * Every manifest and directive is SIGNED (RSA-SHA256) by a key that exists
-#     only in the `ota-signing` environment, which has a required reviewer. The
+#     only in the `ota-signing` environment (deployment refs: main + mobile-ota-*
+#     tags; no reviewer, so the tag push is the approval). The
 #     `sign` job is the only job that can read it, it runs no npm tree (bare
 #     node + mobile/scripts/ota/lib.ts, node: built-ins only), and it re-derives
 #     every hash and the prod-DS check from the bytes before it signs. The app
@@ -276,10 +277,11 @@ jobs:
             ${{ runner.temp }}/ota/files/
           if-no-files-found: error
 
-  # THE approval gate. `ota-signing` is a GitHub environment with a required
-  # reviewer and the OTA_CODE_SIGNING_KEY secret; this job waits for a human
-  # before it can read the key. The reviewer approves the summary the build or
-  # prepare job printed (platforms, runtime versions, update ids, bundle hashes).
+  # The only job that can read the key. `ota-signing` is a GitHub environment
+  # holding OTA_CODE_SIGNING_KEY, open only to `main` and `mobile-ota-*` tag
+  # refs. It has no required reviewer, so a tag push signs and publishes
+  # unattended; the build or prepare job's summary (platforms, runtime
+  # versions, update ids, bundle hashes) is the record of what went out.
   sign:
     needs: [plan, build, prepare]
     if: >-
