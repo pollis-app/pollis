@@ -297,6 +297,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "file_keystate",
         include_str!("../migrations/000036_file_keystate.sql"),
     ),
+    (
+        37,
+        "push_ticket",
+        include_str!("../migrations/000037_push_ticket.sql"),
+    ),
 ];
 
 /// Every script for the MAIN DB, in apply order (baseline first). One element

@@ -1180,6 +1180,16 @@ global ordering + a UNIQUE index enforcing the per-subject invariant).
 
 **Rollout, and why it took one step rather than two (#1157).** #1122 landed the handle alongside `conversationId` on the usual additive plan — send both, prefer the handle, drop the old field once clients that prefer it are the floor. #1157 then dropped it immediately, because the floor turned out to be vacuous: **mobile has never been distributed** (#712, #340 and #341 are all still open), and mobile is the only push consumer — desktop never registers a token. There is no shipped client reading `conversationId`, so waiting a release would have bought nothing and left the disclosure open for it.
 
+### push_ticket _(migration 000037, #1423)_
+- `ticket_id` TEXT PK _(Expo's ticket id, 1-128 chars)_
+- `token` TEXT NOT NULL _(the push token the message went to)_
+- `created_at` INTEGER NOT NULL _(unix seconds)_
+- trigger `push_ticket_bound`: every insert drops rows more than 24 h older than it
+
+**Why.** Expo answers a push with a per-message ticket, and what APNs/FCM made of an accepted message arrives only later as a receipt, fetched by ticket id. `DeviceNotRegistered` after an uninstall or an FCM token rotation, and `InvalidCredentials`, often show up only there. `push::send_batch` reads every ticket (an error class is counted, logged by class only, and `DeviceNotRegistered` deletes the `push_token` row), and keeps each accepted ticket id here; `push::check_push_receipts`, run by the GC sweep, asks Expo for the receipts, handles them the same way, and deletes each answered row. Counts are served on `GET /v1/ops/push`.
+
+**Not who.** The token is already in `push_token`; nothing here says which user or conversation a push was for. Rows go with the token, with account deletion (through the user's tokens, `teardown::purge_user_rows`), and after 24 hours, when Expo would no longer answer anyway.
+
 The payload is now `data: { h }` and nothing else, and `mobile/lib/push/routing.ts` has no `conversationId` branch at all — a payload carrying one is *ignored*, so a rolled-back DS or a malicious push to a stolen token cannot re-enable the disclosure by putting the field back.
 
 ### user_groups / user_dms _(migration 000009 — created, then retired #1085)_

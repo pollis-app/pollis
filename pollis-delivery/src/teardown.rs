@@ -78,6 +78,7 @@ pub const USER_PURGED_TABLES: &[&str] = &[
     "mls_welcome",
     "pinned_message",
     "push_handle",
+    "push_ticket",
     "push_token",
     "read_cursor_sync",
     "security_event",
@@ -324,6 +325,13 @@ pub async fn purge_user_rows(conn: &Connection, user_id: &str) -> anyhow::Result
     conn.execute("DELETE FROM device_enrollment_request WHERE user_id = ?1", uid()).await?;
     conn.execute("DELETE FROM mls_key_package WHERE user_id = ?1", uid()).await?;
     conn.execute("DELETE FROM conversation_watermark WHERE user_id = ?1", uid()).await?;
+    // #1423: tickets awaiting a receipt name only a token, so they go via the
+    // user's tokens, before those are deleted.
+    conn.execute(
+        "DELETE FROM push_ticket WHERE token IN (SELECT token FROM push_token WHERE user_id = ?1)",
+        uid(),
+    )
+    .await?;
     conn.execute("DELETE FROM push_token WHERE user_id = ?1", uid()).await?;
     // #1122: the only durable record that a notification for some conversation
     // went to this user. A deleted account must not leave it behind.
