@@ -1139,7 +1139,11 @@ Current state:
 - **Push (client wired):** `lib/push/` + `usePushNotifications` — contextual
   permission (asked on first conversation open, not at login), token registration
   (`register_push_token`, best-effort), content-free tap/data handlers, and a
-  Notifications row in Preferences. Push covers backgrounded/closed delivery;
+  Notifications row in Preferences. Since #1423 (`lib/push/registration.ts`,
+  `hooks/usePushRegistration.ts`, `tests/push-registration.test.ts`) a user counts
+  as registered only after the DS accepted the token, and the app also registers
+  without prompting on sign-in/unlock and every return to the foreground, and
+  re-registers on `Notifications.addPushTokenListener` (token rotation). Push covers backgrounded/closed delivery;
   foreground delivery is the realtime path above.
 - **Voice — libraries installed, NOT activated (#343).** Mobile will take the
   **JS LiveKit SDK** path (`@livekit/react-native` + `@livekit/react-native-webrtc`)
