@@ -19,7 +19,8 @@
 //
 // Everything degrades gracefully: denied permission, a missing EAS
 // projectId, or a failed `register_push_token` call all resolve without
-// throwing, leaving the app working exactly as it does today.
+// throwing, leaving the app working exactly as it does today. A failed
+// registration is retried on the next foreground, unlock or chat open (#1423).
 
 import { Platform, Linking } from "react-native";
 import * as Notifications from "expo-notifications";
@@ -27,6 +28,7 @@ import Constants from "expo-constants";
 import { invoke } from "../native";
 import i18n from "../../i18n";
 import { readPayloadRouting } from "./routing";
+import { createPushRegistrar, type EnsureOptions } from "./registration";
 
 // Present foreground notifications as a banner / in the list, content-free
 // (no sound, no badge). This is pure config and safe at module load — it
@@ -57,15 +59,43 @@ async function ensureAndroidChannel(): Promise<void> {
   });
 }
 
-// Registered-this-session guard so the whole flow (and the token POST) runs
-// at most once per signed-in user, even though we call it on every
-// conversation open.
-const registeredFor = new Set<string>();
+// The registration state machine (`./registration.ts`, #1423) over the real
+// native calls. It marks a user registered only once `register_push_token` has
+// succeeded, so a failure is retried on the next foreground, unlock or chat
+// open instead of sticking for the session.
+const registrar = createPushRegistrar({
+  getPermissions: () => Notifications.getPermissionsAsync(),
+  requestPermissions: () => Notifications.requestPermissionsAsync(),
+  prepare: ensureAndroidChannel,
+  getToken: async () => {
+    // projectId is required to mint an Expo push token. In bare/dev builds
+    // without EAS configured it's absent — degrade rather than throw.
+    const projectId =
+      Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
+    if (!projectId) {
+      console.warn("[push] no EAS projectId — skipping push token registration");
+      return null;
+    }
+    return (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+  },
+  register: async (userId, token) => {
+    await invoke("register_push_token", {
+      userId,
+      token,
+      platform: Platform.OS,
+    });
+  },
+  warn: (message, error) => {
+    console.warn(message, error);
+  },
+});
 
 /**
- * Contextual permission + registration. Call this at a moment where
- * notifications are obviously useful — we trigger it the first time a
- * conversation is opened — NOT at login.
+ * Permission + registration.
+ *
+ * With `prompt` (the default) this is the contextual moment — a conversation
+ * opened, the Preferences toggle — where notifications are obviously useful,
+ * so the one-shot OS prompt may fire. Never at login.
  *
  * The OS permission prompt is one-shot: once a user answers, you can't show
  * it again in-app. So we pre-check with `getPermissionsAsync` and only fire
@@ -73,65 +103,36 @@ const registeredFor = new Set<string>();
  * granted we skip straight to registration; if denied we do nothing (turning
  * it back on is a Settings trip — see `openNotificationSettings`).
  *
+ * `prompt: false` registers only if permission is already granted; the app
+ * calls it on sign-in/unlock and every return to the foreground
+ * (`usePushRegistration`). `refresh: true` re-fetches the token even when
+ * already registered — a token rotation.
+ *
  * Returns the Expo push token, or null if not granted / already handled / no
  * EAS projectId / the `register_push_token` call fails. Best-effort
  * throughout: never throws, never blocks the UI.
  */
-export async function ensurePushRegistration(
+export function ensurePushRegistration(
   userId: string,
+  options: EnsureOptions = {},
 ): Promise<string | null> {
-  // Already handled this session — re-entry on later conversation opens is a
-  // cheap no-op rather than a repeated token fetch.
-  if (registeredFor.has(userId)) {
-    return null;
-  }
+  return registrar.ensure(userId, { prompt: true, ...options });
+}
 
-  const current = await Notifications.getPermissionsAsync();
-  let granted = current.granted;
-  // Only fire the one-shot OS prompt while the system says we still can
-  // (i.e. the user hasn't already answered).
-  if (!granted && current.canAskAgain) {
-    granted = (await Notifications.requestPermissionsAsync()).granted;
-  }
-  if (!granted) {
-    // Denied (or can't ask again). Don't mark as handled — a later Settings
-    // grant should still be picked up on the next conversation open.
-    return null;
-  }
-
-  await ensureAndroidChannel();
-
-  // projectId is required to mint an Expo push token. In bare/dev builds
-  // without EAS configured it's absent — degrade rather than throw.
-  const projectId =
-    Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
-  if (!projectId) {
-    console.warn("[push] no EAS projectId — skipping push token registration");
-    return null;
-  }
-
-  let token: Notifications.ExpoPushToken;
-  try {
-    token = await Notifications.getExpoPushTokenAsync({ projectId });
-  } catch (e) {
-    console.warn("[push] getExpoPushTokenAsync failed:", e);
-    return null;
-  }
-
-  // Best-effort backend registration. On failure we fall back to the
-  // focus/realtime ingest path, so a transient error here is non-fatal.
-  try {
-    await invoke("register_push_token", {
-      userId,
-      token: token.data,
-      platform: Platform.OS,
-    });
-  } catch {
-    // No-op — falls back to focus/realtime ingest.
-  }
-
-  registeredFor.add(userId);
-  return token.data;
+/**
+ * Re-register when the OS hands the app a new push token (#1423). FCM rotates
+ * tokens; without this the DS kept pushing to the dead one until a later chat
+ * open in a later session. The listener's own token is the native device
+ * token, not the Expo one, so this re-fetches the Expo token and re-registers
+ * only if it changed. Returns a disposer.
+ */
+export function addPushTokenRotationListener(userId: string): () => void {
+  const sub = Notifications.addPushTokenListener(() => {
+    void ensurePushRegistration(userId, { prompt: false, refresh: true });
+  });
+  return () => {
+    sub.remove();
+  };
 }
 
 /**

@@ -31,6 +31,7 @@ import { createTapGate, type TapGate } from "../lib/push/tapGate";
 import { isInSignedInApp } from "../lib/enrollmentPrompt";
 import { useIngestConversation, type ConversationKind } from "./queries/useMessages";
 import { useOpenConversation } from "./useOpenConversation";
+import { usePushRegistration } from "./usePushRegistration";
 
 function toConversationKind(kind: string): ConversationKind | null {
   if (kind === "channel" || kind === "dm") {
@@ -110,4 +111,7 @@ export function usePushNotifications() {
   useEffect(() => {
     gate.setReady(ready);
   }, [ready, gate]);
+
+  // #1423: keep the token registered (sign-in/unlock, foreground, rotation).
+  usePushRegistration(userId);
 }
