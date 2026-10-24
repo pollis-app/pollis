@@ -14,6 +14,20 @@
       "version": "1.0.14",
       "commit": "2c9c53f771194db3e763fa218d2636432b8c3c1b",
       "runtimeVersion": "cd2015f48976c765d0cf6c3495f5e3d29ef1f2f5"
+    },
+    {
+      "platform": "android",
+      "channel": "play",
+      "version": "1.0.15",
+      "commit": "d6b3370188eca83ec97fb749f061c821267b88ce",
+      "runtimeVersion": "3d24cb87e81195301172ddbc218ced95b3ba89c4"
+    },
+    {
+      "platform": "android",
+      "channel": "sideload",
+      "version": "1.0.15",
+      "commit": "d6b3370188eca83ec97fb749f061c821267b88ce",
+      "runtimeVersion": "a2ebce84423d3f01e2a1f4805b5da1d1c16d1697"
     }
   ]
 }
