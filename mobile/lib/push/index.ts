@@ -167,13 +167,15 @@ export function openNotificationSettings(): Promise<void> {
 }
 
 export interface PushHandlers {
-  // A notification was tapped — navigate to the referenced conversation.
-  onOpenConversation: (conversationId: string, kind: string) => void;
+  // A notification was tapped. Passes the payload's data blob unresolved: the
+  // caller may have to hold the tap until the app is unlocked, and resolving
+  // the handle is a signed DS call (`resolveNotificationRouting`).
+  onTap: (data: unknown) => void;
   // A notification arrived (foreground / data) — pull + decrypt locally.
   onDataReceived: (conversationId: string, kind: string) => void;
 }
 
-type Routing = { conversationId: string; kind: string };
+export type Routing = { conversationId: string; kind: string };
 
 // Pull the routing fields out of a notification's data blob, preferring the
 // opaque handle (#1122) and falling back to the plain id.
@@ -189,7 +191,7 @@ type Routing = { conversationId: string; kind: string };
 // Returns null when there is nothing to act on, which is also what a failed
 // resolve produces: the tap opens the app rather than a conversation, and a
 // background push is skipped until the next poll.
-async function readRouting(data: unknown): Promise<Routing | null> {
+export async function resolveNotificationRouting(data: unknown): Promise<Routing | null> {
   const decided = readPayloadRouting(data);
   if (decided === null) {
     return null;
@@ -214,31 +216,53 @@ async function readRouting(data: unknown): Promise<Routing | null> {
 }
 
 /**
- * Wire notification listeners: tap (response) → `onOpenConversation`,
- * receipt in foreground → `onDataReceived`. Returns a disposer that removes
- * both subscriptions.
+ * The tap that launched the app, if one has not been handled yet (#1422).
+ *
+ * On a cold start the OS delivers the tap before any listener exists — the
+ * session is still being restored — so the response listener never sees it,
+ * and the tap used to just open the app. expo-notifications keeps the most
+ * recent response; take it once and clear it, so it is never routed twice.
+ * The live listener below clears it too, for the same reason.
+ */
+export function takeLaunchNotificationData(): unknown | null {
+  try {
+    const response = Notifications.getLastNotificationResponse();
+    if (!response) {
+      return null;
+    }
+    Notifications.clearLastNotificationResponse();
+    return response.notification.request.content.data ?? null;
+  } catch {
+    // Not available on this build: nothing to route.
+    return null;
+  }
+}
+
+/**
+ * Wire notification listeners: tap (response) → `onTap`, receipt in
+ * foreground → `onDataReceived`. Returns a disposer that removes both
+ * subscriptions.
  */
 export function addPushListeners(handlers: PushHandlers): () => void {
-  // Both listeners are async now: resolving the handle (#1122) is a network
-  // call. `void` because expo-notifications ignores a returned promise — the
-  // work continues, it is simply not awaited by the subscription.
   const responseSub = Notifications.addNotificationResponseReceivedListener(
     (response) => {
-      void (async () => {
-        const conv = await readRouting(
-          response.notification.request.content.data,
-        );
-        if (conv) {
-          handlers.onOpenConversation(conv.conversationId, conv.kind);
-        }
-      })();
+      try {
+        Notifications.clearLastNotificationResponse();
+      } catch {
+        // Not available on this build: a later launch check could find this
+        // tap again and open the same conversation, which is harmless.
+      }
+      handlers.onTap(response.notification.request.content.data);
     },
   );
 
+  // Async: resolving the handle (#1122) is a network call. `void` because
+  // expo-notifications ignores a returned promise — the work continues, it is
+  // simply not awaited by the subscription.
   const receivedSub = Notifications.addNotificationReceivedListener(
     (notification) => {
       void (async () => {
-        const conv = await readRouting(notification.request.content.data);
+        const conv = await resolveNotificationRouting(notification.request.content.data);
         if (conv) {
           handlers.onDataReceived(conv.conversationId, conv.kind);
         }
