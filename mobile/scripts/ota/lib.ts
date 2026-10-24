@@ -595,3 +595,64 @@ export function mergeRecords(accumulator: BinaryRecord[], records: BinaryRecord[
   }
   return [...accumulator, ...records];
 }
+
+// ---------------------------------------------------------------------------
+// The store-build ledger (#1427): mobile/store/runtime-versions.json
+// ---------------------------------------------------------------------------
+
+// One binary in a store or on pollis.com, and the runtime version baked into it
+// (the AAB/APK's `assets/fingerprint`, the IPA's
+// `Pollis.app/EXUpdates.bundle/fingerprint`). An update reaches exactly the
+// binaries whose runtime version it names.
+export interface StoreBuild {
+  platform: Platform;
+  channel: string;
+  version: string;
+  commit: string;
+  runtimeVersion: string;
+}
+
+export interface Reach {
+  platform: Platform;
+  runtimeVersion: string;
+  binaries: StoreBuild[];
+}
+
+const FINGERPRINT_RE = /^[0-9a-f]{40}$/;
+
+// The ledger's `builds`, checked: a typo would silently make an update look
+// unreachable (or reachable), so a malformed entry is an error.
+export function parseStoreBuilds(text: string): StoreBuild[] {
+  const doc = JSON.parse(text) as { builds?: unknown };
+  if (!Array.isArray(doc.builds)) {
+    throw new Error("runtime-versions.json: `builds` must be an array");
+  }
+  return doc.builds.map((b, i) => {
+    const e = b as Partial<StoreBuild>;
+    if (!(PLATFORMS as readonly string[]).includes(e.platform ?? "")) {
+      throw new Error(`runtime-versions.json builds[${i}]: unknown platform ${e.platform}`);
+    }
+    if (!FINGERPRINT_RE.test(e.runtimeVersion ?? "")) {
+      throw new Error(`runtime-versions.json builds[${i}]: runtimeVersion must be 40 lowercase hex, got ${e.runtimeVersion}`);
+    }
+    for (const k of ["channel", "version", "commit"] as const) {
+      if (typeof e[k] !== "string" || e[k] === "") {
+        throw new Error(`runtime-versions.json builds[${i}]: ${k} is required`);
+      }
+    }
+    return e as StoreBuild;
+  });
+}
+
+// Which recorded binaries each platform's update would reach.
+export function reachOf(runtimeVersions: Partial<Record<Platform, string>>, builds: StoreBuild[]): Reach[] {
+  const out: Reach[] = [];
+  for (const p of PLATFORMS) {
+    const rv = runtimeVersions[p];
+    if (rv === undefined) {
+      continue;
+    }
+    out.push({ platform: p, runtimeVersion: rv, binaries: builds.filter((b) => b.platform === p && b.runtimeVersion === rv) });
+  }
+  return out;
+}

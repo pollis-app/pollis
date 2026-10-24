@@ -247,6 +247,34 @@ jobs:
         if: always()
         run: rm -f "$RUNNER_TEMP/pollis-sideload.jks"
 
+      # The runtime version Gradle baked into the APKs, and every input of it
+      # (#1427), from the tree as Gradle left it. Record the value in
+      # mobile/store/runtime-versions.json when this release ships, or no OTA
+      # job will know these APKs exist.
+      - name: Record the runtime version and its sources
+        working-directory: mobile
+        # A record, not a gate: it must never cost a release.
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/fingerprint"
+          node_modules/.bin/fingerprint fingerprint:generate --platform android --debug > "$RUNNER_TEMP/fingerprint/android.json"
+          baked="$(unzip -p android/app/build/outputs/apk/release/app-x86_64-release.apk assets/fingerprint)"
+          computed="$(jq -r .hash "$RUNNER_TEMP/fingerprint/android.json")"
+          echo "android runtime version: baked ${baked}, recomputed ${computed}"
+          echo "${baked}" > "$RUNNER_TEMP/fingerprint/baked-android.txt"
+          if [ "$baked" != "$computed" ]; then
+            echo "::warning::the APK's runtime version ${baked} is not what fingerprint.config.js computes (${computed}); diff the uploaded sources"
+          fi
+
+      - name: Upload the fingerprint sources
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: apk-fingerprint-sources
+          path: ${{ runner.temp }}/fingerprint/
+          if-no-files-found: error
+
       # Everything a downloader is told on pollis.com, checked against the bytes
       # of every APK: who signed it, what it is, which server it talks to.
       - name: Verify the APKs

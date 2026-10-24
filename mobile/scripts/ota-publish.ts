@@ -9,6 +9,8 @@
 //   build                 expo export with prod EXPO_PUBLIC values, runtime
 //                         versions from the fingerprint, safety checks, unsigned
 //                         manifests            → <dir>/plan.json + <dir>/files/
+//                         Refuses an update no recorded store build would take
+//                         (store/runtime-versions.json); `--unreached warn` only warns
 //   prepare-republish     re-serve an earlier group's bytes under new update ids
 //                         (rollback to a known-good update)
 //   prepare-rollback      rollBackToEmbedded directives (rollback to the store
@@ -51,6 +53,8 @@ import {
   buildManifest,
   mergeRecords,
   parseMultipart,
+  parseStoreBuilds,
+  reachOf,
   partName,
   pointerFor,
   pointerKey,
@@ -64,12 +68,14 @@ import {
   type PlanAction,
   type PlanEntry,
   type Platform,
+  type Reach,
 } from "./ota/lib.ts";
 
 const MOBILE = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = resolve(MOBILE, "..");
 const CERT_PATH = join(MOBILE, "store", "ota-code-signing.pem");
 const ACCUMULATOR_KEY = "internal/binary-records.json";
+const LEDGER_PATH = join(MOBILE, "store", "runtime-versions.json");
 
 // ---------------------------------------------------------------------------
 // small helpers
@@ -216,8 +222,8 @@ function summary(plan: Plan): string {
   return lines.join("\n") + "\n";
 }
 
-function emitSummary(plan: Plan, dir: string): void {
-  const text = summary(plan);
+function emitSummary(plan: Plan, dir: string, extra = ""): void {
+  const text = summary(plan) + extra;
   writeFileSync(join(dir, "summary.md"), text);
   if (process.env.GITHUB_STEP_SUMMARY) {
     writeFileSync(process.env.GITHUB_STEP_SUMMARY, text, { flag: "a" });
@@ -282,6 +288,7 @@ async function cmdBuild(opts: Record<string, string>): Promise<void> {
   };
 
   const before = await runtimeVersions();
+  const reach = checkReach(before, opts.unreached ?? "fail");
   const expoClient = getConfig(MOBILE, { isPublicConfig: true, skipSDKVersionRequirement: true }).exp;
 
   const exportDir = join(out, "export");
@@ -370,7 +377,47 @@ async function cmdBuild(opts: Record<string, string>): Promise<void> {
   }
 
   writePlan(out, plan);
-  emitSummary(plan, out);
+  emitSummary(plan, out, reachSummary(reach));
+}
+
+// An update reaches only binaries whose baked runtime version it names (#1427).
+// Compare against every store build on record: a platform that reaches none is
+// a loud warning, and an update that reaches no binary at all is refused unless
+// `--unreached warn` (dry runs, which exist to look at exactly that case).
+function checkReach(runtimeVersions: Record<string, string>, mode: string): Reach[] {
+  if (mode !== "warn" && mode !== "fail") {
+    fail(`--unreached must be warn or fail, got ${mode}`);
+  }
+  const builds = parseStoreBuilds(readFileSync(LEDGER_PATH, "utf8"));
+  const reach = reachOf(runtimeVersions, builds);
+  for (const r of reach) {
+    if (r.binaries.length > 0) {
+      const names = r.binaries.map((b) => `${b.channel} ${b.version}`).join(", ");
+      console.log(`${r.platform} runtime version ${r.runtimeVersion} reaches: ${names}`);
+    } else {
+      console.log(
+        `::warning::${r.platform} runtime version ${r.runtimeVersion} matches no store build in ` +
+          `${relative(REPO, LEDGER_PATH)}; this update would reach no ${r.platform} binary on record`,
+      );
+    }
+  }
+  if (mode === "fail" && reach.every((r) => r.binaries.length === 0)) {
+    fail(
+      `no platform's runtime version matches a recorded store build, so this update would reach nobody. ` +
+        `If a store build has shipped from this native layer, record its runtime version in ` +
+        `${relative(REPO, LEDGER_PATH)} first; otherwise native code changed and a store build is needed.`,
+    );
+  }
+  return reach;
+}
+
+function reachSummary(reach: Reach[]): string {
+  const lines = ["", "| platform | reaches recorded store builds |", "|---|---|"];
+  for (const r of reach) {
+    const names = r.binaries.map((b) => `${b.channel} ${b.version}`).join(", ");
+    lines.push(`| ${r.platform} | ${names || "**none** (no binary on record has this runtime version)"} |`);
+  }
+  return lines.join("\n") + "\n";
 }
 
 // ---------------------------------------------------------------------------
