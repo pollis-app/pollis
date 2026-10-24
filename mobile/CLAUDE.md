@@ -1105,7 +1105,8 @@ Current state:
   groups/DM lists). It ingests + invalidates on `new_message` / `dm_created` /
   `membership_changed`. Graceful no-op until `get_livekit_token` exists on the
   bridge. A missed wake-up is caught up, not waited out: returning to the
-  foreground re-ingests every listed conversation, and a LiveKit `Reconnected`
+  foreground re-ingests every listed conversation (so does landing in the app —
+  cold start, sign-in, unlock — once both lists load, #1422), and a LiveKit `Reconnected`
   re-ingests that room (`lib/messageWake.ts`) — a message sent from the user's
   other device has no push to fall back on. Such a message is shown live but
   never counted unread (decided after ingest from the newest row's sender).
