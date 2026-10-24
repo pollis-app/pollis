@@ -206,6 +206,26 @@ jobs:
             exit 1
           fi
 
+      # Every input of the runtime version, per platform (#1427). A few seconds
+      # of hashing; diff it against `fingerprint:generate --debug` from a store
+      # build's machine when an update does not reach a binary.
+      - name: Record the fingerprint sources
+        working-directory: mobile
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/fingerprint"
+          for p in android ios; do
+            node_modules/.bin/fingerprint fingerprint:generate --platform "$p" --debug > "$RUNNER_TEMP/fingerprint/$p.json"
+            echo "$p runtime version: $(jq -r .hash "$RUNNER_TEMP/fingerprint/$p.json")"
+          done
+
+      - name: Upload the fingerprint sources
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ota-fingerprint-sources
+          path: ${{ runner.temp }}/fingerprint/
+          if-no-files-found: error
+
       # expo export + the store-build checks + unsigned manifests. The DS URL
       # is a literal: it is the one value this pipeline exists to get right,
       # and the bundle check proves it landed. EXPO_NO_DOTENV is set by the
