@@ -40,6 +40,18 @@ ignore = [
     # exercised. Re-evaluate when rsa ships a fix.
     { id = "RUSTSEC-2023-0071", reason = "rsa: no upstream fix; transitive via the DS's jsonwebtoken; decryption-timing oracle not reachable (HS256 JWT signing only)" },
 
+    # crypto-bigint 0.5.5 constant-time leaks (secret-dependent branches in
+    # sub/div/Montgomery mul). Fixed only in 0.7.6; nothing on 0.5 is patched.
+    # 0.5.5 enters through elliptic-curve 0.13 (p256/p384/k256/primeorder) via
+    # openmls_rust_crypto + hpke-rs-rust-crypto + openmls_basic_credential
+    # (pinned openmls rev) and the DS's jsonwebtoken; none can move to
+    # elliptic-curve 0.14 from our graph. Not reached with secrets: our MLS
+    # ciphersuite is MLKEM768X25519 + MLDSA44 (legacy X25519/Ed25519), so no
+    # NIST/secp256k1 private key is ever created or operated on, and the DS
+    # signs JWTs with HS256. Drop when openmls/jsonwebtoken move to
+    # elliptic-curve 0.14 (#1419).
+    { id = "RUSTSEC-2026-0387", reason = "crypto-bigint 0.5 timing leaks; fix is 0.7.6, unreachable under elliptic-curve 0.13 (openmls_rust_crypto, jsonwebtoken); no P-256/P-384/k256 secret is ever used: MLS is MLKEM768X25519+MLDSA44, DS JWTs are HS256; #1419" },
+
     # h2 0.3 accepts and queues empty DATA frames without limit (unbounded
     # memory, or a panic on length overflow). Low severity. The fix is h2
     # 0.4.16; there is no 0.3 backport, and 0.3.27 is the last 0.3 release.
