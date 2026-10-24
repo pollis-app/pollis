@@ -335,6 +335,7 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route("/v1/config", get(effective_config))
         .route("/v1/ops/otp-requests", get(ops_log::otp_requests))
         .route("/v1/ops/errors", get(error_log::list))
+        .route("/v1/ops/push", get(push::ops_push))
         .route(<SubmitBody as DsRequest>::PATH, post(submit))
         .route(<CommitSinceReport as DsRequest>::PATH, post(report_commit_since))
         .route(<writes::GroupInfoBody as DsRequest>::PATH, post(writes::group_info))

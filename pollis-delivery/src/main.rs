@@ -180,6 +180,19 @@ fn spawn_envelope_gc_sweep(db: Arc<Db>, metrics: RetentionMetricsHandle) {
                             Ok(_) => {}
                             Err(e) => tracing::warn!("push-handle sweep failed: {e}"),
                         }
+                        // #1423: ask Expo for the receipts of the pushes sent
+                        // since, prune tokens it says are dead, and drop
+                        // tickets once answered or past 24 hours.
+                        match pollis_delivery::push::check_push_receipts(&conn).await {
+                            Ok(r) if r.checked > 0 || r.expired > 0 => tracing::info!(
+                                "push receipts: {} checked ({} error), {} expired unanswered",
+                                r.checked,
+                                r.errors,
+                                r.expired
+                            ),
+                            Ok(_) => {}
+                            Err(e) => tracing::warn!("push receipt check failed: {e}"),
+                        }
                     }
                     Err(e) => tracing::warn!("envelope-GC sweep failed: {e}"),
                 },

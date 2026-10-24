@@ -632,7 +632,8 @@ pub async fn send_message(
                 if let Err(e) =
                     crate::push::notify_new_message(&conn, &conversation_id, &sender, only).await
                 {
-                    tracing::warn!("push fan-out for {conversation_id}: {e}");
+                    // No conversation id: push logs name nothing (#1423).
+                    tracing::warn!("push fan-out failed: {e}");
                 }
             });
         }
