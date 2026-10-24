@@ -30,9 +30,20 @@
 //      A binary only accepts updates signed for the certificate compiled into
 //      it, so a rotated certificate must mean a new runtime version: old
 //      binaries keep their own pointers (signed by the old key) instead of
-//      sharing one with binaries that trust a different key.
+//      sharing one with binaries that trust a different key;
+//   5. normalises node_modules files that GRADLE REWRITES IN PLACE (#1427).
+//      @react-native-masked-view/masked-view's build.gradle strips
+//      `package="org.reactnative.maskedview"` from its own
+//      android/src/main/AndroidManifest.xml whenever Gradle configures it. A
+//      store build's machine has the rewritten file; a fresh install (the
+//      Linux OTA job) has the pristine one, and the package is hashed as a
+//      whole dir, so one commit got two runtime versions and OTAs never
+//      reached Play binaries. Hashing both as the rewritten form makes them
+//      agree and keeps every binary already built (with the rewrite) valid.
+//      Likewise build output a tool leaves inside a package (the npm ubrn
+//      bin's cargo `target/`) is ignored rather than hashed.
 //
-// tests/ota-fingerprint.test.ts pins all three.
+// tests/ota-config.test.ts pins 1-4; tests/ota-fingerprint.test.ts pins 5.
 
 const { execFileSync } = require("child_process");
 const crypto = require("crypto");
@@ -111,6 +122,16 @@ const GENERATED_NATIVE_BRIDGE = [
   "modules/pollis-native/PollisNativeFramework.xcframework/**/*",
 ];
 
+// Build output that tools write INTO an installed package (see 5. above). The
+// npm `ubrn` bin (node_modules/.bin/uniffi-bindgen-react-native) compiles the
+// CLI from source on first use, leaving ~1 GB of cargo output and a Cargo.lock
+// in the package dir, which iOS autolinking hashes whole. CI installs ubrn with
+// `cargo install` and never has them; the npm version is hashed in (1) anyway.
+const NODE_MODULES_BUILD_OUTPUT = [
+  "node_modules/uniffi-bindgen-react-native/target/**/*",
+  "node_modules/uniffi-bindgen-react-native/Cargo.lock",
+];
+
 // Drop `updates` from the hashed Expo config (see 3. above). Everything else in
 // the config — plugins, permissions, entitlements — stays in.
 function stripUpdatesBlock(source, chunk) {
@@ -120,6 +141,46 @@ function stripUpdatesBlock(source, chunk) {
   const config = JSON.parse(chunk.toString());
   delete config.updates;
   return JSON.stringify(config);
+}
+
+// Files a dependency's build.gradle rewrites inside node_modules (see 5.
+// above), each with the exact edit Gradle makes. Keyed by the path relative to
+// the project root, as @expo/fingerprint names it.
+const GRADLE_REWRITTEN_FILES = {
+  // masked-view android/build.gradle, AGP >= 7: manifestContent.replaceAll(PACKAGE_PROP, '')
+  "node_modules/@react-native-masked-view/masked-view/android/src/main/AndroidManifest.xml": (text) =>
+    text.split('package="org.reactnative.maskedview"').join(""),
+};
+
+// A file's bytes as Gradle leaves them. Idempotent, so a file Gradle already
+// rewrote hashes the same as a pristine one.
+function normaliseGradleRewrite(filePath, text) {
+  const rewrite = GRADLE_REWRITTEN_FILES[filePath];
+  if (rewrite == null) {
+    return text;
+  }
+  return rewrite(text);
+}
+
+// File contents arrive in 1 KiB chunks, concurrently across files: buffer a
+// rewritten file whole so the edit never straddles a chunk boundary.
+const pendingRewrites = new Map();
+
+function fileHookTransform(source, chunk, isEndOfFile, encoding) {
+  if (source.type !== "file" || !Object.hasOwn(GRADLE_REWRITTEN_FILES, source.filePath)) {
+    return stripUpdatesBlock(source, chunk, isEndOfFile, encoding);
+  }
+  const parts = pendingRewrites.get(source.filePath) ?? [];
+  if (chunk != null) {
+    parts.push(Buffer.from(chunk));
+  }
+  if (!isEndOfFile) {
+    pendingRewrites.set(source.filePath, parts);
+    return null;
+  }
+  pendingRewrites.delete(source.filePath);
+  const text = Buffer.concat(parts).toString("utf8");
+  return Buffer.from(normaliseGradleRewrite(source.filePath, text), "utf8");
 }
 
 // The certificate's bytes, or "absent" before the owner has generated it.
@@ -134,7 +195,7 @@ function otaCertificateDigest() {
 /** @type {import('expo/fingerprint').Config} */
 module.exports = {
   sourceSkips: ["ExpoConfigVersions", "PackageJsonAndroidAndIosScriptsIfNotContainRun"],
-  ignorePaths: GENERATED_NATIVE_BRIDGE,
+  ignorePaths: [...GENERATED_NATIVE_BRIDGE, ...NODE_MODULES_BUILD_OUTPUT],
   extraSources: [
     {
       type: "contents",
@@ -149,10 +210,13 @@ module.exports = {
       reasons: ["OTA code-signing certificate"],
     },
   ],
-  fileHookTransform: stripUpdatesBlock,
+  fileHookTransform,
 };
 
 module.exports.rustCoreDigest = rustCoreDigest;
 module.exports.rustCrateClosure = rustCrateClosure;
 module.exports.GENERATED_NATIVE_BRIDGE = GENERATED_NATIVE_BRIDGE;
 module.exports.otaCertificateDigest = otaCertificateDigest;
+module.exports.GRADLE_REWRITTEN_FILES = GRADLE_REWRITTEN_FILES;
+module.exports.NODE_MODULES_BUILD_OUTPUT = NODE_MODULES_BUILD_OUTPUT;
+module.exports.normaliseGradleRewrite = normaliseGradleRewrite;
