@@ -131,6 +131,17 @@ test("every place that cleared a badge also advances the persisted cursor", () =
   assert.match(chat, /appStore\.clearOpenConversationId\(conversationId\);/);
 });
 
+test("landing in the app catches up every listed conversation once", () => {
+  // A message that arrived while the app was closed woke nothing: without a
+  // catch-up on landing it was never ingested, so it could not be counted.
+  const realtime = read("hooks/useInboxRealtime.ts");
+  assert.match(
+    realtime,
+    /landedRef\.current = true;\s*for \(const target of catchUpTargets\(groupsRef\.current, dmsRef\.current\)\)/,
+  );
+  assert.match(realtime, /if \(!inApp\) \{\s*landedRef\.current = false;/);
+});
+
 test("the unread lifecycle is mounted with the signed-in services", () => {
   const layout = read("app/_layout.tsx");
   assert.match(layout, /useUnreadSync\(\);/);

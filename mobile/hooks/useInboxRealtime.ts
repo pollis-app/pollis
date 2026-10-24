@@ -73,8 +73,8 @@ export function useInboxRealtime() {
   // the tabs render from, so a membership change that refreshes the lists
   // also reconciles the subscriptions. No polling: list invalidation is
   // event-driven (below) or screen-focus.
-  const { data: groups = [] } = useUserGroupsWithChannels();
-  const { data: dms = [] } = useDMChannels();
+  const { data: groups = [], isSuccess: groupsLoaded } = useUserGroupsWithChannels();
+  const { data: dms = [], isSuccess: dmsLoaded } = useDMChannels();
 
   // Read live values through refs so the (stable) event handler never forces
   // a resubscribe.
@@ -324,6 +324,28 @@ export function useInboxRealtime() {
       sub.remove();
     };
   }, [userId]);
+
+  // Landing in the app — cold start, sign-in, unlock — catches up every listed
+  // conversation once, as a resume does (#1422). A message that arrived while
+  // the app was closed or locked woke nothing here: no push runs JS in a killed
+  // app, and LiveKit does not replay. Without this it stayed un-ingested, so
+  // neither its preview nor its unread count showed until the conversation was
+  // opened. Waits for both lists so a group or DM is not skipped; once per
+  // landing, so a list refetch does not re-run it.
+  const landedRef = useRef(false);
+  useEffect(() => {
+    if (!inApp) {
+      landedRef.current = false;
+      return;
+    }
+    if (landedRef.current || !groupsLoaded || !dmsLoaded) {
+      return;
+    }
+    landedRef.current = true;
+    for (const target of catchUpTargets(groupsRef.current, dmsRef.current)) {
+      void ingestRef.current(target.id, target.kind);
+    }
+  }, [inApp, groupsLoaded, dmsLoaded]);
 
   // Signed in / unlocked: deliver what the durable outbox holds (#1335) — a
   // message a killed process left unsent. The core starts this drain itself

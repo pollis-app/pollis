@@ -25,7 +25,8 @@ tags:
 - extendedWaitUntil:
     visible:
       id: "unread-.*"
-      text: "2"
+      containsChild:
+        text: "2"
     timeout: 60000
 - takeScreenshot: unread-02-after-resume
 # Leave it unread and close the app; the peer sends again while it is closed.

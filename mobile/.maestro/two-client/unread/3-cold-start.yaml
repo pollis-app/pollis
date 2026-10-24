@@ -22,7 +22,8 @@ tags:
 - extendedWaitUntil:
     visible:
       id: "unread-.*"
-      text: "3"
+      containsChild:
+        text: "3"
     timeout: 60000
 - takeScreenshot: unread-03-after-cold-start
 - tapOn:
