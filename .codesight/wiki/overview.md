@@ -233,6 +233,10 @@ full detail: `docs/metadata-retention-policy.md` §3.
   the table's trigger (72 h / 500 rows) and a 30-writes-a-minute budget; read
   with `curl -H "Authorization: Bearer $POLLIS_DS_METRICS_TOKEN"
   https://api.pollis.com/v1/ops/errors` (404 without a token configured).
+  Push fan-out failures happen after the send has answered, so they never
+  reach that table; `push.rs` counts them instead (Expo ticket and receipt
+  error classes, pruned tokens; no token, user or conversation) and serves the
+  counts on `GET /v1/ops/push` behind the same token (#1423).
 - **Relay.** `pollis-relay/src/ratelimit.rs` `IpKey::of(ip)` (HMAC under a
   per-boot key) is computed in the accept loop; the per-IP connection and
   circuit maps hold only `IpKey`s.

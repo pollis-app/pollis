@@ -29,11 +29,31 @@
 //!
 //! Best-effort throughout: a push that fails to send must never fail a send that
 //! already landed.
+//!
+//! # What Expo said back (#1423)
+//!
+//! Expo answers 200 with one TICKET per message, and an error there
+//! (`DeviceNotRegistered`, `MessageRateExceeded`, `InvalidCredentials`, ...) is
+//! not an HTTP error. What APNs/FCM later made of an accepted message arrives
+//! only as a RECEIPT, fetched by ticket id. So:
+//!
+//!   * every ticket is read ([`parse_tickets`]); an error is counted and logged
+//!     by CLASS only, never the token, the user, the conversation or Expo's
+//!     free-text message (which quotes the token);
+//!   * `DeviceNotRegistered` deletes that `push_token` row on the spot;
+//!   * an accepted ticket's id is kept in `push_ticket` (migration 000037) and
+//!     the GC sweep asks Expo for its receipt ([`check_push_receipts`]), with
+//!     the same handling; a ticket is dropped once answered or after 24 hours;
+//!   * the counts are served to the operator on `GET /v1/ops/push`
+//!     ([`ops_push`]). They are in memory, counted since the last start.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Mutex;
 
 use axum::extract::State;
-use axum::response::Response;
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum::Json;
 use libsql::Connection;
 use pollis_api::devices::{ResolvePushHandleBody, ResolvePushHandleResponse};
 use rand::rngs::OsRng;
@@ -48,8 +68,23 @@ use crate::util::{BIND_CHUNK, placeholders};
 /// Expo's push service endpoint. Accepts a JSON array of up to 100 messages.
 const EXPO_PUSH_URL: &str = "https://exp.host/--/api/v2/push/send";
 
+/// Expo's receipts endpoint. Accepts up to 1000 ticket ids per request.
+const EXPO_RECEIPTS_URL: &str = "https://exp.host/--/api/v2/push/getReceipts";
+
 /// Expo accepts up to 100 messages per request.
 const EXPO_BATCH: usize = 100;
+
+/// Expo accepts up to 1000 ticket ids per receipts request.
+const RECEIPT_BATCH: usize = 1000;
+
+/// Tickets asked about per sweep, at most. Anything beyond waits for the next
+/// sweep or ages out, which only delays a prune.
+const RECEIPTS_PER_SWEEP: usize = 10 * RECEIPT_BATCH;
+
+/// How long a ticket is worth keeping. Expo discards receipts after 24 hours,
+/// so an older ticket can never be answered. Migration 000037's trigger
+/// enforces the same bound.
+pub const PUSH_TICKET_MAX_AGE_SECS: i64 = 24 * 60 * 60;
 
 /// The Expo access token the fan-out authenticates with (`EXPO_TOKEN`).
 ///
@@ -74,8 +109,15 @@ fn expo_token() -> Option<&'static str> {
 /// Split out from the send loop so the "token set => `Authorization` present,
 /// token unset => absent" invariant is testable without touching the process
 /// environment, which no parallel test can do safely.
-fn expo_request(token: Option<&str>, chunk: &[serde_json::Value]) -> reqwest::RequestBuilder {
-    let req = crate::util::http_post(crate::util::Upstream::ExpoPush, EXPO_PUSH_URL).json(chunk);
+///
+/// Also builds the receipts request: with enhanced security on, Expo wants the
+/// token there too.
+fn expo_request<B: serde::Serialize + ?Sized>(
+    url: &str,
+    token: Option<&str>,
+    body: &B,
+) -> reqwest::RequestBuilder {
+    let req = crate::util::http_post(crate::util::Upstream::ExpoPush, url).json(body);
     match token {
         Some(token) => req.bearer_auth(token),
         None => req,
@@ -123,27 +165,432 @@ pub async fn notify_new_message(
     let handles = mint_push_handles(conn, &user_ids, conversation_id, kind).await;
 
     let messages: Vec<serde_json::Value> = tokens
-        .into_iter()
+        .iter()
         .map(|(token, platform, user_id)| {
-            expo_message(&token, platform.as_deref(), handles.get(&user_id))
+            expo_message(token, platform.as_deref(), handles.get(user_id))
         })
         .collect();
+    let push_tokens: Vec<String> = tokens.into_iter().map(|(token, _, _)| token).collect();
 
-    let token = expo_token();
-    for chunk in messages.chunks(EXPO_BATCH) {
-        // Through `util::http_post`, which forces a deadline (#913). A push
-        // nobody is waiting on must never be the thing that pins a handler open.
-        match expo_request(token, chunk).send().await {
-            Ok(r) if !r.status().is_success() => {
-                let status = r.status();
-                let body = r.text().await.unwrap_or_default();
-                tracing::warn!("expo push non-success {status}: {body}");
-            }
-            Err(e) => tracing::warn!("expo push send failed: {e}"),
-            _ => {}
-        }
+    let auth = expo_token();
+    for (chunk, chunk_tokens) in messages
+        .chunks(EXPO_BATCH)
+        .zip(push_tokens.chunks(EXPO_BATCH))
+    {
+        send_batch(conn, EXPO_PUSH_URL, auth, chunk, chunk_tokens, stats()).await;
     }
     Ok(())
+}
+
+// ── Tickets, receipts and outcome counts (#1423) ────────────────────────────
+
+/// What Expo said went wrong with one message, as a fixed set of names.
+///
+/// Logged and counted INSTEAD of Expo's own text: the `message` Expo sends with
+/// an error quotes the push token, and the `details` may too. An unknown or
+/// missing class is `Other`, so nothing Expo sends can reach a log line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum PushErrorClass {
+    DeviceNotRegistered,
+    MessageTooBig,
+    MessageRateExceeded,
+    MismatchSenderId,
+    InvalidCredentials,
+    Other,
+}
+
+impl PushErrorClass {
+    /// Classify Expo's `details.error`.
+    pub fn from_expo(error: Option<&str>) -> Self {
+        match error {
+            Some("DeviceNotRegistered") => Self::DeviceNotRegistered,
+            Some("MessageTooBig") => Self::MessageTooBig,
+            Some("MessageRateExceeded") => Self::MessageRateExceeded,
+            Some("MismatchSenderId") => Self::MismatchSenderId,
+            Some("InvalidCredentials") => Self::InvalidCredentials,
+            _ => Self::Other,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::DeviceNotRegistered => "DeviceNotRegistered",
+            Self::MessageTooBig => "MessageTooBig",
+            Self::MessageRateExceeded => "MessageRateExceeded",
+            Self::MismatchSenderId => "MismatchSenderId",
+            Self::InvalidCredentials => "InvalidCredentials",
+            Self::Other => "Other",
+        }
+    }
+}
+
+/// One ticket or one receipt, reduced to what the DS acts on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PushOutcome {
+    /// Accepted. For a ticket, `id` is what the receipt is fetched by; a
+    /// receipt carries none.
+    Ok { id: Option<String> },
+    Error(PushErrorClass),
+}
+
+/// Read one ticket or receipt object: `{"status":"ok","id":…}` or
+/// `{"status":"error","details":{"error":…}}`. Anything else is an `Other`
+/// error, since a ticket we cannot read is one we cannot follow up.
+fn parse_outcome(v: &serde_json::Value) -> PushOutcome {
+    match v.get("status").and_then(|s| s.as_str()) {
+        Some("ok") => PushOutcome::Ok {
+            id: v.get("id").and_then(|i| i.as_str()).map(str::to_string),
+        },
+        Some("error") => PushOutcome::Error(PushErrorClass::from_expo(
+            v.get("details")
+                .and_then(|d| d.get("error"))
+                .and_then(|e| e.as_str()),
+        )),
+        _ => PushOutcome::Error(PushErrorClass::Other),
+    }
+}
+
+/// The tickets in a send response, in message order. `None` when the body has
+/// no `data` to read (a request-level error).
+pub fn parse_tickets(body: &serde_json::Value) -> Option<Vec<PushOutcome>> {
+    match body.get("data")? {
+        serde_json::Value::Array(items) => Some(items.iter().map(parse_outcome).collect()),
+        // Expo answers a single-message request with a bare object. We always
+        // send an array, but reading both costs nothing.
+        obj @ serde_json::Value::Object(_) => Some(vec![parse_outcome(obj)]),
+        _ => None,
+    }
+}
+
+/// The receipts in a getReceipts response, keyed by ticket id. A ticket Expo
+/// has no receipt for yet is simply absent.
+pub fn parse_receipts(body: &serde_json::Value) -> Option<Vec<(String, PushOutcome)>> {
+    let data = body.get("data")?.as_object()?;
+    Some(
+        data.iter()
+            .map(|(id, v)| (id.clone(), parse_outcome(v)))
+            .collect(),
+    )
+}
+
+/// Expo's request-level error codes (`errors[].code`), kept only when they have
+/// the shape Expo uses (upper-case words and underscores), so a code cannot
+/// carry a token or anything else into a log line or the counts.
+fn request_error_codes(body: &serde_json::Value) -> Vec<String> {
+    body.get("errors")
+        .and_then(|e| e.as_array())
+        .map(|errors| {
+            errors
+                .iter()
+                .filter_map(|e| e.get("code").and_then(|c| c.as_str()))
+                .filter(|c| {
+                    !c.is_empty()
+                        && c.len() <= 64
+                        && c.chars().all(|ch| ch.is_ascii_uppercase() || ch == '_')
+                })
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Push outcome counts since the process started, for `GET /v1/ops/push`.
+///
+/// Counts only: no token, user, conversation, or time of any single push.
+#[derive(Default)]
+pub struct PushStats {
+    inner: Mutex<PushCounts>,
+}
+
+#[derive(Default, Clone, serde::Serialize)]
+struct PushCounts {
+    since: u64,
+    /// Messages in send requests Expo answered with tickets.
+    messages_sent: u64,
+    /// Send requests that failed outright: a transport error, a non-2xx, or a
+    /// body with no tickets. Every message in such a request was lost.
+    send_request_failures: u64,
+    /// Request-level error codes Expo named, by code.
+    send_request_errors: BTreeMap<String, u64>,
+    tickets_ok: u64,
+    ticket_errors: BTreeMap<&'static str, u64>,
+    /// Receipts requests that failed outright; their tickets are asked about
+    /// again on the next sweep.
+    receipt_request_failures: u64,
+    receipts_ok: u64,
+    receipt_errors: BTreeMap<&'static str, u64>,
+    /// Tickets dropped unanswered after 24 hours.
+    tickets_expired: u64,
+    /// `push_token` rows deleted on `DeviceNotRegistered`.
+    tokens_pruned: u64,
+}
+
+impl PushStats {
+    fn with(&self, f: impl FnOnce(&mut PushCounts)) {
+        let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if g.since == 0 {
+            g.since = crate::util::now_unix();
+        }
+        f(&mut g);
+    }
+
+    /// The counts as served on `GET /v1/ops/push`.
+    pub fn snapshot(&self) -> serde_json::Value {
+        let g = self.inner.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        serde_json::to_value(g).unwrap_or(serde_json::Value::Null)
+    }
+}
+
+/// The process-wide counts. A static rather than an `AppState` field because
+/// the fan-out runs detached from its request with only a connection, and the
+/// GC sweep runs outside the router altogether.
+pub fn stats() -> &'static PushStats {
+    static STATS: std::sync::OnceLock<PushStats> = std::sync::OnceLock::new();
+    STATS.get_or_init(PushStats::default)
+}
+
+/// POST one batch to Expo and act on every ticket. Never fails: whatever goes
+/// wrong is counted and logged, and the send that triggered it has already
+/// been answered.
+///
+/// `tokens[i]` is the token `messages[i]` is addressed to; Expo returns the
+/// tickets in message order.
+async fn send_batch(
+    conn: &Connection,
+    url: &str,
+    auth: Option<&str>,
+    messages: &[serde_json::Value],
+    tokens: &[String],
+    stats: &PushStats,
+) {
+    // Through `util::http_post`, which forces a deadline (#913). A push nobody
+    // is waiting on must never be the thing that pins a handler open.
+    let response = match expo_request(url, auth, messages).send().await {
+        Ok(r) => r,
+        Err(e) => {
+            stats.with(|c| c.send_request_failures += 1);
+            tracing::warn!("expo push send failed: {}", e.without_url());
+            return;
+        }
+    };
+    let status = response.status();
+    let body: serde_json::Value = response.json().await.unwrap_or(serde_json::Value::Null);
+    let codes = request_error_codes(&body);
+    let tickets = if status.is_success() {
+        parse_tickets(&body)
+    } else {
+        None
+    };
+    let Some(tickets) = tickets else {
+        stats.with(|c| {
+            c.send_request_failures += 1;
+            for code in &codes {
+                *c.send_request_errors.entry(code.clone()).or_default() += 1;
+            }
+        });
+        // The status and Expo's error codes only: the body can quote tokens.
+        tracing::warn!("expo push request failed: status {status}, codes {codes:?}");
+        return;
+    };
+    stats.with(|c| c.messages_sent += messages.len() as u64);
+    if tickets.len() != tokens.len() {
+        tracing::warn!(
+            "expo push: {} ticket(s) for {} message(s); acting on the aligned prefix",
+            tickets.len(),
+            tokens.len()
+        );
+    }
+    let now = crate::util::now_unix() as i64;
+    for (outcome, token) in tickets.into_iter().zip(tokens) {
+        match outcome {
+            PushOutcome::Ok { id } => {
+                stats.with(|c| c.tickets_ok += 1);
+                let Some(id) = id else {
+                    continue;
+                };
+                // Best-effort, like everything here: a DS running before
+                // migration 000037 fails this and simply checks no receipt.
+                let stored = conn
+                    .execute(
+                        "INSERT OR IGNORE INTO push_ticket (ticket_id, token, created_at) \
+                         VALUES (?1, ?2, ?3)",
+                        libsql::params![id, token.clone(), now],
+                    )
+                    .await;
+                if let Err(e) = stored {
+                    tracing::debug!("push_ticket insert skipped: {e}");
+                }
+            }
+            PushOutcome::Error(class) => {
+                stats.with(|c| *c.ticket_errors.entry(class.as_str()).or_default() += 1);
+                tracing::warn!("expo push ticket error: {}", class.as_str());
+                if class == PushErrorClass::DeviceNotRegistered {
+                    prune_token(conn, token, stats).await;
+                }
+            }
+        }
+    }
+}
+
+/// Delete a token Expo says no longer reaches a device, and any tickets still
+/// waiting on it. A device that is in fact still there re-registers on its next
+/// launch or foreground.
+async fn prune_token(conn: &Connection, token: &str, stats: &PushStats) {
+    let deleted = conn
+        .execute(
+            "DELETE FROM push_token WHERE token = ?1",
+            libsql::params![token.to_string()],
+        )
+        .await;
+    match deleted {
+        Ok(n) => {
+            if n > 0 {
+                stats.with(|c| c.tokens_pruned += n);
+            }
+        }
+        Err(e) => tracing::warn!("push_token prune failed: {e}"),
+    }
+    let tickets = conn
+        .execute(
+            "DELETE FROM push_ticket WHERE token = ?1",
+            libsql::params![token.to_string()],
+        )
+        .await;
+    if let Err(e) = tickets {
+        tracing::debug!("push_ticket prune skipped: {e}");
+    }
+}
+
+/// What one receipts sweep did.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct ReceiptSweep {
+    /// Tickets dropped unanswered because they passed 24 hours.
+    pub expired: u64,
+    /// Tickets Expo had a receipt for, now deleted.
+    pub checked: u64,
+    /// Of those, the ones that were errors.
+    pub errors: u64,
+}
+
+/// Ask Expo for the receipts of every outstanding ticket and act on them.
+/// Called from the GC sweep in `main`.
+pub async fn check_push_receipts(conn: &Connection) -> anyhow::Result<ReceiptSweep> {
+    check_receipts_at(conn, EXPO_RECEIPTS_URL, expo_token(), stats()).await
+}
+
+async fn check_receipts_at(
+    conn: &Connection,
+    url: &str,
+    auth: Option<&str>,
+    stats: &PushStats,
+) -> anyhow::Result<ReceiptSweep> {
+    let mut sweep = ReceiptSweep::default();
+    let cutoff = crate::util::now_unix() as i64 - PUSH_TICKET_MAX_AGE_SECS;
+    sweep.expired = conn
+        .execute(
+            "DELETE FROM push_ticket WHERE created_at < ?1",
+            libsql::params![cutoff],
+        )
+        .await?;
+    if sweep.expired > 0 {
+        stats.with(|c| c.tickets_expired += sweep.expired);
+    }
+
+    let mut rows = conn
+        .query(
+            "SELECT ticket_id, token FROM push_ticket ORDER BY created_at LIMIT ?1",
+            libsql::params![RECEIPTS_PER_SWEEP as i64],
+        )
+        .await?;
+    let mut pending: HashMap<String, String> = HashMap::new();
+    while let Some(row) = rows.next().await? {
+        pending.insert(row.get::<String>(0)?, row.get::<String>(1)?);
+    }
+    let ids: Vec<&String> = pending.keys().collect();
+
+    for chunk in ids.chunks(RECEIPT_BATCH) {
+        let body = serde_json::json!({ "ids": chunk });
+        let response = match expo_request(url, auth, &body).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                stats.with(|c| c.receipt_request_failures += 1);
+                tracing::warn!("expo receipts request failed: {}", e.without_url());
+                continue;
+            }
+        };
+        let status = response.status();
+        let json: serde_json::Value = response.json().await.unwrap_or(serde_json::Value::Null);
+        let receipts = if status.is_success() {
+            parse_receipts(&json)
+        } else {
+            None
+        };
+        let Some(receipts) = receipts else {
+            stats.with(|c| c.receipt_request_failures += 1);
+            let codes = request_error_codes(&json);
+            tracing::warn!("expo receipts request failed: status {status}, codes {codes:?}");
+            continue;
+        };
+        for (id, outcome) in receipts {
+            // Only ids we asked about: a receipt for anything else is ignored
+            // rather than trusted to name a row.
+            let Some(token) = pending.get(&id) else {
+                continue;
+            };
+            match outcome {
+                PushOutcome::Ok { .. } => stats.with(|c| c.receipts_ok += 1),
+                PushOutcome::Error(class) => {
+                    sweep.errors += 1;
+                    stats.with(|c| *c.receipt_errors.entry(class.as_str()).or_default() += 1);
+                    tracing::warn!("expo push receipt error: {}", class.as_str());
+                    if class == PushErrorClass::DeviceNotRegistered {
+                        prune_token(conn, token, stats).await;
+                    }
+                }
+            }
+            conn.execute(
+                "DELETE FROM push_ticket WHERE ticket_id = ?1",
+                libsql::params![id],
+            )
+            .await?;
+            sweep.checked += 1;
+        }
+    }
+    Ok(sweep)
+}
+
+/// `GET /v1/ops/push` — push outcome counts since the DS started, plus how many
+/// tickets are still waiting on a receipt. Behind the operator token: 404 when
+/// none is configured, 401 without the right bearer token (like
+/// `/v1/ops/errors`).
+pub async fn ops_push(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let Some(expected) = state.metrics_token.as_deref() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    if !crate::bearer_token_matches(&headers, expected) {
+        return crate::error::AuthRejection::Unauthorized.into_response();
+    }
+    let pending = match state.db.conn().await {
+        Ok(conn) => pending_tickets(&conn).await.ok(),
+        Err(_) => None,
+    };
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "now": crate::util::now_unix(),
+            "pending_receipts": pending,
+            "counts": stats().snapshot(),
+        })),
+    )
+        .into_response()
+}
+
+async fn pending_tickets(conn: &Connection) -> anyhow::Result<i64> {
+    let mut rows = conn.query("SELECT COUNT(*) FROM push_ticket", ()).await?;
+    match rows.next().await? {
+        Some(row) => Ok(row.get::<i64>(0)?),
+        None => Ok(0),
+    }
 }
 
 /// Every member of `conversation_id` except `sender_id`.
@@ -271,7 +718,8 @@ pub async fn mint_push_handles(
             Ok(_) => {
                 out.insert(user.clone(), handle);
             }
-            Err(e) => tracing::warn!("push handle insert failed for {user}: {e}"),
+            // No user id: push logs name no one (#1423).
+            Err(e) => tracing::warn!("push handle insert failed: {e}"),
         }
     }
     out
@@ -381,7 +829,10 @@ mod tests {
 
     /// The `Authorization` header the fan-out would actually put on the wire.
     fn authorization(token: Option<&str>) -> Option<String> {
-        let req = expo_request(token, &[]).build().expect("request builds");
+        let empty: [serde_json::Value; 0] = [];
+        let req = expo_request(EXPO_PUSH_URL, token, &empty[..])
+            .build()
+            .expect("request builds");
         req.headers()
             .get(reqwest::header::AUTHORIZATION)
             .map(|v| v.to_str().expect("header is ascii").to_string())
@@ -580,5 +1031,309 @@ mod tests {
             .await
             .unwrap()
             .is_some());
+    }
+
+    // ── #1423: tickets, receipts, pruning ────────────────────────────────────
+
+    /// A stand-in for Expo: answers every POST with `status` and `body`, and
+    /// keeps what it was sent. A real socket and the real client, so the
+    /// request the DS builds is the one that goes out.
+    async fn fake_expo(
+        status: u16,
+        body: serde_json::Value,
+    ) -> (String, std::sync::Arc<Mutex<Vec<serde_json::Value>>>) {
+        use axum::routing::post;
+        let seen = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let seen2 = seen.clone();
+        let app = axum::Router::new().route(
+            "/",
+            post(move |Json(sent): Json<serde_json::Value>| {
+                let seen = seen2.clone();
+                let body = body.clone();
+                async move {
+                    seen.lock().unwrap().push(sent);
+                    (StatusCode::from_u16(status).unwrap(), Json(body))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (format!("http://{addr}/"), seen)
+    }
+
+    async fn add_token(c: &Connection, token: &str, user: &str) {
+        c.execute(
+            "INSERT INTO push_token (token, user_id, platform, updated_at) \
+             VALUES (?1, ?2, 'android', '2026-10-24T00:00:00Z')",
+            libsql::params![token.to_string(), user.to_string()],
+        )
+        .await
+        .unwrap();
+    }
+
+    async fn tokens_left(c: &Connection) -> Vec<String> {
+        let mut rows = c
+            .query("SELECT token FROM push_token ORDER BY token", ())
+            .await
+            .unwrap();
+        let mut out = Vec::new();
+        while let Some(r) = rows.next().await.unwrap() {
+            out.push(r.get::<String>(0).unwrap());
+        }
+        out
+    }
+
+    async fn tickets_left(c: &Connection) -> Vec<(String, String)> {
+        let mut rows = c
+            .query("SELECT ticket_id, token FROM push_ticket ORDER BY ticket_id", ())
+            .await
+            .unwrap();
+        let mut out = Vec::new();
+        while let Some(r) = rows.next().await.unwrap() {
+            out.push((r.get::<String>(0).unwrap(), r.get::<String>(1).unwrap()));
+        }
+        out
+    }
+
+    fn counts(stats: &PushStats) -> serde_json::Value {
+        stats.snapshot()
+    }
+
+    #[test]
+    fn tickets_are_classified_and_unknown_errors_are_other() {
+        let body = serde_json::json!({ "data": [
+            { "status": "ok", "id": "t1" },
+            { "status": "error", "message": "\"ExponentPushToken[x]\" is not registered",
+              "details": { "error": "DeviceNotRegistered", "expoPushToken": "ExponentPushToken[x]" } },
+            { "status": "error", "details": { "error": "MessageRateExceeded" } },
+            { "status": "error", "details": { "error": "ExponentPushToken[leak]" } },
+            { "status": "error" },
+            "garbage",
+        ]});
+        assert_eq!(
+            parse_tickets(&body).unwrap(),
+            vec![
+                PushOutcome::Ok { id: Some("t1".into()) },
+                PushOutcome::Error(PushErrorClass::DeviceNotRegistered),
+                PushOutcome::Error(PushErrorClass::MessageRateExceeded),
+                PushOutcome::Error(PushErrorClass::Other),
+                PushOutcome::Error(PushErrorClass::Other),
+                PushOutcome::Error(PushErrorClass::Other),
+            ]
+        );
+        // A request-level error has no tickets to read.
+        assert_eq!(parse_tickets(&serde_json::json!({ "errors": [] })), None);
+    }
+
+    /// Only Expo-shaped codes survive into a log line or the counts.
+    #[test]
+    fn request_error_codes_cannot_carry_a_token() {
+        let body = serde_json::json!({ "errors": [
+            { "code": "PUSH_TOO_MANY_EXPERIENCE_IDS", "details": { "x": ["ExponentPushToken[a]"] } },
+            { "code": "ExponentPushToken[a]" },
+            { "code": "user@example.com" },
+        ]});
+        assert_eq!(request_error_codes(&body), vec!["PUSH_TOO_MANY_EXPERIENCE_IDS"]);
+    }
+
+    /// The bug: a 200 with error tickets used to be read as success. Now each
+    /// ticket is acted on: `DeviceNotRegistered` prunes its token, an accepted
+    /// ticket is kept for its receipt, other errors are only counted.
+    #[tokio::test]
+    async fn tickets_prune_dead_tokens_and_keep_ids_for_receipts() {
+        let c = conn().await;
+        add_token(&c, "ExponentPushToken[live]", "alice").await;
+        add_token(&c, "ExponentPushToken[dead]", "bob").await;
+        add_token(&c, "ExponentPushToken[busy]", "carol").await;
+        let (url, seen) = fake_expo(
+            200,
+            serde_json::json!({ "data": [
+                { "status": "ok", "id": "ticket-live" },
+                { "status": "error", "details": { "error": "DeviceNotRegistered" } },
+                { "status": "error", "details": { "error": "MessageRateExceeded" } },
+            ]}),
+        )
+        .await;
+        let tokens = vec![
+            "ExponentPushToken[live]".to_string(),
+            "ExponentPushToken[dead]".to_string(),
+            "ExponentPushToken[busy]".to_string(),
+        ];
+        let messages: Vec<_> = tokens
+            .iter()
+            .map(|t| expo_message(t, Some("android"), None))
+            .collect();
+        let stats = PushStats::default();
+
+        send_batch(&c, &url, None, &messages, &tokens, &stats).await;
+
+        assert_eq!(seen.lock().unwrap().len(), 1, "one request for the batch");
+        assert_eq!(
+            tokens_left(&c).await,
+            vec!["ExponentPushToken[busy]", "ExponentPushToken[live]"],
+            "only the DeviceNotRegistered token is pruned"
+        );
+        assert_eq!(
+            tickets_left(&c).await,
+            vec![("ticket-live".to_string(), "ExponentPushToken[live]".to_string())]
+        );
+        let snap = counts(&stats);
+        assert_eq!(snap["messages_sent"], 3);
+        assert_eq!(snap["tickets_ok"], 1);
+        assert_eq!(snap["ticket_errors"]["DeviceNotRegistered"], 1);
+        assert_eq!(snap["ticket_errors"]["MessageRateExceeded"], 1);
+        assert_eq!(snap["tokens_pruned"], 1);
+        // The counts name no token and no user.
+        let wire = snap.to_string();
+        assert!(!wire.contains("ExponentPushToken"), "{wire}");
+        assert!(!wire.contains("alice") && !wire.contains("bob"), "{wire}");
+    }
+
+    /// A request-level failure is counted and touches nothing.
+    #[tokio::test]
+    async fn a_failed_request_is_counted_and_prunes_nothing() {
+        let c = conn().await;
+        add_token(&c, "ExponentPushToken[a]", "alice").await;
+        let (url, _) = fake_expo(
+            400,
+            serde_json::json!({ "errors": [{ "code": "PUSH_TOO_MANY_EXPERIENCE_IDS" }] }),
+        )
+        .await;
+        let tokens = vec!["ExponentPushToken[a]".to_string()];
+        let messages = vec![expo_message(&tokens[0], None, None)];
+        let stats = PushStats::default();
+
+        send_batch(&c, &url, None, &messages, &tokens, &stats).await;
+
+        assert_eq!(tokens_left(&c).await, vec!["ExponentPushToken[a]"]);
+        assert!(tickets_left(&c).await.is_empty());
+        let snap = counts(&stats);
+        assert_eq!(snap["send_request_failures"], 1);
+        assert_eq!(snap["send_request_errors"]["PUSH_TOO_MANY_EXPERIENCE_IDS"], 1);
+        assert_eq!(snap["messages_sent"], 0);
+    }
+
+    /// An unreachable Expo is a counted failure, not an error or a panic: the
+    /// send that triggered it has already been answered.
+    #[tokio::test]
+    async fn an_unreachable_expo_is_counted_not_raised() {
+        let c = conn().await;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        drop(listener);
+        let tokens = vec!["ExponentPushToken[a]".to_string()];
+        let messages = vec![expo_message(&tokens[0], None, None)];
+        let stats = PushStats::default();
+
+        send_batch(&c, &url, None, &messages, &tokens, &stats).await;
+
+        assert_eq!(counts(&stats)["send_request_failures"], 1);
+    }
+
+    /// Receipts: a `DeviceNotRegistered` receipt prunes the token, an answered
+    /// ticket is deleted either way, an unanswered one waits, and one past 24
+    /// hours is dropped without being asked about.
+    #[tokio::test]
+    async fn receipts_prune_dead_tokens_and_purge_answered_and_expired_tickets() {
+        let c = conn().await;
+        add_token(&c, "ExponentPushToken[ok]", "alice").await;
+        add_token(&c, "ExponentPushToken[dead]", "bob").await;
+        add_token(&c, "ExponentPushToken[wait]", "carol").await;
+        add_token(&c, "ExponentPushToken[old]", "dave").await;
+        let now = crate::util::now_unix() as i64;
+        for (id, token, at) in [
+            ("r-ok", "ExponentPushToken[ok]", now),
+            ("r-dead", "ExponentPushToken[dead]", now),
+            ("r-wait", "ExponentPushToken[wait]", now),
+            ("r-old", "ExponentPushToken[old]", now - PUSH_TICKET_MAX_AGE_SECS - 60),
+        ] {
+            c.execute(
+                "INSERT INTO push_ticket (ticket_id, token, created_at) VALUES (?1, ?2, ?3)",
+                libsql::params![id, token, at],
+            )
+            .await
+            .unwrap();
+        }
+        let (url, seen) = fake_expo(
+            200,
+            serde_json::json!({ "data": {
+                "r-ok": { "status": "ok" },
+                "r-dead": { "status": "error", "details": { "error": "DeviceNotRegistered" } },
+                "not-ours": { "status": "error", "details": { "error": "DeviceNotRegistered" } },
+            }}),
+        )
+        .await;
+        let stats = PushStats::default();
+
+        let sweep = check_receipts_at(&c, &url, None, &stats).await.unwrap();
+
+        assert_eq!(sweep.expired, 1);
+        assert_eq!(sweep.checked, 2);
+        assert_eq!(sweep.errors, 1);
+        let asked = seen.lock().unwrap()[0]["ids"].clone();
+        let mut asked: Vec<String> = serde_json::from_value(asked).unwrap();
+        asked.sort();
+        assert_eq!(asked, vec!["r-dead", "r-ok", "r-wait"], "the expired ticket is not asked about");
+        assert_eq!(
+            tickets_left(&c).await,
+            vec![("r-wait".to_string(), "ExponentPushToken[wait]".to_string())]
+        );
+        assert_eq!(
+            tokens_left(&c).await,
+            vec!["ExponentPushToken[ok]", "ExponentPushToken[old]", "ExponentPushToken[wait]"]
+        );
+        let snap = counts(&stats);
+        assert_eq!(snap["receipts_ok"], 1);
+        assert_eq!(snap["receipt_errors"]["DeviceNotRegistered"], 1);
+        assert_eq!(snap["tickets_expired"], 1);
+        assert_eq!(snap["tokens_pruned"], 1);
+    }
+
+    /// A failed receipts request keeps every ticket for the next sweep.
+    #[tokio::test]
+    async fn a_failed_receipts_request_keeps_the_tickets() {
+        let c = conn().await;
+        let now = crate::util::now_unix() as i64;
+        c.execute(
+            "INSERT INTO push_ticket (ticket_id, token, created_at) VALUES ('r1', 'ExponentPushToken[a]', ?1)",
+            libsql::params![now],
+        )
+        .await
+        .unwrap();
+        let (url, _) = fake_expo(503, serde_json::json!({})).await;
+        let stats = PushStats::default();
+
+        let sweep = check_receipts_at(&c, &url, None, &stats).await.unwrap();
+
+        assert_eq!(sweep.checked, 0);
+        assert_eq!(tickets_left(&c).await.len(), 1);
+        assert_eq!(counts(&stats)["receipt_request_failures"], 1);
+    }
+
+    /// The table bounds itself: a ticket older than a day cannot outlive the
+    /// next insert, even if the sweep never runs.
+    #[tokio::test]
+    async fn the_ticket_table_drops_day_old_rows_on_insert() {
+        let c = conn().await;
+        let now = crate::util::now_unix() as i64;
+        c.execute(
+            "INSERT INTO push_ticket (ticket_id, token, created_at) VALUES ('old', 't', ?1)",
+            libsql::params![now - PUSH_TICKET_MAX_AGE_SECS - 1],
+        )
+        .await
+        .unwrap();
+        c.execute(
+            "INSERT INTO push_ticket (ticket_id, token, created_at) VALUES ('new', 't', ?1)",
+            libsql::params![now],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            tickets_left(&c).await,
+            vec![("new".to_string(), "t".to_string())]
+        );
     }
 }
