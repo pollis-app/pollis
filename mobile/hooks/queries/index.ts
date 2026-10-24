@@ -25,3 +25,4 @@ export * from "./useBookmarks";
 export * from "./usePins";
 export * from "./useExport";
 export * from "./useVault";
+export * from "./useUnread";

@@ -45,6 +45,7 @@ import {
   useUserGroupsWithChannels,
   useGroupMembers,
   flattenPages,
+  markConversationRead,
   type ConversationKind,
   type Message,
 } from "../../hooks/queries";
@@ -201,6 +202,25 @@ function TextChat(props: ChatViewProps = {}) {
     }, [conversationId, kind, ingest]),
   );
 
+  // Unread (#1422): this conversation is on screen, so it never badges and
+  // its persisted read cursor advances — on arrival, however it was reached
+  // (a row, Search, a notification tap), and again on leaving, for whatever
+  // landed while it was open. The newest-message effect below covers arrivals
+  // while it stays open.
+  useFocusEffect(
+    useCallback(() => {
+      if (!conversationId) {
+        return;
+      }
+      appStore.setOpenConversationId(conversationId);
+      markConversationRead(conversationId);
+      return () => {
+        appStore.clearOpenConversationId(conversationId);
+        markConversationRead(conversationId);
+      };
+    }, [conversationId]),
+  );
+
   // Auto-scroll to bottom when a NEW newest message lands (arrival or
   // optimistic send). Keyed on the newest id rather than the array length so
   // loading an older page never yanks the reader away from the history they
@@ -215,6 +235,18 @@ function TextChat(props: ChatViewProps = {}) {
       listRef.current?.scrollToOffset({ offset: 0, animated: true });
     });
   }, [newestId]);
+
+  // A message that arrives while the conversation is on screen is read: move
+  // the cursor so the persisted count agrees once this screen is left.
+  useEffect(() => {
+    if (!conversationId || !newestId) {
+      return;
+    }
+    if (appStore.openConversationId !== conversationId) {
+      return;
+    }
+    markConversationRead(conversationId);
+  }, [conversationId, newestId]);
 
   // The embedded (iPad) pane keeps this component mounted across
   // conversations, so a reply must never outlive the one it was started in.

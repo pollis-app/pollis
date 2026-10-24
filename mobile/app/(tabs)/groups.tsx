@@ -10,6 +10,7 @@ import {
   useUserGroupsWithChannels,
   usePendingGroupInvites,
   useAdminPendingJoinRequestCounts,
+  markConversationRead,
 } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
 import { useLayoutClass } from "../../hooks/useLayoutClass";
@@ -122,7 +123,7 @@ function Groups() {
     }
     appStore.setSelectedChannelId(autoChannel.id);
     // Showing a conversation clears its unread count, as opening it does.
-    appStore.markRead(autoChannel.id);
+    markConversationRead(autoChannel.id);
   }, [autoChannel, autoGroupId]);
 
   const selectGroup = (id: string) => {
@@ -141,7 +142,7 @@ function Groups() {
     appStore.setSelectedChannelId(c.id);
     // Opening a conversation clears its unread count (desktop does the same
     // in its Channel page).
-    appStore.markRead(c.id);
+    markConversationRead(c.id);
     // Re-opening the channel already shown closes any page over it.
     resetPane();
     // On regular the right pane updates in place; on compact push the chat.

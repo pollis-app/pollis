@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Screen, Header } from "../../components/ui";
 import { GroupPanel } from "../../components/groups/GroupPanel";
 import { appStore } from "../../stores/appStore";
+import { markConversationRead } from "../../hooks/queries";
 import { useIsRegular } from "../../hooks/useLayoutClass";
 
 // A single group's page on phones, reached by route (invite links, deep
@@ -49,7 +50,7 @@ function GroupDetail() {
             appStore.setSelectedGroupId(groupId);
             appStore.setSelectedChannelId(c.id);
             // Opening a conversation clears its unread count.
-            appStore.markRead(c.id);
+            markConversationRead(c.id);
             router.push({
               pathname: "/chat/[id]",
               params: { id: c.id, kind: "channel", name: c.name },

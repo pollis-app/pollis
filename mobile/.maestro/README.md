@@ -236,6 +236,17 @@ message" on it, pin its own message and unpin the peer's
 the device's pin and unpin in its own list. The one-device half (pin, list,
 jump, unpin) is `flows/pins.yaml`.
 
+**Unread for messages that arrived while away (automated, #1422):** `mobile/scripts/maestro-unread.sh <device>`
+— the lost-message shape with `pollis-tui`'s `unread_peer` example, which sends
+only when the script touches a signal file. The device opens a DM with a fresh
+peer and goes to the background (`two-client/unread/1-open-dm.yaml`); the peer
+sends two; on resume the Direct tab badge and the row's count must read 2
+(`2-resume.yaml`), then the app is closed; the peer sends a third; after a cold
+start and the PIN the count must read 3, opening the DM clears it, and it stays
+cleared after another relaunch (`3-cold-start.yaml`). Reading on one device
+clearing the count on another is pinned by the core's cursor-merge tests, not
+here: it needs a second device of the same account.
+
 **Store-listing screenshots:** `mobile/scripts/maestro-store-shots.sh <device> [out-dir]`
 — `pollis-tui`'s `store_shots_peer` example plays the second person (dev DS
 only). The device shoots sign-in, signs up, makes "Design Team" with #General,

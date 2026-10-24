@@ -22,6 +22,7 @@ import { initializeNativeBridge, invoke } from "../lib/native";
 import { usePushNotifications } from "../hooks/usePushNotifications";
 import { useInboxRealtime } from "../hooks/useInboxRealtime";
 import { useEnrollmentApprovals } from "../hooks/useEnrollmentApprovals";
+import { useUnreadSync } from "../hooks/queries/useUnread";
 import { AutoLockProvider } from "../lib/autolock";
 import i18n, { adoptUserLanguage, hydrateLanguage } from "../i18n";
 import { appStore } from "../stores/appStore";
@@ -34,12 +35,14 @@ SplashScreen.preventAutoHideAsync();
 // QueryClient + router and only run after the bridge is ready. Each hook is a
 // no-op until a user is signed in: push installs notification listeners; inbox
 // realtime keeps the groups/DM lists live while foregrounded; a new device's
-// approval request opens the approval screen (#1360); the language
-// re-resolves so a user's own stored choice wins over the pre-auth screens'.
+// approval request opens the approval screen (#1360); unread badges follow
+// the persisted read cursors (#1422); the language re-resolves so a user's
+// own stored choice wins over the pre-auth screens'.
 function SignedInServicesGate() {
   usePushNotifications();
   useInboxRealtime();
   useEnrollmentApprovals();
+  useUnreadSync();
   const userId = useObserver(() => appStore.currentUser?.id ?? null);
   useEffect(() => {
     if (userId) {

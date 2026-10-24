@@ -23,6 +23,7 @@ import type {
   MessageQueueItem,
 } from "../types";
 import { messageJumpStore } from "./messageJumpStore";
+import { unreadBadges, type UnreadCount } from "../lib/unread";
 
 class AppStore implements AppState {
   // ── Core / user ────────────────────────────────────────────────────────
@@ -49,8 +50,15 @@ class AppStore implements AppState {
   isLoading = false;
   error: string | null = null;
 
-  // Unread message counts keyed by conversation_id or channel_id
+  // Unread message counts keyed by conversation_id or channel_id. Hydrated
+  // from the persisted read cursors (hooks/queries/useUnread.ts, #1422); a
+  // live wake-up bumps it in between.
   unreadCounts: Record<string, number> = {};
+
+  // The conversation whose chat screen is focused, phone or iPad pane. Set by
+  // the chat screen itself, so it is right however the screen was reached (a
+  // list row, Search, a notification tap). It never badges.
+  openConversationId: string | null = null;
 
   // True while the session is PIN-locked (manual "Lock now" or auto-lock,
   // see lib/autolock.tsx). Cleared when the PIN screen unlocks or a fresh
@@ -169,6 +177,24 @@ class AppStore implements AppState {
     this.error = error;
   }
 
+  setOpenConversationId(id: string) {
+    this.openConversationId = id;
+  }
+
+  // Clears the open conversation, unless another one has taken its place
+  // (focus moves to the new screen before the old one blurs).
+  clearOpenConversationId(id: string) {
+    if (this.openConversationId === id) {
+      this.openConversationId = null;
+    }
+  }
+
+  // Replace the whole badge set from the persisted cursors (#1422). See
+  // `unreadBadges` for why it is a replacement and not a merge.
+  hydrateUnread(counts: UnreadCount[]) {
+    this.unreadCounts = unreadBadges(counts, this.openConversationId);
+  }
+
   // Clears the unread count for a conversation or channel
   markRead(id: string) {
     if (!(id in this.unreadCounts)) {
@@ -202,6 +228,7 @@ class AppStore implements AppState {
     this.isLoading = false;
     this.error = null;
     this.unreadCounts = {};
+    this.openConversationId = null;
     this.isLocked = false;
     // A jump queued in this session points into this session's history.
     messageJumpStore.reset();

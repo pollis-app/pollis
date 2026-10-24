@@ -1,0 +1,54 @@
+appId: com.pollis.mobile
+tags:
+  - two-client
+---
+# UNREAD (#1422), part 1 of 3 — driven by scripts/maestro-unread.sh.
+# Sign up a fresh account, open a DM with the peer the script just signed up
+# (${MAESTRO_PEER_HANDLE}) and say hello, then leave the conversation for the
+# Direct tab and send the app to the background. The peer sends only after
+# this, so nothing it sends is on screen when it arrives.
+
+- runFlow: ../../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-direct"
+- tapOn:
+    id: "btn-new-dm"
+- tapOn:
+    id: "input-user-search"
+- inputText: "${MAESTRO_PEER_HANDLE}"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible:
+      id: "row-user-.*"
+    timeout: 20000
+- tapOn:
+    id: "row-user-.*"
+- extendedWaitUntil:
+    visible:
+      id: "input-composer"
+    timeout: 30000
+- tapOn:
+    id: "input-composer"
+- inputText: "hello peer"
+# The keyboard can sit over the send button and take the tap (Gboard's mic).
+- hideKeyboard
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*: hello peer, .*"
+    timeout: 15000
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "tab-direct"
+- extendedWaitUntil:
+    visible:
+      id: "row-dm-.*"
+    timeout: 30000
+# Our own message is never unread.
+- assertNotVisible:
+    id: "unread-.*"
+- assertNotVisible:
+    id: "badge-direct"
+- takeScreenshot: unread-01-dm-open
+- pressKey: Home

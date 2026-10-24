@@ -1105,7 +1105,8 @@ Current state:
   groups/DM lists). It ingests + invalidates on `new_message` / `dm_created` /
   `membership_changed`. Graceful no-op until `get_livekit_token` exists on the
   bridge. A missed wake-up is caught up, not waited out: returning to the
-  foreground re-ingests every listed conversation, and a LiveKit `Reconnected`
+  foreground re-ingests every listed conversation (so does landing in the app —
+  cold start, sign-in, unlock — once both lists load, #1422), and a LiveKit `Reconnected`
   re-ingests that room (`lib/messageWake.ts`) — a message sent from the user's
   other device has no push to fall back on. Such a message is shown live but
   never counted unread (decided after ingest from the newest row's sender).
@@ -1144,7 +1145,23 @@ Current state:
   as registered only after the DS accepted the token, and the app also registers
   without prompting on sign-in/unlock and every return to the foreground, and
   re-registers on `Notifications.addPushTokenListener` (token rotation). Push covers backgrounded/closed delivery;
-  foreground delivery is the realtime path above.
+  foreground delivery is the realtime path above. A tap is held
+  (`lib/push/tapGate.ts`) until the device is past the PIN, and the tap that
+  cold-started the app is picked up with `getLastNotificationResponse` (#1422):
+  before, a cold-start tap was dropped and a tap on a locked app pushed the
+  chat over the PIN screen.
+- **Unread badges are persisted (#1422, desktop's #844):**
+  `hooks/queries/useUnread.ts` reads `get_unread_counts` into
+  `appStore.unreadCounts` (whole-set replace, `lib/unread.ts`) on landing in
+  the app, on resume and after every ingest, so a message that arrived while
+  the app was backgrounded or closed badges the tab, the DM row, the group dot
+  and the channel count. `markConversationRead` (clears the badge and runs
+  `mark_conversation_read`) replaces every bare `appStore.markRead`; the chat
+  screen marks itself read on focus, on blur and as messages arrive, and
+  records itself in `appStore.openConversationId`, which never badges.
+  `sync_read_cursors` runs on unlock and resume, so reading on one device
+  clears the others. The `useInboxRealtime` bump stays as the instant path.
+  Maestro: `scripts/maestro-unread.sh` (dev-DS peer `unread_peer`).
 - **Voice — libraries installed, NOT activated (#343).** Mobile will take the
   **JS LiveKit SDK** path (`@livekit/react-native` + `@livekit/react-native-webrtc`)
   rather than desktop's Rust media pipeline — see the architectural note in epic

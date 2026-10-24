@@ -823,6 +823,22 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let conversation_ids: Vec<String> = arg(&args, "conversationIds")?;
             ok(messages::read_last_messages(conversation_ids, &state()?).await?)
         }
+        // ----- unread (#844, mobile #1422) -----
+        // Persisted per-conversation read cursors, so a message that arrived
+        // while the app was backgrounded or closed still badges.
+        "get_unread_counts" => {
+            let user_id: String = arg(&args, "userId")?;
+            ok(messages::get_unread_counts(user_id, &state()?).await?)
+        }
+        "mark_conversation_read" => {
+            let conversation_id: String = arg(&args, "conversationId")?;
+            let user_id: String = arg(&args, "userId")?;
+            ok(messages::mark_conversation_read(conversation_id, user_id, &state()?).await?)
+        }
+        "sync_read_cursors" => {
+            let user_id: String = arg(&args, "userId")?;
+            ok(messages::sync_read_cursors(user_id, &state()?).await?)
+        }
         // ----- threads -----
         "read_thread_messages" => {
             let thread_id: String = arg(&args, "threadId")?;
@@ -1327,6 +1343,9 @@ mod tests {
             "read_channel_messages",
             "read_dm_messages",
             "read_last_messages",
+            "get_unread_counts",
+            "mark_conversation_read",
+            "sync_read_cursors",
             "list_security_events",
             "delete_account",
             "wipe_local_data",
@@ -1350,6 +1369,29 @@ mod tests {
         ] {
             assert!(is_registered(cmd).await, "no bridge arm for {cmd}");
         }
+    }
+
+    /// The unread arms (#1422) take the same camelCase args as the Tauri
+    /// commands desktop calls, so mobile's `useUnread` sends what desktop's
+    /// does. Args parse before `state()`, so a missing one names itself.
+    #[tokio::test]
+    async fn unread_arms_take_the_desktop_arg_names() {
+        async fn missing(cmd: &str, args: &str) -> String {
+            match invoke(cmd.to_string(), args.to_string()).await {
+                Ok(_) => panic!("{cmd} should fail without its args"),
+                Err(BridgeError::Bridge(msg)) => msg,
+            }
+        }
+        assert_eq!(missing("get_unread_counts", "{}").await, "missing arg: userId");
+        assert_eq!(missing("sync_read_cursors", "{}").await, "missing arg: userId");
+        assert_eq!(
+            missing("mark_conversation_read", "{}").await,
+            "missing arg: conversationId"
+        );
+        assert_eq!(
+            missing("mark_conversation_read", r#"{"conversationId":"c1"}"#).await,
+            "missing arg: userId"
+        );
     }
 
     #[tokio::test]
