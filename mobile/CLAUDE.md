@@ -754,7 +754,7 @@ afterwards targets only the binaries built afterwards.
   from the environment, `EXPO_NO_DOTENV`, runtime versions, the store-build
   checks: bundle names `api.pollis.com` and never `api-dev`, only the four
   public `EXPO_PUBLIC_*` reads, no secret value in any file) → `sign` in the
-  **`ota-signing` environment** (required reviewer; re-derives every hash and
+  **`ota-signing` environment** (no reviewer — the tag push is the approval; re-derives every hash and
   the prod-DS check from the bytes, bare node with no npm tree, then signs) →
   `publish`: upload bytes + archive, SLSA provenance, **append to the
   transparency log**, only then flip the live pointers, then re-fetch through
@@ -802,8 +802,8 @@ gh workflow run mobile-ota-release.yml --ref main -f action=rollback-to-embedded
 cd mobile && node scripts/ota-publish.ts verify --platform ios --runtime-version <rv>
 ```
 
-Every operation is approved in the `ota-signing` environment and logged before
-it goes live. The group id is in each run's summary and in `ota/groups/` in
+Every operation runs unattended in the `ota-signing` environment (refs limited to
+`main` and `mobile-ota-*` tags, no reviewer) and is logged before it goes live. The group id is in each run's summary and in `ota/groups/` in
 the `pollis` bucket. Rolling forward after a rollback is simply the next publish (a newer
 `createdAt` wins). The client keeps a crashing update from bricking the app on
 its own (expo-updates rolls back to the previous update if one fails before

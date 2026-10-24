@@ -95,7 +95,10 @@ including one added in a PR that merges without review.
   mobile app's over-the-air JS updates, which skip store review and replace the code
   that handles plaintext; every OTA-capable phone runs whatever it signs. It is an
   **environment** secret of `ota-signing` only — never repository-level — with a
-  **required reviewer**, and deployment refs limited to `main` and `mobile-ota-*` tags.
+  deployment refs limited to `main` and `mobile-ota-*` tags. It has **no required
+  reviewer** (removed 2026-10-24 so OTA fixes ship without a manual approval): pushing a
+  `mobile-ota-*` tag is the approval, so repository write access is the gate, and every
+  update is logged in the transparency tree before it goes live.
   Only `mobile-ota-release.yml`'s `sign` job names the environment
   (`mobile/tests/ota-config.test.ts` pins that the key is referenced exactly once,
   there). The environment exists (created with the key, #1250); without it the
@@ -109,7 +112,7 @@ behind an Environment with reviewers (item 3), which is what actually gates a di
 run. Workflows where a hand-fired run publishes or mutates something real:
 `cli-release.yml`, `verifier-release.yml`, `mobile-apk-release.yml` (publishes
 only when dispatched on a `mobile-v*` tag ref), `mobile-ota-release.yml` (publishes,
-republishes or rolls back — always behind the `ota-signing` reviewer), `attest-release.yml`,
+republishes or rolls back — only from `main` or a `mobile-ota-*` tag, via the `ota-signing` environment), `attest-release.yml`,
 `transparency-publish.yml`, `aur-republish.yml`, `website-deploy.yml`,
 `delivery-deploy-{dev,prod}.yml`, `db-migrate-dev.yml`, `livekit-deploy.yml`, `livekit-restart.yml`,
 `relay-image.yml`. (`desktop-release.yml` already self-refuses a dispatch.)
