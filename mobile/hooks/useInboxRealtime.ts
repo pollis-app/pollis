@@ -43,6 +43,7 @@ import {
   messageQueryKeys,
   useIngestConversation,
 } from "./queries/useMessages";
+import { refreshUnread } from "./queries/useUnread";
 import { deviceWasRevoked } from "../lib/deviceRevoked";
 import { isInSignedInApp, noticeEnrollmentRequested } from "../lib/enrollmentPrompt";
 
@@ -72,8 +73,8 @@ export function useInboxRealtime() {
   // the tabs render from, so a membership change that refreshes the lists
   // also reconciles the subscriptions. No polling: list invalidation is
   // event-driven (below) or screen-focus.
-  const { data: groups = [] } = useUserGroupsWithChannels();
-  const { data: dms = [] } = useDMChannels();
+  const { data: groups = [], isSuccess: groupsLoaded } = useUserGroupsWithChannels();
+  const { data: dms = [], isSuccess: dmsLoaded } = useDMChannels();
 
   // Read live values through refs so the (stable) event handler never forces
   // a resubscribe.
@@ -128,14 +129,20 @@ export function useInboxRealtime() {
           const kind = event.channel_id ? "channel" : "dm";
           // Unread: never for the conversation on screen. Selection is set on
           // row press and cleared when a list screen regains focus on compact
-          // layouts, so "selected" tracks "open".
+          // layouts; the chat screen also records itself as open, which covers
+          // one reached without a row press (a notification tap). The open
+          // chat advances its own read cursor as the message renders.
           const isOpen =
             appStore.selectedChannelId === id ||
-            appStore.selectedConversationId === id;
+            appStore.selectedConversationId === id ||
+            appStore.openConversationId === id;
           // Land the envelope (ingest refreshes the message cache + previews),
-          // then read the newest row back to see who wrote it.
-          void ingestRef.current(id, kind).then(async () => {
+          // then read the newest row back to see who wrote it. The bump below
+          // is the instant badge; the persisted counts are re-read after it
+          // (not by the ingest), so the two cannot add up to a double count.
+          void ingestRef.current(id, kind, { refreshUnread: false }).then(async () => {
             if (isOpen) {
+              refreshUnread(qc);
               return;
             }
             let latest: WakeLatest | null = null;
@@ -150,6 +157,7 @@ export function useInboxRealtime() {
             if (shouldCountUnread({ latest, selfId: userId, isOpen })) {
               appStore.incrementUnread(id);
             }
+            refreshUnread(qc);
           });
           break;
         }
@@ -316,6 +324,28 @@ export function useInboxRealtime() {
       sub.remove();
     };
   }, [userId]);
+
+  // Landing in the app — cold start, sign-in, unlock — catches up every listed
+  // conversation once, as a resume does (#1422). A message that arrived while
+  // the app was closed or locked woke nothing here: no push runs JS in a killed
+  // app, and LiveKit does not replay. Without this it stayed un-ingested, so
+  // neither its preview nor its unread count showed until the conversation was
+  // opened. Waits for both lists so a group or DM is not skipped; once per
+  // landing, so a list refetch does not re-run it.
+  const landedRef = useRef(false);
+  useEffect(() => {
+    if (!inApp) {
+      landedRef.current = false;
+      return;
+    }
+    if (landedRef.current || !groupsLoaded || !dmsLoaded) {
+      return;
+    }
+    landedRef.current = true;
+    for (const target of catchUpTargets(groupsRef.current, dmsRef.current)) {
+      void ingestRef.current(target.id, target.kind);
+    }
+  }, [inApp, groupsLoaded, dmsLoaded]);
 
   // Signed in / unlocked: deliver what the durable outbox holds (#1335) — a
   // message a killed process left unsent. The core starts this drain itself

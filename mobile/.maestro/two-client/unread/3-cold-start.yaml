@@ -1,0 +1,62 @@
+appId: com.pollis.mobile
+tags:
+  - two-client
+---
+# UNREAD (#1422), part 3 of 3. The peer sent a third message while the app was
+# closed. A cold start used to wipe every count; now the two unread from part 2
+# survive and the new one adds to them. Opening the DM clears the row count and
+# the tab badge, and they stay cleared.
+
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-pin"
+    timeout: 20000
+- runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "badge-direct"
+    timeout: 60000
+- tapOn:
+    id: "tab-direct"
+- extendedWaitUntil:
+    visible:
+      id: "unread-.*"
+      containsChild:
+        text: "3"
+    timeout: 60000
+- takeScreenshot: unread-03-after-cold-start
+- tapOn:
+    text: ".*${MAESTRO_PEER_HANDLE}.*"
+- extendedWaitUntil:
+    visible: "sent while the app was closed"
+    timeout: 30000
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "tab-direct"
+- extendedWaitUntil:
+    notVisible:
+      id: "unread-.*"
+    timeout: 15000
+- assertNotVisible:
+    id: "badge-direct"
+# The read cursor persisted: still read after another cold start.
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-pin"
+    timeout: 20000
+- runFlow: ../../subflows/enter-pin.yaml
+- tapOn:
+    id: "tab-direct"
+- extendedWaitUntil:
+    visible:
+      id: "row-dm-.*"
+    timeout: 30000
+- assertNotVisible:
+    id: "unread-.*"
+- assertNotVisible:
+    id: "badge-direct"
+- takeScreenshot: unread-04-read-after-relaunch

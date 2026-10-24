@@ -23,6 +23,7 @@ import {
   useDMRequests,
   useLastMessages,
   previewText,
+  markConversationRead,
 } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
@@ -230,7 +231,7 @@ function Direct() {
                 resetPane();
                 // Opening a conversation clears its unread count (desktop
                 // does the same in its DM page).
-                appStore.markRead(d.id);
+                markConversationRead(d.id);
                 // On regular the right pane updates in place; on compact push
                 // the conversation as today.
                 if (!isRegular) {
