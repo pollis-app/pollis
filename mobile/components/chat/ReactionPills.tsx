@@ -83,23 +83,28 @@ export function ReactionPills({
               minHeight: 32,
               paddingHorizontal: 10,
               borderRadius: r.pill,
-              backgroundColor: reacted
-                ? semantic.accent
-                : pressed
-                  ? semantic.high
+              // Reacted = accent outline, no fill: an accent fill sat behind
+              // the emoji and swallowed the default (yellow) skin tone. Every
+              // pill carries the border so toggling never shifts the layout.
+              borderWidth: 1.5,
+              borderColor: reacted ? semantic.accent : "transparent",
+              backgroundColor: pressed
+                ? semantic.high
+                : reacted
+                  ? "transparent"
                   : semantic.raised,
             })}
           >
             <ReactionFace emoji={reaction.emoji} />
-            {/* Reacted = accent fill + dark bold count (the inverse of the
-                others' dark fill + accent count), never colour alone. */}
+            {/* Reacted = accent outline + bold count (the others: dark fill +
+                medium count), never colour alone. */}
             <Text
               style={[
                 ty.meta,
                 {
                   fontFamily: reacted ? fonts.bold : fonts.medium,
                   fontSize: 13,
-                  color: reacted ? semantic.onAccent : semantic.accent,
+                  color: semantic.accent,
                 },
               ]}
             >
