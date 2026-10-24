@@ -1,0 +1,32 @@
+appId: com.pollis.mobile
+tags:
+  - two-client
+---
+# UNREAD (#1422), part 2 of 3. The peer sent two messages while the app was in
+# the background, so no live wake-up counted them. Back in the foreground the
+# resume catch-up ingests them and the persisted counts must show where they
+# landed: the Direct tab badge and the DM row's count.
+
+- launchApp:
+    stopApp: false
+# Auto-lock may have engaged while away; unlock if so.
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "badge-direct"
+    timeout: 60000
+- tapOn:
+    id: "tab-direct"
+- extendedWaitUntil:
+    visible:
+      id: "unread-.*"
+      text: "2"
+    timeout: 60000
+- takeScreenshot: unread-02-after-resume
+# Leave it unread and close the app; the peer sends again while it is closed.
+- stopApp

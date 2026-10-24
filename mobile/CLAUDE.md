@@ -1140,7 +1140,23 @@ Current state:
   permission (asked on first conversation open, not at login), token registration
   (`register_push_token`, best-effort), content-free tap/data handlers, and a
   Notifications row in Preferences. Push covers backgrounded/closed delivery;
-  foreground delivery is the realtime path above.
+  foreground delivery is the realtime path above. A tap is held
+  (`lib/push/tapGate.ts`) until the device is past the PIN, and the tap that
+  cold-started the app is picked up with `getLastNotificationResponse` (#1422):
+  before, a cold-start tap was dropped and a tap on a locked app pushed the
+  chat over the PIN screen.
+- **Unread badges are persisted (#1422, desktop's #844):**
+  `hooks/queries/useUnread.ts` reads `get_unread_counts` into
+  `appStore.unreadCounts` (whole-set replace, `lib/unread.ts`) on landing in
+  the app, on resume and after every ingest, so a message that arrived while
+  the app was backgrounded or closed badges the tab, the DM row, the group dot
+  and the channel count. `markConversationRead` (clears the badge and runs
+  `mark_conversation_read`) replaces every bare `appStore.markRead`; the chat
+  screen marks itself read on focus, on blur and as messages arrive, and
+  records itself in `appStore.openConversationId`, which never badges.
+  `sync_read_cursors` runs on unlock and resume, so reading on one device
+  clears the others. The `useInboxRealtime` bump stays as the instant path.
+  Maestro: `scripts/maestro-unread.sh` (dev-DS peer `unread_peer`).
 - **Voice — libraries installed, NOT activated (#343).** Mobile will take the
   **JS LiveKit SDK** path (`@livekit/react-native` + `@livekit/react-native-webrtc`)
   rather than desktop's Rust media pipeline — see the architectural note in epic
