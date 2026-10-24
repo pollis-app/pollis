@@ -728,9 +728,34 @@ afterwards targets only the binaries built afterwards.
   exists only where `ubrn build` ran; (c) skips the version fields and the
   `updates` block, which move without the native code moving; (d) hashes the
   code-signing certificate, so a rotated certificate is a new runtime version
-  and old binaries keep their own, old-key-signed pointers.
+  and old binaries keep their own, old-key-signed pointers; (e) hashes
+  node_modules files that **Gradle rewrites in place** as Gradle leaves them,
+  and ignores build output tools leave inside packages (#1427). A store build
+  runs Gradle/Xcode and the OTA job does not, so without (e) one commit had two
+  runtime versions: masked-view's `build.gradle` strips `package=` from its
+  own `AndroidManifest.xml` in node_modules, so the Play 1.0.14 binary carries
+  `5466ba19…` while the OTA job computed `35e62c3e…` and its updates reached
+  nobody. Likewise the npm `ubrn` bin compiles itself into
+  `node_modules/uniffi-bindgen-react-native/target/`, which iOS hashed. It was
+  never Linux vs macOS: a fresh install on a Mac gives CI's value.
+  `tests/ota-fingerprint.test.ts` pins (e) and fails if another installed
+  package's `build.gradle` starts writing into its own sources.
   Consequence: **a pollis-core change blocks OTA for every binary built before
   it** — that is intended.
+- **Store-build ledger** (`store/runtime-versions.json`): every shipped binary
+  and the runtime version baked into it. `ota-publish.ts build` prints which
+  recorded binaries each platform's update reaches, warns (`::warning::`) for
+  a platform that reaches none, and **refuses a publish that reaches no
+  recorded binary at all** (a dry run passes `--unreached warn` and only
+  warns). **After every store build, add its entry** (a PR, before the next
+  OTA): Android `unzip -p app-release.aab base/assets/fingerprint` (APK:
+  `assets/fingerprint`); iOS `unzip -p Pollis.ipa
+  Payload/Pollis.app/EXUpdates.bundle/fingerprint`. The sideload APK workflow
+  prints its value (`Record the runtime version and its sources`). The OTA
+  `build` job uploads `ota-fingerprint-sources` (the `--debug` sources per
+  platform) on every run; when an update misses a binary, diff that against
+  `node_modules/.bin/fingerprint fingerprint:generate --platform <p> --debug`
+  on the build machine.
 - **Server**: the DS front-door Worker itself (`pollis-delivery/worker/updates.ts`,
   wired in `worker/index.ts`) — no separate project, domain or bucket. Under
   `/updates/` on api.pollis.com it serves `GET /updates/api/manifest`
