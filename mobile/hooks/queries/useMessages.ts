@@ -770,11 +770,6 @@ export function useDeleteMessage(
   });
 }
 
-/**
- * Imperative ingest trigger — fire-and-forget. Called from `useFocusEffect`
- * in the chat screen when the screen mounts or refocuses, so the user sees
- * any messages delivered while the app was backgrounded.
- */
 export interface IngestOptions {
   // Re-read the unread counts once the envelopes land (default true). The
   // live wake-up passes false: it bumps the badge itself and refetches after,
@@ -782,6 +777,11 @@ export interface IngestOptions {
   refreshUnread?: boolean;
 }
 
+/**
+ * Imperative ingest trigger — fire-and-forget. Called from `useFocusEffect`
+ * in the chat screen when the screen mounts or refocuses, so the user sees
+ * any messages delivered while the app was backgrounded.
+ */
 export function useIngestConversation() {
   const currentUser = useObserver(() => appStore.currentUser);
   const queryClient = useQueryClient();

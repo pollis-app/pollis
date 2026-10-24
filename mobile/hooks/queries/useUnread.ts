@@ -52,6 +52,10 @@ export function useUnreadCounts(userId: string | null) {
       (await invoke<UnreadCount[]>("get_unread_counts", { userId })) ?? [],
     enabled: !!userId,
     staleTime: 1000 * 30,
+    // Every answer is a new object, even one equal to the last: the store may
+    // have moved in between (a live bump, an optimistic clear), and only a
+    // changed `data` reference re-runs the hydrate that puts it right.
+    structuralSharing: false,
   });
 }
 

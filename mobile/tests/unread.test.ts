@@ -95,6 +95,9 @@ test("the persisted counts are read with the desktop command shapes", () => {
   assert.match(hook, /invoke<number>\("sync_read_cursors", \{ userId \}\)/);
   // No polling: refetches are event-driven (unlock, foreground, ingest).
   assert.doesNotMatch(hook, /refetchInterval|setInterval/);
+  // An answer equal to the last must still re-hydrate: the store may have
+  // moved in between (a live bump, an optimistic clear).
+  assert.match(hook, /structuralSharing: false/);
   // Gated on being past the PIN: the counts live in the encrypted local DB.
   assert.match(hook, /isInSignedInApp\(segments, isLocked\)/);
   assert.match(hook, /AppState\.addEventListener\("change"/);
