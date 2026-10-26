@@ -172,6 +172,47 @@ async fn an_unedited_entry_reads_back_with_updated_at_equal_to_created_at() {
     );
 }
 
+/// #1497: a save is resent after a connection failure (`DsRequest::IDEMPOTENT`),
+/// so the DS may see the same bytes twice. The repeat must be a no-op — the
+/// entry must not come back "(edited)" because the network hiccuped — while
+/// the attachment references stay exactly the declared set.
+#[tokio::test]
+async fn a_byte_identical_resave_is_a_no_op() {
+    let db = fresh().await;
+    let conn = db.conn().await.unwrap();
+    let first = save("alice", "v1", CIPHERTEXT, &[HASH_A]);
+    apply_save_vault_message(&conn, Some("alice"), &first)
+        .await
+        .unwrap();
+    let out = apply_save_vault_message(&conn, Some("alice"), &first)
+        .await
+        .unwrap();
+    assert!(matches!(out, VaultOutcome::Ok), "a resend is accepted, not refused");
+
+    let resp = read_vault(&db, "alice").await;
+    assert_eq!(resp.messages.len(), 1);
+    assert_eq!(
+        resp.messages[0].updated_at, resp.messages[0].created_at,
+        "a resend must not read back as an edit"
+    );
+    assert_eq!(ref_count(&db, "v1").await, 1);
+}
+
+/// The issue's own shape: one entry carrying twelve images is inside every
+/// bound the DS sets on a save.
+#[tokio::test]
+async fn an_entry_with_twelve_attachments_is_accepted() {
+    let db = fresh().await;
+    let conn = db.conn().await.unwrap();
+    let hashes: Vec<String> = (0..12).map(|i| format!("{i:064x}")).collect();
+    let refs: Vec<&str> = hashes.iter().map(String::as_str).collect();
+    let out = apply_save_vault_message(&conn, Some("alice"), &save("alice", "v12", CIPHERTEXT, &refs))
+        .await
+        .unwrap();
+    assert!(matches!(out, VaultOutcome::Ok));
+    assert_eq!(ref_count(&db, "v12").await, 12);
+}
+
 /// The cross-user overwrite: mallory saves under alice's ULID. The row must
 /// stand untouched and the answer must be Forbidden.
 #[tokio::test]
