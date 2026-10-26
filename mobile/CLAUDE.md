@@ -1004,7 +1004,7 @@ app/
   group/*              new, invite, invite-links, members, settings, emoji, requests, discover
   chat/[id].tsx        conversation (Header + list + composer); chat/thread.tsx
   dm/{new,info,requests}.tsx · conversation/{info,pins}.tsx · user/[id].tsx · report.tsx
-  media.tsx            full-screen attachment viewer (#1248): zoom/swipe, video, audio, save/share
+  media.tsx            full-screen attachment viewer (#1248, #1492): zoom, swipe pager, swipe-down dismiss, video, audio, save/share
   vault.tsx            the Vault (#1316): chat-with-yourself + media grid, opened from the top of Direct
   self/*               preferences, user-settings, security, blocked, saved, …
 components/
@@ -1158,7 +1158,13 @@ Current state:
   an entry's files). Long press → entry sheet (pin/unpin, edit, delete); edit
   reuses the chat's `EditBar`, delete arms `VaultDeleteBar` in place of the
   composer (desktop's confirm, "on every device, cannot be undone"); the Media chip
-  shows a grid that opens `app/media.tsx` with `source=vault`. Attachments come
+  shows a grid (a virtualised `FlatList`) that opens `app/media.tsx` with
+  `source=vault`. The viewer then swipes through the grid's images and videos in
+  grid order, newest first (`vaultViewerItems`, #1492): a pager that mounts only
+  the page on screen ± 1, so only those hold decrypted files; pinch/double-tap
+  zoom stops the paging until back at 1×, a video pauses when swiped away, a
+  downward drag dismisses, and "12 / 100" sits under the filename
+  (`text-media-position`). Maestro: `.maestro/flows/vault-swipe.yaml`. Attachments come
   from the photo library, as in chat — desktop's arbitrary-file drop has no mobile
   picker yet (no `expo-document-picker`). Maestro: `.maestro/flows/vault.yaml`.
 - **Keystore-at-rest (Android + iOS):** the file-backed keystore (the only

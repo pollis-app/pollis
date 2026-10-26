@@ -21,6 +21,7 @@ import {
   exportFilename,
   formatClock,
   mediaKind,
+  shouldDismiss,
 } from "../lib/media/viewer.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -122,4 +123,44 @@ test("the send settles its pending attachments' ids for the viewer, and the view
   const viewer = readFileSync(join(ROOT, "app/media.tsx"), "utf8");
   assert.match(viewer, /collectViewerItems\(messages, currentAttachmentId\(attachmentId\)\)/);
   assert.match(viewer, /currentId = currentAttachmentId\(trackedId\)/);
+});
+
+test("swipe down dismisses past a fifth of the page or on a fling, never upwards (#1492)", () => {
+  // 1000 px page: 200 px is the line.
+  assert.equal(shouldDismiss(150, 0, 1000), false);
+  assert.equal(shouldDismiss(250, 0, 1000), true);
+  assert.equal(shouldDismiss(60, 1500, 1000), true);
+  // Dragged far, then heading back up when let go: the user changed their mind.
+  assert.equal(shouldDismiss(400, -800, 1000), false);
+  assert.equal(shouldDismiss(0, 2000, 1000), false);
+  assert.equal(shouldDismiss(-50, 0, 1000), false);
+});
+
+test("the pager stays virtualised and the swipe-down never fights paging or zoom (#1492)", () => {
+  const src = readFileSync(join(ROOT, "app/media.tsx"), "utf8");
+  // Only the page on screen and one each side are mounted.
+  assert.match(src, /windowSize=\{3\}/);
+  assert.match(src, /initialNumToRender=\{1\}/);
+  // Paging stops while zoomed; the dismiss pan is off while zoomed, single
+  // finger, downward only, fails sideways, and runs beside the pager's scroll.
+  assert.match(src, /scrollEnabled=\{multiple && !zoomed\}/);
+  assert.match(src, /\.enabled\(!zoomed && pageHeight > 0\)/);
+  assert.match(src, /\.maxPointers\(1\)/);
+  assert.match(src, /\.failOffsetY\(-\d+\)/);
+  assert.match(src, /\.failOffsetX\(\[-\d+, \d+\]\)/);
+  assert.match(src, /\.simultaneousWithExternalGesture\(pagerGesture\)/);
+  // The position indicator is reachable by e2e.
+  assert.match(src, /subtitleTestID="text-media-position"/);
+  // Off-screen video pauses; images reset their zoom.
+  const video = readFileSync(join(ROOT, "components/media/VideoPage.tsx"), "utf8");
+  assert.match(video, /if \(!active\) \{\s*player\.pause\(\);/);
+  const image = readFileSync(join(ROOT, "components/media/ZoomableImage.tsx"), "utf8");
+  assert.match(image, /if \(!active\) \{\s*scale\.value = 1;/);
+});
+
+test("the Vault grid is virtualised, so a large vault never decrypts every tile (#1492)", () => {
+  const src = readFileSync(join(ROOT, "components/vault/VaultMediaGrid.tsx"), "utf8");
+  assert.match(src, /<FlatList/);
+  assert.match(src, /numColumns=\{COLUMNS\}/);
+  assert.doesNotMatch(src, /<ScrollView/);
 });
