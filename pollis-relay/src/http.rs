@@ -289,6 +289,12 @@ mod seam_tests {
             if SEAM_FILES.contains(&rel.as_str()) {
                 continue;
             }
+            // Integration-test crates (`<crate>/tests/**`) never ship, for the
+            // same reason `#[cfg(test)]` modules are excluded below: the vault
+            // soak's tap proxy and DS client deliberately build unpooled clients.
+            if rel.split('/').nth(1) == Some("tests") {
+                continue;
+            }
             let Ok(src) = std::fs::read_to_string(file) else {
                 continue;
             };
