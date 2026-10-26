@@ -1,0 +1,23 @@
+appId: com.pollis.mobile
+---
+# Select the six newest photos in Android's photo picker (multi-select). Its
+# thumbnails are labelled "Photo taken on <date>"; the first two rows are
+# always on screen, the third sits under the selection bar.
+- tapOn:
+    text: "Photo taken on.*"
+    index: 0
+- tapOn:
+    text: "Photo taken on.*"
+    index: 1
+- tapOn:
+    text: "Photo taken on.*"
+    index: 2
+- tapOn:
+    text: "Photo taken on.*"
+    index: 3
+- tapOn:
+    text: "Photo taken on.*"
+    index: 4
+- tapOn:
+    text: "Photo taken on.*"
+    index: 5

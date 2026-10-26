@@ -1,0 +1,116 @@
+appId: com.pollis.mobile
+tags:
+  - parity
+---
+# VAULT SAVE (#1497) — a big entry saves, and a save that cannot is honest
+# about it and retryable. Against the dev DS on a Release build.
+#
+# Part 1 (both platforms) is the issue's own scenario: ONE entry carrying
+# twelve images. It failed every time with "Couldn't save to your vault":
+# the twelve uploads decoded their images on the core's async workers, the
+# HTTP requests those workers drive starved, and the presigns died on dead
+# pooled connections.
+#
+# Part 2 (Android only — Maestro can switch airplane mode only there): a save
+# made offline names the reason, puts the draft back and offers "Try again";
+# back online, the retry saves it.
+#
+# Self-contained: a fresh disposable account, no peer.
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-direct"
+- tapOn:
+    id: "row-vault"
+- extendedWaitUntil:
+    visible:
+      id: "vault-empty"
+    timeout: 15000
+
+# ── Part 1: twelve images in one entry ──────────────────────────────────────
+# Six copies seeded into the library; the picker is opened twice and all six
+# picked each time, so the entry carries twelve attachments.
+- addMedia:
+    - "../fixtures/media-viewer.png"
+    - "../fixtures/media-viewer.png"
+    - "../fixtures/media-viewer.png"
+    - "../fixtures/media-viewer.png"
+    - "../fixtures/media-viewer.png"
+    - "../fixtures/media-viewer.png"
+- repeat:
+    times: 2
+    commands:
+      - tapOn:
+          id: "btn-attach"
+      - waitForAnimationToEnd:
+          timeout: 5000
+      - runFlow:
+          when:
+            platform: Android
+          file: ../subflows/pick-six-photos-android.yaml
+      - runFlow:
+          when:
+            platform: iOS
+          file: ../subflows/pick-six-photos-ios.yaml
+      - tapOn:
+          text: "(?i)(add|done).*"
+      - waitForAnimationToEnd:
+          timeout: 3000
+- extendedWaitUntil:
+    visible:
+      id: "strip-attachments"
+    timeout: 10000
+- takeScreenshot: vault-retry-01-twelve-picked
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible:
+      id: "btn-attachment-.*"
+    timeout: 120000
+- assertNotVisible:
+    id: "text-vault-save-failed"
+- takeScreenshot: vault-retry-02-twelve-saved
+
+# ── Part 2: offline save → reason + draft back → Try again (Android) ────────
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - setAirplaneMode: enabled
+      - tapOn:
+          id: "input-composer"
+      - inputText: "vault offline 1497"
+      - tapOn:
+          id: "btn-send"
+      - extendedWaitUntil:
+          visible:
+            id: "text-vault-save-failed"
+          timeout: 60000
+      - assertVisible: ".*Couldn't reach Pollis.*"
+      - assertVisible:
+          id: "btn-vault-retry"
+      # The draft is back in the composer.
+      - assertVisible: "vault offline 1497"
+      - takeScreenshot: vault-retry-03-failed-offline
+      - setAirplaneMode: disabled
+      # Give the radio a moment to come back before retrying.
+      - extendedWaitUntil:
+          visible:
+            id: "btn-vault-retry"
+          timeout: 5000
+      - repeat:
+          while:
+            visible:
+              id: "text-vault-save-failed"
+          times: 5
+          commands:
+            - tapOn:
+                id: "btn-vault-retry"
+            - waitForAnimationToEnd:
+                timeout: 8000
+      - extendedWaitUntil:
+          visible: ".*vault offline 1497, .*"
+          timeout: 30000
+      - assertNotVisible:
+          id: "text-vault-save-failed"
+      - takeScreenshot: vault-retry-04-retried

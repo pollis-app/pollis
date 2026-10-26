@@ -1,0 +1,22 @@
+appId: com.pollis.mobile
+---
+# Select the six newest photos in the iOS photo picker (multi-select). Its
+# thumbnails are labelled "Photo, <date>".
+- tapOn:
+    text: "Photo, .*"
+    index: 0
+- tapOn:
+    text: "Photo, .*"
+    index: 1
+- tapOn:
+    text: "Photo, .*"
+    index: 2
+- tapOn:
+    text: "Photo, .*"
+    index: 3
+- tapOn:
+    text: "Photo, .*"
+    index: 4
+- tapOn:
+    text: "Photo, .*"
+    index: 5

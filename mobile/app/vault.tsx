@@ -16,7 +16,7 @@ import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import * as ImagePicker from "expo-image-picker";
 import { observer } from "mobx-react-lite";
-import { Screen, Header, Field, Chip } from "../components/ui";
+import { Screen, Header, Field, Chip, Button } from "../components/ui";
 import { Icon } from "../components/icons";
 import { Composer } from "../components/chat/Composer";
 import { EditBar } from "../components/chat/EditBar";
@@ -41,6 +41,8 @@ import {
   filterVaultEntries,
   isVaultEntryEdited,
   vaultAttachments,
+  vaultSaveFailure,
+  type VaultSaveFailure,
 } from "../lib/vault";
 import { outgoingText } from "../lib/messageText";
 import type { PickedAttachment } from "../lib/attachments";
@@ -51,6 +53,13 @@ import type { MessageAttachment } from "../types";
 import { useTheme } from "../components/theme";
 
 type VaultView = "chat" | "media";
+
+// What a failed save says, by what the user can do about it (#1497).
+const SAVE_FAILED_COPY: Record<VaultSaveFailure, string> = {
+  offline: "mobile:vault.saveFailedOffline",
+  tooLarge: "mobile:vault.saveFailedTooLarge",
+  other: "mobile:vault.saveFailed",
+};
 
 // Rows of the inverted list — entries interleaved with day separators,
 // newest first.
@@ -329,15 +338,27 @@ function VaultScreen() {
             }}
           />
           {send.isError ? (
-            <Text
-              accessibilityRole="alert"
-              style={[
-                ty.meta,
-                { color: semantic.danger, paddingHorizontal: space.lg, paddingVertical: 4 },
-              ]}
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: space.sm,
+                paddingHorizontal: space.lg,
+                paddingVertical: 4,
+              }}
             >
-              {t("mobile:vault.saveFailed")}
-            </Text>
+              <Text
+                accessibilityRole="alert"
+                testID="text-vault-save-failed"
+                style={[ty.meta, { color: semantic.danger, flex: 1 }]}
+              >
+                {t(SAVE_FAILED_COPY[vaultSaveFailure(send.error)])}
+              </Text>
+              {/* The draft is already back in the composer; this sends it again. */}
+              <Button variant="subtle" onPress={onSend} testID="btn-vault-retry">
+                {t("mobile:vault.retry")}
+              </Button>
+            </View>
           ) : null}
           {editTarget ? (
             <EditBar

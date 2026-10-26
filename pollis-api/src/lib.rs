@@ -136,6 +136,14 @@ pub trait DsRequest: serde::Serialize {
     /// both bounds on one associated type is what makes the two halves the same
     /// declaration rather than two that happen to agree today.
     type Response: serde::Serialize + serde::de::DeserializeOwned;
+
+    /// Whether sending this request twice has the same effect as sending it
+    /// once (RFC 9110 §9.2.2). Only such a request may be resent after a
+    /// connection failure that left the client unable to tell whether the DS
+    /// saw it (#1497): a pooled connection the server had already closed, a
+    /// reset mid-write. Declared per endpoint in the table below with a
+    /// trailing `idempotent`; the default is the safe answer.
+    const IDEMPOTENT: bool = false;
 }
 
 /// Who is expected to call an endpoint (#925).
@@ -205,11 +213,12 @@ pub struct Endpoint {
 /// impls and [`ENDPOINTS`] are generated from the same lines, so they cannot
 /// drift from each other.
 macro_rules! endpoints {
-    ($($aud:ident $ty:ty => $path:literal, $resp:ty);* $(;)?) => {
+    ($($aud:ident $ty:ty => $path:literal, $resp:ty $(, $idem:ident)?);* $(;)?) => {
         $(
             impl $crate::DsRequest for $ty {
                 const PATH: &'static str = $path;
                 type Response = $resp;
+                $(const IDEMPOTENT: bool = endpoints!(@idempotent $idem);)?
             }
 
             endpoints!(@client_impl $aud $ty);
@@ -227,6 +236,9 @@ macro_rules! endpoints {
             }),*
         ];
     };
+
+    // The only flag a row may carry; any other word is a compile error.
+    (@idempotent idempotent) => { true };
 
     // `Client` rows — and only those — get the marker trait `ds_post` requires.
     (@client_impl Client $ty:ty) => { impl $crate::ClientRequest for $ty {} };
@@ -255,7 +267,7 @@ endpoints! {
     Client   messages::RemoveReaction           => "/v1/reactions/remove",               StatusOk;
     Client   messages::WatermarkBody            => "/v1/watermarks/advance",             StatusOk;
     Operator messages::EnvelopeGcBody           => "/v1/envelopes/gc",                   StatusOk;
-    Client   messages::AttachmentRegisterBody   => "/v1/attachments/register",           StatusOk;
+    Client   messages::AttachmentRegisterBody   => "/v1/attachments/register",           StatusOk, idempotent;
     Client   messages::AttachmentDeleteBody     => "/v1/attachments/delete",             StatusOk;
 
     // ── Domain B — groups, channels, membership, invites, join requests ──────
@@ -297,8 +309,8 @@ endpoints! {
     // ── Vault (#107) ─────────────────────────────────────────────────────────
     // Opaque per-entry blobs under a key derived from the account identity
     // key, same construction as `SaveReadCursorsBody` — see that type's docs.
-    Client   vault::SaveVaultMessageBody        => "/v1/vault/save",                     StatusOk;
-    Client   vault::DeleteVaultMessageBody      => "/v1/vault/delete",                   StatusOk;
+    Client   vault::SaveVaultMessageBody        => "/v1/vault/save",                     StatusOk, idempotent;
+    Client   vault::DeleteVaultMessageBody      => "/v1/vault/delete",                   StatusOk, idempotent;
     Client   vault::VaultMessagesBody           => "/v1/read/vault",                     vault::VaultMessagesResponse;
 
     // ── Custom emoji (#848) ──────────────────────────────────────────────────
@@ -373,7 +385,7 @@ endpoints! {
     Client   broker::LivekitSendDataBody        => "/v1/livekit/send-data",              broker::LivekitSendDataResponse;
     Client   broker::LivekitParticipantsBody    => "/v1/livekit/participants",           broker::LivekitParticipantsResponse;
     Client   broker::LivekitIdentitiesBody      => "/v1/livekit/identities",             broker::LivekitIdentitiesResponse;
-    Client   broker::R2PresignBody              => "/v1/r2/presign",                     broker::R2PresignResponse;
+    Client   broker::R2PresignBody              => "/v1/r2/presign",                     broker::R2PresignResponse, idempotent;
 
     // ── Directory + conversation READS (#987) ────────────────────────────────
     // All POST, all with the parameters in the SIGNED body: the canonical
