@@ -365,7 +365,13 @@
       "savedMessages": "已保存的消息",
       "appearance": "外观",
       "signOut": "退出登录…",
-      "signOutConfirmTitle": "要在此设备上退出 Pollis 吗？"
+      "signOutConfirmTitle": "要在此设备上退出 Pollis 吗？",
+      "version": "版本",
+      "versionValue": "{{version}} ({{build}})",
+      "runningUpdate": "更新 {{id}} · {{date}}",
+      "update": "更新",
+      "updateHint": "打开{{place}}",
+      "updateFailed": "无法打开{{place}}"
     },
     "identityHeading": "身份",
     "preferences": {

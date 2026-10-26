@@ -190,12 +190,16 @@ jobs:
       # the config, so it is set on both steps. POLLIS_OTA=production likewise:
       # this is a prod build, so it takes signed over-the-air updates (#1250),
       # and app.config.js fails the build if the OTA code-signing certificate
-      # (mobile/store/ota-code-signing.pem) is missing.
+      # (mobile/store/ota-code-signing.pem) is missing. POLLIS_RELEASE_KEY=sideload
+      # makes app.config.js's install channel "sideload" (#1443); the value
+      # that ships is the one Gradle embeds in the next step, which sets it
+      # too, but the prebuild sees the same config.
       - name: Expo prebuild (android)
         working-directory: mobile
         env:
           POLLIS_BUILD: ${{ steps.version.outputs.build }}
           POLLIS_OTA: production
+          POLLIS_RELEASE_KEY: sideload
         run: pnpm expo prebuild --platform android --no-install --clean
 
       # The keystore and its passwords exist only for this step and the next:
@@ -338,6 +342,15 @@ jobs:
             echo "bundle: api.pollis.com x${prod}, api-dev.pollis.com x${dev}"
             if [ "$prod" -eq 0 ] || [ "$dev" -ne 0 ]; then
               echo "::error::${abi} bundle does not point at the prod Delivery Service only"
+              exit 1
+            fi
+
+            # 5. Install channel (#1443): the app config expo-constants
+            #    embedded at Gradle preBuild says "sideload", so Self -> App ->
+            #    Update opens pollis.com/android, not the Play listing.
+            channel="$(unzip -p "$apk" assets/app.config | jq -r '.extra.installChannel')"
+            if [ "$channel" != "sideload" ]; then
+              echo "::error::${abi} APK embeds install channel '${channel}', expected 'sideload' (is POLLIS_RELEASE_KEY=sideload reaching Gradle?)"
               exit 1
             fi
             echo "::endgroup::"
