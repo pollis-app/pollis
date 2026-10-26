@@ -1,0 +1,18 @@
+appId: com.pollis.mobile
+---
+# Save what is in the Vault composer's strip. The screen ignores Send while the
+# previous save is still in flight, and a failed save puts the draft back in
+# the strip, so keep pressing Send until the strip has gone.
+- repeat:
+    while:
+      visible:
+        id: "strip-attachments"
+    times: 30
+    commands:
+      - tapOn:
+          id: "btn-send"
+      - extendedWaitUntil:
+          notVisible:
+            id: "strip-attachments"
+          timeout: 4000
+          optional: true

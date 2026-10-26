@@ -1,0 +1,21 @@
+appId: com.pollis.mobile
+---
+# Attach the newest photo in the device library (the one `addMedia` just
+# seeded) through the SYSTEM picker, by accessibility label, never by
+# coordinate — "Photo, <date>" on iOS, "Photo taken on <date>" on Android 13+.
+# With multiple selection on, iOS needs "Add"; Android's picker may return on
+# the tap itself or wait for "Done", so that confirm is optional.
+- tapOn:
+    id: "btn-attach"
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: "Photo(,| taken on) .*"
+    index: 0
+- tapOn:
+    text: "(?i)(add|done).*"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: "strip-attachments"
+    timeout: 10000

@@ -8,8 +8,8 @@ tags:
 # dismisses it. Desktop's MediaGalleryView walks the same roll with the arrow
 # keys and its on-screen previous/next.
 #
-# Seeds the vault with twelve numbered images (fixtures/vault-swipe-NN.png,
-# each a different colour) in one entry, through the SYSTEM photo picker —
+# Seeds the vault with twelve images (fixtures/vault-swipe-NN.png, numbered,
+# each a different colour), one entry each, through the SYSTEM photo picker —
 # cells picked by accessibility label, never by coordinate (see
 # media-viewer.yaml's header for why). Every step is mandatory.
 # Self-contained: a fresh disposable account, no peer.
@@ -26,54 +26,74 @@ tags:
       id: "vault-empty"
     timeout: 15000
 
-# --- Seed: twelve images in one entry ---
+# --- Seed: twelve image entries ---
+# One image per entry, each its own encrypted upload + sealed DS write, so the
+# roll also crosses entry boundaries (grid order = newest entry first). The
+# picker's first cell is picked each round; which library photo it is does not
+# matter — every pick is a separate upload with its own id and filename.
 - addMedia:
     - "../fixtures/vault-swipe-01.png"
+- runFlow: ../subflows/pick-newest-photo.yaml
+- runFlow: ../subflows/send-vault-picks.yaml
+- addMedia:
     - "../fixtures/vault-swipe-02.png"
+- runFlow: ../subflows/pick-newest-photo.yaml
+- runFlow: ../subflows/send-vault-picks.yaml
+- addMedia:
     - "../fixtures/vault-swipe-03.png"
+- runFlow: ../subflows/pick-newest-photo.yaml
+- runFlow: ../subflows/send-vault-picks.yaml
+- addMedia:
     - "../fixtures/vault-swipe-04.png"
+- runFlow: ../subflows/pick-newest-photo.yaml
+- runFlow: ../subflows/send-vault-picks.yaml
+- addMedia:
     - "../fixtures/vault-swipe-05.png"
+- runFlow: ../subflows/pick-newest-photo.yaml
+- runFlow: ../subflows/send-vault-picks.yaml
+- addMedia:
     - "../fixtures/vault-swipe-06.png"
+- runFlow: ../subflows/pick-newest-photo.yaml
+- runFlow: ../subflows/send-vault-picks.yaml
+- addMedia:
     - "../fixtures/vault-swipe-07.png"
+- runFlow: ../subflows/pick-newest-photo.yaml
+- runFlow: ../subflows/send-vault-picks.yaml
+- addMedia:
     - "../fixtures/vault-swipe-08.png"
+- runFlow: ../subflows/pick-newest-photo.yaml
+- runFlow: ../subflows/send-vault-picks.yaml
+- addMedia:
     - "../fixtures/vault-swipe-09.png"
+- runFlow: ../subflows/pick-newest-photo.yaml
+- runFlow: ../subflows/send-vault-picks.yaml
+- addMedia:
     - "../fixtures/vault-swipe-10.png"
+- runFlow: ../subflows/pick-newest-photo.yaml
+- runFlow: ../subflows/send-vault-picks.yaml
+- addMedia:
     - "../fixtures/vault-swipe-11.png"
+- runFlow: ../subflows/pick-newest-photo.yaml
+- runFlow: ../subflows/send-vault-picks.yaml
+- addMedia:
     - "../fixtures/vault-swipe-12.png"
-- tapOn:
-    id: "btn-attach"
-- waitForAnimationToEnd:
-    timeout: 5000
-# Multiple selection is on: each tap adds one cell.
-- repeat:
-    times: 12
-    commands:
-      - evalScript: ${output.cell = (output.cell === undefined ? 0 : output.cell + 1)}
-      - tapOn:
-          text: "Photo(,| taken on) .*"
-          index: ${output.cell}
-- takeScreenshot: vault-swipe-01-picker
-- tapOn:
-    text: "(?i)(add|done).*"
-- extendedWaitUntil:
-    visible:
-      id: "strip-attachments"
-    timeout: 10000
-- tapOn:
-    id: "btn-send"
-# Twelve encrypted uploads plus the sealed entry: a DS round trip each.
+- runFlow: ../subflows/pick-newest-photo.yaml
+- runFlow: ../subflows/send-vault-picks.yaml
 - extendedWaitUntil:
     visible:
       id: "btn-attachment-.*"
-    timeout: 120000
+    timeout: 60000
+- takeScreenshot: vault-swipe-01-entries
 
 # --- The grid, then the viewer on its first tile ---
 - tapOn:
     id: "chip-vault-view-media"
+# All twelve saved (the last save may still be landing).
 - extendedWaitUntil:
     visible:
       id: "tile-vault-media-.*"
-    timeout: 15000
+      index: 11
+    timeout: 60000
 - waitForAnimationToEnd:
     timeout: 3000
 - takeScreenshot: vault-swipe-02-grid
@@ -84,9 +104,11 @@ tags:
     visible:
       id: "screen-media-viewer"
     timeout: 10000
-- assertVisible:
-    id: "text-media-position"
-    text: "1 / 12.*"
+- extendedWaitUntil:
+    visible:
+      id: "text-media-position"
+      text: "1 / 12.*"
+    timeout: 10000
 - extendedWaitUntil:
     visible:
       id: "media-image-rendered"
@@ -96,11 +118,13 @@ tags:
 - evalScript: ${output.first = maestro.copiedText}
 - takeScreenshot: vault-swipe-03-first
 
+# Swipes are explicit, quick, mid-screen strokes: an element-anchored swipe
+# did not fling the pager on Android.
 # --- Swipe left: the next image, and the position follows ---
 - swipe:
-    from:
-      id: "pager-media"
-    direction: LEFT
+    start: 90%, 50%
+    end: 10%, 50%
+    duration: 250
 - waitForAnimationToEnd:
     timeout: 3000
 - extendedWaitUntil:
@@ -119,15 +143,15 @@ tags:
 - takeScreenshot: vault-swipe-04-second
 
 - swipe:
-    from:
-      id: "pager-media"
-    direction: LEFT
+    start: 90%, 50%
+    end: 10%, 50%
+    duration: 250
 - waitForAnimationToEnd:
     timeout: 3000
 - swipe:
-    from:
-      id: "pager-media"
-    direction: LEFT
+    start: 90%, 50%
+    end: 10%, 50%
+    duration: 250
 - waitForAnimationToEnd:
     timeout: 3000
 - extendedWaitUntil:
@@ -146,9 +170,9 @@ tags:
 
 # --- Swipe right goes back one ---
 - swipe:
-    from:
-      id: "pager-media"
-    direction: RIGHT
+    start: 10%, 50%
+    end: 90%, 50%
+    duration: 250
 - waitForAnimationToEnd:
     timeout: 3000
 - extendedWaitUntil:
@@ -187,9 +211,9 @@ tags:
 
 # --- A downward drag dismisses, back to the grid ---
 - swipe:
-    from:
-      id: "pager-media"
-    direction: DOWN
+    start: 50%, 40%
+    end: 50%, 85%
+    duration: 250
 - extendedWaitUntil:
     visible:
       id: "screen-vault"
