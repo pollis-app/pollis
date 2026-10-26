@@ -1192,7 +1192,7 @@ global ordering + a UNIQUE index enforcing the per-subject invariant).
 
 The payload is now `data: { h }` and nothing else, and `mobile/lib/push/routing.ts` has no `conversationId` branch at all — a payload carrying one is *ignored*, so a rolled-back DS or a malicious push to a stolen token cannot re-enable the disclosure by putting the field back.
 
-### channel_mute _(migration 000039, #1431)_
+### channel_mute _(migration 000038, #1431)_
 - `user_id` TEXT NOT NULL, `channel_id` TEXT NOT NULL — PRIMARY KEY `(user_id, channel_id)`
 - `muted_at` TEXT NOT NULL DEFAULT `datetime('now')`
 - index `idx_channel_mute_channel(channel_id)` — the fan-out reads by channel
