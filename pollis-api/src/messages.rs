@@ -50,8 +50,25 @@ pub struct SendMessageBody {
     ///   past the conversation.
     ///
     /// The push itself carries `{ conversationId, kind }` and nothing else.
+    ///
+    /// Since #1431 a current client sends `Some([])` for EVERY group-channel
+    /// message, not only `@all`: channel chatter pushes by default, and the DS
+    /// drops each recipient who muted the channel (`channel_mute`) unless
+    /// `push_mentions` names them. A client from before #1431 still sends `None`
+    /// for chatter, which keeps meaning "no push".
     #[serde(default)]
     pub push_to: Option<Vec<String>>,
+    /// The members this message names directly by `@username` (#1431) — the
+    /// ones who are pushed even if they muted the channel (Slack semantics: a
+    /// muted channel stays silent for chatter and `@all`, but a direct mention
+    /// still reaches you). Narrows nothing and widens nothing on its own: a
+    /// recipient must still be in the `push_to` audience and a member.
+    ///
+    /// Absent (a client from before #1431) → the non-empty `push_to` list
+    /// itself, because such a client sends a non-empty list only for
+    /// `@username` mentions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub push_mentions: Option<Vec<String>>,
     /// The MLS lineage the ciphertext was sealed at, as the client read it off
     /// its own envelope (#1041). Together with `epoch` this is the envelope's
     /// position in the commit log; the DS refuses to keep an envelope whose

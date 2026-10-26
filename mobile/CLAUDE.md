@@ -985,8 +985,14 @@ full-screen page and every pane page uses `<Screen>`'s one
 
 Keyboard (#1246): `react-native-keyboard-controller` owns it. `KeyboardProvider`
 wraps the root layout; `<Screen>` and `SheetOverlay` use its
-`KeyboardAvoidingView` (`behavior="padding"`, `automaticOffset`) on both
-platforms, and a `<Screen>` nested in another skips its own. Never import
+`KeyboardAvoidingView` (`behavior="padding"`) on both platforms, and a
+`<Screen>` nested in another skips its own. `<Screen>` must NOT pass
+`automaticOffset` (#1432): it reads the window position asynchronously, and
+on Android that can answer before the screen sits below the status bar, so
+the stale frame left every keyboard on the screen a status bar short — the
+chat composer hidden behind it, mostly in long conversations. The layout
+frame alone is exact, since a `<Screen>` starts at the window's top; only
+`SheetOverlay` (inside a Modal, never moves) keeps `automaticOffset`. Never import
 `KeyboardAvoidingView` from `react-native` or hand-roll an inset from
 `Keyboard` events: the app is edge-to-edge, so `adjustResize` is inert and
 `keyboardDidShow` heights come out short. A screen that mounts with the
@@ -1220,7 +1226,12 @@ Current state:
   - Content-free fan-out — **`pollis_delivery::push::notify_new_message`, in the
     DS, not the client** (#987 moved it off every client so nobody needs a
     credential that can read other people's `push_token` rows). Driven by the
-    `push_to` field on `POST /v1/messages/send`. Payload is `{ h }` — an opaque
+    `push_to` field on `POST /v1/messages/send`. Since #1431 every group-channel
+    message pushes every other member, minus whoever muted that channel (a
+    per-account `channel_mute` row on the DS, toggled from the channel's
+    "More" sheet, `toggle-channel-mute`) unless the message names them by
+    `@username` (`push_mentions`). Because the DS filters, a muted channel is
+    silent in the foreground too. Payload is `{ h }` — an opaque
     per-notification handle, resolved via `POST /v1/push/resolve` (#1122/#1157)
     — and a generic "New message" body. Never plaintext, sender, or the
     conversation id.

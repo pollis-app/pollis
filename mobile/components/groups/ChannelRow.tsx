@@ -1,6 +1,7 @@
 import { Pressable, Text, View } from "react-native";
 import { semantic, fonts, r, space, layout } from "../../theme/tokens";
 import { Badge, Dot } from "../ui";
+import { Icon } from "../icons";
 
 // One row of the group panel's channel list (Main.dc.html): 44pt, a small
 // 16pt glyph, 16pt name. Selected = accentSoft fill + accent text; unread =
@@ -18,6 +19,7 @@ export function ChannelRow({
   testID,
   accessibilityLabel,
   dimWhenRead = true,
+  muted = false,
 }: {
   // Rendered at 16pt by the caller (e.g. <Icon.hash size={16} />).
   icon: React.ReactNode;
@@ -33,12 +35,18 @@ export function ChannelRow({
   accessibilityLabel: string;
   // Channel rows dim when read; "This group" rows always dim.
   dimWhenRead?: boolean;
+  // A muted channel (#1431): drawn a tier quieter than a read one, never
+  // bold, with a trailing bell-off glyph so the state is not colour alone.
+  // The caller adds "muted" to the spoken label.
+  muted?: boolean;
 }) {
   const color = selected
     ? semantic.accent
-    : unread || !dimWhenRead
-      ? semantic.text
-      : semantic.dim;
+    : muted
+      ? semantic.muted
+      : unread || !dimWhenRead
+        ? semantic.text
+        : semantic.dim;
   return (
     <Pressable
       testID={testID}
@@ -67,13 +75,18 @@ export function ChannelRow({
         numberOfLines={1}
         style={{
           flex: 1,
-          fontFamily: selected ? fonts.semibold : unread ? fonts.bold : fonts.medium,
+          fontFamily: selected ? fonts.semibold : unread && !muted ? fonts.bold : fonts.medium,
           fontSize: 16,
           color,
         }}
       >
         {name}
       </Text>
+      {muted ? (
+        <View accessible={false}>
+          <Icon.bellOff size={16} color={selected ? semantic.accent : semantic.muted} />
+        </View>
+      ) : null}
       {value !== undefined ? (
         <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: semantic.muted }}>
           {value}

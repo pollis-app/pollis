@@ -610,7 +610,9 @@ pub async fn send_message(
     // using it would exclude nobody and push the sender their own message.
     // A replay (#1335) already woke them the first time.
     if matches!(outcome, WriteOutcome::Ok) && !replayed {
-        if let Some(push_to) = parsed.push_to.clone() {
+        if let Some(audience) =
+            crate::push::PushAudience::from_send(parsed.push_to.clone(), parsed.push_mentions.clone())
+        {
             let sender = authed.clone().unwrap_or_else(|| {
                 parsed.sender_id.clone().unwrap_or_default()
             });
@@ -624,13 +626,8 @@ pub async fn send_message(
                         return;
                     }
                 };
-                let only = if push_to.is_empty() {
-                    None
-                } else {
-                    Some(push_to.as_slice())
-                };
                 if let Err(e) =
-                    crate::push::notify_new_message(&conn, &conversation_id, &sender, only).await
+                    crate::push::notify_new_message(&conn, &conversation_id, &sender, &audience).await
                 {
                     // No conversation id: push logs name nothing (#1423).
                     tracing::warn!("push fan-out failed: {e}");
@@ -3839,6 +3836,7 @@ mod admin_delete_visibility_tests {
                 epoch: None,
                 // No push from a unit test — these assert envelope columns.
                 push_to: None,
+                push_mentions: None,
                 delete_token_hash: Some(FIXTURE_CAPABILITY_HASH.to_string()),
             },
         )
@@ -4014,6 +4012,7 @@ mod admin_delete_visibility_tests {
                 epoch: None,
                 // No push from a unit test — these assert envelope columns.
                 push_to: None,
+                push_mentions: None,
                 delete_token_hash: Some(FIXTURE_CAPABILITY_HASH.to_string()),
             },
         )
@@ -4143,6 +4142,7 @@ mod admin_delete_visibility_tests {
                 epoch: None,
                 // No push from a unit test — these assert envelope columns.
                 push_to: None,
+                push_mentions: None,
                 delete_token_hash: Some(FIXTURE_CAPABILITY_HASH.to_string()),
             },
         )
@@ -4444,6 +4444,7 @@ mod epoch_gate_tests {
             generation,
             epoch,
             push_to: None,
+            push_mentions: None,
             delete_token_hash: Some(FIXTURE_CAPABILITY_HASH.to_string()),
         }
     }
@@ -4902,6 +4903,7 @@ mod delete_capability_tests_support {
             generation: None,
             epoch: None,
             push_to: None,
+            push_mentions: None,
             delete_token_hash,
         }
     }
@@ -5407,6 +5409,7 @@ mod delivery_sequence_tests {
             generation: None,
             epoch: None,
             push_to: None,
+            push_mentions: None,
         }
     }
 

@@ -266,6 +266,7 @@ pub(crate) async fn emit_receipt(
         // A receipt frame wakes nobody: it is an acknowledgement of
         // something the recipient already has (#987).
         push_to: None,
+        push_mentions: None,
         delete_token_hash: Some(delete_token_hash),
     };
     // No re-seal loop here, deliberately: a receipt's callers may hold the

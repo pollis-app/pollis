@@ -11,6 +11,7 @@ import {
   useGroupChannels,
   useGroupMembers,
   useGroupJoinRequests,
+  useMutedChannels,
 } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
 import type { Channel } from "../../types";
@@ -94,6 +95,9 @@ function GroupPanelImpl({
     refetchMembers,
   ]);
   const { data: joinRequests = [] } = useGroupJoinRequests(groupId);
+  // Muted channels (#1431) are dimmed and marked; the testID gains `-muted`
+  // so the device tier can see the state (Maestro reads ids, not colours).
+  const { data: mutedChannels } = useMutedChannels();
   const unreadCounts = appStore.unreadCounts;
   const me = appStore.currentUser?.id;
 
@@ -233,20 +237,29 @@ function GroupPanelImpl({
         {channels.map((c) => {
           const unread = unreadCounts[c.id] ?? 0;
           const selected = selectedChannelId === c.id;
-          const color = selected ? semantic.accent : unread > 0 ? semantic.text : semantic.dim;
-          const label = selected
+          const isMuted = mutedChannels?.has(c.id) ?? false;
+          const color = selected
+            ? semantic.accent
+            : isMuted
+              ? semantic.muted
+              : unread > 0
+                ? semantic.text
+                : semantic.dim;
+          const base = selected
             ? t("group.panel.channelSelected", { name: c.name })
             : unread > 0
               ? t("group.panel.channelUnread", { name: c.name, count: unread })
               : c.name;
+          const label = isMuted ? `${base}, ${t("channels:channel.mutedHint")}` : base;
           return (
             <ChannelRow
               key={c.id}
-              testID={`row-channel-${c.id}`}
+              testID={isMuted ? `row-channel-${c.id}-muted` : `row-channel-${c.id}`}
               icon={<Icon.hash size={16} color={color} />}
               name={c.name}
               selected={selected}
               unread={unread > 0}
+              muted={isMuted}
               accessibilityLabel={label}
               onPress={() => onOpenChannel(c)}
             />

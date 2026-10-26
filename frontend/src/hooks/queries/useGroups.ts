@@ -19,7 +19,72 @@ export const groupQueryKeys = {
   myJoinRequest: (groupId: string | undefined, userId: string | null) =>
     ["group-join-requests", "my", groupId, userId] as const,
   inviteLinks: (groupId: string) => ["group-invite-links", groupId] as const,
+  mutedChannels: (userId: string | null) => ["groups", "muted-channels", userId] as const,
 };
+
+/**
+ * The channels this account muted (#1431), as a set of channel ids.
+ *
+ * Stored on the DS for the whole account: the push fan-out reads it to skip a
+ * muted member (unless they are @named), every device reads the same row, and
+ * the DS nudges the account's other devices (`channel_mutes_changed`) to
+ * refetch this query. `useLiveKitRealtime` mirrors it into `notify.ts` so the
+ * desktop's own OS notifications follow the same rule.
+ */
+export function useMutedChannels() {
+  const currentUser = useObserver(() => appStore.currentUser);
+
+  return useQuery({
+    queryKey: groupQueryKeys.mutedChannels(currentUser?.id ?? null),
+    queryFn: async (): Promise<Set<string>> => {
+      if (!currentUser) {
+        throw new Error("No current user");
+      }
+      const ids = await invoke<string[]>("list_muted_channels", { userId: currentUser.id });
+      return new Set(ids);
+    },
+    enabled: !!currentUser,
+    staleTime: 1000 * 60,
+  });
+}
+
+/**
+ * Mute or unmute one channel for this account (#1431). Optimistic: the
+ * sidebar dims and the toggle flips on the same frame, and a failure rolls
+ * back to what was there.
+ */
+export function useSetChannelMuted() {
+  const queryClient = useQueryClient();
+  const currentUser = useObserver(() => appStore.currentUser);
+  const key = groupQueryKeys.mutedChannels(currentUser?.id ?? null);
+
+  return useMutation({
+    mutationFn: async ({ channelId, muted }: { channelId: string; muted: boolean }) => {
+      if (!currentUser) {
+        throw new Error("No current user");
+      }
+      await invoke("set_channel_muted", { userId: currentUser.id, channelId, muted });
+    },
+    onMutate: async ({ channelId, muted }) => {
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<Set<string>>(key);
+      const next = new Set(previous ?? []);
+      if (muted) {
+        next.add(channelId);
+      } else {
+        next.delete(channelId);
+      }
+      queryClient.setQueryData(key, next);
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      queryClient.setQueryData(key, context?.previous);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: key });
+    },
+  });
+}
 
 export function useUserGroupsWithChannels() {
   const currentUser = useObserver(() => appStore.currentUser);

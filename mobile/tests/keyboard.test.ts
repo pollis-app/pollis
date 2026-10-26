@@ -53,8 +53,25 @@ test("<Screen> and the sheet avoid the keyboard with keyboard-controller on both
     const kav = src.match(/<KeyboardAvoidingView[\s\S]*?>/);
     assert.ok(kav, `${file} must render a KeyboardAvoidingView`);
     assert.match(kav[0], /behavior="padding"/, `${file}: one behaviour for iOS and Android`);
-    assert.match(kav[0], /automaticOffset/, `${file}: measure the view's real position in the window`);
   }
+});
+
+// #1432: `automaticOffset` takes the frame's height from the layout event but
+// its window position from an async native call, which on Android can answer
+// before the screen is mounted below the status bar (y=0). Nothing measures
+// again, so every keyboard on that screen stopped a status bar short and hid
+// the chat composer behind it. <Screen> is always a full screen whose top is
+// the window's top, so the layout event's own frame (relative to the
+// SafeAreaView) is exact and cannot go stale. The sheet keeps it: its view
+// fills the Modal's window from the first layout, so the position is 0 either
+// way.
+test("<Screen> avoids the keyboard from its layout frame, not automaticOffset", () => {
+  const kav = read("components/ui.tsx").match(/<KeyboardAvoidingView[\s\S]*?>/);
+  assert.ok(kav);
+  assert.doesNotMatch(kav[0], /automaticOffset/, "<Screen>: no async window position (#1432)");
+  const sheet = read("components/chat/SheetOverlay.tsx").match(/<KeyboardAvoidingView[\s\S]*?>/);
+  assert.ok(sheet);
+  assert.match(sheet[0], /automaticOffset/, "the sheet measures its place in the Modal's window");
 });
 
 test("nothing uses React Native's KeyboardAvoidingView or hand-rolls a keyboard inset", () => {

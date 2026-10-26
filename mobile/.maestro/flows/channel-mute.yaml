@@ -1,0 +1,115 @@
+appId: com.pollis.mobile
+tags:
+  - parity
+---
+# CHANNEL MUTE (#1431, desktop's header bell) — mute a channel from its
+# "More" sheet, see it dimmed and marked in the group's channel list, unmute.
+# Self-contained: creates a group (→ #General) so there is a channel.
+#
+# What it proves on a device: the sheet carries the mute switch; flipping it
+# reaches the dev DS (`set_channel_muted`) and SURVIVES the re-read the
+# mutation does when it settles — a refused write rolls the optimistic flip
+# back, so a switch still on after the wait is the DS's own answer; the
+# channel row then reads as muted (its id gains `-muted`; colour alone is not
+# a state); unmuting clears both. The push half — the DS skipping a muted
+# member unless @named — is pinned in pollis-delivery and the flows suite.
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-groups"
+- assertVisible:
+    id: "screen-groups"
+
+- tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Mute Group"
+- tapOn:
+    id: "btn-submit-group"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "E2E Mute Group, .*"
+    timeout: 15000
+- assertNotVisible:
+    id: "row-channel-.*-muted"
+- tapOn:
+    text: "General"
+- assertVisible:
+    id: "screen-chat"
+
+# ── Mute from the channel's "More" sheet ─────────────────────────────────
+- tapOn:
+    id: "btn-chat-menu"
+- assertVisible:
+    id: "toggle-channel-mute"
+    checked: false
+- takeScreenshot: channel-mute-01-sheet-off
+- tapOn:
+    id: "toggle-channel-mute"
+- assertVisible:
+    id: "toggle-channel-mute"
+    checked: true
+# The mutation re-reads the DS's answer when it settles; a refused write
+# would roll the switch back. No queryable "settled" signal, so a flat wait.
+- extendedWaitUntil:
+    visible:
+      id: "__never_matches__"
+    timeout: 5000
+    optional: true
+- assertVisible:
+    id: "toggle-channel-mute"
+    checked: true
+- takeScreenshot: channel-mute-02-sheet-on
+- tapOn:
+    id: "btn-menu-cancel"
+
+# ── The channel list marks it ────────────────────────────────────────────
+- tapOn:
+    id: "btn-back"
+- extendedWaitUntil:
+    visible:
+      id: "row-channel-.*-muted"
+    timeout: 10000
+- takeScreenshot: channel-mute-03-list-muted
+
+# ── Unmute ───────────────────────────────────────────────────────────────
+- tapOn:
+    id: "row-channel-.*-muted"
+- assertVisible:
+    id: "screen-chat"
+- tapOn:
+    id: "btn-chat-menu"
+- assertVisible:
+    id: "toggle-channel-mute"
+    checked: true
+- tapOn:
+    id: "toggle-channel-mute"
+- assertVisible:
+    id: "toggle-channel-mute"
+    checked: false
+- extendedWaitUntil:
+    visible:
+      id: "__never_matches__"
+    timeout: 5000
+    optional: true
+- assertVisible:
+    id: "toggle-channel-mute"
+    checked: false
+- tapOn:
+    id: "btn-menu-cancel"
+- tapOn:
+    id: "btn-back"
+- extendedWaitUntil:
+    visible:
+      id: "panel-group"
+    timeout: 10000
+- assertNotVisible:
+    id: "row-channel-.*-muted"
+- takeScreenshot: channel-mute-04-list-unmuted
