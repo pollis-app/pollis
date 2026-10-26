@@ -98,7 +98,7 @@ jobs:
       - name: Add android rust target
         run: rustup target add aarch64-linux-android
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: android-aarch64
           # No rustc-environment hash: the runner image's own `stable` is hashed
@@ -132,7 +132,7 @@ jobs:
       - name: Add ios rust target
         run: rustup target add aarch64-apple-ios
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: ios-aarch64
           # No rustc-environment hash: the runner image's own `stable` is hashed
@@ -275,7 +275,7 @@ jobs:
       - name: Add android rust targets
         run: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: android-apk
           # No rustc-environment hash: the runner image's own `stable` is hashed

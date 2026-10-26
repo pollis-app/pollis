@@ -212,7 +212,7 @@ jobs:
           toolchain: 1.96.0
           components: clippy
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: |
             .
@@ -498,7 +498,7 @@ jobs:
       # given the same `workspaces`, toolchain and CARGO_* env. Never saves —
       # `tests` is the single writer, so the shards cannot race it with a
       # partial copy (#759 budget).
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: tests
           workspaces: |
@@ -628,7 +628,7 @@ jobs:
           # Explicit, so the toolchain does not depend on which branch the pinned SHA is (#1353).
           toolchain: 1.96.0
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: macos-at-rest
           # See the `tests` job: the runner's own toolchain must not split the key.
