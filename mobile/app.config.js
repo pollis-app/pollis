@@ -156,6 +156,49 @@ function assertMediaEnv(env) {
   }
 }
 
+// ## Install channel (#1443)
+//
+// Where this binary updates from, decided by how it was BUILT — never guessed
+// at runtime from the installer or the signature. Self -> App -> Update opens
+// the matching place (lib/installChannel.ts). Derived from what each build
+// path already sets, so neither needs a new variable to remember:
+//
+//   POLLIS_RELEASE_KEY=sideload   the pollis.com APK (mobile-apk-release.yml
+//                                 and its documented local recipe). Signed
+//                                 with the sideload key, it can only ever be
+//                                 updated by another sideload APK.
+//   POLLIS_OTA=production         a store build: the Play AAB (default upload
+//                                 key) or the iOS archive (TestFlight / the
+//                                 App Store — one binary serves both).
+//   neither                       "dev": dev clients, Maestro's api-dev
+//                                 Release builds, CI's debug-keystore APK.
+//
+// It lands in `extra.installChannel` of the config every native build embeds
+// (expo-constants writes `assets/app.config` at Gradle preBuild, and
+// EXConstants.bundle/app.config at archive time), so it is read with the env
+// of the NATIVE build step — the one that holds POLLIS_RELEASE_KEY on the APK
+// workflow. The app reads that embedded copy, which an OTA update cannot
+// replace (lib/buildInfo.ts). fingerprint.config.js leaves it out of the
+// runtime version, so the OTA job (which sets neither variable) still computes
+// the fingerprint every binary carries.
+const INSTALL_CHANNELS = ["store", "sideload", "dev"];
+
+function installChannelFor(env) {
+  const key = env.POLLIS_RELEASE_KEY;
+  if (key !== undefined && key !== "" && key !== "upload" && key !== "sideload") {
+    throw new Error(
+      `POLLIS_RELEASE_KEY must be "upload" or "sideload" (or unset), got ${JSON.stringify(key)}`,
+    );
+  }
+  if (key === "sideload") {
+    return "sideload";
+  }
+  if (env.POLLIS_OTA === OTA_CHANNEL) {
+    return "store";
+  }
+  return "dev";
+}
+
 // Guard the inputs rather than silently shipping a wrong number: a bad version
 // string here becomes NaN in a store field, which fails late and confusingly.
 function versionCodeFrom(version, build) {
@@ -198,9 +241,12 @@ module.exports = ({ config }) => {
     ios: { ...config.ios, buildNumber: String(code) },
     android: { ...config.android, versionCode: code },
     updates: updatesConfigFor(process.env, certExists),
+    extra: { ...config.extra, installChannel: installChannelFor(process.env) },
   };
 };
 
 module.exports.updatesConfigFor = updatesConfigFor;
 module.exports.assertMediaEnv = assertMediaEnv;
+module.exports.installChannelFor = installChannelFor;
+module.exports.INSTALL_CHANNELS = INSTALL_CHANNELS;
 module.exports.OTA = { OTA_CHANNEL, OTA_UPDATE_URL, OTA_CERT_PATH, OTA_PROD_DS, OTA_NEUTRAL_CLIENT_ID };

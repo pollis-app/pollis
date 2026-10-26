@@ -100,6 +100,7 @@ IOS_DEVICE="iPhone 17 Pro" mobile/scripts/maestro-run.sh auth ios   # an Xcode 2
 | `profile-prefs` | accent re-theme, behavior toggle, display-name save | no |
 | `search` | #1202 desktop parity: a seeded message hit with highlighted snippet + "About N results", sort toggle, corpus footer, opening a hit, settings-page quick-jump, and the "why no results" explanation | no |
 | `security` | device list + blocked-list entry | no |
+| `app-update` | #1443 Self → App shows the native version + build number and the Update row with its destination (a Maestro build is the `dev` channel, so it names pollis.com) | no |
 | `media-viewer` | #1248 send an image through the SYSTEM photo picker (seeded by `addMedia` from `fixtures/`, cell picked by its accessibility label), cold-restart, and require the image to render from R2 (`media-image-rendered`, never `media-unavailable`); then the full-screen viewer: double-tap zoom, Save to photos with feedback, Share reachable, Close. Every step is mandatory | no |
 | `vault` | #1316 Direct → Vault: empty state, save two entries, pin, edit (pin survives), search filters, media view, a best-effort image entry opening the viewer from the grid, delete asks first (cancel keeps it, confirm removes it), re-open re-syncs from the DS | no |
 | `export` | #856 on-device archive from Security: summary renders, share button reachable, no network offer on an attachment-free account | no |

@@ -395,7 +395,13 @@
       "savedMessages": "Збережені повідомлення",
       "appearance": "Вигляд",
       "signOut": "Вийти…",
-      "signOutConfirmTitle": "Вийти з Pollis на цьому пристрої?"
+      "signOutConfirmTitle": "Вийти з Pollis на цьому пристрої?",
+      "version": "Версія",
+      "versionValue": "{{version}} ({{build}})",
+      "runningUpdate": "Оновлення {{id}} · {{date}}",
+      "update": "Оновити",
+      "updateHint": "Відкриває {{place}}",
+      "updateFailed": "Не вдалося відкрити {{place}}"
     },
     "identityHeading": "Ідентичність",
     "preferences": {

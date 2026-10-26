@@ -386,7 +386,13 @@
       "savedMessages": "Saved messages",
       "appearance": "Appearance",
       "signOut": "Sign out…",
-      "signOutConfirmTitle": "Sign out of Pollis on this device?"
+      "signOutConfirmTitle": "Sign out of Pollis on this device?",
+      "version": "Version",
+      "versionValue": "{{version}} ({{build}})",
+      "runningUpdate": "Update {{id}} · {{date}}",
+      "update": "Update",
+      "updateHint": "Opens {{place}}",
+      "updateFailed": "Couldn’t open {{place}}"
     },
     "identityHeading": "Identity",
     "preferences": {

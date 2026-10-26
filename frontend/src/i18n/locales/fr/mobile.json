@@ -375,7 +375,13 @@
       "savedMessages": "Messages enregistrés",
       "appearance": "Apparence",
       "signOut": "Se déconnecter…",
-      "signOutConfirmTitle": "Se déconnecter de Pollis sur cet appareil ?"
+      "signOutConfirmTitle": "Se déconnecter de Pollis sur cet appareil ?",
+      "version": "Version",
+      "versionValue": "{{version}} ({{build}})",
+      "runningUpdate": "Mise à jour {{id}} · {{date}}",
+      "update": "Mettre à jour",
+      "updateHint": "Ouvre {{place}}",
+      "updateFailed": "Impossible d’ouvrir {{place}}"
     },
     "identityHeading": "Identité",
     "preferences": {

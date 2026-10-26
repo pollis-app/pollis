@@ -25,7 +25,8 @@
 //   3. skips the version fields (package.json `version` / POLLIS_BUILD — they
 //      move without the native code moving) and the `updates` block (whether a
 //      build has OTA switched on is not native-compatibility information, and
-//      the native build phase re-reads the config without the Expo CLI's env);
+//      the native build phase re-reads the config without the Expo CLI's env),
+//      and `extra.installChannel` (#1443, the same: build env, not native code);
 //   4. hashes the OTA code-signing CERTIFICATE (store/ota-code-signing.pem).
 //      A binary only accepts updates signed for the certificate compiled into
 //      it, so a rotated certificate must mean a new runtime version: old
@@ -140,6 +141,12 @@ function stripUpdatesBlock(source, chunk) {
   }
   const config = JSON.parse(chunk.toString());
   delete config.updates;
+  // The install channel (#1443) is set by the native build's env, which the
+  // OTA job never has: hashing it would give every store/sideload binary a
+  // runtime version no update is ever built for. It is not native code either.
+  if (config.extra && typeof config.extra === "object") {
+    delete config.extra.installChannel;
+  }
   return JSON.stringify(config);
 }
 

@@ -387,6 +387,27 @@ check `mobile/.env`:
   `app/_layout.tsx` still read it, so it alone kept getting inlined while the
   others were inert. Grep for the read, not just for the var.
 
+**Install channel (#1443) — leave `POLLIS_RELEASE_KEY` unset (or `upload`).**
+Self → App → Update opens where the install updates from, and the build decides
+which: `app.config.js` writes `extra.installChannel` = `sideload` when
+`POLLIS_RELEASE_KEY=sideload` is in the **environment**, else `store` when
+`POLLIS_OTA=production`, else `dev`. The copy that counts is the one
+expo-constants embeds during the **native** build (Gradle preBuild →
+`assets/app.config`; the Xcode phase → `EXConstants.bundle/app.config`), so the
+env of the Gradle/Xcode step decides it, and an OTA update cannot change it
+(`lib/buildInfo.ts` reads that embedded copy, never `Constants.expoConfig`).
+`store` opens the Play listing on Android, and on iOS TestFlight — one IPA
+serves TestFlight and the App Store, so no build can tell them apart — until
+`IOS_APP_STORE_ID` in `lib/installChannel.ts` is set to the App Store record's
+Apple ID (JS, so an OTA carries it). `sideload` opens pollis.com/android, `dev`
+pollis.com. Pass the sideload key as an env var, never as `-PPOLLIS_RELEASE_KEY`:
+Gradle would sign with it but the config would not see it. The channel is
+stripped from the fingerprint (`fingerprint.config.js`), so it never moves a
+runtime version. Binaries from before 1.0.17 embed no channel: Android ones
+open pollis.com/android (which links Play and the APK), iOS ones the Apple
+destination. Check it in every binary (commands below; the APK workflow
+asserts `sideload`).
+
 ### iOS
 
 Whole path, verified end-to-end 2026-08-21 (Xcode 26.4.1, iPhoneOS SDK 26.4) —
@@ -464,6 +485,7 @@ codesign -dvvv /tmp/ipa/Payload/Pollis.app          # Authority=Apple Distributi
 codesign -d --entitlements :- /tmp/ipa/Payload/Pollis.app   # get-task-allow=false, aps-environment=production
 /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' /tmp/ipa/Payload/Pollis.app/Info.plist
 strings /tmp/ipa/Payload/Pollis.app/main.jsbundle | grep -o 'https://api[a-z.-]*pollis.com'
+jq -r .extra.installChannel /tmp/ipa/Payload/Pollis.app/EXConstants.bundle/app.config   # store
 ```
 
 The bundle-URL check is the one people forget: it is the only direct proof the shipped
@@ -559,6 +581,8 @@ Doppler `PLAY_SERVICE_ACCOUNT_JSON`, copy in 1Password):
 jarsigner -verify -certs android/app/build/outputs/bundle/release/app-release.aab  # CN=Daniel Kral, OU=Pollis
 unzip -p android/app/build/outputs/bundle/release/app-release.aab base/assets/index.android.bundle \
   | strings | grep -o 'https://api[a-z.-]*pollis.com'                              # prod DS only
+unzip -p android/app/build/outputs/bundle/release/app-release.aab base/assets/app.config \
+  | jq -r .extra.installChannel                                                    # store
 scripts/play-publish.py upload --track alpha --status draft --name "1.0.0 (1000000)"
 scripts/play-publish.py listing --icon <512px.png> [--feature-graphic <1024x500.png>] [--phone <shots>]
 ```
@@ -642,7 +666,9 @@ install and crash loading the core.
   shows `com.pollis.mobile`, `versionName` = `package.json`, `versionCode` = the
   `app.config.js` derivation, not debuggable; native libs for exactly its own
   ABI, `libpollis-native.so` included; and the raw bytes of `assets/index.android.bundle` contain `api.pollis.com`
-  and not `api-dev.pollis.com` (Hermes bytecode — `strings` can miss it). After
+  and not `api-dev.pollis.com` (Hermes bytecode — `strings` can miss it); and
+  `assets/app.config` embeds `extra.installChannel: "sideload"` (#1443 — Self →
+  App → Update then opens this page, not Play). After
   upload it re-downloads both CDN URLs and `latest.json` and compares hashes.
 - **No native auto-update.** Nothing in the app checks for a newer APK; users
   come back to the page for native changes. JS-only changes reach sideloaded
