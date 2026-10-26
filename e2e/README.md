@@ -25,6 +25,7 @@ Both `.spec.js` and `.spec.ts` are picked up by the one config.
 | spec | what it proves |
 |---|---|
 | `mentions.spec.js` | `@username` autocomplete + rendering in BOTH skins: terminal ghost-completes on Tab with no pop-over; refined drives the Slack-style list with arrows/Enter/Tab/Esc; your own mention renders stronger than a peer's; an unresolvable `@name` offers nothing |
+| `admin-name-chips.spec.ts` | Admin name chips in BOTH skins (#1488): your own keeps the accent, every other admin's is filled with their own stable colour under dark ink (light background too), and a member's name stays plain coloured text |
 | `bookmarks.spec.ts` | Saved messages + permalinks in BOTH skins: the saved list, an honest "not on this device" placeholder, channel/DM permalink jumps, and an unresolvable permalink that leaks nothing |
 | `emoji.spec.ts` | Custom emoji in BOTH skins: the picker mounts the real standard set (≥100 cells, not the old hardcoded eight), search narrows it, a pick splices in AT THE CARET rather than appending, and a `<:name:hash>` token renders as an image while a malformed one stays literal |
 | `invite-links.spec.ts` | Shareable invite links in BOTH skins: a created link is shown once with its bounds, copy puts exactly it on the clipboard, no list view can hand the token back, and revoking retires the row and takes its card away; the section carries no `>`/`[…]` terminal decoration and the link wraps rather than scrolling |
@@ -33,7 +34,6 @@ Both `.spec.js` and `.spec.ts` are picked up by the one config.
 | `bookmarks.spec.ts` | Saved messages + `pollis://m/` permalinks in BOTH skins: the saved list, an evicted body admitting it honestly, channel/DM permalink jump-and-highlight, and an unresolvable permalink leaking nothing |
 | `receipts.spec.ts` | DM delivery/read receipts in BOTH skins: a delivered tick, a read tick, the two being visually distinct (different glyph AND different colour), a group channel showing none at all, and a multi-participant DM rendering "2/3" rather than a boolean |
 | `non-admin-identity.spec.ts` | Group/channel identity for a non-admin in BOTH skins (#1281): no rename entry point for a member, and a rename page open across a demotion turns read-only — no empty Description field, no Save |
-| `admin-name-chips.spec.ts` | Admin name chips in BOTH skins (#1488): your own keeps the accent, every other admin's is filled with their own stable colour under dark ink (light background too), and a member's name stays plain coloured text |
 
 First run needs the browser once: `pnpm --filter @pollis/e2e exec playwright install chromium`.
 
