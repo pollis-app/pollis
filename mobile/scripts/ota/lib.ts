@@ -455,6 +455,9 @@ export interface PlanEntry {
   updateId?: string;
   launchSha256?: string;
   assets?: { sha256: string; key: string; fileExtension: string; contentType: string }[];
+  // #1446: this entry is the entry for `aliasOf` (same platform, same plan)
+  // re-issued under a runtime version the ledger records as native-identical.
+  aliasOf?: string;
 }
 
 export type PlanAction = "publish" | "republish" | "rollback";
@@ -602,20 +605,27 @@ export function mergeRecords(accumulator: BinaryRecord[], records: BinaryRecord[
 
 // One binary in a store or on pollis.com, and the runtime version baked into it
 // (the AAB/APK's `assets/fingerprint`, the IPA's
-// `Pollis.app/EXUpdates.bundle/fingerprint`). An update reaches exactly the
-// binaries whose runtime version it names.
+// `Pollis.app/EXUpdates.bundle/fingerprint`). An update reaches the binaries
+// whose runtime version it names, plus those recorded as native-identical to it.
 export interface StoreBuild {
   platform: Platform;
   channel: string;
   version: string;
   commit: string;
   runtimeVersion: string;
+  // #1446: this binary's baked runtime version is stray (polluted by build-time
+  // state, #1429) but its native code is identical to the binary of the same
+  // platform and commit that carries THIS runtime version. Every update built
+  // for that runtime version is also published, re-signed, under this one.
+  nativeIdenticalTo?: string;
 }
 
 export interface Reach {
   platform: Platform;
   runtimeVersion: string;
   binaries: StoreBuild[];
+  // The ledger runtime versions that alias this one (each also gets the update).
+  aliases: string[];
 }
 
 const FINGERPRINT_RE = /^[0-9a-f]{40}$/;
@@ -627,7 +637,7 @@ export function parseStoreBuilds(text: string): StoreBuild[] {
   if (!Array.isArray(doc.builds)) {
     throw new Error("runtime-versions.json: `builds` must be an array");
   }
-  return doc.builds.map((b, i) => {
+  const builds = doc.builds.map((b, i) => {
     const e = b as Partial<StoreBuild>;
     if (!(PLATFORMS as readonly string[]).includes(e.platform ?? "")) {
       throw new Error(`runtime-versions.json builds[${i}]: unknown platform ${e.platform}`);
@@ -640,11 +650,64 @@ export function parseStoreBuilds(text: string): StoreBuild[] {
         throw new Error(`runtime-versions.json builds[${i}]: ${k} is required`);
       }
     }
+    if (e.nativeIdenticalTo !== undefined && !FINGERPRINT_RE.test(e.nativeIdenticalTo)) {
+      throw new Error(`runtime-versions.json builds[${i}]: nativeIdenticalTo must be 40 lowercase hex, got ${e.nativeIdenticalTo}`);
+    }
     return e as StoreBuild;
   });
+  builds.forEach((b, i) => {
+    if (b.nativeIdenticalTo === undefined) {
+      return;
+    }
+    if (b.nativeIdenticalTo === b.runtimeVersion) {
+      throw new Error(`runtime-versions.json builds[${i}]: nativeIdenticalTo names its own runtime version`);
+    }
+    // The equivalence is only ever between two builds of ONE commit on ONE
+    // platform: the same native sources, one value polluted at build time. An
+    // alias across commits could land an update on different native code.
+    const target = builds.filter(
+      (t) => t.platform === b.platform && t.commit === b.commit && t.runtimeVersion === b.nativeIdenticalTo,
+    );
+    if (target.length === 0) {
+      throw new Error(
+        `runtime-versions.json builds[${i}]: nativeIdenticalTo ${b.nativeIdenticalTo} is not a recorded ${b.platform} ` +
+          `runtime version of commit ${b.commit}`,
+      );
+    }
+    // No chains: a target is a real runtime version, never itself an alias.
+    if (target.some((t) => t.nativeIdenticalTo !== undefined)) {
+      throw new Error(`runtime-versions.json builds[${i}]: nativeIdenticalTo ${b.nativeIdenticalTo} is itself an alias`);
+    }
+    // A runtime version is either real or an alias, never both: otherwise an
+    // update built for it would land on two different native layers.
+    const real = builds.filter((t) => t.platform === b.platform && t.runtimeVersion === b.runtimeVersion);
+    if (real.some((t) => t.nativeIdenticalTo !== b.nativeIdenticalTo)) {
+      throw new Error(
+        `runtime-versions.json builds[${i}]: ${b.platform} runtime version ${b.runtimeVersion} is recorded both as ` +
+          `an alias of ${b.nativeIdenticalTo} and otherwise`,
+      );
+    }
+  });
+  return builds;
 }
 
-// Which recorded binaries each platform's update would reach.
+// Every ledger runtime version of `platform` that is native-identical to
+// `runtimeVersion` (never `runtimeVersion` itself), sorted. Only aliases of the
+// update's OWN runtime version count, so an update never lands on a binary
+// whose native code differs from the one it was built for.
+export function aliasesOf(platform: Platform, runtimeVersion: string, builds: StoreBuild[]): string[] {
+  const out = new Set<string>();
+  for (const b of builds) {
+    if (b.platform === platform && b.nativeIdenticalTo === runtimeVersion && b.runtimeVersion !== runtimeVersion) {
+      out.add(b.runtimeVersion);
+    }
+  }
+  return [...out].sort();
+}
+
+// Which recorded binaries each platform's update would reach: those carrying
+// its runtime version, and those carrying an alias of it (which get the same
+// update, re-signed under their own runtime version).
 export function reachOf(runtimeVersions: Partial<Record<Platform, string>>, builds: StoreBuild[]): Reach[] {
   const out: Reach[] = [];
   for (const p of PLATFORMS) {
@@ -652,7 +715,98 @@ export function reachOf(runtimeVersions: Partial<Record<Platform, string>>, buil
     if (rv === undefined) {
       continue;
     }
-    out.push({ platform: p, runtimeVersion: rv, binaries: builds.filter((b) => b.platform === p && b.runtimeVersion === rv) });
+    const aliases = aliasesOf(p, rv, builds);
+    const targets = new Set([rv, ...aliases]);
+    out.push({
+      platform: p,
+      runtimeVersion: rv,
+      aliases,
+      binaries: builds.filter((b) => b.platform === p && targets.has(b.runtimeVersion)),
+    });
   }
   return out;
+}
+
+// The same update for another runtime version: identical bytes (launch bundle,
+// assets, config), its own update id and the alias's runtimeVersion. The
+// runtime version is inside the signed body and the client only launches an
+// update whose runtimeVersion equals its own (expo-updates
+// LauncherSelectionPolicyFilterAware), so an alias is re-built and re-signed,
+// never a copy of the original's bytes.
+export function aliasManifest(body: string, runtimeVersion: string, id: string): string {
+  if (!UUID_RE.test(id)) {
+    throw new Error(`update id must be a lowercase UUID, got ${id}`);
+  }
+  if (!RUNTIME_VERSION_RE.test(runtimeVersion)) {
+    throw new Error(`invalid runtime version ${runtimeVersion}`);
+  }
+  const m = JSON.parse(body) as Record<string, unknown>;
+  return JSON.stringify({ ...m, id, runtimeVersion });
+}
+
+// Add, for every entry in the plan, the same update (or directive) under each
+// ledger alias of its runtime version that the plan does not already cover.
+// `newId` mints the alias manifest's update id.
+export function expandAliases(entries: PlanEntry[], builds: StoreBuild[], newId: () => string): PlanEntry[] {
+  const slots = new Set(entries.map((e) => `${e.platform}/${e.runtimeVersion}`));
+  const out = [...entries];
+  for (const e of entries) {
+    if (e.aliasOf !== undefined) {
+      continue;
+    }
+    for (const alias of aliasesOf(e.platform, e.runtimeVersion, builds)) {
+      const slot = `${e.platform}/${alias}`;
+      if (slots.has(slot)) {
+        continue;
+      }
+      slots.add(slot);
+      if (e.kind === "manifest") {
+        const updateId = newId();
+        out.push({ ...e, runtimeVersion: alias, body: aliasManifest(e.body, alias, updateId), updateId, signature: undefined, aliasOf: e.runtimeVersion });
+      } else {
+        out.push({ ...e, runtimeVersion: alias, signature: undefined, aliasOf: e.runtimeVersion });
+      }
+    }
+  }
+  return out;
+}
+
+// What the signer checks before it signs an alias (it does not trust the build
+// job): the ledger records the alias for that runtime version; the target entry
+// is in the same plan; the alias carries exactly the target's bytes with only
+// its id and runtimeVersion changed. Also: every ledger alias of every
+// non-alias entry has an entry, so no aliased binary is silently left behind.
+export function assertAliasEntries(entries: PlanEntry[], builds: StoreBuild[]): void {
+  const bySlot = new Map(entries.map((e) => [`${e.platform}/${e.runtimeVersion}`, e]));
+  for (const e of entries) {
+    const slot = `${e.platform}/${e.runtimeVersion}`;
+    if (e.aliasOf === undefined) {
+      for (const alias of aliasesOf(e.platform, e.runtimeVersion, builds)) {
+        if (!bySlot.has(`${e.platform}/${alias}`)) {
+          throw new Error(`${slot}: the ledger aliases ${alias} to it, but the plan has no entry for it`);
+        }
+      }
+      continue;
+    }
+    if (!aliasesOf(e.platform, e.aliasOf, builds).includes(e.runtimeVersion)) {
+      throw new Error(`${slot}: the ledger does not record ${e.runtimeVersion} as native-identical to ${e.aliasOf}`);
+    }
+    const target = bySlot.get(`${e.platform}/${e.aliasOf}`);
+    if (target === undefined || target.aliasOf !== undefined || target.kind !== e.kind) {
+      throw new Error(`${slot}: alias of ${e.aliasOf}, which is not a ${e.kind} entry of this plan`);
+    }
+    if (e.kind === "manifest") {
+      if (e.updateId === undefined || e.updateId === target.updateId) {
+        throw new Error(`${slot}: an alias needs its own update id`);
+      }
+      if (e.body !== aliasManifest(target.body, e.runtimeVersion, e.updateId)) {
+        throw new Error(`${slot}: the alias manifest differs from ${e.aliasOf}'s beyond id and runtimeVersion`);
+      }
+      if (e.launchSha256 !== target.launchSha256 || JSON.stringify(e.assets) !== JSON.stringify(target.assets)) {
+        throw new Error(`${slot}: the alias's files differ from ${e.aliasOf}'s`);
+      }
+    } else if (e.body !== target.body) {
+      throw new Error(`${slot}: the alias directive differs from ${e.aliasOf}'s`);
+    }
+  }
 }

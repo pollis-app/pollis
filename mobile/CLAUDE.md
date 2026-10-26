@@ -792,6 +792,33 @@ afterwards targets only the binaries built afterwards.
   platform) on every run; when an update misses a binary, diff that against
   `node_modules/.bin/fingerprint fingerprint:generate --platform <p> --debug`
   on the build machine.
+- **Runtime-version aliases (#1446).** A binary whose baked value is stray but
+  whose native code is identical to another build of the **same platform and
+  commit** carries `nativeIdenticalTo: <that build's runtime version>` in the
+  ledger — today the sideload APKs 1.0.14/1.0.15/1.0.16 (`cd2015f4…`,
+  `a2ebce84…`, `27b59ee3…`), aliased to Play's `5466ba19…`, `3d24cb87…`,
+  `8f1befed…` (#1429). `parseStoreBuilds` refuses an alias whose target is not
+  a recorded runtime version of that platform and commit, an alias of an
+  alias, or a value recorded both as an alias and as a real runtime version.
+  `build` then issues each update **also under every alias of its own runtime
+  version** — never any other, so an update built for `8f1befed…` reaches Play
+  and sideload 1.0.16 but not 1.0.14/1.0.15. An alias is a **separate
+  manifest, re-signed**: same bundle, assets and config, its own update id,
+  and `runtimeVersion` set to the alias. Copying the original's bytes would not
+  work: `runtimeVersion` is inside the signed body, the Worker refuses a
+  pointer whose body names another runtime version, and expo-updates launches
+  only an update whose `runtimeVersion` equals the binary's own
+  (`LauncherSelectionPolicyFilterAware`). Each alias is its own plan entry
+  (`aliasOf` in the summary's "alias of" column), live pointer, archive and
+  transparency leaves (`arch` = the alias). `sign` re-checks every alias
+  against its own checkout's ledger and the target entry (same bytes, only id
+  + runtimeVersion differ) and refuses a plan that leaves a recorded alias out.
+  The reach check and summary count aliased binaries ("sideload 1.0.16 (alias
+  27b59ee3…)"). `prepare-republish` and `prepare-rollback --runtime-version
+  <rv>` expand aliases the same way, so an aliased binary rolls back with its
+  target. Only record an alias for a build whose native code you know matches
+  (same commit, value differing for a reason like #1429) — a wrong alias
+  ships JS to a binary it was not built against.
 - **Server**: the DS front-door Worker itself (`pollis-delivery/worker/updates.ts`,
   wired in `worker/index.ts`) — no separate project, domain or bucket. Under
   `/updates/` on api.pollis.com it serves `GET /updates/api/manifest`
