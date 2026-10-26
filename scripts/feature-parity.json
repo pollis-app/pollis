@@ -32,7 +32,9 @@
   "missing_from_cli": {
     "create_device_offer": "The terminal client signs in by email or Secret Key; it does not show a sign-in QR (#1361).",
     "await_device_offer": "The terminal client signs in by email or Secret Key; it does not show a sign-in QR (#1361).",
-    "cancel_device_offer": "The terminal client signs in by email or Secret Key; it does not show a sign-in QR (#1361)."
+    "cancel_device_offer": "The terminal client signs in by email or Secret Key; it does not show a sign-in QR (#1361).",
+    "list_muted_channels": "Per-channel mute (#1431) silences pushes and OS notifications; the terminal client raises neither and has no channel-settings surface. A mute set on desktop or mobile applies to the whole account.",
+    "set_channel_muted": "Per-channel mute (#1431) silences pushes and OS notifications; the terminal client raises neither and has no channel-settings surface. A mute set on desktop or mobile applies to the whole account."
   },
   "patterns": [
     {

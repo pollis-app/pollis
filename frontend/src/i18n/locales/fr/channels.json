@@ -29,7 +29,11 @@
     "fallbackTitle": "Canal",
     "renameLabel": "Renommer le canal",
     "deleteLabel": "Supprimer le canal",
-    "pinsLabel": "Messages épinglés"
+    "pinsLabel": "Messages épinglés",
+    "muteLabel": "Mettre le canal en sourdine",
+    "unmuteLabel": "Réactiver les notifications du canal",
+    "mutedHint": "En sourdine",
+    "muteDescription": "Un canal en sourdine ne vous notifie pas, sauf quand quelqu'un vous mentionne par votre nom."
   },
   "createChannel": {
     "pageTitle": "Nouveau canal",

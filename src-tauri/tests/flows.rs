@@ -15,6 +15,8 @@ mod harness;
 mod adversarial;
 #[path = "flows/auth.rs"]
 mod auth;
+#[path = "flows/channel_mute.rs"]
+mod channel_mute;
 #[path = "flows/cross_signing.rs"]
 mod cross_signing;
 #[path = "flows/device_link.rs"]

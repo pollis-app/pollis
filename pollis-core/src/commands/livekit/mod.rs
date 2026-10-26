@@ -290,6 +290,16 @@ pub(super) fn dispatch_data(
                 });
             }
         }
+        Some("channel_mutes_changed") => {
+            // DS-originated only (`profile::set_channel_mute`), like
+            // `enrollment_requested`: a participant-published copy is dropped.
+            // Harmless either way — it only triggers a re-read — but there is
+            // no reason to let a client fake a server nudge.
+            if sender.is_some() {
+                return None;
+            }
+            let _ = channel.send(RealtimeEvent::ChannelMutesChanged);
+        }
         Some("call_invite") => {
             // The caller is the attributed actor — a ring with no attributable
             // caller is dropped, never shown as "from" whoever the body names.
@@ -577,6 +587,20 @@ mod tests {
             "verification_code": "123456",
         });
         assert_eq!(run(payload.clone(), None).len(), 1);
+        let someone = PacketSender {
+            user_id: "alice".into(),
+            username: None,
+        };
+        assert!(run(payload, Some(&someone)).is_empty());
+    }
+
+    /// #1431: the mute re-read nudge is forwarded from the DS and dropped from a
+    /// participant.
+    #[test]
+    fn channel_mutes_changed_is_honoured_only_from_the_ds() {
+        let payload = serde_json::json!({ "type": "channel_mutes_changed" });
+        let events = run(payload.clone(), None);
+        assert!(matches!(events[..], [RealtimeEvent::ChannelMutesChanged]));
         let someone = PacketSender {
             user_id: "alice".into(),
             username: None,

@@ -81,6 +81,8 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::groups::list_user_groups,
             crate::commands::groups::list_user_groups_with_channels,
             crate::commands::groups::list_group_channels,
+            crate::commands::groups::list_muted_channels,
+            crate::commands::groups::set_channel_muted,
             crate::commands::groups::create_group,
             crate::commands::groups::create_channel,
             crate::commands::groups::send_group_invite,

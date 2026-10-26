@@ -579,6 +579,10 @@ async fn record_send_data(
     next: axum::middleware::Next,
 ) -> axum::response::Response {
     let path = <pollis_api::broker::LivekitSendDataBody as pollis_api::DsRequest>::PATH;
+    let send_path = <pollis_api::messages::SendMessageBody as pollis_api::DsRequest>::PATH;
+    if req.uri().path() == send_path {
+        return record_push_audience(req, next).await;
+    }
     if req.uri().path() != path {
         return next.run(req).await;
     }
@@ -599,6 +603,52 @@ async fn record_send_data(
         });
     }
     resp
+}
+
+/// The push audience one `POST /v1/messages/send` asked the DS for (#1431):
+/// `push_to` and `push_mentions` exactly as the client sent them. The suite
+/// has no Expo, so this is where a test sees who a send would wake.
+#[derive(Clone, Debug)]
+pub(crate) struct SentPushAudience {
+    pub(crate) message_id: String,
+    pub(crate) conversation_id: String,
+    pub(crate) push_to: Option<Vec<String>>,
+    pub(crate) push_mentions: Option<Vec<String>>,
+}
+
+static SENT_PUSH_AUDIENCES: std::sync::Mutex<Vec<SentPushAudience>> =
+    std::sync::Mutex::new(Vec::new());
+
+async fn record_push_audience(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let (parts, body) = req.into_parts();
+    let bytes = match axum::body::to_bytes(body, usize::MAX).await {
+        Ok(b) => b,
+        Err(e) => return ds_internal_error(format!("send body: {e}")),
+    };
+    if let Ok(p) = serde_json::from_slice::<pollis_api::messages::SendMessageBody>(&bytes) {
+        SENT_PUSH_AUDIENCES.lock().expect("push log").push(SentPushAudience {
+            message_id: p.id,
+            conversation_id: p.conversation_id,
+            push_to: p.push_to,
+            push_mentions: p.push_mentions,
+        });
+    }
+    next.run(axum::extract::Request::from_parts(parts, axum::body::Body::from(bytes)))
+        .await
+}
+
+/// The push audience the send of `message_id` carried, if it reached the DS.
+pub(crate) fn sent_push_audience(message_id: &str) -> Option<SentPushAudience> {
+    SENT_PUSH_AUDIENCES
+        .lock()
+        .expect("push log")
+        .iter()
+        .rev()
+        .find(|a| a.message_id == message_id)
+        .cloned()
 }
 
 /// Wait (bounded) for a wake-up to `room` matching `pred`. Publishes are
@@ -647,6 +697,7 @@ pub(crate) fn wake_up_count(room: &str, pred: impl Fn(&serde_json::Value) -> boo
 
 pub(crate) async fn wipe() {
     SENT_WAKE_UPS.lock().expect("wake-up log").clear();
+    SENT_PUSH_AUDIENCES.lock().expect("push log").clear();
     let w = world().await;
     wipe_remote(
         &w.remote.conn().await.expect("main conn"),
