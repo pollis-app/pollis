@@ -233,7 +233,14 @@ pub async fn insert(db: &Db, row: &FailedRequest) -> anyhow::Result<()> {
             row.detail.clone()
         ],
     )
-    .await?;
+    .await
+    .map_err(|e| {
+        // It runs right after a failure, so it is likely to meet the same
+        // outage; tell the pool before this connection is released (#1500).
+        let e = anyhow::Error::from(e);
+        crate::error::note_transient(&e);
+        e
+    })?;
     Ok(())
 }
 

@@ -548,6 +548,11 @@ races, and duplicate deliveries. All are additive to the flows above.
   - *Negative results are never cached* — a missing row is the normal state of a
     device mid-enrollment, and a cached "unknown device" would 401 a device that
     has since registered.
+  - *A failed lookup is a 503, not a 401 (#1500).* If the database cannot be read
+    the request is refused (`AuthRejection::Unavailable`, `{"error":"unavailable"}`)
+    — never authenticated, never cached — but a client is not told its perfectly
+    good key is unknown. The cached entry points take the `Db` and check a
+    connection out only on a miss.
   - *Depends on `max_instances: 1`* (`pollis-delivery/wrangler.{dev,prod}.jsonc`):
     one container ⇒ one cache ⇒ eviction is globally effective. **Raising
     `max_instances` breaks this** — a sibling instance would keep serving a

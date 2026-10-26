@@ -16,9 +16,11 @@ use base64::Engine as _;
 use ml_dsa::{Keypair, MlDsa44, Signer, SigningKey, VerifyingKey};
 use http_body_util::BodyExt as _;
 use pollis_delivery::auth::{
-    canonical_message, verify_request_identity_cached, DeviceKeyCache, DEVICE_KEY_CACHE_TTL_SECS,
+    canonical_message, verify_request_identity, verify_request_identity_cached, DeviceKeyCache,
+    DEVICE_KEY_CACHE_TTL_SECS,
 };
 use pollis_delivery::db::Db;
+use pollis_delivery::error::AuthRejection;
 use pollis_delivery::{build_router_with_state, AppState};
 use rand_core::{OsRng, RngCore as _};
 use tower::ServiceExt as _;
@@ -992,7 +994,6 @@ async fn ttl_backstop_expires_a_cached_entry() {
     seed_device(&db, "alice", "dev-alice", &sk.verifying_key()).await;
 
     let cache = DeviceKeyCache::default();
-    let conn = db.conn().await.unwrap();
     let t0 = now();
     let body = since_body_json("conv1", 0, 1);
     let headers = signed_headers("/v1/commits/since", "alice", "dev-alice", t0, &sk, &body);
@@ -1000,7 +1001,7 @@ async fn ttl_backstop_expires_a_cached_entry() {
 
     // Populate.
     assert!(
-        verify_request_identity_cached(&cache, &conn, &headers, "POST", path, &body, t0)
+        verify_request_identity_cached(&cache, &db, &headers, "POST", path, &body, t0)
             .await
             .is_ok()
     );
@@ -1014,7 +1015,7 @@ async fn ttl_backstop_expires_a_cached_entry() {
     assert!(
         verify_request_identity_cached(
             &cache,
-            &conn,
+            &db,
             &headers,
             "POST",
             path,
@@ -1030,7 +1031,7 @@ async fn ttl_backstop_expires_a_cached_entry() {
     assert!(
         verify_request_identity_cached(
             &cache,
-            &conn,
+            &db,
             &headers,
             "POST",
             path,
@@ -1055,14 +1056,13 @@ async fn invalidate_device_forces_a_re_read_of_a_rotated_pubkey() {
     seed_device(&db, "alice", "dev-alice", &old_sk.verifying_key()).await;
 
     let cache = DeviceKeyCache::default();
-    let conn = db.conn().await.unwrap();
     let t = now();
     let path = "/v1/commits/since";
     let body = since_body_json("conv1", 0, 1);
 
     let old_headers = signed_headers(path, "alice", "dev-alice", t, &old_sk, &body);
     assert!(
-        verify_request_identity_cached(&cache, &conn, &old_headers, "POST", path, &body, t)
+        verify_request_identity_cached(&cache, &db, &old_headers, "POST", path, &body, t)
             .await
             .is_ok()
     );
@@ -1071,7 +1071,7 @@ async fn invalidate_device_forces_a_re_read_of_a_rotated_pubkey() {
     set_device_pubkey_behind_the_ds(&db, "dev-alice", &new_sk.verifying_key()).await;
     let new_headers = signed_headers(path, "alice", "dev-alice", t, &new_sk, &body);
     assert!(
-        verify_request_identity_cached(&cache, &conn, &new_headers, "POST", path, &body, t)
+        verify_request_identity_cached(&cache, &db, &new_headers, "POST", path, &body, t)
             .await
             .is_err(),
         "the stale cached key rejects the device's real, current signature"
@@ -1080,13 +1080,13 @@ async fn invalidate_device_forces_a_re_read_of_a_rotated_pubkey() {
     // Eviction is the fix.
     cache.invalidate_device("alice", "dev-alice");
     assert!(
-        verify_request_identity_cached(&cache, &conn, &new_headers, "POST", path, &body, t)
+        verify_request_identity_cached(&cache, &db, &new_headers, "POST", path, &body, t)
             .await
             .is_ok(),
         "after eviction the current key is re-read and accepted"
     );
     assert!(
-        verify_request_identity_cached(&cache, &conn, &old_headers, "POST", path, &body, t)
+        verify_request_identity_cached(&cache, &db, &old_headers, "POST", path, &body, t)
             .await
             .is_err(),
         "and the superseded key is refused"
@@ -1103,7 +1103,6 @@ async fn a_miss_is_never_cached_so_a_new_device_is_not_locked_out() {
     let sk = gen_signing_key();
 
     let cache = DeviceKeyCache::default();
-    let conn = db.conn().await.unwrap();
     let t = now();
     let path = "/v1/commits/since";
     let body = since_body_json("conv1", 0, 1);
@@ -1111,7 +1110,7 @@ async fn a_miss_is_never_cached_so_a_new_device_is_not_locked_out() {
 
     // No row yet → 401, and nothing is remembered about the miss.
     assert!(
-        verify_request_identity_cached(&cache, &conn, &headers, "POST", path, &body, t)
+        verify_request_identity_cached(&cache, &db, &headers, "POST", path, &body, t)
             .await
             .is_err()
     );
@@ -1122,7 +1121,7 @@ async fn a_miss_is_never_cached_so_a_new_device_is_not_locked_out() {
 
     // The very next request works — no TTL to wait out.
     assert!(
-        verify_request_identity_cached(&cache, &conn, &headers, "POST", path, &body, t)
+        verify_request_identity_cached(&cache, &db, &headers, "POST", path, &body, t)
             .await
             .is_ok(),
         "a freshly-enrolled device authenticates immediately"
@@ -1240,7 +1239,6 @@ async fn a_revoked_device_is_never_cached() {
     seed_revoked_device(&db, "alice", "dev-alice", &sk.verifying_key()).await;
 
     let cache = DeviceKeyCache::default();
-    let conn = db.conn().await.unwrap();
     let t = now();
     let path = "/v1/commits/since";
     let body = since_body_json("conv1", 0, 1);
@@ -1248,10 +1246,115 @@ async fn a_revoked_device_is_never_cached() {
 
     for _ in 0..3 {
         assert!(
-            verify_request_identity_cached(&cache, &conn, &headers, "POST", path, &body, t)
+            verify_request_identity_cached(&cache, &db, &headers, "POST", path, &body, t)
                 .await
                 .is_err()
         );
         assert!(cache.is_empty(), "a revoked device is never cached");
     }
+}
+
+// ── Database failures during auth (#1500) ────────────────────────────────────
+
+/// Make the device-key lookup fail on the database, the way a dropped Turso
+/// connection does: the lookup's query names `account_suspension`, so without
+/// that table every lookup errors.
+async fn break_key_lookup(db: &Db) {
+    db.conn()
+        .await
+        .unwrap()
+        .execute("DROP TABLE account_suspension", ())
+        .await
+        .unwrap();
+}
+
+async fn status_and_error(router: axum::Router, req: Request<Body>) -> (StatusCode, String) {
+    let resp = router.oneshot(req).await.unwrap();
+    let status = resp.status();
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
+    (status, v["error"].as_str().unwrap_or_default().to_string())
+}
+
+/// #1500: a database failure while reading the signer's key is a 503
+/// `unavailable`, not a 401 — the DS could not check the signature, which says
+/// nothing about the client's credentials. It is still a refusal: the request
+/// is not authenticated and nothing it carried is applied.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_database_failure_during_key_lookup_is_503_not_401() {
+    let db = fresh_db().await;
+    let sk = gen_signing_key();
+    seed_device(&db, "alice", "dev-alice", &sk.verifying_key()).await;
+    seed_group_membership(&db, "conv1", "alice").await;
+    break_key_lookup(&db).await;
+
+    let router = build_router_with_state(AppState::new(Arc::clone(&db), true));
+    let body = submit_body_json("conv1", 0, "alice");
+    let req = signed_request("alice", "dev-alice", now(), &sk, &body, None);
+
+    assert_eq!(
+        status_and_error(router, req).await,
+        (StatusCode::SERVICE_UNAVAILABLE, "unavailable".to_string())
+    );
+    let conn = db.conn().await.unwrap();
+    let mut rows = conn
+        .query("SELECT COUNT(*) FROM mls_commit_log", ())
+        .await
+        .unwrap();
+    let commits: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
+    assert_eq!(commits, 0, "a request that could not be authenticated wrote nothing");
+}
+
+/// The other half of #1500: with the database healthy, an unknown device and a
+/// bad signature are still the plain 401.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unknown_device_is_still_401_when_the_database_is_healthy() {
+    let db = fresh_db().await;
+    let sk = gen_signing_key();
+    seed_device(&db, "alice", "dev-alice", &sk.verifying_key()).await;
+    seed_group_membership(&db, "conv1", "alice").await;
+
+    let body = submit_body_json("conv1", 0, "alice");
+    let router = build_router_with_state(AppState::new(Arc::clone(&db), true));
+    let unknown = signed_request("alice", "dev-nobody", now(), &sk, &body, None);
+    assert_eq!(
+        status_and_error(router, unknown).await,
+        (StatusCode::UNAUTHORIZED, "unauthorized".to_string())
+    );
+
+    let router = build_router_with_state(AppState::new(Arc::clone(&db), true));
+    let bad_sig = b64(&[0u8; pollis_device_cert::MLDSA44_SIG_LEN]);
+    let forged = signed_request("alice", "dev-alice", now(), &sk, &body, Some(&bad_sig));
+    assert_eq!(
+        status_and_error(router, forged).await,
+        (StatusCode::UNAUTHORIZED, "unauthorized".to_string())
+    );
+}
+
+/// Both verify paths answer a failed lookup with `Unavailable`, never with an
+/// identity, and the cached one remembers nothing about it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_key_lookup_never_authenticates_and_is_never_cached() {
+    let db = fresh_db().await;
+    let sk = gen_signing_key();
+    seed_device(&db, "alice", "dev-alice", &sk.verifying_key()).await;
+    break_key_lookup(&db).await;
+
+    let t = now();
+    let path = "/v1/commits/since";
+    let body = since_body_json("conv1", 0, 1);
+    let headers = signed_headers(path, "alice", "dev-alice", t, &sk, &body);
+
+    let cache = DeviceKeyCache::default();
+    assert_eq!(
+        verify_request_identity_cached(&cache, &db, &headers, "POST", path, &body, t).await,
+        Err(AuthRejection::Unavailable)
+    );
+    assert!(cache.is_empty(), "a failed lookup is not cached");
+
+    let conn = db.conn().await.unwrap();
+    assert_eq!(
+        verify_request_identity(&conn, &headers, "POST", path, &body, t).await,
+        Err(AuthRejection::Unavailable)
+    );
 }
