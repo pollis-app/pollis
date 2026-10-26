@@ -246,7 +246,7 @@ pub async fn push_recipients(
 }
 
 /// Every user who muted `channel_id` (#1431). A failed read — a DS running
-/// before migration 000039 is applied — counts as nobody: an unwanted push is
+/// before migration 000038 is applied — counts as nobody: an unwanted push is
 /// recoverable, a dropped one is not.
 async fn muted_by(conn: &Connection, channel_id: &str) -> Vec<String> {
     let mut out = Vec::new();
