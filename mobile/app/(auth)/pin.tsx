@@ -17,10 +17,12 @@ import { useFinalizeEnrollment } from "../../hooks/queries/useEnrollment";
 import { useSubmitLock } from "../../hooks/useSubmitLock";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
+import { useThemeRerender } from "../../components/theme";
 
 type Stage = "checking" | "create-first" | "create-confirm" | "unlock";
 
 function AuthPIN() {
+  useThemeRerender();
   const { t } = useTranslation("auth");
   const router = useRouter();
   const currentUser = appStore.currentUser;

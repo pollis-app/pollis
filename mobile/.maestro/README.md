@@ -98,6 +98,7 @@ IOS_DEVICE="iPhone 17 Pro" mobile/scripts/maestro-run.sh auth ios   # an Xcode 2
 | `reply` | #1270 swipe a message toward the start edge → reply bar (not the message sheet), send, the row quotes the original; double tap does the same; dismiss cancels; tapping a quote jumps to the original | no |
 | `channel-menu` | #1193 the channel kebab sheet: every item tapped by `testID`, plus `channel-menu-01-open` — the gallery shot that must show an OPAQUE sheet (no header/composer through its buttons; the invariant itself is pinned in `tests/sheet-opaque.test.ts`) | no |
 | `profile-prefs` | accent re-theme, behavior toggle, display-name save | no |
+| `theme-startup` | #1447 pick lilac, then a cold restart: the first screen (PIN unlock or tabs) carries `theme-boot-accent-bda3e0` and no amber probe before any tap, and the tabs stay lilac after unlock; a fresh account settles on amber even with lilac left in the device store | no |
 | `search` | #1202 desktop parity: a seeded message hit with highlighted snippet + "About N results", sort toggle, corpus footer, opening a hit, settings-page quick-jump, and the "why no results" explanation | no |
 | `security` | device list + blocked-list entry | no |
 | `app-update` | #1443 Self → App shows the native version + build number and the Update row with its destination (a Maestro build is the `dev` channel, so it names pollis.com) | no |

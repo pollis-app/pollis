@@ -30,6 +30,7 @@ import { MediaImage } from "../../components/Media";
 import { useOpenMediaViewer } from "../../hooks/useOpenMediaViewer";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
+import { useThemeRerender } from "../../components/theme";
 
 // Cap on grid tiles, matching desktop's MembersPanel (#826): each tile
 // resolves its own bytes through the media transport, so an unbounded grid
@@ -38,6 +39,7 @@ import { observer } from "mobx-react-lite";
 const MEDIA_LIMIT = 30;
 
 function ConversationInfo() {
+  useThemeRerender();
   const router = useNav();
   const { t } = useTranslation("mobile");
   const params = useRouteParams<{

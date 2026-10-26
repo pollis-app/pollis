@@ -9,6 +9,7 @@ import { useResolvePermalink } from "../../hooks/queries";
 import { useConversationRoute } from "../../hooks/useConversationRoute";
 import { permalinkMissCopy } from "../../lib/permalinks";
 import { messageJumpStore } from "../../stores/messageJumpStore";
+import { useThemeRerender } from "../../components/theme";
 
 /**
  * Deep-link target for `pollis://m/<conversation_id>/<message_id>` (#887).
@@ -19,6 +20,7 @@ import { messageJumpStore } from "../../stores/messageJumpStore";
  * and a message this device does not hold are indistinguishable).
  */
 export default function PermalinkScreen() {
+  useThemeRerender();
   const { t } = useTranslation("mobile");
   const { openConversation } = useOpenConversation();
   const params = useLocalSearchParams<{ permalink?: string | string[] }>();

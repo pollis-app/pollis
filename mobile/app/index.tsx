@@ -4,6 +4,7 @@ import { useRouter } from "expo-router";
 import { restoreSession } from "../hooks/queries/useAuth";
 import { invoke } from "../lib/native";
 import { semantic } from "../theme/tokens";
+import { useThemeRerender } from "../components/theme";
 
 interface UnlockStateSnapshot {
   pin_set: boolean;
@@ -21,6 +22,7 @@ interface UnlockStateSnapshot {
  * Runs once; downstream screens own the rest of the flow.
  */
 export default function Index() {
+  useThemeRerender();
   const router = useRouter();
   const [routed, setRouted] = useState(false);
 

@@ -3,15 +3,29 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
+  useRef,
   useState,
 } from "react";
+import { useSegments } from "expo-router";
+import { useObserver } from "mobx-react-lite";
+import { appStore } from "../stores/appStore";
+import { isInSignedInApp } from "../lib/enrollmentPrompt";
 import {
   setAccentRgb,
   setBackgroundRgb,
   hexToRgbTriplet,
+  currentAccentHex,
+  currentBackgroundHex,
   DEFAULT_ACCENT_HEX,
   DEFAULT_BACKGROUND_HEX,
 } from "../theme/tokens";
+import {
+  accentFromPreferences,
+  accentOnUserChange,
+  persistAccent,
+} from "../theme/accentStore";
+import { deviceAccentBackend } from "../theme/deviceAccent";
 import { usePreferences } from "../hooks/queries/usePreferences";
 
 // The two theme bases. Everything else derives from them (theme/derive.ts).
@@ -31,32 +45,64 @@ const Ctx = createContext<ThemeCtx>({
 });
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [accentHex, setAccentHex] = useState(DEFAULT_ACCENT_HEX);
-  const [backgroundHex, setBackgroundHex] = useState(DEFAULT_BACKGROUND_HEX);
-  const { data: prefs, update } = usePreferences();
+  // Start from what theme/tokens.ts already paints with — the accent this
+  // device last showed, read synchronously at load (#1447) — never from the
+  // default, or the provider and the tokens disagree until prefs arrive.
+  const [accentHex, setAccentHex] = useState(currentAccentHex);
+  const [backgroundHex, setBackgroundHex] = useState(currentBackgroundHex);
+  const { data: prefs, dataUpdatedAt, update, refetch } = usePreferences();
 
-  // Seed accent from server-side preferences when they first arrive (after
-  // sign-in). Subsequent local changes go through `setAccent` below and
-  // persist via `update({ accent_hex })`, so this effect only fires on the
-  // initial load.
+  const applyAccent = useCallback((hex: string) => {
+    setAccentRgb(hexToRgbTriplet(hex));
+    setAccentHex(hex);
+    persistAccent(deviceAccentBackend, hex);
+  }, []);
+
+  // The synced preference wins once it loads (sign-in, or a change made on
+  // another device) and is remembered for the next cold start. Before the
+  // PIN unlock the read cannot succeed, and its `{}` used to sit in the cache
+  // for a minute, so the accent appeared only when some later mount refetched
+  // it (#1447). Read it again the moment the app is unlocked. Local picks go
+  // through `setAccent` and persist via `update({ accent_hex })`, after which
+  // this resolves to the colour already on screen and does nothing.
+  const userId = useObserver(() => appStore.currentUser?.id ?? null);
+  const isLocked = useObserver(() => appStore.isLocked);
+  const segments = useSegments();
+  const unlocked = !!userId && isInSignedInApp(segments, isLocked);
+  const [unlockedAt, setUnlockedAt] = useState<number | null>(null);
   useEffect(() => {
-    const remote = prefs?.accent_hex;
-    if (typeof remote === "string" && remote !== accentHex) {
-      setAccentRgb(hexToRgbTriplet(remote));
-      setAccentHex(remote);
+    if (unlocked) {
+      setUnlockedAt(Date.now());
+      void refetch();
+    } else {
+      setUnlockedAt(null);
     }
-    // Only react to server data changes, not local accentHex updates —
-    // otherwise we'd loop on every local pick.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prefs?.accent_hex]);
+  }, [unlocked, refetch]);
+  // Only a read made after the unlock can say "this account has no accent".
+  const trusted = unlockedAt !== null && dataUpdatedAt >= unlockedAt;
+  const remoteAccent = accentFromPreferences(prefs, trusted);
+  useEffect(() => {
+    if (remoteAccent && remoteAccent !== currentAccentHex()) {
+      applyAccent(remoteAccent);
+    }
+  }, [remoteAccent, applyAccent]);
+
+  // Sign-out returns to the default palette.
+  const previousUserId = useRef(userId);
+  useEffect(() => {
+    const next = accentOnUserChange(previousUserId.current, userId);
+    previousUserId.current = userId;
+    if (next && next !== currentAccentHex()) {
+      applyAccent(next);
+    }
+  }, [userId, applyAccent]);
 
   const setAccent = useCallback(
     (hex: string) => {
-      setAccentRgb(hexToRgbTriplet(hex));
-      setAccentHex(hex);
+      applyAccent(hex);
       update({ accent_hex: hex });
     },
-    [update],
+    [applyAccent, update],
   );
 
   const setBackground = useCallback((hex: string) => {
@@ -64,16 +110,27 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     setBackgroundHex(hex);
   }, []);
 
-  return (
-    <Ctx.Provider value={{ accentHex, setAccent, backgroundHex, setBackground }}>
-      {children}
-    </Ctx.Provider>
+  const value = useMemo(
+    () => ({ accentHex, setAccent, backgroundHex, setBackground }),
+    [accentHex, setAccent, backgroundHex, setBackground],
   );
+
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
-// Subscribing to this re-renders the consumer when a base colour changes — so
-// the token getters resolve to the new theme. <Screen> and <TabBar> both
-// subscribe, which covers the whole tree.
+// Subscribing re-renders the CALLER when a base colour changes, so the token
+// getters it reads resolve to the new theme, and so does every element it
+// creates. It does NOT reach elements a parent created and passed down as
+// `children`: React bails out on those, so a subscribing <Screen> alone left
+// the rest of the page in the old colours until something else re-rendered
+// it (#1447). So every route component subscribes, and a list with a
+// memoised `renderItem` passes the accent as `extraData`
+// (tests/theme-startup.test.ts pins both).
 export function useTheme() {
   return useContext(Ctx);
+}
+
+/** Re-renders the caller on a palette change, for components that only read tokens. */
+export function useThemeRerender(): void {
+  useContext(Ctx);
 }

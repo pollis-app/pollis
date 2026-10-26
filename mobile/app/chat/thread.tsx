@@ -25,6 +25,7 @@ import { useMentionCandidates } from "../../hooks/useMentionCandidates";
 import { useOpenMediaViewer } from "../../hooks/useOpenMediaViewer";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
+import { useTheme } from "../../components/theme";
 
 /**
  * Slack-style thread screen (#831): the root message pinned at the top,
@@ -33,6 +34,7 @@ import { observer } from "mobx-react-lite";
  * per thread and per conversation (#837).
  */
 function ThreadScreen() {
+  const { accentHex } = useTheme();
   const router = useNav();
   const { t } = useTranslation("nav");
   const params = useRouteParams<{
@@ -229,6 +231,8 @@ function ThreadScreen() {
         data={replies}
         keyExtractor={(m) => m.id}
         renderItem={renderRow}
+        // `renderRow` is memoised: re-render the rows on a palette change.
+        extraData={accentHex}
         ListHeaderComponent={header}
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingTop: 4, paddingBottom: 12 }}

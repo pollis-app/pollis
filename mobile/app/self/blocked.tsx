@@ -5,8 +5,10 @@ import { ErrorText } from "../../components/self/SettingsField";
 import { type as ty, space } from "../../theme/tokens";
 import { activeLocale } from "../../i18n";
 import { useBlockedUsers, useUnblockUser } from "../../hooks/queries";
+import { useThemeRerender } from "../../components/theme";
 
 export default function Blocked() {
+  useThemeRerender();
   const { t } = useTranslation("dms");
   const { data: blocked = [], isLoading } = useBlockedUsers();
   const unblock = useUnblockUser();

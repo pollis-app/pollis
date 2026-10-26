@@ -48,6 +48,7 @@ import { haptic } from "../lib/haptics";
 import { appStore } from "../stores/appStore";
 import { semantic, type as ty, space } from "../theme/tokens";
 import type { MessageAttachment } from "../types";
+import { useTheme } from "../components/theme";
 
 type VaultView = "chat" | "media";
 
@@ -62,6 +63,7 @@ function entryTime(entry: VaultMessage): number {
 }
 
 function VaultScreen() {
+  const { accentHex } = useTheme();
   const { t } = useTranslation("vault");
   const router = useRouter();
   const [view, setView] = useState<VaultView>("chat");
@@ -313,6 +315,8 @@ function VaultScreen() {
             data={items}
             keyExtractor={(item) => item.key}
             renderItem={renderItem}
+            // `renderItem` is memoised: re-render the rows on a palette change.
+            extraData={accentHex}
             style={{ flex: 1 }}
             keyboardShouldPersistTaps="handled"
             // An inverted list pins short content to the visual bottom; these

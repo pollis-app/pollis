@@ -7,6 +7,7 @@ import { GroupPanel } from "../../components/groups/GroupPanel";
 import { appStore } from "../../stores/appStore";
 import { markConversationRead } from "../../hooks/queries";
 import { useIsRegular } from "../../hooks/useLayoutClass";
+import { useThemeRerender } from "../../components/theme";
 
 // A single group's page on phones, reached by route (invite links, deep
 // links, search results). Creating a group lands on the Groups tab instead. Renders the same panel the Groups tab shows under
@@ -81,6 +82,7 @@ function GroupRedirect() {
 }
 
 function GroupRoute() {
+  useThemeRerender();
   const regular = useIsRegular();
   return regular ? <GroupRedirect /> : <GroupDetail />;
 }
