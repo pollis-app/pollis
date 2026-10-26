@@ -199,6 +199,25 @@ export function currentAttachmentId(id: string): string {
   return next;
 }
 
+// Swipe down to dismiss (#1492), Google Photos style: the drag must pass a
+// fifth of the page, or be flung, to close the viewer; anything less springs
+// back. Runs on the UI thread inside the pager's pan gesture, hence the
+// worklet directive (inert under plain node, where the tests call it).
+// Upward drags never start the gesture (see app/media.tsx).
+export const DISMISS_FRACTION = 0.2;
+export const DISMISS_VELOCITY = 900;
+
+/** Whether a downward drag of `dy` px ending at `vy` px/s closes the viewer. */
+export function shouldDismiss(dy: number, vy: number, pageHeight: number): boolean {
+  "worklet";
+  // Nothing pulled down, or the finger was heading back up when it let go:
+  // the user changed their mind.
+  if (dy <= 0 || vy < -DISMISS_VELOCITY / 3) {
+    return false;
+  }
+  return dy > pageHeight * DISMISS_FRACTION || vy > DISMISS_VELOCITY;
+}
+
 /** "1:05" / "1:02:09" for the audio player's clock. */
 export function formatClock(seconds: number): string {
   const total = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;

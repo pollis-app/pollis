@@ -4,6 +4,7 @@
 
 import type { MessageAttachment } from "../types";
 import { parseContent, type AttachmentWire } from "./messageContent.ts";
+import { isRollMedia, mediaKind, type ViewerItems } from "./media/viewer.ts";
 
 /** Mirror of `pollis_core::commands::vault::VaultMessage`. */
 export interface VaultMessage {
@@ -86,15 +87,25 @@ export function editedVaultContent(original: string, draft: string): string | nu
   return JSON.stringify({ _att: att, ...(text ? { _txt: text } : {}) });
 }
 
-/** The entries as the media viewer's message list (lib/media/viewer.ts). */
-export function vaultViewerMessages(entries: readonly VaultMessage[]): {
-  id: string;
-  attachments: MessageAttachment[];
-  created_at: number;
-}[] {
-  return entries.map((entry) => ({
-    id: entry.id,
-    attachments: parseContent(entry.content, "vault").attachments,
-    created_at: new Date(entry.created_at).getTime(),
-  }));
+/**
+ * The full-screen viewer's pages for an attachment tapped in the Vault's
+ * media view (#1492): the grid's own images and videos, in the grid's order
+ * (newest entry first), so a swipe walks exactly what the grid shows — as
+ * desktop's MediaGalleryView walks its roll. Audio and other files open
+ * alone; an id the vault no longer holds yields nothing.
+ */
+export function vaultViewerItems(
+  entries: readonly VaultMessage[],
+  attachmentId: string,
+): ViewerItems {
+  const all = vaultAttachments(entries);
+  const tapped = all.find((a) => a.id === attachmentId);
+  if (!tapped) {
+    return { items: [], index: 0 };
+  }
+  if (!isRollMedia(mediaKind(tapped.content_type))) {
+    return { items: [tapped], index: 0 };
+  }
+  const items = all.filter((a) => isRollMedia(mediaKind(a.content_type)));
+  return { items, index: items.indexOf(tapped) };
 }
