@@ -31,6 +31,15 @@ type CategoryConfig = {
   // `AppShell`'s incomingCall effect via `start_ring` / `stop_ring`.
   honorsRingtonePref?: boolean;
   cooldownMs?: number;
+  // A channel event the per-channel mute (#1431) silences: no sound and no OS
+  // notification while `payload.roomId` is muted. The badge still counts.
+  // `user_mention` deliberately lacks it — a direct @mention gets through a
+  // mute, exactly as the DS push fan-out lets it through.
+  mutable?: boolean;
+  // Categories sharing a group share one cooldown per room, so the
+  // `new_message` and the mention ping that one @mention raises make one
+  // sound and one banner, not two.
+  cooldownGroup?: string;
 };
 
 // Single source of truth for notification behaviour. Edit a row to change
@@ -40,12 +49,18 @@ type CategoryConfig = {
 // sound and OS notification — never to the badge or status-bar alert.
 //
 // Convention: anything that fires `osNotif` should also fire `sound: 'ping'`
-// so the user always hears every system notification. Pings are reserved for
-// personal events (DMs, invites, enrollment) — channel chatter only updates
-// the unread badge so noisy rooms don't become a constant ping.
+// so the user always hears every system notification.
+//
+// Channel chatter pings and raises an OS notification by default (#1431), the
+// same as the push every channel message now sends to phones. A room that
+// gets too noisy is muted per channel (`setMutedChannels`, synced from the DS
+// for the whole account): a muted channel's chatter and @all only update the
+// badge, and a direct @mention still gets through. The account-wide
+// "notifications off" preference (`allowOsNotif`) still silences every OS
+// banner on this device.
 const CATEGORIES: Record<Category, CategoryConfig> = {
   direct_message:    { sound: 'ping',  osNotif: true,  badge: true, alert: true, cooldownMs: 2500 },
-  channel_message:   {                                  badge: true,              cooldownMs: 2500 },
+  channel_message:   { sound: 'ping',  osNotif: true,  badge: true,              cooldownMs: 2500, mutable: true, cooldownGroup: 'channel' },
   voice_other_join:  { sound: 'join'                                                              },
   voice_other_leave: { sound: 'leave'                                                             },
   voice_self_join:   { sound: 'join'                                                              },
@@ -54,17 +69,18 @@ const CATEGORIES: Record<Category, CategoryConfig> = {
   group_invite:      { sound: 'ping',  osNotif: true,               alert: true                   },
   enrollment:        { sound: 'ping',  osNotif: true,                            overlay: true    },
   incoming_call:     {                  osNotif: true,                            honorsRingtonePref: true },
-  // @all in a group: the one channel event that DOES raise an OS ping (unlike
-  // channel_message). Badge is left to the accompanying new_message event so a
-  // connected client doesn't double-count unread.
-  all_mention:       { sound: 'ping',  osNotif: true,                            cooldownMs: 2500 },
+  // @all in a group. Silenced by a mute like chatter (it is addressed to the
+  // room, not to you). Badge is left to the accompanying new_message event so
+  // a connected client doesn't double-count unread.
+  all_mention:       { sound: 'ping',  osNotif: true,                            cooldownMs: 2500, mutable: true, cooldownGroup: 'channel' },
   // @username in a group (#843) — someone spoke to YOU by name, which is a
   // personal event, so it is treated like a DM rather than like channel
   // chatter: ping, OS notification, AND the status-bar alert that names the
   // sender. It is deliberately louder than `all_mention` (which is addressed
   // to a room, not to you) — that alert is the difference. Badge is left to
-  // the accompanying new_message event so unread isn't double-counted.
-  user_mention:      { sound: 'ping',  osNotif: true,               alert: true, cooldownMs: 2500 },
+  // the accompanying new_message event so unread isn't double-counted. NOT
+  // mutable: a direct mention reaches you in a muted channel (#1431).
+  user_mention:      { sound: 'ping',  osNotif: true,               alert: true, cooldownMs: 2500, cooldownGroup: 'channel' },
 };
 
 export type NotifyPayload = {
@@ -123,8 +139,16 @@ export function saveDeviceCallRingtone(userId: string | null | undefined, enable
 
 const cooldowns = new Map<string, number>();
 
+// The account's muted channel ids (#1431), mirrored from the DS by
+// `useLiveKitRealtime` whenever the `useMutedChannels` query changes.
+let mutedChannels: ReadonlySet<string> = new Set();
+
 export function setNotifyPrefs(next: NotifyPrefs): void {
   prefs = next;
+}
+
+export function setMutedChannels(ids: Iterable<string>): void {
+  mutedChannels = new Set(ids);
 }
 
 export function notify(category: Category, payload: NotifyPayload = {}): void {
@@ -133,7 +157,7 @@ export function notify(category: Category, payload: NotifyPayload = {}): void {
     return;
   }
 
-  const cooldownKey = `${category}:${payload.roomId ?? '_global'}`;
+  const cooldownKey = `${config.cooldownGroup ?? category}:${payload.roomId ?? '_global'}`;
   const now = Date.now();
   const cooled = config.cooldownMs !== undefined
     && now - (cooldowns.get(cooldownKey) ?? 0) < config.cooldownMs;
@@ -145,12 +169,15 @@ export function notify(category: Category, payload: NotifyPayload = {}): void {
   // continues to read the account-level allow_sound_effects only.
   const ringtoneAllowed = !config.honorsRingtonePref || prefs.allowCallRingtone;
 
-  if (config.sound && prefs.allowSound && ringtoneAllowed && !cooled) {
+  // A muted channel (#1431) stays silent for chatter and @all.
+  const silenced = !!config.mutable && !!payload.roomId && mutedChannels.has(payload.roomId);
+
+  if (config.sound && prefs.allowSound && ringtoneAllowed && !cooled && !silenced) {
     playSfx(config.sound);
     fired = true;
   }
 
-  if (config.osNotif && prefs.allowOsNotif && prefs.osPermissionGranted && ringtoneAllowed && !cooled) {
+  if (config.osNotif && prefs.allowOsNotif && prefs.osPermissionGranted && ringtoneAllowed && !cooled && !silenced) {
     const title = payload.title ?? i18n.t('chat:notify.newMessageTitle');
     const body = payload.body
       ?? (payload.senderUsername

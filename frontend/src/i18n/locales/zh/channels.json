@@ -27,7 +27,11 @@
     "fallbackTitle": "频道",
     "renameLabel": "重命名频道",
     "deleteLabel": "删除频道",
-    "pinsLabel": "置顶消息"
+    "pinsLabel": "置顶消息",
+    "muteLabel": "将频道设为免打扰",
+    "unmuteLabel": "取消频道免打扰",
+    "mutedHint": "免打扰",
+    "muteDescription": "免打扰的频道不会通知你，除非有人点名提及你。"
   },
   "createChannel": {
     "pageTitle": "新建频道",

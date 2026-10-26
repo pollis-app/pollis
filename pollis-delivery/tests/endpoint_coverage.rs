@@ -137,7 +137,10 @@ fn the_endpoint_table_covers_the_whole_write_surface() {
         //
         // 115 since #1382 keyed attachments to an MLS-wrapped per-conversation
         // ring: `/v1/file-keys/keystate` and `/v1/read/file-keystate`.
-        115,
+        //
+        // 117 since #1431 added the per-channel mute the push fan-out reads:
+        // `/v1/channel-mutes/set` and `/v1/read/channel-mutes`.
+        117,
         "the DS write surface changed — update this count deliberately, and make \
          sure the new endpoint is routed in BOTH pollis-delivery and the flows harness"
     );

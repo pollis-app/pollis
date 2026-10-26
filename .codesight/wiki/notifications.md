@@ -40,7 +40,7 @@ The single source of truth (`frontend/src/utils/notify.ts`):
 ```ts
 const CATEGORIES: Record<Category, CategoryConfig> = {
   direct_message:    { sound: 'ping',  osNotif: true,  badge: true, alert: true, cooldownMs: 2500 },
-  channel_message:   {                                  badge: true,              cooldownMs: 2500 },
+  channel_message:   { sound: 'ping',  osNotif: true,  badge: true,              cooldownMs: 2500, mutable: true, cooldownGroup: 'channel' },
   voice_other_join:  { sound: 'join'                                                              },
   voice_other_leave: { sound: 'leave'                                                             },
   voice_self_join:   { sound: 'join'                                                              },
@@ -49,16 +49,17 @@ const CATEGORIES: Record<Category, CategoryConfig> = {
   group_invite:      { sound: 'ping',  osNotif: true,               alert: true                   },
   enrollment:        { sound: 'ping',  osNotif: true,                            overlay: true    },
   incoming_call:     {                  osNotif: true,                            honorsRingtonePref: true },
-  // @all in a group: the one channel event that DOES raise an OS ping (unlike
-  // channel_message). Badge is left to the accompanying new_message event so a
-  // connected client doesn't double-count unread.
-  all_mention:       { sound: 'ping',  osNotif: true,                            cooldownMs: 2500 },
+  // @all in a group. Silenced by a mute like chatter (it is addressed to the
+  // room, not to you). Badge is left to the accompanying new_message event so
+  // a connected client doesn't double-count unread.
+  all_mention:       { sound: 'ping',  osNotif: true,                            cooldownMs: 2500, mutable: true, cooldownGroup: 'channel' },
   // @username in a group (#843) — someone spoke to YOU by name, which is a
   // personal event, so it is treated like a DM rather than like channel
   // chatter: ping, OS notification, AND the status-bar alert that names the
   // sender. Deliberately louder than `all_mention` (addressed to a room, not
-  // to you) — that alert is the difference.
-  user_mention:      { sound: 'ping',  osNotif: true,               alert: true, cooldownMs: 2500 },
+  // to you) — that alert is the difference. NOT mutable: a direct mention
+  // reaches you in a muted channel (#1431).
+  user_mention:      { sound: 'ping',  osNotif: true,               alert: true, cooldownMs: 2500, cooldownGroup: 'channel' },
 };
 ```
 
@@ -72,12 +73,14 @@ const CATEGORIES: Record<Category, CategoryConfig> = {
 | `alert` | Sets the blinking status-bar alert (`appStore.setStatusBarAlert`) | none | Cleared on navigation |
 | `overlay` | Sets `pendingEnrollmentApproval` so the UI takes over | none | Used only by enrollment |
 | `honorsRingtonePref` | Gates the ringtone on the **device-local** call-ringtone toggle, independent of the account-level `allow_sound_effects` | `allowCallRingtone` | Used only by `incoming_call` |
-| `cooldownMs` | Suppresses repeat sound + OS-notif within the window | — | Keyed by `(category, roomId)` |
+| `cooldownMs` | Suppresses repeat sound + OS-notif within the window | — | Keyed by `(cooldownGroup ?? category, roomId)` |
+| `mutable` | Silenced (sound + OS notif) while `payload.roomId` is a muted channel (#1431); the badge still counts | `setMutedChannels` | `channel_message`, `all_mention` |
+| `cooldownGroup` | Categories sharing a group share one cooldown per room | — | `channel`: the `new_message` and the mention ping one @mention raises make one sound and one banner |
 
 ### Conventions
 
 1. **Anything with `osNotif: true` should also have `sound: 'ping'`.** Users always hear every system notification. Don't ship a silent OS banner. The one exception is `incoming_call`, which has no `sound` because it plays a *ringtone* on its own device-local gate (`honorsRingtonePref`) rather than a one-shot sfx — muting ringing on one device must not silence every other alert on it.
-2. **Pings are reserved for personal events.** Channel chatter only updates the badge — noisy rooms must not become a constant ping. Mentions are the sanctioned exception, and they earn it by being addressed: `@all` to the room, `@username` to you specifically.
+2. **Channel chatter pings by default; a noisy room is muted, not ignored (#1431).** Every channel message also pushes every other member's phones, so desktop matches: `channel_message` pings and raises an OS notification. A user who finds a channel too loud mutes it (per channel, per account, stored on the DS — see "Per-channel mute" below); a muted channel's chatter and `@all` only update the badge, while a direct `@username` still gets through. The account-wide `allow_desktop_notifications` preference still silences every OS banner on the device.
 3. **`badge` and `alert` are never cooldown-gated.** The unread count must stay accurate; only sound and OS notifications dedupe.
 
 ## Categorization (the call site)
@@ -206,26 +209,60 @@ That's it. No new branches, no new refs, no new pref handling. If you need a new
 
 ## Cooldown semantics
 
-Cooldown is keyed by `${category}:${roomId ?? '_global'}`. It applies only to sound and OS notification — never to badge, alert, or overlay. The cooldown timestamp is recorded only when *something actually fired* (i.e., pref + permission allowed it). This means:
+Cooldown is keyed by `${cooldownGroup ?? category}:${roomId ?? '_global'}`; `channel_message`, `all_mention` and `user_mention` share the `channel` group, so one @mention (which arrives as both a `new_message` and a mention ping) sounds once. It applies only to sound and OS notification — never to badge, alert, or overlay. The cooldown timestamp is recorded only when *something actually fired* (i.e., pref + permission allowed it). This means:
 
 - A 10-message burst from one DM pings once, OS-notifies once, but badges 10 times.
 - A burst across two DM rooms pings twice (different cooldown buckets).
 - If sound is disabled but OS notif is enabled, the OS notification still fires and starts the cooldown.
 
-## Mentions (#843)
+## Mentions (#843) and who gets pushed (#1431)
 
-`@all` and `@username` are the only channel events that wake anyone. Both are
-decided **in Rust**, in `pollis-core/src/commands/messages/send.rs`:
+Mentions are decided **in Rust**, in `pollis-core/src/commands/messages/send.rs`:
 
 - `mention_audience(is_channel, content, members)` returns `Everyone` (a DM, or
   a channel `@all`), `Only(user_ids)` (a channel naming specific members), or
-  `Nobody` (ordinary channel chatter). Its unit tests are the invariant: a
-  per-user mention wakes exactly the people named, and a plain channel message
-  wakes nobody.
-- That one value drives BOTH fanouts, so they cannot drift: the inbox ping
-  (`all_mention` to every member, or `user_mention` to just the named ones) and
-  the background push (`notify_new_message(..., only, ...)`, which intersects
-  the subset with real membership so it can only ever remove recipients).
+  `Nobody` (ordinary channel chatter). It drives the inbox ping: `all_mention`
+  to every member, or `user_mention` to just the named ones. A member named
+  directly inside an `@all` gets the `user_mention` instead of the
+  `all_mention`, because that is the ping that gets through a mute.
+- `direct_mentions(content, members)` is the list of members named by
+  `@username` (whether or not the message also says `@all`).
+
+**Every channel message pushes every other member (#1431).** The send carries
+`push_to: Some([])` (everyone) and `push_mentions: Some(direct_mentions)`; the
+DS (`pollis_delivery::push::PushAudience::from_send` → `push_recipients`)
+takes every member but the sender, intersects with any `push_to` subset (so it
+can only ever remove recipients), then drops each member who muted the channel
+unless `push_mentions` names them. A DM sends no mention list; nobody can mute
+one.
+
+**Backward compatibility.** A client from before #1431 sends `None` for
+ordinary chatter (still: no push), `Some([])` for `@all` (the mute applies), and
+`Some([ids])` with no `push_mentions` for `@username` — read as "only these, and
+they are the mention list", so they get through a mute exactly as before.
+
+## Per-channel mute (#1431)
+
+A row in `channel_mute (user_id, channel_id)` (migration 000038) — the row's
+existence is the mute. Per account, not per device: `set_channel_muted` writes
+it through `POST /v1/channel-mutes/set` (only for a group channel the caller is
+a member of; a DM or group id is refused), `list_muted_channels` reads it back
+through `POST /v1/read/channel-mutes`, and after every write the DS sends
+`channel_mutes_changed` to the owner's `inbox-<user>` room (DS-originated; a
+participant-published copy is dropped) so the account's other devices refetch.
+Rows go when the member leaves or is removed, with the channel, and with the
+account (`teardown.rs`).
+
+- **Desktop:** the bell in the channel header (`channel-mute-toggle`) toggles
+  it; the sidebar and the group's channel list draw a muted channel in the
+  muted tier with a bell-off mark (`sidebar-channel-muted-<id>`).
+  `useLiveKitRealtime` mirrors `useMutedChannels` into `notify.ts`
+  (`setMutedChannels`), which silences `mutable` categories for that room.
+- **Mobile:** the channel's "More" sheet carries the switch
+  (`toggle-channel-mute`); the group panel dims the row and marks it with a
+  bell-off glyph (its id becomes `row-channel-<id>-muted`). Pushes — the only
+  OS notifications mobile raises, backgrounded or foreground — are already
+  filtered by the DS.
 
 **Mentions cannot leak.** `members` is the roster of the conversation the
 sender already belongs to, so an `@name` matching nobody in the room resolves
@@ -255,8 +292,9 @@ modal, a portal, or a fixed overlay.
 | `frontend/src/components/ui/RichTextInput.tsx` | The composer field: contentEditable projection of the wire text, and the terminal skin's inline ghost (shared with `:shortcode:` completion) |
 | `frontend/src/components/ui/MentionSuggestList.tsx` | Refined skin's Slack-style suggestion list |
 | `frontend/src/components/Message/MessageBody.tsx` | Splits mention tokens out, delegates the rest to `LinkifiedText` |
-| `pollis-core/src/commands/messages/send.rs` | `mention_audience()` — who gets woken, + the inbox fanout |
-| `pollis-delivery/src/push.rs` | `notify_new_message(..., only, ...)` recipient filter |
+| `pollis-core/src/commands/messages/send.rs` | `mention_audience()` / `direct_mentions()` — the inbox fanout and the push audience |
+| `pollis-delivery/src/push.rs` | `PushAudience` + `push_recipients` — membership intersection and the per-channel mute |
+| `pollis-delivery/src/profile.rs` | `set_channel_mute` / `read_channel_mutes` (#1431) |
 | `frontend/src/utils/sfx.ts` | `playSfx()` wrapper around `play_sfx` Rust command |
 | `frontend/src/hooks/useLiveKitRealtime.ts` | Categorizes incoming Rust events, calls `notify(...)`, owns pref + permission sync |
 | `frontend/src/voice/voiceBridge.ts` | Calls `notify('voice_self_join'/'voice_self_leave')` for local actions (was `hooks/useVoiceChannel.ts`, deleted) |
@@ -269,4 +307,5 @@ modal, a portal, or a fixed overlay.
 ## Related issues
 
 - #843 — per-user `@username` mentions that notify the mentioned user.
+- #1431 — channel messages push by default; per-channel, per-account mute.
 - #186 — original audit + dispatcher refactor (PR #202).

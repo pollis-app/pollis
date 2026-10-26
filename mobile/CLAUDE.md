@@ -1226,7 +1226,12 @@ Current state:
   - Content-free fan-out — **`pollis_delivery::push::notify_new_message`, in the
     DS, not the client** (#987 moved it off every client so nobody needs a
     credential that can read other people's `push_token` rows). Driven by the
-    `push_to` field on `POST /v1/messages/send`. Payload is `{ h }` — an opaque
+    `push_to` field on `POST /v1/messages/send`. Since #1431 every group-channel
+    message pushes every other member, minus whoever muted that channel (a
+    per-account `channel_mute` row on the DS, toggled from the channel's
+    "More" sheet, `toggle-channel-mute`) unless the message names them by
+    `@username` (`push_mentions`). Because the DS filters, a muted channel is
+    silent in the foreground too. Payload is `{ h }` — an opaque
     per-notification handle, resolved via `POST /v1/push/resolve` (#1122/#1157)
     — and a generic "New message" body. Never plaintext, sender, or the
     conversation id.

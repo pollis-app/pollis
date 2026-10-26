@@ -29,7 +29,11 @@
     "fallbackTitle": "Canal",
     "renameLabel": "Renombrar canal",
     "deleteLabel": "Eliminar canal",
-    "pinsLabel": "Mensajes fijados"
+    "pinsLabel": "Mensajes fijados",
+    "muteLabel": "Silenciar canal",
+    "unmuteLabel": "Dejar de silenciar canal",
+    "mutedHint": "Silenciado",
+    "muteDescription": "Los canales silenciados no te avisan, salvo cuando alguien te menciona por tu nombre."
   },
   "createChannel": {
     "pageTitle": "Canal nuevo",
