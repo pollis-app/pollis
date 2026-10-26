@@ -37,7 +37,11 @@
     "fallbackTitle": "قناة",
     "renameLabel": "إعادة تسمية القناة",
     "deleteLabel": "حذف القناة",
-    "pinsLabel": "الرسائل المثبتة"
+    "pinsLabel": "الرسائل المثبتة",
+    "muteLabel": "كتم القناة",
+    "unmuteLabel": "إلغاء كتم القناة",
+    "mutedHint": "مكتومة",
+    "muteDescription": "لا تُرسل القنوات المكتومة إشعارات إليك، إلا عندما يذكرك أحد باسمك."
   },
   "createChannel": {
     "pageTitle": "قناة جديدة",

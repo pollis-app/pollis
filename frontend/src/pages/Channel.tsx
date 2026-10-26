@@ -1,10 +1,10 @@
 import React, { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { Pencil, Pin, Trash2 } from "lucide-react";
+import { Bell, BellOff, Pencil, Pin, Trash2 } from "lucide-react";
 import { MainContent } from "../components/Layout/MainContent";
 import { useRightPanel } from "../components/Layout/RightPanel/useRightPanel";
-import { useUserGroupsWithChannels } from "../hooks/queries/useGroups";
+import { useMutedChannels, useSetChannelMuted, useUserGroupsWithChannels } from "../hooks/queries/useGroups";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useMarkConversationRead } from "../hooks/queries/useUnread";
@@ -47,6 +47,10 @@ export const ChannelPage: React.FC = observer(() => {
   const group = groupsWithChannels?.find((g) => g.id === groupId);
   const channel = group?.channels.find((c) => c.id === channelId);
   const isAdmin = group?.current_user_role === "admin";
+  const { data: mutedChannels } = useMutedChannels();
+  const setChannelMuted = useSetChannelMuted();
+  const isMuted = mutedChannels?.has(channelId) ?? false;
+  const muteLabel = isMuted ? t("channel.unmuteLabel") : t("channel.muteLabel");
 
   const title = channel ? channel.name : t("channel.fallbackTitle");
 
@@ -65,6 +69,21 @@ export const ChannelPage: React.FC = observer(() => {
             testId="channel-export-trigger"
           />
         </div>
+        {/* Per-channel mute (#1431): silences this channel's pushes and
+            notifications on every device of the account, except a direct
+            @mention. Optimistic, and disabled while the write is in flight. */}
+        <button
+          data-testid="channel-mute-toggle"
+          data-muted={isMuted ? "true" : "false"}
+          onClick={() => setChannelMuted.mutate({ channelId, muted: !isMuted })}
+          disabled={setChannelMuted.isPending}
+          aria-pressed={isMuted}
+          aria-label={muteLabel}
+          title={`${muteLabel}. ${t("channel.muteDescription")}`}
+          className="icon-btn-sm flex-shrink-0 padding-0 me-2"
+        >
+          {isMuted ? <BellOff size={14} aria-hidden="true" /> : <Bell size={14} aria-hidden="true" />}
+        </button>
         <button
           data-testid="channel-pins-trigger"
           onClick={togglePins}
