@@ -1166,7 +1166,10 @@ Current state:
   downward drag dismisses, and "12 / 100" sits under the filename
   (`text-media-position`). Maestro: `.maestro/flows/vault-swipe.yaml`. Attachments come
   from the photo library, as in chat — desktop's arbitrary-file drop has no mobile
-  picker yet (no `expo-document-picker`). Maestro: `.maestro/flows/vault.yaml`.
+  picker yet (no `expo-document-picker`). A failed save names its reason
+  (`vaultSaveFailure`), puts the draft back and offers "Try again"
+  (`btn-vault-retry`); a retry uploads only the files that failed (#1497).
+  Maestro: `.maestro/flows/vault.yaml`, `.maestro/flows/vault-retry.yaml`.
 - **Keystore-at-rest (Android + iOS):** the file-backed keystore (the only
   backend on mobile) envelope-encrypts its contents with an AES-256-GCM master
   key held in the platform secure store — same on-disk blob (`iv(12)||gcm-ct`,

@@ -84,6 +84,14 @@ export async function releaseStaged(attachments: Attachment[]): Promise<void> {
 }
 
 /**
+ * Uploads that already succeeded, by the composer's attachment object (#1497).
+ * A failed draft goes back to the composer as the SAME objects, so a retry
+ * finds these and uploads only what failed. Weak, so a draft that is dropped
+ * takes its entries with it.
+ */
+const uploaded = new WeakMap<Attachment, MediaUploadResult>();
+
+/**
  * Upload a composer's attachments and encode them into the message body.
  *
  * This is the ENCODE half of the `_att` envelope that
@@ -131,44 +139,49 @@ export async function buildMessageContent(
   // place an attachment's bytes can be: a file the user already has, or the
   // in-memory staging area (`pollis_core::commands::staging`). A successful
   // staged upload releases its own bytes; a failed one leaves them staged so a
-  // retry still has something to send.
-  let results: MediaUploadResult[];
-  try {
-    results = await Promise.all(
-      attachments.map((att) => {
-        if (!att.source) {
-          return Promise.reject(
-            new Error(`attachment ${att.name} has no bytes to upload yet`),
-          );
-        }
-        if (att.source.kind === "staged") {
-          return invoke<MediaUploadResult>("upload_media_staged", {
-            stagedId: att.source.id,
-            filename: att.name,
-            contentType: att.mimeType,
-          });
-        }
-        return invoke<MediaUploadResult>("upload_media", {
-          path: att.source.path,
-          filename: att.name,
-          contentType: att.mimeType,
-        });
-      }),
-    );
-  } catch (err) {
-    // The send has failed and the composer cleared itself the moment it handed
-    // these over, so nothing will retry them — release the bytes rather than
-    // leaving entries no reference points at. Uploads that already succeeded
-    // released their own; discarding an id twice is a no-op.
-    await Promise.all(
-      attachments.map((att) =>
-        att.source?.kind === "staged"
-          ? discardStagedAttachment(att.source.id).catch(() => false)
-          : Promise.resolve(false),
-      ),
-    );
-    throw err;
+  // retry still has something to send. The caller owns that retry: the Vault
+  // hands the failed draft back to its composer (#1497), and the composer
+  // releases staged bytes when a card is removed — so nothing is discarded
+  // here on failure.
+  // Every upload runs to completion before a failure is reported, and each one
+  // that succeeded is remembered against its attachment (#1497): a retry of
+  // the same draft uploads only what failed. That is also what makes a retry
+  // possible at all for a staged attachment, whose bytes are released the
+  // moment its upload succeeds.
+  const settled = await Promise.allSettled(
+    attachments.map((att) => {
+      const done = uploaded.get(att);
+      if (done) {
+        return Promise.resolve(done);
+      }
+      if (!att.source) {
+        return Promise.reject(
+          new Error(`attachment ${att.name} has no bytes to upload yet`),
+        );
+      }
+      const upload =
+        att.source.kind === "staged"
+          ? invoke<MediaUploadResult>("upload_media_staged", {
+              stagedId: att.source.id,
+              filename: att.name,
+              contentType: att.mimeType,
+            })
+          : invoke<MediaUploadResult>("upload_media", {
+              path: att.source.path,
+              filename: att.name,
+              contentType: att.mimeType,
+            });
+      return upload.then((result) => {
+        uploaded.set(att, result);
+        return result;
+      });
+    }),
+  );
+  const failed = settled.find((s): s is PromiseRejectedResult => s.status === "rejected");
+  if (failed) {
+    throw failed.reason;
   }
+  const results = settled.map((s) => (s as PromiseFulfilledResult<MediaUploadResult>).value);
 
   const envelope: Record<string, unknown> = {
     _att: results.map((r, i) => {

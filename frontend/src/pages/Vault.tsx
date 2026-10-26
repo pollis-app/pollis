@@ -27,10 +27,18 @@ import {
   type VaultMessage,
 } from "../hooks/queries/useVault";
 import { buildMessageContent } from "../utils/attachmentEnvelope";
+import { vaultSaveFailure, type VaultSaveFailure } from "../utils/vaultSaveFailure";
 import { formatClockTime, formatDayDivider } from "../utils/format";
 import type { MessageAttachment } from "../types";
 
 type VaultView = "chat" | "media";
+
+// What a failed save says, by what the user can do about it (#1497).
+const SAVE_FAILED_COPY: Record<VaultSaveFailure, string> = {
+  offline: "saveFailedOffline",
+  tooLarge: "saveFailedTooLarge",
+  other: "saveFailed",
+};
 
 /**
  * The Vault (#107): a private, end-to-end-encrypted space that works like a
@@ -100,14 +108,29 @@ export const VaultPage: React.FC = observer(() => {
     return out;
   }, [entries]);
 
+  // A save that failed (#1497): why, for the line above the composer. The
+  // draft itself goes back into the composer, and "Try again" sends it.
+  const [saveFailure, setSaveFailure] = useState<VaultSaveFailure | null>(null);
+  const [saving, setSaving] = useState(false);
+
   const handleSend = useCallback(
     async (text: string, attachments: Attachment[]) => {
       const contentText = text.trim();
       if (!contentText && attachments.length === 0) {
         return;
       }
-      const content = await buildMessageContent(attachments, contentText);
-      sendMutation.mutate({ content });
+      setSaveFailure(null);
+      setSaving(true);
+      try {
+        const content = await buildMessageContent(attachments, contentText);
+        await sendMutation.mutateAsync({ content });
+      } catch (err) {
+        console.warn("[vault] save failed:", err);
+        setSaveFailure(vaultSaveFailure(err));
+        chatInputRef.current?.restore(contentText, attachments);
+      } finally {
+        setSaving(false);
+      }
     },
     [sendMutation],
   );
@@ -333,6 +356,33 @@ export const VaultPage: React.FC = observer(() => {
             </div>
           ) : (
             <div className="flex-shrink-0" data-testid="vault-composer">
+              {saving ? (
+                <p
+                  className="px-4 pt-2 font-mono text-xs text-muted"
+                  role="status"
+                  data-testid="vault-saving"
+                >
+                  {t("saving")}
+                </p>
+              ) : null}
+              {saveFailure && !saving ? (
+                <div
+                  className="flex items-center gap-3 px-4 pt-2"
+                  data-testid="vault-save-failed"
+                >
+                  <p className="flex-1 font-mono text-xs text-danger" role="alert">
+                    {t(SAVE_FAILED_COPY[saveFailure])}
+                  </p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => chatInputRef.current?.send()}
+                    data-testid="vault-save-retry"
+                  >
+                    {t("saveRetry")}
+                  </Button>
+                </div>
+              ) : null}
               <ChatInput
                 ref={chatInputRef}
                 onSend={handleSend}

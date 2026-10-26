@@ -823,6 +823,27 @@ impl Plaintext {
     }
 }
 
+/// How many uploads may hold their bytes at once (#1497). Each one keeps the
+/// plaintext, its ciphertext and — for an image — the decoded pixels resident
+/// (a 12 MP photo decodes to 48 MB), and a renderer that starts every picked
+/// file at once (a 12-image Vault entry) multiplied that past what a phone
+/// will give a process. Uploads past the bound wait their turn; the R2 PUTs
+/// they would have overlapped with share one link anyway.
+const MAX_CONCURRENT_UPLOADS: usize = 3;
+
+static UPLOAD_SLOTS: tokio::sync::Semaphore =
+    tokio::sync::Semaphore::const_new(MAX_CONCURRENT_UPLOADS);
+
+/// Wait for an upload slot; held for the upload's whole life. Taken only by
+/// the public entry points, never by [`upload_plaintext`], so it is never
+/// acquired twice by one upload.
+async fn upload_slot() -> tokio::sync::SemaphorePermit<'static> {
+    UPLOAD_SLOTS
+        .acquire()
+        .await
+        .expect("the upload semaphore is never closed")
+}
+
 /// Upload a file to the user's Vault, sealed under the Vault file key (#1382).
 /// Chat attachments do not come through here: the durable outbox uploads
 /// them under their conversation's key ring (`upload_outbox_bytes`).
@@ -854,6 +875,7 @@ pub async fn upload_media(
         )));
     }
 
+    let _slot = upload_slot().await;
     // Read plaintext from disk.
     let data = tokio::fs::read(&path).await
         .map_err(|e| Error::Other(anyhow::anyhow!("read file {path}: {e}")))?;
@@ -873,6 +895,7 @@ pub async fn upload_media_staged(
     content_type: String,
     state: &Arc<AppState>,
 ) -> Result<MediaUploadResult> {
+    let _slot = upload_slot().await;
     let bytes = crate::commands::staging::peek_staged(&staged_id).ok_or_else(|| {
         Error::Other(anyhow::anyhow!(
             "no staged attachment {staged_id}: it was already uploaded, discarded, or the              session ended"
@@ -924,6 +947,7 @@ pub(crate) async fn upload_outbox_bytes(
             height: None,
         });
     }
+    let _slot = upload_slot().await;
     upload_plaintext(
         Plaintext::Owned(data),
         filename,
@@ -932,6 +956,57 @@ pub(crate) async fn upload_outbox_bytes(
         state,
     )
     .await
+}
+
+/// What [`seal_off_runtime`] derives from an upload's plaintext.
+struct Sealed {
+    /// Plaintext SHA-256, hex (#879).
+    sha256: String,
+    /// `(blurhash, width, height)` for an image; `None` for anything else.
+    image_meta: Option<anyhow::Result<(String, u32, u32)>>,
+    ciphertext: Vec<u8>,
+}
+
+/// Hash, measure and encrypt an upload's plaintext, then release it — on the
+/// blocking pool, never on an async worker (#1497).
+///
+/// This is CPU work measured in seconds for a phone photo (a 12 MP decode
+/// alone), and the bridge runtime has four workers. A multi-image Vault save
+/// used to run it inline in every upload at once, which parked every worker:
+/// the HTTP requests those workers drive stopped being polled, and connection
+/// deadlines and pooled-connection health checks fired late or not at all, so
+/// presigns failed with "error sending request" and the save with them.
+async fn seal_off_runtime(
+    data: Plaintext,
+    is_image: bool,
+    enc_key: zeroize::Zeroizing<[u8; 32]>,
+    enc_nonce: [u8; 12],
+) -> Result<Sealed> {
+    tokio::task::spawn_blocking(move || {
+        // The plaintext digest rides inside the encrypted reference so a
+        // recipient can confirm it got exactly the bytes the sender meant (#879).
+        let sha256 = hex::encode(sha256_bytes(data.as_slice()));
+        let image_meta = if is_image {
+            Some(compute_image_meta(data.as_slice()))
+        } else {
+            None
+        };
+        // Chunked AES-256-GCM; the bytes go up via a DS-minted presigned PUT
+        // (the client holds no R2 credentials).
+        let ciphertext = encrypt_chunked(data.as_slice(), &enc_key, &enc_nonce);
+        drop(enc_key);
+        // Release the plaintext BEFORE the presign round trip and the upload
+        // (#915): everything derived from it was computed here, and the PUT is
+        // the longest-lived step of an upload.
+        data.release();
+        Sealed {
+            sha256,
+            image_meta,
+            ciphertext,
+        }
+    })
+    .await
+    .map_err(|e| Error::Other(anyhow::anyhow!("upload preparation failed: {e}")))
 }
 
 /// The shared upload core: seal under a fresh per-file key from `scope`'s
@@ -973,31 +1048,19 @@ async fn upload_plaintext(
     let (enc_key, enc_nonce) = crate::commands::file_keys::derive_file_key(&ring_key, &file_id);
     drop(ring_key);
 
-    // The plaintext digest rides inside the encrypted reference so a recipient
-    // can confirm it got exactly the bytes the sender meant (#879).
-    let sha256 = hex::encode(sha256_bytes(data.as_slice()));
+    // Hash, image metadata and encryption: see [`seal_off_runtime`].
+    let is_image = content_type.starts_with("image/");
+    let Sealed { sha256, image_meta, ciphertext } =
+        seal_off_runtime(data, is_image, enc_key, enc_nonce).await?;
 
-    // Compute blurhash + dimensions before data is consumed.
-    let (blurhash, width, height) = if content_type.starts_with("image/") {
-        match compute_image_meta(data.as_slice()) {
-            Ok((bh, w, h)) => (Some(bh), Some(w), Some(h)),
-            Err(e) => {
-                crate::diag!("[upload_media] image meta failed ({content_type}): {e}");
-                (None, None, None)
-            }
+    let (blurhash, width, height) = match image_meta {
+        Some(Ok((bh, w, h))) => (Some(bh), Some(w), Some(h)),
+        Some(Err(e)) => {
+            crate::diag!("[upload_media] image meta failed ({content_type}): {e}");
+            (None, None, None)
         }
-    } else {
-        (None, None, None)
+        None => (None, None, None),
     };
-
-    // Encrypt with chunked AES-256-GCM, then upload via a DS-minted presigned
-    // PUT (the client holds no R2 credentials).
-    let ciphertext = encrypt_chunked(data.as_slice(), &enc_key, &enc_nonce);
-    drop(enc_key);
-    // Release the plaintext BEFORE the presign round trip and the upload
-    // (#915): everything derived from it was computed above, and the PUT is
-    // the longest-lived step in the function.
-    data.release();
 
     let put_url =
         presign_r2_with_length(state, "put", &r2_key, Some(ciphertext.len() as u64)).await?;
@@ -1411,13 +1474,20 @@ fn sha256_bytes(data: &[u8]) -> [u8; 32] {
     Sha256::digest(data).into()
 }
 
+/// Longest edge of the image a blurhash is computed from.
+const BLURHASH_SOURCE_MAX: u32 = 64;
+
 fn compute_image_meta(data: &[u8]) -> anyhow::Result<(String, u32, u32)> {
     use image::GenericImageView;
     let img = image::load_from_memory(data)
         .map_err(|e| anyhow::anyhow!("image decode: {e}"))?;
     let (width, height) = img.dimensions();
-    let rgba = img.to_rgba8();
-    let hash = blurhash::encode(4, 3, width, height, rgba.as_raw())
+    // A 4x3-component blurhash is a dozen averages over the whole frame, so a
+    // thumbnail gives the same placeholder as the full image — and encoding
+    // the full image costs seconds per phone photo (12 cosine sums over 12 M
+    // pixels), which is what made a multi-image save crawl (#1497).
+    let small = img.thumbnail(BLURHASH_SOURCE_MAX, BLURHASH_SOURCE_MAX).to_rgba8();
+    let hash = blurhash::encode(4, 3, small.width(), small.height(), small.as_raw())
         .map_err(|e| anyhow::anyhow!("blurhash: {e:?}"))?;
     Ok((hash, width, height))
 }
@@ -1613,9 +1683,19 @@ pub(crate) async fn r2_put_url(
         .header("Content-Type", content_type)
         .body(data)
         .send()
-        .await?;
+        .await
+        // `without_url`: a presigned URL is a short-lived write credential for
+        // the object, and has no business in a log a user may share.
+        .map_err(|e| e.without_url())
+        .inspect_err(|e| {
+            crate::diag!(
+                "[r2] PUT transport error: {}",
+                crate::commands::mls::ds_client::error_chain(e)
+            );
+        })?;
     if !resp.status().is_success() {
         let status = resp.status();
+        crate::diag!("[r2] PUT → {status}");
         let body = error_snippet(resp).await;
         return Err(Error::Other(anyhow::anyhow!("R2 upload failed: {} — {}", status, body)));
     }
@@ -2197,5 +2277,63 @@ mod tests {
             .expect("under the cap");
         assert_eq!(got.len(), TOTAL);
         assert!(got.iter().all(|b| *b == b'x'), "the bytes must be the ones sent");
+    }
+
+    /// #1497: sealing an upload must not occupy the async runtime. On a
+    /// single-threaded runtime a ticker task can only advance while the seal
+    /// is off the runtime's one thread; inline (the pre-#1497 shape) it never
+    /// ticks at all, which is the starvation that failed multi-image saves.
+    #[tokio::test]
+    async fn sealing_an_upload_leaves_the_runtime_free() {
+        let ticks = Arc::new(AtomicU64::new(0));
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ticker = {
+            let (ticks, stop) = (Arc::clone(&ticks), Arc::clone(&stop));
+            tokio::spawn(async move {
+                while !stop.load(Ordering::Relaxed) {
+                    tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                    ticks.fetch_add(1, Ordering::Relaxed);
+                }
+            })
+        };
+        // Let the ticker start before the seal begins.
+        tokio::task::yield_now().await;
+
+        let data = Plaintext::Owned(vec![7u8; 48 * 1024 * 1024]);
+        let started = std::time::Instant::now();
+        let sealed = seal_off_runtime(data, false, zeroize::Zeroizing::new([1u8; 32]), [2u8; 12])
+            .await
+            .expect("seal");
+        let elapsed = started.elapsed();
+        stop.store(true, Ordering::Relaxed);
+        ticker.await.unwrap();
+
+        assert!(sealed.image_meta.is_none());
+        assert!(sealed.ciphertext.len() > 48 * 1024 * 1024);
+        assert!(
+            elapsed >= std::time::Duration::from_millis(20),
+            "the seal finished in {elapsed:?}: too fast to tell whether it blocked"
+        );
+        assert!(
+            ticks.load(Ordering::Relaxed) >= 3,
+            "the runtime was blocked for the whole {elapsed:?} seal"
+        );
+    }
+
+    /// The blurhash comes from a thumbnail (#1497), but the dimensions an
+    /// attachment reports are still the original's.
+    #[test]
+    fn image_meta_reports_the_original_dimensions() {
+        let img = image::RgbImage::from_fn(1200, 900, |x, y| {
+            image::Rgb([(x % 256) as u8, (y % 256) as u8, ((x + y) % 256) as u8])
+        });
+        let mut bytes = Vec::new();
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+            .expect("encode");
+        let (hash, w, h) = compute_image_meta(&bytes).expect("meta");
+        assert_eq!((w, h), (1200, 900));
+        // A 4x3-component blurhash: 1 size + 1 max-AC + 4 DC + 2 per AC (11).
+        assert_eq!(hash.len(), 1 + 1 + 4 + 2 * 11);
     }
 }

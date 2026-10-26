@@ -83,6 +83,12 @@ export function stagedIdOf(attachment: Attachment): string | null {
 export interface ChatInputHandle {
   addFiles: (files: File[]) => void;
   focus: () => void;
+  /** Put a draft whose send failed back in the composer (#1497) — the text
+   *  only into an empty input, the attachments only into an empty tray, so a
+   *  draft the user has started since is never overwritten. */
+  restore: (text: string, attachments: Attachment[]) => void;
+  /** Send what the composer holds, exactly as Enter would. */
+  send: () => void;
 }
 
 interface ChatInputProps {
@@ -455,10 +461,24 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     });
   }, [attachments, maxAttachments]);
 
+  // `handleSend` reads the latest render's state, so the handle is rebuilt
+  // with it rather than memoized past it.
+  const sendRef = useRef<() => void>(() => {});
   useImperativeHandle(ref, () => ({
     addFiles: (files: File[]) => { files.forEach(handleBrowserFile); },
     focus: () => { inputRef.current?.focus(); },
-  }), [handleBrowserFile]);
+    restore: (text: string, restored: Attachment[]) => {
+      setMessage((current) => {
+        if (current.trim()) {
+          return current;
+        }
+        setDraft(draftKey, text);
+        return text;
+      });
+      setAttachments((current) => (current.length > 0 ? current : restored));
+    },
+    send: () => { sendRef.current(); },
+  }), [handleBrowserFile, draftKey]);
 
   // Register as the active file-drop target while mounted, so AppShell only
   // shows the drag overlay on views that can actually receive a file (not,
@@ -633,6 +653,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     setAttachments([]);
     inputRef.current?.focus();
   };
+  sendRef.current = handleSend;
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // Mention keys are handled BEFORE the Enter-sends branch: while a
