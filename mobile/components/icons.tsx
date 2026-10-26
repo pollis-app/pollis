@@ -40,6 +40,7 @@ import {
   Link2,
   Share2,
   Download,
+  ExternalLink,
   AlertCircle,
   ArrowLeft,
   ArrowRight,
@@ -142,6 +143,8 @@ export const Icon = {
   link: wrap(Link2, 14),
   share: wrap(Share2, 14),
   download: wrap(Download, 14),
+  // A row that leaves the app (a store listing, a web page).
+  external: wrap(ExternalLink, 16),
   trash: wrap(Trash2),
   logOut: wrap(LogOut),
   exit: wrap(LogOut, 14),

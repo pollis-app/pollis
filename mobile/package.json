@@ -18,6 +18,7 @@
     "@tanstack/react-query": "^5.100.11",
     "@ubjs/core": "0.31.0-6",
     "expo": "~57.0.31",
+    "expo-application": "~57.0.3",
     "expo-asset": "~57.0.20",
     "expo-audio": "~57.0.5",
     "expo-build-properties": "~57.0.22",

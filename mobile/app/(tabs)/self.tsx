@@ -8,6 +8,7 @@ import { ProfileCard } from "../../components/self/ProfileCard";
 import { accentDisplayName } from "../../components/self/accentName";
 import { useNotificationPermission } from "../../components/self/useNotificationPermission";
 import { confirmSignOut } from "../../components/self/confirmSignOut";
+import { VersionRow, UpdateRow } from "../../components/self/BuildRows";
 import { useTheme } from "../../components/theme";
 import { semantic, type as ty, fonts, space } from "../../theme/tokens";
 import { languageOption } from "../../i18n/languages";
@@ -168,6 +169,8 @@ function Self() {
             chevron
             onPress={() => router.push("/self/diagnostics")}
           />
+          <VersionRow />
+          <UpdateRow />
         </Group>
 
         <Group>

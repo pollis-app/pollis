@@ -1,0 +1,29 @@
+appId: com.pollis.mobile
+tags:
+  - parity
+---
+# APP VERSION + UPDATE (#1443) — Self -> App shows the installed version and
+# build number, and an Update row naming where this install updates from.
+# Desktop's equivalent is its Software update page (version + updater).
+#
+# A Maestro build is a "dev" channel build (no POLLIS_OTA, no sideload key),
+# so its Update row names pollis.com; a store build names Google Play /
+# TestFlight / App Store, the sideload APK pollis.com. The mapping itself is
+# pinned in tests/install-channel.test.ts. The row is not tapped: it leaves
+# the app for a browser or store, which this flow cannot follow.
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-self"
+- scrollUntilVisible:
+    element:
+      id: "row-self-update"
+    direction: DOWN
+# The native version, then the native build number in brackets.
+- assertVisible:
+    id: "row-self-version"
+    text: "Version, [0-9]+\\.[0-9]+\\.[0-9]+ \\([0-9]+\\).*"
+- assertVisible:
+    id: "row-self-update"
+    text: "Update, pollis\\.com"
+- takeScreenshot: app-update-01-self-app

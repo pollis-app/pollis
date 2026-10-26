@@ -415,7 +415,13 @@
       "savedMessages": "الرسائل المحفوظة",
       "appearance": "المظهر",
       "signOut": "تسجيل الخروج…",
-      "signOutConfirmTitle": "هل تريد تسجيل الخروج من Pollis على هذا الجهاز؟"
+      "signOutConfirmTitle": "هل تريد تسجيل الخروج من Pollis على هذا الجهاز؟",
+      "version": "الإصدار",
+      "versionValue": "{{version}} ({{build}})",
+      "runningUpdate": "التحديث {{id}} · {{date}}",
+      "update": "تحديث",
+      "updateHint": "يفتح {{place}}",
+      "updateFailed": "تعذّر فتح {{place}}"
     },
     "identityHeading": "الهوية",
     "preferences": {
