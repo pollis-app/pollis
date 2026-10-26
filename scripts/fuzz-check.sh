@@ -24,6 +24,16 @@ MAX_TIME="${FUZZ_MAX_TOTAL_TIME:-20}"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root/fuzz"
 
+# Build a target with LeakSanitizer off. cargo-fuzz's RUSTFLAGS carry
+# -Zsanitizer=address, which the `cc` crate forwards to C it compiles — so
+# libsql-sqlite3-parser's build script builds its `lemon` parser generator
+# with ASan and then runs it, and lemon (which never frees before exit) trips
+# LSan and fails the build. Leak checking stays on for the fuzz run itself,
+# which reuses this build: LSAN_OPTIONS is not a build input.
+build_target() {
+  LSAN_OPTIONS="detect_leaks=0" cargo "+$NIGHTLY" fuzz build "$1"
+}
+
 if ! command -v cargo-fuzz >/dev/null 2>&1; then
   echo "cargo-fuzz not found — install with: cargo install cargo-fuzz" >&2
   exit 1
@@ -51,6 +61,7 @@ if [[ "${FUZZ_MUTANT:-0}" == "1" ]]; then
     echo "--- mutant: $t ---"
     work="$(mktemp -d)"
     cp -r "corpus/$t/." "$work/" 2>/dev/null || true
+    build_target "$t"
     if cargo "+$NIGHTLY" fuzz run "$t" "$work" -- -runs="$RUNS" -max_total_time="$MAX_TIME"; then
       echo "TEETH FAILURE: mutant '$t' did not crash — the property check is toothless" >&2
       exit 1
@@ -70,6 +81,7 @@ for t in "${TARGETS[@]}"; do
   echo "--- $t ---"
   work="$(mktemp -d)"
   cp -r "corpus/$t/." "$work/" 2>/dev/null || true
+  build_target "$t"
   cargo "+$NIGHTLY" fuzz run "$t" "$work" -- -runs="$RUNS" -max_total_time="$MAX_TIME"
   rm -rf "$work"
 done
