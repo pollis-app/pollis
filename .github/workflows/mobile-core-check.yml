@@ -380,6 +380,23 @@ jobs:
           GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx4096m
         run: ./gradlew :app:assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
 
+      # The runtime version Gradle baked must be the one a Gradle-free recompute
+      # (the OTA job's) gives, or OTAs miss every binary built this way. Gradle
+      # bakes it mid-build, so anything a build leaves in a fingerprinted dir
+      # only while it runs breaks this (#1429: Kotlin's `.kotlin/sessions/`);
+      # mobile-apk-release.yml runs the same check on every shipped APK.
+      - name: Baked runtime version equals the OTA job's
+        working-directory: mobile
+        run: |
+          set -euo pipefail
+          baked="$(unzip -p android/app/build/outputs/apk/release/app-release.apk assets/fingerprint)"
+          computed="$(node_modules/.bin/fingerprint fingerprint:generate --platform android | jq -r .hash)"
+          echo "android runtime version: baked ${baked}, recomputed ${computed}"
+          if [ "$baked" != "$computed" ]; then
+            echo "::error::the APK's runtime version ${baked} is not what the OTA job computes (${computed}); compare the createReleaseUpdatesResources line in the Gradle log with \`fingerprint:generate --platform android --debug\`"
+            exit 1
+          fi
+
       - name: Upload APK
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
