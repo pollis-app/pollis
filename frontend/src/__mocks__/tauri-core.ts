@@ -1631,6 +1631,11 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
 
     case 'send_vault_message': {
       const { content } = args as { userId: string; content: string };
+      // `failSends` covers the Vault too (#1497): the save dies on the
+      // connection, exactly the text the core rejects with.
+      if (store.failSends) {
+        throw 'ds_post /v1/vault/save: error sending request for url (https://api.pollis.test/v1/vault/save): connection closed before message completed';
+      }
       const now = new Date().toISOString();
       const entry: MockVaultMessage = {
         id: `vault_${store.vaultMessages.length + 1}`,

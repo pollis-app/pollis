@@ -109,3 +109,28 @@ export function vaultViewerItems(
   const items = all.filter((a) => isRollMedia(mediaKind(a.content_type)));
   return { items, index: items.indexOf(tapped) };
 }
+
+/** Why a save failed, as far as the user can act on it (#1497). */
+export type VaultSaveFailure = "offline" | "tooLarge" | "other";
+
+/**
+ * Sort a failed save into what the user can do about it. The core's errors
+ * reach JS as text, so this reads the shapes `pollis-core` produces: a
+ * connection that failed or timed out, or a 5xx from the DS or R2, is
+ * "offline" (sending again is the fix); a file over the upload cap is
+ * "tooLarge" (sending again is not). Anything else stays generic. A port of
+ * desktop's `vaultSaveFailure` (frontend/src/utils/vaultSaveFailure.ts).
+ */
+export function vaultSaveFailure(err: unknown): VaultSaveFailure {
+  const text = err instanceof Error ? err.message : String(err ?? "");
+  if (/the limit is \d+ bytes|content_length out of range|blob size out of range/i.test(text)) {
+    return "tooLarge";
+  }
+  if (
+    /error sending request|connection|timed out|dns error|network error/i.test(text) ||
+    /\b5\d\d [A-Z][a-z]/.test(text)
+  ) {
+    return "offline";
+  }
+  return "other";
+}
