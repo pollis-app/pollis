@@ -6,7 +6,7 @@ import { formatTimeOfDay, formatFullTimestamp, toMs } from "../../utils/format";
 import { observer } from "mobx-react-lite";
 import { MessageBody } from "./MessageBody";
 import { MediaLinkUnfurl } from "./MediaLinkUnfurl";
-import { getUsernameColor } from "../../utils/usernameColor";
+import { getUsernameColor, getUsernameChipColor } from "../../utils/usernameColor";
 import { AttachmentDisplay } from "./AttachmentDisplay";
 import { MessageAvatar } from "./MessageAvatar";
 import { MessageActions } from "./MessageActions";
@@ -118,6 +118,13 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
   // even if their user id rotates; fall back to sender_id otherwise.
   const authorColorKey = message.sender_username ?? message.sender_id;
   const authorColor = getUsernameColor(authorColorKey, isLightBg);
+  // Admin name chip (#1488): your own keeps the theme accent; any other
+  // admin's is filled with their own stable colour under dark ink, so two
+  // admins are told apart the same way two members are.
+  const adminChipClass = isOwn ? "bg-accent text-bg" : "text-ink";
+  const adminChipStyle: React.CSSProperties | undefined = isOwn
+    ? undefined
+    : { background: getUsernameChipColor(authorColorKey) };
 
   const replyTo = replyToMessage ?? null;
 
@@ -170,15 +177,10 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
 
   // ── Refined skin: Slack-style avatar-gutter row ───────────────────────────
   if (skin === "refined") {
-    // Per-author name color; admins keep the accent badge treatment.
-    const nameStyle: React.CSSProperties = isAuthorAdmin
-      ? {
-          background: "var(--c-accent)",
-          color: "var(--c-bg)",
-          paddingInlineStart: "0.25rem",
-          paddingInlineEnd: "0.25rem",
-          borderRadius: "var(--radius-chip)",
-        }
+    // Per-author name color; admins get the filled chip.
+    const nameClass = isAuthorAdmin ? `${adminChipClass} px-1 rounded-chip` : "";
+    const nameStyle: React.CSSProperties | undefined = isAuthorAdmin
+      ? adminChipStyle
       : { color: isOwn ? "var(--c-accent)" : authorColor };
 
     return (
@@ -246,7 +248,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             <div className="flex items-baseline gap-2 min-w-0">
               <bdi
                 data-testid="message-author"
-                className="text-sm font-semibold flex-shrink-0"
+                className={`text-sm font-semibold flex-shrink-0 ${nameClass}`}
                 style={nameStyle}
               >
                 {displayName}
@@ -392,14 +394,8 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
 
         <bdi
           data-testid="message-author"
-          className="flex-shrink-0 font-mono text-sm font-semibold me-1"
-          style={isAuthorAdmin ? {
-            background: "var(--c-accent)",
-            color: "var(--c-bg)",
-            paddingInlineStart: "0.25rem",
-            paddingInlineEnd: "0.25rem",
-            borderRadius: "0.125rem",
-          } : {
+          className={`flex-shrink-0 font-mono text-sm font-semibold me-1 ${isAuthorAdmin ? `${adminChipClass} px-1 rounded-sm` : ""}`}
+          style={isAuthorAdmin ? adminChipStyle : {
             color: isOwn ? "var(--c-accent)" : authorColor,
           }}
         >
