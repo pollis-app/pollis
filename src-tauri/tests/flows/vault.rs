@@ -244,3 +244,87 @@ async fn another_account_cannot_touch_the_vault() {
     drop(alice);
     drop(bob);
 }
+
+/// A Vault file is collected when the last entry holding it goes (#1491) —
+/// and not a moment before. Until #1491 deleting an entry released its DS
+/// references and nothing ever collected the file: its `attachment_object`
+/// row (and its stored object) stayed for the life of the account.
+///
+/// The flows world has no object storage, so the object row stands in for the
+/// upload: it is seeded server-side exactly as `/v1/attachments/register`
+/// leaves it, and the presigned DELETE the client then asks for fails
+/// harmlessly (no broker). The live-storage half is the vault soak's
+/// (`tests/vault_soak.rs`): object 404, rows gone, cache entry gone.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn deleting_the_last_entry_that_holds_a_file_collects_it() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let alice_p = alice.sign_up("alice@test.local").await;
+
+    let file_id = "ab".repeat(32);
+    let key = format!("media/{file_id}.enc");
+    let remote = writable_remote().await;
+    remote
+        .conn()
+        .await
+        .expect("conn")
+        .execute(
+            "INSERT INTO attachment_object (content_hash, r2_key) VALUES (?1, ?2)",
+            libsql::params![file_id.clone(), key.clone()],
+        )
+        .await
+        .expect("seed attachment_object");
+    let object_rows = || async {
+        let conn = remote.conn().await.expect("conn");
+        let mut rows = conn
+            .query(
+                "SELECT 1 FROM attachment_object WHERE content_hash = ?1",
+                libsql::params![file_id.clone()],
+            )
+            .await
+            .expect("query");
+        let mut n = 0;
+        while rows.next().await.expect("row").is_some() {
+            n += 1;
+        }
+        n
+    };
+
+    let body = serde_json::json!({ "_att": [{
+        "key": key, "name": "a.bin", "ct": "application/octet-stream", "size": 3,
+        "hash": file_id, "kv": 0, "sha": "cd".repeat(32),
+    }]})
+    .to_string();
+    let mut ids = Vec::new();
+    for _ in 0..2 {
+        let e = alice
+            .invoke_json(
+                "send_vault_message",
+                serde_json::json!({ "userId": alice_p.id, "content": body }),
+            )
+            .await;
+        ids.push(e["id"].as_str().unwrap().to_string());
+    }
+
+    // Two entries hold the file; deleting one must leave it.
+    alice
+        .invoke_json(
+            "delete_vault_message",
+            serde_json::json!({ "id": ids[0], "userId": alice_p.id }),
+        )
+        .await;
+    assert_eq!(object_rows().await, 1, "a file another entry still holds was collected");
+
+    // An edit that drops it from the last entry releases it — collected.
+    alice
+        .invoke_json(
+            "edit_vault_message",
+            serde_json::json!({ "id": ids[1], "newContent": "just text now", "userId": alice_p.id }),
+        )
+        .await;
+    assert_eq!(object_rows().await, 0, "the file outlived the last entry that held it");
+
+    drop(alice);
+}

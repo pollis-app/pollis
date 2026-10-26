@@ -754,7 +754,9 @@ live envelope" with "a `vault_attachment_ref` joined to a live `vault_message`",
 so a file that exists only in someone's vault survives every collect pass.
 Maintained by `/v1/vault/save` (replace-on-save — an edit that drops a file
 releases it) and `/v1/vault/delete`; reaped by `sweep_envelope_gc` if ever
-orphaned. The user→file-id pairing it records is already conceded by the signed
+orphaned. Releasing the last reference does not by itself remove the object: the
+client's `delete_vault_message` / `edit_vault_message` then collect the
+`attachment_object` row and the stored object (#1491). The user→file-id pairing it records is already conceded by the signed
 upload presign. Vault files are sealed under the account's Vault file root
 (HKDF over the account identity key, info `pollis-vault-files-v1`, #1382), so
 nothing in this row or the object opens them.
