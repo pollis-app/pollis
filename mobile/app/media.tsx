@@ -2,18 +2,28 @@
 // lightbox (AttachmentDisplay) and its walkable roll (MediaGalleryView).
 //
 // A pushed page, never a modal: Close/back at the top-start, the system edge
-// swipe pops it (except while an image is zoomed, when a drag pans instead).
-// An image or video walks the conversation's images and videos, by swipe or
-// with the previous/next buttons (desktop's arrows, wrapping like desktop's
-// roll); audio and other files open alone. Save to photos (images, video)
-// and Share (anything) replace desktop's Download.
+// swipe pops it, and so does a downward drag on the media (#1492) — both
+// only while nothing is zoomed, when a drag pans instead. An image or video
+// walks the conversation's images and videos (from the Vault: the media
+// grid's, in grid order) by horizontal swipe or with the previous/next
+// buttons (desktop's arrows, wrapping like desktop's roll), with "12 / 100"
+// under the filename; audio and other files open alone. Save to photos
+// (images, video) and Share (anything) replace desktop's Download, and act
+// on the page on screen.
+//
+// The pager is virtualised for rolls of hundreds: only the page on screen
+// and one each side are mounted. An image page decrypts on mount and
+// releases (unlinks) its plaintext file on unmount; a video page takes its
+// file only while on screen, and pauses when swiped away.
 //
 // Every byte shown here is the locally decrypted file the chat already uses
 // (`useMediaUri` / `get_media_path`); nothing is fetched in plaintext.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AccessibilityInfo, Linking, Text, View } from "react-native";
-import { FlatList } from "react-native-gesture-handler";
+import { AccessibilityInfo, FlatList, Linking, Text, View } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import { scheduleOnRN } from "react-native-worklets";
 import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { Button, Header, IconButton, Screen } from "../components/ui";
@@ -27,7 +37,7 @@ import {
   useVaultMessages,
   type ConversationKind,
 } from "../hooks/queries";
-import { vaultViewerMessages } from "../lib/vault";
+import { vaultViewerItems } from "../lib/vault";
 import {
   mediaCacheGeneration,
   releaseNamedMediaUri,
@@ -39,6 +49,7 @@ import {
   collectViewerItems,
   currentAttachmentId,
   mediaKind,
+  shouldDismiss,
 } from "../lib/media/viewer";
 import { formatBytes } from "../lib/exportArchive";
 import { semantic, space, type as ty } from "../theme/tokens";
@@ -81,7 +92,7 @@ export default function MediaViewerScreen() {
   const { data: vaultEntries } = useVaultMessages(fromVault);
   const messages = useMemo(() => {
     if (fromVault) {
-      return vaultViewerMessages(vaultEntries ?? []);
+      return [];
     }
     const conversation = flattenPages(conversationData);
     if (!threadId) {
@@ -91,15 +102,21 @@ export default function MediaViewerScreen() {
     // out of the main timeline).
     const root = conversation.find((m) => m.id === threadId);
     return [...(root ? [root] : []), ...(replies ?? [])];
-  }, [conversationData, replies, threadId, fromVault, vaultEntries]);
+  }, [conversationData, replies, threadId, fromVault]);
 
   // Both ids follow a pending → confirmed swap (`currentAttachmentId`): the
   // viewer may open on a just-sent attachment before its send settles. The
   // swap lands with the cache update that re-renders this screen.
+  // From the Vault the roll is the media grid's, in the grid's order
+  // (newest first), so a swipe walks what the grid showed (#1492).
   const { items, index: initialIndex } = useMemo(
-    () => collectViewerItems(messages, currentAttachmentId(attachmentId)),
-    [messages, attachmentId],
+    () =>
+      fromVault
+        ? vaultViewerItems(vaultEntries ?? [], currentAttachmentId(attachmentId))
+        : collectViewerItems(messages, currentAttachmentId(attachmentId)),
+    [fromVault, vaultEntries, messages, attachmentId],
   );
+  const sourceLoaded = fromVault ? !!vaultEntries : !!conversationData;
 
   // Track the page by attachment id, not index: a message arriving or being
   // deleted while the viewer is open shifts indices, not identities.
@@ -216,6 +233,46 @@ export default function MediaViewerScreen() {
     [items, currentIndex],
   );
 
+  // Swipe down to dismiss (#1492). The pan is simultaneous with the pager's
+  // own scroll gesture and fails as soon as the drag turns sideways, so a
+  // horizontal swipe always pages; it starts only downwards, with one
+  // finger (a pinch stays the image's), and not at all while zoomed, when
+  // a drag pans the image.
+  const pagerGesture = useMemo(() => Gesture.Native(), []);
+  const dragY = useSharedValue(0);
+  const pageHeight = size?.height ?? 0;
+  const close = useCallback(() => {
+    router.back();
+  }, [router]);
+  const dismissGesture = Gesture.Pan()
+    .enabled(!zoomed && pageHeight > 0)
+    .maxPointers(1)
+    .activeOffsetY(24)
+    .failOffsetY(-24)
+    .failOffsetX([-16, 16])
+    .simultaneousWithExternalGesture(pagerGesture)
+    .onUpdate((e) => {
+      dragY.value = Math.max(0, e.translationY);
+    })
+    .onEnd((e) => {
+      if (shouldDismiss(dragY.value, e.velocityY, pageHeight)) {
+        dragY.value = withTiming(pageHeight, { duration: 160 }, (finished) => {
+          if (finished) {
+            scheduleOnRN(close);
+          }
+        });
+      } else {
+        dragY.value = withTiming(0, { duration: 180 });
+      }
+    });
+  const dragStyle = useAnimatedStyle(() => {
+    const progress = pageHeight > 0 ? Math.min(1, dragY.value / pageHeight) : 0;
+    return {
+      opacity: 1 - progress * 0.6,
+      transform: [{ translateY: dragY.value }, { scale: 1 - progress * 0.15 }],
+    };
+  });
+
   const kindOfCurrent = current ? mediaKind(current.content_type) : "file";
   // An optimistic send still uploading has neither bytes in R2 nor, unless
   // it was picked on this device, a local file.
@@ -238,58 +295,66 @@ export default function MediaViewerScreen() {
         subtitle={subtitle || undefined}
         backLabel={t("vault:media.close")}
         backTestID="btn-media-close"
+        titleTestID="text-media-title"
+        subtitleTestID="text-media-position"
         onBack={() => router.back()}
       />
-      <View
-        testID="pager-media"
-        style={{ flex: 1 }}
-        onLayout={(e) => {
-          const { width, height } = e.nativeEvent.layout;
-          setSize({ width, height });
-        }}
-      >
-        {items.length === 0 ? (
-          <MediaStatus state={conversationData ? "error" : "loading"} />
-        ) : size ? (
-          <FlatList
-            ref={listRef}
-            data={items}
-            keyExtractor={(a) => a.id}
-            horizontal
-            pagingEnabled
-            showsHorizontalScrollIndicator={false}
-            scrollEnabled={multiple && !zoomed}
-            initialScrollIndex={initialIndex}
-            getItemLayout={(_, index) => ({
-              length: size.width,
-              offset: size.width * index,
-              index,
-            })}
-            // One page each side: neighbours decrypt ahead of the swipe, and
-            // nothing further away holds plaintext on disk.
-            windowSize={3}
-            initialNumToRender={1}
-            maxToRenderPerBatch={1}
-            extraData={currentIndex}
-            onMomentumScrollEnd={(e) => {
-              const index = Math.round(e.nativeEvent.contentOffset.x / size.width);
-              const next = items[Math.max(0, Math.min(items.length - 1, index))];
-              if (next) {
-                setCurrentId(next.id);
-              }
-            }}
-            renderItem={({ item, index }) => (
-              <MediaViewerPage
-                attachment={item}
-                width={size.width}
-                height={size.height}
-                active={index === currentIndex}
-                onZoomChange={setZoomed}
+      <GestureDetector gesture={dismissGesture}>
+        <Animated.View
+          testID="pager-media"
+          style={[{ flex: 1 }, dragStyle]}
+          onLayout={(e) => {
+            const { width, height } = e.nativeEvent.layout;
+            setSize({ width, height });
+          }}
+        >
+          {items.length === 0 ? (
+            <MediaStatus state={sourceLoaded ? "error" : "loading"} />
+          ) : size ? (
+            <GestureDetector gesture={pagerGesture}>
+              <FlatList
+                ref={listRef}
+                data={items}
+                keyExtractor={(a) => a.id}
+                horizontal
+                pagingEnabled
+                directionalLockEnabled
+                showsHorizontalScrollIndicator={false}
+                scrollEnabled={multiple && !zoomed}
+                initialScrollIndex={initialIndex}
+                getItemLayout={(_, index) => ({
+                  length: size.width,
+                  offset: size.width * index,
+                  index,
+                })}
+                // One page each side: neighbours decrypt ahead of the swipe,
+                // and nothing further away is mounted, so nothing further
+                // away holds plaintext on disk — however long the roll.
+                windowSize={3}
+                initialNumToRender={1}
+                maxToRenderPerBatch={1}
+                extraData={currentIndex}
+                onMomentumScrollEnd={(e) => {
+                  const index = Math.round(e.nativeEvent.contentOffset.x / size.width);
+                  const next = items[Math.max(0, Math.min(items.length - 1, index))];
+                  if (next) {
+                    setCurrentId(next.id);
+                  }
+                }}
+                renderItem={({ item, index }) => (
+                  <MediaViewerPage
+                    attachment={item}
+                    width={size.width}
+                    height={size.height}
+                    active={index === currentIndex}
+                    onZoomChange={setZoomed}
+                  />
+                )}
               />
-            )}
-          />
-        ) : null}
-      </View>
+            </GestureDetector>
+          ) : null}
+        </Animated.View>
+      </GestureDetector>
 
       {current ? (
         <View

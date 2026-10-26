@@ -1,0 +1,201 @@
+appId: com.pollis.mobile
+tags:
+  - parity
+---
+# VAULT SWIPE (#1492) — the Vault's media view opens a full-screen viewer that
+# swipes left/right through every image in grid order, Google Photos style,
+# with a "n / total" position under the filename, and a downward drag
+# dismisses it. Desktop's MediaGalleryView walks the same roll with the arrow
+# keys and its on-screen previous/next.
+#
+# Seeds the vault with twelve numbered images (fixtures/vault-swipe-NN.png,
+# each a different colour) in one entry, through the SYSTEM photo picker —
+# cells picked by accessibility label, never by coordinate (see
+# media-viewer.yaml's header for why). Every step is mandatory.
+# Self-contained: a fresh disposable account, no peer.
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-direct"
+- tapOn:
+    id: "row-vault"
+- assertVisible:
+    id: "screen-vault"
+- extendedWaitUntil:
+    visible:
+      id: "vault-empty"
+    timeout: 15000
+
+# --- Seed: twelve images in one entry ---
+- addMedia:
+    - "../fixtures/vault-swipe-01.png"
+    - "../fixtures/vault-swipe-02.png"
+    - "../fixtures/vault-swipe-03.png"
+    - "../fixtures/vault-swipe-04.png"
+    - "../fixtures/vault-swipe-05.png"
+    - "../fixtures/vault-swipe-06.png"
+    - "../fixtures/vault-swipe-07.png"
+    - "../fixtures/vault-swipe-08.png"
+    - "../fixtures/vault-swipe-09.png"
+    - "../fixtures/vault-swipe-10.png"
+    - "../fixtures/vault-swipe-11.png"
+    - "../fixtures/vault-swipe-12.png"
+- tapOn:
+    id: "btn-attach"
+- waitForAnimationToEnd:
+    timeout: 5000
+# Multiple selection is on: each tap adds one cell.
+- repeat:
+    times: 12
+    commands:
+      - evalScript: ${output.cell = (output.cell === undefined ? 0 : output.cell + 1)}
+      - tapOn:
+          text: "Photo(,| taken on) .*"
+          index: ${output.cell}
+- takeScreenshot: vault-swipe-01-picker
+- tapOn:
+    text: "(?i)(add|done).*"
+- extendedWaitUntil:
+    visible:
+      id: "strip-attachments"
+    timeout: 10000
+- tapOn:
+    id: "btn-send"
+# Twelve encrypted uploads plus the sealed entry: a DS round trip each.
+- extendedWaitUntil:
+    visible:
+      id: "btn-attachment-.*"
+    timeout: 120000
+
+# --- The grid, then the viewer on its first tile ---
+- tapOn:
+    id: "chip-vault-view-media"
+- extendedWaitUntil:
+    visible:
+      id: "tile-vault-media-.*"
+    timeout: 15000
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: vault-swipe-02-grid
+- tapOn:
+    id: "tile-vault-media-.*"
+    index: 0
+- extendedWaitUntil:
+    visible:
+      id: "screen-media-viewer"
+    timeout: 10000
+- assertVisible:
+    id: "text-media-position"
+    text: "1 / 12.*"
+- extendedWaitUntil:
+    visible:
+      id: "media-image-rendered"
+    timeout: 30000
+- copyTextFrom:
+    id: "text-media-title"
+- evalScript: ${output.first = maestro.copiedText}
+- takeScreenshot: vault-swipe-03-first
+
+# --- Swipe left: the next image, and the position follows ---
+- swipe:
+    from:
+      id: "pager-media"
+    direction: LEFT
+- waitForAnimationToEnd:
+    timeout: 3000
+- extendedWaitUntil:
+    visible:
+      id: "text-media-position"
+      text: "2 / 12.*"
+    timeout: 5000
+- copyTextFrom:
+    id: "text-media-title"
+- assertTrue: ${maestro.copiedText != output.first}
+- evalScript: ${output.second = maestro.copiedText}
+- extendedWaitUntil:
+    visible:
+      id: "media-image-rendered"
+    timeout: 30000
+- takeScreenshot: vault-swipe-04-second
+
+- swipe:
+    from:
+      id: "pager-media"
+    direction: LEFT
+- waitForAnimationToEnd:
+    timeout: 3000
+- swipe:
+    from:
+      id: "pager-media"
+    direction: LEFT
+- waitForAnimationToEnd:
+    timeout: 3000
+- extendedWaitUntil:
+    visible:
+      id: "text-media-position"
+      text: "4 / 12.*"
+    timeout: 5000
+- copyTextFrom:
+    id: "text-media-title"
+- assertTrue: ${maestro.copiedText != output.second && maestro.copiedText != output.first}
+- extendedWaitUntil:
+    visible:
+      id: "media-image-rendered"
+    timeout: 30000
+- takeScreenshot: vault-swipe-05-fourth
+
+# --- Swipe right goes back one ---
+- swipe:
+    from:
+      id: "pager-media"
+    direction: RIGHT
+- waitForAnimationToEnd:
+    timeout: 3000
+- extendedWaitUntil:
+    visible:
+      id: "text-media-position"
+      text: "3 / 12.*"
+    timeout: 5000
+
+# --- The on-screen buttons walk the same roll, wrapping like desktop's ---
+- tapOn:
+    id: "btn-media-prev"
+- tapOn:
+    id: "btn-media-prev"
+- tapOn:
+    id: "btn-media-prev"
+- extendedWaitUntil:
+    visible:
+      id: "text-media-position"
+      text: "12 / 12.*"
+    timeout: 5000
+- extendedWaitUntil:
+    visible:
+      id: "media-image-rendered"
+    timeout: 30000
+- takeScreenshot: vault-swipe-06-wrapped
+- tapOn:
+    id: "btn-media-next"
+- extendedWaitUntil:
+    visible:
+      id: "text-media-position"
+      text: "1 / 12.*"
+    timeout: 5000
+- copyTextFrom:
+    id: "text-media-title"
+- assertTrue: ${maestro.copiedText == output.first}
+
+# --- A downward drag dismisses, back to the grid ---
+- swipe:
+    from:
+      id: "pager-media"
+    direction: DOWN
+- extendedWaitUntil:
+    visible:
+      id: "screen-vault"
+    timeout: 5000
+- assertNotVisible:
+    id: "screen-media-viewer"
+- assertVisible:
+    id: "vault-media"
+- takeScreenshot: vault-swipe-07-dismissed

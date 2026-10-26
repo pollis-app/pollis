@@ -520,9 +520,13 @@ Search-tab quick-jump), with `mobile/hooks/queries/useVault.ts` and the pure rul
 and attachment filenames. An edit of an entry with files rebuilds the same `_att`
 envelope around the new caption, so files survive a text edit. Mobile reaches pin /
 edit / delete through a long-press sheet, edit and delete replace the composer as on
-desktop, and the media view's grid opens the shared full-screen viewer
-(`app/media.tsx`, `source=vault`). Mobile attaches photos from the library only (the
-chat composer's picker); desktop takes any file. Maestro: `mobile/.maestro/flows/vault.yaml`.
+desktop, and the media view's grid (virtualised) opens the shared full-screen viewer
+(`app/media.tsx`, `source=vault`), which swipes through the grid's images and videos
+in grid order, newest first (#1492, `vaultViewerItems`) — desktop's
+`MediaGalleryView` walks the same roll with ←/→ and its on-screen previous/next.
+Mobile attaches photos from the library only (the
+chat composer's picker); desktop takes any file. Maestro: `mobile/.maestro/flows/vault.yaml`,
+`vault-swipe.yaml` (twelve images, swipe, position, swipe-down dismiss).
 
 ## mls (`commands/mls/`)
 Only three MLS commands are registered (`src-tauri/src/commands/mls.rs`):
