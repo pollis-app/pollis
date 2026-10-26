@@ -28,6 +28,14 @@ name = "flows"
 path = "tests/flows.rs"
 required-features = ["test-harness"]
 
+# The vault media soak (#1491): ad hoc only, never part of a CI test run. Behind
+# its own feature so no ordinary `cargo test` even compiles it; run it with
+# `scripts/vault-soak.sh` (see .codesight/wiki/testing.md).
+[[test]]
+name = "vault_soak"
+path = "tests/vault_soak.rs"
+required-features = ["vault-soak"]
+
 [features]
 # Default = today's shipping desktop config, byte-for-byte: the native shell
 # (wry + webkit2gtk + the five tauri default features), the desktop media
@@ -62,6 +70,8 @@ os-keystore = ["pollis-core/os-keystore"]
 # `cargo test --features test-harness --test flows` (default features), or
 # headless with `--no-default-features --features test-harness`.
 test-harness = ["tauri/test", "pollis-core/test-harness", "dep:libsql"]
+# Builds the ad-hoc vault soak test target (`tests/vault_soak.rs`, #1491).
+vault-soak = ["test-harness"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -182,6 +192,19 @@ base64 = "0.22"
 # The flows attacker model (`StolenLeaf`) decodes the `mls:<hex>` envelope
 # framing straight off the DS, the way a wiretap would.
 hex = "0.4"
+# The vault soak suite (#1491, tests/vault_soak.rs): scans request bodies,
+# stored objects, DS rows and the local disk for plaintext and key material
+# (aho-corasick), re-derives the file AEAD to prove the stored object opens with
+# the real key only (aes-gcm, hkdf, sha2), forwards through its recording taps
+# (reqwest), and signs operator-side S3 requests (chrono). All already in the
+# graph at these versions via pollis-core / pollis-delivery.
+aho-corasick = "1"
+aes-gcm = "0.10"
+hkdf = "0.12"
+sha2 = "0.10"
+rand = "0.8"
+chrono = "0.4"
+soak-reqwest = { package = "reqwest", version = "0.12", default-features = false, features = ["rustls-tls"] }
 
 [target.'cfg(unix)'.dependencies]
 # setrlimit(RLIMIT_NOFILE, ...) at startup so we don't hit the macOS default

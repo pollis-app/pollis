@@ -138,6 +138,11 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             // a path the user never chose (`crate::pathscope`).
             crate::commands::r2::upload_media,
             crate::commands::emoji::upload_group_emoji,
+            // The view / save half of the media path, for the vault soak suite
+            // (#1491, `tests/vault_soak.rs`), which drives a Vault file through
+            // upload, render, save and delete against real object storage.
+            crate::commands::r2::get_media_url,
+            crate::commands::r2::save_media_to_path,
             // Pinned messages (#99)
             crate::commands::pinned_messages::pin_message,
             crate::commands::pinned_messages::unpin_message,
