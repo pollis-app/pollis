@@ -243,7 +243,7 @@ they are the mention list", so they get through a mute exactly as before.
 
 ## Per-channel mute (#1431)
 
-A row in `channel_mute (user_id, channel_id)` (migration 000038) — the row's
+A row in `channel_mute (user_id, channel_id)` (migration 000039) — the row's
 existence is the mute. Per account, not per device: `set_channel_muted` writes
 it through `POST /v1/channel-mutes/set` (only for a group channel the caller is
 a member of; a DM or group id is refused), `list_muted_channels` reads it back
