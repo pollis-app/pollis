@@ -841,6 +841,12 @@ async fn reset_recover_in_tx(
         libsql::params![actor.clone()],
     )
     .await?;
+    // Every channel mute (#1431) hung on a membership that just went.
+    tx.execute(
+        "DELETE FROM channel_mute WHERE user_id = ?1",
+        libsql::params![actor.clone()],
+    )
+    .await?;
     tx.execute(
         "DELETE FROM dm_channel_member WHERE user_id = ?1",
         libsql::params![actor.clone()],

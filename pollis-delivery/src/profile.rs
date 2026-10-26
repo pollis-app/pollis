@@ -484,6 +484,133 @@ pub async fn apply_unblock_user(
     Ok(WriteOutcome::Ok)
 }
 
+// ── POST /v1/channel-mutes/set (#1431) ───────────────────────────────────────
+
+pub async fn set_channel_mute(
+    State(state): State<AppState>,
+    req: RawRequest,
+) -> Result<Response, AppError> {
+    let (authed, parsed) = match gate_and_parse::<SetChannelMuteBody>(&state, &req).await? {
+        Ok(v) => v,
+        Err(resp) => return Ok(resp),
+    };
+    let conn = state.db.conn().await?;
+    let outcome = apply_set_channel_mute(&conn, authed.as_deref(), &parsed).await?;
+    if matches!(outcome, WriteOutcome::Ok) {
+        // Tell the account's other devices to re-read their mutes, so a mute set
+        // on the phone dims the channel on the desktop without a refetch. The DS
+        // sends it (a client may not publish this type), and it names only the
+        // owner's own inbox. Best-effort: a device that misses it re-reads its
+        // mutes on its next launch or foreground.
+        let user = authed.clone().unwrap_or_else(|| parsed.user_id.clone());
+        let inbox = format!("inbox-{user}");
+        let event = serde_json::json!({ "type": "channel_mutes_changed" });
+        if let Err(e) = crate::broker::room_send_data(&state, &inbox, &event).await {
+            tracing::warn!("channel-mute inbox notify failed (non-fatal): {e}");
+        }
+    }
+    outcome_response::<SetChannelMuteBody>(outcome)
+}
+
+/// Mute or unmute one group channel for the caller's account (#1431).
+///
+/// Authz: the actor is the authenticated user, and the id must be a group
+/// CHANNEL the actor is currently a member of — so a mute row can never name a
+/// channel its owner is not in, a DM, or a group. The row's existence is the
+/// mute, so both directions are idempotent.
+pub async fn apply_set_channel_mute(
+    conn: &Connection,
+    authed: Option<&str>,
+    body: &SetChannelMuteBody,
+) -> anyhow::Result<WriteOutcome> {
+    let user = match resolve_actor(authed, Some(body.user_id.as_str())) {
+        Ok(u) => u,
+        Err(o) => return Ok(o),
+    };
+    if body.muted {
+        if !is_channel_member(conn, &body.channel_id, &user).await? {
+            return Ok(WriteOutcome::Forbidden);
+        }
+        conn.execute(
+            "INSERT OR IGNORE INTO channel_mute (user_id, channel_id) VALUES (?1, ?2)",
+            libsql::params![user, body.channel_id.clone()],
+        )
+        .await?;
+    } else {
+        // Unmuting needs no membership check: the DELETE is scoped to the
+        // actor's own rows, and letting a former member clear a stale row is
+        // harmless.
+        conn.execute(
+            "DELETE FROM channel_mute WHERE user_id = ?1 AND channel_id = ?2",
+            libsql::params![user, body.channel_id.clone()],
+        )
+        .await?;
+    }
+    Ok(WriteOutcome::Ok)
+}
+
+/// True when `channel_id` names a group CHANNEL (not a DM, not a group) whose
+/// group `user_id` belongs to.
+async fn is_channel_member(
+    conn: &Connection,
+    channel_id: &str,
+    user_id: &str,
+) -> anyhow::Result<bool> {
+    let mut rows = conn
+        .query(
+            "SELECT 1 FROM channels c \
+             JOIN group_member gm ON gm.group_id = c.group_id \
+             WHERE c.id = ?1 AND gm.user_id = ?2 LIMIT 1",
+            libsql::params![channel_id.to_string(), user_id.to_string()],
+        )
+        .await?;
+    Ok(rows.next().await?.is_some())
+}
+
+// ── POST /v1/read/channel-mutes (#1431) ──────────────────────────────────────
+
+pub async fn read_channel_mutes(
+    State(state): State<AppState>,
+    req: RawRequest,
+) -> Result<Response, AppError> {
+    let parsed: ChannelMutesBody = match serde_json::from_slice(&req.body) {
+        Ok(b) => b,
+        Err(_) => return Ok(bad_request("invalid body")),
+    };
+    let who = match crate::reads::authed_user(&state, &req, Some(parsed.user_id.as_str())).await? {
+        Ok(u) => u,
+        Err(resp) => return Ok(resp),
+    };
+    let conn = state.db.conn().await?;
+    Ok(crate::writes::ok_response::<ChannelMutesBody>(
+        list_channel_mutes(&conn, &who).await?,
+    ))
+}
+
+/// The channels `user_id` muted and is still a member of, sorted by id.
+///
+/// The membership join keeps a row left behind by a path that did not clean up
+/// (a removal on a DS from before #1431) out of the answer.
+pub async fn list_channel_mutes(
+    conn: &Connection,
+    user_id: &str,
+) -> anyhow::Result<ChannelMutesResponse> {
+    let mut rows = conn
+        .query(
+            "SELECT cm.channel_id FROM channel_mute cm \
+             JOIN channels c ON c.id = cm.channel_id \
+             JOIN group_member gm ON gm.group_id = c.group_id AND gm.user_id = cm.user_id \
+             WHERE cm.user_id = ?1 ORDER BY cm.channel_id",
+            libsql::params![user_id.to_string()],
+        )
+        .await?;
+    let mut channel_ids = Vec::new();
+    while let Some(row) = rows.next().await? {
+        channel_ids.push(row.get::<String>(0)?);
+    }
+    Ok(ChannelMutesResponse { channel_ids })
+}
+
 // ── POST /v1/dm/create ───────────────────────────────────────────────────────
 
 pub async fn create_dm(
