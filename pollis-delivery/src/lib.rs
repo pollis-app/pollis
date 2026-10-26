@@ -403,6 +403,10 @@ pub fn build_router_with_state(state: AppState) -> Router {
         // The encrypted read-cursor push (#844). Its plaintext neighbour two
         // lines up is `/v1/profile/preferences`; this one stores ciphertext.
         .route(<profile::SaveReadCursorsBody as DsRequest>::PATH, post(profile::save_read_cursors))
+        // Per-channel mute (#1431) — plaintext, because the push fan-out reads
+        // it to skip a muted recipient. MAIN DB.
+        .route(<profile::SetChannelMuteBody as DsRequest>::PATH, post(profile::set_channel_mute))
+        .route(<profile::ChannelMutesBody as DsRequest>::PATH, post(profile::read_channel_mutes))
         // Pinned messages (#99) — the wrapped pin-key state (Kpin, CAS on
         // (generation, epoch)) and the pin snapshots sealed under it. Both
         // ciphertext-only tables on the MAIN DB.

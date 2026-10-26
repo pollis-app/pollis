@@ -243,6 +243,11 @@ export function useInboxRealtime() {
             });
           break;
         }
+        case "channel_mutes_changed":
+          // Another device of this account muted or unmuted a channel
+          // (#1431); the DS sent this. Re-read so the list dims to match.
+          void qc.invalidateQueries({ queryKey: groupQueryKeys.mutedChannels(userId) });
+          break;
         case "enrollment_requested":
           // A new device of this account filed its enrollment request (#1360).
           // The DS sends this, never a client. `useEnrollmentApprovals` opens

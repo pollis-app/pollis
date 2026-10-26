@@ -996,6 +996,7 @@ function TextChat(props: ChatViewProps = {}) {
       {menuOpen && conversationId ? (
         <ChannelMenuSheet
           title={title}
+          channelId={conversationId}
           onInfo={() => {
             setMenuOpen(false);
             // Navigate once the sheet's Modal is dismissed (see afterSheetClose).

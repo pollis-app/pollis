@@ -216,14 +216,20 @@ export function Screen({
           both platforms, in step with its animation (#1246). The app is
           edge-to-edge (#1194), so the window never resizes; keyboard-controller
           reads the real IME inset and pads by however much of the keyboard
-          overlaps this view, measured from the view's position in the window
-          (tab bar, pane, bottom inset all included). A screen that mounts
-          with the keyboard already up (email → OTP) starts from the current
-          keyboard height, so it never waits for a show event. */}
+          overlaps this view (tab bar and bottom inset included). A screen
+          that mounts with the keyboard already up (email → OTP) starts from
+          the current keyboard height, so it never waits for a show event.
+          No `automaticOffset` (#1432): it pairs the layout event's height with
+          a window position fetched asynchronously, and on Android that fetch
+          can land before the view is mounted below the status bar (y=0, not
+          the inset). Nothing re-measures, so every keyboard on that screen
+          stopped a status bar short and hid the composer, most often in a
+          long conversation, whose first mount is slow. Without it the frame
+          comes from the layout event alone, relative to this SafeAreaView,
+          which is a full screen whose top is the window's top. */}
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior="padding"
-        automaticOffset
         enabled={!nested}
       >
         <KeyboardAvoidedContext.Provider value={true}>

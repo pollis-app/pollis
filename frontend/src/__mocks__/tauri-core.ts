@@ -273,6 +273,17 @@ interface MockStore {
    * `failSends`, or flip it with `window.__tauriFailSends(bool)`.
    */
   failSends: boolean;
+  /**
+   * Per-channel mute (#1431). Account-wide and DS-held in production; a
+   * preload seeds `mutedChannels`, and `set_channel_muted` writes it here.
+   */
+  mutedChannels: string[];
+  /**
+   * What `plugin:notification|is_permission_granted` answers. Off by default,
+   * as a fresh install is; a spec that counts OS notifications preloads
+   * `notificationPermission: true`.
+   */
+  notificationPermission: boolean;
 }
 
 // Only `@tauri-apps/api/core` and `/event` are vite-aliased to these mocks.
@@ -393,6 +404,8 @@ const store: MockStore = {
       ? '/Users/alice/Downloads/pollis-archive.json'
       : preload.exportSavePath,
   failSends: preload.failSends === true,
+  mutedChannels: (preload.mutedChannels as string[] | undefined) ?? [],
+  notificationPermission: preload.notificationPermission === true,
 };
 
 // Expose for test inspection via page.evaluate(() => window.__tauriMock)
@@ -1193,7 +1206,24 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return 0;
 
     case 'plugin:notification|is_permission_granted':
-      return false;
+      return store.notificationPermission;
+
+    // An OS banner. Counted by `__tauriInvokeCounts` like every command; the
+    // args land in `__tauriLastArgs`.
+    case 'plugin:notification|notify':
+      return null;
+
+    case 'list_muted_channels':
+      return [...store.mutedChannels];
+
+    case 'set_channel_muted': {
+      const { channelId, muted } = args as { channelId: string; muted: boolean };
+      store.mutedChannels = store.mutedChannels.filter((id) => id !== channelId);
+      if (muted) {
+        store.mutedChannels.push(channelId);
+      }
+      return null;
+    }
 
     // The in-app terminal's device-local switch. Off, as a fresh install is —
     // see pollis-core/src/commands/terminal_gate.rs.

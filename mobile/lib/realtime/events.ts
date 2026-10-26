@@ -90,6 +90,12 @@ export type RealtimeEvent =
       link_id?: string | null;
     }
   | {
+      // Emitted by the Delivery Service, never by a client, when this
+      // account's channel mutes changed on one of its devices (#1431).
+      // Carries nothing: the mutes are re-read over the signed channel.
+      type: "channel_mutes_changed";
+    }
+  | {
       // LOCAL, never on the wire (`decodeRealtimeEvent` refuses it): the room's
       // LiveKit connection healed after a drop. Wake-ups published meanwhile
       // are lost, so listeners catch the room up from the Delivery Service.
@@ -111,6 +117,7 @@ const KNOWN_TYPES = new Set<RealtimeEvent["type"]>([
   "roster_changed",
   "device_revoked",
   "enrollment_requested",
+  "channel_mutes_changed",
 ]);
 
 /**
@@ -160,7 +167,7 @@ export function decodeRealtimeEvent(
  * dropped — the rule desktop's `dispatch_data` applies.
  */
 export function isTrustedOrigin(event: RealtimeEvent, fromParticipant: boolean): boolean {
-  if (event.type === "enrollment_requested") {
+  if (event.type === "enrollment_requested" || event.type === "channel_mutes_changed") {
     return !fromParticipant;
   }
   return true;

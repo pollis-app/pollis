@@ -326,6 +326,12 @@ endpoints! {
     // `SavePreferencesBody`. See the type's docs for why the two differ.
     Client   profile::SaveReadCursorsBody       => "/v1/read-cursors/save",              StatusOk;
 
+    // ── Per-channel mute (#1431) ─────────────────────────────────────────────
+    // Plaintext on purpose: the DS is what reads it, to skip a muted
+    // recipient's push. See `SetChannelMuteBody`.
+    Client   profile::SetChannelMuteBody        => "/v1/channel-mutes/set",              StatusOk;
+    Client   profile::ChannelMutesBody          => "/v1/read/channel-mutes",             profile::ChannelMutesResponse;
+
     // ── Domain D — devices and key packages ──────────────────────────────────
     Client   devices::PublishKeyPackagesBody    => "/v1/key-packages",                   StatusOk;
     Client   devices::ClaimKeyPackageBody       => "/v1/key-packages/claim",             devices::ClaimKeyPackageResponse;

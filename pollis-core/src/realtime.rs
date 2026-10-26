@@ -125,6 +125,10 @@ pub enum RealtimeEvent {
         new_device_id: String,
         link_id: Option<String>,
     },
+    /// This account's channel mutes changed on one of its devices (#1431) —
+    /// re-read them. DS-originated only, carries nothing but the type: the
+    /// mutes themselves are read back over the signed channel.
+    ChannelMutesChanged,
     /// Sent after a room's event stream recovers from a drop. The frontend
     /// uses this to resync state that may have changed during the outage
     /// (voice presence, etc.) since the event stream itself doesn't replay

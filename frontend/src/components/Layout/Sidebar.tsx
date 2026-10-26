@@ -4,6 +4,7 @@ import { useRouter, useRouterState } from "@tanstack/react-router";
 import {
   ChevronDown,
   ChevronRight,
+  BellOff,
   Hash,
   Volume2,
   Settings as SettingsIcon,
@@ -18,7 +19,7 @@ import {
   Bookmark,
   Vault as VaultIcon,
 } from "lucide-react";
-import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
+import { useMutedChannels, useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
 import { useVoiceRoomCounts } from "../../hooks/queries/useVoiceParticipants";
 import { usePeerVerificationMap } from "../../hooks/queries/useUserProfile";
@@ -73,6 +74,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
   );
 
   const { data: groupsWithChannels = [] } = useUserGroupsWithChannels();
+  const { data: mutedChannels } = useMutedChannels();
   const { data: dmConversations = [] } = useDMConversations();
   // peerUserId → { verified, key_changed }. Used to glance-render the
   // shield-check (verified) / shield-alert (changed) icons next to each
@@ -209,6 +211,9 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
                     const unread = unreadCounts[ch.id] ?? 0;
                     const voiceCount = isVoice ? voiceCounts[ch.id] ?? 0 : 0;
                     const isActive = isVoice ? activeVoiceId === ch.id : activeChannelId === ch.id;
+                    // A muted channel (#1431) is dimmed, with a quiet badge
+                    // and a bell-off mark so the state is not colour alone.
+                    const isMuted = mutedChannels?.has(ch.id) ?? false;
                     const badge = isVoice
                       ? voiceCount > 0
                         ? voiceCount
@@ -235,6 +240,19 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
                         leading={isVoice ? <Volume2 {...iconProps} /> : <Hash {...iconProps} />}
                         label={ch.name}
                         badge={badge}
+                        dimmed={isMuted}
+                        trailing={
+                          isMuted ? (
+                            <span
+                              data-testid={`sidebar-channel-muted-${ch.id}`}
+                              title={t("channels:channel.mutedHint")}
+                              aria-label={t("channels:channel.mutedHint")}
+                              className="inline-flex shrink-0"
+                            >
+                              <BellOff {...iconProps} />
+                            </span>
+                          ) : null
+                        }
                       />
                     );
                   })}
@@ -439,16 +457,20 @@ interface RowProps {
       Omitted for group / channel / DM rows, whose labels are user-generated
       and therefore already locale-independent. */
   testId?: string;
+  /** A muted channel (#1431): drawn in the muted text tier, with a muted
+      unread badge, unless it is the active row. */
+  dimmed?: boolean;
 }
 
-const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, label, badge, trailing, testId }) => {
+const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, label, badge, trailing, testId, dimmed }) => {
   return (
     <div
       data-active={isActive ? "true" : "false"}
+      data-muted={dimmed ? "true" : undefined}
       className={`sidebar-row flex w-full items-stretch border-s-2 transition-colors ${
         isActive
           ? "bg-hover border-accent text-accent"
-          : "bg-transparent border-transparent text-fg hover:bg-hover"
+          : `bg-transparent border-transparent hover:bg-hover ${dimmed ? "text-muted" : "text-fg"}`
       }`}
     >
       {chevron && (
@@ -483,7 +505,7 @@ const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, 
             trailing badge to the wrong end of the row. */}
         <bdi className="flex-1 truncate">{label}</bdi>
         {trailing}
-        {badge != null && <UnreadBadge count={badge} />}
+        {badge != null && <UnreadBadge count={badge} muted={dimmed} />}
       </button>
     </div>
   );

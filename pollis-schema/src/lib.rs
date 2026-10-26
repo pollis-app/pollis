@@ -303,6 +303,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         include_str!("../migrations/000037_push_ticket.sql"),
     ),
     (
+        38,
+        "channel_mute",
+        include_str!("../migrations/000038_channel_mute.sql"),
+    ),
+    (
         39,
         "message_reaction_conversation",
         include_str!("../migrations/000039_message_reaction_conversation.sql"),

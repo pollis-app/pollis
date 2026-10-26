@@ -1195,6 +1195,15 @@ global ordering + a UNIQUE index enforcing the per-subject invariant).
 
 The payload is now `data: { h }` and nothing else, and `mobile/lib/push/routing.ts` has no `conversationId` branch at all — a payload carrying one is *ignored*, so a rolled-back DS or a malicious push to a stolen token cannot re-enable the disclosure by putting the field back.
 
+### channel_mute _(migration 000038, #1431)_
+- `user_id` TEXT NOT NULL, `channel_id` TEXT NOT NULL — PRIMARY KEY `(user_id, channel_id)`
+- `muted_at` TEXT NOT NULL DEFAULT `datetime('now')`
+- index `idx_channel_mute_channel(channel_id)` — the fan-out reads by channel
+
+**Why it is on the server, in the clear.** Every group-channel message pushes every other member since #1431, and the push fan-out runs on the DS (#987), so a mute only works if the DS can read it before it sends. A row here is per account, so every device of the account sees the same mute. `push::push_recipients` drops a member who muted the channel unless the send's `push_mentions` names them (a direct `@username`); `@all` and chatter stay silent. Unlike `read_cursor_sync` this cannot be ciphertext — the server is what acts on it — and what it reveals (this user muted this channel, and when) is membership-level metadata, not content or reading habits.
+
+**Invalid states.** The row's existence is the mute, so a double mute is one row (PK) and an unmute deletes it. `profile::apply_set_channel_mute` writes a row only for a group channel the caller is a member of (a DM or group id is refused); leaving or being removed from a group drops the member's rows for its channels (`teardown::purge_member_channel_mutes`), an identity reset drops all of them, channel/group teardown drops the channel's rows, and account deletion drops the user's (`teardown::purge_user_rows`). The read (`list_channel_mutes`) also joins on current membership, so a row stranded by an older DS is never served.
+
 ### user_groups / user_dms _(migration 000009 — created, then retired #1085)_
 **Empty and unreferenced.** Created by migration `000009` as the directory index for the per-conversation-DB split (#261 Phase 2). #261 was dropped (not-planned) and the maintenance + reads were reverted, leaving a frozen backfill of the roster as of the moment the migration ran — never inserted into, never read, only deleted from. That is the worst shape a table can have: it could only drift further from `group_member` / `dm_channel_member`, so anything that started reading it would have served a confidently wrong sidebar while looking authoritative.
 
