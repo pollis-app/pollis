@@ -33,6 +33,7 @@ use pollis_api::groups::DeleteGroupBody;
 /// the list is complete against the live schema.
 const USER_COLUMNS: &[(&str, &str)] = &[
     ("account_recovery", "user_id"),
+    ("channel_mute", "user_id"),
     ("conversation_watermark", "user_id"),
     ("device_enrollment_request", "user_id"),
     ("dm_channel", "created_by"),
@@ -184,6 +185,10 @@ async fn seed_user(c: &Connection, u: &str, peer: &str, solo: bool) {
     exec(c, &format!("INSERT INTO conversation (id, kind) VALUES ('{cid}', 'channel')")).await;
     exec(c, &format!(
         "INSERT INTO channels (id, group_id, name) VALUES ('{cid}', '{gid}', 'general')"
+    )).await;
+    // #1431: the user muted their own channel.
+    exec(c, &format!(
+        "INSERT INTO channel_mute (user_id, channel_id) VALUES ('{u}', '{cid}')"
     )).await;
     exec(c, &format!(
         "INSERT INTO message_envelope (id, conversation_id, sender_id, ciphertext, sent_at) \
@@ -609,6 +614,7 @@ async fn group_deletion_leaves_no_row_naming_the_group() {
     // The channel and everything hanging off it.
     for (table, col) in [
         ("channels", "id"),
+        ("channel_mute", "channel_id"),
         ("message_envelope", "conversation_id"),
         ("conversation_watermark", "conversation_id"),
         ("mls_group_info", "conversation_id"),

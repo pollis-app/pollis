@@ -56,6 +56,7 @@ pub const USER_PURGED_TABLES: &[&str] = &[
     "account_recovery",
     "directory_lookup_budget",
     "attachment_ref",
+    "channel_mute",
     "conversation_watermark",
     "device_enrollment_request",
     "dm_channel",
@@ -97,6 +98,7 @@ pub const USER_PURGED_TABLES: &[&str] = &[
 /// them.
 pub const CONVERSATION_PURGED_TABLES: &[&str] = &[
     "attachment_ref",
+    "channel_mute",
     "channels",
     "conversation_seq",
     "conversation_watermark",
@@ -344,6 +346,9 @@ pub async fn purge_user_rows(conn: &Connection, user_id: &str) -> anyhow::Result
     // exactly why it would otherwise sit here forever: nothing about it looks
     // like user data to anyone auditing the tables by eye.
     conn.execute("DELETE FROM read_cursor_sync WHERE user_id = ?1", uid()).await?;
+    // Channel mutes (#1431): plaintext "this user muted this channel" rows the
+    // push fan-out reads. They name the user, so they go with the account.
+    conn.execute("DELETE FROM channel_mute WHERE user_id = ?1", uid()).await?;
     // The vault (#107): references first, while the subquery can still see the
     // entries, then the entries. Dropping the references is what releases the
     // shared attachment objects for collection, exactly like `attachment_ref`
@@ -492,6 +497,26 @@ pub async fn purge_conversation_rows(
     conn.execute("DELETE FROM pinned_message WHERE conversation_id = ?1", cid()).await?;
     conn.execute("DELETE FROM pin_keystate WHERE conversation_id = ?1", cid()).await?;
     conn.execute("DELETE FROM file_keystate WHERE conversation_id = ?1", cid()).await?;
+    // Mutes of this channel (#1431). A no-op for a DM id, which nobody can mute.
+    conn.execute("DELETE FROM channel_mute WHERE channel_id = ?1", cid()).await?;
+    Ok(())
+}
+
+/// Drop `user_id`'s channel mutes (#1431) for every channel of `group_id` -- the
+/// half of leaving or being removed from a group that the mutes need. Without
+/// it a mute would outlive the membership it was set under and come back if
+/// the user rejoined.
+pub async fn purge_member_channel_mutes(
+    conn: &Connection,
+    group_id: &str,
+    user_id: &str,
+) -> anyhow::Result<()> {
+    conn.execute(
+        "DELETE FROM channel_mute WHERE user_id = ?1 \
+         AND channel_id IN (SELECT id FROM channels WHERE group_id = ?2)",
+        libsql::params![user_id.to_string(), group_id.to_string()],
+    )
+    .await?;
     Ok(())
 }
 

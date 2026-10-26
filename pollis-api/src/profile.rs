@@ -161,3 +161,38 @@ pub struct SaveReadCursorsBody {
     /// base64 — AES-256-GCM ciphertext + tag over the padded cursor list.
     pub blob: String,
 }
+
+// ── Per-channel mute (#1431) ─────────────────────────────────────────────────
+
+/// `POST /v1/channel-mutes/set` — mute or unmute one group channel for the
+/// caller's whole account.
+///
+/// The mute is stored on the DS, in the clear, because the DS is what acts on
+/// it: the push fan-out (`pollis_delivery::push::notify_new_message`) skips a
+/// recipient who muted the channel unless the message names them directly by
+/// `@username`. Every device of the account reads the same row, which is what
+/// syncs it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetChannelMuteBody {
+    /// The owner; when signed it must equal the authenticated user (you mute
+    /// only for yourself).
+    pub user_id: String,
+    /// A group CHANNEL id the caller is a member of. A DM or a group id is
+    /// refused: a DM is personal by construction and always notifies.
+    pub channel_id: String,
+    /// `true` mutes, `false` unmutes. Both are idempotent.
+    pub muted: bool,
+}
+
+/// `POST /v1/read/channel-mutes` — the caller's muted channel ids.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelMutesBody {
+    /// Must equal the authenticated user; a mismatch is a 403.
+    pub user_id: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelMutesResponse {
+    /// Every channel the caller has muted and is still a member of, sorted.
+    pub channel_ids: Vec<String>,
+}

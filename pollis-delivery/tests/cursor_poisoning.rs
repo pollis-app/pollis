@@ -86,6 +86,7 @@ fn send(id: &str, sent_at: &str) -> SendMessageBody {
         generation: None,
         epoch: None,
         push_to: None,
+        push_mentions: None,
         delete_token_hash: Some(FIXTURE_CAPABILITY_HASH.to_string()),
     }
 }

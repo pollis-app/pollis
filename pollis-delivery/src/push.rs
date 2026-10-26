@@ -124,27 +124,66 @@ fn expo_request<B: serde::Serialize + ?Sized>(
     }
 }
 
-/// Wake every other member of a conversation with a content-free notification.
+/// Who a send asked the DS to wake (#987, #843, #1431), decoded from the
+/// `push_to` / `push_mentions` pair on `POST /v1/messages/send`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PushAudience {
+    /// `None` = every other member (a DM, any current channel message, an old
+    /// client's `@all`). `Some(ids)` = only these — an old client's
+    /// `@username`. Always INTERSECTED with real membership, never trusted.
+    pub only: Option<Vec<String>>,
+    /// Members named directly by `@username`. They are woken even if they muted
+    /// the channel; everyone else who muted it is skipped.
+    pub mentioned: Vec<String>,
+}
+
+impl PushAudience {
+    /// Decode the wire pair. `None` when the send asked for no push at all
+    /// (`push_to` absent — an old client's ordinary channel chatter, or an
+    /// edit/delete/receipt envelope).
+    ///
+    /// `push_mentions` absent means a client from before #1431, which only ever
+    /// sent a non-empty `push_to` for direct `@username` mentions — so that list
+    /// IS its mention list, and its named members still get through a mute.
+    pub fn from_send(
+        push_to: Option<Vec<String>>,
+        push_mentions: Option<Vec<String>>,
+    ) -> Option<Self> {
+        let push_to = push_to?;
+        let mentioned = push_mentions.unwrap_or_else(|| push_to.clone());
+        let only = if push_to.is_empty() { None } else { Some(push_to) };
+        Some(Self { only, mentioned })
+    }
+}
+
+/// Wake the members of a conversation a send asked for with a content-free
+/// notification.
 ///
-/// `mention_only` narrows the recipients to a subset — used by per-user
-/// `@username` mentions (#843), where a channel message must wake exactly the
-/// people named and nobody else. `None` means every member, which is the DM and
-/// `@all` behaviour. The subset is INTERSECTED with real membership rather than
-/// trusted, so it can only ever REMOVE recipients: it cannot be used to push to
-/// someone outside the conversation.
+/// `audience.only` narrows the recipients to a subset; it is INTERSECTED with
+/// real membership rather than trusted, so it can only ever REMOVE recipients:
+/// it cannot be used to push to someone outside the conversation. Then every
+/// recipient who muted the channel (`channel_mute`, #1431) is dropped unless
+/// the message names them directly — Slack's rule, so a muted channel still
+/// reaches you on `@you` but not on `@all` or chatter.
 pub async fn notify_new_message(
     conn: &Connection,
     conversation_id: &str,
     sender_id: &str,
-    mention_only: Option<&[String]>,
+    audience: &PushAudience,
 ) -> anyhow::Result<()> {
-    // Recipients = conversation members other than the sender. `is_member`'s
-    // three-legged id namespace applies here too: the id may be a DM, a group or
-    // a channel, and a channel's members live on its group.
-    let mut user_ids = conversation_recipients(conn, conversation_id, sender_id).await?;
-    if let Some(allowed) = mention_only {
-        user_ids.retain(|u| allowed.contains(u));
-    }
+    notify_new_message_at(conn, EXPO_PUSH_URL, conversation_id, sender_id, audience).await
+}
+
+/// [`notify_new_message`] against an explicit Expo URL, so a test can stand a
+/// fake Expo up and see exactly which tokens a send would wake.
+pub async fn notify_new_message_at(
+    conn: &Connection,
+    expo_url: &str,
+    conversation_id: &str,
+    sender_id: &str,
+    audience: &PushAudience,
+) -> anyhow::Result<()> {
+    let user_ids = push_recipients(conn, conversation_id, sender_id, audience).await?;
     if user_ids.is_empty() {
         return Ok(());
     }
@@ -177,9 +216,59 @@ pub async fn notify_new_message(
         .chunks(EXPO_BATCH)
         .zip(push_tokens.chunks(EXPO_BATCH))
     {
-        send_batch(conn, EXPO_PUSH_URL, auth, chunk, chunk_tokens, stats()).await;
+        send_batch(conn, expo_url, auth, chunk, chunk_tokens, stats()).await;
     }
     Ok(())
+}
+
+/// The users a send wakes: every member but the sender, narrowed to
+/// `audience.only`, minus whoever muted the channel and is not named in
+/// `audience.mentioned`.
+pub async fn push_recipients(
+    conn: &Connection,
+    conversation_id: &str,
+    sender_id: &str,
+    audience: &PushAudience,
+) -> anyhow::Result<Vec<String>> {
+    // Recipients = conversation members other than the sender. `is_member`'s
+    // three-legged id namespace applies here too: the id may be a DM, a group or
+    // a channel, and a channel's members live on its group.
+    let mut user_ids = conversation_recipients(conn, conversation_id, sender_id).await?;
+    if let Some(allowed) = &audience.only {
+        user_ids.retain(|u| allowed.contains(u));
+    }
+    if user_ids.is_empty() {
+        return Ok(user_ids);
+    }
+    let muted = muted_by(conn, conversation_id).await;
+    user_ids.retain(|u| !muted.contains(u) || audience.mentioned.contains(u));
+    Ok(user_ids)
+}
+
+/// Every user who muted `channel_id` (#1431). A failed read — a DS running
+/// before migration 000038 is applied — counts as nobody: an unwanted push is
+/// recoverable, a dropped one is not.
+async fn muted_by(conn: &Connection, channel_id: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let rows = conn
+        .query(
+            "SELECT user_id FROM channel_mute WHERE channel_id = ?1",
+            libsql::params![channel_id.to_string()],
+        )
+        .await;
+    let mut rows = match rows {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::debug!("channel_mute read skipped: {e}");
+            return out;
+        }
+    };
+    while let Ok(Some(row)) = rows.next().await {
+        if let Ok(user) = row.get::<String>(0) {
+            out.push(user);
+        }
+    }
+    out
 }
 
 // ── Tickets, receipts and outcome counts (#1423) ────────────────────────────
@@ -1335,5 +1424,102 @@ mod tests {
             tickets_left(&c).await,
             vec![("new".to_string(), "t".to_string())]
         );
+    }
+
+    // ── #1431: channel pushes by default, per-channel mute ────────────────────
+
+    /// A group with one channel: alice (the sender), bob (who muted the
+    /// channel) and carol, each with one push token.
+    async fn muted_channel_fixture() -> Connection {
+        let c = conn().await;
+        for sql in [
+            "INSERT INTO conversation (id, kind) VALUES ('g1', 'group')",
+            "INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'alice')",
+            "INSERT INTO conversation (id, kind) VALUES ('ch1', 'channel')",
+            "INSERT INTO channels (id, group_id, name) VALUES ('ch1', 'g1', 'general')",
+            "INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'alice', 'admin')",
+            "INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'bob', 'member')",
+            "INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'carol', 'member')",
+            "INSERT INTO channel_mute (user_id, channel_id) VALUES ('bob', 'ch1')",
+        ] {
+            c.execute(sql, ()).await.unwrap();
+        }
+        add_token(&c, "ExponentPushToken[alice]", "alice").await;
+        add_token(&c, "ExponentPushToken[bob]", "bob").await;
+        add_token(&c, "ExponentPushToken[carol]", "carol").await;
+        c
+    }
+
+    /// Which tokens one send woke, by running the real fan-out against a fake
+    /// Expo and reading back what it was sent.
+    async fn woken(c: &Connection, audience: &PushAudience) -> Vec<String> {
+        let (url, seen) = fake_expo(200, serde_json::json!({ "data": [] })).await;
+        notify_new_message_at(c, &url, "ch1", "alice", audience)
+            .await
+            .unwrap();
+        let mut out: Vec<String> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .flat_map(|batch| batch.as_array().cloned().unwrap_or_default())
+            .map(|m| m["to"].as_str().unwrap().to_string())
+            .collect();
+        out.sort();
+        out
+    }
+
+    /// The issue's acceptance test: a user who muted a channel gets no push
+    /// for ordinary chatter or for `@all`, but does for a direct `@username`.
+    /// Everyone else in the channel is pushed for all three.
+    #[tokio::test]
+    async fn a_muted_member_is_pushed_only_when_mentioned_by_name() {
+        let c = muted_channel_fixture().await;
+        let carol_only = vec!["ExponentPushToken[carol]".to_string()];
+        let both = vec![
+            "ExponentPushToken[bob]".to_string(),
+            "ExponentPushToken[carol]".to_string(),
+        ];
+
+        // Chatter and `@all` look the same on the wire from a current client:
+        // everyone, nobody named.
+        let chatter = PushAudience::from_send(Some(vec![]), Some(vec![])).unwrap();
+        assert_eq!(woken(&c, &chatter).await, carol_only, "chatter skips the muted member");
+        assert_eq!(woken(&c, &chatter).await, carol_only, "@all skips the muted member");
+
+        // `@bob`: everyone is still woken, and bob gets through his mute.
+        let at_bob =
+            PushAudience::from_send(Some(vec![]), Some(vec!["bob".to_string()])).unwrap();
+        assert_eq!(woken(&c, &at_bob).await, both, "a direct mention reaches a muted member");
+
+        // The sender is never pushed their own message.
+        assert!(!woken(&c, &at_bob).await.contains(&"ExponentPushToken[alice]".to_string()));
+    }
+
+    /// The oldest store build keeps working against a mute-aware DS: its
+    /// chatter (`push_to` absent) still pushes nobody, its `@all` respects the
+    /// mute, and its `@username` (a non-empty `push_to`, no `push_mentions`)
+    /// still reaches exactly the members named, through a mute.
+    #[tokio::test]
+    async fn an_old_client_send_keeps_its_meaning() {
+        let c = muted_channel_fixture().await;
+
+        assert_eq!(PushAudience::from_send(None, None), None, "old chatter: no push");
+
+        let old_all = PushAudience::from_send(Some(vec![]), None).unwrap();
+        assert_eq!(woken(&c, &old_all).await, vec!["ExponentPushToken[carol]".to_string()]);
+
+        let old_at_bob = PushAudience::from_send(Some(vec!["bob".to_string()]), None).unwrap();
+        assert_eq!(woken(&c, &old_at_bob).await, vec!["ExponentPushToken[bob]".to_string()]);
+    }
+
+    /// A mention list cannot widen the audience past the conversation: naming
+    /// someone who is not a member wakes nobody extra.
+    #[tokio::test]
+    async fn a_mention_cannot_reach_outside_the_channel() {
+        let c = muted_channel_fixture().await;
+        add_token(&c, "ExponentPushToken[mallory]", "mallory").await;
+        let audience =
+            PushAudience::from_send(Some(vec![]), Some(vec!["mallory".to_string()])).unwrap();
+        assert_eq!(woken(&c, &audience).await, vec!["ExponentPushToken[carol]".to_string()]);
     }
 }
