@@ -9,7 +9,7 @@ import {
   filterVaultEntries,
   isVaultEntryEdited,
   vaultAttachments,
-  vaultViewerMessages,
+  vaultViewerItems,
   type VaultMessage,
 } from "../lib/vault.ts";
 import { parseContent } from "../lib/messageContent.ts";
@@ -95,18 +95,47 @@ test("an entry is edited once it was rewritten (pinning counts, as on desktop)",
   assert.equal(isVaultEntryEdited(entry("a", "x", { updated_at: T1 })), true);
 });
 
-test("the viewer walks vault entries by creation time", () => {
-  const messages = vaultViewerMessages([
-    entry("a", envelope([{ key: "media/1", name: "a.png", ct: "image/png" }]), { created_at: T1 }),
-    entry("b", "no files"),
-  ]);
-  assert.deepEqual(
-    messages.map((m) => [m.id, m.created_at, m.attachments.map((a) => a.id)]),
-    [
-      ["a", new Date(T1).getTime(), ["media/1"]],
-      ["b", new Date(T0).getTime(), []],
-    ],
+test("the viewer walks the grid's images and videos in grid order, newest first (#1492)", () => {
+  const entries = [
+    entry("old", envelope([
+      { key: "media/1", name: "1.png", ct: "image/png" },
+      { key: "media/2", name: "2.mp4", ct: "video/mp4" },
+    ]), { created_at: T0 }),
+    entry("doc", envelope([{ key: "media/doc", name: "tax.pdf", ct: "application/pdf" }]), { created_at: T1 }),
+    entry("new", envelope([
+      { key: "media/3", name: "3.jpg", ct: "image/jpeg" },
+      { key: "media/voice", name: "memo.m4a", ct: "audio/mp4" },
+      { key: "media/4", name: "4.png", ct: "image/png" },
+    ]), { created_at: "2026-10-03T09:00:00.000Z" }),
+  ];
+  const { items, index } = vaultViewerItems(entries, "media/1");
+  // The order the grid lays out (vaultAttachments), minus files and audio.
+  assert.deepEqual(items.map((a) => a.id), ["media/3", "media/4", "media/1", "media/2"]);
+  assert.equal(index, 2);
+  assert.equal(vaultViewerItems(entries, "media/3").index, 0);
+});
+
+test("a vault file or voice memo opens alone, and an unknown id yields nothing", () => {
+  const entries = [
+    entry("a", envelope([
+      { key: "media/1", name: "1.png", ct: "image/png" },
+      { key: "media/doc", name: "tax.pdf", ct: "application/pdf" },
+    ])),
+  ];
+  assert.deepEqual(vaultViewerItems(entries, "media/doc").items.map((a) => a.id), ["media/doc"]);
+  assert.deepEqual(vaultViewerItems(entries, "media/gone"), { items: [], index: 0 });
+});
+
+test("hundreds of vault items page in grid order around the tapped one", () => {
+  const entries = Array.from({ length: 300 }, (_, i) =>
+    entry(`e${i}`, envelope([{ key: `media/${i}`, name: `${i}.png`, ct: "image/png" }]), {
+      created_at: new Date(Date.UTC(2026, 0, 1, 0, i)).toISOString(),
+    }),
   );
+  const { items, index } = vaultViewerItems(entries, "media/150");
+  assert.equal(items.length, 300);
+  assert.equal(items[0].id, "media/299");
+  assert.equal(items[index].id, "media/150");
 });
 
 test("the screen is reachable from Direct and from Search, and registered on the root stack", () => {
@@ -118,6 +147,7 @@ test("the screen is reachable from Direct and from Search, and registered on the
 test("the media viewer reads the vault only when opened from it", () => {
   const viewer = src("app/media.tsx");
   assert.match(viewer, /useVaultMessages\(fromVault\)/);
+  assert.match(viewer, /vaultViewerItems\(/);
   assert.match(viewer, /params\.source === "vault"/);
 });
 

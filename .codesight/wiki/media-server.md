@@ -230,5 +230,12 @@ none. It is a local `copyAsync`, never a fetch, ref-counted and unlinked the
 same way; Save to photos (expo-media-library, add-only) and Share
 (expo-sharing) read from it.
 
+The viewer's pager is virtualised for rolls of hundreds (#1492): only the page
+on screen and one each side are mounted. An image page holds a `useMediaUri`
+reference while mounted, so neighbours decrypt ahead of a swipe and a page that
+scrolls further away drops its reference (the last one unlinks the file); a
+video page takes its named copy only while on screen. The Vault's grid is a
+virtualised list too, so a large vault never decrypts every tile at once.
+
 ---
 _Back to [index.md](./index.md)_

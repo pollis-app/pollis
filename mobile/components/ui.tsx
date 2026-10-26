@@ -384,9 +384,15 @@ export function Header({
   backLabel: backLabelProp,
   backTestID = "btn-back",
   testID,
+  titleTestID,
+  subtitleTestID,
 }: {
   title?: string;
   subtitle?: string;
+  // e2e handles on the title / subtitle text (e.g. the media viewer's
+  // filename and "12 / 100" position).
+  titleTestID?: string;
+  subtitleTestID?: string;
   // Small glyph before the title (e.g. Icon.hash for a channel).
   titleIcon?: React.ReactNode;
   actions?: React.ReactNode;
@@ -423,6 +429,7 @@ export function Header({
       <View style={{ flexDirection: "row", alignItems: "center", gap: space.xs }}>
         {titleIcon}
         <Text
+          testID={titleTestID}
           accessibilityRole="header"
           numberOfLines={1}
           style={[
@@ -434,7 +441,11 @@ export function Header({
         </Text>
       </View>
       {subtitle ? (
-        <Text numberOfLines={1} style={[ty.meta, { fontSize: 13, color: semantic.muted }]}>
+        <Text
+          testID={subtitleTestID}
+          numberOfLines={1}
+          style={[ty.meta, { fontSize: 13, color: semantic.muted }]}
+        >
           {subtitle}
         </Text>
       ) : null}
