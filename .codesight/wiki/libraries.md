@@ -27,7 +27,7 @@
 - `frontend/src/utils/sfx.ts` — playSfx, SFX
 - `frontend/src/utils/timeAgo.ts` — timeAgo
 - `frontend/src/utils/urlRouting.ts` — deriveSlug, updateURL, parseURL
-- `frontend/src/utils/usernameColor.ts` — setBackgroundLightness, isBackgroundLight, useBackgroundIsLight, getUsernameColor
+- `frontend/src/utils/usernameColor.ts` — setBackgroundLightness, isBackgroundLight, useBackgroundIsLight, getUsernameColor, getUsernameChipColor (another admin's name-chip fill under `text-ink`, #1488)
 - `frontend/src/utils/voiceWarmup.ts` — warmVoiceChannel
 - `frontend/src/hooks/queries/useBlocks.ts` — blocksQueryKeys, useDMRequests, useAcceptDMRequest, useBlockUser, useUnblockUser, useBlockedUsers
 - `frontend/src/hooks/queries/useGroups.ts` — groupQueryKeys, useUserGroupsWithChannels, useUserGroups, useCreateGroup, useJoinGroup, …

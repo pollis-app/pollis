@@ -113,3 +113,16 @@ export function getUsernameColor(key: string, isLightBg: boolean): string {
   cache.set(cacheKey, color);
   return color;
 }
+
+/**
+ * Fill for another admin's name chip (#1488). The chip carries dark
+ * `text-ink` on top, so the fill is always the user's bright (dark-theme)
+ * variant: on a dark background it is exactly the colour their name gets
+ * as text; on a light background it is the same hue, lighter. The
+ * light-theme text variant (35% lightness) cannot carry dark text — a blue
+ * hue gets under 1.7:1 — while the bright one keeps every hue at or above
+ * 5:1 against `--c-ink` (pinned in `tests/username-color.test.ts`).
+ */
+export function getUsernameChipColor(key: string): string {
+  return getUsernameColor(key, false);
+}
