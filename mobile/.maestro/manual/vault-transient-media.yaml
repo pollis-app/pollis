@@ -1,0 +1,82 @@
+appId: com.pollis.mobile
+tags:
+  - manual
+---
+# MANUAL — vault soak, mobile half (#1491). Not in `maestro-run.sh all`: it lives
+# outside flows/, and its proof is a filesystem check Maestro cannot make.
+#
+# Mobile has no loopback media server, so viewing a Vault image decrypts it to a
+# PLAINTEXT file, `<cacheDirectory>/pollis-media/<file id>` (`get_media_path`,
+# pollis-core/src/bridge.rs), plus a named copy under `pollis-media/named/` for
+# the full-screen viewer. `mobile/lib/media/cache.ts` must unlink both when the
+# last view releases them. This flow stores an image in the Vault, opens it in
+# the viewer, closes it, leaves the Vault and backgrounds the app; then check by
+# hand that `pollis-media/` holds nothing — commands in
+# .codesight/wiki/testing.md → "Vault media soak" → "Mobile".
+#
+#   maestro test -e MAESTRO_EMAIL=… -e MAESTRO_OTP=… -e MAESTRO_PIN=… \
+#     mobile/.maestro/manual/vault-transient-media.yaml
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-direct"
+- tapOn:
+    id: "row-vault"
+- assertVisible:
+    id: "screen-vault"
+
+- addMedia:
+    - "../fixtures/media-viewer.png"
+- tapOn:
+    id: "btn-attach"
+- waitForAnimationToEnd:
+    timeout: 5000
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - tapOn:
+          text: "Photo, .*"
+          index: 0
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - tapOn:
+          text: "Photo taken on.*"
+          index: 0
+- tapOn:
+    text: "(?i)(add|done).*"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: "strip-attachments"
+    timeout: 10000
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible:
+      id: "btn-attachment-.*"
+    timeout: 60000
+
+# View it full-screen: both plaintext copies exist now.
+- tapOn:
+    id: "chip-vault-view-media"
+- tapOn:
+    id: "tile-vault-media-.*"
+    index: 0
+- extendedWaitUntil:
+    visible:
+      id: "screen-media-viewer"
+    timeout: 10000
+- takeScreenshot: vault-transient-viewing
+- tapOn:
+    id: "btn-media-close"
+
+# Viewing ends: leave the Vault and background the app. Every view has
+# released its reference, so `pollis-media/` must now be empty.
+- tapOn:
+    id: "btn-back"
+- assertVisible:
+    id: "screen-direct"
+- pressKey: home

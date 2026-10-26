@@ -1,0 +1,138 @@
+name: Vault soak
+
+# The ad-hoc vault media soak (#1491): upload a corpus of large files to the
+# Vault, prove each is encrypted at every hop except while being viewed,
+# re-download and byte-compare, delete and prove the deletion. See
+# .codesight/wiki/testing.md → "Vault media soak".
+#
+# workflow_dispatch ONLY. It must never run on push or pull_request: it takes
+# tens of minutes, moves gigabytes, and the dev target writes to the shared dev
+# DS and dev R2. The report is uploaded as the run's artifact.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "local = in-process DS + SeaweedFS on the runner; dev = api-dev + dev R2"
+        type: choice
+        options: [local, dev]
+        default: local
+      count:
+        description: "Number of random files (log-spaced from min to max size)"
+        default: "12"
+      min_size:
+        description: "Smallest file, binary units (e.g. 512K, 1M)"
+        default: "1M"
+      max_size:
+        description: "Largest file (e.g. 600M, 2G); over the upload cap = proven refused"
+        default: "1G"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vault-soak-${{ inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  local:
+    if: inputs.target == 'local'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Fail fast on a stalled apt mirror
+        run: bash scripts/ci-apt-retries.sh
+
+      # The headless `pollis` build still links glib/gtk (mirrors kani.yml);
+      # ffmpeg makes the real video/photo the corpus includes.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libxdo-dev libssl-dev libasound2-dev libpulse-dev \
+            libpipewire-0.3-dev libva-dev libdbus-1-dev cmake clang ninja-build \
+            ffmpeg
+
+      - name: Free disk space (only if short)
+        run: bash scripts/ci-free-disk.sh
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
+        with:
+          toolchain: 1.96.0
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: false
+
+      - name: Vault soak (local)
+        env:
+          POLLIS_SOAK_COUNT: ${{ inputs.count }}
+          POLLIS_SOAK_MIN_SIZE: ${{ inputs.min_size }}
+          POLLIS_SOAK_MAX_SIZE: ${{ inputs.max_size }}
+          POLLIS_SOAK_WORKDIR: ${{ runner.temp }}/vault-soak
+        run: ./scripts/vault-soak.sh local
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vault-soak-local-report
+          path: ${{ runner.temp }}/vault-soak/report.md
+          if-no-files-found: warn
+
+  dev:
+    if: inputs.target == 'dev'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    # The dev DS's secrets live in Doppler (pollis/dev_personal), reached with
+    # the delivery-dev environment's service token, as the dev deploy does.
+    environment: delivery-dev
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Fail fast on a stalled apt mirror
+        run: bash scripts/ci-apt-retries.sh
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libxdo-dev libssl-dev libasound2-dev libpulse-dev \
+            libpipewire-0.3-dev libva-dev libdbus-1-dev cmake clang ninja-build \
+            ffmpeg
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
+        with:
+          toolchain: 1.96.0
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: false
+
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
+
+      # `doppler run` puts the dev values (DEV_OTP, R2_*, TURSO_*,
+      # POLLIS_DEV_ACCESS_KEY) in the soak's environment only; the soak never
+      # prints them.
+      - name: Vault soak (dev)
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+          POLLIS_SOAK_COUNT: ${{ inputs.count }}
+          POLLIS_SOAK_MIN_SIZE: ${{ inputs.min_size }}
+          POLLIS_SOAK_MAX_SIZE: ${{ inputs.max_size }}
+          POLLIS_SOAK_WORKDIR: ${{ runner.temp }}/vault-soak
+          POLLIS_DELIVERY_URL: https://api-dev.pollis.com
+        run: doppler run --preserve-env=POLLIS_DELIVERY_URL -- ./scripts/vault-soak.sh dev
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vault-soak-dev-report
+          path: ${{ runner.temp }}/vault-soak/report.md
+          if-no-files-found: warn

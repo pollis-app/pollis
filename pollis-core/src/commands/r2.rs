@@ -270,6 +270,32 @@ fn find_cached_file_in(dir: &Path, content_hash: &str) -> Option<(PathBuf, Strin
     None
 }
 
+/// Remove `user_id`'s cached copy of `content_hash`, if it has one — for a file
+/// whose last reference this user just deleted, so its cache entry does not sit
+/// on disk until eviction or sign-out (#1491). The cached bytes are encrypted at
+/// rest; this is about a deleted file no longer existing anywhere, not about
+/// plaintext.
+///
+/// The hash is a file id (64 hex) or a content digest; anything else names no
+/// cache file and is ignored, so a malformed reference cannot be turned into a
+/// pattern that matches some other entry.
+pub(crate) fn evict_cached_file_for_user(user_id: &str, content_hash: &str) {
+    if content_hash.len() != 64 || !content_hash.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return;
+    }
+    let Some(root) = MEDIA_CACHE_DIR.get() else {
+        return;
+    };
+    let Some(dir) = user_cache_dir(root, user_id) else {
+        return;
+    };
+    while let Some((path, _)) = find_cached_file_in(&dir, content_hash) {
+        if std::fs::remove_file(&path).is_err() {
+            return;
+        }
+    }
+}
+
 /// Counts every full walk of the media-cache directory.
 ///
 /// Exists so "this code path does not stat the whole cache" can be asserted as
@@ -813,6 +839,21 @@ pub async fn upload_media(
     content_type: String,
     state: &Arc<AppState>,
 ) -> Result<MediaUploadResult> {
+    // Refuse an over-cap file from its metadata, BEFORE reading it.
+    // `upload_plaintext` makes the same check, but only after the whole file is
+    // resident: picking a 2 GB video would buffer 2 GB just to be told no, which
+    // on a phone is an out-of-memory kill rather than an error (#1491).
+    let len = tokio::fs::metadata(&path)
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("stat file {path}: {e}")))?
+        .len();
+    if len > pollis_api::broker::R2_MEDIA_MAX_BYTES {
+        return Err(Error::Other(anyhow::anyhow!(
+            "attachment is {len} bytes; the limit is {} bytes",
+            pollis_api::broker::R2_MEDIA_MAX_BYTES
+        )));
+    }
+
     // Read plaintext from disk.
     let data = tokio::fs::read(&path).await
         .map_err(|e| Error::Other(anyhow::anyhow!("read file {path}: {e}")))?;
@@ -1486,6 +1527,15 @@ pub(crate) fn r2_config_problem(r2_endpoint: &str, r2_public_url: &str) -> Optio
          Build with the R2 values for the Delivery Service this build talks to.",
         missing.join(" and ")
     ))
+}
+
+/// Test harness only: a presigned GET for `key`, minted by this client's own DS
+/// session exactly as a download would mint it. The vault soak suite (#1491)
+/// uses it to show that a session which never saw a deleted file cannot fetch
+/// it either.
+#[cfg(feature = "test-harness")]
+pub async fn test_presign_get(state: &Arc<AppState>, key: &str) -> Result<String> {
+    Ok(presign_r2(state, "get", key).await?.as_str().to_string())
 }
 
 /// Ask the DS to presign an R2 `operation` (`"get"` / `"put"` / `"delete"`) on
