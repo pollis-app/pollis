@@ -29,6 +29,19 @@
 //!    is therefore dropped instead of reused, which is exactly the sporadic
 //!    traffic case where the handshake cost does not matter anyway.
 //!
+//!    The age is how long ago the connection was last *used*, not last parked
+//!    (#1500). A checkout that never touched the connection (the auth gate on a
+//!    device-key cache hit used to be one) re-parks it with its old age; before,
+//!    it re-parked it as brand new, so a steady trickle of such checkouts kept a
+//!    connection whose stream had long expired in circulation, and the next
+//!    request that queried on it failed with `stream not found`.
+//! 3. **A connection that saw a transport failure is never parked.** libsql
+//!    keeps a stream's baton when a request on it fails at the HTTP layer (a
+//!    dropped connection, a 404 `stream not found`), so every later statement on
+//!    that connection sends the dead baton and fails the same way. Any
+//!    connection checked out when a transient database error is recorded
+//!    ([`note_transport_fault`]) is dropped instead of parked.
+//!
 //! Transactions are unaffected: hrana's `transaction()` calls `open_stream()`
 //! and binds the `Transaction` to its *own* stream, so concurrent transactions
 //! never share statement context. Pooling also does not widen concurrency —
@@ -36,6 +49,7 @@
 //! pool only reuses them.
 
 use std::ops::Deref;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -56,10 +70,32 @@ const MAX_PARKED: usize = 16;
 
 struct Parked {
     conn: Connection,
+    /// When the connection was last used — not when it was parked.
     since: Instant,
 }
 
-/// Parked connections, most recently parked last.
+/// Transient database failures recorded since start ([`note_transport_fault`]).
+/// A checkout remembers the value it saw; one that changed while it was out is
+/// not parked again.
+static TRANSPORT_FAULTS: AtomicU64 = AtomicU64::new(0);
+
+/// Record a transient database failure (#1500): every connection checked out
+/// right now is dropped on release instead of being parked for reuse. Called
+/// from [`crate::error::note_transient`], which every handler error passes
+/// through while its connections are still checked out.
+///
+/// Coarse on purpose. The pool cannot tell which connection failed, and dropping
+/// a healthy one costs only a reconnect; parking a broken one fails every
+/// request that draws it until it ages out.
+pub fn note_transport_fault() {
+    TRANSPORT_FAULTS.fetch_add(1, Ordering::SeqCst);
+}
+
+fn transport_faults() -> u64 {
+    TRANSPORT_FAULTS.load(Ordering::SeqCst)
+}
+
+/// Parked connections, most recently used last.
 #[derive(Default)]
 struct Pool {
     parked: Mutex<Vec<Parked>>,
@@ -68,19 +104,19 @@ struct Pool {
 impl Pool {
     /// Take the freshest parked connection, or `None` if the pool is empty or
     /// everything in it has gone stale.
-    fn take(&self, max_idle: Duration) -> Option<Connection> {
+    fn take(&self, max_idle: Duration) -> Option<Parked> {
         let mut parked = self.parked.lock().unwrap();
         let entry = parked.pop()?;
         if entry.since.elapsed() < max_idle {
-            return Some(entry.conn);
+            return Some(entry);
         }
-        // Entries are pushed in park order, so everything still in the vec is
+        // Entries are kept in last-used order, so everything still in the vec is
         // older than the one we just rejected. Drop the lot.
         parked.clear();
         None
     }
 
-    fn park(&self, conn: Connection) {
+    fn park(&self, conn: Connection, since: Instant) {
         // A connection left mid-transaction carries statement state the next
         // caller must not inherit. Handlers use `transaction()` (which gets its
         // own stream), so this should never trip — but the pool must not be the
@@ -92,10 +128,9 @@ impl Pool {
         if parked.len() >= MAX_PARKED {
             return;
         }
-        parked.push(Parked {
-            conn,
-            since: Instant::now(),
-        });
+        // Kept in last-used order, which `take` relies on.
+        let at = parked.partition_point(|p| p.since <= since);
+        parked.insert(at, Parked { conn, since });
     }
 }
 
@@ -105,12 +140,22 @@ pub struct ConnGuard {
     /// `Some` for the guard's whole life; `Drop` takes it to park it.
     conn: Option<Connection>,
     pool: Arc<Pool>,
+    /// When a parked connection was last used before this checkout; `None` for
+    /// a new one, which has no stream to go stale.
+    last_used: Option<Instant>,
+    /// Whether anything reached the connection through this guard. Every use
+    /// goes through `Deref`, so an untouched guard re-parks the connection with
+    /// its old age instead of a fresh one.
+    touched: AtomicBool,
+    /// [`TRANSPORT_FAULTS`] at checkout.
+    faults_at_checkout: u64,
 }
 
 impl Deref for ConnGuard {
     type Target = Connection;
 
     fn deref(&self) -> &Connection {
+        self.touched.store(true, Ordering::Relaxed);
         self.conn
             .as_ref()
             .expect("connection is only taken in Drop")
@@ -119,9 +164,17 @@ impl Deref for ConnGuard {
 
 impl Drop for ConnGuard {
     fn drop(&mut self) {
-        if let Some(conn) = self.conn.take() {
-            self.pool.park(conn);
+        let Some(conn) = self.conn.take() else {
+            return;
+        };
+        if transport_faults() != self.faults_at_checkout {
+            return;
         }
+        let since = match self.last_used {
+            Some(last_used) if !*self.touched.get_mut() => last_used,
+            _ => Instant::now(),
+        };
+        self.pool.park(conn, since);
     }
 }
 
@@ -245,19 +298,23 @@ impl Db {
     /// never blocks on the pool: an empty pool builds a connection rather than
     /// waiting, which is what lets handlers nest checkouts.
     pub async fn conn(&self) -> Result<ConnGuard> {
-        let conn = match self.pool.take(self.max_idle) {
-            Some(conn) => conn,
+        let faults_at_checkout = transport_faults();
+        let (conn, last_used) = match self.pool.take(self.max_idle) {
+            Some(parked) => (parked.conn, Some(parked.since)),
             None => {
                 let conn = self.db.connect()?;
                 for pragma in self.pragmas {
                     conn.query(pragma, ()).await?;
                 }
-                conn
+                (conn, None)
             }
         };
         Ok(ConnGuard {
             conn: Some(conn),
             pool: Arc::clone(&self.pool),
+            last_used,
+            touched: AtomicBool::new(false),
+            faults_at_checkout,
         })
     }
 }

@@ -67,9 +67,16 @@
 //!
 //! ## Never fail open
 //!
-//! Any error on the auth path — missing/garbled header, DB lookup failure,
-//! malformed pubkey, signature decode error — resolves to
-//! [`AuthRejection::Unauthorized`]. We never let an error become acceptance.
+//! Any error on the auth path — missing/garbled header, malformed pubkey,
+//! signature decode error — resolves to [`AuthRejection::Unauthorized`]. A
+//! failed device-key lookup (the database could not be read) resolves to
+//! [`AuthRejection::Unavailable`], a 503 (#1500): still a refusal, but one that
+//! does not tell a client with a perfectly good key that it is signed out. We
+//! never let an error become acceptance.
+//!
+//! The cached entry points take the [`Db`], not a connection, and check one out
+//! only on a cache miss. A checkout on every request, used only on a miss, kept
+//! putting a pooled connection back as if it had just been used (#1500).
 //!
 //! ## Device-pubkey cache (#658)
 //!
@@ -119,6 +126,7 @@ use pollis_device_cert::{MLDSA44_PUB_LEN, MLDSA44_SIG_LEN};
 type Signature = ml_dsa::Signature<MlDsa44>;
 type VerifyingKey = ml_dsa::VerifyingKey<MlDsa44>;
 
+use crate::db::Db;
 use crate::error::AuthRejection;
 
 /// Replay window, in seconds, on either side of the server clock. See module
@@ -510,7 +518,8 @@ fn parse_credentials(headers: &HeaderMap, now: i64) -> Result<Credentials, AuthR
 /// device that has not published a cert since #668; it must re-run
 /// `publish-device-cert` (which is session/cert gated, never device-signature
 /// gated, so it is always reachable) before it can authenticate a write. A DB
-/// error propagates as `Err` and the caller still rejects (never fails open).
+/// error propagates as `Err` and the caller still rejects (never fails open),
+/// with a 503 rather than a 401 ([`read_device`], #1500).
 async fn lookup_device_pubkey(
     conn: &Connection,
     user_id: &str,
@@ -623,10 +632,11 @@ pub async fn verify_request(
 
 /// [`verify_request`], served from `cache` when the device's pubkey is already
 /// there (#658). Identical semantics — the ML-DSA-44 signature is still verified
-/// in full; only the Turso read for the verifying key is skipped.
+/// in full; only the Turso read for the verifying key is skipped, and a
+/// connection is checked out of `db` only for that read.
 pub async fn verify_request_cached(
     cache: &DeviceKeyCache,
-    conn: &Connection,
+    db: &Db,
     headers: &HeaderMap,
     method: &str,
     path: &str,
@@ -634,7 +644,7 @@ pub async fn verify_request_cached(
     now: i64,
 ) -> Result<String, AuthRejection> {
     Ok(
-        verify_request_identity_cached(cache, conn, headers, method, path, body, now)
+        verify_request_identity_cached(cache, db, headers, method, path, body, now)
             .await?
             .0,
     )
@@ -656,7 +666,7 @@ pub async fn verify_request_identity(
     body: &[u8],
     now: i64,
 ) -> Result<(String, String), AuthRejection> {
-    verify_request_inner(None, conn, headers, method, path, body, now).await
+    verify_request_inner(None, KeySource::Conn(conn), headers, method, path, body, now).await
 }
 
 /// [`verify_request_identity`], served from `cache` on a hit (#658). Same
@@ -664,14 +674,50 @@ pub async fn verify_request_identity(
 /// signature check.
 pub async fn verify_request_identity_cached(
     cache: &DeviceKeyCache,
-    conn: &Connection,
+    db: &Db,
     headers: &HeaderMap,
     method: &str,
     path: &str,
     body: &[u8],
     now: i64,
 ) -> Result<(String, String), AuthRejection> {
-    verify_request_inner(Some(cache), conn, headers, method, path, body, now).await
+    verify_request_inner(Some(cache), KeySource::Db(db), headers, method, path, body, now).await
+}
+
+/// Where a device key is read from when it has to be read at all.
+#[derive(Clone, Copy)]
+enum KeySource<'a> {
+    /// A connection the caller already holds (the uncached entry points).
+    Conn(&'a Connection),
+    /// The pool, checked out only for the read (#1500): a request served from
+    /// the cache never takes a connection.
+    Db(&'a Db),
+}
+
+/// [`lookup_device_pubkey`] against `source`. A database failure is
+/// [`AuthRejection::Unavailable`] — a refusal, so never an acceptance, but a 503
+/// rather than a 401 (#1500).
+async fn read_device(
+    source: KeySource<'_>,
+    user_id: &str,
+    device_id: &str,
+) -> Result<DeviceLookup, AuthRejection> {
+    let unavailable = |e: anyhow::Error| {
+        crate::error::note_transient(&e);
+        tracing::error!("device key lookup failed: {e:#}");
+        AuthRejection::Unavailable
+    };
+    match source {
+        KeySource::Conn(conn) => lookup_device_pubkey(conn, user_id, device_id)
+            .await
+            .map_err(unavailable),
+        KeySource::Db(db) => {
+            let conn = db.conn().await.map_err(unavailable)?;
+            lookup_device_pubkey(&conn, user_id, device_id)
+                .await
+                .map_err(unavailable)
+        }
+    }
 }
 
 /// The one implementation of the verify path. `cache: None` is the uncached
@@ -680,7 +726,7 @@ pub async fn verify_request_identity_cached(
 /// cache off.
 async fn verify_request_inner(
     cache: Option<&DeviceKeyCache>,
-    conn: &Connection,
+    source: KeySource<'_>,
     headers: &HeaderMap,
     method: &str,
     path: &str,
@@ -698,15 +744,14 @@ async fn verify_request_inner(
         Some(c) => match c.lookup(&creds.user_id, &creds.device_id, now) {
             Lookup::Hit(vk) => vk,
             Lookup::Miss(stamp) => {
-                let vk = match lookup_device_pubkey(conn, &creds.user_id, &creds.device_id).await {
-                    Ok(DeviceLookup::Live(vk)) => Arc::new(vk),
-                    // Unknown / revoked device, or a DB error: never fail open,
-                    // and never cache the negative (see `DeviceKeyCache` docs).
-                    Ok(DeviceLookup::Revoked(vk)) => {
+                // Unknown / revoked device, or a DB error: never fail open, and
+                // never cache the negative (see `DeviceKeyCache` docs).
+                let vk = match read_device(source, &creds.user_id, &creds.device_id).await? {
+                    DeviceLookup::Live(vk) => Arc::new(vk),
+                    DeviceLookup::Revoked(vk) => {
                         return Err(revoked_refusal(&vk, &creds, method, path, body));
                     }
-                    Ok(DeviceLookup::Refused) => return Err(AuthRejection::Unauthorized),
-                    Err(_) => return Err(AuthRejection::Unauthorized),
+                    DeviceLookup::Refused => return Err(AuthRejection::Unauthorized),
                 };
                 // Test seam (#721): with a barrier installed, park here — after
                 // the read, before the insert — so a test can commit a revoke into
@@ -721,13 +766,12 @@ async fn verify_request_inner(
         // Uncached path: the in-process integration harnesses build their own
         // routers and have no `AppState` to hang a cache off — every lookup hits
         // the DB.
-        None => match lookup_device_pubkey(conn, &creds.user_id, &creds.device_id).await {
-            Ok(DeviceLookup::Live(vk)) => Arc::new(vk),
-            Ok(DeviceLookup::Revoked(vk)) => {
+        None => match read_device(source, &creds.user_id, &creds.device_id).await? {
+            DeviceLookup::Live(vk) => Arc::new(vk),
+            DeviceLookup::Revoked(vk) => {
                 return Err(revoked_refusal(&vk, &creds, method, path, body));
             }
-            Ok(DeviceLookup::Refused) => return Err(AuthRejection::Unauthorized),
-            Err(_) => return Err(AuthRejection::Unauthorized),
+            DeviceLookup::Refused => return Err(AuthRejection::Unauthorized),
         },
     };
 
