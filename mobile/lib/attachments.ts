@@ -65,6 +65,10 @@ export function outgoingAttachments(attachments: PickedAttachment[]): OutgoingAt
   }));
 }
 
+/** Uploads that already succeeded, by picked attachment (#1497). Weak, so a
+ *  draft that is dropped takes its entries with it. */
+const uploaded = new WeakMap<PickedAttachment, MediaUploadResult>();
+
 /**
  * Upload every attachment, then build the message content string. With no
  * attachments the caption passes through untouched (plain-text fast path).
@@ -79,15 +83,31 @@ export async function buildMessageContent(
   if (attachments.length === 0) {
     return contentText;
   }
-  const results = await Promise.all(
-    attachments.map((att) =>
-      invoke<MediaUploadResult>("upload_media", {
+  // Every upload runs to completion before a failure is reported, and each
+  // one that succeeded is remembered against its attachment (#1497): the
+  // Vault hands a failed draft back to the composer as the SAME objects, so a
+  // retry uploads only what failed instead of all twelve photos again.
+  const settled = await Promise.allSettled(
+    attachments.map((att) => {
+      const done = uploaded.get(att);
+      if (done) {
+        return Promise.resolve(done);
+      }
+      return invoke<MediaUploadResult>("upload_media", {
         path: att.uri,
         filename: att.name,
         contentType: att.mimeType,
-      }),
-    ),
+      }).then((result) => {
+        uploaded.set(att, result);
+        return result;
+      });
+    }),
   );
+  const failed = settled.find((s): s is PromiseRejectedResult => s.status === "rejected");
+  if (failed) {
+    throw failed.reason;
+  }
+  const results = settled.map((s) => (s as PromiseFulfilledResult<MediaUploadResult>).value);
 
   const envelope: Record<string, unknown> = {
     _att: results.map((r) => ({

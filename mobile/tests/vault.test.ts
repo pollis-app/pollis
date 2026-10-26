@@ -9,6 +9,7 @@ import {
   filterVaultEntries,
   isVaultEntryEdited,
   vaultAttachments,
+  vaultSaveFailure,
   vaultViewerItems,
   type VaultMessage,
 } from "../lib/vault.ts";
@@ -155,4 +156,43 @@ test("delete asks first: the sheet arms the bar, with the confirm haptic", () =>
   const screen = src("app/vault.tsx");
   assert.match(screen, /haptic\("confirmArm"\);\s*setPendingDeleteId\(entry\.id\)/);
   assert.match(screen, /<VaultDeleteBar/);
+});
+
+// #1497: a failed save names what the user can do, read from the core's text.
+test("a failed save is sorted by what the user can do about it", () => {
+  const offline = [
+    "ds_post /v1/r2/presign: error sending request for url (https://api-dev.pollis.com/v1/r2/presign): client error (SendRequest): connection closed before message completed",
+    'ds_post /v1/vault/save 500 Internal Server Error: {"error":"internal error"}',
+    "Network error: error sending request for url (https://r2.example/media/x.enc)",
+    "R2 upload failed: 503 Service Unavailable — slow down",
+    "ds_post /v1/r2/presign: operation timed out",
+  ];
+  for (const message of offline) {
+    assert.equal(vaultSaveFailure(new Error(message)), "offline", message);
+  }
+  assert.equal(
+    vaultSaveFailure(new Error("attachment is 300000000 bytes; the limit is 262144000 bytes")),
+    "tooLarge",
+  );
+  assert.equal(vaultSaveFailure(new Error("vault entry is empty")), "other");
+  assert.equal(vaultSaveFailure(new Error("attachment is 512 bytes")), "other");
+  assert.equal(vaultSaveFailure(undefined), "other");
+});
+
+test("a failed save shows its reason and a retry that sends the restored draft", () => {
+  const screen = src("app/vault.tsx");
+  assert.match(screen, /vaultSaveFailure\(send\.error\)/);
+  assert.match(screen, /testID="btn-vault-retry"/);
+});
+
+test("a retry of the same draft uploads only what failed", () => {
+  const lib = src("lib/attachments.ts");
+  assert.match(lib, /const done = uploaded\.get\(att\)/);
+  assert.match(lib, /uploaded\.set\(att, result\)/);
+  assert.match(lib, /Promise\.allSettled\(/);
+  // The failed draft goes back as the same objects, which is what the memo keys on.
+  assert.match(
+    src("app/vault.tsx"),
+    /setPendingAttachments\(\(current\) => \(current\.length > 0 \? current : attachments\)\)/,
+  );
 });

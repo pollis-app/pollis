@@ -8,6 +8,11 @@
   "viewToggle": "Vault view",
   "viewChat": "Chat",
   "viewMedia": "Media",
+  "saving": "Saving…",
+  "saveFailed": "Couldn't save to your vault. Your draft is back in the composer.",
+  "saveFailedOffline": "Couldn't reach Pollis to save this. Your draft is back in the composer — check your connection and try again.",
+  "saveFailedTooLarge": "A file is too large for your vault. Your draft is back in the composer — remove it and send again.",
+  "saveRetry": "Try again",
   "entry": {
     "pinned": "Pinned",
     "edited": "(edited)",
