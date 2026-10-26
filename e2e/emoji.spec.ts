@@ -631,7 +631,7 @@ for (const skin of SKINS) {
       await expect(row.getByTestId("message-reactions")).toHaveCount(0);
     });
 
-    test("pills sit on one line, starting under the author", async ({ page }) => {
+    test("pills sit on one line, starting under the message text", async ({ page }) => {
       await openChannel(page, skin, {
         m1: [
           { emoji: "👍", user_ids: ["u_dana"], count: 1 },
@@ -654,9 +654,10 @@ for (const skin of SKINS) {
       );
       expect(new Set(boxes.map((b) => b.top)).size).toBe(1);
 
-      // The first pill starts where the text column starts: under the
-      // author in both skins (refined's name and body share a column).
-      const anchor = row.getByTestId(skin === "terminal" ? "message-author" : "message-content");
+      // The first pill starts where the message text starts, in both skins:
+      // refined's name and body share a column, and terminal's pills sit in
+      // the body column after `name :` (#1489).
+      const anchor = row.getByTestId("message-content");
       const anchorLeft = Math.round((await anchor.boundingBox())!.x);
       expect(Math.abs(boxes[0].left - anchorLeft)).toBeLessThanOrEqual(1);
     });
