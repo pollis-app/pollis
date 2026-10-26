@@ -764,8 +764,16 @@ afterwards targets only the binaries built afterwards.
   nobody. Likewise the npm `ubrn` bin compiles itself into
   `node_modules/uniffi-bindgen-react-native/target/`, which iOS hashed. It was
   never Linux vs macOS: a fresh install on a Mac gives CI's value.
+  **Gradle bakes the value mid-build** (`createReleaseUpdatesResources`), so a
+  file that exists only while Gradle runs counts too: the Kotlin plugin keeps
+  `.kotlin/sessions/*.salive` in each included build's root, and
+  `expo-updates-gradle-plugin/` is a hashed dir. That gave the sideload APKs
+  1.0.14–1.0.16 their own runtime versions (#1429; the 1.0.16 APK `27b59ee3…`
+  against Play/OTA `8f1befed…`); `node_modules/**/.kotlin/` is now ignored.
   `tests/ota-fingerprint.test.ts` pins (e) and fails if another installed
-  package's `build.gradle` starts writing into its own sources.
+  package's `build.gradle` starts writing into its own sources. CI **fails**
+  any APK whose baked value a Gradle-free recompute does not reproduce: every
+  PR's `android-build` job and every sideload release.
   Consequence: **a pollis-core change blocks OTA for every binary built before
   it** — that is intended.
 - **Store-build ledger** (`store/runtime-versions.json`): every shipped binary
@@ -777,7 +785,9 @@ afterwards targets only the binaries built afterwards.
   OTA): Android `unzip -p app-release.aab base/assets/fingerprint` (APK:
   `assets/fingerprint`); iOS `unzip -p Pollis.ipa
   Payload/Pollis.app/EXUpdates.bundle/fingerprint`. The sideload APK workflow
-  prints its value (`Record the runtime version and its sources`). The OTA
+  prints its value and fails on a mismatch (`Check the baked runtime version
+  and record its sources`; Gradle's log prints the baked per-source hashes on
+  the `createReleaseUpdatesResources` line). The OTA
   `build` job uploads `ota-fingerprint-sources` (the `--debug` sources per
   platform) on every run; when an update misses a binary, diff that against
   `node_modules/.bin/fingerprint fingerprint:generate --platform <p> --debug`
