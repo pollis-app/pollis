@@ -413,36 +413,51 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           {":"}
         </span>
 
-        <span
-          data-testid="message-content"
-          dir="auto"
-          className={`font-mono text-sm break-words flex-1 min-w-0 ${isDeleted ? "text-muted" : "text-fg"}`}
-          style={{
-            whiteSpace: "pre-wrap",
-          }}
-        >
-          <MessageBody text={content} ctx={ctx} />
-          {message.edited_at && !isDeleted && (
-            <span className="ms-1 text-xs text-muted">
-              {t("message.edited")}
-            </span>
-          )}
-          {/* Only a FAILED send is labelled. An optimistic row already looks sent
-              — the `[sending]` tag made a fast send feel slow. Kept for reference:
-              {message.status && message.status !== "sent" && (…)} */}
-          {message.status === "failed" && (
-            <span className="ms-1 text-xs text-muted">
-              [{t(`status.${message.status}`)}]
-            </span>
-          )}
-          {/* A failed send's way out (#1335): Retry / Discard. */}
-          {message.status === "failed" && isOwn && (
-            <UnsentMessageActions message={message} />
-          )}
-          {/* No delivery / read ticks in the terminal skin — a product call, not
-              a privacy one: receipts are still queried, and the refined skin
-              still shows them. */}
-        </span>
+        {/* Body column (#1489): text, media and reactions share the column
+            that starts after `name :`, so a picture lines up with the
+            message it belongs to rather than with the timestamp — the
+            terminal counterpart of the refined skin's right column. */}
+        <div className="flex-1 min-w-0">
+          <span
+            data-testid="message-content"
+            dir="auto"
+            className={`block font-mono text-sm break-words ${isDeleted ? "text-muted" : "text-fg"}`}
+            style={{
+              whiteSpace: "pre-wrap",
+            }}
+          >
+            <MessageBody text={content} ctx={ctx} />
+            {message.edited_at && !isDeleted && (
+              <span className="ms-1 text-xs text-muted">
+                {t("message.edited")}
+              </span>
+            )}
+            {/* Only a FAILED send is labelled. An optimistic row already looks sent
+                — the `[sending]` tag made a fast send feel slow. Kept for reference:
+                {message.status && message.status !== "sent" && (…)} */}
+            {message.status === "failed" && (
+              <span className="ms-1 text-xs text-muted">
+                [{t(`status.${message.status}`)}]
+              </span>
+            )}
+            {/* A failed send's way out (#1335): Retry / Discard. */}
+            {message.status === "failed" && isOwn && (
+              <UnsentMessageActions message={message} />
+            )}
+            {/* No delivery / read ticks in the terminal skin — a product call, not
+                a privacy one: receipts are still queried, and the refined skin
+                still shows them. */}
+          </span>
+
+          {/* Inline previews for media URLs typed in the message body */}
+          {!isDeleted && <MediaLinkUnfurl text={content} />}
+
+          {attachmentBlocks}
+
+          {/* Reaction pills. Adding one lives in the hover bar
+              (`ReactionAddButton`). */}
+          {!isDeleted && <MessageReactions messageId={message.id} className="mt-0.5" />}
+        </div>
 
         {/* Action buttons — only visible on hover */}
         {!isDeleted && !isUnsent && (
@@ -465,32 +480,6 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           />
         )}
       </div>
-
-      {/* Inline previews for media URLs typed in the message body */}
-      {!isDeleted && <MediaLinkUnfurl text={content} />}
-
-      {/* Visual media: horizontal strip of uniform 96×96 thumbs */}
-      {mediaThumbs.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1">
-          {mediaThumbs.map((a) => (
-            <AttachmentDisplay key={a.id} attachment={a} />
-          ))}
-        </div>
-      )}
-
-      {/* Audio / files — each on its own row */}
-      {otherAttachments.length > 0 && (
-        <div className="mt-2 flex flex-col gap-2">
-          {otherAttachments.map((a) => (
-            <AttachmentDisplay key={a.id} attachment={a} />
-          ))}
-        </div>
-      )}
-
-      {/* Reaction pills, indented to the author column (`w-20` timestamp)
-          so the first pill sits under the name. Adding one lives in the
-          hover bar (`ReactionAddButton`). */}
-      {!isDeleted && <MessageReactions messageId={message.id} className="ms-20 mt-0.5" />}
     </div>
   );
 });
