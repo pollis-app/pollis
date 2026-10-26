@@ -12,7 +12,7 @@
  *   - the hook buffers the file, so a chunk boundary cannot split the edit;
  *   - masked-view's build.gradle still makes exactly the edit mirrored here;
  *   - no other installed package's build.gradle rewrites its own sources;
- *   - the npm ubrn build output is ignored;
+ *   - the npm ubrn build output and Kotlin's `.kotlin/` build state are ignored;
  *   - the store-build ledger parses, and an update's reach is computed from it.
  *
  *   cd mobile && pnpm test
@@ -20,7 +20,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -123,7 +123,35 @@ test("build output a tool leaves inside an installed package is not fingerprinte
   }
   assert.ok(ignored.includes("node_modules/uniffi-bindgen-react-native/target/**/*"));
   assert.ok(ignored.includes("node_modules/uniffi-bindgen-react-native/Cargo.lock"));
+  assert.ok(ignored.includes("node_modules/**/.kotlin/**/*"));
 });
+
+// #1429: the Kotlin Gradle plugin keeps `.kotlin/sessions/*.salive` in each
+// included build's root for exactly as long as the build runs, and
+// expo-updates bakes the runtime version mid-build. The sideload APKs hashed it
+// (expo-updates-gradle-plugin is a fingerprinted dir); the OTA job never did.
+// End to end through @expo/fingerprint, the way Gradle's bake step calls it.
+const updatesPlugin = join(nodeModules, "expo-updates", "expo-updates-gradle-plugin");
+test(
+  "a Kotlin build-session file mid-build does not move the runtime version",
+  { skip: !existsSync(updatesPlugin) && "node_modules not installed" },
+  async () => {
+    const { createFingerprintAsync } = require("expo/fingerprint");
+    const options = { platforms: ["android"], ignorePaths: ["android/**/*", "ios/**/*"], silent: true };
+    const kotlinDir = join(updatesPlugin, ".kotlin");
+    const existed = existsSync(kotlinDir);
+    const session = join(kotlinDir, "sessions", `kotlin-compiler-${process.pid}.salive`);
+    const before = await createFingerprintAsync(mobile, options);
+    mkdirSync(dirname(session), { recursive: true });
+    writeFileSync(session, "");
+    try {
+      const during = await createFingerprintAsync(mobile, options);
+      assert.equal(during.hash, before.hash);
+    } finally {
+      rmSync(existed ? session : kotlinDir, { recursive: true, force: true });
+    }
+  },
+);
 
 const ledger = readFileSync(join(mobile, "store", "runtime-versions.json"), "utf8");
 
@@ -153,4 +181,22 @@ test("an update's reach is the recorded binaries with its runtime version", () =
   );
   // The value the OTA job used to compute for 1.0.14's native layer reached nothing.
   assert.equal(reachOf({ android: "35e62c3e7d8d032e4ac83ac761ca268e6e4f2d1b" }, builds)[0].binaries.length, 0);
+});
+
+// #1429: a baked runtime version the OTA job does not compute strands the
+// binary, so both Gradle builds in CI refuse one rather than warn about it.
+test("CI fails any APK whose baked runtime version the OTA job would not compute", () => {
+  const workflows = join(mobile, "..", ".github", "workflows");
+  const checks: Array<[string, RegExp]> = [
+    ["mobile-apk-release.yml", /- name: Check the baked runtime version and record its sources\n([\s\S]*?)(?=\n {6}- name:)/],
+    ["mobile-core-check.yml", /- name: Baked runtime version equals the OTA job's\n([\s\S]*?)(?=\n {6}- name:)/],
+  ];
+  for (const [file, stepRe] of checks) {
+    const step = stepRe.exec(readFileSync(join(workflows, file), "utf8"))?.[1];
+    assert.ok(step, `${file}: the runtime-version check step is missing`);
+    assert.doesNotMatch(step, /continue-on-error/, `${file}: the check must fail the job`);
+    assert.match(step, /fingerprint:generate --platform android/, file);
+    assert.match(step, /assets\/fingerprint/, file);
+    assert.match(step, /if \[ "\$baked" != "\$computed" \]; then[\s\S]*?exit 1/, file);
+  }
 });
