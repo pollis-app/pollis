@@ -240,7 +240,9 @@ jobs:
           MODE: ${{ needs.plan.outputs.mode }}
         # The build compares each runtime version with the store builds in
         # mobile/store/runtime-versions.json (#1427): a publish that would reach
-        # no recorded binary fails; a dry run only warns.
+        # no recorded binary fails; a dry run only warns. Each update is also
+        # issued, re-signed, under every ledger runtime version recorded as
+        # native-identical to its own (`nativeIdenticalTo`, #1446).
         run: |
           set -euo pipefail
           unreached=fail

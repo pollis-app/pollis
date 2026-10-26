@@ -10,7 +10,9 @@
 //                         versions from the fingerprint, safety checks, unsigned
 //                         manifests            → <dir>/plan.json + <dir>/files/
 //                         Refuses an update no recorded store build would take
-//                         (store/runtime-versions.json); `--unreached warn` only warns
+//                         (store/runtime-versions.json); `--unreached warn` only warns.
+//                         Each update is also issued, re-signed, under every
+//                         ledger runtime version aliased to its own (#1446)
 //   prepare-republish     re-serve an earlier group's bytes under new update ids
 //                         (rollback to a known-good update)
 //   prepare-rollback      rollBackToEmbedded directives (rollback to the store
@@ -42,6 +44,7 @@ import {
   assertBundleTargetsProd,
   assertCodeSigningCertificate,
   assertKeyMatchesCertificate,
+  assertAliasEntries,
   assertManifestShape,
   assertNoSecretValues,
   assertOnlyPublicEnvReads,
@@ -51,6 +54,7 @@ import {
   base64UrlToHex,
   buildDirective,
   buildManifest,
+  expandAliases,
   mergeRecords,
   parseMultipart,
   parseStoreBuilds,
@@ -69,6 +73,7 @@ import {
   type PlanEntry,
   type Platform,
   type Reach,
+  type StoreBuild,
 } from "./ota/lib.ts";
 
 const MOBILE = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -127,6 +132,10 @@ function run(cmd: string, args: string[], options: { cwd?: string; env?: NodeJS.
     throw new Error(`${cmd} ${args.join(" ")} exited ${r.status}${err ? `: ${err}` : ""}`);
   }
   return typeof r.stdout === "string" ? r.stdout : "";
+}
+
+function readLedger(): StoreBuild[] {
+  return parseStoreBuilds(readFileSync(LEDGER_PATH, "utf8"));
 }
 
 function readPlan(dir: string): Plan {
@@ -211,12 +220,12 @@ function summary(plan: Plan): string {
     `- source commit: \`${plan.commit}\``,
     `- channel: \`${plan.channel}\`, base URL: ${plan.baseUrl}`,
     "",
-    "| platform | runtime version | kind | update id | launch bundle sha256 | assets |",
-    "|---|---|---|---|---|---|",
+    "| platform | runtime version | alias of | kind | update id | launch bundle sha256 | assets |",
+    "|---|---|---|---|---|---|---|",
   ];
   for (const e of plan.entries) {
     lines.push(
-      `| ${e.platform} | \`${e.runtimeVersion}\` | ${e.kind} | ${e.updateId ?? "-"} | ${e.launchSha256 ? `\`${e.launchSha256}\`` : "-"} | ${e.assets?.length ?? 0} |`,
+      `| ${e.platform} | \`${e.runtimeVersion}\` | ${e.aliasOf ? `\`${e.aliasOf}\`` : "-"} | ${e.kind} | ${e.updateId ?? "-"} | ${e.launchSha256 ? `\`${e.launchSha256}\`` : "-"} | ${e.assets?.length ?? 0} |`,
     );
   }
   return lines.join("\n") + "\n";
@@ -288,7 +297,8 @@ async function cmdBuild(opts: Record<string, string>): Promise<void> {
   };
 
   const before = await runtimeVersions();
-  const reach = checkReach(before, opts.unreached ?? "fail");
+  const builds = readLedger();
+  const reach = checkReach(before, builds, opts.unreached ?? "fail");
   const expoClient = getConfig(MOBILE, { isPublicConfig: true, skipSDKVersionRequirement: true }).exp;
 
   const exportDir = join(out, "export");
@@ -376,24 +386,31 @@ async function cmdBuild(opts: Record<string, string>): Promise<void> {
     });
   }
 
+  // #1446: the same update for every recorded binary whose native code is
+  // identical to the one it was built for, under that binary's own runtime version.
+  plan.entries = expandAliases(plan.entries, builds, randomUUID);
+  for (const e of plan.entries) {
+    assertManifestShape(e.body, { runtimeVersion: e.runtimeVersion, baseUrl: plan.baseUrl });
+  }
+  assertAliasEntries(plan.entries, builds);
+
   writePlan(out, plan);
   emitSummary(plan, out, reachSummary(reach));
 }
 
-// An update reaches only binaries whose baked runtime version it names (#1427).
+// An update reaches only binaries whose baked runtime version it names (#1427),
+// directly or as a ledger alias of it (#1446: re-issued under the alias).
 // Compare against every store build on record: a platform that reaches none is
 // a loud warning, and an update that reaches no binary at all is refused unless
 // `--unreached warn` (dry runs, which exist to look at exactly that case).
-function checkReach(runtimeVersions: Record<string, string>, mode: string): Reach[] {
+function checkReach(runtimeVersions: Record<string, string>, builds: StoreBuild[], mode: string): Reach[] {
   if (mode !== "warn" && mode !== "fail") {
     fail(`--unreached must be warn or fail, got ${mode}`);
   }
-  const builds = parseStoreBuilds(readFileSync(LEDGER_PATH, "utf8"));
   const reach = reachOf(runtimeVersions, builds);
   for (const r of reach) {
     if (r.binaries.length > 0) {
-      const names = r.binaries.map((b) => `${b.channel} ${b.version}`).join(", ");
-      console.log(`${r.platform} runtime version ${r.runtimeVersion} reaches: ${names}`);
+      console.log(`${r.platform} runtime version ${r.runtimeVersion} reaches: ${binaryNames(r)}`);
     } else {
       console.log(
         `::warning::${r.platform} runtime version ${r.runtimeVersion} matches no store build in ` +
@@ -411,11 +428,20 @@ function checkReach(runtimeVersions: Record<string, string>, mode: string): Reac
   return reach;
 }
 
+// "play 1.0.16, sideload 1.0.16 (alias 27b59ee3…)".
+function binaryNames(r: Reach): string {
+  return r.binaries
+    .map((b) => `${b.channel} ${b.version}${b.runtimeVersion === r.runtimeVersion ? "" : ` (alias ${b.runtimeVersion})`}`)
+    .join(", ");
+}
+
 function reachSummary(reach: Reach[]): string {
-  const lines = ["", "| platform | reaches recorded store builds |", "|---|---|"];
+  const lines = ["", "| platform | runtime version | aliases | reaches recorded store builds |", "|---|---|---|---|"];
   for (const r of reach) {
-    const names = r.binaries.map((b) => `${b.channel} ${b.version}`).join(", ");
-    lines.push(`| ${r.platform} | ${names || "**none** (no binary on record has this runtime version)"} |`);
+    const aliases = r.aliases.map((a) => `\`${a}\``).join(", ") || "-";
+    lines.push(
+      `| ${r.platform} | \`${r.runtimeVersion}\` | ${aliases} | ${binaryNames(r) || "**none** (no binary on record has this runtime version)"} |`,
+    );
   }
   return lines.join("\n") + "\n";
 }
@@ -501,7 +527,7 @@ interface GroupArchive {
   groupId: string;
   createdAt: string;
   commit: string;
-  entries: { platform: Platform; runtimeVersion: string; kind: string; updateId?: string }[];
+  entries: { platform: Platform; runtimeVersion: string; kind: string; updateId?: string; aliasOf?: string }[];
 }
 
 function cmdPrepareRepublish(opts: Record<string, string>): void {
@@ -559,6 +585,9 @@ function cmdPrepareRepublish(opts: Record<string, string>): void {
       assets: archive.assets,
     });
   }
+  // An aliased binary rolls back with its target (#1446), even when the group
+  // being re-served predates the alias.
+  plan.entries = expandAliases(plan.entries, readLedger(), randomUUID);
   // The leaves describe bytes built from the original commit, so they record it.
   plan.commit = first!.commit;
   plan.sourceDateEpoch = first!.sourceDateEpoch;
@@ -608,6 +637,9 @@ function cmdPrepareRollback(opts: Record<string, string>): void {
   if (plan.entries.length === 0) {
     fail("nothing to roll back: no live pointer matches");
   }
+  // A named runtime version takes its ledger aliases with it (#1446); `all`
+  // already lists their live pointers.
+  plan.entries = expandAliases(plan.entries, readLedger(), randomUUID);
   writePlan(out, plan);
   emitSummary(plan, out);
 }
@@ -664,6 +696,11 @@ function cmdSign(opts: Record<string, string>): void {
         fail(`${slot}: unknown directive ${d.type}`);
       }
     }
+  }
+  // Aliases (#1446) are checked against this checkout's ledger, not the build
+  // job's word: an update may land only on a binary recorded native-identical.
+  assertAliasEntries(plan.entries, readLedger());
+  for (const e of plan.entries) {
     e.signature = signBody(e.body, key);
     verifyBody(e.body, e.signature, cert);
   }
@@ -735,7 +772,7 @@ function uploadContent(r2: R2, dir: string, plan: Plan): void {
     groupId: plan.groupId,
     createdAt: plan.createdAt,
     commit: plan.commit,
-    entries: plan.entries.map((e) => ({ platform: e.platform, runtimeVersion: e.runtimeVersion, kind: e.kind, updateId: e.updateId })),
+    entries: plan.entries.map((e) => ({ platform: e.platform, runtimeVersion: e.runtimeVersion, kind: e.kind, updateId: e.updateId, aliasOf: e.aliasOf })),
   };
   r2Put(r2, `groups/${plan.groupId}.json`, writeTemp(JSON.stringify(group)), "application/json", "no-cache");
 }

@@ -1,5 +1,5 @@
 {
-  "about": "Every shipped mobile binary and the runtime version baked into it (#1427). The OTA build refuses an update that matches none. Append one entry per store build when it ships: android `unzip -p <aab|apk> base/assets/fingerprint` (APK: assets/fingerprint), ios `Payload/Pollis.app/EXUpdates.bundle/fingerprint` in the IPA. Runbook: mobile/CLAUDE.md -> OTA updates.",
+  "about": "Every shipped mobile binary and the runtime version baked into it (#1427). The OTA build refuses an update that matches none. Append one entry per store build when it ships: android `unzip -p <aab|apk> base/assets/fingerprint` (APK: assets/fingerprint), ios `Payload/Pollis.app/EXUpdates.bundle/fingerprint` in the IPA. `nativeIdenticalTo` (#1446): this binary's baked value is stray (build-time pollution, #1429) but its native code is identical to the build of the same platform and commit carrying that runtime version; every update for that runtime version is also published, re-signed, under this one. Runbook: mobile/CLAUDE.md -> OTA updates.",
   "builds": [
     {
       "platform": "android",
@@ -13,7 +13,8 @@
       "channel": "sideload",
       "version": "1.0.14",
       "commit": "2c9c53f771194db3e763fa218d2636432b8c3c1b",
-      "runtimeVersion": "cd2015f48976c765d0cf6c3495f5e3d29ef1f2f5"
+      "runtimeVersion": "cd2015f48976c765d0cf6c3495f5e3d29ef1f2f5",
+      "nativeIdenticalTo": "5466ba191d93be2e4fae2ca99c6ccdc2c964ffe4"
     },
     {
       "platform": "android",
@@ -27,7 +28,8 @@
       "channel": "sideload",
       "version": "1.0.15",
       "commit": "d6b3370188eca83ec97fb749f061c821267b88ce",
-      "runtimeVersion": "a2ebce84423d3f01e2a1f4805b5da1d1c16d1697"
+      "runtimeVersion": "a2ebce84423d3f01e2a1f4805b5da1d1c16d1697",
+      "nativeIdenticalTo": "3d24cb87e81195301172ddbc218ced95b3ba89c4"
     },
     {
       "platform": "android",
@@ -41,7 +43,8 @@
       "channel": "sideload",
       "version": "1.0.16",
       "commit": "f20d203ac0fdba8a47d70951a2755728a98ff41e",
-      "runtimeVersion": "27b59ee394cc3224b66c6bb87420560a6415eadc"
+      "runtimeVersion": "27b59ee394cc3224b66c6bb87420560a6415eadc",
+      "nativeIdenticalTo": "8f1befed077744ecff198dc91a0366852132f4a8"
     }
   ]
 }
