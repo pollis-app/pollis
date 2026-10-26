@@ -11,6 +11,7 @@ import { semantic, fonts, r } from "../../theme/tokens";
 import { useVerifyOtp } from "../../hooks/queries/useAuth";
 import { useSubmitLock } from "../../hooks/useSubmitLock";
 import { reopenKeyboard } from "../../lib/codeFieldFocus";
+import { useThemeRerender } from "../../components/theme";
 
 const CODE_LENGTH = 6;
 // Zero-width U+2060 after the address: forbids a line break between it and the
@@ -18,6 +19,7 @@ const CODE_LENGTH = 6;
 const WORD_JOINER = "\u2060";
 
 export default function AuthOTP() {
+  useThemeRerender();
   const { t } = useTranslation("auth");
   const router = useRouter();
   const { email: emailParam } = useLocalSearchParams<{ email?: string }>();

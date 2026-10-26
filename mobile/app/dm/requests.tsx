@@ -15,6 +15,7 @@ import {
   useAcceptDMRequest,
   useBlockUser,
 } from "../../hooks/queries";
+import { useThemeRerender } from "../../components/theme";
 
 /**
  * Message requests, opened from the single "Message requests" row on the
@@ -23,6 +24,7 @@ import {
  * dm-request bar (there is no decline command in pollis-core).
  */
 export default function DMRequests() {
+  useThemeRerender();
   const { t } = useTranslation("mobile");
   const { data: requests = [], isLoading } = useDMRequests();
   const acceptRequest = useAcceptDMRequest();

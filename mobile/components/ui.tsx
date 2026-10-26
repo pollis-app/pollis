@@ -21,6 +21,7 @@ import { useTranslation } from "react-i18next";
 import { semantic, type as ty, fonts, r, space, layout, currentTheme } from "../theme/tokens";
 import { buttonColors, checkboxColors, controlDisabled, type ControlSurface } from "../theme/button";
 import { useTheme } from "./theme";
+import { ThemeProbe } from "./ThemeProbe";
 import { useLayoutClass } from "../hooks/useLayoutClass";
 import { PaneEntryContext } from "./pane/paneContext";
 import { activeLocale } from "../i18n";
@@ -182,8 +183,10 @@ export function Screen({
   // area, so the screen must not pad by it again.
   aboveTabBar?: boolean;
 }) {
-  // Subscribe to the theme so the whole subtree re-renders (and the token
-  // getters resolve to the new colours) when a base colour changes.
+  // Subscribe to the theme so the screen's own surfaces (and the probe below)
+  // re-render when a base colour changes. This does NOT re-render `children`
+  // — the route created those — which is why every route component
+  // subscribes itself (#1447; see components/theme.tsx).
   useTheme();
   const cls = useLayoutClass();
   const { width: windowWidth } = useWindowDimensions();
@@ -212,6 +215,7 @@ export function Screen({
       }}
       edges={["top"]}
     >
+      <ThemeProbe />
       {/* Keeps a bottom <Field>/<BottomAction>/composer above the keyboard on
           both platforms, in step with its animation (#1246). The app is
           edge-to-edge (#1194), so the window never resizes; keyboard-controller

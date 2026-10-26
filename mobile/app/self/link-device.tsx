@@ -14,6 +14,7 @@ import { appStore } from "../../stores/appStore";
 import { acceptDeviceOffer, cancelDeviceLink, finishDeviceOffer } from "../../hooks/queries";
 import { isNewDeviceCode, isSignInCode } from "../../lib/linkCodes";
 import { haptic } from "../../lib/haptics";
+import { useThemeRerender } from "../../components/theme";
 
 /**
  * Scan to sign in a device (#1361): the device being signed in — a desktop at
@@ -42,6 +43,7 @@ type Step =
   | { kind: "failed"; title: string; message: string };
 
 export default function ScanToSignIn() {
+  useThemeRerender();
   const { t } = useTranslation("settings");
   const router = useRouter();
   const regular = useIsRegular();

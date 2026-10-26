@@ -10,8 +10,10 @@ import { semantic, type as ty } from "../../theme/tokens";
 import { useRequestOtp } from "../../hooks/queries/useAuth";
 import { useSubmitLock } from "../../hooks/useSubmitLock";
 import { getSessionNotice, setSessionNotice, subscribeSessionNotice } from "../../lib/deviceRevoked";
+import { useThemeRerender } from "../../components/theme";
 
 export default function AuthEmail() {
+  useThemeRerender();
   const { t } = useTranslation("auth");
   const router = useRouter();
   const [email, setEmail] = useState("");

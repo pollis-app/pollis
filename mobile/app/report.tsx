@@ -17,6 +17,7 @@ import { ReasonRow } from "../components/direct/ReasonRow";
 import { semantic, space } from "../theme/tokens";
 import { invoke } from "../lib/native";
 import { useReportUser, type ReportReason } from "../hooks/queries";
+import { useThemeRerender } from "../components/theme";
 
 const REASONS: ReportReason[] = ["spam", "harassment", "illegal", "other"];
 
@@ -27,6 +28,7 @@ const REASONS: ReportReason[] = ["spam", "harassment", "illegal", "other"];
  * pick a reason, then Report or Report and block; then a short confirmation.
  */
 export default function ReportScreen() {
+  useThemeRerender();
   const { t } = useTranslation("chat");
   const router = useRouter();
   const { userId, conversationId, messageId } = useLocalSearchParams<{

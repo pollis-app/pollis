@@ -10,12 +10,14 @@ import { Icon } from "../../components/icons";
 import { semantic, type as ty, space } from "../../theme/tokens";
 import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
+import { useThemeRerender } from "../../components/theme";
 
 type Stage = "enter-email" | "enter-code";
 
 const CODE_LENGTH = 6;
 
 function ChangeEmail() {
+  useThemeRerender();
   const { t } = useTranslation("settings");
   const router = useRouter();
   const currentUser = appStore.currentUser;

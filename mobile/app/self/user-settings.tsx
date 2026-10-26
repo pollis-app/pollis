@@ -19,8 +19,10 @@ import { semantic, type as ty, space } from "../../theme/tokens";
 import { useUserProfile, useUpdateProfile } from "../../hooks/queries";
 import { isValidUsername } from "../../lib/username";
 import { appStore } from "../../stores/appStore";
+import { useThemeRerender } from "../../components/theme";
 
 function UserSettings() {
+  useThemeRerender();
   const { t } = useTranslation("settings");
   const router = useRouter();
   const currentUser = appStore.currentUser;

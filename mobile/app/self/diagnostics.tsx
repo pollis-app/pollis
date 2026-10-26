@@ -6,6 +6,7 @@ import { CopyDiagnosticsButton } from "../../components/self/CopyDiagnosticsButt
 import { ErrorText } from "../../components/self/SettingsField";
 import { semantic, type as ty, space, r } from "../../theme/tokens";
 import { getDiagnostics } from "../../lib/diagnostics";
+import { useThemeRerender } from "../../components/theme";
 
 /**
  * The on-device diagnostics log (#1305): what it holds, what it never holds,
@@ -14,6 +15,7 @@ import { getDiagnostics } from "../../lib/diagnostics";
  * `DiagnosticsPage`, same copy.
  */
 export default function Diagnostics() {
+  useThemeRerender();
   const { t } = useTranslation("settings");
   const [report, setReport] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);

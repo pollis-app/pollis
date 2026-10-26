@@ -16,8 +16,10 @@ import { activeLocale } from "../../i18n";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { haptic } from "../../lib/haptics";
+import { useThemeRerender } from "../../components/theme";
 
 function Members() {
+  useThemeRerender();
   const { t } = useTranslation("channels");
   const router = useNav();
   const { groupId } = useRouteParams<{ groupId?: string }>();

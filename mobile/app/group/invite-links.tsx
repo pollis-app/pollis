@@ -14,6 +14,7 @@ import {
 } from "../../hooks/queries";
 import { activeLocale } from "../../i18n";
 import { haptic } from "../../lib/haptics";
+import { useThemeRerender } from "../../components/theme";
 
 // #847 (mobile) — review and revoke a group's shareable invite links.
 //
@@ -22,6 +23,7 @@ import { haptic } from "../../lib/haptics";
 // `sha256(secret)` and has no token to give back. A link is copyable exactly
 // once, at creation, on the invite screen.
 export default function GroupInviteLinks() {
+  useThemeRerender();
   const { t } = useTranslation("channels");
   const { groupId } = useRouteParams<{ groupId?: string }>();
   const router = useNav();

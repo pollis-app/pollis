@@ -29,11 +29,13 @@ import { AddGroupSheet } from "../../components/groups/AddGroupSheet";
 import { readLastGroupId, writeLastGroupId } from "../../components/groups/lastGroup";
 import type { Channel } from "../../types";
 import { ChatView } from "../chat/[id]";
+import { useThemeRerender } from "../../components/theme";
 
 // The Groups tab (Main.dc.html): a strip of group pills, then the selected
 // group's channel panel. Picking a pill switches the group in place; the
 // choice is remembered across launches.
 function Groups() {
+  useThemeRerender();
   const { t } = useTranslation("mobile");
   const router = useRouter();
   const { data: groups = [], isLoading, isError } = useUserGroupsWithChannels();

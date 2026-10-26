@@ -6,8 +6,10 @@ import { LabeledField, Hint, ErrorText } from "../../components/groups/FormBits"
 import { Icon } from "../../components/icons";
 import { semantic, type as ty, fonts, space } from "../../theme/tokens";
 import { useGroupBySlug, useRequestGroupAccess, useMyJoinRequest } from "../../hooks/queries";
+import { useThemeRerender } from "../../components/theme";
 
 export default function Discover() {
+  useThemeRerender();
   const { t } = useTranslation("search");
   const [slug, setSlug] = useState("");
   // Looked up on Search / return, never per keystroke: slug lookups share a

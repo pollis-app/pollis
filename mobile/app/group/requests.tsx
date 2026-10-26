@@ -11,8 +11,10 @@ import {
   useUserGroupsWithChannels,
 } from "../../hooks/queries";
 import { activeLocale } from "../../i18n";
+import { useThemeRerender } from "../../components/theme";
 
 export default function JoinRequests() {
+  useThemeRerender();
   const { t } = useTranslation("channels");
   const { groupId } = useRouteParams<{ groupId?: string }>();
   const router = useNav();
