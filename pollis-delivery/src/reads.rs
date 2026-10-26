@@ -98,10 +98,9 @@ async fn reader(
             )),
         });
     }
-    let conn = state.db.conn().await?;
     match auth::verify_request_identity_cached(
         &state.device_keys,
-        &conn,
+        &state.db,
         &req.headers,
         req.method.as_str(),
         req.uri.path(),
@@ -135,10 +134,9 @@ pub(crate) async fn authed_user(
             _ => Err(bad_request("user_id required when auth is disabled")),
         });
     }
-    let conn = state.db.conn().await?;
     match auth::verify_request_cached(
         &state.device_keys,
-        &conn,
+        &state.db,
         &req.headers,
         req.method.as_str(),
         req.uri.path(),

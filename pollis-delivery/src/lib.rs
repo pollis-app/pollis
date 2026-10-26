@@ -712,10 +712,9 @@ async fn submit(State(state): State<AppState>, req: RawRequest) -> Result<Respon
     // Verify the signature over the *raw* body before parsing. The path is
     // taken from the matched URI (no query on this route).
     let authed_user = if state.require_auth {
-        let conn = state.db.conn().await?;
         match auth::verify_request_cached(
             &state.device_keys,
-            &conn,
+            &state.db,
             &req.headers,
             req.method.as_str(),
             req.uri.path(),
@@ -827,10 +826,9 @@ async fn report_commit_since(
     // DB. `(user_id, device_id)` come from the verified signature — never from
     // the body — when auth is on.
     let authed = if state.require_auth {
-        let conn = state.db.conn().await?;
         match auth::verify_request_identity_cached(
             &state.device_keys,
-            &conn,
+            &state.db,
             &req.headers,
             req.method.as_str(),
             req.uri.path(),
