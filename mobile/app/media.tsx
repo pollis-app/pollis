@@ -43,6 +43,7 @@ import {
 import { formatBytes } from "../lib/exportArchive";
 import { semantic, space, type as ty } from "../theme/tokens";
 import type { MessageAttachment } from "../types";
+import { useThemeRerender } from "../components/theme";
 
 type Feedback = "saved" | "denied" | "saveFailed" | "shareFailed" | "shareUnavailable";
 
@@ -55,6 +56,7 @@ const FEEDBACK_KEYS: Record<Feedback, string> = {
 };
 
 export default function MediaViewerScreen() {
+  useThemeRerender();
   const { t } = useTranslation("mobile");
   const router = useRouter();
   const navigation = useNavigation();

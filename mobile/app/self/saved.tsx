@@ -17,6 +17,7 @@ import { useConversationRoute } from "../../hooks/useConversationRoute";
 import { EmojiText } from "../../components/emoji/EmojiText";
 import { permalinkMissCopy } from "../../lib/permalinks";
 import { messageJumpStore } from "../../stores/messageJumpStore";
+import { useThemeRerender } from "../../components/theme";
 
 function timeAgo(iso: string): string {
   const then = new Date(iso).getTime();
@@ -42,6 +43,7 @@ function timeAgo(iso: string): string {
  * and navigates nowhere.
  */
 export default function SavedScreen() {
+  useThemeRerender();
   const { t } = useTranslation("saved");
   // Phones push the conversation; iPad opens it in its tab's two-pane.
   const { openConversation } = useOpenConversation();

@@ -16,7 +16,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { useObserver } from "mobx-react-lite";
 import { semantic } from "../theme/tokens";
 import { drillIn, settingsPage } from "../lib/transitions";
-import { ThemeProvider } from "../components/theme";
+import { ThemeProvider, useThemeRerender } from "../components/theme";
 import { queryClient } from "../lib/queryClient";
 import { initializeNativeBridge, invoke } from "../lib/native";
 import { usePushNotifications } from "../hooks/usePushNotifications";
@@ -50,6 +50,26 @@ function SignedInServicesGate() {
     }
   }, [userId]);
   return null;
+}
+
+// The root stack, under <ThemeProvider> so its scene background follows a
+// palette change like every other surface (#1447).
+function RootStack({ children }: { children: React.ReactNode }) {
+  useThemeRerender();
+  return (
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: semantic.bg },
+        // Drilling further into a route (tab → group → channel) pushes
+        // the new screen in from the right; back reverses it. Timing
+        // lives in lib/transitions.
+        ...drillIn,
+      }}
+    >
+      {children}
+    </Stack>
+  );
 }
 
 export default function RootLayout() {
@@ -152,16 +172,7 @@ export default function RootLayout() {
             {/* Auto-lock (#899): captures touch starts to refresh the idle
                 deadline and locks on background-elapsed / foreground-idle. */}
             <AutoLockProvider>
-            <Stack
-              screenOptions={{
-                headerShown: false,
-                contentStyle: { backgroundColor: semantic.bg },
-                // Drilling further into a route (tab → group → channel) pushes
-                // the new screen in from the right; back reverses it. Timing
-                // lives in lib/transitions.
-                ...drillIn,
-              }}
-            >
+            <RootStack>
               {/* Boot router cuts in with nothing. Entering the tab container
                   fades — this is the Initializing → app handoff (and cold-boot
                   → app); tab switches *inside* (tabs) stay un-animated, handled
@@ -232,7 +243,7 @@ export default function RootLayout() {
                 name="self/delete-account"
                 options={settingsPage}
               />
-            </Stack>
+            </RootStack>
             </AutoLockProvider>
           </ThemeProvider>
         </QueryClientProvider>

@@ -39,6 +39,7 @@ delete/remove/revoke), the record id is appended to keep the selector unique
 | Element | testID |
 | --- | --- |
 | Back chevron, top-start of every pushed screen (`<Header>`; `<BackBar>` on `group/[id]`) | `btn-back` |
+| Active palette (#1447; invisible full-size probes drawn under every `<Screen>`'s content, `components/ThemeProbe.tsx`) | `theme-accent-<rrggbb>` — the accent the screen rendered with (default `theme-accent-fabf5a`, lilac `theme-accent-bda3e0`); `theme-boot-accent-<rrggbb>` — the accent the app was seeded with at load, i.e. the first frame's |
 | Tab bar entries (`<TabBar>`) | `tab-groups`, `tab-direct`, `tab-search`, `tab-self`; unread badge `badge-<tab>` |
 | Bottom sheet Close button (top-end of every `SheetOverlay`; `closeTestID`) | `btn-sheet-close` by default (group menu, add group, create channel, emoji picker); the message-actions sheet's Close is `btn-action-cancel` and the channel sheet's is `btn-menu-cancel`, so those long-standing ids still close their sheets |
 | Sign-out confirmation | **native Alert, no testID.** `btn-sign-out` (Self tab and `self/security`) opens it; tap the destructive button by its label, `auth:shell.signOutTitle` — en `"Sign out"`, es `"Cerrar sesión"` (Cancel = `common:actions.cancel`). Title: `mobile:self.hub.signOutConfirmTitle` ("Sign out of Pollis on this device?"). |

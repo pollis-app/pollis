@@ -19,8 +19,10 @@ import { useCreateGroup } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
 import { writeLastGroupId } from "../../components/groups/lastGroup";
 import { observer } from "mobx-react-lite";
+import { useThemeRerender } from "../../components/theme";
 
 function NewGroup() {
+  useThemeRerender();
   const { t } = useTranslation("channels");
   const router = useRouter();
   const [name, setName] = useState("");

@@ -11,6 +11,7 @@ import { restoreSession } from "../../hooks/queries/useAuth";
 import { appStore } from "../../stores/appStore";
 import { useOpenConversation } from "../../hooks/useOpenConversation";
 import { groupQueryKeys, type RedeemedInvite } from "../../hooks/queries";
+import { useThemeRerender } from "../../components/theme";
 
 interface UnlockStateSnapshot {
   pin_set: boolean;
@@ -45,6 +46,7 @@ type Phase = "working" | "confirm" | "joining" | "signedOut" | "locked" | "faile
 // revoked or used up — distinguishing them would confirm to an attacker that
 // a token was real but stale.
 export default function InviteLanding() {
+  useThemeRerender();
   const { t } = useTranslation("mobile");
   const router = useRouter();
   // Phones land on the group page; iPad on the Groups tab's two-pane.

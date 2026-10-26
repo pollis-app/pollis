@@ -37,8 +37,10 @@ import {
 } from "../../components/MasterDetail";
 import { usePaneStack } from "../../components/pane/paneContext";
 import { ChatView } from "../chat/[id]";
+import { useThemeRerender } from "../../components/theme";
 
 function Direct() {
+  useThemeRerender();
   const router = useRouter();
   const { t } = useTranslation("mobile");
   const { data: dms = [], isLoading, isError } = useDMChannels();

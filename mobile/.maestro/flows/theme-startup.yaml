@@ -1,0 +1,88 @@
+appId: com.pollis.mobile
+tags:
+  - parity
+---
+# THEME AT STARTUP (#1447) — a non-default palette must paint the FIRST frame
+# of a cold start (the PIN screen included), not arrive after the synced
+# preferences load or a few navigations later. Self-contained.
+#
+# Hooks (components/ThemeProbe.tsx, drawn by every <Screen>):
+#   theme-accent-<rrggbb>       the accent the screen rendered with;
+#   theme-boot-accent-<rrggbb>  the accent the app was seeded with at load,
+#                               i.e. what the first frame painted. Asserting it
+#                               rules out "amber first, then purple once the
+#                               preferences round trip lands".
+# Lilac (#bda3e0) is the purple preset; amber (#fabf5a) is the default.
+
+- runFlow: ../subflows/sign-in.yaml
+
+# A brand-new account has no saved accent, so it settles on the default — even
+# if an earlier run left lilac in the device store (iOS keeps the keychain
+# across clearState): the synced blob wins once it loads.
+- extendedWaitUntil:
+    visible:
+      id: "theme-accent-fabf5a"
+    timeout: 20000
+
+# Pick lilac. The whole visible UI re-themes at once.
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-preferences"
+- assertVisible:
+    id: "screen-self-preferences"
+- tapOn:
+    id: "chip-accent-lilac"
+- assertVisible:
+    id: "theme-accent-bda3e0"
+- takeScreenshot: theme-01-lilac-picked
+# Back on a tab the pick did not render: it must already be lilac too, with
+# no navigation in between to remount it.
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "tab-groups"
+- assertVisible:
+    id: "theme-accent-bda3e0"
+- assertNotVisible:
+    id: "theme-accent-fabf5a"
+- takeScreenshot: theme-02-groups-after-pick
+
+# Cold restart. The first screen (the PIN unlock, or the tabs if the session
+# is still unlocked) is lilac from its first frame — before any tap.
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "theme-boot-accent-bda3e0"
+    timeout: 30000
+- assertVisible:
+    id: "theme-accent-bda3e0"
+- assertNotVisible:
+    id: "theme-accent-fabf5a"
+- takeScreenshot: theme-03-cold-start-first-screen
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 30000
+- assertVisible:
+    id: "theme-boot-accent-bda3e0"
+- assertNotVisible:
+    id: "theme-accent-fabf5a"
+- takeScreenshot: theme-04-cold-start-tabs
+
+# Leave the device on the default palette for the flows that follow.
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-preferences"
+- tapOn:
+    id: "chip-accent-amber"
+- assertVisible:
+    id: "theme-accent-fabf5a"

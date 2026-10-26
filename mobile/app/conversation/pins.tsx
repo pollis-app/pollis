@@ -36,8 +36,10 @@ import { pinPreview } from "../../lib/pins";
 import { permalinkMissCopy } from "../../lib/permalinks";
 import { messageJumpStore } from "../../stores/messageJumpStore";
 import { appStore } from "../../stores/appStore";
+import { useThemeRerender } from "../../components/theme";
 
 function PinnedMessagesScreen() {
+  useThemeRerender();
   const nav = useNav();
   const { t } = useTranslation("nav");
   const params = useRouteParams<{ id?: string; kind?: string; name?: string }>();

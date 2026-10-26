@@ -40,6 +40,7 @@ import {
 import { ExportArchive } from "../../components/ExportArchive";
 import { SAS_LENGTH, normalizeSasInput } from "../../lib/enrollmentSas";
 import { haptic } from "../../lib/haptics";
+import { useThemeRerender } from "../../components/theme";
 
 function formatRelative(iso: string): string {
   const d = new Date(iso);
@@ -196,6 +197,7 @@ function describeEvent(event: SecurityEvent): {
 const SECURITY_EVENTS_PAGE_SIZE = 20;
 
 export default function Security() {
+  useThemeRerender();
   const { t } = useTranslation("settings");
   const router = useRouter();
   const { section } = useLocalSearchParams<{ section?: string }>();

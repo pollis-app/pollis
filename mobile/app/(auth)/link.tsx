@@ -10,6 +10,7 @@ import { semantic, type as ty, fonts, r } from "../../theme/tokens";
 import { useClaimDeviceLink } from "../../hooks/queries";
 import { OfferCodeView } from "../../components/auth/OfferCodeView";
 import { isSignInCode, phoneDeviceName } from "../../lib/linkCodes";
+import { useThemeRerender } from "../../components/theme";
 
 /**
  * Sign in with another device. Three ways in, one screen, laid out like Sign
@@ -22,6 +23,7 @@ import { isSignInCode, phoneDeviceName } from "../../lib/linkCodes";
  *   under Security → Scan to sign in a device.
  */
 export default function LinkSignIn() {
+  useThemeRerender();
   const { t } = useTranslation("auth");
   const router = useRouter();
   const claim = useClaimDeviceLink();

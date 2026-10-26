@@ -11,6 +11,7 @@ import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import i18n from "../../i18n";
 import { haptic } from "../../lib/haptics";
+import { useThemeRerender } from "../../components/theme";
 
 /**
  * Emergency Kit — shown once, right after a brand-new account's PIN is set.
@@ -50,6 +51,7 @@ function emergencyKitDocument(secretKey: string): string {
 }
 
 function EmergencyKit() {
+  useThemeRerender();
   const { t } = useTranslation("auth");
   const router = useRouter();
   const pendingSecretKey = appStore.pendingSecretKey;
