@@ -1,0 +1,109 @@
+appId: com.pollis.mobile
+tags:
+  - parity
+---
+# LONG HISTORY — #1432: with more messages than fit on screen, the composer
+# must still sit at the bottom of the conversation, visible, on open and
+# re-open. Every other flow posts a handful of messages, which never fills the
+# list, so it never caught the Android composer being pushed off the screen.
+# Self-contained: creates a group (→ #General) and seeds the history itself.
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-groups"
+- assertVisible:
+    id: "screen-groups"
+
+- tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Long History"
+- tapOn:
+    id: "btn-submit-group"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "E2E Long History, .*"
+    timeout: 15000
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"
+
+# The first send in a fresh group pays for the MLS group setup; wait for it to
+# land before seeding the rest.
+- tapOn:
+    id: "input-composer"
+- inputText: "history 0"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*istory 0.*"
+    timeout: 30000
+
+# Seed far more than one screen of messages (a Pixel 8 shows ~10 rows).
+- evalScript: ${output.n = 0}
+- repeat:
+    times: 25
+    commands:
+      - evalScript: ${output.n = output.n + 1}
+      - tapOn:
+          id: "input-composer"
+      - inputText: "history ${output.n}"
+      # Send stays disabled while the previous message is still sending; a
+      # tap then does nothing, so wait for it to come back.
+      - extendedWaitUntil:
+          visible:
+            id: "btn-send"
+            enabled: true
+          timeout: 20000
+      - tapOn:
+          id: "btn-send"
+      # One message per send: wait for it to land before the next.
+      - extendedWaitUntil:
+          visible: ".*istory ${output.n},.*"
+          timeout: 20000
+- hideKeyboard
+- assertVisible:
+    id: "input-composer"
+- assertVisible:
+    id: "btn-send"
+
+# Re-open: the conversation mounts with the whole history already loaded,
+# which is where the composer went missing.
+- tapOn:
+    id: "btn-back"
+    optional: true
+- tapOn:
+    text: "General"
+- assertVisible:
+    id: "screen-chat"
+- extendedWaitUntil:
+    visible: ".*istory 25,.*"
+    timeout: 15000
+- assertVisible:
+    id: "input-composer"
+- assertVisible:
+    id: "btn-send"
+- takeScreenshot: long-history-01-composer-visible
+
+# Sending from here still works and lands at the bottom.
+- tapOn:
+    id: "input-composer"
+- inputText: "after reopen"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*after reopen.*"
+    timeout: 15000
+- hideKeyboard
+- assertVisible:
+    id: "input-composer"
+- takeScreenshot: long-history-02-after-send

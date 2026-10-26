@@ -94,6 +94,7 @@ IOS_DEVICE="iPhone 17 Pro" mobile/scripts/maestro-run.sh auth ios   # an Xcode 2
 | `groups` | create group, open, channel visible | no |
 | `messaging` | send / edit / delete / react in a self-owned channel | no |
 | `outbox` | #1335 a message whose send is killed mid-flight (`stopApp` right after Send in a fresh group) is still there after relaunch + unlock and is delivered by the outbox drain (no `btn-retry-message-*` left); Android only: a send made in airplane mode is kept as failed with `btn-retry-message-<id>` / `btn-discard-message-<id>`, and back online Retry settles it | no |
+| `long-history` | #1432 seeds a channel with more messages than one screen holds (each send made with the keyboard up, so a composer left behind the keyboard fails the tap), then re-opens it: `input-composer` and `btn-send` must be on screen | no |
 | `reply` | #1270 swipe a message toward the start edge → reply bar (not the message sheet), send, the row quotes the original; double tap does the same; dismiss cancels; tapping a quote jumps to the original | no |
 | `channel-menu` | #1193 the channel kebab sheet: every item tapped by `testID`, plus `channel-menu-01-open` — the gallery shot that must show an OPAQUE sheet (no header/composer through its buttons; the invariant itself is pinned in `tests/sheet-opaque.test.ts`) | no |
 | `profile-prefs` | accent re-theme, behavior toggle, display-name save | no |
