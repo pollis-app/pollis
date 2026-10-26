@@ -1,11 +1,11 @@
 import React, { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { ArrowLeft, Hash, Plus, Volume2, Users, UserPlus, Inbox, LogOut, Pencil, Smile } from "lucide-react";
+import { ArrowLeft, BellOff, Hash, Plus, Volume2, Users, UserPlus, Inbox, LogOut, Pencil, Smile } from "lucide-react";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
-import { useUserGroupsWithChannels, useGroupJoinRequests } from "../hooks/queries/useGroups";
+import { useUserGroupsWithChannels, useGroupJoinRequests, useMutedChannels } from "../hooks/queries/useGroups";
 import { LastMessagePreview } from "../components/Message/LastMessagePreview";
 import { useLastMessages } from "../hooks/queries/useMessages";
 import { useVoiceRoomCounts } from "../hooks/queries/useVoiceParticipants";
@@ -20,6 +20,7 @@ export const GroupPage: React.FC = observer(() => {
   const { data: groupsWithChannels, isLoading } = useUserGroupsWithChannels();
   const group = groupsWithChannels?.find((g) => g.id === groupId);
   const isAdmin = group?.current_user_role === 'admin';
+  const { data: mutedChannels } = useMutedChannels();
 
   const voiceChannelIds = useMemo(
     () => (group?.channels ?? []).filter((ch) => ch.channel_type === "voice").map((ch) => ch.id),
@@ -79,6 +80,18 @@ export const GroupPage: React.FC = observer(() => {
     },
     badge: unreadCounts[ch.id] ?? 0,
     testId: `channel-option-${ch.id}`,
+    // A muted channel (#1431) is drawn in the dimmed tier, with a bell-off
+    // mark so the state is not carried by colour alone.
+    ...(mutedChannels?.has(ch.id)
+      ? {
+        type: "system" as const,
+        trailingIndicator: (
+          <span title={t("channel.mutedHint")} aria-label={t("channel.mutedHint")} className="text-muted">
+            <BellOff size={12} />
+          </span>
+        ),
+      }
+      : {}),
   }));
 
   const voiceChannelItems: TerminalMenuItem[] = voiceChannels.map((ch) => {

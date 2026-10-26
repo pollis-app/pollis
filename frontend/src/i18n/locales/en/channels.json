@@ -29,7 +29,11 @@
     "fallbackTitle": "Channel",
     "renameLabel": "Rename channel",
     "deleteLabel": "Delete channel",
-    "pinsLabel": "Pinned messages"
+    "pinsLabel": "Pinned messages",
+    "muteLabel": "Mute channel",
+    "unmuteLabel": "Unmute channel",
+    "mutedHint": "Muted",
+    "muteDescription": "Muted channels don't notify you, except when someone mentions you by name."
   },
   "createChannel": {
     "pageTitle": "New Channel",

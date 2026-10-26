@@ -14,9 +14,9 @@ import { flushOutbox, lastMessageQueryKeys, messageQueryKeys, useDMConversations
 import { receiptQueryKeys } from './queries/useReceipts';
 import { invalidateVoiceRoom, voiceQueryKeys } from './queries/useVoiceParticipants';
 import { usePreferences } from './queries/usePreferences';
-import { groupQueryKeys, useUserGroupsWithChannels } from './queries/useGroups';
+import { groupQueryKeys, useMutedChannels, useUserGroupsWithChannels } from './queries/useGroups';
 import { blocksQueryKeys } from './queries/useBlocks';
-import { notify, setNotifyPrefs, loadDeviceCallRingtone } from '../utils/notify';
+import { notify, setNotifyPrefs, setMutedChannels, loadDeviceCallRingtone } from '../utils/notify';
 import { logIgnored } from '../utils/log';
 import { shouldAlertForWake, type WakeLatest } from '../utils/messageWake';
 import { typingStore, typingRoomKey } from '../stores/typingStore';
@@ -128,6 +128,11 @@ type RealtimeEvent =
     /// Set when the request belongs to a QR device link (#1207 / #1361). The
     /// core forwards it from the DS packet; it carries no code (#1096).
     link_id: string | null;
+  }
+  | {
+    // DS-originated (#1431): this account's channel mutes changed on another
+    // of its devices. Carries nothing; the mutes are re-read.
+    type: 'channel_mutes_changed';
   }
   | {
     type: 'realtime_reconnected';
@@ -287,6 +292,14 @@ export function useLiveKitRealtime() {
       setNotifyPrefs({ allowSound, allowOsNotif, osPermissionGranted: false, allowCallRingtone });
     });
   }, [isTauriReady, prefsQuery.data?.allow_sound_effects, prefsQuery.data?.allow_desktop_notifications, currentUser?.id]);
+
+  // ── Channel mutes → notify() (#1431) ──────────────────────────────────────
+  // The DS already skips a muted channel's pushes; this keeps this desktop's
+  // own sounds and OS banners to the same rule.
+  const { data: mutedChannels } = useMutedChannels();
+  useEffect(() => {
+    setMutedChannels(mutedChannels ?? []);
+  }, [mutedChannels]);
 
   // ── Enrollment poll fallback ────────────────────────────────────────────
   // The enrollment-request inbox nudge is emitted server-side by the DS (the
@@ -608,6 +621,13 @@ export function useLiveKitRealtime() {
           queryClientRef.current.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
           queryClientRef.current.invalidateQueries({ queryKey: receiptQueryKeys.conversation(event.room_id) });
         }
+        return;
+      }
+
+      if (event.type === 'channel_mutes_changed') {
+        queryClientRef.current.invalidateQueries({
+          queryKey: groupQueryKeys.mutedChannels(currentUserIdRef.current),
+        });
         return;
       }
 
