@@ -985,8 +985,14 @@ full-screen page and every pane page uses `<Screen>`'s one
 
 Keyboard (#1246): `react-native-keyboard-controller` owns it. `KeyboardProvider`
 wraps the root layout; `<Screen>` and `SheetOverlay` use its
-`KeyboardAvoidingView` (`behavior="padding"`, `automaticOffset`) on both
-platforms, and a `<Screen>` nested in another skips its own. Never import
+`KeyboardAvoidingView` (`behavior="padding"`) on both platforms, and a
+`<Screen>` nested in another skips its own. `<Screen>` must NOT pass
+`automaticOffset` (#1432): it reads the window position asynchronously, and
+on Android that can answer before the screen sits below the status bar, so
+the stale frame left every keyboard on the screen a status bar short — the
+chat composer hidden behind it, mostly in long conversations. The layout
+frame alone is exact, since a `<Screen>` starts at the window's top; only
+`SheetOverlay` (inside a Modal, never moves) keeps `automaticOffset`. Never import
 `KeyboardAvoidingView` from `react-native` or hand-roll an inset from
 `Keyboard` events: the app is edge-to-edge, so `adjustResize` is inert and
 `keyboardDidShow` heights come out short. A screen that mounts with the
