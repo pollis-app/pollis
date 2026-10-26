@@ -806,6 +806,105 @@ failure it distils the failing op sequence out of the teed log into
 `marathon-failing-op-sequence.txt` and uploads it as an artifact — the op sequence
 being the only repro of record for a non-seedable run.
 
+## Vault media soak (#1491)
+
+An **ad-hoc** suite, never part of a CI test run, that uses the Vault's media
+mode as a file store and proves, file by file, that each one is encrypted
+everywhere it goes except while it is being viewed, comes back byte-identical,
+and is really gone after a delete. `src-tauri/tests/vault_soak.rs` (+
+`tests/vault_soak/`), behind its own `vault-soak` feature (so no ordinary
+`cargo test` even compiles it) and `#[ignore]`.
+
+```bash
+scripts/vault-soak.sh            # local: in-process DS + SeaweedFS in docker
+scripts/vault-soak.sh dev        # api-dev + dev R2 (secrets from .env.development)
+POLLIS_SOAK_SIZES=1M,50M,600M,2G scripts/vault-soak.sh
+```
+
+Or Actions → **Vault soak** (`.github/workflows/vault-soak.yml`,
+`workflow_dispatch` only, inputs target / count / min_size / max_size; the
+report is the run's artifact; the dev job reads Doppler through the
+`delivery-dev` environment). Knobs (all env, documented at the top of the
+script): `POLLIS_SOAK_COUNT` (default 20 local, 4 dev), `POLLIS_SOAK_MIN_SIZE`
+/ `POLLIS_SOAK_MAX_SIZE` (1M / 2G local, 256K / 8M dev; sizes log-spaced
+between them), `POLLIS_SOAK_SIZES` (explicit list), `POLLIS_SOAK_MEDIA_DIR`
+(real files; default: the repo's README images and a WAV, plus a generated
+H.264 clip and JPEG when `ffmpeg` is installed), `POLLIS_SOAK_SEED`,
+`POLLIS_SOAK_KEEP=1`. The report lands at `<workdir>/report.md` (default
+`target/vault-soak/<timestamp>-<target>/`): per file the size, upload / view /
+save / delete timings, throughput and every proof with its evidence, then the
+global proofs. The script builds our own crates at opt-level 2 (the AES-GCM
+generics are instantiated in pollis-core, so an opt-level-0 build runs them an
+order of magnitude slower than shipped code); `POLLIS_SOAK_OPT=0` skips that.
+
+**The two worlds.** *Local*: the real DS router in-process (auth on), its R2
+broker pointed at SeaweedFS (Apache-2.0; MinIO deliberately avoided) with
+throwaway credentials, and the client reaching both through **recording
+reverse proxies** (`tap.rs`) — every request and response body on the DS and
+object-storage hops is inspected. The S3 tap keeps the `Host` header the URL
+was signed for. *Dev*: api-dev through a local DS tap; R2 is reached directly
+(its TLS endpoint is the origin the DS signs for, so that hop has no tap and
+the at-rest object stands in for the PUT body); DS rows are read from dev
+Turso when `TURSO_URL` / `TURSO_TOKEN` are set, and both throwaway accounts are
+deleted at the end. The script refuses the production DS.
+
+**Needles.** Each corpus file contributes plaintext windows (prefix, suffix,
+six interior 64-byte samples — walked forward to a distinctive window in
+low-entropy media), its filename (which carries a random token), and its
+plaintext SHA-256 (hex and raw — the digest lives only inside the encrypted
+entry). Secrets are added in raw, hex, HEX, base64 and base64url: the account
+identity key seed, the Vault file root, the device's local-DB key, and each
+file's AES key and nonce (`commands::vault::test_hooks::vault_file_secrets`,
+test-harness only). One Aho–Corasick automaton searches every hop for all of
+them.
+
+| Proof | How |
+|---|---|
+| **in transit** | the S3 PUT body: needle-free, high entropy, no file magic, sealed length, byte-identical to the stored object; every S3 GET response likewise; every DS request/response body re-scanned at the end with every needle, including keys learned after the request went out |
+| **at rest (storage)** | the raw object fetched with the bucket's own credentials (an operator's view): needle-free, entropy above the random-data floor, no magic, ≠ plaintext digest; it opens with the real file key and the plaintext digest matches, while HKDF of the file id, a convergent HKDF(sha256(plaintext)) key and a random key are all refused; an exact duplicate shares neither file id nor ciphertext (#1382) |
+| **DS rows** | `attachment_object` holds the random file id (≠ any digest of the content) and the object key only; `vault_attachment_ref` and `vault_message` exist; every cell needle-free; after deletion a full scan of every table in both DS databases (local) |
+| **local cache / DB** | the media-cache entry is ciphertext that opens with the device DB key and not a wrong one; the whole app data dir (SQLCipher DB, WAL, cache, `accounts.json`, logs) is needle-free; the DB has no plaintext header, a wrong key cannot open it, and the right key finds every entry — so "no needle on disk" is not vacuous |
+| **transient plaintext** | the loopback view returns the plaintext with `Cache-Control: no-store`; the system temp dir holds no new decrypted copy; locking turns every loopback URL into 403; the next unlock empties the cache; ending the session (logout, or account deletion on dev) leaves the user's cache dir empty — a stored, viewed sentinel proves it had something to wipe |
+| **round trip** | `save_media_to_path` (download, decrypt, verify, write) and SHA-256 of the saved file |
+| **delete** | operator GET → 404; `attachment_object`, `vault_attachment_ref`, `vault_message` rows gone; the cache entry gone; the owner's own `download_media` fails; the entry is gone after a re-sync; a brand-new device and account minting its own presigned GET gets 404 |
+
+**Over-cap files are part of the run.** A Vault file is at most
+`R2_MEDIA_MAX_BYTES` (104 MiB; the DS refuses to sign a larger PUT) and is
+sealed and fetched whole in memory (4 MiB AEAD chunks, but no streaming), so
+anything larger cannot be stored. Sizes above the cap stay in the corpus on
+purpose: the soak proves each is refused in milliseconds with no request on
+either tap. Files over the 100 MiB per-file cache cap are viewed through the
+in-memory byte path and must leave nothing in the cache.
+
+**What the first run found** (fixed in the same PR): deleting a Vault entry
+released its DS references but nothing ever collected the files — the object
+and its `attachment_object` row stayed in storage for the life of the account
+(and an edit that dropped a file did the same). `delete_vault_message` /
+`edit_vault_message` now collect them (see `commands.md` → vault). And
+`upload_media` read the whole file before applying the size cap, so picking a
+2 GB video buffered 2 GB to be told no; it now refuses from the file's
+metadata.
+
+### Mobile
+
+Mobile's transient plaintext lives in JS, not core: `get_media_path` decrypts a
+viewed Vault file to `<cacheDirectory>/pollis-media/<file id>` (plus a named
+copy under `pollis-media/named/` for the viewer) and `mobile/lib/media/cache.ts`
+unlinks both on the last release. The core soak cannot reach that, so it is a
+manual check: run `mobile/.maestro/manual/vault-transient-media.yaml` (outside
+`flows/`, so never part of `maestro-run.sh all`) against a Release build, then
+list the directory — it must be empty:
+
+```bash
+# iOS simulator
+ls "$(xcrun simctl get_app_container booted com.pollis.mobile data)/Library/Caches/pollis-media"
+# Android emulator (google_apis image; `adb root` is refused on Play images)
+adb root && adb shell ls /data/data/com.pollis.mobile/cache/pollis-media
+```
+
+Run the same listing while the viewer is still open to see the check has
+teeth (the decrypted file and its named copy are there).
+
 ## Machine-checked proofs (Kani, #452)
 
 Beyond the tests, the **pure** correctness cores of the MLS/DS state machine are

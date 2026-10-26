@@ -6342,6 +6342,8 @@ dependencies = [
 name = "pollis"
 version = "1.1.0"
 dependencies = [
+ "aes-gcm",
+ "aho-corasick",
  "anyhow",
  "axum 0.7.9",
  "base64 0.22.1",
@@ -6349,6 +6351,7 @@ dependencies = [
  "cocoa",
  "dotenvy",
  "hex",
+ "hkdf 0.12.4",
  "image",
  "libc",
  "libsql",
@@ -6361,11 +6364,14 @@ dependencies = [
  "pollis-delivery",
  "pollis-sqlcipher",
  "proptest",
+ "rand 0.8.6",
+ "reqwest 0.12.28",
  "reqwest 0.13.2",
  "rusqlite",
  "serde",
  "serde_json",
  "serial_test",
+ "sha2 0.10.9",
  "tauri",
  "tauri-build",
  "tauri-plugin-clipboard-manager",

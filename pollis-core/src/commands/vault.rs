@@ -396,6 +396,8 @@ pub async fn edit_vault_message(
         get_local(db.conn(), &id)?
     }
     .ok_or_else(|| Error::Other(anyhow::anyhow!("vault entry not found")))?;
+    // An edit that drops a file releases it, exactly like a delete does.
+    let released = released_files(state, &id, Some(&new_content)).await?;
 
     let entry = VaultEntryPlain {
         v: 1,
@@ -403,6 +405,9 @@ pub async fn edit_vault_message(
         pinned: existing.pinned,
     };
     save_entry(state, &user_id, &id, &entry, &existing.created_at).await?;
+    for att in &released {
+        release_vault_file(state, &user_id, att).await;
+    }
 
     let updated_at = super::messages::envelope_sent_at();
     let guard = state.local_db.lock().await;
@@ -480,23 +485,100 @@ pub async fn delete_vault_message(
     user_id: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
+    // Read the entry's files BEFORE it is gone: the DS drops the entry's
+    // references with it, but nothing else would ever collect the objects.
+    let released = released_files(state, &id, None).await?;
+
     let body = pollis_api::vault::DeleteVaultMessageBody {
         id: id.clone(),
         user_id: user_id.clone(),
     };
     super::mls::ds_post_ok(state, &body).await?;
 
+    {
+        let guard = state.local_db.lock().await;
+        let db = guard
+            .as_ref()
+            .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
+        db.conn()
+            .execute(
+                "DELETE FROM vault_entry_cache WHERE id = ?1",
+                rusqlite::params![id],
+            )
+            .map_err(|e| Error::Other(anyhow::anyhow!("vault cache delete: {e}")))?;
+    }
+
+    for att in &released {
+        release_vault_file(state, &user_id, att).await;
+    }
+    Ok(())
+}
+
+/// The files entry `id` holds that no OTHER entry in the local cache holds,
+/// minus any still named by `new_body` (an edit that keeps a file). These are
+/// the files whose last reference a delete or an edit of `id` releases.
+///
+/// Read from the local cache, which every write keeps in step with the server
+/// and every list refreshes: the UI can only delete or edit an entry it has
+/// listed, so the entry is there.
+async fn released_files(
+    state: &Arc<AppState>,
+    id: &str,
+    new_body: Option<&str>,
+) -> Result<Vec<super::messages::AttachmentRef>> {
     let guard = state.local_db.lock().await;
     let db = guard
         .as_ref()
         .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
-    db.conn()
-        .execute(
-            "DELETE FROM vault_entry_cache WHERE id = ?1",
-            rusqlite::params![id],
-        )
-        .map_err(|e| Error::Other(anyhow::anyhow!("vault cache delete: {e}")))?;
-    Ok(())
+    let mut held_elsewhere = std::collections::HashSet::new();
+    let mut mine = Vec::new();
+    for entry in list_local(db.conn())? {
+        let refs = super::messages::parse_attachment_refs(&entry.content);
+        if entry.id == id {
+            mine = refs;
+        } else {
+            held_elsewhere.extend(refs.into_iter().map(|r| r.content_hash));
+        }
+    }
+    if let Some(body) = new_body {
+        held_elsewhere.extend(
+            super::messages::parse_attachment_refs(body)
+                .into_iter()
+                .map(|r| r.content_hash),
+        );
+    }
+    Ok(mine
+        .into_iter()
+        .filter(|r| !held_elsewhere.contains(&r.content_hash))
+        .collect())
+}
+
+/// Collect a Vault file whose last reference was just released (#1491): the
+/// DS's `attachment_object` row, the stored object, and this device's cached
+/// copy. Until this ran on delete, a deleted Vault file stayed in object storage
+/// and in `attachment_object` for the life of the account.
+///
+/// Best-effort and logged, like `cleanup_attachment` for chat messages: the
+/// entry itself is already gone, which is what the user asked for. Both server
+/// steps are conditional on the server side — the row is collected and the
+/// delete presign minted only while NO live reference (message or vault, any
+/// user) remains — so a file another entry or message still holds survives.
+async fn release_vault_file(
+    state: &Arc<AppState>,
+    user_id: &str,
+    att: &super::messages::AttachmentRef,
+) {
+    let collect = pollis_api::messages::AttachmentDeleteBody {
+        content_hash: att.content_hash.clone(),
+        message_id: None,
+    };
+    if let Err(e) = super::mls::ds_post_ok(state, &collect).await {
+        crate::diag!("[vault] failed to collect attachment row {}: {e}", att.content_hash);
+    }
+    if let Err(e) = super::r2::delete_r2_object(state, &att.r2_key).await {
+        crate::diag!("[vault] failed to delete object {}: {e}", att.r2_key);
+    }
+    super::r2::evict_cached_file_for_user(user_id, &att.content_hash);
 }
 
 /// Case-insensitive substring search over the local cache. Runs entirely
@@ -523,6 +605,46 @@ pub async fn search_vault_messages(
         .into_iter()
         .filter(|m| m.content.to_lowercase().contains(&needle))
         .collect())
+}
+
+/// Test harness only: the secrets a Vault file's confidentiality rests on, so
+/// the vault soak suite (#1491, `src-tauri/tests/vault_soak.rs`) can search
+/// every place the file passes through — request bodies, object storage, DS
+/// rows, the local disk — for each of them, and prove the stored object opens
+/// with the real key and with nothing else.
+#[cfg(feature = "test-harness")]
+pub mod test_hooks {
+    use super::*;
+
+    pub struct VaultFileSecrets {
+        /// The account identity key seed every Vault key derives from.
+        pub account_seed: Vec<u8>,
+        /// The Vault file root (`pollis-vault-files-v1`).
+        pub root_key: [u8; 32],
+        /// This file's AES-256-GCM key and base nonce.
+        pub file_key: [u8; 32],
+        pub file_nonce: [u8; 12],
+    }
+
+    pub async fn vault_file_secrets(
+        state: &Arc<AppState>,
+        user_id: &str,
+        file_id_hex: &str,
+    ) -> Result<VaultFileSecrets> {
+        let file_id: [u8; 32] = hex::decode(file_id_hex)
+            .ok()
+            .and_then(|b| b.try_into().ok())
+            .ok_or_else(|| Error::Other(anyhow::anyhow!("file id must be 32 hex bytes")))?;
+        let seed = account_seed(state, user_id).await?;
+        let root = vault_file_root_key(state, user_id).await?;
+        let (key, nonce) = crate::commands::file_keys::derive_file_key(&root, &file_id);
+        Ok(VaultFileSecrets {
+            account_seed: seed.to_vec(),
+            root_key: *root,
+            file_key: *key,
+            file_nonce: nonce,
+        })
+    }
 }
 
 #[cfg(test)]
