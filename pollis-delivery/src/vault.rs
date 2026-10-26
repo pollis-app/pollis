@@ -147,13 +147,20 @@ pub async fn apply_save_vault_message(
             // A fresh row's `updated_at` IS its `created_at`: clients show
             // "(edited)" when the two differ, and the column default (server
             // clock, SQLite format) made every entry look edited (#1316). Only
-            // the rewrite arm below stamps a new value.
+            // the rewrite arm below stamps a new value — and only for a real
+            // change: a byte-identical save is a client resending after a
+            // connection failure (#1497, `DsRequest::IDEMPOTENT`), and must not
+            // mark the entry edited. A genuine edit is always a fresh nonce.
             "INSERT INTO vault_message (id, user_id, nonce, blob, created_at, updated_at) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?5) \
              ON CONFLICT(id) DO UPDATE SET \
                  nonce = excluded.nonce, \
                  blob = excluded.blob, \
-                 updated_at = datetime('now') \
+                 updated_at = CASE \
+                     WHEN vault_message.nonce = excluded.nonce \
+                      AND vault_message.blob = excluded.blob \
+                     THEN vault_message.updated_at \
+                     ELSE datetime('now') END \
              WHERE vault_message.user_id = ?2",
             libsql::params![
                 body.id.clone(),

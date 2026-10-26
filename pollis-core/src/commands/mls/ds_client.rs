@@ -95,7 +95,7 @@ pub async fn ds_post<B: ClientRequest>(
     // which the mobile builds pay for in binary size for no benefit.
     let body_bytes = serde_json::to_vec(body)
         .map_err(|e| Error::Other(anyhow::anyhow!("ds_post serialize: {e}")))?;
-    ds_post_bytes(state, B::PATH, body_bytes).await
+    ds_post_bytes(state, B::PATH, B::IDEMPOTENT, body_bytes).await
 }
 
 /// The signing + sending half of [`ds_post`], with the body already serialized.
@@ -103,6 +103,7 @@ pub async fn ds_post<B: ClientRequest>(
 async fn ds_post_bytes(
     state: &Arc<AppState>,
     path: &str,
+    idempotent: bool,
     body_bytes: Vec<u8>,
 ) -> Result<reqwest::Response> {
     // Resolved before the identity lookups below so a missing URL still reports
@@ -167,9 +168,9 @@ async fn ds_post_bytes(
         .header("X-Pollis-Signature", signature_b64)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .body(body_bytes);
-    let resp = send_ds(path, request)
+    let resp = send_ds_resending(path, request, idempotent)
         .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("ds_post {path}: {e}")))?;
+        .map_err(|e| Error::Other(anyhow::anyhow!("ds_post {path}: {}", error_chain(&e))))?;
     if is_device_revoked_response(&resp) {
         if note_revoked_response(state, &user_id, &device_id).await {
             crate::diag!("[ds] {path}: this device was revoked from the account; signing out");
@@ -755,6 +756,50 @@ fn with_dev_key(state: &AppState, request: reqwest::RequestBuilder) -> reqwest::
     }
 }
 
+/// [`send_ds`], plus ONE resend for an idempotent request whose first attempt
+/// died on the connection rather than getting an answer (#1497) — what every
+/// HTTP client does for a request it may repeat (RFC 9110 §9.2.2). A pooled
+/// keep-alive connection the far end has already closed is the common case:
+/// nothing about it is the request's fault, and a fresh connection succeeds.
+/// The resend carries the same signature, still inside the DS's replay window.
+/// A non-idempotent request is never resent: the first attempt may have landed.
+async fn send_ds_resending(
+    path: &str,
+    request: reqwest::RequestBuilder,
+    idempotent: bool,
+) -> reqwest::Result<reqwest::Response> {
+    let resend = if idempotent { request.try_clone() } else { None };
+    match (send_ds(path, request).await, resend) {
+        (Err(e), Some(again)) if is_connection_failure(&e) => {
+            crate::diag!("[ds] {path}: resending once after a connection failure");
+            send_ds(path, again).await
+        }
+        (result, _) => result,
+    }
+}
+
+/// A transport failure that happened on the CONNECTION — it could not be
+/// opened, or it died before an answer came back (a pooled keep-alive
+/// connection the far end had closed, a reset). Not a timeout: a request that
+/// timed out may still be running on the DS, and waiting the deadline out
+/// twice is no recovery.
+pub(crate) fn is_connection_failure(e: &reqwest::Error) -> bool {
+    !e.is_timeout() && (e.is_connect() || e.is_request())
+}
+
+/// An error and every `source()` beneath it, `": "`-joined — what a transport
+/// failure actually was, not just reqwest's top line.
+pub(crate) fn error_chain(e: &(dyn std::error::Error + 'static)) -> String {
+    let mut out = e.to_string();
+    let mut cur = e.source();
+    while let Some(s) = cur {
+        out.push_str(": ");
+        out.push_str(&s.to_string());
+        cur = s.source();
+    }
+    out
+}
+
 /// 16 hex characters from the OS RNG.
 fn new_request_id() -> String {
     use rand::RngCore as _;
@@ -776,7 +821,13 @@ async fn send_ds(path: &str, request: reqwest::RequestBuilder) -> reqwest::Resul
             crate::diag!("[ds] {path} → {} req={request_id}", resp.status());
         }
         Err(e) => {
-            crate::diag!("[ds] {path} → transport error req={request_id}: {e}");
+            // reqwest's Display stops at "error sending request for url"; the
+            // cause (a reset, a closed pooled connection, a timeout) is in the
+            // source chain, and without it a failure cannot be diagnosed (#1497).
+            crate::diag!(
+                "[ds] {path} → transport error req={request_id}: {}",
+                error_chain(e)
+            );
         }
         Ok(_) => {}
     }
@@ -1009,5 +1060,89 @@ mod tests {
             elapsed < REPORT_TIMEOUT * 2,
             "bound should fire near REPORT_TIMEOUT ({REPORT_TIMEOUT:?}), took {elapsed:?}"
         );
+    }
+
+    /// A DS whose FIRST connection reads the request and closes without an
+    /// answer — what a client sees when it reuses a keep-alive connection the
+    /// far end had already dropped — and answers 200 on every later one.
+    /// Returns its URL and how many connections it has accepted.
+    async fn drops_the_first_connection() -> (String, Arc<std::sync::atomic::AtomicUsize>) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let count = Arc::clone(&accepted);
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let n = count.fetch_add(1, Ordering::SeqCst);
+                tokio::spawn(async move {
+                    // Read until the end of the headers plus the 2-byte body.
+                    let mut buf = Vec::new();
+                    let mut chunk = [0u8; 1024];
+                    loop {
+                        let Ok(read) = sock.read(&mut chunk).await else { return };
+                        if read == 0 {
+                            return;
+                        }
+                        buf.extend_from_slice(&chunk[..read]);
+                        if let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                            if buf.len() >= end + 4 + 2 {
+                                break;
+                            }
+                        }
+                    }
+                    if n == 0 {
+                        // Close with no answer at all.
+                        return;
+                    }
+                    let _ = sock
+                        .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n{}")
+                        .await;
+                });
+            }
+        });
+        (format!("http://{addr}/v1/r2/presign"), accepted)
+    }
+
+    /// #1497: an idempotent request survives a connection that dies before
+    /// answering — one resend, on a new connection.
+    #[tokio::test]
+    async fn an_idempotent_request_is_resent_once_after_a_dropped_connection() {
+        let (url, accepted) = drops_the_first_connection().await;
+        let client = crate::net::overlay::http_client(None);
+        let resp = send_ds_resending("/v1/r2/presign", client.post(&url).body("{}"), true)
+            .await
+            .expect("the resend must succeed");
+        assert!(resp.status().is_success());
+        assert_eq!(accepted.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
+    /// The other half: a request that may NOT be repeated is never resent, so
+    /// the connection failure reaches the caller.
+    #[tokio::test]
+    async fn a_non_idempotent_request_is_never_resent() {
+        let (url, accepted) = drops_the_first_connection().await;
+        let client = crate::net::overlay::http_client(None);
+        let err = send_ds_resending("/v1/messages/send", client.post(&url).body("{}"), false)
+            .await
+            .expect_err("no resend, so the dropped connection is the answer");
+        assert!(is_connection_failure(&err), "unexpected error kind: {err:?}");
+        assert_eq!(accepted.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    /// The endpoints a Vault save is made of are the ones declared repeatable;
+    /// a message send is not.
+    #[test]
+    fn the_vault_save_path_is_declared_idempotent() {
+        use pollis_api::DsRequest;
+        const {
+            assert!(pollis_api::broker::R2PresignBody::IDEMPOTENT);
+            assert!(pollis_api::messages::AttachmentRegisterBody::IDEMPOTENT);
+            assert!(pollis_api::vault::SaveVaultMessageBody::IDEMPOTENT);
+            assert!(pollis_api::vault::DeleteVaultMessageBody::IDEMPOTENT);
+            assert!(!pollis_api::messages::SendMessageBody::IDEMPOTENT);
+            assert!(!pollis_api::commit::SubmitBody::IDEMPOTENT);
+        }
     }
 }
