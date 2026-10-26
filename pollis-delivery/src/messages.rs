@@ -1567,20 +1567,28 @@ pub async fn apply_add_reaction(
         Ok(u) => u,
         Err(o) => return Ok(o),
     };
+    let conversation = reaction_conversation(conn, body).await?;
     if authed.is_some() {
-        let Some(conv) = reaction_conversation(conn, body).await? else {
+        let Some(conv) = conversation.as_deref() else {
             return Ok(WriteOutcome::Forbidden);
         };
-        if !is_member(conn, &conv, &user).await? {
+        if !is_member(conn, conv, &user).await? {
             return Ok(WriteOutcome::Forbidden);
         }
     }
+    // The row records the conversation it was gated against (#1433): the read
+    // gate needs it once envelope GC has collected the message. A repeat add of
+    // a row that predates the column stamps it — it is the actor's own row and
+    // the actor has just passed the gate for this conversation.
     let id = Ulid::new().to_string();
     let now = now_rfc3339();
     conn.execute(
-        "INSERT OR IGNORE INTO message_reaction (id, message_id, user_id, emoji, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        libsql::params![id, body.message_id.clone(), user, body.emoji.clone(), now],
+        "INSERT INTO message_reaction (id, message_id, user_id, emoji, created_at, conversation_id) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
+         ON CONFLICT(message_id, user_id, emoji) DO UPDATE \
+            SET conversation_id = excluded.conversation_id \
+          WHERE message_reaction.conversation_id IS NULL",
+        libsql::params![id, body.message_id.clone(), user, body.emoji.clone(), now, conversation],
     )
     .await?;
     Ok(WriteOutcome::Ok)
@@ -6119,5 +6127,104 @@ mod reaction_membership_tests {
             1,
             "the DELETE is scoped to the actor's own user_id"
         );
+    }
+
+    async fn seen_by(c: &Connection, who: &str, message_id: &str) -> Vec<(String, Vec<String>)> {
+        let mut membership = std::collections::HashMap::new();
+        crate::directory::visible_reactions(c, message_id, who, &mut membership)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| (r.emoji, r.user_ids))
+            .collect()
+    }
+
+    async fn collect_envelope(c: &Connection, id: &str) {
+        c.execute(
+            "DELETE FROM message_envelope WHERE id = ?1",
+            libsql::params![id.to_string()],
+        )
+        .await
+        .unwrap();
+    }
+
+    /// #1433, the finding. A member's reaction to a message whose envelope GC
+    /// has collected is written (the add gate above) but was never readable:
+    /// the read gate asked only the envelope. FAILS before the change — empty.
+    #[tokio::test]
+    async fn a_reaction_to_a_collected_envelope_is_readable_by_members() {
+        let c = conn().await;
+        apply_add_reaction(&c, Some("alice"), &body("m-gone", Some("g1")))
+            .await
+            .unwrap();
+        assert_eq!(
+            seen_by(&c, "alice", "m-gone").await,
+            vec![("🔥".to_string(), vec!["alice".to_string()])]
+        );
+        assert!(seen_by(&c, "mallory", "m-gone").await.is_empty());
+    }
+
+    /// #1433: a reaction made while the envelope existed outlives it. FAILS
+    /// before the change — the pill vanished with the sweep.
+    #[tokio::test]
+    async fn a_reaction_survives_its_envelope_being_collected() {
+        let c = conn().await;
+        seed_envelope(&c, "m-live", "g1").await;
+        apply_add_reaction(&c, Some("alice"), &body("m-live", None))
+            .await
+            .unwrap();
+        assert_eq!(seen_by(&c, "alice", "m-live").await.len(), 1);
+
+        collect_envelope(&c, "m-live").await;
+        assert_eq!(seen_by(&c, "alice", "m-live").await.len(), 1);
+        assert!(seen_by(&c, "mallory", "m-live").await.is_empty());
+    }
+
+    /// A row declared against another conversation once the envelope is gone
+    /// stays in that conversation: mallory sees her own row, alice never sees
+    /// it in her pills, and mallory cannot read alice's.
+    #[tokio::test]
+    async fn a_row_declared_elsewhere_does_not_cross_conversations() {
+        let c = conn().await;
+        apply_add_reaction(&c, Some("alice"), &body("m-gone", Some("g1")))
+            .await
+            .unwrap();
+        let mut forged = body("m-gone", Some("g2"));
+        forged.emoji = "💀".to_string();
+        apply_add_reaction(&c, Some("mallory"), &forged).await.unwrap();
+
+        assert_eq!(
+            seen_by(&c, "alice", "m-gone").await,
+            vec![("🔥".to_string(), vec!["alice".to_string()])]
+        );
+        assert_eq!(
+            seen_by(&c, "mallory", "m-gone").await,
+            vec![("💀".to_string(), vec!["mallory".to_string()])]
+        );
+    }
+
+    /// A row from before the column existed is envelope-gated, as it always
+    /// was, and the actor's own repeat add stamps it so it survives GC.
+    #[tokio::test]
+    async fn a_legacy_row_is_stamped_by_a_repeat_add() {
+        let c = conn().await;
+        c.execute(
+            "INSERT INTO message_reaction (id, message_id, user_id, emoji) \
+             VALUES ('r1', 'm-old', 'alice', '🔥')",
+            (),
+        )
+        .await
+        .unwrap();
+        seed_envelope(&c, "m-old", "g1").await;
+        assert_eq!(seen_by(&c, "alice", "m-old").await.len(), 1);
+
+        collect_envelope(&c, "m-old").await;
+        assert!(seen_by(&c, "alice", "m-old").await.is_empty());
+
+        apply_add_reaction(&c, Some("alice"), &body("m-old", Some("g1")))
+            .await
+            .unwrap();
+        assert_eq!(reaction_count(&c, "m-old").await, 1, "still one row");
+        assert_eq!(seen_by(&c, "alice", "m-old").await.len(), 1);
     }
 }

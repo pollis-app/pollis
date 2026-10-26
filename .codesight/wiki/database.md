@@ -765,7 +765,10 @@ nothing in this row or the object opens them.
 - `user_id` TEXT NOT NULL FK users
 - `emoji` TEXT NOT NULL
 - `created_at` TEXT NOT NULL DEFAULT now
+- `conversation_id` TEXT _(migration `000039`, #1433 — the conversation the add was membership-gated against; NULL only for rows written before it whose envelope was already collected)_
 - UNIQUE: (`message_id`, `user_id`, `emoji`)
+
+Read gate (`directory::visible_reactions`, behind `/v1/messages/lookup`'s `reactions_for`) is **per row**: a row is shown to members of its `conversation_id`, and a NULL row to members of the envelope's conversation while the envelope survives. Before #1433 the read asked only the envelope, so envelope GC (#689) hid every reaction on a message once everyone had read it — a tapped pill appeared optimistically and vanished on the refetch. A row declared against another conversation after GC (the add gate trusts the declaration then, #1161) stays visible only inside that conversation. A repeat add stamps a legacy NULL row (it is the actor's own row).
 
 ### attachment_object
 - `content_hash` TEXT PK _(since #1382 the object's **random 32-byte file id**, hex — a name, not derived from the content and not key material; before #1382 it was SHA-256 of the plaintext, the convergent key)_
