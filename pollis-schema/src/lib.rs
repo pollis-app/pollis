@@ -307,6 +307,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "channel_mute",
         include_str!("../migrations/000038_channel_mute.sql"),
     ),
+    (
+        39,
+        "message_reaction_conversation",
+        include_str!("../migrations/000039_message_reaction_conversation.sql"),
+    ),
 ];
 
 /// Every script for the MAIN DB, in apply order (baseline first). One element

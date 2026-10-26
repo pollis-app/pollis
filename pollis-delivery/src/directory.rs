@@ -435,14 +435,12 @@ pub async fn message_lookup(
     };
 
     // Reactions are gated on the same question — membership of the message's
-    // conversation — asked once per message. A message the caller may not see
-    // is simply absent, never a distinguishable refusal.
+    // conversation — per row (see `visible_reactions`). A message the caller
+    // may not see is simply absent, never a distinguishable refusal.
     let mut reactions = Vec::new();
+    let mut membership = HashMap::new();
     for message_id in &parsed.reactions_for {
-        let Some(_) = envelope_conversation(&conn, message_id, &who).await? else {
-            continue;
-        };
-        let grouped = message_reactions(&conn, message_id).await?;
+        let grouped = visible_reactions(&conn, message_id, &who, &mut membership).await?;
         if !grouped.is_empty() {
             reactions.push(MessageReactions {
                 message_id: message_id.clone(),
@@ -486,22 +484,60 @@ async fn envelope_conversation(
     }
 }
 
-/// One message's reactions, grouped by emoji in insertion order.
-async fn message_reactions(
+/// The reactions on one message that `user_id` may see, grouped by emoji in
+/// insertion order.
+///
+/// A row is visible to a member of the conversation it was gated against when
+/// it was written (`message_reaction.conversation_id`, #1433), or — for a row
+/// that predates that column — to a member of the envelope's conversation while
+/// the envelope survives. Gating on the envelope alone, as this did before,
+/// hid every reaction on a message as soon as envelope GC (#689) collected it,
+/// which for an active conversation is shortly after everyone has read it: a
+/// tapped pill appeared optimistically and the refetch took it away again.
+///
+/// Per row, not per message: once the envelope is gone the DS cannot tell
+/// which conversation a message id belongs to, and the add gate trusted the
+/// writer's declaration. A row declared against some OTHER conversation is
+/// therefore shown only to members of that one — never mixed into the real
+/// conversation's pills, and never a way to read the real conversation's rows.
+pub async fn visible_reactions(
     conn: &Connection,
     message_id: &str,
+    user_id: &str,
+    membership: &mut HashMap<String, bool>,
 ) -> anyhow::Result<Vec<ReactionWire>> {
+    let envelope = envelope_conversation(conn, message_id, user_id).await?;
     let mut rows = conn
         .query(
-            "SELECT emoji, user_id FROM message_reaction \
+            "SELECT emoji, user_id, conversation_id FROM message_reaction \
              WHERE message_id = ?1 ORDER BY created_at ASC",
             libsql::params![message_id.to_string()],
         )
         .await?;
-    let mut out: Vec<ReactionWire> = Vec::new();
+    let mut fetched: Vec<(String, String, Option<String>)> = Vec::new();
     while let Some(row) = rows.next().await? {
-        let emoji: String = row.get(0)?;
-        let user_id: String = row.get(1)?;
+        fetched.push((row.get(0)?, row.get(1)?, row.get(2)?));
+    }
+    drop(rows);
+
+    let mut out: Vec<ReactionWire> = Vec::new();
+    for (emoji, reactor, conversation) in fetched {
+        let visible = match conversation {
+            None => envelope.is_some(),
+            Some(c) if envelope.as_deref() == Some(c.as_str()) => true,
+            Some(c) => match membership.get(&c) {
+                Some(known) => *known,
+                None => {
+                    let member = crate::writes::is_member(conn, &c, user_id).await?;
+                    membership.insert(c, member);
+                    member
+                }
+            },
+        };
+        if !visible {
+            continue;
+        }
+        let user_id = reactor;
         match out.iter_mut().find(|r| r.emoji == emoji) {
             Some(existing) => existing.user_ids.push(user_id),
             None => out.push(ReactionWire {

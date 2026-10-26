@@ -2182,6 +2182,104 @@ async fn reactions_round_trip_between_two_members() {
     drop(bob);
 }
 
+async fn react(client: &TestClient, user_id: &str, message_id: &str, emoji: &str) {
+    client
+        .invoke_json(
+            "add_reaction",
+            serde_json::json!({
+                "messageId": message_id,
+                "userId": user_id,
+                "emoji": emoji,
+            }),
+        )
+        .await;
+}
+
+/// #1433: reactions on a message whose envelope the DS has collected.
+///
+/// Envelope GC (#689) deletes a `message_envelope` row once every member device
+/// has read past it — routinely, within one sweep of a quiet conversation. The
+/// reaction WRITE survives that (#1161 gates it on the client's declared
+/// conversation), but the READ in `/v1/messages/lookup` was gated on the
+/// envelope alone, so from then on the message had no reactions for anyone: a
+/// tap showed the pill optimistically and the refetch took it away again —
+/// "can't add emoji reactions to certain messages". Reactions made BEFORE the
+/// sweep vanished with it too.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn reactions_survive_envelope_collection() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+
+    let group_id = alice.create_group("Collected").await;
+    alice.invite(&group_id, &bob_profile.username).await;
+    let invite_id = bob
+        .first_pending_invite()
+        .await
+        .expect("pending invite")["id"]
+        .as_str()
+        .expect("invite id")
+        .to_string();
+    bob.accept_invite(&invite_id).await;
+    bob.poll().await;
+
+    let channel_id = alice.general_channel_id(&group_id).await;
+    alice.process_commits_for(&channel_id).await;
+    let early = alice
+        .send_channel_message_id(&channel_id, "reacted to before the sweep")
+        .await;
+    let late = alice
+        .send_channel_message_id(&channel_id, "reacted to after the sweep")
+        .await;
+    // Bob reacts while the envelope still exists (he has fetched it, so he
+    // holds the local copy the reaction is declared against).
+    bob.fetch_channel_messages(&channel_id).await;
+    react(&bob, &bob_profile.id, &early, "👀").await;
+
+    // Everyone has read past both messages, and the sweep collects them.
+    alice.fetch_channel_messages(&channel_id).await;
+    bob.fetch_channel_messages(&channel_id).await;
+    let remote = crate::harness::writable_remote().await;
+    run_gc_sweep(&remote).await;
+    assert_eq!(
+        envelope_count(&remote, &channel_id).await,
+        0,
+        "fixture: both envelopes must have been collected"
+    );
+
+    // A reaction made after collection is readable by both members.
+    react(&alice, &alice_profile.id, &late, "👍").await;
+    for (who, client) in [("alice", &alice), ("bob", &bob)] {
+        let seen = client
+            .invoke_json("get_reactions", serde_json::json!({ "messageId": late }))
+            .await;
+        assert_eq!(
+            seen.as_array().map(|a| a.len()),
+            Some(1),
+            "{who} must see a reaction added after the envelope was collected: {seen:#?}"
+        );
+        assert_eq!(seen[0]["emoji"], "👍");
+    }
+
+    // And one made before the sweep did not disappear with the envelope.
+    let seen = alice
+        .invoke_json("get_reactions", serde_json::json!({ "messageId": early }))
+        .await;
+    assert_eq!(
+        seen.as_array().map(|a| a.len()),
+        Some(1),
+        "a reaction made while the envelope existed must outlive it: {seen:#?}"
+    );
+    assert_eq!(seen[0]["emoji"], "👀");
+
+    drop(alice);
+    drop(bob);
+}
+
 /// #1087: the delivery sequence, end to end through the real stack.
 ///
 /// The rest of this suite proves delivery *works*, which is the property that
