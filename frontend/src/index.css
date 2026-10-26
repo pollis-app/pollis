@@ -77,6 +77,11 @@
     /* ── Voice-connected label (fixed, hue-independent) ─────────── */
     --c-voice-connected: hsl(150 55% 62%);
 
+    /* ── Ink: dark text on a bright per-user fill (fixed, theme-independent).
+       Another admin's name chip (#1488) — stays dark on light themes too,
+       where --c-bg would not. */
+    --c-ink: hsl(0 0% 4%);
+
     --font-mono: 'DM Mono', ui-monospace, monospace;
     --font-sans: 'Atkinson Hyperlegible Next', system-ui, sans-serif;
 
