@@ -176,7 +176,8 @@ test("an update's reach is the recorded binaries with its runtime version", () =
     reach.map((r) => [r.platform, r.binaries.map((b) => b.channel)]),
     [
       ["ios", []],
-      ["android", ["play"]],
+      // Sideload 1.0.14 via its ledger alias (#1446; tests/ota-aliases.test.ts).
+      ["android", ["play", "sideload"]],
     ],
   );
   // The value the OTA job used to compute for 1.0.14's native layer reached nothing.
