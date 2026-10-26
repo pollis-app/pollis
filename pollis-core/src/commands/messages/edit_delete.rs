@@ -586,6 +586,7 @@ async fn send_redaction_message(
             // ingest, and pushing "you have a new message" for a deletion would be
             // both wrong and a notification the user cannot act on (#987).
             push_to: None,
+            push_mentions: None,
             delete_token_hash: delete_token_hash.clone(),
         },
         |_, _| Ok(()),

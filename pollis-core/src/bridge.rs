@@ -530,6 +530,18 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let requester_id: String = arg(&args, "requesterId")?;
             ok(groups::list_group_channels(group_id, requester_id, &state()?).await?)
         }
+        // Per-channel mute (#1431), stored on the DS for the whole account.
+        "list_muted_channels" => {
+            let user_id: String = arg(&args, "userId")?;
+            ok(groups::list_muted_channels(user_id, &state()?).await?)
+        }
+        "set_channel_muted" => {
+            let user_id: String = arg(&args, "userId")?;
+            let channel_id: String = arg(&args, "channelId")?;
+            let muted: bool = arg(&args, "muted")?;
+            groups::set_channel_muted(user_id, channel_id, muted, &state()?).await?;
+            ok(())
+        }
         "create_group" => {
             let name: String = arg(&args, "name")?;
             let description: Option<String> = arg_opt(&args, "description")?;

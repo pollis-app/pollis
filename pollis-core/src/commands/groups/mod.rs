@@ -37,7 +37,10 @@ pub use groups::{
 };
 
 // ── Channel CRUD ─────────────────────────────────────────────────────────────
-pub use channels::{create_channel, delete_channel, list_group_channels, update_channel};
+pub use channels::{
+    create_channel, delete_channel, list_group_channels, list_muted_channels, set_channel_muted,
+    update_channel,
+};
 
 // ── Membership / roles ───────────────────────────────────────────────────────
 pub use membership::{

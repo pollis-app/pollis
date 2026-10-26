@@ -24,6 +24,16 @@ pub async fn list_group_channels(group_id: String, requester_id: String, state: 
 }
 
 #[tauri::command]
+pub async fn list_muted_channels(user_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<String>> {
+    pollis_core::commands::groups::list_muted_channels(user_id, &state).await
+}
+
+#[tauri::command]
+pub async fn set_channel_muted(user_id: String, channel_id: String, muted: bool, state: State<'_, Arc<AppState>>) -> Result<()> {
+    pollis_core::commands::groups::set_channel_muted(user_id, channel_id, muted, &state).await
+}
+
+#[tauri::command]
 pub async fn create_group(name: String, description: Option<String>, owner_id: String, create_default_text_channel: Option<bool>, create_default_voice_channel: Option<bool>, state: State<'_, Arc<AppState>>) -> Result<Group> {
     pollis_core::commands::groups::create_group(name, description, owner_id, create_default_text_channel, create_default_voice_channel, &state).await
 }

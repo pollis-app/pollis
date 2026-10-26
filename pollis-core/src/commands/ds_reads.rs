@@ -524,6 +524,18 @@ pub(crate) async fn read_cursors(
     ds_post_json(state, &body).await
 }
 
+/// The channels this account muted (#1431). No defaulting: a failure surfaces,
+/// so a caller never mistakes "could not ask" for "nothing is muted".
+pub(crate) async fn channel_mutes(
+    state: &Arc<AppState>,
+    user_id: &str,
+) -> Result<pollis_api::profile::ChannelMutesResponse> {
+    let body = pollis_api::profile::ChannelMutesBody {
+        user_id: user_id.to_string(),
+    };
+    ds_post_json(state, &body).await
+}
+
 // ── Pinned messages (#99) ────────────────────────────────────────────────────
 
 /// The conversation's current wrapped pin key, or `None` when nobody has

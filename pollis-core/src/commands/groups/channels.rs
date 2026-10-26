@@ -166,3 +166,31 @@ pub async fn delete_channel(
 
     Ok(())
 }
+
+/// Mute or unmute a group channel for this account (#1431).
+///
+/// Stored on the DS, which is what reads it: the push fan-out skips a member
+/// who muted the channel unless the message names them by `@username`. The
+/// row is per account, so every device sees it; the DS nudges the account's
+/// other devices (`channel_mutes_changed`) to re-read. Each client also keeps
+/// its own in-app alerts quiet for a muted channel.
+pub async fn set_channel_muted(
+    user_id: String,
+    channel_id: String,
+    muted: bool,
+    state: &Arc<AppState>,
+) -> Result<()> {
+    let body = pollis_api::profile::SetChannelMuteBody {
+        user_id,
+        channel_id,
+        muted,
+    };
+    crate::commands::mls::ds_post_ok(state, &body).await
+}
+
+/// The ids of every channel this account muted and is still a member of.
+pub async fn list_muted_channels(user_id: String, state: &Arc<AppState>) -> Result<Vec<String>> {
+    Ok(crate::commands::ds_reads::channel_mutes(state, &user_id)
+        .await?
+        .channel_ids)
+}
