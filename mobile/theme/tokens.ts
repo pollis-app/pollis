@@ -1,7 +1,9 @@
 import { Platform } from "react-native";
 import { compositeOver } from "./composite";
 import { deriveTheme, type Theme } from "./derive";
-import { DEFAULT_ACCENT_HEX, DEFAULT_BACKGROUND_HEX } from "./accents";
+import { DEFAULT_BACKGROUND_HEX } from "./accents";
+import { loadBootAccent } from "./accentStore";
+import { deviceAccentBackend } from "./deviceAccent";
 
 export { DEFAULT_ACCENT_HEX, DEFAULT_BACKGROUND_HEX, ACCENT_PRESETS } from "./accents";
 
@@ -13,7 +15,12 @@ export { DEFAULT_ACCENT_HEX, DEFAULT_BACKGROUND_HEX, ACCENT_PRESETS } from "./ac
 // `palette` / `semantic` / `type` colours are getters over the current derived
 // theme, so changing a base re-derives everything on the next render.
 
-let _accentRgb = hexToRgbTriplet(DEFAULT_ACCENT_HEX);
+// The accent starts as the one this device last showed (#1447), read
+// synchronously while this module loads — before any component renders and
+// before any module could capture a colour — so a cold start opens in the
+// user's palette instead of flashing amber until the synced preference lands.
+const _bootAccentHex = loadBootAccent(deviceAccentBackend);
+let _accentRgb = hexToRgbTriplet(_bootAccentHex);
 let _bgRgb = hexToRgbTriplet(DEFAULT_BACKGROUND_HEX);
 let _theme: Theme = deriveTheme(_accentRgb, _bgRgb);
 
@@ -37,6 +44,21 @@ export function setAccentHex(hex: string) {
 /** Sets the background from "#rrggbb". */
 export function setBackgroundHex(hex: string) {
   setBackgroundRgb(hexToRgbTriplet(hex));
+}
+
+/** The live accent as "#rrggbb". */
+export function currentAccentHex(): string {
+  return rgbTripletToHex(_accentRgb);
+}
+
+/** The accent the tokens were seeded with at load — what the first frame painted. */
+export function bootAccentHex(): string {
+  return _bootAccentHex;
+}
+
+/** The live background as "#rrggbb". */
+export function currentBackgroundHex(): string {
+  return rgbTripletToHex(_bgRgb);
 }
 
 /** The current derived theme (every colour token as a string). */

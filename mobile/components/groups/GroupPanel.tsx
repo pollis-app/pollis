@@ -18,6 +18,7 @@ import type { Channel } from "../../types";
 import { ChannelRow } from "./ChannelRow";
 import { GroupMenuSheet } from "./GroupMenuSheet";
 import { CreateChannelSheet } from "./CreateChannelSheet";
+import { useThemeRerender } from "../theme";
 
 // Re-reads of an empty roster (a just-created group's read can lag the
 // create): a few, spaced out, then give up and show no count.
@@ -50,6 +51,7 @@ function GroupPanelImpl({
   // bottom edge (the /group/[id] route, which has no tab bar to clear).
   bottomInset?: number;
 }) {
+  useThemeRerender();
   const { t } = useTranslation("mobile");
   // iPad two-pane: group pages open in the detail pane (useNav).
   const router = useNav();

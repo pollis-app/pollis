@@ -1436,6 +1436,27 @@ no react-native) and the accent presets in `theme/accents.ts`.
   (`setAccentRgb/Hex`, `setBackgroundRgb/Hex`; `<ThemeProvider>` holds them and
   `useTheme()` re-renders subscribers). `palette.*`, `semantic.*` and the
   `type.*` colours are getters over the live derived theme.
+- **The saved accent paints the first frame (#1447).** The synced
+  `accent_hex` preference lands only after sign-in and a DS round trip, so
+  the device also keeps the last accent it showed in `expo-secure-store`
+  (`theme/accentStore.ts`, key `pollis.theme.accent`), and `theme/tokens.ts`
+  reads it with the SYNCHRONOUS `SecureStore.getItem` while the module loads —
+  before any render, PIN screen included. `ThemeProvider` starts from the live
+  tokens, refetches the synced blob the moment the app is unlocked, applies a
+  saved `accent_hex` and writes every change back. `get_preferences` answers
+  `{}` before the unlock (remote read fails, local cache locked), so a blob
+  with no accent means the default only when read after the unlock; sign-out
+  also resets to the default. Never read a token at module scope
+  (`StyleSheet.create` / a top-level `const`): it is frozen at import.
+- **Every themed surface must re-render on a change.** `useTheme()` re-renders
+  only its caller: a subscribing `<Screen>` does NOT re-render the `children`
+  its route created, and `observer()` is a memo that skips parent re-renders.
+  So every route component, and every `observer`/`memo` component that reads
+  tokens, calls `useThemeRerender()` (or `useTheme()`), and a `FlatList` whose
+  `renderItem` is a `useCallback` passes `extraData={accentHex}`.
+  `tests/theme-startup.test.ts` fails on a miss. `<Screen>` draws the
+  invisible e2e hooks `theme-accent-<rrggbb>` / `theme-boot-accent-<rrggbb>`
+  (`components/ThemeProbe.tsx`; Maestro `theme-startup.yaml`).
 - `semantic`: `text` / `dim` / `muted` (text ramp), `bg` < `panel` < `raised`
   < `high` (surfaces), `hair` / `hairSoft` (translucent separators), `edge`
   (opaque control border, ≥3:1 vs raised), `accent`, `accentFaint/Soft/Mid/Line`

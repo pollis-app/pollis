@@ -24,6 +24,7 @@ import {
   useCreateGroupInviteLink,
   type CreatedInviteLink,
 } from "../../hooks/queries";
+import { useThemeRerender } from "../../components/theme";
 
 // Expiry presets, mirroring desktop's InviteLinkManager (#847). A fixed list
 // rather than a date picker on purpose — every preset here is one a person
@@ -62,6 +63,7 @@ const USES_OPTIONS: {
 ];
 
 export default function InviteToGroup() {
+  useThemeRerender();
   const { t } = useTranslation("channels");
   const router = useNav();
   const { groupId } = useRouteParams<{ groupId?: string }>();

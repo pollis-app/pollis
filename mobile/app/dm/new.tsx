@@ -16,8 +16,10 @@ import {
 import { Icon } from "../../components/icons";
 import { semantic, space, layout } from "../../theme/tokens";
 import { useUserSearch, useCreateDM } from "../../hooks/queries";
+import { useThemeRerender } from "../../components/theme";
 
 export default function NewDM() {
+  useThemeRerender();
   const { openConversation } = useOpenConversation();
   const { t } = useTranslation("mobile");
   const [query, setQuery] = useState("");

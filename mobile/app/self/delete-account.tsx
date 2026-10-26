@@ -9,6 +9,7 @@ import { semantic, type as ty, space } from "../../theme/tokens";
 import { useDeleteAccount } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
 import { endSession } from "../../lib/session";
+import { useThemeRerender } from "../../components/theme";
 
 // The word the user must type to arm deletion. Matches desktop's
 // SecurityPage: deliberately a constant, not translatable copy, so the
@@ -16,6 +17,7 @@ import { endSession } from "../../lib/session";
 const DELETE_CONFIRM_WORD = "DELETE";
 
 function DeleteAccount() {
+  useThemeRerender();
   const { t } = useTranslation("settings");
   const currentUser = appStore.currentUser;
   const [confirmText, setConfirmText] = useState("");

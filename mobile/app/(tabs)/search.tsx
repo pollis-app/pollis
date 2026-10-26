@@ -29,6 +29,7 @@ import {
 } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
 import { useOpenConversation } from "../../hooks/useOpenConversation";
+import { useThemeRerender } from "../../components/theme";
 
 // Search filter syntax, shown as pills. The operators are typed literally,
 // so they are not translated; only the label above them is. `token` is what a
@@ -44,6 +45,7 @@ const SEARCH_FILTERS = [
 ];
 
 export default function Search() {
+  useThemeRerender();
   const router = useRouter();
   // Phones push the conversation/group; iPad opens it in its tab's two-pane.
   const { openConversation, openGroup } = useOpenConversation();

@@ -30,6 +30,7 @@ import { CustomEmojiImage } from "../../components/emoji/CustomEmojiImage";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { haptic } from "../../lib/haptics";
+import { useThemeRerender } from "../../components/theme";
 
 /** `file://` URI → bare filesystem path for the Rust side. */
 function uriToPath(uri: string): string {
@@ -40,6 +41,7 @@ function uriToPath(uri: string): string {
 }
 
 function GroupEmoji() {
+  useThemeRerender();
   const { t } = useTranslation("emoji");
   const { groupId } = useRouteParams<{ groupId?: string }>();
   const router = useNav();

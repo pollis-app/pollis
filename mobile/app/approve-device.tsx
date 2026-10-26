@@ -8,6 +8,7 @@ import { semantic, type as ty, fonts, space } from "../theme/tokens";
 import { useApproveEnrollment, useRejectEnrollment } from "../hooks/queries";
 import { SAS_LENGTH, normalizeSasInput } from "../lib/enrollmentSas";
 import { useSubmitLock } from "../hooks/useSubmitLock";
+import { useThemeRerender } from "../components/theme";
 
 /**
  * A new device of this account asks to be approved (#1360) — mobile's twin of
@@ -21,6 +22,7 @@ import { useSubmitLock } from "../hooks/useSubmitLock";
  * also supply the matching code.
  */
 export default function ApproveDevice() {
+  useThemeRerender();
   const { t } = useTranslation("auth");
   const router = useRouter();
   const { requestId, newDeviceId } = useLocalSearchParams<{

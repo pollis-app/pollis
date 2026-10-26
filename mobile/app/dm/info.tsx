@@ -20,8 +20,10 @@ import { useDMChannel, useLeaveDM } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { haptic } from "../../lib/haptics";
+import { useThemeRerender } from "../../components/theme";
 
 function DMInfo() {
+  useThemeRerender();
   const router = useNav();
   const { t } = useTranslation("mobile");
   const { id } = useRouteParams<{ id?: string }>();

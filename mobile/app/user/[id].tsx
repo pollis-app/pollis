@@ -30,6 +30,7 @@ import {
 } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
+import { useThemeRerender } from "../../components/theme";
 
 interface RawProfile {
   id: string;
@@ -39,6 +40,7 @@ interface RawProfile {
 }
 
 function UserProfile() {
+  useThemeRerender();
   const { t } = useTranslation("dms");
   const router = useNav();
   const { openConversation } = useOpenConversation();

@@ -14,6 +14,7 @@ import { useInitializeIdentity } from "../../hooks/queries/useAuth";
 import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
+import { useThemeRerender } from "../../components/theme";
 
 interface Step {
   n: string;
@@ -22,6 +23,7 @@ interface Step {
 }
 
 function Initializing() {
+  useThemeRerender();
   const { t } = useTranslation("mobile");
   const router = useRouter();
   const currentUser = appStore.currentUser;

@@ -14,10 +14,12 @@ import {
   type EnrollmentHandle,
 } from "../../hooks/queries";
 import { useSubmitLock } from "../../hooks/useSubmitLock";
+import { useThemeRerender } from "../../components/theme";
 
 type Mode = "chooser" | "polling" | "recovery";
 
 export default function Enrollment() {
+  useThemeRerender();
   const { t } = useTranslation("mobile");
   const router = useRouter();
   // Signed in by a QR device link (#1207): no chooser and no code to read

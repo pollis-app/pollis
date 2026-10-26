@@ -68,6 +68,7 @@ import { selectConversation } from "../../hooks/useOpenConversation";
 import { haptic } from "../../lib/haptics";
 import { messageJumpStore } from "../../stores/messageJumpStore";
 import { nextJumpStep } from "../../lib/messageJump";
+import { useTheme, useThemeRerender } from "../../components/theme";
 
 // Props let this screen double as an embedded right-pane conversation on the
 // two-pane (regular/iPad) layout. Route usage passes NO props, so every value
@@ -87,6 +88,7 @@ type ChatListItem =
   | { type: "msg"; key: string; message: Message; continued: boolean };
 
 function TextChat(props: ChatViewProps = {}) {
+  const { accentHex } = useTheme();
   // Embedded in the iPad two-pane, pushes of info / thread / profile pages
   // land in the detail pane (useNav); on phones it is the router.
   const router = useNav();
@@ -805,6 +807,8 @@ function TextChat(props: ChatViewProps = {}) {
         data={items}
         keyExtractor={(item) => item.key}
         renderItem={renderItem}
+        // `renderItem` is memoised: re-render the rows on a palette change.
+        extraData={accentHex}
         style={{ flex: 1 }}
         // `flexGrow` + `justifyContent` anchor a SHORT thread to the visual
         // top. Without them an inverted list pins its content to the visual
@@ -1077,6 +1081,7 @@ function ChatRedirect() {
 }
 
 function ChatRoute() {
+  useThemeRerender();
   const regular = useIsRegular();
   return regular ? <ChatRedirect /> : <ChatView />;
 }
