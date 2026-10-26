@@ -42,7 +42,8 @@
 //      reached Play binaries. Hashing both as the rewritten form makes them
 //      agree and keeps every binary already built (with the rewrite) valid.
 //      Likewise build output a tool leaves inside a package (the npm ubrn
-//      bin's cargo `target/`) is ignored rather than hashed.
+//      bin's cargo `target/`, Kotlin's `.kotlin/` session state, #1429) is
+//      ignored rather than hashed.
 //
 // tests/ota-config.test.ts pins 1-4; tests/ota-fingerprint.test.ts pins 5.
 
@@ -128,9 +129,21 @@ const GENERATED_NATIVE_BRIDGE = [
 // CLI from source on first use, leaving ~1 GB of cargo output and a Cargo.lock
 // in the package dir, which iOS autolinking hashes whole. CI installs ubrn with
 // `cargo install` and never has them; the npm version is hashed in (1) anyway.
+//
+// `.kotlin/` is the Kotlin Gradle plugin's (2.x) per-build state directory,
+// created in the root of every Gradle build that applies it — including the
+// included builds that live in node_modules, such as
+// expo-updates/expo-updates-gradle-plugin, which is hashed as a whole dir. For
+// as long as the build runs it holds `sessions/kotlin-compiler-<n>.salive`,
+// deleted when the build ends. expo-updates bakes the runtime version DURING
+// the build (`createReleaseUpdatesResources`), so the sideload APK hashed a
+// session file that neither the OTA job nor any later recompute ever sees: the
+// 1.0.15/1.0.16 APKs each got their own runtime version, and no OTA reached
+// them (#1429). Nothing in it is ever compiled into the app.
 const NODE_MODULES_BUILD_OUTPUT = [
   "node_modules/uniffi-bindgen-react-native/target/**/*",
   "node_modules/uniffi-bindgen-react-native/Cargo.lock",
+  "node_modules/**/.kotlin/**/*",
 ];
 
 // Drop `updates` from the hashed Expo config (see 3. above). Everything else in

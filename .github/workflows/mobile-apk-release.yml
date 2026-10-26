@@ -251,27 +251,35 @@ jobs:
         if: always()
         run: rm -f "$RUNNER_TEMP/pollis-sideload.jks"
 
-      # The runtime version Gradle baked into the APKs, and every input of it
-      # (#1427), from the tree as Gradle left it. Record the value in
-      # mobile/store/runtime-versions.json when this release ships, or no OTA
-      # job will know these APKs exist.
-      - name: Record the runtime version and its sources
+      # The runtime version Gradle baked into the APKs must be the one the OTA
+      # job computes for this commit: that job has no Gradle and none of this
+      # step's env, which is exactly what this recompute reproduces. If they
+      # differ, no OTA ever reaches these APKs (1.0.14-1.0.16 shipped that way,
+      # #1429), so it fails the release. Record the value in
+      # mobile/store/runtime-versions.json when this release ships.
+      #
+      # To diagnose a mismatch: Gradle's `createReleaseUpdatesResources` task
+      # prints the baked fingerprint's per-source hashes as one JSON line in the
+      # previous step's log; compare them with the uploaded `--debug` sources.
+      - name: Check the baked runtime version and record its sources
         working-directory: mobile
-        # A record, not a gate: it must never cost a release.
-        continue-on-error: true
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/fingerprint"
           node_modules/.bin/fingerprint fingerprint:generate --platform android --debug > "$RUNNER_TEMP/fingerprint/android.json"
-          baked="$(unzip -p android/app/build/outputs/apk/release/app-x86_64-release.apk assets/fingerprint)"
           computed="$(jq -r .hash "$RUNNER_TEMP/fingerprint/android.json")"
-          echo "android runtime version: baked ${baked}, recomputed ${computed}"
-          echo "${baked}" > "$RUNNER_TEMP/fingerprint/baked-android.txt"
-          if [ "$baked" != "$computed" ]; then
-            echo "::warning::the APK's runtime version ${baked} is not what fingerprint.config.js computes (${computed}); diff the uploaded sources"
-          fi
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            baked="$(unzip -p "android/app/build/outputs/apk/release/app-${abi}-release.apk" assets/fingerprint)"
+            echo "${abi} runtime version: baked ${baked}, recomputed ${computed}"
+            echo "${baked}" > "$RUNNER_TEMP/fingerprint/baked-android-${abi}.txt"
+            if [ "$baked" != "$computed" ]; then
+              echo "::error::the ${abi} APK's runtime version ${baked} is not what the OTA job computes for this commit (${computed}), so no OTA would reach it; diff the uploaded sources against the createReleaseUpdatesResources line in the Gradle log"
+              exit 1
+            fi
+          done
 
       - name: Upload the fingerprint sources
+        if: ${{ !cancelled() }}
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
