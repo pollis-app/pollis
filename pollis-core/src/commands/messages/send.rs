@@ -300,13 +300,17 @@ pub(super) async fn deliver_queued(
     // Mentions (#843) — decided HERE, before the envelope post, because the push
     // audience now rides on that write (#987).
     //
-    // Group messages don't raise OS notifications for every new message, but a
-    // mention does: an explicit `@all` pings every group member's inbox, and an
-    // `@username` pings exactly the members named. Both resolve against THIS
-    // channel's roster, which the sender is already a member of, so a mention can
-    // never address (or probe for) someone outside the room. Per-user
-    // "notifications off" is enforced client-side in notify.ts. Only meaningful
-    // for group channels; a DM already notifies its recipient unconditionally.
+    // An explicit `@all` pings every group member's inbox, and an `@username`
+    // pings exactly the members named. Both resolve against THIS channel's
+    // roster, which the sender is already a member of, so a mention can never
+    // address (or probe for) someone outside the room. Only meaningful for group
+    // channels; a DM already notifies its recipient unconditionally.
+    //
+    // Who hears about it, end to end (#1431): every channel message pushes every
+    // other member, and the DS skips a member who muted the channel unless they
+    // are in `direct` below (Slack semantics). In-app, each client applies the
+    // same rule to its own alerts (desktop `notify.ts`); the account-wide
+    // "notifications off" preference still silences OS banners there.
     let members: Vec<(String, String)> = if is_channel {
         crate::commands::ds_reads::group(state, &mls_group_id, &sender_id, false)
             .await?
@@ -331,16 +335,26 @@ pub(super) async fn deliver_queued(
     // out by the DS since #987 — the client no longer reads other people's
     // `push_token` rows, and the two round trips it took to do so are gone.
     //
-    // Notification policy is driven by the SAME `audience` the inbox fanout
-    // below uses, so the two cannot drift: a DM always notifies its recipient, a
-    // channel `@all` notifies every member, a channel `@username` notifies
-    // exactly the members named, and ordinary channel chatter notifies nobody
-    // (it would be far too noisy — desktop raises no per-message notification
-    // for it either).
-    let push_to: Option<Vec<String>> = match &audience {
-        MentionAudience::Everyone => Some(Vec::new()),
-        MentionAudience::Only(ids) => Some(ids.clone()),
-        MentionAudience::Nobody => None,
+    // Since #1431 every message pushes every other member — a DM, `@all`,
+    // `@username` and ordinary channel chatter alike — and the DS drops each
+    // member who muted the channel unless `push_mentions` names them. The
+    // mention list is the members named directly by `@username`, even inside an
+    // `@all`, because being named is what gets through a mute. A DM has no
+    // mention list: nobody can mute one.
+    //
+    // A client from before #1431 still sends `None` for channel chatter (no
+    // push) and a bare `push_to` list for `@username`; the DS keeps reading both
+    // the old way (`pollis_delivery::push::PushAudience::from_send`).
+    let direct: Vec<String> = if is_channel {
+        direct_mentions(&content, &members)
+    } else {
+        Vec::new()
+    };
+    let push_to: Option<Vec<String>> = Some(Vec::new());
+    let push_mentions: Option<Vec<String>> = if is_channel {
+        Some(direct.clone())
+    } else {
+        None
     };
 
     // Post to Turso for offline delivery. DS seam: route the envelope write
@@ -378,6 +392,7 @@ pub(super) async fn deliver_queued(
             generation: Some(sealed.generation),
             epoch: Some(sealed.epoch),
             push_to: push_to.clone(),
+            push_mentions: push_mentions.clone(),
             delete_token_hash: delete_token_hash.clone(),
         },
         |conn, sealed| {
@@ -440,7 +455,9 @@ pub(super) async fn deliver_queued(
     // Inbox pings for the audience decided above. Fire-and-forget; failures are
     // logged, never fatal to the send.
     if is_channel {
-        // `@all` keeps its exact existing payload and fanout — every member.
+        // `@all` pings every member. A member ALSO named directly gets the
+        // `user_mention` instead (#1431): that is the ping that gets through a
+        // channel they muted, so naming them inside an `@all` must not demote it.
         if mentions_all(&content) {
             let payload = serde_json::json!({
                 "type": "all_mention",
@@ -449,9 +466,17 @@ pub(super) async fn deliver_queued(
                 "sender_id": sender_id,
                 "sender_username": sender_username,
             });
+            let named = serde_json::json!({
+                "type": "user_mention",
+                "group_id": mls_group_id,
+                "channel_id": conversation_id,
+                "sender_id": sender_id,
+                "sender_username": sender_username,
+            });
             for (uid, _) in &members {
+                let ping = if direct.contains(uid) { &named } else { &payload };
                 if let Err(e) =
-                    crate::commands::livekit::publish_to_user_inbox(state, uid, payload.clone())
+                    crate::commands::livekit::publish_to_user_inbox(state, uid, ping.clone())
                         .await
                 {
                     crate::diag!("[realtime] send_message: @all inbox publish to {uid}: {e}");
@@ -583,22 +608,32 @@ pub(crate) fn mention_audience(
     if mentions_all(content) {
         return MentionAudience::Everyone;
     }
-    let tokens = mention_tokens(content);
-    if tokens.is_empty() {
-        return MentionAudience::Nobody;
+    let ids = direct_mentions(content, members);
+    if ids.is_empty() {
+        MentionAudience::Nobody
+    } else {
+        MentionAudience::Only(ids)
     }
+}
+
+/// The members `content` names directly by `@username`, whether or not it also
+/// says `@all` — the ones a channel mute does not silence (#1431).
+///
+/// Same matching as [`mention_audience`]: against `members` only (never a
+/// directory), case-insensitive, in `members` order, deduplicated.
+pub(crate) fn direct_mentions(content: &str, members: &[(String, String)]) -> Vec<String> {
+    let tokens = mention_tokens(content);
     let mut ids: Vec<String> = Vec::new();
+    if tokens.is_empty() {
+        return ids;
+    }
     for (user_id, username) in members {
         let uname = username.to_lowercase();
         if !uname.is_empty() && tokens.contains(&uname) && !ids.contains(user_id) {
             ids.push(user_id.clone());
         }
     }
-    if ids.is_empty() {
-        MentionAudience::Nobody
-    } else {
-        MentionAudience::Only(ids)
-    }
+    ids
 }
 
 #[cfg(test)]
@@ -704,6 +739,19 @@ mod tests {
         assert_eq!(mention_tokens("@ hello"), Vec::<String>::new());
         assert_eq!(mention_tokens("user@example.com"), Vec::<String>::new());
         assert_eq!(mention_tokens("hi @dana"), vec!["dana".to_string()]);
+    }
+
+    // #1431: the list that gets through a mute. A name inside an `@all` still
+    // counts — being named is what matters — and `@all` itself names nobody.
+    #[test]
+    fn direct_mentions_survive_an_all_mention() {
+        assert_eq!(
+            direct_mentions("@all and especially @Dana", &members()),
+            vec!["u_dana".to_string()]
+        );
+        assert_eq!(direct_mentions("@all standup", &members()), Vec::<String>::new());
+        assert_eq!(direct_mentions("plain chatter", &members()), Vec::<String>::new());
+        assert_eq!(direct_mentions("@carol not here", &members()), Vec::<String>::new());
     }
 }
 

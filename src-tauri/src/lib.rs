@@ -560,6 +560,8 @@ pub fn run() {
             commands::groups::list_user_groups,
             commands::groups::list_user_groups_with_channels,
             commands::groups::list_group_channels,
+            commands::groups::list_muted_channels,
+            commands::groups::set_channel_muted,
             commands::groups::create_group,
             commands::groups::create_channel,
             commands::groups::send_group_invite,
