@@ -42,6 +42,8 @@ export default {
         danger: 'var(--c-danger)',
         // "In a voice room" green. Not re-skinned, like the accents.
         connected: 'var(--c-voice-connected)',
+        // Fixed dark text for a bright runtime fill (admin name chip) → `text-ink`.
+        ink: 'var(--c-ink)',
       },
       // `--bar-h` is the shared chrome-bar height and `--side-w` the sidebar /
       // right-panel measure (both rem ⇒ font-scalable). Exposed via spacing so
