@@ -34,6 +34,7 @@ Both `.spec.js` and `.spec.ts` are picked up by the one config.
 | `bookmarks.spec.ts` | Saved messages + `pollis://m/` permalinks in BOTH skins: the saved list, an evicted body admitting it honestly, channel/DM permalink jump-and-highlight, and an unresolvable permalink leaking nothing |
 | `receipts.spec.ts` | DM delivery/read receipts in BOTH skins: a delivered tick, a read tick, the two being visually distinct (different glyph AND different colour), a group channel showing none at all, and a multi-participant DM rendering "2/3" rather than a boolean |
 | `non-admin-identity.spec.ts` | Group/channel identity for a non-admin in BOTH skins (#1281): no rename entry point for a member, and a rename page open across a demotion turns read-only — no empty Description field, no Save |
+| `terminal-attachment-indent.spec.ts` | Terminal skin (#1489): picture strips, file rows and reaction pills start at the message text column after `name :`, not the timestamp — for a multi-attachment row, consecutive same-sender rows and a reply |
 
 First run needs the browser once: `pnpm --filter @pollis/e2e exec playwright install chromium`.
 
