@@ -375,7 +375,13 @@
       "savedMessages": "Mensajes guardados",
       "appearance": "Apariencia",
       "signOut": "Cerrar sesión…",
-      "signOutConfirmTitle": "¿Cerrar sesión de Pollis en este dispositivo?"
+      "signOutConfirmTitle": "¿Cerrar sesión de Pollis en este dispositivo?",
+      "version": "Versión",
+      "versionValue": "{{version}} ({{build}})",
+      "runningUpdate": "Actualización {{id}} · {{date}}",
+      "update": "Actualizar",
+      "updateHint": "Abre {{place}}",
+      "updateFailed": "No se pudo abrir {{place}}"
     },
     "identityHeading": "Identidad",
     "preferences": {
