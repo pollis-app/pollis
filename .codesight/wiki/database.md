@@ -92,7 +92,20 @@ Three rules keep reuse safe, all enforced in `db.rs` rather than by convention:
   (describe + cursor never close it) and the server reaps idle streams, so
   anything parked past `DEFAULT_MAX_IDLE` (3s) is discarded instead of reused.
   That is precisely the sporadic-traffic case where the handshake cost is
-  irrelevant anyway.
+  irrelevant anyway. The age runs from the connection's last *use* (#1500): a
+  checkout that never touched it re-parks it with its old age, and the auth gate
+  checks one out only on a device-key cache miss. Before, every cached signed
+  request re-parked the connection as new, so one whose stream Turso had expired
+  stayed in circulation and the next query on it failed with `stream not found`.
+- **A connection that saw a transport failure is dropped (#1500).** libsql keeps a
+  stream's baton when a request fails at the HTTP layer, so every later statement
+  on that connection fails the same way. A transient database error passing
+  through `AppError` (or the error-log insert) calls `db::note_transport_fault`,
+  and every connection checked out at that moment is dropped instead of parked.
+  Transient errors (dropped/timed-out connection, `stream not found`, a 5xx from
+  Turso, `SQLITE_BUSY`/`LOCKED`) answer **503 `{"error":"unavailable"}`**, not
+  500; a database failure during the device-key lookup is the same 503, not a
+  401, and still never authenticates.
 - **Checkout never blocks.** The pool is elastic (mint on miss, cap the *parked*
   count, never the live count) because handlers nest checkouts — `submit` holds a
   `log_db` connection while taking a `db` one, and in single-DB deploys those are

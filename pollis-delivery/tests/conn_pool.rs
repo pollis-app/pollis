@@ -28,212 +28,15 @@
 //! path, because per-connection PRAGMAs are exactly what the local test DBs
 //! depend on.
 
-use std::collections::{HashMap, HashSet};
-use std::net::SocketAddr;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::Duration;
 
-use axum::extract::{ConnectInfo, State};
-use axum::routing::post;
-use axum::{Json, Router};
-use libsql_hrana::proto::{
-    BatchResult, BatchStreamResp, CloseStreamResp, DescribeResult, DescribeStreamResp,
-    ExecuteStreamResp, GetAutocommitStreamResp, PipelineReqBody, PipelineRespBody, StmtResult,
-    StreamRequest, StreamResponse, StreamResult,
-};
 use pollis_delivery::db::Db;
 
-/// What the double saw, keyed the way the assertions need it.
-#[derive(Default)]
-struct Double {
-    /// Distinct client socket addresses == distinct TCP connections == distinct
-    /// `hyper::Client`s built by libsql.
-    peers: Mutex<HashSet<SocketAddr>>,
-    /// SQL executed on each hrana stream, in order.
-    streams: Mutex<HashMap<u64, Vec<String>>>,
-    /// Whether each stream is in autocommit (i.e. NOT inside a transaction).
-    autocommit: Mutex<HashMap<u64, bool>>,
-    /// Live baton -> stream id. A stream keeps its id across baton rotations.
-    batons: Mutex<HashMap<String, u64>>,
-    next_stream: AtomicU64,
-    next_baton: AtomicU64,
-}
-
-impl Double {
-    fn record(&self, stream: u64, sql: &str) {
-        self.streams
-            .lock()
-            .unwrap()
-            .entry(stream)
-            .or_default()
-            .push(sql.to_string());
-        let upper = sql.trim().to_uppercase();
-        if upper.starts_with("BEGIN") {
-            self.autocommit.lock().unwrap().insert(stream, false);
-        }
-        if upper.starts_with("COMMIT") || upper.starts_with("ROLLBACK") {
-            self.autocommit.lock().unwrap().insert(stream, true);
-        }
-    }
-
-    fn is_autocommit(&self, stream: u64) -> bool {
-        *self
-            .autocommit
-            .lock()
-            .unwrap()
-            .get(&stream)
-            .unwrap_or(&true)
-    }
-
-    fn mint_baton(&self, stream: u64) -> String {
-        let baton = format!("b{}", self.next_baton.fetch_add(1, Ordering::SeqCst));
-        self.batons.lock().unwrap().insert(baton.clone(), stream);
-        baton
-    }
-
-    fn connections(&self) -> usize {
-        self.peers.lock().unwrap().len()
-    }
-
-    /// Streams whose SQL log contains `needle`, as (stream id, sql log).
-    fn streams_containing(&self, needle: &str) -> Vec<(u64, Vec<String>)> {
-        self.streams
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|(_, sqls)| sqls.iter().any(|s| s.contains(needle)))
-            .map(|(id, sqls)| (*id, sqls.clone()))
-            .collect()
-    }
-}
-
-fn ok(response: StreamResponse) -> StreamResult {
-    StreamResult::Ok { response }
-}
-
-/// A result shaped like a one-row write. The tests assert on protocol traffic,
-/// not on data, so nothing here needs a real SQLite behind it.
-fn stmt_result() -> StmtResult {
-    StmtResult {
-        cols: vec![],
-        rows: vec![],
-        affected_row_count: 1,
-        last_insert_rowid: Some(1),
-        replication_index: None,
-        rows_read: 0,
-        rows_written: 1,
-        query_duration_ms: 0.0,
-    }
-}
-
-async fn pipeline(
-    State(state): State<Arc<Double>>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    // Raw bytes, not `Json<_>`: libsql posts the pipeline without a
-    // `Content-Type` header, which axum's JSON extractor rejects.
-    body: axum::body::Bytes,
-) -> Json<PipelineRespBody> {
-    let req: PipelineReqBody = serde_json::from_slice(&body).expect("pipeline request");
-    state.peers.lock().unwrap().insert(peer);
-
-    // A request carrying a baton continues an existing stream; one without
-    // opens a new one — the hrana rule the pool's staleness bound protects.
-    let stream = match req.baton.as_deref() {
-        Some(baton) => *state
-            .batons
-            .lock()
-            .unwrap()
-            .get(baton)
-            .expect("baton was issued by this double"),
-        None => state.next_stream.fetch_add(1, Ordering::SeqCst),
-    };
-
-    let mut results = Vec::new();
-    let mut closed = false;
-    for request in req.requests {
-        match request {
-            StreamRequest::Execute(exec) => {
-                state.record(stream, exec.stmt.sql.as_deref().unwrap_or(""));
-                results.push(ok(StreamResponse::Execute(ExecuteStreamResp {
-                    result: stmt_result(),
-                })));
-            }
-            StreamRequest::Batch(batch) => {
-                let steps = batch.batch.steps.len();
-                for step in &batch.batch.steps {
-                    state.record(stream, step.stmt.sql.as_deref().unwrap_or(""));
-                }
-                results.push(ok(StreamResponse::Batch(BatchStreamResp {
-                    result: BatchResult {
-                        step_results: (0..steps).map(|_| Some(stmt_result())).collect(),
-                        step_errors: (0..steps).map(|_| None).collect(),
-                        replication_index: None,
-                    },
-                })));
-            }
-            StreamRequest::GetAutocommit(_) => {
-                results.push(ok(StreamResponse::GetAutocommit(GetAutocommitStreamResp {
-                    is_autocommit: state.is_autocommit(stream),
-                })));
-            }
-            StreamRequest::Describe(_) => {
-                results.push(ok(StreamResponse::Describe(DescribeStreamResp {
-                    result: DescribeResult {
-                        params: vec![],
-                        cols: vec![],
-                        is_explain: false,
-                        is_readonly: false,
-                    },
-                })));
-            }
-            StreamRequest::Close(_) => {
-                closed = true;
-                results.push(ok(StreamResponse::Close(CloseStreamResp {})));
-            }
-            other => panic!("test double got an unhandled hrana request: {other:?}"),
-        }
-    }
-
-    // Dropping the baton is how a server tells the client the stream is gone.
-    let baton = if closed {
-        None
-    } else {
-        Some(state.mint_baton(stream))
-    };
-    Json(PipelineRespBody {
-        baton,
-        base_url: None,
-        results,
-    })
-}
-
-/// Start the double and return it with the `http://` URL to point `Db` at.
-async fn start_double() -> (Arc<Double>, String) {
-    let state = Arc::new(Double::default());
-    let app = Router::new()
-        .route("/v3/pipeline", post(pipeline))
-        .with_state(Arc::clone(&state));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind double");
-    let addr = listener.local_addr().expect("local addr");
-    tokio::spawn(async move {
-        axum::serve(
-            listener,
-            app.into_make_service_with_connect_info::<SocketAddr>(),
-        )
-        .await
-        .expect("serve double");
-    });
-    (state, format!("http://{addr}"))
-}
-
-async fn remote_db(url: &str) -> Db {
-    Db::connect_remote(url, "test-token")
-        .await
-        .expect("remote db")
-}
+#[path = "support/hrana_double.rs"]
+mod hrana_double;
+use hrana_double::{remote_db, start_double};
 
 /// The defect itself: before pooling, twenty sequential requests built twenty
 /// `hyper::Client`s and therefore paid twenty TCP + TLS handshakes. Reuse makes
@@ -353,6 +156,42 @@ async fn a_stale_parked_connection_is_never_reused() {
         double.connections(),
         2,
         "a connection parked past the idle window must be discarded, not reused"
+    );
+}
+
+/// #1500: a connection's age is counted from its last USE. Before, a checkout
+/// that never touched the connection — the auth gate on a device-key cache hit
+/// took one on every signed request — parked it again as brand new, so a steady
+/// trickle of signed requests kept a connection whose stream Turso had long
+/// expired in circulation until a request finally queried on it and failed with
+/// `stream not found`.
+#[tokio::test]
+async fn an_untouched_checkout_does_not_make_a_connection_look_fresh() {
+    let (double, url) = start_double().await;
+    let db = remote_db(&url)
+        .await
+        .with_max_idle(Duration::from_millis(200));
+
+    let conn = db.conn().await.expect("checkout");
+    // `prepare` leaves the hrana stream open, as a `query` does.
+    conn.prepare("SELECT 1").await.expect("prepare");
+    drop(conn);
+
+    // Checkouts that never touch the connection, each well inside the window
+    // measured from the previous one, but adding up to more than it.
+    for _ in 0..4 {
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        drop(db.conn().await.expect("checkout"));
+    }
+
+    let conn = db.conn().await.expect("checkout");
+    conn.execute("INSERT INTO t VALUES (1)", ())
+        .await
+        .expect("execute");
+    assert_eq!(
+        double.connections(),
+        2,
+        "a connection last used longer ago than the window is not reused, however often it was checked out"
     );
 }
 
