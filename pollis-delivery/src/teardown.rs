@@ -468,8 +468,10 @@ pub async fn purge_conversation_rows(
         cid(),
     )
     .await?;
+    // By the envelope while it survives, and by the conversation the reaction
+    // was gated against (#1433) once GC has collected it.
     conn.execute(
-        "DELETE FROM message_reaction WHERE message_id IN \
+        "DELETE FROM message_reaction WHERE conversation_id = ?1 OR message_id IN \
          (SELECT id FROM message_envelope WHERE conversation_id = ?1)",
         cid(),
     )
