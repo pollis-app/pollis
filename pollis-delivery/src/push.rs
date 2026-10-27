@@ -1972,14 +1972,15 @@ mod tests {
     /// endpoints answer "nothing" rather than failing.
     #[tokio::test]
     async fn a_database_without_the_column_dismisses_nothing() {
-        let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
-        let c = db.connect().unwrap();
-        c.execute_batch(
-            "CREATE TABLE push_handle (handle TEXT PRIMARY KEY, user_id TEXT NOT NULL, \
-             conversation_id TEXT NOT NULL, kind TEXT NOT NULL, \
-             created_at TEXT NOT NULL DEFAULT (datetime('now')));\
-             INSERT INTO push_handle (handle, user_id, conversation_id, kind) \
-             VALUES ('h1', 'alice', 'conv-1', 'dm');",
+        let c = conn().await;
+        // The real schema, minus what 000040 added.
+        c.execute("ALTER TABLE push_handle DROP COLUMN dismissed_at", ())
+            .await
+            .unwrap();
+        c.execute(
+            "INSERT INTO push_handle (handle, user_id, conversation_id, kind) \
+             VALUES ('h1', 'alice', 'conv-1', 'dm')",
+            (),
         )
         .await
         .unwrap();
