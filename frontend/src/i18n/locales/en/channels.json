@@ -115,7 +115,16 @@
     "adminToggle": "admin",
     "kick": "kick",
     "verified": "Verified contact",
-    "keyChanged": "Identity key changed — re-verify"
+    "keyChanged": "Identity key changed — re-verify",
+    "invited": {
+      "heading": "Invited",
+      "by": "invited by {{name}} · {{date}}",
+      "byUnknown": "invited {{date}}",
+      "revoke": "Revoke",
+      "revoking": "Revoking…",
+      "revokeLabel": "Revoke the invite for {{name}}",
+      "revokeFailed": "Couldn't revoke the invite."
+    }
   },
   "kickMember": {
     "pageTitle": "Remove Member",

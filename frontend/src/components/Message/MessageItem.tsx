@@ -29,6 +29,9 @@ interface MessageItemProps {
   replyToMessage?: Message | null;
   authorUsername?: string;
   isAuthorAdmin?: boolean;
+  /** The author joined the group within the last week of this message's
+   * timestamp (#1506) — draws the small "new" tag after their name. */
+  isAuthorNew?: boolean;
   /** True when the viewer is an admin in this message's group — enables
    * deleting other members' messages for moderation. */
   canModerate?: boolean;
@@ -78,6 +81,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
   replyToMessage,
   authorUsername,
   isAuthorAdmin = false,
+  isAuthorNew = false,
   canModerate = false,
   isGroupStart = true,
   onReply,
@@ -127,6 +131,18 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
     : { background: getUsernameChipColor(authorColorKey) };
 
   const replyTo = replyToMessage ?? null;
+
+  // The "new" member tag (#1506): a filled pill after the name, never a
+  // border. One element for both skins, so its look and label cannot drift.
+  const newTag = isAuthorNew ? (
+    <span
+      data-testid="message-new-tag"
+      title={t("message.newMemberTitle")}
+      className="flex-shrink-0 self-center px-1.5 rounded-chip bg-surface-high text-accent text-2xs font-medium select-none"
+    >
+      {t("message.newMember")}
+    </span>
+  ) : null;
 
   const replyToAuthor = replyTo
     ? (replyTo.sender_username ?? replyTo.sender_id)
@@ -253,6 +269,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
               >
                 {displayName}
               </bdi>
+              {newTag}
               <bdi
                 data-testid="message-timestamp"
                 dir="ltr"
@@ -401,6 +418,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
         >
           {displayName}
         </bdi>
+        {isAuthorNew && <span className="h-6 me-1 flex flex-shrink-0 items-center">{newTag}</span>}
 
         <span
           className="font-mono text-sm select-none me-1 flex-shrink-0 text-muted"

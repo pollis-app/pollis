@@ -5,7 +5,9 @@
     "deleted": "[محذوفة]",
     "encrypted": "[مشفَّرة]",
     "redacted": "[محجوبة]",
-    "edited": "(مُعدَّلة)"
+    "edited": "(مُعدَّلة)",
+    "newMember": "جديد",
+    "newMemberTitle": "انضم خلال آخر 7 أيام"
   },
   "status": {
     "pending": "قيد الانتظار",
@@ -58,12 +60,6 @@
     "unknownAuthor": "غير معروف",
     "blockedAuthor": "مستخدم محظور",
     "blockedBody": "[محظورة]"
-  },
-  "roster": {
-    "joined": "انضم {{name}} إلى المجموعة",
-    "left": "غادر {{name}} المجموعة",
-    "deviceAdded": "أضاف {{name}} جهازًا جديدًا",
-    "deviceRemoved": "أزال {{name}} أحد أجهزته"
   },
   "replyBar": {
     "replyingTo": "رد على <name>{{name}}</name>",

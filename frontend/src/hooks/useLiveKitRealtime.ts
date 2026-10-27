@@ -22,7 +22,6 @@ import { shouldAlertForWake, type WakeLatest } from '../utils/messageWake';
 import { typingStore, typingRoomKey } from '../stores/typingStore';
 import { presenceStore } from '../stores/presenceStore';
 import { keyChangeStore } from '../stores/keyChangeStore';
-import { rosterChangeStore, type RosterBanner } from '../stores/rosterChangeStore';
 import { peerVerificationKeys } from './queries/useUserProfile';
 import { listPendingEnrollmentRequests } from '../services/api';
 import { isTypedCodeRequest } from '../utils/enrollmentPrompt';
@@ -176,10 +175,6 @@ type RealtimeEvent =
     conversation_id: string;
     epoch_before: number;
     epoch_after: number;
-    joined_user_ids: string[];
-    left_user_ids: string[];
-    devices_added: [string, string][];
-    devices_removed: [string, string][];
   };
 
 export function useLiveKitRealtime() {
@@ -694,63 +689,14 @@ export function useLiveKitRealtime() {
       }
 
       if (event.type === 'roster_changed') {
-        // Project the per-user / per-device diff into chronologically-
-        // ordered banners. Self-actions are filtered out so the user
-        // doesn't see "you joined" / "you left" notices for their own
-        // moves. The reconciler's own commit also fires this event, so
-        // without a self filter we'd double-render on the actor's side.
-        const selfId = currentUserIdRef.current;
-        const now = Date.now();
-        const banners: RosterBanner[] = [];
-        for (const user_id of event.joined_user_ids) {
-          if (user_id === selfId) {
-            continue;
-          }
-          banners.push({
-            id: `${event.conversation_id}:${event.epoch_after}:joined:${user_id}`,
-            observed_at_ms: now,
-            epoch: event.epoch_after,
-            payload: { kind: "joined", user_id },
-          });
-        }
-        for (const user_id of event.left_user_ids) {
-          if (user_id === selfId) {
-            continue;
-          }
-          banners.push({
-            id: `${event.conversation_id}:${event.epoch_after}:left:${user_id}`,
-            observed_at_ms: now,
-            epoch: event.epoch_after,
-            payload: { kind: "left", user_id },
-          });
-        }
-        for (const [user_id, device_id] of event.devices_added) {
-          if (user_id === selfId) {
-            continue;
-          }
-          banners.push({
-            id: `${event.conversation_id}:${event.epoch_after}:dev_add:${user_id}:${device_id}`,
-            observed_at_ms: now,
-            epoch: event.epoch_after,
-            payload: { kind: "device_added", user_id, device_id },
-          });
-        }
-        for (const [user_id, device_id] of event.devices_removed) {
-          if (user_id === selfId) {
-            continue;
-          }
-          banners.push({
-            id: `${event.conversation_id}:${event.epoch_after}:dev_rem:${user_id}:${device_id}`,
-            observed_at_ms: now,
-            epoch: event.epoch_after,
-            payload: { kind: "device_removed", user_id, device_id },
-          });
-        }
-        rosterChangeStore.push(event.conversation_id, banners);
-        // Refresh the member list so the sidebar / member roster picks
-        // up the change without waiting for the next periodic refetch.
+        // A refetch hint, never a timeline line: membership changes are not
+        // announced in channels or DMs (#1506). Refresh the member list and
+        // its pending invites (an invite or a revoke reconciles too).
         queryClientRef.current.invalidateQueries({
           queryKey: groupQueryKeys.members(event.conversation_id),
+        });
+        queryClientRef.current.invalidateQueries({
+          queryKey: groupQueryKeys.groupInvites(event.conversation_id),
         });
         return;
       }

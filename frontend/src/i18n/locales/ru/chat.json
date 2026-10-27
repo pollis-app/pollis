@@ -5,7 +5,9 @@
     "deleted": "[удалено]",
     "encrypted": "[зашифровано]",
     "redacted": "[скрыто]",
-    "edited": "(изменено)"
+    "edited": "(изменено)",
+    "newMember": "новый",
+    "newMemberTitle": "В группе меньше 7 дней"
   },
   "status": {
     "pending": "в очереди",
@@ -52,12 +54,6 @@
     "unknownAuthor": "Неизвестно",
     "blockedAuthor": "заблокированный пользователь",
     "blockedBody": "[заблокировано]"
-  },
-  "roster": {
-    "joined": "{{name}} теперь в группе",
-    "left": "{{name}} больше не в группе",
-    "deviceAdded": "У {{name}} появилось новое устройство",
-    "deviceRemoved": "У {{name}} удалено устройство"
   },
   "replyBar": {
     "replyingTo": "ответ для <name>{{name}}</name>",

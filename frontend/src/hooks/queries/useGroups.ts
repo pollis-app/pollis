@@ -15,6 +15,9 @@ export const groupQueryKeys = {
   channels: (groupId: string) => ["groups", groupId, "channels"] as const,
   members: (groupId: string) => ["groups", groupId, "members"] as const,
   pendingInvites: (userId: string | null) => ["group-invites", "pending", userId] as const,
+  /** A group's outgoing pending invites (#1506). Under `group-invites` so the
+   *  `membership_changed` wake-up's prefix invalidation covers it. */
+  groupInvites: (groupId: string) => ["group-invites", "group", groupId] as const,
   joinRequests: (groupId: string) => ["group-join-requests", groupId] as const,
   myJoinRequest: (groupId: string | undefined, userId: string | null) =>
     ["group-join-requests", "my", groupId, userId] as const,
@@ -547,6 +550,55 @@ export function useGroupMembers(groupId: string | null) {
     },
     enabled: !!groupId && !!currentUser,
     staleTime: 1000 * 30,
+  });
+}
+
+/** A pending invite as the member page's "Invited" section lists it (#1506). */
+export interface GroupInvite {
+  id: string;
+  invitee_id: string;
+  invitee_username: string | null;
+  inviter_id: string;
+  inviter_username: string | null;
+  created_at: string;
+}
+
+/** The group's pending invites: who was invited, by whom, and when. */
+export function useGroupInvites(groupId: string | null) {
+  const currentUser = useObserver(() => appStore.currentUser);
+
+  return useQuery({
+    queryKey: groupQueryKeys.groupInvites(groupId ?? ''),
+    queryFn: async (): Promise<GroupInvite[]> => {
+      if (!groupId || !currentUser) {
+        return [];
+      }
+      return await invoke<GroupInvite[]>('list_group_invites', { groupId, userId: currentUser.id });
+    },
+    enabled: !!groupId && !!currentUser,
+    staleTime: 1000 * 30,
+  });
+}
+
+/**
+ * Withdraw a pending invite. The DS allows the inviter and the group's admins;
+ * the core then commits the invitee's devices out of the MLS tree.
+ */
+export function useRevokeGroupInvite() {
+  const queryClient = useQueryClient();
+  const currentUser = useObserver(() => appStore.currentUser);
+
+  return useMutation({
+    mutationFn: async ({ groupId, inviteId }: { groupId: string; inviteId: string }) => {
+      if (!currentUser) {
+        throw new Error('No current user');
+      }
+      await invoke('revoke_group_invite', { inviteId, groupId, userId: currentUser.id });
+      return groupId;
+    },
+    onSuccess: (groupId) => {
+      queryClient.invalidateQueries({ queryKey: groupQueryKeys.groupInvites(groupId) });
+    },
   });
 }
 

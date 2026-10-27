@@ -111,7 +111,16 @@
     "adminToggle": "admin",
     "kick": "expulsar",
     "verified": "Contacto verificado",
-    "keyChanged": "La clave de identidad ha cambiado: vuelve a verificar"
+    "keyChanged": "La clave de identidad ha cambiado: vuelve a verificar",
+    "invited": {
+      "heading": "Invitados",
+      "by": "invitado por {{name}} · {{date}}",
+      "byUnknown": "invitado el {{date}}",
+      "revoke": "Revocar",
+      "revoking": "Revocando…",
+      "revokeLabel": "Revocar la invitación de {{name}}",
+      "revokeFailed": "No se pudo revocar la invitación."
+    }
   },
   "kickMember": {
     "pageTitle": "Expulsar miembro",

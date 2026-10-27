@@ -6,6 +6,8 @@
     "encrypted": "[encrypted]",
     "redacted": "[redacted]",
     "edited": "(edited)",
+    "newMember": "new",
+    "newMemberTitle": "Joined in the last 7 days",
     "undecryptable": {
       "tag": "undecryptable",
       "title": "Couldn't decrypt",
@@ -60,12 +62,6 @@
     "unknownAuthor": "Unknown",
     "blockedAuthor": "blocked user",
     "blockedBody": "[blocked]"
-  },
-  "roster": {
-    "joined": "{{name}} joined the group",
-    "left": "{{name}} left the group",
-    "deviceAdded": "{{name}} added a new device",
-    "deviceRemoved": "{{name}} removed a device"
   },
   "replyBar": {
     "replyingTo": "replying to <name>{{name}}</name>",
