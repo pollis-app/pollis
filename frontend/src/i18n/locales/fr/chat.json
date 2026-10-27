@@ -5,7 +5,9 @@
     "deleted": "[supprimé]",
     "encrypted": "[chiffré]",
     "redacted": "[expurgé]",
-    "edited": "(modifié)"
+    "edited": "(modifié)",
+    "newMember": "nouveau",
+    "newMemberTitle": "A rejoint le groupe ces 7 derniers jours"
   },
   "status": {
     "pending": "en attente",
@@ -46,12 +48,6 @@
     "unknownAuthor": "Inconnu",
     "blockedAuthor": "utilisateur bloqué",
     "blockedBody": "[bloqué]"
-  },
-  "roster": {
-    "joined": "{{name}} a rejoint le groupe",
-    "left": "{{name}} a quitté le groupe",
-    "deviceAdded": "{{name}} a ajouté un nouvel appareil",
-    "deviceRemoved": "{{name}} a retiré un appareil"
   },
   "replyBar": {
     "replyingTo": "en réponse à <name>{{name}}</name>",

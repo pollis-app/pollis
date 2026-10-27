@@ -5,7 +5,9 @@
     "deleted": "[видалено]",
     "encrypted": "[зашифровано]",
     "redacted": "[приховано]",
-    "edited": "(змінено)"
+    "edited": "(змінено)",
+    "newMember": "новий",
+    "newMemberTitle": "У групі менше 7 днів"
   },
   "status": {
     "pending": "очікує",
@@ -52,12 +54,6 @@
     "unknownAuthor": "Невідомо",
     "blockedAuthor": "заблокований користувач",
     "blockedBody": "[заблоковано]"
-  },
-  "roster": {
-    "joined": "{{name}} тепер у групі",
-    "left": "{{name}} більше не в групі",
-    "deviceAdded": "{{name}}: додано новий пристрій",
-    "deviceRemoved": "{{name}}: пристрій прибрано"
   },
   "replyBar": {
     "replyingTo": "відповідь для <name>{{name}}</name>",

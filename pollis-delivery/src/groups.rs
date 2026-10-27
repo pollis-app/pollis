@@ -1078,6 +1078,102 @@ pub async fn apply_decline_invite(
     Ok(WriteOutcome::Ok)
 }
 
+// ── POST /v1/invites/revoke ──────────────────────────────────────────────────
+
+pub async fn revoke_invite(
+    State(state): State<AppState>,
+    req: RawRequest,
+) -> Result<Response, AppError> {
+    let (authed, parsed) = match gate_and_parse::<RevokeInviteBody>(&state, &req).await? {
+        Ok(v) => v,
+        Err(resp) => return Ok(resp),
+    };
+    let conn = state.db.conn().await?;
+    // Who to tell, read before the revoke consumes the row.
+    let target = revoked_invite_target(&conn, &parsed.invite_id).await?;
+    let outcome = apply_revoke_invite(&conn, authed.as_deref(), &parsed).await?;
+    if let (WriteOutcome::Ok, Some((invitee, group_id))) = (&outcome, target) {
+        // Drop the invite from the invitee's pending list. The DS sends it: once
+        // the row is gone the revoker no longer shares a roster with the invitee,
+        // so the broker would refuse the revoker's own publish to their inbox.
+        // A bare wake-up, the same one an accept or a removal sends.
+        // Best-effort: the invitee's list re-reads on its next fetch anyway, and
+        // accepting a revoked invite is refused.
+        let inbox = format!("inbox-{invitee}");
+        let event = serde_json::json!({ "type": "membership_changed", "group_id": group_id });
+        if let Err(e) = crate::broker::room_send_data(&state, &inbox, &event).await {
+            tracing::warn!("revoked-invite inbox notify failed (non-fatal): {e}");
+        }
+    }
+    outcome_response::<RevokeInviteBody>(outcome)
+}
+
+/// `(invitee_id, group_id)` of an invite, if it still exists.
+async fn revoked_invite_target(
+    conn: &Connection,
+    invite_id: &str,
+) -> anyhow::Result<Option<(String, String)>> {
+    let mut rows = conn
+        .query(
+            "SELECT invitee_id, group_id FROM group_invite WHERE id = ?1",
+            libsql::params![invite_id.to_string()],
+        )
+        .await?;
+    match rows.next().await? {
+        Some(row) => Ok(Some((row.get(0)?, row.get(1)?))),
+        None => Ok(None),
+    }
+}
+
+/// Withdraw a pending invite (#1506). Authz: the actor is still a member of the
+/// invite's group AND either sent this invite or is an admin of that group. The
+/// group and the inviter are both read from the invite row, never from the
+/// request, so an admin of group A cannot revoke group B's invite.
+///
+/// The row is deleted, exactly as a decline deletes it. That is what takes the
+/// invitee out of the group's desired MLS roster ([`crate::directory::desired_roster`]
+/// counts pending invitees as present), so the revoker's next reconcile commits
+/// their leaves out of the tree. An invite that is already gone (accepted,
+/// declined, revoked twice) answers Forbidden, the same refusal as one that is
+/// not the actor's to revoke.
+pub async fn apply_revoke_invite(
+    conn: &Connection,
+    authed: Option<&str>,
+    body: &RevokeInviteBody,
+) -> anyhow::Result<WriteOutcome> {
+    let actor = match resolve_actor(authed, body.actor_id.as_deref()) {
+        Ok(a) => a,
+        Err(o) => return Ok(o),
+    };
+    let mut rows = conn
+        .query(
+            "SELECT group_id, inviter_id FROM group_invite WHERE id = ?1",
+            libsql::params![body.invite_id.clone()],
+        )
+        .await?;
+    let (group_id, inviter_id): (String, String) = match rows.next().await? {
+        Some(row) => (row.get(0)?, row.get(1)?),
+        None => return Ok(WriteOutcome::Forbidden),
+    };
+    drop(rows);
+
+    if authed.is_some() {
+        let allowed = match group_role(conn, &group_id, &actor).await? {
+            Some(role) => role == "admin" || inviter_id == actor,
+            None => false,
+        };
+        if !allowed {
+            return Ok(WriteOutcome::Forbidden);
+        }
+    }
+    conn.execute(
+        "DELETE FROM group_invite WHERE id = ?1 AND group_id = ?2",
+        libsql::params![body.invite_id.clone(), group_id],
+    )
+    .await?;
+    Ok(WriteOutcome::Ok)
+}
+
 // ── POST /v1/join-requests/create ────────────────────────────────────────────
 
 pub async fn create_join_request(

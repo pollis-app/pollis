@@ -568,6 +568,8 @@ pub fn run() {
             commands::groups::get_pending_invites,
             commands::groups::accept_group_invite,
             commands::groups::decline_group_invite,
+            commands::groups::list_group_invites,
+            commands::groups::revoke_group_invite,
             commands::groups::create_group_invite_link,
             commands::groups::list_group_invite_links,
             commands::groups::revoke_group_invite_link,

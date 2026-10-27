@@ -5,7 +5,9 @@
     "deleted": "[已删除]",
     "encrypted": "[已加密]",
     "redacted": "[已隐去]",
-    "edited": "（已编辑）"
+    "edited": "（已编辑）",
+    "newMember": "新",
+    "newMemberTitle": "加入不到 7 天"
   },
   "status": {
     "pending": "待发送",
@@ -43,12 +45,6 @@
     "unknownAuthor": "未知",
     "blockedAuthor": "已屏蔽的用户",
     "blockedBody": "[已屏蔽]"
-  },
-  "roster": {
-    "joined": "{{name}} 加入了群组",
-    "left": "{{name}} 退出了群组",
-    "deviceAdded": "{{name}} 添加了一台新设备",
-    "deviceRemoved": "{{name}} 移除了一台设备"
   },
   "replyBar": {
     "replyingTo": "正在回复 <name>{{name}}</name>",

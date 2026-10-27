@@ -109,7 +109,16 @@
     "adminToggle": "管理员",
     "kick": "移除",
     "verified": "已验证的联系人",
-    "keyChanged": "身份密钥已更改 — 请重新验证"
+    "keyChanged": "身份密钥已更改 — 请重新验证",
+    "invited": {
+      "heading": "已邀请",
+      "by": "由 {{name}} 邀请 · {{date}}",
+      "byUnknown": "邀请于 {{date}}",
+      "revoke": "撤销",
+      "revoking": "正在撤销…",
+      "revokeLabel": "撤销对 {{name}} 的邀请",
+      "revokeFailed": "无法撤销邀请。"
+    }
   },
   "kickMember": {
     "pageTitle": "移除成员",

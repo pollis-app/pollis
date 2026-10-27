@@ -10,7 +10,7 @@ import Animated, {
 import { useTranslation } from "react-i18next";
 import { Avatar } from "../ui";
 import { Icon } from "../icons";
-import { fonts, semantic, type as ty } from "../../theme/tokens";
+import { fonts, r, semantic, type as ty } from "../../theme/tokens";
 import { MessageBodyInline } from "./MessageBody";
 import { ReactionPills } from "./ReactionPills";
 import { ReceiptIndicator } from "./ReceiptIndicator";
@@ -86,6 +86,7 @@ export function MessageRow({
   onPressReplyQuote,
   highlighted = false,
   continued = false,
+  isNew = false,
   testID,
   messageId,
 }: {
@@ -128,6 +129,9 @@ export function MessageRow({
   highlighted?: boolean;
   // Same sender as the row above, within the grouping window.
   continued?: boolean;
+  // The sender joined the group within a week of this message (#1506): a
+  // small "new" tag after their name. Group channels only.
+  isNew?: boolean;
   testID?: string;
   messageId?: string;
 }) {
@@ -210,6 +214,9 @@ export function MessageRow({
     ? `${t("mobile:chat.replyQuoteLabel", { name: replyTo?.name ?? "", text: quoteText })}. `
     : "";
 
+  // The tag is part of the one spoken label, not a separate element.
+  const spokenName = isNew ? `${name} (${t("message.newMember")})` : name;
+
   return (
     <SwipeToReply onReply={onReply} pressFeedback={press}>
       <AnimatedPressable
@@ -218,7 +225,7 @@ export function MessageRow({
         onPressIn={onPressIn}
         onPressOut={onPressOut}
         testID={testID}
-        accessibilityLabel={`${quoteLabel}${text ? t("preview.withSender", { name, text }) : name}, ${
+        accessibilityLabel={`${quoteLabel}${text ? t("preview.withSender", { name: spokenName, text }) : spokenName}, ${
           statusLabel ?? time
         }`}
         accessibilityActions={a11yActions}
@@ -317,6 +324,23 @@ export function MessageRow({
                 >
                   {name}
                 </Text>
+                {isNew ? (
+                  <View
+                    testID="message-new-tag"
+                    importantForAccessibility="no-hide-descendants"
+                    accessibilityElementsHidden
+                    style={{
+                      alignSelf: "center",
+                      backgroundColor: semantic.accentFaint,
+                      borderRadius: r.pill,
+                      paddingHorizontal: 6,
+                    }}
+                  >
+                    <Text style={[ty.meta, { fontFamily: fonts.medium, color: semantic.accent }]}>
+                      {t("message.newMember")}
+                    </Text>
+                  </View>
+                ) : null}
                 {/* A pending row renders exactly like a sent one: a "sending"
                     label or dimmed row made a fast send feel slow. Only a failure
                     is labelled, matching desktop. */}

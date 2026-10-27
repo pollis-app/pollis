@@ -325,37 +325,14 @@ pub(super) fn dispatch_data(
             }
         }
         Some("roster_changed") => {
-            // Mirror of the RosterChanged variant in realtime.rs. Diffs
-            // are wire-format string arrays (joined/left) and
-            // `[user_id, device_id]` pair arrays (devices_added/removed).
-            // Pull them through `serde_json::from_value` rather than
-            // re-parsing by hand so a wire-shape drift fails fast in dev.
+            // Mirror of the RosterChanged variant in realtime.rs: a bare
+            // refetch hint (§5.3) — the conversation and its epochs, no ids.
             let conversation_id = data
                 .get("conversation_id")
                 .and_then(|v| v.as_str())
                 .map(str::to_owned);
             let epoch_before = data.get("epoch_before").and_then(|v| v.as_u64());
             let epoch_after = data.get("epoch_after").and_then(|v| v.as_u64());
-            let joined_user_ids: Vec<String> = data
-                .get("joined_user_ids")
-                .cloned()
-                .and_then(|v| serde_json::from_value(v).ok())
-                .unwrap_or_default();
-            let left_user_ids: Vec<String> = data
-                .get("left_user_ids")
-                .cloned()
-                .and_then(|v| serde_json::from_value(v).ok())
-                .unwrap_or_default();
-            let devices_added: Vec<(String, String)> = data
-                .get("devices_added")
-                .cloned()
-                .and_then(|v| serde_json::from_value(v).ok())
-                .unwrap_or_default();
-            let devices_removed: Vec<(String, String)> = data
-                .get("devices_removed")
-                .cloned()
-                .and_then(|v| serde_json::from_value(v).ok())
-                .unwrap_or_default();
             if let (Some(conversation_id), Some(epoch_before), Some(epoch_after)) =
                 (conversation_id, epoch_before, epoch_after)
             {
@@ -363,10 +340,6 @@ pub(super) fn dispatch_data(
                     conversation_id,
                     epoch_before,
                     epoch_after,
-                    joined_user_ids,
-                    left_user_ids,
-                    devices_added,
-                    devices_removed,
                 });
             }
         }

@@ -1406,6 +1406,34 @@ impl TestClient {
         .await;
     }
 
+    /// The group's pending invites as its member page lists them (#1506).
+    pub(crate) async fn list_group_invites(&self, group_id: &str) -> Vec<serde_json::Value> {
+        let invites: serde_json::Value = self
+            .invoke_json(
+                "list_group_invites",
+                json!({ "groupId": group_id, "userId": self.user_id() }),
+            )
+            .await;
+        invites.as_array().expect("invites array").clone()
+    }
+
+    /// Withdraw a pending invite from the member page (#1506).
+    pub(crate) async fn try_revoke_invite(
+        &self,
+        group_id: &str,
+        invite_id: &str,
+    ) -> Result<serde_json::Value, String> {
+        self.invoke_try(
+            "revoke_group_invite",
+            json!({
+                "inviteId": invite_id,
+                "groupId": group_id,
+                "userId": self.user_id(),
+            }),
+        )
+        .await
+    }
+
     pub(crate) async fn list_group_ids(&self) -> Vec<String> {
         let groups: serde_json::Value = self
             .invoke_json("list_user_groups", json!({ "userId": self.user_id() }))

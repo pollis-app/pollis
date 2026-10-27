@@ -52,9 +52,9 @@ export function useConversationRealtime(
 
     const handleEvent = (event: RealtimeEvent) => {
       // Membership / role events arrive on the conversation (group) room.
-      // Data-refresh parity only — invalidate the affected queries so the
-      // member list and group/DM lists reflect live changes. Banner UX
-      // (desktop's ephemeral rosterChangeStore notices) is future work.
+      // Data refresh only — invalidate the affected queries so the member
+      // list and group/DM lists reflect live changes. Membership is never
+      // announced in the timeline (#1506), on mobile or desktop.
       if (event.type === "member_role_changed") {
         // Mirror desktop: refresh the affected group's member list and the
         // groups list (which embeds the current user's role).
@@ -65,12 +65,13 @@ export function useConversationRealtime(
         return;
       }
       if (event.type === "roster_changed") {
-        // Mirror desktop's INTENT (data only): refresh the affected
-        // conversation's member/detail queries plus the groups and DM lists
-        // so membership reflects live. The ephemeral roster BANNER UI is a
-        // separate enhancement, not ported here.
+        // Refresh the affected conversation's members and pending invites
+        // plus the groups and DM lists, as desktop does. No timeline line.
         void qcRef.current.invalidateQueries({
           queryKey: groupInviteQueryKeys.members(event.conversation_id),
+        });
+        void qcRef.current.invalidateQueries({
+          queryKey: groupInviteQueryKeys.groupInvites(event.conversation_id),
         });
         void qcRef.current.invalidateQueries({ queryKey: groupQueryKeys.all });
         void qcRef.current.invalidateQueries({ queryKey: dmQueryKeys.all });

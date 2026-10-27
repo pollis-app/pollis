@@ -393,16 +393,6 @@ pub struct ReconcileOutcome {
     /// external-joins on its own next catch-up. A stored "skipped" list would be
     /// a second copy of what the tree already says.
     pub skipped_no_suite_kp: Vec<(String, String)>,
-    /// The tree membership as it stood when the commit was staged — walked
-    /// INSIDE `stage_reconcile_commit`, immediately after its own
-    /// `merge_pending_commit` (#1084).
-    ///
-    /// The "before" for the join/leave banner cannot be the snapshot the caller
-    /// took at the top of its pass: staging resolves any pending commit first,
-    /// so by the time the diff is computed the tree may already have moved. A
-    /// banner derived from the stale snapshot misreports who joined and who
-    /// left. Empty on a no-op pass, where there is no banner to render.
-    pub tree_before: Vec<(String, String)>,
     /// `(user_id, device_id, reason)` for every claimed KeyPackage the committer
     /// REFUSED to turn into an Add because its leaf signature key is not the one
     /// the claimed user's `account_id_pub` certified — or could not be shown to
@@ -906,19 +896,6 @@ where
         .merge_pending_commit(provider)
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("merge pending: {e}")))?;
 
-    // #1084: the tree as it ACTUALLY stands now that the pending commit is
-    // resolved. This — not the caller's pre-pass snapshot — is the "before" the
-    // join/leave banner has to diff against.
-    let tree_before: Vec<(String, String)> = group
-        .members()
-        .map(|m| {
-            (
-                parse_credential_user_id(&m.credential),
-                parse_credential_device_id(&m.credential).unwrap_or_default(),
-            )
-        })
-        .collect();
-
     // Validate KPs.
     let mut available_kps: Vec<(String, String, KeyPackage)> = Vec::new();
     let mut refused: Vec<(String, String, String)> = Vec::new();
@@ -1019,7 +996,6 @@ where
         Some(identities),
     )?;
     outcome.refused_uncertified = refused;
-    outcome.tree_before = tree_before;
     Ok(Some((outcome, data)))
 }
 
@@ -1479,7 +1455,7 @@ pub async fn reconcile_group_mls_impl(
         .await;
 
         match published {
-            // We own this epoch. Fall through to roster banners / voice rotation.
+            // We own this epoch. Fall through to the roster hint / voice rotation.
             Ok(PublishOutcome::Won) => {}
             // Another member committed this epoch first; our staged commit is on
             // a branch no one will adopt. It has been rolled back — converge on
@@ -1543,112 +1519,29 @@ pub async fn reconcile_group_mls_impl(
         }
     }
 
-    // Roster-change banners. Fire only when an actual epoch bump happened
-    // — `outcome.added` / `outcome.removed` are populated only on the
-    // committing branch, and the no-op early-returns above leave them
-    // empty. Local emit drives this client's own UI; the room-server
-    // publish reaches existing members so their inline timeline picks up
-    // the banner without refetching. New joiners don't see banners for
-    // themselves because the Welcome path doesn't go through this hook
-    // (it lives in `process_pending_welcomes`).
+    // Roster-change hint. Fire only when an actual epoch bump happened —
+    // `outcome.added` / `outcome.removed` are populated only on the committing
+    // branch, and the no-op early-returns above leave them empty. It is a
+    // refetch hint and names no one: membership changes are never announced in
+    // a timeline (#1506), so there is no diff to compute or carry.
     if outcome.epoch_after > outcome.epoch_before
         && (!outcome.added.is_empty() || !outcome.removed.is_empty())
     {
-        use std::collections::HashSet;
-
-        // #1084: both sides of this diff are now TREE WALKS, not a snapshot plus
-        // arithmetic.
-        //
-        // The "before" is the walk `stage_reconcile_commit` took after resolving
-        // any pending commit — `already_in_tree`, captured at the top of this
-        // pass, is taken BEFORE staging and staging's own pre-merge can move the
-        // tree out from under it. The "after" is a fresh walk of the merged
-        // group rather than `already_in_tree` with `added`/`removed` applied,
-        // because that arithmetic inherits every error in the "before" and
-        // silently disagrees with the tree whenever the pre-merge did anything.
-        //
-        // A banner is cosmetic; a WRONG banner tells a member somebody joined or
-        // left when they did not. So if the fresh walk is unavailable, nothing is
-        // emitted rather than a guess.
-        let prior_user_ids: HashSet<&String> =
-            outcome.tree_before.iter().map(|(uid, _)| uid).collect();
-
-        let post_tree: Option<Vec<(String, String)>> = {
-            let guard = state.local_db.lock().await;
-            guard.as_ref().and_then(|db| {
-                load_stored_group(db.conn(), &conversation_id).map(|group| {
-                    group
-                        .members()
-                        .map(|m| {
-                            (
-                                parse_credential_user_id(&m.credential),
-                                parse_credential_device_id(&m.credential).unwrap_or_default(),
-                            )
-                        })
-                        .collect()
-                })
-            })
-        };
-        let Some(post_tree) = post_tree else {
-            crate::diag!(
-                "[reconcile] {conversation_id}: no post-commit tree walk available — \
-                 skipping the roster banner rather than reporting a guessed diff"
-            );
-            return Ok(outcome);
-        };
-        let post_user_ids: HashSet<&String> =
-            post_tree.iter().map(|(uid, _)| uid).collect();
-
-        let mut joined_user_ids: Vec<String> = Vec::new();
-        let mut devices_added: Vec<(String, String)> = Vec::new();
-        let mut seen_added_user: HashSet<&String> = HashSet::new();
-        for pair in &outcome.added {
-            if prior_user_ids.contains(&pair.0) {
-                devices_added.push(pair.clone());
-            } else if seen_added_user.insert(&pair.0) {
-                joined_user_ids.push(pair.0.clone());
-            }
-        }
-
-        let mut left_user_ids: Vec<String> = Vec::new();
-        let mut devices_removed: Vec<(String, String)> = Vec::new();
-        let mut seen_removed_user: HashSet<&String> = HashSet::new();
-        for pair in &outcome.removed {
-            if post_user_ids.contains(&pair.0) {
-                devices_removed.push(pair.clone());
-            } else if seen_removed_user.insert(&pair.0) {
-                left_user_ids.push(pair.0.clone());
-            }
-        }
-
         // Local emit. The sink is None during early boot / signed-out;
         // dropping the send is the right behaviour there.
-        // The LOCAL sink keeps the full per-user / per-device diff so the acting
-        // client renders inline "X joined / X left" banners. Only the cleartext
-        // LiveKit broadcast below is minimized (§5.3).
         let sink = state.livekit.lock().await.channel.clone();
         if let Some(ch) = sink {
             let _ = ch.send(crate::realtime::RealtimeEvent::RosterChanged {
                 conversation_id: conversation_id.clone(),
                 epoch_before: outcome.epoch_before,
                 epoch_after: outcome.epoch_after,
-                joined_user_ids,
-                left_user_ids,
-                devices_added,
-                devices_removed,
             });
         }
 
-        // Room broadcast. §5.3 metadata minimization: the LiveKit broadcast
-        // carries the routing handle + epochs ONLY — the per-user join/left and
-        // device id lists are deliberately omitted, since LiveKit forwards them
-        // in cleartext and they are a direct social-graph leak. The full lists
-        // stay on the LOCAL sink above (where the acting client renders inline
-        // banners). Remote peers receive the bare nudge and refetch the member
-        // list (`livekit/mod.rs` dispatch → member-list invalidation); they
-        // re-derive the diff from the authenticated MLS commit they process, not
-        // from this cleartext packet. Non-fatal: a flaky LiveKit blip mustn't
-        // fail the reconcile that already committed to Turso.
+        // Room broadcast. §5.3 metadata minimization: the routing handle +
+        // epochs ONLY — LiveKit forwards it in cleartext. Remote peers refetch
+        // the member list (`livekit/mod.rs` dispatch). Non-fatal: a flaky
+        // LiveKit blip mustn't fail the reconcile that already committed.
         if let Err(e) = crate::commands::livekit::publish_to_room_server(
             state,
             &conversation_id,
