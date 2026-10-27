@@ -105,9 +105,8 @@ pub const LEAVE_KIND: &str = "leave";
 /// `roster_changed` wake-up broadcast to a conversation's LiveKit room. Carries
 /// only the routing handle + epochs so already-connected peers refetch the
 /// member list — the per-user `joined`/`left`/device id lists are deliberately
-/// omitted from the cleartext broadcast (§5.3). The reconciling client still
-/// emits those lists to its OWN local sink to render inline banners; remote
-/// peers re-derive the diff from the authenticated MLS commit / member refetch.
+/// omitted from the cleartext broadcast (§5.3). No client renders a membership
+/// line any more (#1506), so nothing needs them.
 pub fn roster_changed_payload(conversation_id: &str, epoch_before: u64, epoch_after: u64) -> Value {
     json!({
         "type": "roster_changed",

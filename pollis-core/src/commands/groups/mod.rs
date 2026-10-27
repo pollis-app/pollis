@@ -26,8 +26,8 @@ mod types;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 pub use types::{
-    Channel, CreatedInviteLink, Group, GroupMember, GroupPreview, GroupWithChannels,
-    InviteLinkSummary, JoinRequest, PendingInvite, RedeemedInvite,
+    Channel, CreatedInviteLink, Group, GroupInvite, GroupMember, GroupPreview,
+    GroupWithChannels, InviteLinkSummary, JoinRequest, PendingInvite, RedeemedInvite,
 };
 
 // ── Group CRUD / search ──────────────────────────────────────────────────────
@@ -50,8 +50,8 @@ pub use membership::{
 // ── Invites ──────────────────────────────────────────────────────────────────
 pub use invites::{
     accept_group_invite, create_group_invite_link, decline_group_invite, get_pending_invites,
-    list_group_invite_links, redeem_group_invite_link, revoke_group_invite_link,
-    send_group_invite, INVITE_LINK_ERR,
+    list_group_invite_links, list_group_invites, redeem_group_invite_link, revoke_group_invite,
+    revoke_group_invite_link, send_group_invite, INVITE_LINK_ERR,
 };
 
 // ── Join requests ────────────────────────────────────────────────────────────

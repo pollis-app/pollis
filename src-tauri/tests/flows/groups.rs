@@ -172,6 +172,94 @@ async fn group_invite_decline_flow() {
     drop(bob);
 }
 
+/// #1506: the member page lists a pending invite (invitee, inviter, when) to
+/// every member, a plain member may not withdraw it, and the inviter can. A
+/// revoke must also take the invitee's devices back out of the MLS tree: they
+/// were grafted in at invite time, and a pending invitee who stays in the tree
+/// keeps receiving everything sealed for the group.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_revoked_invite_leaves_the_list_and_the_tree() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+
+    let alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+    let carol_profile = carol.sign_up("carol@test.local").await;
+
+    let group_id = alice.create_group("Revoke Test").await;
+    alice.invite(&group_id, &carol_profile.username).await;
+    let carol_invite = carol.first_pending_invite().await.expect("carol's invite");
+    carol
+        .accept_invite(carol_invite["id"].as_str().expect("invite id"))
+        .await;
+    carol.poll().await;
+
+    alice.invite(&group_id, &bob_profile.username).await;
+    let in_tree = |members: &[(String, String)], user: &str| members.iter().any(|(u, _)| u == user);
+    let tree = pollis_lib::commands::mls::local_tree_members(&alice.state, &group_id).await;
+    assert!(
+        in_tree(&tree, &bob_profile.id),
+        "precondition: a pending invitee is grafted into the tree at invite time"
+    );
+
+    // Every member sees the pending invite, with who sent it.
+    let listed = carol.list_group_invites(&group_id).await;
+    assert_eq!(listed.len(), 1, "carol should see bob's pending invite: {listed:?}");
+    let invite = &listed[0];
+    assert_eq!(invite["invitee_id"], bob_profile.id);
+    assert_eq!(invite["invitee_username"], bob_profile.username);
+    assert_eq!(invite["inviter_id"], alice_profile.id);
+    assert!(invite["created_at"].as_str().is_some_and(|s| !s.is_empty()));
+    let invite_id = invite["id"].as_str().expect("invite id").to_string();
+
+    // Carol neither sent it nor is an admin.
+    assert!(
+        carol
+            .try_revoke_invite(&group_id, &invite_id)
+            .await
+            .is_err(),
+        "a plain member must not revoke someone else's invite"
+    );
+    assert_eq!(alice.list_group_invites(&group_id).await.len(), 1);
+
+    let epoch_before = crate::harness::ds_head_epoch(&group_id).await;
+    alice
+        .try_revoke_invite(&group_id, &invite_id)
+        .await
+        .expect("the inviter may revoke");
+
+    assert!(alice.list_group_invites(&group_id).await.is_empty());
+    assert!(bob.first_pending_invite().await.is_none(), "bob's invite is gone");
+    let tree = pollis_lib::commands::mls::local_tree_members(&alice.state, &group_id).await;
+    assert!(
+        !in_tree(&tree, &bob_profile.id),
+        "a revoked invitee must be committed out of the tree, got {tree:?}"
+    );
+    assert!(in_tree(&tree, &carol_profile.id), "carol stays in the tree");
+    assert!(
+        crate::harness::ds_head_epoch(&group_id).await > epoch_before,
+        "the removal is a published commit"
+    );
+
+    // The group still works for the members who are left.
+    let channel_id = alice.general_channel_id(&group_id).await;
+    carol.process_commits_for(&channel_id).await;
+    alice.send_channel_message(&channel_id, "after the revoke").await;
+    let carol_msgs = carol.fetch_channel_messages(&channel_id).await;
+    assert!(
+        carol_msgs.iter().any(|m| m["content"] == "after the revoke"),
+        "carol must still read the group after the revoke: {carol_msgs:#?}"
+    );
+
+    drop(alice);
+    drop(bob);
+    drop(carol);
+}
+
 /// Carol's request is rejected. She does not become a member and the pending
 /// list clears.
 #[tokio::test(flavor = "multi_thread")]

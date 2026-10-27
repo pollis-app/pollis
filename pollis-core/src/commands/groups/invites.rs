@@ -4,7 +4,7 @@ use ulid::Ulid;
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
-use super::types::{CreatedInviteLink, InviteLinkSummary, PendingInvite, RedeemedInvite};
+use super::types::{CreatedInviteLink, GroupInvite, InviteLinkSummary, PendingInvite, RedeemedInvite};
 use super::authz;
 
 /// Invite a user (by username) to a group. Inviter must be a current member.
@@ -191,6 +191,79 @@ pub async fn decline_group_invite(
         user_id: Some(user_id),
     };
     crate::commands::mls::ds_post_ok(state, &body).await?;
+
+    Ok(())
+}
+
+/// A group's pending invites, for the member page's "Invited" section (#1506).
+/// Members only — an outsider gets the shared refusal, as for the roster.
+pub async fn list_group_invites(
+    group_id: String,
+    user_id: String,
+    state: &Arc<AppState>,
+) -> Result<Vec<GroupInvite>> {
+    let resp = crate::commands::ds_reads::group_with_invites(state, &group_id, &user_id).await?;
+    if !resp.authorized {
+        return Err(Error::Other(anyhow::anyhow!(authz::NOT_A_MEMBER)));
+    }
+    Ok(resp
+        .invites
+        .into_iter()
+        .map(|i| GroupInvite {
+            id: i.id,
+            invitee_id: i.invitee_id,
+            invitee_username: i.invitee_username,
+            inviter_id: i.inviter_id,
+            inviter_username: i.inviter_username,
+            created_at: i.created_at,
+        })
+        .collect())
+}
+
+/// Withdraw a pending invite (#1506). The DS allows it to the member who sent
+/// the invite and to the group's admins, re-deriving both from the invite row.
+///
+/// Deleting the row takes the invitee out of the desired roster, but their
+/// devices were grafted into the MLS tree at invite time (`send_group_invite`),
+/// so this device then commits them out — the same catch-up + reconcile a
+/// removal runs. Without it the invitee would keep receiving every message
+/// sealed for the group until some later reconcile noticed.
+pub async fn revoke_group_invite(
+    invite_id: String,
+    group_id: String,
+    user_id: String,
+    state: &Arc<AppState>,
+) -> Result<()> {
+    let body = pollis_api::groups::RevokeInviteBody {
+        invite_id,
+        actor_id: Some(user_id.clone()),
+    };
+    crate::commands::mls::ds_post_ok(state, &body).await?;
+
+    // Ingest-before-advance (#440): see `remove_member_from_group`.
+    if let Err(e) = crate::commands::messages::catch_up_mls_group_interleaved(
+        state, &group_id, &user_id,
+    ).await {
+        crate::diag!("[mls] revoke_group_invite: catch_up_mls_group for {group_id}: {e}");
+    }
+
+    // Reconcile removes the invitee's leaves from the MLS tree.
+    if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
+        state, &group_id, &user_id,
+    ).await {
+        crate::diag!("[mls] revoke_group_invite: reconcile for group {group_id}: {e}");
+    }
+
+    // Members refetch the member page. A bare wake-up that names no one
+    // (§5.3). The invitee's own nudge comes from the DS, which is the only
+    // party still allowed to reach their inbox once the invite is gone.
+    if let Err(e) = crate::commands::livekit::publish_to_room_server(
+        state,
+        &group_id,
+        crate::commands::livekit_signalling::membership_changed_payload(&group_id),
+    ).await {
+        crate::diag!("[realtime] revoke_group_invite: notify group {group_id}: {e}");
+    }
 
     Ok(())
 }

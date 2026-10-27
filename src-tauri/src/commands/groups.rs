@@ -64,6 +64,16 @@ pub async fn decline_group_invite(invite_id: String, user_id: String, state: Sta
 }
 
 #[tauri::command]
+pub async fn list_group_invites(group_id: String, user_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<pollis_core::commands::groups::GroupInvite>> {
+    pollis_core::commands::groups::list_group_invites(group_id, user_id, &state).await
+}
+
+#[tauri::command]
+pub async fn revoke_group_invite(invite_id: String, group_id: String, user_id: String, state: State<'_, Arc<AppState>>) -> Result<()> {
+    pollis_core::commands::groups::revoke_group_invite(invite_id, group_id, user_id, &state).await
+}
+
+#[tauri::command]
 pub async fn request_group_access(group_id: String, requester_id: String, state: State<'_, Arc<AppState>>) -> Result<()> {
     pollis_core::commands::groups::request_group_access(group_id, requester_id, &state).await
 }
