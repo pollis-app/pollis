@@ -26,9 +26,21 @@ export interface GroupMember {
   joined_at: string;
 }
 
+/** A pending invite as the member page's "Invited" section lists it (#1506). */
+export interface GroupInvite {
+  id: string;
+  invitee_id: string;
+  invitee_username: string | null;
+  inviter_id: string;
+  inviter_username: string | null;
+  created_at: string;
+}
+
 export const groupInviteQueryKeys = {
   pending: (userId: string | null) => ["group-invites", "pending", userId] as const,
   members: (groupId: string | null) => ["groups", groupId, "members"] as const,
+  // A group's outgoing pending invites (#1506) — desktop's key.
+  groupInvites: (groupId: string | null) => ["group-invites", "group", groupId] as const,
 };
 
 const ROLE_RANK: Record<string, number> = { owner: 0, admin: 1 };
@@ -157,6 +169,54 @@ export function useGroupMembers(groupId: string | null) {
     },
     enabled: !!groupId && !!currentUser,
     staleTime: 1000 * 60,
+  });
+}
+
+/** The group's pending invites: who was invited, by whom, and when (#1506). */
+export function useGroupInvites(groupId: string | null) {
+  const currentUser = useObserver(() => appStore.currentUser);
+
+  return useQuery({
+    queryKey: groupInviteQueryKeys.groupInvites(groupId),
+    queryFn: async (): Promise<GroupInvite[]> => {
+      if (!groupId || !currentUser) {
+        return [];
+      }
+      return await invoke<GroupInvite[]>("list_group_invites", {
+        groupId,
+        userId: currentUser.id,
+      });
+    },
+    enabled: !!groupId && !!currentUser,
+    staleTime: 1000 * 30,
+  });
+}
+
+/**
+ * Withdraw a pending invite. The DS allows the inviter and the group's admins;
+ * the core then commits the invitee's devices out of the MLS tree.
+ */
+export function useRevokeGroupInvite(groupId: string | null) {
+  const queryClient = useQueryClient();
+  const currentUser = useObserver(() => appStore.currentUser);
+  return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
+    meta: { haptic: { success: "destructive" } },
+    mutationFn: async (inviteId: string) => {
+      if (!currentUser || !groupId) {
+        throw new Error("No active group");
+      }
+      await invoke("revoke_group_invite", {
+        inviteId,
+        groupId,
+        userId: currentUser.id,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: groupInviteQueryKeys.groupInvites(groupId),
+      });
+    },
   });
 }
 

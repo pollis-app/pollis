@@ -239,6 +239,18 @@ message" on it, pin its own message and unpin the peer's
 the device's pin and unpin in its own list. The one-device half (pin, list,
 jump, unpin) is `flows/pins.yaml`.
 
+**Group membership without timeline lines (automated, #1506):** `mobile/scripts/maestro-membership.sh <device>`
+— `pollis-tui`'s `membership_peer` example plays the group's creator, and signs
+up a second account that stays a pending invitee. The creator invites the
+device's fresh account by email; the device accepts, opens #General and posts —
+its own message is tagged "new" and no "joined" line appears
+(`two-client/membership/1-accept-and-post.yaml`). The creator then posts,
+invites the pending account and makes the device an admin; the device sees the
+creator's message untagged, finds the pending invite under "Invited" on the
+member page (invitee, "invited by"), and revokes it
+(`2-tags-and-revoke.yaml`). The script passes only when the creator sees the
+invite gone.
+
 **Unread for messages that arrived while away (automated, #1422):** `mobile/scripts/maestro-unread.sh <device>`
 — the lost-message shape with `pollis-tui`'s `unread_peer` example, which sends
 only when the script touches a signal file. The device opens a DM with a fresh
