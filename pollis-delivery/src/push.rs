@@ -21,11 +21,16 @@
 //!
 //! # What a push carries
 //!
-//! `{ conversationId, kind }` and nothing else — enough for the client to route
-//! and re-ingest the (still-encrypted) message locally, never the plaintext, the
-//! sender, or any content. Expo/APNs/FCM therefore learn no more than the DS
-//! already knows: that a conversation had activity. This is the same approach
-//! Signal and WhatsApp take when the server cannot decrypt.
+//! An opaque per-notification handle `h` (#1122/#1157) and nothing else —
+//! enough for the client to route and re-ingest the (still-encrypted) message
+//! after resolving it over its own channel, never the plaintext, the sender, the
+//! conversation, or any content. On Android the handle is also the
+//! notification's `tag` (#1508), so the app can find and clear it in the tray.
+//!
+//! When the user reads a conversation on any client, `POST /v1/push/dismiss`
+//! sends their devices one silent, data-only push `{ d: [handles] }` naming the
+//! notifications to clear (#1508) — the same random handles, so again no
+//! conversation and no content. See [`dismiss_push`].
 //!
 //! Best-effort throughout: a push that fails to send must never fail a send that
 //! already landed.
@@ -55,7 +60,11 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use libsql::Connection;
-use pollis_api::devices::{ResolvePushHandleBody, ResolvePushHandleResponse};
+use pollis_api::devices::{
+    DismissEntry, DismissPushBody, DismissPushResponse, DismissedPushHandlesBody,
+    DismissedPushHandlesResponse, ResolvePushHandleBody, ResolvePushHandleResponse,
+    DISMISSED_QUERY_MAX_HANDLES, DISMISS_MAX_CONVERSATIONS,
+};
 use rand::rngs::OsRng;
 use rand::RngCore as _;
 
@@ -765,6 +774,15 @@ fn expo_message(
     // Android posts to the channel the client created at startup.
     if platform == Some("android") {
         msg["channelId"] = serde_json::Value::String("default".into());
+        // #1508: the system posts a backgrounded app's notification itself,
+        // and none of `data` is readable from the tray afterwards — only its
+        // tag. Tagging it with the handle (already in the payload, random per
+        // notification) is what lets the app find it again to clear it once
+        // read. A per-conversation tag would have been simpler and is exactly
+        // what #1122 removed: a stable value the providers could count.
+        if let Some(h) = handle {
+            msg["tag"] = serde_json::Value::String(h.clone());
+        }
     }
     msg
 }
@@ -910,6 +928,328 @@ pub async fn sweep_push_handles(conn: &Connection) -> anyhow::Result<u64> {
         )
         .await?;
     Ok(n)
+}
+
+// ── POST /v1/push/dismiss + /v1/push/dismissed (#1508) ───────────────────────
+//
+// A notification used to stay in the tray after its message was read, unless
+// it was the very notification the user tapped. The reading client — any of
+// them: desktop, the TUI, the same phone, another phone — now reports the
+// conversations whose read cursor moved, and the DS clears that user's
+// notifications for them on every device:
+//
+//   1. stamp `dismissed_at` on the user's handles for those conversations that
+//      were minted BEFORE the read (an age, so the clocks never have to agree:
+//      a message that lands after the read keeps its notification);
+//   2. send each of the user's devices one silent, data-only push carrying the
+//      handles — the same random values the notifications already carried, so
+//      the providers learn which notifications were read, never a conversation;
+//   3. keep the stamped rows until the TTL sweep, so a device that missed the
+//      silent push asks `/v1/push/dismissed` on its next foreground.
+//
+// Rate: nothing is sent when nothing is outstanding (re-reading a conversation
+// is free), the client debounces its reports, and the DS coalesces one user's
+// dismissals into at most one push per device per [`DISMISS_COALESCE`].
+
+/// How long one user's dismissals are gathered before the silent push goes.
+/// Reading three conversations in a row is one push, not three. Short, because
+/// the point is that the tray clears while the user is still looking.
+pub const DISMISS_COALESCE: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Handles per silent push. 100 × 22 characters stays far below the 4 KiB
+/// APNs/FCM payload cap; more than that is split across pushes.
+const DISMISS_HANDLES_PER_PUSH: usize = 100;
+
+/// How long a silent dismissal may wait at the provider for an offline device.
+/// Past the handle TTL the notification can no longer be matched anyway.
+const DISMISS_TTL_SECS: i64 = PUSH_HANDLE_TTL_DAYS * 24 * 60 * 60;
+
+/// The silent push that clears notifications. Built from the token, the
+/// platform and the handles only, so what leaves the process can be asserted on
+/// directly: no title, no body (so no OS ever shows it, and an app that does
+/// not understand `d` ignores it — expo-notifications drops a data-only
+/// message it has no task for, on every version we have shipped), and `data`
+/// is `{ d }` and nothing else.
+fn expo_dismiss_message(
+    token: &str,
+    platform: Option<&str>,
+    handles: &[String],
+) -> serde_json::Value {
+    let mut msg = serde_json::json!({
+        "to": token,
+        "data": { "d": handles },
+        // Normal: a dismissal is not worth waking a dozing phone for, and iOS
+        // requires priority 5 for a background (content-available) push.
+        "priority": "normal",
+        "ttl": DISMISS_TTL_SECS,
+    });
+    if platform == Some("ios") {
+        // Wakes the app in the background to run the dismissal task. Both
+        // spellings: `contentAvailable` is the current field, `_contentAvailable`
+        // the older one; Expo prefers the former when both are set.
+        msg["contentAvailable"] = serde_json::Value::Bool(true);
+        msg["_contentAvailable"] = serde_json::Value::Bool(true);
+    }
+    msg
+}
+
+/// Stamp the user's outstanding handles for `entries` dismissed and return
+/// them. Only handles minted at or before each read (`now - read_secs_ago`),
+/// within the TTL, and not already dismissed.
+///
+/// Best-effort like the rest of push: a database that predates migration
+/// 000040 has no `dismissed_at` column, and that reads as "nothing to dismiss".
+pub async fn mark_dismissed(
+    conn: &Connection,
+    user_id: &str,
+    entries: &[DismissEntry],
+    now_unix: i64,
+) -> Vec<String> {
+    // One cutoff per conversation: the LATEST read wins if a conversation is
+    // named twice.
+    let mut cutoffs: BTreeMap<&str, i64> = BTreeMap::new();
+    for e in entries {
+        if e.conversation_id.is_empty() || e.conversation_id.len() > 128 {
+            continue;
+        }
+        let at = now_unix - i64::from(e.read_secs_ago);
+        let slot = cutoffs.entry(e.conversation_id.as_str()).or_insert(at);
+        if at > *slot {
+            *slot = at;
+        }
+    }
+    let mut handles = Vec::new();
+    for (conversation_id, cutoff) in cutoffs {
+        let rows = conn
+            .query(
+                "SELECT handle FROM push_handle \
+                 WHERE user_id = ?1 AND conversation_id = ?2 AND dismissed_at IS NULL \
+                   AND created_at <= datetime(?3, 'unixepoch') \
+                   AND created_at >= datetime('now', ?4) \
+                 ORDER BY created_at",
+                libsql::params![
+                    user_id.to_string(),
+                    conversation_id.to_string(),
+                    cutoff,
+                    format!("-{PUSH_HANDLE_TTL_DAYS} days")
+                ],
+            )
+            .await;
+        let mut rows = match rows {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::debug!("push dismiss lookup skipped: {e}");
+                return Vec::new();
+            }
+        };
+        while let Ok(Some(row)) = rows.next().await {
+            if let Ok(h) = row.get::<String>(0) {
+                handles.push(h);
+            }
+        }
+    }
+    let mut stamped = Vec::with_capacity(handles.len());
+    for chunk in handles.chunks(BIND_CHUNK) {
+        let ph = placeholders(chunk.len(), 2);
+        let sql = format!(
+            "UPDATE push_handle SET dismissed_at = datetime('now') \
+             WHERE user_id = ?1 AND dismissed_at IS NULL AND handle IN ({ph})"
+        );
+        let mut params: Vec<libsql::Value> = vec![user_id.to_string().into()];
+        params.extend(chunk.iter().map(|h| h.clone().into()));
+        match conn.execute(&sql, params).await {
+            Ok(_) => stamped.extend_from_slice(chunk),
+            // No user id, no handle: push logs name no one (#1423).
+            Err(e) => tracing::warn!("push dismiss stamp failed: {e}"),
+        }
+    }
+    stamped
+}
+
+/// The subset of `handles` that belong to `user_id` and were dismissed.
+pub async fn dismissed_handles(
+    conn: &Connection,
+    user_id: &str,
+    handles: &[String],
+) -> Vec<String> {
+    let mut out = Vec::new();
+    for chunk in handles.chunks(BIND_CHUNK) {
+        let ph = placeholders(chunk.len(), 2);
+        let sql = format!(
+            "SELECT handle FROM push_handle \
+             WHERE user_id = ?1 AND dismissed_at IS NOT NULL AND handle IN ({ph})"
+        );
+        let mut params: Vec<libsql::Value> = vec![user_id.to_string().into()];
+        params.extend(chunk.iter().map(|h| h.clone().into()));
+        let mut rows = match conn.query(&sql, params).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::debug!("push dismissed lookup skipped: {e}");
+                return Vec::new();
+            }
+        };
+        while let Ok(Some(row)) = rows.next().await {
+            if let Ok(h) = row.get::<String>(0) {
+                out.push(h);
+            }
+        }
+    }
+    out
+}
+
+/// Send `user_id`'s devices the silent push that clears `handles`. Never fails:
+/// like every push, an error is counted and logged by class.
+pub async fn send_dismissals(
+    conn: &Connection,
+    expo_url: &str,
+    user_id: &str,
+    handles: &[String],
+) {
+    if handles.is_empty() {
+        return;
+    }
+    let tokens = match push_tokens(conn, &[user_id.to_string()]).await {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::warn!("push dismiss: token read failed: {e}");
+            return;
+        }
+    };
+    let mut messages = Vec::new();
+    let mut message_tokens = Vec::new();
+    for (token, platform, _) in &tokens {
+        for chunk in handles.chunks(DISMISS_HANDLES_PER_PUSH) {
+            messages.push(expo_dismiss_message(token, platform.as_deref(), chunk));
+            message_tokens.push(token.clone());
+        }
+    }
+    let auth = expo_token();
+    for (chunk, chunk_tokens) in messages
+        .chunks(EXPO_BATCH)
+        .zip(message_tokens.chunks(EXPO_BATCH))
+    {
+        send_batch(conn, expo_url, auth, chunk, chunk_tokens, stats()).await;
+    }
+}
+
+/// Handles waiting for their user's coalesced dismissal push. A user is in the
+/// map exactly while one send is scheduled for them.
+fn pending_dismissals() -> &'static Mutex<HashMap<String, Vec<String>>> {
+    static PENDING: std::sync::OnceLock<Mutex<HashMap<String, Vec<String>>>> =
+        std::sync::OnceLock::new();
+    PENDING.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Queue `handles` for `user_id`'s next dismissal push, scheduling it if none
+/// is pending. Returns whether this call scheduled the send (the first in a
+/// window), so a test can see the coalescing.
+pub fn queue_dismissals(
+    db: std::sync::Arc<crate::db::Db>,
+    expo_url: String,
+    delay: std::time::Duration,
+    user_id: &str,
+    handles: Vec<String>,
+) -> bool {
+    if handles.is_empty() {
+        return false;
+    }
+    let schedule = {
+        let mut pending = pending_dismissals()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        match pending.get_mut(user_id) {
+            Some(list) => {
+                list.extend(handles);
+                false
+            }
+            None => {
+                pending.insert(user_id.to_string(), handles);
+                true
+            }
+        }
+    };
+    if schedule {
+        let user = user_id.to_string();
+        tokio::spawn(async move {
+            tokio::time::sleep(delay).await;
+            let handles = pending_dismissals()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&user)
+                .unwrap_or_default();
+            let conn = match db.conn().await {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!("push dismiss: conn failed: {e}");
+                    return;
+                }
+            };
+            send_dismissals(&conn, &expo_url, &user, &handles).await;
+        });
+    }
+    schedule
+}
+
+/// POST `/v1/push/dismiss` — the caller read these conversations; clear their
+/// notifications on every device of theirs (#1508).
+///
+/// Answers how many notifications were newly dismissed. The push itself goes
+/// out after the response, coalesced per user ([`queue_dismissals`]).
+pub async fn dismiss_push(
+    State(state): State<AppState>,
+    req: RawRequest,
+) -> Result<Response, AppError> {
+    let parsed: DismissPushBody = match serde_json::from_slice(&req.body) {
+        Ok(b) => b,
+        Err(_) => return Ok(crate::writes::bad_request("invalid body")),
+    };
+    if parsed.conversations.len() > DISMISS_MAX_CONVERSATIONS {
+        return Ok(crate::writes::bad_request("too many conversations"));
+    }
+    let who = match authed_user(&state, &req, Some(&parsed.user_id)).await? {
+        Ok(u) => u,
+        Err(resp) => return Ok(resp),
+    };
+    let conn = state.db.conn().await?;
+    let now = crate::util::now_unix() as i64;
+    let handles = mark_dismissed(&conn, &who, &parsed.conversations, now).await;
+    let dismissed = u32::try_from(handles.len()).unwrap_or(u32::MAX);
+    queue_dismissals(
+        state.db.clone(),
+        EXPO_PUSH_URL.to_string(),
+        DISMISS_COALESCE,
+        &who,
+        handles,
+    );
+    Ok(crate::writes::ok_response::<DismissPushBody>(
+        DismissPushResponse { dismissed },
+    ))
+}
+
+/// POST `/v1/push/dismissed` — which of these tray notifications were read
+/// since (#1508)? The foreground catch-up for a device that missed the silent
+/// push. Another user's handle is simply absent from the answer, exactly like
+/// one that was never minted.
+pub async fn read_dismissed_push_handles(
+    State(state): State<AppState>,
+    req: RawRequest,
+) -> Result<Response, AppError> {
+    let parsed: DismissedPushHandlesBody = match serde_json::from_slice(&req.body) {
+        Ok(b) => b,
+        Err(_) => return Ok(crate::writes::bad_request("invalid body")),
+    };
+    if parsed.handles.len() > DISMISSED_QUERY_MAX_HANDLES {
+        return Ok(crate::writes::bad_request("too many handles"));
+    }
+    let who = match authed_user(&state, &req, Some(&parsed.user_id)).await? {
+        Ok(u) => u,
+        Err(resp) => return Ok(resp),
+    };
+    let conn = state.db.conn().await?;
+    let dismissed = dismissed_handles(&conn, &who, &parsed.handles).await;
+    Ok(crate::writes::ok_response::<DismissedPushHandlesBody>(
+        DismissedPushHandlesResponse { dismissed },
+    ))
 }
 
 #[cfg(test)]
@@ -1521,5 +1861,199 @@ mod tests {
         let audience =
             PushAudience::from_send(Some(vec![]), Some(vec!["mallory".to_string()])).unwrap();
         assert_eq!(woken(&c, &audience).await, vec!["ExponentPushToken[carol]".to_string()]);
+    }
+
+    // ── #1508: a read clears its notifications on every device ───────────────
+
+    fn entry(conversation_id: &str, read_secs_ago: u32) -> DismissEntry {
+        DismissEntry {
+            conversation_id: conversation_id.to_string(),
+            read_secs_ago,
+        }
+    }
+
+    fn now() -> i64 {
+        crate::util::now_unix() as i64
+    }
+
+    /// Android tags the notification with its handle, so the app can find a
+    /// system-posted notification in the tray again; iOS needs no tag (the
+    /// handle is readable from a delivered notification's payload there).
+    #[test]
+    fn an_android_notification_is_tagged_with_its_handle() {
+        let h = "aGFuZGxlLXRhZw".to_string();
+        let android = expo_message("t", Some("android"), Some(&h));
+        assert_eq!(android["tag"].as_str(), Some(h.as_str()));
+        assert!(expo_message("t", Some("ios"), Some(&h)).get("tag").is_none());
+        // No handle, no tag — never a conversation-derived stand-in.
+        assert!(expo_message("t", Some("android"), None).get("tag").is_none());
+    }
+
+    /// The silent push: `data` is `{ d }` and nothing else, no title or body
+    /// (so no OS shows it and an older app ignores it), and iOS asks to be
+    /// woken in the background.
+    #[test]
+    fn the_dismissal_push_is_silent_and_carries_only_handles() {
+        let handles = vec!["aaaa".to_string(), "bbbb".to_string()];
+        for platform in [Some("android"), Some("ios"), None] {
+            let msg = expo_dismiss_message("ExponentPushToken[x]", platform, &handles);
+            let data = msg["data"].as_object().expect("data object");
+            assert_eq!(data.keys().collect::<Vec<_>>(), vec!["d"]);
+            assert_eq!(msg["data"]["d"], serde_json::json!(["aaaa", "bbbb"]));
+            assert!(msg.get("title").is_none() && msg.get("body").is_none(), "{msg}");
+            assert_eq!(msg["priority"].as_str(), Some("normal"));
+            let wire = serde_json::to_string(&msg).unwrap();
+            for forbidden in ["conversationId", "conversation_id", "kind", "channelId"] {
+                assert!(!wire.contains(forbidden), "`{forbidden}` in {wire}");
+            }
+        }
+        let ios = expo_dismiss_message("t", Some("ios"), &handles);
+        assert_eq!(ios["contentAvailable"], serde_json::json!(true));
+        let android = expo_dismiss_message("t", Some("android"), &handles);
+        assert!(android.get("contentAvailable").is_none());
+    }
+
+    /// The core rule: only the reader's own handles, only for the conversations
+    /// read, only ones minted before the read — and only once.
+    #[tokio::test]
+    async fn a_read_dismisses_only_the_readers_earlier_notifications_once() {
+        let c = conn().await;
+        let alice = vec!["alice".to_string()];
+        let a1 = mint_push_handles(&c, &alice, "conv-1", "dm").await["alice"].clone();
+        let a2 = mint_push_handles(&c, &alice, "conv-1", "dm").await["alice"].clone();
+        let other_conv = mint_push_handles(&c, &alice, "conv-2", "dm").await["alice"].clone();
+        let bob = mint_push_handles(&c, &["bob".to_string()], "conv-1", "dm").await["bob"].clone();
+
+        // A read that happened a minute before these were minted clears none
+        // of them: those messages arrived after it.
+        assert!(mark_dismissed(&c, "alice", &[entry("conv-1", 60)], now()).await.is_empty());
+
+        // A read now (one second of margin past the mint) clears alice's two
+        // conv-1 notifications and nothing else.
+        let mut got = mark_dismissed(&c, "alice", &[entry("conv-1", 0)], now() + 1).await;
+        got.sort();
+        let mut want = vec![a1.clone(), a2.clone()];
+        want.sort();
+        assert_eq!(got, want);
+
+        // Re-reading is free: nothing outstanding, nothing to push.
+        assert!(mark_dismissed(&c, "alice", &[entry("conv-1", 0)], now() + 1).await.is_empty());
+
+        // The catch-up query answers for alice's dismissed handles only.
+        let asked = vec![a1.clone(), a2.clone(), other_conv.clone(), bob.clone(), "nope".into()];
+        let mut dismissed = dismissed_handles(&c, "alice", &asked).await;
+        dismissed.sort();
+        assert_eq!(dismissed, want);
+        // Bob's own handle is not dismissed, and alice's are not his to see.
+        assert!(dismissed_handles(&c, "bob", &asked).await.is_empty());
+
+        // Naming someone else's conversation does not reach their handles.
+        assert!(mark_dismissed(&c, "mallory", &[entry("conv-1", 0)], now() + 1).await.is_empty());
+        assert!(dismissed_handles(&c, "bob", &[bob]).await.is_empty());
+    }
+
+    /// An expired handle is past matching; a malformed id is skipped.
+    #[tokio::test]
+    async fn expired_handles_and_bad_ids_are_ignored() {
+        let c = conn().await;
+        mint_push_handles(&c, &["alice".to_string()], "conv-1", "dm").await;
+        c.execute(
+            "UPDATE push_handle SET created_at = datetime('now', ?1)",
+            libsql::params![format!("-{} days", PUSH_HANDLE_TTL_DAYS + 1)],
+        )
+        .await
+        .unwrap();
+        assert!(mark_dismissed(&c, "alice", &[entry("conv-1", 0)], now() + 1).await.is_empty());
+        let long = "x".repeat(129);
+        assert!(mark_dismissed(&c, "alice", &[entry("", 0), entry(&long, 0)], now()).await.is_empty());
+    }
+
+    /// A database from before migration 000040 has no `dismissed_at`: the
+    /// endpoints answer "nothing" rather than failing.
+    #[tokio::test]
+    async fn a_database_without_the_column_dismisses_nothing() {
+        let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
+        let c = db.connect().unwrap();
+        c.execute_batch(
+            "CREATE TABLE push_handle (handle TEXT PRIMARY KEY, user_id TEXT NOT NULL, \
+             conversation_id TEXT NOT NULL, kind TEXT NOT NULL, \
+             created_at TEXT NOT NULL DEFAULT (datetime('now')));\
+             INSERT INTO push_handle (handle, user_id, conversation_id, kind) \
+             VALUES ('h1', 'alice', 'conv-1', 'dm');",
+        )
+        .await
+        .unwrap();
+        assert!(mark_dismissed(&c, "alice", &[entry("conv-1", 0)], now() + 1).await.is_empty());
+        assert!(dismissed_handles(&c, "alice", &["h1".to_string()]).await.is_empty());
+    }
+
+    /// The silent push reaches every device of the reader and nobody else's,
+    /// and splits a long list rather than overflowing the payload.
+    #[tokio::test]
+    async fn dismissals_reach_every_device_of_the_reader_only() {
+        let c = conn().await;
+        add_token(&c, "ExponentPushToken[alice-phone]", "alice").await;
+        c.execute(
+            "INSERT INTO push_token (token, user_id, platform, updated_at) \
+             VALUES ('ExponentPushToken[alice-ipad]', 'alice', 'ios', '2026-10-24T00:00:00Z')",
+            (),
+        )
+        .await
+        .unwrap();
+        add_token(&c, "ExponentPushToken[bob]", "bob").await;
+        let (url, seen) = fake_expo(200, serde_json::json!({ "data": [] })).await;
+        let handles: Vec<String> = (0..150).map(|i| format!("h{i:03}")).collect();
+
+        send_dismissals(&c, &url, "alice", &handles).await;
+
+        let sent: Vec<serde_json::Value> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .flat_map(|b| b.as_array().cloned().unwrap_or_default())
+            .collect();
+        // Two devices × two chunks (100 + 50).
+        assert_eq!(sent.len(), 4, "{sent:?}");
+        let mut to: Vec<&str> = sent.iter().map(|m| m["to"].as_str().unwrap()).collect();
+        to.sort();
+        to.dedup();
+        assert_eq!(to, vec!["ExponentPushToken[alice-ipad]", "ExponentPushToken[alice-phone]"]);
+        let total: usize = sent.iter().map(|m| m["data"]["d"].as_array().unwrap().len()).sum();
+        assert_eq!(total, 300);
+        for m in &sent {
+            let ios = m["to"].as_str().unwrap().contains("ipad");
+            assert_eq!(m.get("contentAvailable").is_some(), ios, "{m}");
+        }
+    }
+
+    /// Several reads inside the coalescing window are one push per device.
+    #[tokio::test]
+    async fn dismissals_within_the_window_are_coalesced_into_one_push() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db.db");
+        let db = std::sync::Arc::new(
+            crate::db::Db::connect_local(path.to_str().unwrap()).await.unwrap(),
+        );
+        {
+            let c = db.conn().await.unwrap();
+            pollis_schema::apply::single_db(&c).await.unwrap();
+            add_token(&c, "ExponentPushToken[carol]", "carol-1508").await;
+        }
+        let (url, seen) = fake_expo(200, serde_json::json!({ "data": [] })).await;
+        let window = std::time::Duration::from_millis(200);
+
+        assert!(queue_dismissals(db.clone(), url.clone(), window, "carol-1508", vec!["h1".into()]));
+        assert!(!queue_dismissals(db.clone(), url.clone(), window, "carol-1508", vec!["h2".into()]));
+        assert!(!queue_dismissals(db.clone(), url.clone(), window, "carol-1508", vec![]));
+        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+
+        let batches = seen.lock().unwrap().clone();
+        assert_eq!(batches.len(), 1, "one request: {batches:?}");
+        assert_eq!(batches[0][0]["data"]["d"], serde_json::json!(["h1", "h2"]));
+
+        // The window closed, so the next read schedules a fresh push.
+        assert!(queue_dismissals(db.clone(), url, window, "carol-1508", vec!["h3".into()]));
+        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+        assert_eq!(seen.lock().unwrap().len(), 2);
     }
 }

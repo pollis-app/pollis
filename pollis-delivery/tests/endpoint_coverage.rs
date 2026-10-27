@@ -140,7 +140,11 @@ fn the_endpoint_table_covers_the_whole_write_surface() {
         //
         // 117 since #1431 added the per-channel mute the push fan-out reads:
         // `/v1/channel-mutes/set` and `/v1/read/channel-mutes`.
-        117,
+        //
+        // 119 since #1508 clears read notifications from every device:
+        // `/v1/push/dismiss` (a read moved the cursor) and `/v1/push/dismissed`
+        // (a phone that missed the silent push catches up on foreground).
+        119,
         "the DS write surface changed — update this count deliberately, and make \
          sure the new endpoint is routed in BOTH pollis-delivery and the flows harness"
     );

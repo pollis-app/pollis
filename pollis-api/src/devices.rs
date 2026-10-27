@@ -164,3 +164,69 @@ pub struct ResolvePushHandleResponse {
     #[serde(default)]
     pub kind: Option<String>,
 }
+
+// ── POST /v1/push/dismiss + /v1/push/dismissed (#1508) ───────────────────────
+
+/// Most conversations one dismiss request may name. A client sends the
+/// conversations whose read cursor moved in one short debounce window, which
+/// is a handful; anything past this is refused as a bad request.
+pub const DISMISS_MAX_CONVERSATIONS: usize = 64;
+
+/// Most handles one `/v1/push/dismissed` query may ask about — a phone's tray,
+/// which Android caps at about fifty notifications per app.
+pub const DISMISSED_QUERY_MAX_HANDLES: usize = 100;
+
+/// One conversation a client read, and how long ago.
+///
+/// An AGE rather than a timestamp, so the two clocks never have to agree: the
+/// DS subtracts it from its own clock and clears only the notifications it
+/// minted before then. A message that lands after the read keeps its
+/// notification.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DismissEntry {
+    pub conversation_id: String,
+    /// Whole seconds since the cursor moved, rounded UP (so the DS's cutoff can
+    /// only fall before the read, never after it).
+    pub read_secs_ago: u32,
+}
+
+/// "I read these conversations": clear their notifications on every device of
+/// mine (#1508).
+///
+/// Device-signed; `user_id` must equal the signer (you dismiss only your own
+/// notifications). The DS stamps the matching `push_handle` rows dismissed and
+/// sends the user's devices one silent, data-only push carrying the handles to
+/// clear — never a conversation id, never content.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DismissPushBody {
+    pub user_id: String,
+    pub conversations: Vec<DismissEntry>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DismissPushResponse {
+    /// How many notifications were newly marked dismissed. Zero when there was
+    /// nothing outstanding — the common case, which sends no push at all.
+    #[serde(default)]
+    pub dismissed: u32,
+}
+
+/// "Which of these notifications in my tray have been read since?" (#1508)
+///
+/// The catch-up for a device that missed the silent dismissal push (iOS does
+/// not wake a force-quit app; Android may hold a normal-priority push in
+/// Doze). Asked on foreground and unlock with the handles still in the tray.
+/// Scoped to the signer: a handle that is not theirs is simply not returned,
+/// exactly like one that was never minted.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DismissedPushHandlesBody {
+    pub user_id: String,
+    pub handles: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DismissedPushHandlesResponse {
+    /// The subset of the asked handles that are this user's and were read.
+    #[serde(default)]
+    pub dismissed: Vec<String>,
+}
