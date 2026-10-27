@@ -60,14 +60,12 @@ export type RealtimeEvent =
       group_id: string;
     }
   | {
+      // A refetch hint (§5.3): no ids. Membership is never announced in a
+      // timeline (#1506).
       type: "roster_changed";
       conversation_id: string;
       epoch_before: number;
       epoch_after: number;
-      joined_user_ids: string[];
-      left_user_ids: string[];
-      devices_added: [string, string][];
-      devices_removed: [string, string][];
     }
   | {
       // Carries nothing (#836). It never usefully did: the handler treats the

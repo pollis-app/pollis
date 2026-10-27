@@ -119,7 +119,16 @@
     "adminToggle": "مشرف",
     "kick": "طرد",
     "verified": "جهة اتصال موثَّقة",
-    "keyChanged": "تغيّر مفتاح الهوية — أعد التحقق"
+    "keyChanged": "تغيّر مفتاح الهوية — أعد التحقق",
+    "invited": {
+      "heading": "المدعوون",
+      "by": "دعاه {{name}} · {{date}}",
+      "byUnknown": "دُعي في {{date}}",
+      "revoke": "إلغاء",
+      "revoking": "جارٍ الإلغاء…",
+      "revokeLabel": "إلغاء دعوة {{name}}",
+      "revokeFailed": "تعذّر إلغاء الدعوة."
+    }
   },
   "kickMember": {
     "pageTitle": "إزالة عضو",

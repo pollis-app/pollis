@@ -854,6 +854,7 @@ pub async fn group(State(state): State<AppState>, req: RawRequest) -> Result<Res
                 invite_links: Vec::new(),
                 join_requests: Vec::new(),
                 emoji: Vec::new(),
+                invites: Vec::new(),
             }))
         }
     };
@@ -871,6 +872,7 @@ pub async fn group(State(state): State<AppState>, req: RawRequest) -> Result<Res
             invite_links: Vec::new(),
             join_requests: Vec::new(),
             emoji: Vec::new(),
+            invites: Vec::new(),
         }));
     };
     let admin = role == "admin";
@@ -886,6 +888,7 @@ pub async fn group(State(state): State<AppState>, req: RawRequest) -> Result<Res
             invite_links: Vec::new(),
             join_requests: Vec::new(),
             emoji: Vec::new(),
+            invites: Vec::new(),
         }));
     }
 
@@ -908,6 +911,11 @@ pub async fn group(State(state): State<AppState>, req: RawRequest) -> Result<Res
         },
         emoji: if parsed.want_emoji {
             group_emoji(&conn, &group_id).await?
+        } else {
+            Vec::new()
+        },
+        invites: if parsed.want_invites {
+            group_invites(&conn, &group_id).await?
         } else {
             Vec::new()
         },
@@ -977,6 +985,37 @@ pub async fn group_members(
             avatar_url: row.get(2)?,
             role: row.get(3)?,
             joined_at: row.get(4)?,
+        });
+    }
+    Ok(out)
+}
+
+/// A group's pending invites, newest first (#1506). Every `group_invite` row is
+/// pending: accept and decline both delete it, and so does a revoke.
+pub async fn group_invites(
+    conn: &Connection,
+    group_id: &str,
+) -> anyhow::Result<Vec<GroupInviteWire>> {
+    let mut rows = conn
+        .query(
+            "SELECT gi.id, gi.invitee_id, ie.username, gi.inviter_id, ir.username, gi.created_at \
+             FROM group_invite gi \
+             LEFT JOIN users ie ON ie.id = gi.invitee_id \
+             LEFT JOIN users ir ON ir.id = gi.inviter_id \
+             WHERE gi.group_id = ?1 \
+             ORDER BY gi.created_at DESC",
+            libsql::params![group_id.to_string()],
+        )
+        .await?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await? {
+        out.push(GroupInviteWire {
+            id: row.get(0)?,
+            invitee_id: row.get(1)?,
+            invitee_username: row.get(2)?,
+            inviter_id: row.get(3)?,
+            inviter_username: row.get(4)?,
+            created_at: row.get(5)?,
         });
     }
     Ok(out)

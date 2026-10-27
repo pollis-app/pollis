@@ -14,6 +14,9 @@ export interface GroupWithChannels extends Group {
   /** The viewer's role in this group ("admin" | "member"), from the core's
    *  `GroupWithChannels.current_user_role`. */
   current_user_role?: string;
+  /** The group's creator, as the core's `GroupWithChannels.owner_id` names
+   *  it. Never carries the "new" member tag (#1506). */
+  owner_id?: string;
 }
 
 export const groupQueryKeys = {

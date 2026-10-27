@@ -15,6 +15,7 @@ import { DaySeparator } from "../../components/chat/DaySeparator";
 import { UndecryptableRow } from "../../components/chat/UndecryptableRow";
 import { collapseUndecryptable } from "../../lib/collapseUndecryptable";
 import { MessageRow } from "../../components/chat/MessageRow";
+import { isNewMemberMessage, newMemberJoins } from "../../lib/newMember";
 import { Composer } from "../../components/chat/Composer";
 import { authorName } from "../../lib/authorName";
 import { outgoingText } from "../../lib/messageText";
@@ -532,6 +533,13 @@ function TextChat(props: ChatViewProps = {}) {
   const { data: groupMembers } = useGroupMembers(
     kind === "channel" ? groupId ?? null : null,
   );
+  // The "new" member tag (#1506): a sender's messages are tagged for a week
+  // after their server-side `joined_at`, in every channel of the group. Same
+  // rule as desktop (`lib/newMember.ts`), from the same server data.
+  const newMemberJoinMs = useMemo(
+    () => newMemberJoins(groupMembers ?? [], group?.owner_id),
+    [groupMembers, group?.owner_id],
+  );
 
   // Header title: prefer the human name passed in by the opener (channel name
   // or DM peer handle). For DMs opened without one, fall back to the other
@@ -639,6 +647,7 @@ function TextChat(props: ChatViewProps = {}) {
           peerCount={peerCount}
           showReceipt={mine && isDm}
           continued={item.continued}
+          isNew={isNewMemberMessage(newMemberJoinMs, m.sender_id, m.created_at)}
           threadCount={summary?.reply_count ?? 0}
           threadLastReply={
             summary?.last_reply_at
@@ -691,6 +700,7 @@ function TextChat(props: ChatViewProps = {}) {
       highlightId,
       retryMessage,
       discardUnsent,
+      newMemberJoinMs,
       t,
     ],
   );

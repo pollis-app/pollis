@@ -135,6 +135,20 @@ interface MockInviteLink {
   revoked_at: string | null;
 }
 
+/**
+ * One pending invite as the member page lists it (#1506). Mirrors
+ * `GroupInvite` in `hooks/queries/useGroups`, plus the group it belongs to.
+ */
+interface MockGroupInvite {
+  id: string;
+  group_id: string;
+  invitee_id: string;
+  invitee_username: string | null;
+  inviter_id: string;
+  inviter_username: string | null;
+  created_at: string;
+}
+
 /** Mirrors `VoiceInputMode` in `pollis-core/src/commands/voice/gate.rs`. */
 type MockVoiceInputMode = 'voice_activity' | 'push_to_talk';
 
@@ -215,6 +229,7 @@ interface MockStore {
   // Shareable invite links (#847), keyed by nothing — the group id is on the
   // row, as it is server-side.
   inviteLinks: MockInviteLink[];
+  groupInvites: MockGroupInvite[];
   /** Open device-enrollment requests the approval takeover renders (#1096). */
   pendingEnrollments: MockPendingEnrollment[];
   /** What the UI actually submitted to `approve_device_enrollment`. */
@@ -374,6 +389,7 @@ const store: MockStore = {
   vaultMessages: preload.vaultMessages ?? [],
   customEmoji: preload.customEmoji ?? [],
   inviteLinks: preload.inviteLinks ?? [],
+  groupInvites: preload.groupInvites ?? [],
   pendingEnrollments: preload.pendingEnrollments ?? [],
   enrollmentApprovals: [],
   deviceLinkPin: (preload.deviceLinkPin as string | undefined) ?? '1234',
@@ -1043,7 +1059,6 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'list_devices':
     case 'list_user_devices':
     case 'list_blocked_users':
-    case 'list_group_invites':
     case 'list_security_events':
     case 'get_pinned_messages':
       return [];
@@ -1911,6 +1926,31 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
             (l.expires_at == null || Date.parse(l.expires_at) > Date.now()) &&
             (l.max_uses == null || l.uses < l.max_uses),
         }));
+    }
+
+    // The member page's pending invites (#1506). Members only, as in Rust.
+    case 'list_group_invites': {
+      const { groupId } = args as { groupId: string };
+      if (roleInGroup(groupId) === null) {
+        throw new Error('not a member of this group');
+      }
+      return store.groupInvites
+        .filter((i) => i.group_id === groupId)
+        .map(({ group_id: _g, ...rest }) => rest);
+    }
+
+    // The inviter or an admin may withdraw an invite; the DS re-derives both.
+    case 'revoke_group_invite': {
+      const { inviteId, userId } = args as { inviteId: string; userId: string };
+      const invite = store.groupInvites.find((i) => i.id === inviteId);
+      if (!invite) {
+        throw new Error('forbidden');
+      }
+      if (roleInGroup(invite.group_id) !== 'admin' && invite.inviter_id !== userId) {
+        throw new Error('forbidden');
+      }
+      store.groupInvites = store.groupInvites.filter((i) => i.id !== inviteId);
+      return null;
     }
 
     case 'revoke_group_invite_link': {

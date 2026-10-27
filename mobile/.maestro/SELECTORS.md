@@ -114,7 +114,7 @@ delete/remove/revoke), the record id is appended to keep the selector unique
 
 | Route | `screen-*` | Key testIDs |
 | --- | --- | --- |
-| `group/members` | `screen-group-members` | `row-member-<userId>`, `btn-toggle-role-<userId>` (make/remove admin), `btn-remove-member-<userId>` |
+| `group/members` | `screen-group-members` | `row-member-<userId>`, `btn-toggle-role-<userId>` (make/remove admin), `btn-remove-member-<userId>`; pending invites (#1506, only while there are any): `section-invited`, `row-invited-<inviteeUserId>`, `btn-revoke-invite-<inviteeUserId>` (the inviter and admins only) |
 | `group/requests` | `screen-group-requests` | `row-request-<id>`, `btn-approve-<id>`, `btn-reject-<id>` |
 | `group/settings` | `screen-group-settings` | Admins: `input-group-name`, `input-group-description`, `btn-save`. Non-admins (#1281): `value-group-name` (text, not an input), `value-group-description` only when the group has a description — with none there is no Description field at all; no `btn-save`. Everyone: `row-channel-<id>`, `btn-delete-channel-<id>`, `row-group-emoji` (→ `group/emoji`), `btn-settings-leave-group` (everyone, two taps), `btn-delete-group` (admins, two taps) |
 | `group/emoji` | `screen-group-emoji` | `input-emoji-shortcode`, `btn-upload-emoji` (every member, #1280), `row-emoji-<shortcode>`, `btn-remove-emoji-<shortcode>` (admins only; two taps), `hint-emoji-admins-remove` (non-admins, when the group has emoji) |
