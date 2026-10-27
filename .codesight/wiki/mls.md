@@ -57,7 +57,7 @@ Steps:
 9. **On success**: `merge_pending_commit` locally → advance the local epoch
 10. **On failure**: `clear_pending_commit` → leave local state at the prior epoch; caller can retry
 11. **Publish GroupInfo** so external-join works
-12. **Emit `RosterChanged` event** with the user-level diff (joined / left / device added / device removed). Local sink + room broadcast so existing members render inline timeline banners.
+12. **Emit `RosterChanged` event** — `conversation_id` + epochs only, a refetch hint (local sink + room broadcast). No timeline line is rendered from it (#1506).
 
 ### Ordering invariant
 
@@ -68,7 +68,7 @@ The remote DB is the source of truth for MLS state. Staging the commit locally, 
 See commit `83df6ef` for the rationale; breaking this ordering re-introduces the 9-user churn flake.
 
 
-**Roster banner (#1084).** The inline "X joined / X left" banner diffs TWO TREE WALKS, never a snapshot plus arithmetic. The "before" is `ReconcileOutcome::tree_before`, walked inside `stage_reconcile_commit` immediately after it resolves any pending commit — the snapshot the pass takes at its start is captured BEFORE staging, and staging's own pre-merge can move the tree out from under it (the #411 lost-response state is exactly that). The "after" is a fresh `load_stored_group` walk of the merged group rather than the "before" with `added`/`removed` applied, because that arithmetic inherits every error in the "before". A banner is cosmetic but a WRONG banner tells a member somebody joined or left when they did not, so if the fresh walk is unavailable nothing is emitted.
+**No roster banner (#1506).** The inline "X joined / X left" banner and the #1084 two-tree-walk diff behind it (`ReconcileOutcome::tree_before`) are gone: a pending invitee is in the desired roster, so the banner fired at INVITE time in every channel. Group timelines carry no membership lines; a fresh member's messages carry a "new" tag driven by `group_member.joined_at` instead — see [safety.md](./safety.md#membership-changes-are-never-announced-1506).
 
 ## How Other Devices Catch Up
 
@@ -1089,10 +1089,9 @@ re-derives the true sender from the MLS credential in the envelope it then fetch
 field reappears live in `pollis-core/src/commands/livekit_signalling.rs`
 (`docs/metadata-minimization-design.md` §5).
 
-The reconciling client still emits the full `joined`/`left`/device-id diff to its
-**own local sink** so it renders inline roster banners immediately; remote peers
-re-derive the diff from the authenticated MLS commit + a member refetch. See
-`.codesight/wiki/safety.md` → "Roster-change banners".
+The local `RosterChanged` event carries no lists either (#1506): nothing renders
+a membership line, so both are bare refetch hints. See
+`.codesight/wiki/safety.md` → "Membership changes are never announced".
 
 ## GroupInfo Publishing
 
