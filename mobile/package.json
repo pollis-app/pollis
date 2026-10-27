@@ -1,7 +1,7 @@
 {
   "name": "mobile",
   "version": "1.0.18",
-  "main": "expo-router/entry",
+  "main": "index.ts",
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
@@ -39,6 +39,7 @@
     "expo-sharing": "~57.0.24",
     "expo-splash-screen": "~57.0.10",
     "expo-status-bar": "~57.0.1",
+    "expo-task-manager": "~57.0.21",
     "expo-updates": "~57.0.26",
     "expo-video": "~57.0.5",
     "i18next": "^26.4.2",

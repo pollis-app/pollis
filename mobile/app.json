@@ -158,7 +158,8 @@
       [
         "expo-notifications",
         {
-          "color": "#e6b65a"
+          "color": "#e6b65a",
+          "enableBackgroundRemoteNotifications": true
         }
       ],
       [
