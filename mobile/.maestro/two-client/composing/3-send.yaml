@@ -1,0 +1,24 @@
+appId: com.pollis.mobile
+tags:
+  - two-client
+---
+# COMPOSING (#1507), part 3 of 3. The peer's lines landed while the keyboard
+# was up. The composer must still be above the keyboard: the draft is sent by
+# tapping Send where it is, without closing the keyboard first. A Send pushed
+# behind the keyboard takes a key press instead, and the draft never lands.
+
+- extendedWaitUntil:
+    visible: ".*peer batch ${BATCH} line 3.*"
+    timeout: 60000
+- takeScreenshot: composing-${BATCH}-arrived
+- assertVisible:
+    id: "input-composer"
+- assertVisible:
+    id: "btn-send"
+    enabled: true
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*${DRAFT},.*"
+    timeout: 20000
+- takeScreenshot: composing-${BATCH}-sent
