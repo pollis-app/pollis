@@ -1,0 +1,51 @@
+appId: com.pollis.mobile
+tags:
+  - two-client
+---
+# MEMBERSHIP (#1506), part 2 of 2 — driven by scripts/maestro-membership.sh.
+# The peer has invited ${MAESTRO_PENDING_HANDLE} and made the phone an admin.
+# The member page lists the pending invite under "Invited" (who, by whom), and
+# the phone — now an admin — revokes it.
+
+- stopApp
+- launchApp
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 30000
+- tapOn:
+    id: "tab-groups"
+# The phone also has a group of its own now: pick the peer's pill.
+- tapOn: "${GROUP_NAME}"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "${GROUP_NAME}, .*"
+    timeout: 30000
+
+- tapOn:
+    id: "row-group-members"
+- extendedWaitUntil:
+    visible:
+      id: "row-invited-.*"
+    timeout: 30000
+- assertVisible:
+    id: "section-invited"
+- assertVisible: "(?i).*@${MAESTRO_PENDING_HANDLE}.*"
+- assertVisible: "(?i).*invited by @${MAESTRO_PEER_HANDLE}.*"
+- takeScreenshot: membership-04-invited
+- tapOn:
+    id: "btn-revoke-invite-.*"
+- extendedWaitUntil:
+    notVisible:
+      id: "row-invited-.*"
+    timeout: 30000
+- assertNotVisible:
+    id: "section-invited"
+- takeScreenshot: membership-05-revoked

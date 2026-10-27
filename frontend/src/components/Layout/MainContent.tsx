@@ -903,12 +903,9 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
             messages={channelMessages}
             // MLS group id for the open conversation. Groups: selectedGroupId.
             // DMs: selectedConversationId (the dm_channel_id IS the MLS group
-            // id for that DM). Either way, this is what RosterChanged events
-            // are keyed by — the rosterChangeStore lookup matches.
+            // id for that DM).
             conversationId={selectedGroupId ?? selectedConversationId ?? null}
-            // Display-name resolution for roster banners. Only group MLS
-            // has a member list; DMs are 1:1 so banner names there fall
-            // back to user_id (no membership churn anyway).
+            // The roster behind the "new" member tag (#1506). DMs have none.
             groupIdForNames={selectedGroupId ?? null}
             adminUserIds={selectedGroupId ? adminUserIds : undefined}
             viewerIsAdmin={viewerIsAdmin}

@@ -114,48 +114,41 @@ cleared verified flag is what persists as evidence the swap happened.
 - All three read from the same `usePeerVerifications` query so the cache is
   one source of truth.
 
-## Roster-change banners
+## Membership changes are never announced (#1506)
 
-Separate from key-change banners. When `reconcile_group_mls_impl` produces a
-non-empty commit (epoch bump + at least one add/remove), it emits
-`RealtimeEvent::RosterChanged` with a user-level diff:
+There are no "X joined / X left / X added a device" lines in any timeline —
+group channel or DM. They used to come from MLS roster reconciliation, which
+made them wrong in exactly the ways that matter: a pending invitee sits in the
+desired roster, so the INVITE grafted them into the tree and every channel
+announced a "join" for someone who had not accepted (often by raw user id, since
+a non-member's name does not resolve); device adds and removes produced lines
+too; and the lines lived only in memory, so only clients online at that moment
+saw them. Leaves and removals are never announced anywhere.
 
-```rust
-RosterChanged {
-    conversation_id, epoch_before, epoch_after,
-    joined_user_ids: Vec<String>,
-    left_user_ids: Vec<String>,
-    devices_added: Vec<(user_id, device_id)>,
-    devices_removed: Vec<(user_id, device_id)>,
-}
-```
+When `reconcile_group_mls_impl` produces a non-empty commit it still emits
+`RealtimeEvent::RosterChanged { conversation_id, epoch_before, epoch_after }` —
+locally, and as the cleartext `roster_changed` room wake-up
+(`livekit_signalling.rs::roster_changed_payload`) — but only as a refetch hint:
+both clients invalidate the member list and the pending-invite list. Neither
+carries a user or device id, so there is no diff to compute (the #1084
+two-tree-walk diff and `ReconcileOutcome::tree_before` went with the banners).
 
-The diff is computed in the reconcile against the pre-state `already_in_tree`
-snapshot: a user with no prior leaves who gains one is a *join*; a user with
-prior leaves who gains one is a *device add*; the inverse for removes.
+What replaces the join line is the **"new" tag**: a member's messages carry a
+small "new" tag after their name for 7 days after their `group_member.joined_at`,
+in every channel of the group. `joined_at` is stamped by the DS when an invite is
+ACCEPTED (or a join request / invite link admits them), never at invite time, and
+every input is server data the member list already carries, so every device —
+including one added later — tags the same messages. The group's creator is never
+tagged. One rule, two copies: `frontend/src/utils/newMember.ts` and
+`mobile/lib/newMember.ts` (`frontend/tests/new-member.test.ts` pins both and
+that they match). The server's zone-less `YYYY-MM-DD HH:MM:SS` is read as UTC;
+a 5-minute tolerance covers a sender whose clock runs behind, and a rejoiner's
+messages from an earlier stint are not tagged.
 
-Locally the reconciler emits via the LiveKit sink so its own UI picks the
-banner up immediately with the full per-user diff. It also broadcasts via
-`publish_to_room_server` so other already-connected room members refetch — but
-that cleartext `roster_changed` wake-up ping now carries **only** the
-`conversation_id` + `epoch_before`/`epoch_after`, **not** the
-`joined`/`left`/device-id lists (metadata minimization #331 v2 §5.3,
-`livekit_signalling.rs::roster_changed_payload`). Remote peers re-derive the diff
-from the authenticated MLS commit + a member refetch rather than trusting a
-cleartext identity list on the wire. New joiners don't see banners for themselves
-(the Welcome path doesn't go through this hook), and the frontend filters
-self-actions defensively. See [mls.md](./mls.md#metadata-minimized-signalling-331-v2).
-
-Renderer plumbing:
-
-- `frontend/src/stores/rosterChangeStore.ts` — per-conversation queue of
-  `RosterBanner` items, capped at 200 to bound memory.
-- `frontend/src/hooks/useLiveKitRealtime.ts` (search for `roster_changed`) —
-  parses the event, splits into per-user banner records, pushes to the store,
-  invalidates `groupQueryKeys.members(conversation_id)`.
-- `frontend/src/components/Message/MessageList.tsx` — interleaves banners with
-  messages by wall-clock timestamp, renders inline as a centered divider
-  (same shape as the existing `DayDivider`).
+Pending invites are shown on the member page instead, under **Invited**
+(invitee, who invited, when; `list_group_invites`), where the inviter and the
+group's admins can revoke (`revoke_group_invite`) — see
+[commands.md](./commands.md).
 
 ## Threat model
 
@@ -488,10 +481,9 @@ the verified device) in the same transaction — the client no longer writes an
   the board. A user-configurable per-conversation "block sends until
   acknowledged" mode is an open product call — would make sense for
   high-stakes DMs, would be UX-hostile in large groups.
-- **Member/device-change event richness.** The current `RosterChanged`
-  event covers join / leave / device add / device remove. Future
-  additions could include explicit "role changed" or "owner transferred"
-  events, but those go through other code paths today.
+- **Member/device-change events.** `RosterChanged` is a bare refetch hint
+  (#1506): membership is never announced in a timeline, and "role changed"
+  or "owner transferred" go through other code paths.
 
 ## Tests
 

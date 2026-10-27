@@ -111,7 +111,16 @@
     "adminToggle": "admin",
     "kick": "exclure",
     "verified": "Contact vérifié",
-    "keyChanged": "Clé d'identité modifiée — à revérifier"
+    "keyChanged": "Clé d'identité modifiée — à revérifier",
+    "invited": {
+      "heading": "Invités",
+      "by": "invité par {{name}} · {{date}}",
+      "byUnknown": "invité le {{date}}",
+      "revoke": "Révoquer",
+      "revoking": "Révocation…",
+      "revokeLabel": "Révoquer l’invitation de {{name}}",
+      "revokeFailed": "Impossible de révoquer l’invitation."
+    }
   },
   "kickMember": {
     "pageTitle": "Retirer un membre",

@@ -61,6 +61,11 @@ export interface NavigableListProps<T> {
   // element that wants initial focus (e.g. the Join button on the
   // voice-channel page).
   autoFocus?: boolean;
+
+  // Draw the row cursor only while focus is inside the list. For a second
+  // list on the same page (the member page's "Invited" section, #1506), so
+  // two lists never both show a cursor at rest.
+  cursorOnlyWhenFocused?: boolean;
 }
 
 type NavState = { rowIndex: number; colIndex: number };
@@ -79,6 +84,7 @@ export function NavigableList<T>({
   rowTestId,
   testId,
   autoFocus = true,
+  cursorOnlyWhenFocused = false,
 }: NavigableListProps<T>) {
   const { t } = useTranslation("common");
   // Resolved at render, not as default parameter values, so the fallbacks
@@ -87,6 +93,8 @@ export function NavigableList<T>({
   const resolvedEmptyLabel = emptyLabel ?? t("list.empty");
   const [nav, setNav] = useState<NavState>({ rowIndex: 0, colIndex: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
+  const [hasFocusWithin, setHasFocusWithin] = useState(false);
+  const showCursor = !cursorOnlyWhenFocused || hasFocusWithin;
   // Tracks whether the user has actually navigated yet. Until they do,
   // the nav-following effect below should not grab focus to the
   // container — it would clobber whatever the parent placed focus on
@@ -238,12 +246,22 @@ export function NavigableList<T>({
       ref={containerRef}
       tabIndex={0}
       onKeyDown={handleKeyDown}
+      onFocus={cursorOnlyWhenFocused ? () => setHasFocusWithin(true) : undefined}
+      onBlur={
+        cursorOnlyWhenFocused
+          ? (e) => {
+              if (!containerRef.current?.contains(e.relatedTarget as Node | null)) {
+                setHasFocusWithin(false);
+              }
+            }
+          : undefined
+      }
       data-testid={testId}
       className="flex-1 flex flex-col overflow-auto outline-none"
     >
       {items.map((item, rowIndex) => {
         const key = getKey(item);
-        const isRowFocused = nav.rowIndex === rowIndex;
+        const isRowFocused = showCursor && nav.rowIndex === rowIndex;
         const rowControls = controls?.(item) ?? [];
 
         return (

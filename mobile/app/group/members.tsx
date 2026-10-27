@@ -2,17 +2,20 @@ import { useMemo, useState } from "react";
 import { View } from "react-native";
 import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { useTranslation } from "react-i18next";
-import { Screen, Header, Body, ListRow, Group, Avatar, Chip } from "../../components/ui";
+import { Screen, Header, Body, ListRow, Group, Avatar, Chip, SectionTitle } from "../../components/ui";
 import { Hint, ErrorText } from "../../components/groups/FormBits";
 import { space } from "../../theme/tokens";
 import {
+  useGroupInvites,
   useGroupMembers,
+  useRevokeGroupInvite,
   useRemoveMember,
   useSetMemberRole,
   useUserGroupsWithChannels,
   sortMembersByRole,
 } from "../../hooks/queries";
 import { activeLocale } from "../../i18n";
+import { parseServerTimestamp } from "../../lib/newMember";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { haptic } from "../../lib/haptics";
@@ -31,6 +34,15 @@ function Members() {
   const group = groups.find((g) => g.id === id);
   const removeMember = useRemoveMember(id);
   const setRole = useSetMemberRole(id);
+  // Pending invites (#1506): who was invited, by whom, when. Every member
+  // sees them; the inviter and the group's admins can revoke.
+  const { data: invites = [] } = useGroupInvites(id);
+  const revokeInvite = useRevokeGroupInvite(id);
+  const revokingId = revokeInvite.isPending ? revokeInvite.variables : undefined;
+  const invitedWhen = (createdAt: string) => {
+    const ms = parseServerTimestamp(createdAt);
+    return ms === null ? createdAt : new Date(ms).toLocaleDateString(activeLocale());
+  };
 
   // Role-then-alphabetical, mirroring desktop's members panel intent —
   // desktop orders online-first, but mobile has no presence source yet, so
@@ -164,6 +176,60 @@ function Members() {
               );
             })}
           </Group>
+        ) : null}
+        {invites.length > 0 ? (
+          <View testID="section-invited">
+            <SectionTitle style={{ paddingHorizontal: 0, paddingTop: space.md }}>
+              {t("members.invited.heading")}
+            </SectionTitle>
+            <Group>
+              {invites.map((inv) => {
+                const handle = `@${inv.invitee_username ?? inv.invitee_id.slice(0, 8)}`;
+                const mayRevoke = iAmAdmin || inv.inviter_id === currentUser?.id;
+                const busy = revokingId === inv.id;
+                const when = invitedWhen(inv.created_at);
+                return (
+                  <View key={inv.id}>
+                    <ListRow
+                      testID={`row-invited-${inv.invitee_id}`}
+                      minHeight={64}
+                      glyph={<Avatar label={inv.invitee_username || inv.invitee_id} />}
+                      name={handle}
+                      sub={
+                        inv.inviter_username
+                          ? t("members.invited.by", { name: `@${inv.inviter_username}`, date: when })
+                          : t("members.invited.byUnknown", { date: when })
+                      }
+                      chevron={false}
+                    />
+                    {mayRevoke ? (
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          paddingStart: 70,
+                          paddingEnd: space.xl,
+                          paddingBottom: space.sm,
+                        }}
+                      >
+                        <Chip
+                          variant="outline"
+                          testID={`btn-revoke-invite-${inv.invitee_id}`}
+                          accessibilityLabel={t("members.invited.revokeLabel", { name: handle })}
+                          disabled={revokeInvite.isPending && !busy}
+                          onPress={busy ? undefined : () => revokeInvite.mutate(inv.id)}
+                        >
+                          {busy ? t("members.invited.revoking") : t("members.invited.revoke")}
+                        </Chip>
+                      </View>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </Group>
+          </View>
+        ) : null}
+        {revokeInvite.isError ? (
+          <ErrorText>{t("members.invited.revokeFailed")}</ErrorText>
         ) : null}
         {removeMember.isError ? (
           <ErrorText>

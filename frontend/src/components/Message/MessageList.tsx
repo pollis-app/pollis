@@ -13,9 +13,8 @@ import {
   type MessageRowWindow,
 } from "./messageWindow";
 import { useBlockedUsers } from "../../hooks/queries";
-import { useGroupMembers } from "../../hooks/queries/useGroups";
+import { useGroupMembers, useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { observer } from "mobx-react-lite";
-import { rosterChangeStore, type RosterBanner } from "../../stores/rosterChangeStore";
 import { formatDayDivider, toMs } from "../../utils/format";
 import { useSkin } from "../../hooks/queries/usePreferences";
 import {
@@ -40,6 +39,7 @@ import type { MessageNavAction } from "../../utils/messageNav";
 import { arrowStep, isHorizontalArrow, isRtlElement } from "../../utils/direction";
 import type { Message } from "../../types";
 import { collapseUndecryptable } from "../../utils/collapseUndecryptable";
+import { isNewMemberMessage, newMemberJoins } from "../../utils/newMember";
 import { EmptyState } from "../ui/EmptyState";
 
 // How long the permalink jump highlight stays on the target row.
@@ -89,53 +89,14 @@ const DayDivider: React.FC<{ label: string; refined: boolean }> = React.memo(({ 
 });
 DayDivider.displayName = "DayDivider";
 
-const RosterChangeBanner: React.FC<{
-  banner: RosterBanner;
-  resolveName: (userId: string) => string;
-}> = React.memo(({ banner, resolveName }) => {
-  const { t } = useTranslation("chat");
-  const name = resolveName(banner.payload.user_id);
-  let label: string;
-  switch (banner.payload.kind) {
-    case "joined":
-      label = t("roster.joined", { name });
-      break;
-    case "left":
-      label = t("roster.left", { name });
-      break;
-    case "device_added":
-      label = t("roster.deviceAdded", { name });
-      break;
-    case "device_removed":
-      label = t("roster.deviceRemoved", { name });
-      break;
-  }
-  return (
-    <div
-      data-testid={`roster-banner-${banner.id}`}
-      className="flex items-center gap-3 py-2 select-none"
-    >
-      <div className="flex-1 h-px bg-line" />
-      <span
-        className="text-xs font-mono text-muted"
-      >
-        {label}
-      </span>
-      <div className="flex-1 h-px bg-line" />
-    </div>
-  );
-});
-RosterChangeBanner.displayName = "RosterChangeBanner";
-
 interface MessageListProps {
   messages: Message[];
-  /** MLS group / DM conversation id. When set, inline roster-change
-   *  banners (X joined / X added a device / X left) interleave with
-   *  messages chronologically. Omit on surfaces with no roster (search
-   *  results, threads). */
+  /** MLS group / DM conversation id. A change resets keyboard log
+   *  navigation. Omit on surfaces with no conversation (search results,
+   *  threads). */
   conversationId?: string | null;
-  /** Group id for resolving display names in roster banners. Equal to
-   *  `conversationId` for top-level group MLS; null for DMs. */
+  /** The group whose roster drives the "new" member tag (#1506). Null for
+   *  DMs, which have no tag. */
   groupIdForNames?: string | null;
   adminUserIds?: Set<string>;
   /** True when the viewer is an admin in this list's group — enables
@@ -230,13 +191,19 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     [messages]
   );
 
-  // Roster-change banners pulled from the per-conversation store. Used
-  // for display-name resolution: groupIdForNames === conversationId for
-  // group MLS, so this read is normally cached by the same query the
-  // member list page uses.
-  const rosterBanners =
-    (conversationId ? rosterChangeStore.byConversation[conversationId] : undefined) ?? [];
+  // The "new" member tag (#1506): a member's messages are tagged for a week
+  // after their server-side `joined_at`. Group channels carry no membership
+  // lines, so this is the only sign someone just arrived. The roster read is
+  // the same cached query the member list and the header use.
   const { data: groupMembers = [] } = useGroupMembers(groupIdForNames ?? null);
+  const { data: groupsWithChannels } = useUserGroupsWithChannels();
+  const groupCreatorId = groupIdForNames
+    ? groupsWithChannels?.find((g) => g.id === groupIdForNames)?.created_by
+    : undefined;
+  const newMemberJoinMs = useMemo(
+    () => newMemberJoins(groupMembers, groupCreatorId),
+    [groupMembers, groupCreatorId],
+  );
 
   // Delivery / read receipts (#857). Queried ONCE here for the whole list and
   // passed down by message id — a per-row query would be one IPC call per
@@ -257,17 +224,6 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     const conv = dmConversations.find((c) => c.id === selectedConversationId);
     return Math.max((conv?.member_count ?? 2) - 1, 1);
   }, [isDm, dmConversations, selectedConversationId]);
-  const usernameByUserId = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const m of groupMembers) {
-      map.set(m.user_id, m.username ?? m.user_id);
-    }
-    return map;
-  }, [groupMembers]);
-  const resolveName = useCallback(
-    (userId: string) => usernameByUserId.get(userId) ?? userId,
-    [usernameByUserId],
-  );
 
   // ── List-wide render inputs, subscribed ONCE (#874) ─────────────────────
   // Every one of these used to be resolved per row: `useSkin()` and
@@ -323,37 +279,26 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     return map;
   }, [sortedMessages]);
 
-  // Interleave messages + roster banners by timestamp. Messages use
-  // `created_at` (Rust unix seconds or ms — `toMs` normalizes); banners
-  // carry an `observed_at_ms` set when the realtime event landed.
-  type TimelineItem =
-    | { kind: "message"; key: string; ts: number; message: Message }
-    | { kind: "banner"; key: string; ts: number; banner: RosterBanner };
-  const timeline: TimelineItem[] = useMemo(() => {
-    const items: TimelineItem[] = sortedMessages.map((message) => ({
-      kind: "message",
-      key: `msg:${message.id}`,
-      ts: toMs(message.created_at),
-      message,
-    }));
-    for (const banner of rosterBanners) {
-      items.push({
-        kind: "banner",
-        key: `banner:${banner.id}`,
-        ts: banner.observed_at_ms,
-        banner,
-      });
-    }
-    items.sort((a, b) => a.ts - b.ts);
-    return items;
-  }, [sortedMessages, rosterBanners]);
+  // One row per message, keyed and timestamped for the window. Messages use
+  // `created_at` (Rust unix seconds or ms — `toMs` normalizes).
+  type TimelineItem = { kind: "message"; key: string; ts: number; message: Message };
+  const timeline: TimelineItem[] = useMemo(
+    () =>
+      sortedMessages.map((message) => ({
+        kind: "message",
+        key: `msg:${message.id}`,
+        ts: toMs(message.created_at),
+        message,
+      })),
+    [sortedMessages],
+  );
 
   // ── Windowing (#874) ────────────────────────────────────────────────────
   // Only the visible slice of the timeline is in the DOM, so layout and paint
   // stop scaling with history length the way render cost already stopped.
   //
   // The list keeps its OWN scroll container and its own markup — the library
-  // is headless, which is what lets day dividers, roster banners, sender
+  // is headless, which is what lets day dividers, sender
   // grouping and both skins' row shapes carry on unchanged inside the window.
   //
   // Timeline keys, not indexes, identify rows (`getItemKey`). That is what
@@ -670,8 +615,8 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   // component, so the effect would never re-run and the jump would be dropped.
   //
   // The match is on the message this list RENDERS rather than on the
-  // `conversationId` prop, which for channels is the MLS *group* id (it feeds
-  // roster banners) and so would never equal a channel permalink's target.
+  // `conversationId` prop, which for channels is the MLS *group* id and so
+  // would never equal a channel permalink's target.
   const requestedJumpMessageId = messageJumpStore.messageId;
   const jumpTargetMessageId =
     requestedJumpMessageId &&
@@ -877,8 +822,6 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   // happens to be inside the window.
   const renderTimelineItem = (idx: number) => {
     const item = timeline[idx];
-    // Day divider only fires on message items (banners aren't tied to
-    // a wall-clock day in the same way — they're notifications).
     const prev = idx > 0 ? timeline[idx - 1] : null;
     const currentDay = startOfLocalDay(new Date(item.ts));
     const prevDay = prev ? startOfLocalDay(new Date(prev.ts)) : null;
@@ -886,22 +829,15 @@ export const MessageList: React.FC<MessageListProps> = observer(({
       item.kind === "message" && (prevDay === null || prevDay !== currentDay);
 
     // A message starts a new sender group (refined skin) when it's the
-    // first item, when a banner or day-divider separates it from the
-    // previous item, when the previous rendered item is a different
-    // author, or when the same author's gap exceeds GROUP_GAP_MS.
+    // first item, when a day-divider separates it from the previous item,
+    // when the previous rendered item is a different author, or when the
+    // same author's gap exceeds GROUP_GAP_MS.
     const isGroupStart =
       item.kind === "message" &&
       (prev === null ||
-        prev.kind === "banner" ||
         showDivider ||
         prev.message.sender_id !== item.message.sender_id ||
         item.ts - prev.ts > GROUP_GAP_MS);
-
-    if (item.kind === "banner") {
-      return (
-        <RosterChangeBanner banner={item.banner} resolveName={resolveName} />
-      );
-    }
 
     const { message } = item;
     const rendered = blockedIds.has(message.sender_id) ? (
@@ -934,6 +870,11 @@ export const MessageList: React.FC<MessageListProps> = observer(({
             : t("list.unknownAuthor")
         }
         isAuthorAdmin={adminUserIds?.has(message.sender_id) ?? false}
+        isAuthorNew={isNewMemberMessage(
+          newMemberJoinMs,
+          message.sender_id,
+          toMs(message.created_at),
+        )}
         canModerate={viewerIsAdmin}
         isGroupStart={isGroupStart}
         onReply={onReply}

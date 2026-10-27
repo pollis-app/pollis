@@ -85,6 +85,17 @@ pub struct PendingInvite {
     pub created_at: String,
 }
 
+/// A pending invite as the group's member page lists it (#1506).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GroupInvite {
+    pub id: String,
+    pub invitee_id: String,
+    pub invitee_username: Option<String>,
+    pub inviter_id: String,
+    pub inviter_username: Option<String>,
+    pub created_at: String,
+}
+
 /// A freshly minted invite link (#847).
 ///
 /// `token` and `url` exist ONLY in this value, returned once from

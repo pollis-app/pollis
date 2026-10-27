@@ -342,6 +342,12 @@ pub struct DirectoryGroupBody {
     /// a different endpoint.
     #[serde(default)]
     pub want_emoji: bool,
+    /// Include the group's pending invites (#1506). Members-only, and opt-in
+    /// so the authorization preflights and the message list's roster read do
+    /// not pay for a list only the member page renders. An older DS ignores
+    /// the field and answers with no `invites`, which reads as "none pending".
+    #[serde(default)]
+    pub want_invites: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -377,6 +383,26 @@ pub struct DirectoryGroupResponse {
     pub join_requests: Vec<JoinRequestWire>,
     #[serde(default)]
     pub emoji: Vec<CustomEmojiWire>,
+    /// Pending invites, when `want_invites` asked for them (#1506). Every
+    /// member sees them: a pending invitee already sits in the group's desired
+    /// MLS roster, so they are no secret from the people they will share it
+    /// with. Defaulted so a client reading an older DS gets an empty list.
+    #[serde(default)]
+    pub invites: Vec<GroupInviteWire>,
+}
+
+/// A pending invite as the group's member page lists it (#1506): who was
+/// invited, by whom, and when.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupInviteWire {
+    pub id: String,
+    pub invitee_id: String,
+    #[serde(default)]
+    pub invitee_username: Option<String>,
+    pub inviter_id: String,
+    #[serde(default)]
+    pub inviter_username: Option<String>,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

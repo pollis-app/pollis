@@ -689,6 +689,18 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             groups::decline_group_invite(invite_id, user_id, &state()?).await?;
             ok(())
         }
+        "list_group_invites" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let user_id: String = arg(&args, "userId")?;
+            ok(groups::list_group_invites(group_id, user_id, &state()?).await?)
+        }
+        "revoke_group_invite" => {
+            let invite_id: String = arg(&args, "inviteId")?;
+            let group_id: String = arg(&args, "groupId")?;
+            let user_id: String = arg(&args, "userId")?;
+            groups::revoke_group_invite(invite_id, group_id, user_id, &state()?).await?;
+            ok(())
+        }
         "create_channel" => {
             let group_id: String = arg(&args, "groupId")?;
             let name: String = arg(&args, "name")?;

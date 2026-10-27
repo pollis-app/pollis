@@ -167,6 +167,23 @@ pub(crate) async fn group(
         user_id: Some(user_id.to_string()),
         role_only: false,
         want_emoji,
+        want_invites: false,
+    };
+    ds_post_json(state, &body).await
+}
+
+/// One group's detail with its pending invites (#1506) — the member page's read.
+pub(crate) async fn group_with_invites(
+    state: &Arc<AppState>,
+    group_id: &str,
+    user_id: &str,
+) -> Result<dir::DirectoryGroupResponse> {
+    let body = dir::DirectoryGroupBody {
+        group_id: group_id.to_string(),
+        user_id: Some(user_id.to_string()),
+        role_only: false,
+        want_emoji: false,
+        want_invites: true,
     };
     ds_post_json(state, &body).await
 }
@@ -186,6 +203,7 @@ pub(crate) async fn group_role(
         user_id: Some(user_id.to_string()),
         role_only: true,
         want_emoji: false,
+        want_invites: false,
     };
     ds_post_json(state, &body).await
 }
