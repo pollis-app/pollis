@@ -48,10 +48,12 @@ export R2_S3_ENDPOINT="${R2_S3_ENDPOINT:-https://unused.invalid}"
 export R2_PUBLIC_URL="${R2_PUBLIC_URL:-https://unused.invalid}"
 export LIVEKIT_URL="${LIVEKIT_URL:-wss://unused.invalid}"
 
-# How many of the app's notifications are in the device's tray.
+# How many of the app's notifications are in the device's tray. Android
+# bundles an app's notifications under a summary it posts itself
+# (AUTOGROUP_SUMMARY); that is not a message, so it is not counted.
 tray_count() {
   adb -s "$DEVICE" shell dumpsys notification --noredact \
-    | grep -c "NotificationRecord(.*pkg=$APP" || true
+    | grep "NotificationRecord(.*pkg=$APP" | grep -vc GROUP_SUMMARY || true
 }
 
 # Wait (up to $2 seconds) until the tray holds exactly $1 of the app's notifications.
