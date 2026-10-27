@@ -7,6 +7,8 @@ tags:
 # invites it by email as soon as it exists; accept from the Groups tab, open
 # #General and post. The phone just joined, so its own message carries the
 # "new" tag (spoken as "(new)" after the name), and no "joined" line appears.
+# Then the phone creates a group of its own and posts there: a group's creator
+# never carries the tag.
 
 - runFlow: ../../subflows/sign-in.yaml
 - tapOn:
@@ -68,3 +70,41 @@ tags:
     timeout: 20000
 - assertNotVisible: "(?i).*joined the group.*"
 - takeScreenshot: membership-02-new-tag
+- tapOn:
+    id: "btn-back"
+
+# A group the phone creates: its own messages there are untagged.
+- tapOn:
+    id: "btn-add-group"
+- tapOn:
+    id: "btn-create-group"
+- assertVisible:
+    id: "screen-group-new"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "${GROUP_NAME} own"
+- tapOn:
+    id: "btn-submit-group"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "${GROUP_NAME} own, .*"
+    timeout: 30000
+- tapOn: "General"
+- extendedWaitUntil:
+    visible:
+      id: "input-composer"
+    timeout: 30000
+- tapOn:
+    id: "input-composer"
+- inputText: "hello from the creator"
+- hideKeyboard
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: "(?i).*: hello from the creator, .*"
+    timeout: 20000
+- assertNotVisible: '(?i).*\(new\): hello from the creator.*'
+- takeScreenshot: membership-03-creator-untagged

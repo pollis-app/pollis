@@ -7,11 +7,12 @@
 # The peers are `pollis-tui`'s `membership_peer` example (a test-harness build
 # that never ships). One signs up an account that will stay a PENDING invitee;
 # the other creates a group, invites the device's fresh account by email, waits
-# for it to accept, posts in #General, invites the pending account and makes the
-# device an admin. Part 1 accepts and posts (the device's message carries the
-# "new" tag, no "joined" line); part 2 checks the creator's message is untagged,
-# then revokes the pending invite from the member page's "Invited" section. The
-# peer must see the invite gone before it exits 0.
+# for it to accept, invites the pending account and makes the device an admin.
+# Part 1 accepts and posts (the device's message carries the "new" tag, no
+# "joined" line), then creates a group of its own and posts there untagged (a
+# creator is never tagged); part 2 revokes the pending invite from the member
+# page's "Invited" section. The peer must see the invite listed and then gone
+# before it exits 0.
 #
 # Needs: a Release build against the dev DS on the device, .maestro/.env filled
 # in, and POLLIS_DEV_ACCESS_KEY for the dev gate (read from Doppler
@@ -84,14 +85,14 @@ echo "    creator handle: $HANDLE"
 
 G=(-e GROUP_NAME="$GROUP_NAME" -e MAESTRO_PEER_HANDLE="$HANDLE" -e MAESTRO_PENDING_HANDLE="$PENDING_HANDLE")
 
-echo "==> 1/2 device signs up, accepts, posts (tagged new, no joined line)"
+echo "==> 1/2 device accepts and posts (tagged new, no joined line); its own group untagged"
 maestro --device "$DEVICE" test "${ENV_ARGS[@]}" "${G[@]}" -e MAESTRO_EMAIL="$PRIMARY_EMAIL" \
   "$FLOWS/1-accept-and-post.yaml"
 
-echo "==> creator posts, invites the pending account, promotes the device"
+echo "==> creator invites the pending account, promotes the device"
 await_peer PEER_PROMOTED 300
 
-echo "==> 2/2 device sees the creator untagged, revokes the pending invite"
+echo "==> 2/2 device revokes the pending invite"
 maestro --device "$DEVICE" test "${ENV_ARGS[@]}" "${G[@]}" "$FLOWS/2-tags-and-revoke.yaml"
 
 echo "==> creator sees the invite gone"

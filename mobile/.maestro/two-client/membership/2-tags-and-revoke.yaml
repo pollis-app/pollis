@@ -3,10 +3,9 @@ tags:
   - two-client
 ---
 # MEMBERSHIP (#1506), part 2 of 2 — driven by scripts/maestro-membership.sh.
-# The peer has posted in #General, invited ${MAESTRO_PENDING_HANDLE} and made
-# the phone an admin. The creator's message carries no "new" tag; the phone's
-# still does. The member page lists the pending invite under "Invited" (who,
-# by whom), and the phone — now an admin — revokes it.
+# The peer has invited ${MAESTRO_PENDING_HANDLE} and made the phone an admin.
+# The member page lists the pending invite under "Invited" (who, by whom), and
+# the phone — now an admin — revokes it.
 
 - stopApp
 - launchApp
@@ -22,21 +21,13 @@ tags:
     timeout: 30000
 - tapOn:
     id: "tab-groups"
+# The phone also has a group of its own now: pick the peer's pill.
+- tapOn: "${GROUP_NAME}"
 - extendedWaitUntil:
     visible:
       id: "btn-group-menu"
       text: "${GROUP_NAME}, .*"
     timeout: 30000
-
-- tapOn: "General"
-- extendedWaitUntil:
-    visible: "(?i).*${MAESTRO_PEER_HANDLE}: hello from the admin, .*"
-    timeout: 60000
-- assertVisible: '(?i).*\(new\): hello from the phone, .*'
-- assertNotVisible: "(?i).*joined the group.*"
-- takeScreenshot: membership-03-tags
-- tapOn:
-    id: "btn-back"
 
 - tapOn:
     id: "row-group-members"
