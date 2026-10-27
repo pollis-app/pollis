@@ -187,6 +187,12 @@ the remove control and removes it.
 — a fresh peer signs up, its handle is read off the screen, and the reporter
 reports it with "Report and block", then unblocks.
 
+**Composing (automated, #1507):** `mobile/scripts/maestro-composing.sh <device>`
+— one device plus `pollis-tui`'s `composing_peer` example. The device types a
+draft with the keyboard up; the peer then sends into the open channel, twice.
+The composer must still be above the keyboard: the draft is sent by tapping
+Send where it is. Each arrival is screenshotted straight off the device.
+
 **Lost message (automated, #1312):** `mobile/scripts/maestro-lost-message.sh <device>`
 — one device plus a dev-DS peer client, not a second device: the script runs
 `pollis-tui`'s `lost_message_peer` example (a `test-harness` build that never

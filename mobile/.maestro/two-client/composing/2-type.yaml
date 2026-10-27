@@ -1,0 +1,14 @@
+appId: com.pollis.mobile
+tags:
+  - two-client
+---
+# COMPOSING (#1507), part 2 of 3. Start a draft in #General and stop with the
+# keyboard up; the script then has the peer send into this channel.
+
+- assertVisible:
+    id: "screen-chat"
+- tapOn:
+    id: "input-composer"
+- inputText: "${DRAFT}"
+- assertVisible:
+    id: "btn-send"

@@ -1,0 +1,63 @@
+appId: com.pollis.mobile
+tags:
+  - two-client
+---
+# COMPOSING (#1507), part 1 of 3 — driven by scripts/maestro-composing.sh.
+# Sign up, make a group with #General, invite the peer
+# (${MAESTRO_PEER_HANDLE}) and open #General. The peer accepts and posts more
+# than a screen of history, so the list scrolls and its first message is not
+# the one under test.
+
+- runFlow: ../../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Composing"
+# Creating a group can take a minute on the dev DS, and a dropped request
+# leaves the form up with an error; tap Create again until the panel shows.
+- repeat:
+    times: 3
+    while:
+      notVisible:
+        id: "btn-group-menu"
+    commands:
+      - tapOn:
+          id: "btn-submit-group"
+          optional: true
+      - extendedWaitUntil:
+          visible:
+            id: "btn-group-menu"
+          timeout: 120000
+          optional: true
+- assertVisible:
+    id: "btn-group-menu"
+
+- tapOn:
+    id: "row-group-invite"
+- tapOn:
+    id: "input-user-search"
+- inputText: "${MAESTRO_PEER_HANDLE}"
+# The field submits on Enter; hideKeyboard is Back on Android and can close
+# the screen instead.
+- pressKey: Enter
+# A sent invite closes the screen.
+- extendedWaitUntil:
+    visible:
+      id: "row-group-invite"
+    timeout: 60000
+
+- tapOn:
+    text: "General"
+- assertVisible:
+    id: "screen-chat"
+- extendedWaitUntil:
+    visible: ".*peer history 15.*"
+    timeout: 300000
