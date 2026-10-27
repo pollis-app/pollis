@@ -169,6 +169,17 @@ pub struct DeclineInviteBody {
     pub user_id: Option<String>,
 }
 
+/// Withdraw a pending invite (#1506). Allowed to the member who sent it and to
+/// any admin of the invite's group, both re-derived server-side from the invite
+/// row — never from the request.
+#[derive(Serialize, Deserialize)]
+pub struct RevokeInviteBody {
+    pub invite_id: String,
+    /// The revoker; bound to the authenticated user when signed.
+    #[serde(default)]
+    pub actor_id: Option<String>,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct CreateJoinRequestBody {
     pub id: String,

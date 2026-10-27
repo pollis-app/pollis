@@ -283,6 +283,7 @@ endpoints! {
     Client   groups::CreateInviteBody           => "/v1/invites/create",                 groups::InviteCreated;
     Client   groups::AcceptInviteBody           => "/v1/invites/accept",                 groups::AcceptedInvite;
     Client   groups::DeclineInviteBody          => "/v1/invites/decline",                StatusOk;
+    Client   groups::RevokeInviteBody           => "/v1/invites/revoke",                 StatusOk;
     Client   groups::CreateInviteLinkBody       => "/v1/invite-links/create",            StatusOk;
     Client   groups::RevokeInviteLinkBody       => "/v1/invite-links/revoke",            StatusOk;
     Client   groups::RedeemInviteLinkBody       => "/v1/invite-links/redeem",            groups::RedeemInviteLinkResponse;
