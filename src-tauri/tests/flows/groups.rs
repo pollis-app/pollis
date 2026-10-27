@@ -260,6 +260,52 @@ async fn a_revoked_invite_leaves_the_list_and_the_tree() {
     drop(carol);
 }
 
+/// The mobile `membership` flow's sequence (#1506): bob accepts and posts at
+/// once, alice then posts, invites carol (left pending) and makes bob an admin.
+/// Bob must read alice's post, and can revoke carol's invite as an admin.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_new_member_reads_the_creator_after_an_invite_and_a_promotion() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+    let _alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+    let carol_profile = carol.sign_up("carol@test.local").await;
+
+    let group_id = alice.create_group("Promote Test").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+    alice.invite(&group_id, "bob@test.local").await;
+    let invite = bob.first_pending_invite().await.expect("bob's invite");
+    bob.accept_invite(invite["id"].as_str().expect("invite id")).await;
+    bob.poll().await;
+    bob.send_channel_message(&channel_id, "hello from the phone").await;
+
+    alice.send_channel_message(&channel_id, "hello from the admin").await;
+    alice.invite(&group_id, &carol_profile.username).await;
+    alice.set_member_role(&group_id, &bob_profile.id, "admin").await;
+
+    let msgs = bob.fetch_channel_messages(&channel_id).await;
+    assert!(
+        msgs.iter().any(|m| m["content"] == "hello from the admin"),
+        "bob must read alice's post: {msgs:#?}"
+    );
+
+    let invites = bob.list_group_invites(&group_id).await;
+    assert_eq!(invites.len(), 1, "{invites:?}");
+    let invite_id = invites[0]["id"].as_str().expect("invite id").to_string();
+    bob.try_revoke_invite(&group_id, &invite_id)
+        .await
+        .expect("an admin may revoke someone else's invite");
+    assert!(alice.list_group_invites(&group_id).await.is_empty());
+
+    drop(alice);
+    drop(bob);
+    drop(carol);
+}
+
 /// Carol's request is rejected. She does not become a member and the pending
 /// list clears.
 #[tokio::test(flavor = "multi_thread")]

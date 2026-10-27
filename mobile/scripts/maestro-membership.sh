@@ -54,7 +54,8 @@ echo "==> building the peer"
 PEER_BIN="$REPO/target/debug/examples/membership_peer"
 PEER_DIR="$(mktemp -d)"
 PEER_OUT="$PEER_DIR/peer.out"
-trap 'kill "${PEER_PID:-}" 2>/dev/null || true; rm -rf "$PEER_DIR"' EXIT
+# Set MEMBERSHIP_KEEP_LOGS=<dir> to keep the peer's output for a failed run.
+trap 'kill "${PEER_PID:-}" 2>/dev/null || true; [ -n "${MEMBERSHIP_KEEP_LOGS:-}" ] && cp "$PEER_DIR"/peer.* "$MEMBERSHIP_KEEP_LOGS"/ 2>/dev/null; rm -rf "$PEER_DIR"' EXIT
 
 # Wait (up to $2 seconds) for a line the peer prints; fail if it dies first.
 await_peer() {
