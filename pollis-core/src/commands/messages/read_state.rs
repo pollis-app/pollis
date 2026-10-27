@@ -243,6 +243,9 @@ pub async fn mark_conversation_read(
     // common case and produces no write at all.
     if moved {
         schedule_read_cursor_push(state, &user_id);
+        // #1508: and clear its notifications from the account's phones. Only
+        // on a move — re-opening a read conversation reports nothing.
+        crate::commands::push::schedule_push_dismiss(state, &user_id, &conversation_id);
     }
     Ok(moved)
 }

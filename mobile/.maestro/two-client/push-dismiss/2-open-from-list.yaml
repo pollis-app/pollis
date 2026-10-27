@@ -1,0 +1,33 @@
+appId: com.pollis.mobile
+tags:
+  - two-client
+---
+# PUSH DISMISS (#1508), part 2 of 3. The peer's two messages arrived as push
+# notifications while the app was in the background (the script checked they
+# are in the tray). Open the app from the launcher — NOT from a notification —
+# and open the DM from the Direct list. Reading it must clear its
+# notifications from the tray; the script checks the tray after this flow.
+
+- launchApp:
+    stopApp: false
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../../subflows/enter-pin.yaml
+- tapOn:
+    id: "tab-direct"
+- extendedWaitUntil:
+    visible:
+      id: "row-dm-.*"
+    timeout: 30000
+- tapOn:
+    text: ".*${MAESTRO_PEER_HANDLE}.*"
+- extendedWaitUntil:
+    visible: "and another one"
+    timeout: 30000
+- takeScreenshot: push-dismiss-02-read-from-list
+- tapOn:
+    id: "btn-back"
+- pressKey: Home

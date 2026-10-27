@@ -1,0 +1,60 @@
+appId: com.pollis.mobile
+tags:
+  - two-client
+---
+# PUSH DISMISS (#1508), part 1 of 3 — driven by scripts/maestro-push-dismiss.sh.
+# Sign up a fresh account, open a DM with the peer the script just signed up
+# (${MAESTRO_PEER_HANDLE}), allow notifications when the app asks (it asks on
+# the first conversation opened), say hello, then go back to the Direct tab and
+# send the app to the background so the peer's messages arrive as pushes.
+
+- runFlow: ../../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-direct"
+- tapOn:
+    id: "btn-new-dm"
+- tapOn:
+    id: "input-user-search"
+- inputText: "${MAESTRO_PEER_HANDLE}"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible:
+      id: "row-user-.*"
+    timeout: 20000
+- tapOn:
+    id: "row-user-.*"
+- extendedWaitUntil:
+    visible:
+      id: "input-composer"
+    timeout: 30000
+# The OS notification prompt (Android 13+ / iOS). Answered once per install.
+- runFlow:
+    when:
+      visible: "Allow"
+    commands:
+      - tapOn: "Allow"
+- tapOn:
+    id: "input-composer"
+- inputText: "hello peer"
+# Android: the keyboard can sit over the send button (Gboard's mic). iOS has
+# no standard dismiss for this field, and the button stays clear of it there.
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - hideKeyboard
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*: hello peer, .*"
+    timeout: 15000
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "tab-direct"
+- extendedWaitUntil:
+    visible:
+      id: "row-dm-.*"
+    timeout: 30000
+- takeScreenshot: push-dismiss-01-dm-open
+- pressKey: Home

@@ -143,7 +143,10 @@ fn the_endpoint_table_covers_the_whole_write_surface() {
         //
         // 118 since #1506 let the inviter or an admin withdraw a pending invite
         // from the member page: `/v1/invites/revoke`.
-        118,
+        // 120 since #1508 clears read notifications from every device:
+        // `/v1/push/dismiss` (a read moved the cursor) and `/v1/push/dismissed`
+        // (a phone that missed the silent push catches up on foreground).
+        120,
         "the DS write surface changed — update this count deliberately, and make \
          sure the new endpoint is routed in BOTH pollis-delivery and the flows harness"
     );

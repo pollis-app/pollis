@@ -29,6 +29,8 @@ import { invoke } from "../native";
 import i18n from "../../i18n";
 import { readPayloadRouting } from "./routing";
 import { createPushRegistrar, type EnsureOptions } from "./registration";
+import { handleOfPresented, trayHandles, type Presented } from "./dismiss";
+import { dismissHandles } from "./dismissTask";
 
 // Present foreground notifications as a banner / in the list, content-free
 // (no sound, no badge). This is pure config and safe at module load — it
@@ -275,6 +277,76 @@ export function addPushListeners(handlers: PushHandlers): () => void {
     responseSub.remove();
     receivedSub.remove();
   };
+}
+
+// ── Clearing read notifications (#1508) ──────────────────────────────────────
+//
+// See `./dismiss.ts` for the three paths and how a tray notification's handle
+// is found. The background (silent push) path is `./dismissTask.ts`; these two
+// run in the app.
+
+async function presentedTray(): Promise<Presented[]> {
+  const presented = await Notifications.getPresentedNotificationsAsync();
+  return presented.map((n) => ({
+    identifier: n.request.identifier,
+    data: n.request.content.data,
+  }));
+}
+
+/**
+ * This device opened `conversationId` (from the tray, the list, Search or a
+ * link): clear its notifications now, without waiting for the DS's silent push.
+ *
+ * Each tray notification's handle is resolved to its conversation over the
+ * same `resolve_push_handle` a tap uses (cached in the core, so a notification
+ * that was already resolved costs nothing). Best-effort: a handle that does
+ * not resolve (offline, expired) is left for the silent push and the
+ * foreground catch-up.
+ */
+export async function dismissConversationNotifications(conversationId: string): Promise<void> {
+  try {
+    const tray = await presentedTray();
+    const withHandle = tray.filter((n) => handleOfPresented(n) !== null);
+    if (withHandle.length === 0) {
+      return;
+    }
+    const matches = await Promise.all(
+      withHandle.map(async (n) => {
+        const routing = await resolveNotificationRouting({ h: handleOfPresented(n) });
+        return routing?.conversationId === conversationId ? handleOfPresented(n) : null;
+      }),
+    );
+    await dismissHandles(matches.filter((h): h is string => h !== null));
+  } catch {
+    // Not available on this build, or the tray could not be read: the other
+    // two paths still clear it.
+  }
+}
+
+/**
+ * Catch up on reads from other devices: ask the DS which of the tray's
+ * notifications were read since, and clear those. Run on landing in the app
+ * and on every return to the foreground — the moments a missed silent push
+ * (iOS after a force-quit, Android in Doze) would otherwise leave stale
+ * notifications behind.
+ *
+ * Never guesses from local unread counts: a notification whose message this
+ * device has not ingested yet would look read, and clearing it would hide an
+ * unread message. Only the DS's record of an actual read clears one.
+ */
+export async function reconcileReadNotifications(userId: string): Promise<void> {
+  try {
+    const handles = trayHandles(await presentedTray());
+    if (handles.length === 0) {
+      return;
+    }
+    const read = await invoke<string[]>("dismissed_push_handles", { userId, handles });
+    if (Array.isArray(read) && read.length > 0) {
+      await dismissHandles(read);
+    }
+  } catch {
+    // Offline, an older DS (404), or no tray access: try again next time.
+  }
 }
 
 export { readPayloadRouting } from "./routing";

@@ -31,6 +31,7 @@ import { queryClient as sharedQueryClient } from "../../lib/queryClient";
 import { isInSignedInApp } from "../../lib/enrollmentPrompt";
 import { resumedToForeground, type UnreadCount } from "../../lib/unread";
 import { appStore } from "../../stores/appStore";
+import { dismissConversationNotifications, reconcileReadNotifications } from "../../lib/push";
 
 export type { UnreadCount } from "../../lib/unread";
 
@@ -71,13 +72,20 @@ export function refreshUnread(qc: QueryClient = sharedQueryClient): void {
  * is, so the app cannot write a cursor past a message it does not have. The
  * badge clears at once (the user opened it; the outcome is not in doubt) and
  * the refetch afterwards confirms it. A cursor that moved is pushed to the
- * account's other devices by the core itself, debounced.
+ * account's other devices by the core itself, debounced, and reported so the
+ * DS clears the conversation's notifications from every phone (#1508).
+ *
+ * This device's own tray is cleared here and now, whatever route opened the
+ * conversation (the tray, the list, Search, a link) and whether or not the
+ * cursor moved — a notification can outlive a read that synced in from another
+ * device.
  *
  * A plain function rather than a hook, so the list rows, Search and
  * `selectConversation` can call it wherever they cleared the badge before.
  */
 export function markConversationRead(conversationId: string): void {
   appStore.markRead(conversationId);
+  void dismissConversationNotifications(conversationId);
   const userId = appStore.currentUser?.id;
   if (!userId) {
     return;
@@ -145,6 +153,9 @@ export function useUnreadSync() {
         refreshUnread(qc);
       }
     });
+    // #1508: clear what was read elsewhere while this device was away and
+    // missed the silent push.
+    void reconcileReadNotifications(userId);
     return () => {
       cancelled = true;
     };
@@ -170,6 +181,7 @@ export function useUnreadSync() {
           refreshUnread(qc);
         }
       });
+      void reconcileReadNotifications(userId);
     });
     return () => {
       sub.remove();

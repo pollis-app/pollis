@@ -352,6 +352,10 @@ endpoints! {
     Client   devices::ResignDeviceCertsBody     => "/v1/devices/resign",                 StatusOk;
     Client   devices::PushTokenBody             => "/v1/push-tokens",                    StatusOk;
     Client   devices::ResolvePushHandleBody     => "/v1/push/resolve",                   devices::ResolvePushHandleResponse;
+    // #1508: a read clears its notifications on every device. Content-free:
+    // conversation ids go to the DS only, the push carries opaque handles.
+    Client   devices::DismissPushBody           => "/v1/push/dismiss",                   devices::DismissPushResponse;
+    Client   devices::DismissedPushHandlesBody  => "/v1/push/dismissed",                 devices::DismissedPushHandlesResponse;
 
     // ── Domains E + G — account lifecycle ────────────────────────────────────
     Client   account::RotateIdentityBody        => "/v1/account/rotate-identity",        account::RotateIdentityResponse;

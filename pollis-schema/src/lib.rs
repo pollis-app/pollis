@@ -312,6 +312,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "message_reaction_conversation",
         include_str!("../migrations/000039_message_reaction_conversation.sql"),
     ),
+    (
+        40,
+        "push_handle_dismissed",
+        include_str!("../migrations/000040_push_handle_dismissed.sql"),
+    ),
 ];
 
 /// Every script for the MAIN DB, in apply order (baseline first). One element
