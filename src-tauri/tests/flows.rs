@@ -51,6 +51,8 @@ mod pinning;
 mod pq_key_packages;
 #[path = "flows/pq_migration.rs"]
 mod pq_migration;
+#[path = "flows/push_dismiss.rs"]
+mod push_dismiss;
 #[path = "flows/rejoin.rs"]
 mod rejoin;
 #[path = "flows/reports.rs"]

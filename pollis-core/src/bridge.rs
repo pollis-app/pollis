@@ -1177,6 +1177,15 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             }))
         }
 
+        // #1508: which of the tray's notifications were read since on any
+        // device. Asked on foreground/unlock, so a phone that missed the
+        // silent dismissal push clears them anyway.
+        "dismissed_push_handles" => {
+            let user_id: String = arg(&args, "userId")?;
+            let handles: Vec<String> = arg(&args, "handles")?;
+            ok(crate::commands::push::dismissed_push_handles(user_id, handles, &state()?).await?)
+        }
+
         // ----- livekit (realtime token) -----
         // Mobile joins the same SFU rooms as desktop via the JS LiveKit SDK
         // (data-only, see mobile/lib/realtime/). It only passes the room name;
@@ -1378,6 +1387,7 @@ mod tests {
             "export_archive",
             "fetch_export_attachments",
             "bundle_export",
+            "dismissed_push_handles",
         ] {
             assert!(is_registered(cmd).await, "no bridge arm for {cmd}");
         }
