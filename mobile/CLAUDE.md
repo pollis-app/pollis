@@ -1272,7 +1272,13 @@ Current state:
   expo's `expo-notifications://foreign_notifications?tag=…` identifier; iOS
   keeps `data.h`. Native pieces (store build only): `expo-task-manager`, and
   `enableBackgroundRemoteNotifications` on the expo-notifications plugin
-  (iOS `UIBackgroundModes: remote-notification`). `tests/push-dismiss.test.ts`;
+  (iOS `UIBackgroundModes: remote-notification`; expo-task-manager adds
+  `fetch`), and an R8 keep rule for `expo.modules.adapters.react.apploader.**`
+  (`extraProguardRules`): expo-modules-core names `RNHeadlessAppLoader` only in
+  manifest meta-data, so minified release builds stripped it and the first
+  data-only push to a killed app crashed in `TaskService.executeTask`.
+  Maestro: `scripts/maestro-push-dismiss.sh` (Android, real pushes, tray read
+  with `dumpsys notification`). `tests/push-dismiss.test.ts`;
   full design in `.codesight/wiki/notifications.md`.
 - **Unread badges are persisted (#1422, desktop's #844):**
   `hooks/queries/useUnread.ts` reads `get_unread_counts` into

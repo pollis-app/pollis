@@ -338,7 +338,9 @@ shipped, 55 and 57), and nothing listens for data-only messages. A client from
 before this change never calls the new endpoints; a new client against an old
 DS gets a 404, which is best-effort (kept and retried with the next read). The
 mobile half needs a store build (pollis-core change + the expo-task-manager
-native module + the iOS `remote-notification` background mode).
+native module + the iOS `remote-notification` background mode + an R8 keep
+rule for expo's headless app loader, without which a minified Android build
+crashed on the first silent push to a killed app).
 
 **Desktop** raises no push and registers no token; its part is the core report
 above, so reading on desktop clears the phone.

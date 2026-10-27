@@ -122,6 +122,21 @@ test("the background task is registered before the app renders", () => {
   assert.doesNotMatch(src, /from "\.\.\/native"|appStore/);
 });
 
+test("R8 keeps the headless loader the killed-app task needs", () => {
+  // expo-modules-core names `RNHeadlessAppLoader` only in manifest meta-data and
+  // loads it by reflection, so a minified release build strips it. Then the
+  // first data-only push to an app with no process died in
+  // `TaskService.executeTask` (ClassNotFoundException -> NullPointerException):
+  // seen on the emulator before this rule.
+  const app = JSON.parse(read("app.json")).expo;
+  const props = app.plugins.find((p: unknown) => Array.isArray(p) && p[0] === "expo-build-properties");
+  assert.equal(props?.[1]?.android?.enableMinifyInReleaseBuilds, true);
+  assert.match(
+    props?.[1]?.android?.extraProguardRules ?? "",
+    /-keep class expo\.modules\.adapters\.react\.apploader\.\*\* \{ \*; \}/,
+  );
+});
+
 test("iOS may wake the app for the silent push", () => {
   const app = JSON.parse(read("app.json")).expo;
   const plugin = app.plugins.find((p: unknown) => Array.isArray(p) && p[0] === "expo-notifications");
