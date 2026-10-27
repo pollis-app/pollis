@@ -1253,6 +1253,33 @@ Current state:
   cold-started the app is picked up with `getLastNotificationResponse` (#1422):
   before, a cold-start tap was dropped and a tap on a locked app pushed the
   chat over the PIN screen.
+- **Read notifications leave the tray (#1508).** Once a conversation is read on
+  any client its notifications clear from every phone, matched by handle, never
+  by conversation id (`lib/push/dismiss.ts`): (1) `markConversationRead` clears
+  this device's own for that conversation at once, by every route
+  (`dismissConversationNotifications`, resolving each tray handle); (2) core
+  reports a moved cursor to `POST /v1/push/dismiss` and the DS sends a silent,
+  data-only `{ d: [handles] }` push that the expo-notifications background task
+  `lib/push/dismissTask.ts` clears — foreground, background, and on Android with
+  the app killed; (3) on landing and every resume `reconcileReadNotifications`
+  asks `dismissed_push_handles` which tray handles were read and clears them
+  (iOS force-quit, Doze). Never from local unread counts — an un-ingested
+  message would look read. The task is defined in **`mobile/index.ts`, the app
+  entry (`package.json` `main`)**, which imports it before `expo-router/entry`:
+  expo-task-manager may load the bundle headless just to run it, so it must
+  not live in a component, and it imports no bridge or store. Android finds a
+  system-posted notification by its `tag` (the DS sets it to the handle) via
+  expo's `expo-notifications://foreign_notifications?tag=…` identifier; iOS
+  keeps `data.h`. Native pieces (store build only): `expo-task-manager`, and
+  `enableBackgroundRemoteNotifications` on the expo-notifications plugin
+  (iOS `UIBackgroundModes: remote-notification`; expo-task-manager adds
+  `fetch`), and an R8 keep rule for `expo.modules.adapters.react.apploader.**`
+  (`extraProguardRules`): expo-modules-core names `RNHeadlessAppLoader` only in
+  manifest meta-data, so minified release builds stripped it and the first
+  data-only push to a killed app crashed in `TaskService.executeTask`.
+  Maestro: `scripts/maestro-push-dismiss.sh` (Android, real pushes, tray read
+  with `dumpsys notification`). `tests/push-dismiss.test.ts`;
+  full design in `.codesight/wiki/notifications.md`.
 - **Unread badges are persisted (#1422, desktop's #844):**
   `hooks/queries/useUnread.ts` reads `get_unread_counts` into
   `appStore.unreadCounts` (whole-set replace, `lib/unread.ts`) on landing in

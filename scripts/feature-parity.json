@@ -22,6 +22,7 @@
     "version": "uniffi build/version probe used by the mobile diagnostics screen; desktop reads its version from Tauri.",
     "register_push_token": "Push notifications are mobile-only (APNs/FCM); desktop is notified over its live connection.",
     "resolve_push_handle": "Mobile push only.",
+    "dismissed_push_handles": "Mobile push only: a phone asks which of its tray notifications were read elsewhere (#1508). Every client's reads already report through mark_conversation_read.",
     "get_media_path": "Mobile counterpart of desktop's get_media_url.",
     "get_emoji_path": "Mobile counterpart of desktop's get_emoji_url.",
     "get_livekit_token": "Mobile's LiveKit data-only connection; desktop's counterpart is connect_rooms.",

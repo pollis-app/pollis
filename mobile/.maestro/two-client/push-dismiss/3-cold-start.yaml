@@ -1,0 +1,30 @@
+appId: com.pollis.mobile
+tags:
+  - two-client
+---
+# PUSH DISMISS (#1508), part 3 of 3. The peer sent again while the app was
+# closed, so the system posted the notification with no app process running.
+# Cold-start from the launcher, unlock, and read the DM from the list: that
+# notification must leave the tray too. The script checks the tray after this.
+
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-pin"
+    timeout: 20000
+- runFlow: ../../subflows/enter-pin.yaml
+- tapOn:
+    id: "tab-direct"
+- extendedWaitUntil:
+    visible:
+      id: "row-dm-.*"
+    timeout: 30000
+- tapOn:
+    text: ".*${MAESTRO_PEER_HANDLE}.*"
+- extendedWaitUntil:
+    visible: "sent while the app was closed"
+    timeout: 30000
+- takeScreenshot: push-dismiss-03-read-after-cold-start
+- tapOn:
+    id: "btn-back"
+- pressKey: Home

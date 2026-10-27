@@ -282,6 +282,69 @@ only when the caret is at the end of the line — and refined gets the
 Slack-style list above the composer (arrows / Enter / Tab / Esc). Neither is a
 modal, a portal, or a fixed overlay.
 
+## Clearing read push notifications (#1508)
+
+A phone's message notification used to stay in the tray after the message was
+read, unless it was the very notification the user tapped: opening the
+conversation from the list, Search or a link, or reading it on desktop or
+another phone, left it there. Slack/Discord behaviour is now the rule — once a
+conversation is read on **any** client, its notifications leave **every**
+phone's tray. Three paths, all matching on the notification's opaque handle `h`
+(#1122), never on a conversation id:
+
+1. **This phone read it.** `markConversationRead` (`mobile/hooks/queries/useUnread.ts`,
+   every route: tray tap, list, Search, link, the open chat as messages arrive)
+   calls `dismissConversationNotifications` (`mobile/lib/push/index.ts`): each
+   tray notification's handle is resolved with the same `resolve_push_handle` a
+   tap uses (cached in core) and the ones for that conversation are dismissed.
+2. **Any client read it.** `pollis-core`'s `mark_conversation_read`, when the
+   cursor moves, queues the conversation (`commands::push::schedule_push_dismiss`,
+   2 s debounce) and reports `{ conversation_id, read_secs_ago }` to
+   `POST /v1/push/dismiss`. The DS stamps the user's handles minted before the
+   read and sends every token of theirs one **silent, data-only** push
+   `{ d: [handles] }` (no title or body, `priority: normal`, iOS
+   `contentAvailable`), coalesced per user (`push::DISMISS_COALESCE`, 2 s).
+   On the phone, the expo-notifications background task
+   (`mobile/lib/push/dismissTask.ts`, registered from the app entry
+   `mobile/index.ts` before expo-router loads) clears those handles from the
+   tray — in the foreground, in the background and, on Android, with the app
+   killed (headless JS); no bridge, no unlock, no network needed.
+3. **The silent push never arrived** (iOS does not wake a force-quit app;
+   Android may hold a normal-priority push in Doze). On landing in the app and
+   every return to the foreground, `reconcileReadNotifications` sends the tray's
+   handles to `dismissed_push_handles` → `POST /v1/push/dismissed` and clears
+   the ones the DS recorded as read. It never guesses from local unread counts:
+   a message not yet ingested on this device would look read.
+
+**Finding a notification's handle in the tray.** iOS keeps the payload on a
+delivered notification, so `data.h` is there. On Android a notification the
+app presented itself (foreground) keeps it too, but one the system posted while
+the app was in the background keeps none of the payload — only its tag — so
+the DS tags every Android message push with its handle, and
+`mobile/lib/push/dismiss.ts` reads it back from expo-notifications' foreign
+identifier (`expo-notifications://foreign_notifications?tag=<h>&id=0`). A
+per-conversation tag (or `collapseId`) would have been simpler and is exactly
+what #1122 removed: a stable value the providers could count.
+
+**Privacy.** The silent push carries only handles the providers already saw on
+the original notifications — they learn which notifications were read, never a
+conversation and never content. The DS learns that the user read a
+conversation at about that time, which the read-receipt envelope (#892, on by
+default) already tells it; the encrypted read-cursor blob stays opaque.
+
+**Compatibility.** A build without the task ignores the silent push: no
+title/body means expo-notifications never presents it (on every SDK we have
+shipped, 55 and 57), and nothing listens for data-only messages. A client from
+before this change never calls the new endpoints; a new client against an old
+DS gets a 404, which is best-effort (kept and retried with the next read). The
+mobile half needs a store build (pollis-core change + the expo-task-manager
+native module + the iOS `remote-notification` background mode + an R8 keep
+rule for expo's headless app loader, without which a minified Android build
+crashed on the first silent push to a killed app).
+
+**Desktop** raises no push and registers no token; its part is the core report
+above, so reading on desktop clears the phone.
+
 ## Files
 
 | File | Role |
@@ -293,7 +356,9 @@ modal, a portal, or a fixed overlay.
 | `frontend/src/components/ui/MentionSuggestList.tsx` | Refined skin's Slack-style suggestion list |
 | `frontend/src/components/Message/MessageBody.tsx` | Splits mention tokens out, delegates the rest to `LinkifiedText` |
 | `pollis-core/src/commands/messages/send.rs` | `mention_audience()` / `direct_mentions()` — the inbox fanout and the push audience |
-| `pollis-delivery/src/push.rs` | `PushAudience` + `push_recipients` — membership intersection and the per-channel mute |
+| `pollis-delivery/src/push.rs` | `PushAudience` + `push_recipients` — membership intersection and the per-channel mute; `dismiss_push` / `read_dismissed_push_handles` — clearing read notifications (#1508) |
+| `pollis-core/src/commands/push.rs` | `schedule_push_dismiss` (debounced report from `mark_conversation_read`), `dismissed_push_handles` (#1508) |
+| `mobile/lib/push/dismiss.ts` · `dismissTask.ts` · `index.ts` | Tray matching by handle, the background task for the silent push, same-device dismissal and the foreground catch-up (#1508) |
 | `pollis-delivery/src/profile.rs` | `set_channel_mute` / `read_channel_mutes` (#1431) |
 | `frontend/src/utils/sfx.ts` | `playSfx()` wrapper around `play_sfx` Rust command |
 | `frontend/src/hooks/useLiveKitRealtime.ts` | Categorizes incoming Rust events, calls `notify(...)`, owns pref + permission sync |
@@ -308,4 +373,5 @@ modal, a portal, or a fixed overlay.
 
 - #843 — per-user `@username` mentions that notify the mentioned user.
 - #1431 — channel messages push by default; per-channel, per-account mute.
+- #1508 — a read on any client clears that conversation's push notifications from every phone.
 - #186 — original audit + dispatcher refactor (PR #202).

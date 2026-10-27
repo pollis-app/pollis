@@ -312,6 +312,14 @@ client IPs from the first-party services, and is opt-in and off by default. This
   given conversation went to a given user. The DS already knew that while building the payload — the
   change is that it now lasts for the TTL rather than an instant, which is why the TTL is short and
   the sweep is not optional.
+- **Read dismissals (#1508):** when a client's read cursor moves it tells the DS which conversation
+  it read and how many seconds ago (`POST /v1/push/dismiss`), and the DS stamps `dismissed_at` on that
+  user's handles for it (`000040_push_handle_dismissed.sql`; same TTL and sweep as the row). That
+  record — this user read this conversation at about this time — is what the read-receipt envelope
+  (on by default) already discloses; the encrypted read-cursor blob is unaffected. The DS then sends
+  the user's devices a silent push whose `data` is `{ d: [handles] }` and nothing else: handles the
+  providers already saw, so they learn which notifications were read, never a conversation. Android
+  message pushes also carry the handle as the notification `tag`, a value already in the payload.
 - **Third parties:** the payload transits Expo's push service and then APNs or FCM. Those services see
   the token, the fixed strings, and an opaque handle that is **different on every notification**. They
   do not see message content, the sender, or which conversation the notification is for — and because
