@@ -106,9 +106,7 @@ pub(super) fn join_from_welcome<C>(
 where
     C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
 {
-    let join_config = MlsGroupJoinConfig::builder()
-        .use_ratchet_tree_extension(true)
-        .build();
+    let join_config = super::provider::join_config();
 
     let processed = ProcessedWelcome::new_from_welcome(provider, &join_config, welcome)
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("process welcome: {e}")))?;

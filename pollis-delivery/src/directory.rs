@@ -324,6 +324,16 @@ async fn fetch_watermarks(
 /// when #1087 moved the cursor to `seq` they failed for a reason unrelated to
 /// what they assert. There is one predicate now, and it lives here.
 #[cfg(test)]
+pub(crate) async fn envelopes_for_conversations(
+    conn: &Connection,
+    conversation_ids: &[String],
+    user_id: &str,
+    device_id: &str,
+) -> anyhow::Result<Vec<EnvelopeWire>> {
+    fetch_envelopes(conn, conversation_ids, user_id, device_id).await
+}
+
+#[cfg(test)]
 pub(crate) async fn envelopes_for_device(
     conn: &Connection,
     conversation_id: &str,
@@ -355,9 +365,11 @@ async fn fetch_envelopes(
             params.push(cid.clone().into());
             params.push(watermarks.get(cid).copied().unwrap_or(0).into());
         }
+        // `rowid` is the order this DS accepted the envelopes in, ACROSS the
+        // group's conversations — see `EnvelopeWire::arrival`.
         let sql = format!(
             "SELECT conversation_id, id, sender_id, ciphertext, reply_to_id, \
-                    target_message_id, sent_at, type, seq \
+                    target_message_id, sent_at, type, seq, rowid \
              FROM message_envelope \
              WHERE {} \
              ORDER BY conversation_id ASC, seq ASC",
@@ -375,6 +387,7 @@ async fn fetch_envelopes(
                 sent_at: row.get(6)?,
                 kind: row.get(7)?,
                 seq: row.get::<Option<i64>>(8).ok().flatten(),
+                arrival: row.get::<Option<i64>>(9).ok().flatten(),
             });
         }
     }

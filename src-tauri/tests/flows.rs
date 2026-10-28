@@ -17,6 +17,8 @@ mod adversarial;
 mod auth;
 #[path = "flows/channel_mute.rs"]
 mod channel_mute;
+#[path = "flows/cross_channel_ingest.rs"]
+mod cross_channel_ingest;
 #[path = "flows/cross_signing.rs"]
 mod cross_signing;
 #[path = "flows/device_link.rs"]

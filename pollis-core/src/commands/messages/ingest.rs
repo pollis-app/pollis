@@ -22,6 +22,13 @@ type EnvelopeRow = (
     i64,
 );
 
+/// One catch-up's envelopes bucketed per bound conversation, in listing order.
+type PerConversation = Vec<(String, Vec<EnvelopeRow>)>;
+
+/// The DS's group-wide arrival position of each envelope in a
+/// [`PerConversation`], same shape: `arrival[ci][ei]` is `per_conv[ci].1[ei]`'s.
+type Arrival = Vec<Vec<Option<i64>>>;
+
 /// Whether a delete tombstone's redaction is done on this device, or must be
 /// retried on a later pass (#693 / #661 WS1). Consumed by
 /// [`ingest_group_envelopes_interleaved`] to choose the tombstone's `EnvKind`
@@ -286,7 +293,7 @@ pub async fn catch_up_mls_group_interleaved(
     // trips before anything else could happen. The correlated watermark subquery
     // is unchanged: it keys off the row's own `conversation_id`, so it still
     // resolves per conversation rather than group-wide.
-    let per_conv = partition_envelopes(resolved.conversation_ids, resolved.envelopes);
+    let (per_conv, arrival) = partition_envelopes(resolved.conversation_ids, resolved.envelopes);
 
     // Drive the shared group's replay once, decrypting each conversation's
     // envelopes as the group reaches their epoch. Returns the per-conversation
@@ -297,6 +304,7 @@ pub async fn catch_up_mls_group_interleaved(
         user_id,
         mls_group_id,
         &per_conv,
+        &arrival,
         is_dm,
         bound,
     )
@@ -354,18 +362,23 @@ pub async fn catch_up_mls_group_interleaved(
 /// Bucket one catch-up's envelopes per bound conversation, in the order the
 /// conversations were listed.
 ///
-/// The composite `ORDER BY conversation_id, sent_at ASC, id ASC` the DS applies
-/// is what lets one result set be partitioned into the same per-conversation
-/// lists a per-channel loop would build: within a conversation the order is
-/// byte-for-byte what it was.
+/// The `ORDER BY conversation_id, seq` the DS applies is what lets one result
+/// set be partitioned into the same per-conversation lists a per-channel loop
+/// would build: within a conversation the order is byte-for-byte what it was.
+///
+/// Alongside, each envelope's group-wide `EnvelopeWire::arrival` position, in
+/// the same shape (`arrival[ci][ei]` belongs to `per_conv[ci].1[ei]`): the
+/// per-conversation lists are the cursor's order, not the order to DECRYPT in —
+/// see [`into_sealing_order`].
 fn partition_envelopes(
     conversation_ids: Vec<String>,
     envelopes: Vec<pollis_api::directory::EnvelopeWire>,
-) -> Vec<(String, Vec<EnvelopeRow>)> {
+) -> (PerConversation, Arrival) {
     let mut per_conv: Vec<(String, Vec<EnvelopeRow>)> = conversation_ids
         .iter()
         .map(|cid| (cid.clone(), Vec::new()))
         .collect();
+    let mut arrival: Vec<Vec<Option<i64>>> = vec![Vec::new(); conversation_ids.len()];
     // Index by conversation id so a row lands in the right bucket regardless
     // of the order the ids were listed in.
     let slot: HashMap<&str, usize> = conversation_ids
@@ -377,6 +390,7 @@ fn partition_envelopes(
         let Some(&i) = slot.get(env.conversation_id.as_str()) else {
             continue;
         };
+        arrival[i].push(env.arrival);
         per_conv[i].1.push((
             env.id,
             env.sender_id,
@@ -391,7 +405,29 @@ fn partition_envelopes(
             env.seq.unwrap_or(0),
         ));
     }
-    per_conv
+    (per_conv, arrival)
+}
+
+/// Put one epoch's run of envelopes — drawn from EVERY conversation of the
+/// group — into the order the DS accepted them, which is the order their
+/// senders sealed them in.
+///
+/// All of a group's channels share one MLS group, so one sender's ratchet
+/// generations run across all of them: a message in #a, six in #b, then one
+/// more in #a are generations 0, 1-6, 7. openmls keeps only the last 5 skipped
+/// generations of a sender (`out_of_order_tolerance`); once it has opened a
+/// generation, anything more than 5 below it is "too distant in the past" and
+/// can never be opened. The run used to go conversation by conversation, so a
+/// device that caught a group up in one pass after a member had interleaved
+/// channels opened #a's generation 7 first and then lost #b's 1 and 2 — while a
+/// member who read along live, in arrival order, lost nothing.
+///
+/// A stable sort on the DS's group-wide position. Within one conversation that
+/// order IS `seq` order (both are assigned in the transaction that inserts the
+/// row), so each conversation's own order is untouched. An older DS sends no
+/// position; every key is then `None` and the run stays as it was.
+fn into_sealing_order(run: &mut [(usize, usize)], arrival: &[Vec<Option<i64>>]) {
+    run.sort_by_key(|&(ci, ei)| arrival.get(ci).and_then(|a| a.get(ei)).copied().flatten());
 }
 
 /// Emit one delivery receipt per conversation for the messages a pass newly
@@ -471,7 +507,7 @@ pub(crate) async fn sweep_current_epoch(
     if !resolved.authorized {
         return Ok(swept);
     }
-    let per_conv = partition_envelopes(resolved.conversation_ids, resolved.envelopes);
+    let (per_conv, arrival) = partition_envelopes(resolved.conversation_ids, resolved.envelopes);
 
     let guard = state.local_db.lock().await;
     let db = guard
@@ -482,9 +518,12 @@ pub(crate) async fn sweep_current_epoch(
         return Ok(swept);
     };
     let at = decryptor.lineage();
-    for (cid, envs) in &per_conv {
-        let mut delivered: Vec<String> = Vec::new();
-        for env in envs {
+    // Every conversation's envelopes sealed at `at`, decrypted as ONE run in the
+    // order they were sealed — the catch-up hook's rule (`into_sealing_order`).
+    let mut run: Vec<(usize, usize)> = Vec::new();
+    let mut decoded: HashMap<(usize, usize), Vec<u8>> = HashMap::new();
+    for (ci, (_cid, envs)) in per_conv.iter().enumerate() {
+        for (ei, env) in envs.iter().enumerate() {
             let (_, _, ciphertext, _, _, _, env_type, _) = env;
             if env_type != "message" && env_type != "edit" {
                 continue;
@@ -498,12 +537,24 @@ pub(crate) async fn sweep_current_epoch(
             if crate::commands::mls::envelope_lineage(&bytes) != Some(at) {
                 continue;
             }
-            if let Ingested::Opened(Some(id)) =
-                decrypt_and_persist_one(conn, &mut decryptor, cid, env, &bytes, user_id, is_dm)
-            {
-                delivered.push(id);
-            }
+            run.push((ci, ei));
+            decoded.insert((ci, ei), bytes);
         }
+    }
+    into_sealing_order(&mut run, &arrival);
+    let mut delivered_per_conv: Vec<Vec<String>> = vec![Vec::new(); per_conv.len()];
+    for (ci, ei) in run {
+        let Some(bytes) = decoded.get(&(ci, ei)) else {
+            continue;
+        };
+        let (cid, envs) = &per_conv[ci];
+        if let Ingested::Opened(Some(id)) =
+            decrypt_and_persist_one(conn, &mut decryptor, cid, &envs[ei], bytes, user_id, is_dm)
+        {
+            delivered_per_conv[ci].push(id);
+        }
+    }
+    for ((cid, _), delivered) in per_conv.iter().zip(delivered_per_conv) {
         if !delivered.is_empty() {
             crate::diag!(
                 "[mls] pre-merge sweep of {cid} decrypted {} envelope(s) sealed at ({}, {}) — \
@@ -544,6 +595,9 @@ async fn ingest_group_envelopes_interleaved(
     user_id: &str,
     mls_group_id: &str,
     per_conv: &[(String, Vec<EnvelopeRow>)],
+    // `arrival[ci][ei]`: the DS's group-wide position of `per_conv[ci].1[ei]`
+    // (see `partition_envelopes`), which orders each epoch's decrypt run.
+    arrival: &[Vec<Option<i64>>],
     // Whether this MLS group backs a DM. Receipts (#857) are DMs-only, so this
     // gates both recording an inbound receipt frame and collecting the
     // delivered batch.
@@ -598,6 +652,11 @@ async fn ingest_group_envelopes_interleaved(
             }
         }
         epoch_of.push(this);
+    }
+    // Each epoch's run is decrypted in the order its envelopes were sealed, not
+    // conversation by conversation — the loss `into_sealing_order` describes.
+    for run in by_epoch.values_mut() {
+        into_sealing_order(run, arrival);
     }
 
     // Drive the commit replay, decrypting each epoch's messages/edits (any
@@ -1195,6 +1254,34 @@ pub async fn ingest_dm_envelopes(
     state: &Arc<AppState>,
 ) -> Result<()> {
     ingest_dm_envelopes_inner(state, &user_id, &dm_channel_id).await
+}
+
+#[cfg(test)]
+mod sealing_order_tests {
+    //! An epoch's decrypt run follows the DS's group-wide arrival order, keeps
+    //! each conversation's own order, and is untouched by an older DS.
+    use super::into_sealing_order;
+
+    #[test]
+    fn a_run_interleaves_conversations_in_arrival_order() {
+        // Conversation 0 holds arrivals 1 and 8; conversation 1 holds 2..=7.
+        let arrival = vec![vec![Some(1), Some(8)], (2..=7).map(Some).collect()];
+        let mut run: Vec<(usize, usize)> =
+            vec![(0, 0), (0, 1), (1, 0), (1, 1), (1, 2), (1, 3), (1, 4), (1, 5)];
+        into_sealing_order(&mut run, &arrival);
+        assert_eq!(
+            run,
+            vec![(0, 0), (1, 0), (1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (0, 1)]
+        );
+    }
+
+    #[test]
+    fn an_older_ds_without_positions_keeps_the_run_as_it_was() {
+        let arrival = vec![vec![None, None], vec![None]];
+        let mut run = vec![(0, 0), (0, 1), (1, 0)];
+        into_sealing_order(&mut run, &arrival);
+        assert_eq!(run, vec![(0, 0), (0, 1), (1, 0)]);
+    }
 }
 
 #[cfg(test)]
