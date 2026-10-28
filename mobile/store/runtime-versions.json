@@ -87,6 +87,13 @@
       "version": "1.0.19",
       "commit": "8a46e921dd9eff0ba5cc9cde3a6cfab450defb39",
       "runtimeVersion": "86b6d207fc7e36c0e209d33ecd0612511c78a8cc"
+    },
+    {
+      "platform": "ios",
+      "channel": "app-store",
+      "version": "1.0.19",
+      "commit": "94ed3d5c4c97590ab529afad153c05444009f699",
+      "runtimeVersion": "e73591e714512327da0a1b3a33a15eb810db5686"
     }
   ]
 }
