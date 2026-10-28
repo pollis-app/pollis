@@ -28,8 +28,13 @@ tags:
 # Regression: dismissing the keyboard (Android back leaves the input focused)
 # used to strand the user — a tap on the boxes must bring it back. Tapping the
 # field's centre lands on the boxes, and the typed code proves the keyboard
-# reached input-otp again.
-- hideKeyboard
+# reached input-otp again. Android only: iOS's number pad has no return key,
+# so hideKeyboard cannot close it there and the step always failed.
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - hideKeyboard
 - tapOn:
     id: "otp-code-field"
 - inputText: "${MAESTRO_OTP}"

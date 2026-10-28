@@ -14,7 +14,7 @@ tags:
 - tapOn:
     id: "tab-groups"
 - tapOn:
-    text: "General"
+    text: "General.*"
 - extendedWaitUntil:
     visible: ".*Onboarding mockups.*"
     timeout: 60000
