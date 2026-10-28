@@ -1,4 +1,4 @@
-appId: com.pollis.mobile
+appId: ${MAESTRO_APP_ID}
 ---
 # #1291: back to the foreground WITHOUT a relaunch (stopApp: false), so only
 # the resume catch-up can bring in the message sent while it was away.

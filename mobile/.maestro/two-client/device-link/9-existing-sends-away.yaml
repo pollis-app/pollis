@@ -1,4 +1,4 @@
-appId: com.pollis.mobile
+appId: ${MAESTRO_APP_ID}
 ---
 # #1291: send while the account's other device is offline in the
 # background, so its live wake-up is lost.

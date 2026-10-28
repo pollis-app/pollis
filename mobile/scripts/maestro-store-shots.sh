@@ -14,6 +14,8 @@
 # `dev_personal` when unset). Display names come from the email local parts,
 # so the accounts are adalovelace@… and bochen@…, never anything real.
 set -euo pipefail
+# shellcheck source=maestro-app-id.sh
+source "$(dirname "$0")/maestro-app-id.sh"
 
 DEVICE="${1:?usage: maestro-store-shots.sh <device-id> [out-dir]}"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"

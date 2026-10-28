@@ -1,4 +1,4 @@
-appId: com.pollis.mobile
+appId: ${MAESTRO_APP_ID}
 ---
 # Peer (a plain member, not an admin): Group settings shows the name as text,
 # and — since the group was created with no description — no Description

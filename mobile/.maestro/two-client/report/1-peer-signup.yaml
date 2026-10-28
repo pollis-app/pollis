@@ -1,4 +1,4 @@
-appId: com.pollis.mobile
+appId: ${MAESTRO_APP_ID}
 ---
 # Peer device: sign up a fresh account and show its handle on Self, where the
 # script reads it off the UI tree.

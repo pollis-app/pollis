@@ -33,7 +33,9 @@ case "$TARGET" in ios|android|both) ;; *) echo "usage: build-release-sims.sh [io
 
 MOBILE="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$MOBILE"
-APP_ID="com.pollis.mobile"
+# iOS and Android ids differ: the App Store team registered com.pollis.ios.
+IOS_APP_ID="com.pollis.ios"
+ANDROID_APP_ID="com.pollis.mobile"
 LAUNCH="${LAUNCH:-1}"
 EXPO="$MOBILE/node_modules/.bin/expo"
 [ -x "$EXPO" ] || { echo "no $EXPO — run: npx -y pnpm@10.25.0 install --ignore-workspace" >&2; exit 1; }
@@ -90,7 +92,7 @@ build_ios() {
   [ -d "$app" ] || { echo "no $app after a successful build?" >&2; exit 1; }
   echo "==> iOS: installing $app"
   xcrun simctl install "$udid" "$app"
-  if [ "$LAUNCH" = 1 ]; then xcrun simctl launch "$udid" "$APP_ID" >/dev/null && echo "==> iOS: launched"; fi
+  if [ "$LAUNCH" = 1 ]; then xcrun simctl launch "$udid" "$IOS_APP_ID" >/dev/null && echo "==> iOS: launched"; fi
 }
 
 build_android() {
@@ -116,7 +118,7 @@ build_android() {
   echo "==> Android: installing $apk"
   adb -s "$serial" install -r "$apk"
   if [ "$LAUNCH" = 1 ]; then
-    adb -s "$serial" shell am start -n "$APP_ID/.MainActivity" >/dev/null && echo "==> Android: launched"
+    adb -s "$serial" shell am start -n "$ANDROID_APP_ID/.MainActivity" >/dev/null && echo "==> Android: launched"
   fi
   if ! git diff --quiet -- modules/pollis-native/android/build.gradle 2>/dev/null; then
     echo "WARN: modules/pollis-native/android/build.gradle is modified (ubrn --targets?) — git checkout it before committing" >&2

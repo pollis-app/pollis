@@ -1,4 +1,4 @@
-appId: com.pollis.mobile
+appId: ${MAESTRO_APP_ID}
 ---
 # #1291: the message from this user's OTHER device appears live in the open
 # conversation, no re-open. Then reply (the script backgrounds it once the
