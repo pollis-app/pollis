@@ -331,7 +331,7 @@ schema, so listing them fails doctor's schema check for no behavioural gain.
 
 ## Store builds (no EAS — local `expo prebuild` + native tooling)
 
-Published as a private individual account, Apple team `9JF7WWYMU2`.
+Published by Pollis Inc. (dan@pollis.com), Apple team `8JT3WH45NZ`, iOS bundle id `com.pollis.ios` (Android keeps `com.pollis.mobile`). The 2026-08 to 2026-10 builds below were made on the retired personal team `9JF7WWYMU2`, whose app record never passed review and now holds `com.pollis.mobile`.
 
 **Version bookkeeping is derived — edit `package.json` `version`, nothing else.**
 `app.config.js` reads it and computes all three store fields, so they cannot
@@ -438,7 +438,7 @@ cd ios && pod install && cd ..
 xcodebuild -workspace ios/Pollis.xcworkspace -scheme Pollis \
   -configuration Release -destination 'generic/platform=iOS' \
   archive -archivePath build/Pollis.xcarchive \
-  DEVELOPMENT_TEAM=9JF7WWYMU2 CODE_SIGNING_ALLOWED=NO
+  DEVELOPMENT_TEAM=8JT3WH45NZ CODE_SIGNING_ALLOWED=NO
 # 4. Give the unsigned app its entitlements, or push is silently lost (below).
 codesign -f -s - --entitlements ios/Pollis/Pollis.entitlements \
   build/Pollis.xcarchive/Products/Applications/Pollis.app
@@ -472,7 +472,7 @@ distribution cert and maps `development` → `production` from the profile. No
 local distribution identity is needed — it is cloud-managed.
 
 `store/ExportOptions.plist` (committed — `ios/` is generated, so it can't live
-there) sets `method: app-store-connect`, `teamID: 9JF7WWYMU2`,
+there) sets `method: app-store-connect`, `teamID: 8JT3WH45NZ`,
 `uploadSymbols: true`. Upload the resulting `.ipa` with Xcode Organizer or
 `xcrun altool`/Transporter.
 
