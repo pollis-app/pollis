@@ -63,6 +63,7 @@ fi
 pkill -9 -f "ffmpeg.*${CAMERA_DEVICE}" >/dev/null 2>&1 || true
 log "unloading v4l2loopback"
 $SUDO modprobe -r v4l2loopback >/dev/null 2>&1 || true
+$SUDO rm -f /etc/udev/rules.d/99-pollis-e2e-v4l2loopback.rules >/dev/null 2>&1 || true
 rm -rf "$CAMERA_DIR" || true
 
 log "backend stopped"

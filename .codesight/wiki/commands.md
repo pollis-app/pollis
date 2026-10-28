@@ -156,7 +156,7 @@ on `pollis-core`.
   - That lookup goes through the local accounts index, which can be stale about the address (an email change made on another device leaves the old one in the keystore). When it misses, the session is bound to a fresh candidate while the keystore still holds an older id — and a session-credentialed `rotate-identity` keeps exactly the session's device (`account::reset_recover_in_tx`, read from the server-side session record, never the request body), so the soft reset used to delete the signing-in device's own row and strand it (#1099).
   - So a **not-yet-enrolled** device with a mismatch **adopts the session's id** — persisting it to the keystore and registering it under the session. An already-enrolled device also sees a mismatch by design (its stable lookup returns `None`) and keeps its stored id; holding the account key is what separates the two cases.
 - `get_session()` → `AuthResult | null` — rebuild profile from `accounts.json`. Does not open the local DB.
-- `get_device_id()` → `string | null` — this device's stable `device_id` (or null pre-registration). Used to build the per-device voice identity (`voice-{user_id}:{device_id}`) so a client can tell which voice participant is itself (#140). **Not a registered Tauri command** as of 2026-08-03 (#714) — it lives in `pollis-core/src/commands/auth.rs` and is called internally; `invoke("get_device_id")` will fail.
+- `get_device_id()` → `string | null` — this device's stable `device_id` (or null pre-registration). Used to build the per-device voice identity (`voice-{user_id}:{device_id}`) so a client can tell which voice participant is itself (#140). Registered on desktop since #1298 (before that `invoke("get_device_id")` failed, the renderer fell back to `voice-{user_id}` and never matched its own device-suffixed events — e.g. the listen-only `mic_availability`).
 - `logout(delete_data)` — clear session, optionally delete local data
 - `delete_account(user_id)` — delete account from Turso + local (user DB, keystore, that user's media cache, media-server token, staged attachments)
 - `wipe_local_data()` — delete all local databases and keystore entries
@@ -722,7 +722,7 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 
 - **`(lib.rs, no module)`** — `hide_window`, `read_clipboard_files`, `read_clipboard_image`
 - **`autolock`** — `report_user_activity`, `set_auto_lock_timeout`
-- **`auth`** — `delete_account`, `dev_login`, `get_session`, `initialize_identity`, `is_current_device_registered`, `list_known_accounts`, `list_user_devices`, `logout`, `request_email_change_otp`, `request_otp`, `revoke_device`, `verify_email_change`, `verify_otp`, `wipe_local_data`
+- **`auth`** — `delete_account`, `dev_login`, `get_device_id`, `get_session`, `initialize_identity`, `is_current_device_registered`, `list_known_accounts`, `list_user_devices`, `logout`, `request_email_change_otp`, `request_otp`, `revoke_device`, `verify_email_change`, `verify_otp`, `wipe_local_data`
 - **`blocks`** — `block_user`, `list_blocked_users`, `unblock_user`, `report_user`
 - **`bookmarks`** — `list_saved_messages`, `resolve_message_permalink`, `save_message`, `toggle_saved_message`, `unsave_message`
 - **`camera`** — `list_video_devices`, `start_camera`, `start_camera_preview`, `stop_camera`, `stop_camera_preview`, `subscribe_camera_events`
@@ -763,7 +763,7 @@ _Back to [index.md](./index.md)_
 
 ## Complete registered-command index
 
-Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **226 commands** in 34 shim modules.
+Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **227 commands** in 34 shim modules.
 Prose above covers roughly half of these; this index covers all of them, so a name that
 appears here but not above is registered and real, just undocumented. Regenerate rather
 than hand-edit.
@@ -772,7 +772,7 @@ than hand-edit.
 
 **`media_permissions`** (4) — `get_media_permission_status`, `open_privacy_settings`, `revoke_media_permissions`, `set_revoke_media_on_exit`
 
-**`auth`** (14) — `delete_account`, `dev_login`, `get_session`, `initialize_identity`, `is_current_device_registered`, `list_known_accounts`, `list_user_devices`, `logout`, `request_email_change_otp`, `request_otp`, `revoke_device`, `verify_email_change`, `verify_otp`, `wipe_local_data`
+**`auth`** (15) — `delete_account`, `dev_login`, `get_device_id`, `get_session`, `initialize_identity`, `is_current_device_registered`, `list_known_accounts`, `list_user_devices`, `logout`, `request_email_change_otp`, `request_otp`, `revoke_device`, `verify_email_change`, `verify_otp`, `wipe_local_data`
 
 **`pin`** (4) — `get_unlock_state`, `lock`, `set_pin`, `unlock`
 

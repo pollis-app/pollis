@@ -44,6 +44,11 @@ pub async fn get_session(state: State<'_, Arc<AppState>>) -> Result<Option<UserP
 }
 
 #[tauri::command]
+pub async fn get_device_id(state: State<'_, Arc<AppState>>) -> Result<Option<String>> {
+    pollis_core::commands::auth::get_device_id(&state).await
+}
+
+#[tauri::command]
 pub async fn logout(state: State<'_, Arc<AppState>>, delete_data: bool) -> Result<()> {
     pollis_core::commands::auth::logout(&state, delete_data).await
 }
