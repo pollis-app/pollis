@@ -431,5 +431,5 @@ offered. (Encryption export compliance is declared in App Store Connect.)
 
 **6. Regulated industry / third-party material.** Not applicable: Pollis is not in a regulated
 industry and includes no protected third-party content. It uses standard encryption, declared
-via ITSAppUsesNonExemptEncryption = YES and the export compliance answers in §5.
+via ITSAppUsesNonExemptEncryption = NO (mass-market 5D992.c; the app is not offered in France), the answer `docs/mobile-compliance-answers.md` §2.1 records.
 
