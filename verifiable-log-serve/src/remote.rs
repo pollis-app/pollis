@@ -189,7 +189,14 @@ pub fn verify_remote(base_url: &str) -> Result<Report> {
     // H-1: trust ONLY the pinned key, never the served one. Drop any served
     // candidate that is not pinned; a log serving its own key (equivocation /
     // MITM) is then left with no key to verify under and fails closed.
-    let candidates = crate::pinned::retain_pinned(candidates, &mut |ok, label| {
+    // Root-then-signers (#754, #1454): a signer the offline root authorises for
+    // the commit-log tree is trusted alongside the compiled pin. A served key set
+    // that does not verify under the pinned root is a failed check, not a skip.
+    let trust = crate::pinned::key_set_trust(&agent, base, verifiable_log::STH_CONTEXT_COMMIT_LOG);
+    if let Some(v) = trust.alarm_violation() {
+        report.check(false, v);
+    }
+    let candidates = crate::pinned::retain_trusted(candidates, &trust, &mut |ok, label| {
         report.check(ok, label);
     });
     if candidates.is_empty() {

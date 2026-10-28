@@ -113,12 +113,37 @@ pub fn verify_account_via(
     user_id: &str,
     proxy: Option<&str>,
 ) -> Result<AccountReport> {
-    let base = base_url.trim_end_matches('/');
     let agent = build_agent(proxy)?;
+    // Root-then-signers (#754, #1454): a signer the offline root authorises for
+    // this tree is trusted alongside the compiled pin, without a release.
+    let trust = crate::pinned::key_set_trust(&agent, base_url, account_key::STH_CONTEXT);
+    verify_account_with(&agent, base_url, user_id, &trust)
+}
+
+/// [`verify_account_via`] with the key-set trust decision supplied by the caller, so a
+/// caller that also pin-checks the served key itself (pollis-core) uses the very
+/// same decision the verifier does. `trust.alarm` fails the report.
+pub fn verify_account_via_trusting(
+    base_url: &str,
+    user_id: &str,
+    proxy: Option<&str>,
+    trust: &crate::pinned::KeySetTrust,
+) -> Result<AccountReport> {
+    let agent = build_agent(proxy)?;
+    verify_account_with(&agent, base_url, user_id, trust)
+}
+
+fn verify_account_with(
+    agent: &ureq::Agent,
+    base_url: &str,
+    user_id: &str,
+    trust: &crate::pinned::KeySetTrust,
+) -> Result<AccountReport> {
+    let base = base_url.trim_end_matches('/');
 
     // Prerequisites, all under the account-keys subtree.
     let pk_doc: PublicKeyDoc =
-        fetch_json(&agent, &format!("{base}/v1/account-keys/public_key.json"))?;
+        fetch_json(agent, &format!("{base}/v1/account-keys/public_key.json"))?;
     // H-1: the pin belongs HERE, at the fetch boundary — this document came off
     // an untrusted server. The `*_in_bundle` core below is deliberately NOT
     // gated: it also verifies a bundle the caller already holds (the publisher
@@ -126,9 +151,10 @@ pub fn verify_account_via(
     // anchor and there is no third party to distrust.
     // Rebind to the pinned-only subset: every key the verdict core may accept from
     // here on is a pinned one, never a key the server merely listed beside it.
-    let pk_doc = crate::pinned::require_pinned(&pk_doc, now_ms()).map_err(crate::error::ServeError::BadBundle)?;
-    let sth: Sth = fetch_json(&agent, &format!("{base}/v1/account-keys/sth/latest.json"))?;
-    let entries: Vec<Entry> = fetch_json(&agent, &format!("{base}/v1/account-keys/entries.json"))?;
+    let pk_doc = crate::pinned::require_pinned_with(&pk_doc, now_ms(), trust)
+        .map_err(crate::error::ServeError::BadBundle)?;
+    let sth: Sth = fetch_json(agent, &format!("{base}/v1/account-keys/sth/latest.json"))?;
+    let entries: Vec<Entry> = fetch_json(agent, &format!("{base}/v1/account-keys/entries.json"))?;
 
     // Plan which proofs to fetch: only this user's entries (decode + match).
     let user_indices: Vec<usize> = entries
@@ -143,7 +169,7 @@ pub fn verify_account_via(
     let mut inclusion: Vec<InclusionCheck> = Vec::with_capacity(user_indices.len());
     for i in &user_indices {
         let url = format!("{base}/v1/account-keys/proof/inclusion/{}/{}.json", sth.tree_size, i);
-        if let Ok(proof) = fetch_json::<InclusionProof>(&agent, &url) {
+        if let Ok(proof) = fetch_json::<InclusionProof>(agent, &url) {
             if let Some(entry) = entries.get(*i) {
                 inclusion.push(InclusionCheck {
                     entry: entry.clone(),
@@ -171,7 +197,14 @@ pub fn verify_account_via(
         consistency: Vec::new(),
     };
 
-    Ok(verify_account_in_bundle(&bundle, user_id))
+    let mut report = verify_account_in_bundle(&bundle, user_id);
+    // A served key set we cannot attribute to the root is an alarm even when the
+    // tree verifies under the compiled pin: never a silent accept.
+    if let Some(v) = trust.alarm_violation() {
+        report.chain_valid = false;
+        report.violations.insert(0, v);
+    }
+    Ok(report)
 }
 
 /// Verify a single user's key-history chain against an **already-loaded**

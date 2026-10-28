@@ -11,12 +11,32 @@ shipping a client update — and that update was verified through the binaries t
 **the leaked key signs**. An attacker holding the key could vouch for their own build
 of the fix. The remedy depended on the thing that was broken.
 
-Now the client pins an **offline root** instead. The root signs nothing but key-set
-statements — "these key ids may sign these trees, until this date" — so retiring a
-signer is a statement the root makes, and clients accept it **without a release**.
+Now the client also pins an **offline root**. The root signs nothing but key-set
+statements: "these key ids may sign these trees, until this date". Since #1454 the
+app (`pollis-core/src/commands/transparency.rs`) and `pollis-verify` fetch
+`/v1/key-set.json` on every check, verify it against the pinned root, and trust the
+signers it names for that tree **in addition to** the compiled `PINNED_LOG_PUBLIC_KEYS`.
 
-That is the whole point, and it is the sentence to check this runbook against: if a
-step here requires shipping a binary, the design has failed.
+What that buys, and what it does not, as the code stands:
+
+- **Rotating in a new signer needs no release.** A signer that only the root-signed
+  key set names is accepted by every client that pins the root.
+- **Retiring a signer that only the key set authorised needs no release.** Drop it
+  from the next statement and clients stop accepting it on their next fetch.
+- **Retiring a signer that is compiled into `PINNED_LOG_PUBLIC_KEYS` still needs a
+  release.** The key set adds to the compiled pins; it cannot revoke them. A
+  compiled key stays trusted until a release drops it or its `not_after` passes.
+  Today's signer (`6cbd4b2aed5c4bf1`) is compiled in, so retiring *it* is the
+  release path described below.
+- **A key set that does not verify falls back to the compiled pins and alarms.**
+  That covers a forged, malformed or expired set, or one naming no signer for the
+  tree. The in-app check reports `Alarm` (or `Mismatch` for "verify this build"),
+  and `pollis-verify` fails the report. A key set that cannot be fetched at all
+  (404, network) falls back silently, because an old or self-hosted log publishes
+  none.
+
+So the goal is that no step here requires shipping a binary. That holds for every
+signer rotated in through the key set. For the compiled signer it does not hold yet.
 
 ## Assume compromise if any of these is true
 
@@ -62,8 +82,16 @@ job rather than reaching clients.
 **4. Re-sign the trees** with the new key. The next scheduled run does this; dispatch
 it if you do not want to wait.
 
-**No client update is required.** Clients fetch the new statement, verify it against
-the root they already pin, and stop accepting the retired signer.
+**No client update is required for a signer the key set added.** Clients fetch the
+new statement, verify it against the root they already pin, and stop accepting the
+retired signer.
+
+**5. If the compromised key is compiled in, ship a release too.** That is true of
+today's signer. Remove it from `PINNED_LOG_PUBLIC_KEYS` in
+`pollis-core/src/commands/transparency.rs` and from `PINNED_LOG_PUBLIC_KEYS_HEX` in
+`verifiable-log-serve/src/pinned.rs` (`scripts/check-pinned-log-key.py` lists every
+copy), or give it a `not_after`. The key set cannot revoke a compiled pin. Until the
+release reaches the fleet, a client still trusts heads that key signs.
 
 ## What an attacker can still do
 
@@ -71,13 +99,16 @@ Be honest about the bound. Holding the leaked signer key, before clients see the
 statement, an attacker can sign a tree head that verifies. What they cannot do is:
 
 - **authorise themselves** — the key set is signed by a root they do not hold;
-- **outlast the retirement** — omission is not a timer they can wait out;
+- **outlast the retirement** of a signer the key set added: omission is not a timer
+  they can wait out. (A compiled-in signer is retired by the step-5 release, so the
+  attacker keeps it until that release lands);
 - **suppress the fix** — the recovery path does not run through the tree they can sign.
 
 The residual exposure is the window between the leak and clients fetching the new key
 set, bounded by the statement's own `not_after`. Shorter statements shrink the
-window; they also mean a client offline longer than that window reports "cannot
-verify" rather than trusting a stale set. A year is the current choice.
+window. A client that only sees an expired statement trusts nothing it names. It
+falls back to its compiled pins and reports an alarm, so the set is never silently
+believed. A year is the current choice.
 
 ## If the ROOT is compromised
 

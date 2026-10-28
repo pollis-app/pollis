@@ -114,8 +114,33 @@ pub fn verify_group_via(
     conversation_id: &str,
     proxy: Option<&str>,
 ) -> Result<GroupReport> {
-    let base = base_url.trim_end_matches('/');
     let agent = build_agent(proxy)?;
+    // Root-then-signers (#754, #1454): a signer the offline root authorises for
+    // this tree is trusted alongside the compiled pin, without a release.
+    let trust = crate::pinned::key_set_trust(&agent, base_url, verifiable_log::STH_CONTEXT_COMMIT_LOG);
+    verify_group_with(&agent, base_url, conversation_id, &trust)
+}
+
+/// [`verify_group_via`] with the key-set trust decision supplied by the caller, so a
+/// caller that also pin-checks the served key itself (pollis-core) uses the very
+/// same decision the verifier does. `trust.alarm` fails the report.
+pub fn verify_group_via_trusting(
+    base_url: &str,
+    conversation_id: &str,
+    proxy: Option<&str>,
+    trust: &crate::pinned::KeySetTrust,
+) -> Result<GroupReport> {
+    let agent = build_agent(proxy)?;
+    verify_group_with(&agent, base_url, conversation_id, trust)
+}
+
+fn verify_group_with(
+    agent: &ureq::Agent,
+    base_url: &str,
+    conversation_id: &str,
+    trust: &crate::pinned::KeySetTrust,
+) -> Result<GroupReport> {
+    let base = base_url.trim_end_matches('/');
 
     // Version gate first: `group` decodes commit leaves, whose encoding changed at
     // the #701 republish, so a verifier older than the log would silently select
@@ -123,12 +148,12 @@ pub fn verify_group_via(
     // the manifest's `format_version` up front and refuse a log newer than we
     // understand with VersionSkew ("upgrade your verifier") rather than a
     // misleading empty result.
-    let index_body = fetch_text(&agent, &format!("{base}/v1/index.json"))?;
+    let index_body = fetch_text(agent, &format!("{base}/v1/index.json"))?;
     gate_leaf_format_version(&index_body)?;
 
     // Prerequisites: the published key, the latest signed head, and the full
     // ordered entry list. Without these there is nothing to verify.
-    let pk_doc: PublicKeyDoc = fetch_json(&agent, &format!("{base}/v1/public_key.json"))?;
+    let pk_doc: PublicKeyDoc = fetch_json(agent, &format!("{base}/v1/public_key.json"))?;
     // H-1: the pin belongs HERE, at the fetch boundary — this document came off
     // an untrusted server. The `*_in_bundle` core below is deliberately NOT
     // gated: it also verifies a bundle the caller already holds (the publisher
@@ -136,9 +161,10 @@ pub fn verify_group_via(
     // anchor and there is no third party to distrust.
     // Rebind to the pinned-only subset: every key the verdict core may accept from
     // here on is a pinned one, never a key the server merely listed beside it.
-    let pk_doc = crate::pinned::require_pinned(&pk_doc, now_ms()).map_err(crate::error::ServeError::BadBundle)?;
-    let sth: Sth = fetch_json(&agent, &format!("{base}/v1/sth/latest.json"))?;
-    let entries: Vec<Entry> = fetch_json(&agent, &format!("{base}/v1/entries.json"))?;
+    let pk_doc = crate::pinned::require_pinned_with(&pk_doc, now_ms(), trust)
+        .map_err(crate::error::ServeError::BadBundle)?;
+    let sth: Sth = fetch_json(agent, &format!("{base}/v1/sth/latest.json"))?;
+    let entries: Vec<Entry> = fetch_json(agent, &format!("{base}/v1/entries.json"))?;
 
     // Plan which proofs to fetch: only this group's entries. Since #701 the leaf
     // carries a windowed pseudonym, not the raw id, so we match by re-deriving the
@@ -164,7 +190,7 @@ pub fn verify_group_via(
     let mut inclusion: Vec<InclusionCheck> = Vec::with_capacity(group_indices.len());
     for i in &group_indices {
         let url = format!("{base}/v1/proof/inclusion/{}/{}.json", sth.tree_size, i);
-        if let Ok(proof) = fetch_json::<InclusionProof>(&agent, &url) {
+        if let Ok(proof) = fetch_json::<InclusionProof>(agent, &url) {
             if let Some(entry) = entries.get(*i) {
                 inclusion.push(InclusionCheck {
                     entry: entry.clone(),
@@ -192,7 +218,14 @@ pub fn verify_group_via(
         consistency: Vec::new(),
     };
 
-    Ok(verify_group_in_bundle(&bundle, conversation_id))
+    let mut report = verify_group_in_bundle(&bundle, conversation_id);
+    // A served key set we cannot attribute to the root is an alarm even when the
+    // tree verifies under the compiled pin: never a silent accept.
+    if let Some(v) = trust.alarm_violation() {
+        report.chain_valid = false;
+        report.violations.insert(0, v);
+    }
+    Ok(report)
 }
 
 /// Verify a single conversation's commit chain against an **already-loaded**
