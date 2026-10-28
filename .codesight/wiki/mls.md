@@ -223,6 +223,22 @@ committer's pre-merge sweep does the same. The watermark is unaffected — it is
 still computed per conversation in `seq` order. An older DS sends no `arrival`
 and the run keeps its old order. Test: `flows/cross_channel_ingest.rs`.
 
+**Backstop: a 100-generation window.** Under the ordering, every group runs with
+`out_of_order_tolerance = 100` (`maximum_forward_distance` stays openmls' 1000),
+built once in `provider::sender_ratchet_configuration` / `provider::join_config`
+and used by create, Welcome and external join. Groups stored before this carry
+openmls' default of 5; `provider::upgrade_sender_ratchet` widens them the first
+time `load_stored_group_at` or `load_group_with_signer` loads them, writing the
+join config only when it differs. openmls reads the window from the group's
+config on every decrypt, so the upgrade applies to existing ratchets at once
+(keys dropped under the old window stay dropped). Cost: up to 100 skipped,
+unused message keys per sender, held in the encrypted local DB and wiped at the
+next commit (`max_past_epochs = 0`). Tests: `mls/tests.rs`
+`the_default_window_loses_a_message_fifty_generations_behind`,
+`a_message_fifty_generations_behind_still_opens`,
+`a_group_stored_with_the_default_window_is_upgraded_on_load`,
+`a_created_group_starts_with_the_wide_window`.
+
 ### Join paths never replace a confirmed group (#1220)
 
 The watermark advances past any envelope sealed below the epoch the replay

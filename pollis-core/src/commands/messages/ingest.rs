@@ -22,6 +22,13 @@ type EnvelopeRow = (
     i64,
 );
 
+/// One catch-up's envelopes bucketed per bound conversation, in listing order.
+type PerConversation = Vec<(String, Vec<EnvelopeRow>)>;
+
+/// The DS's group-wide arrival position of each envelope in a
+/// [`PerConversation`], same shape: `arrival[ci][ei]` is `per_conv[ci].1[ei]`'s.
+type Arrival = Vec<Vec<Option<i64>>>;
+
 /// Whether a delete tombstone's redaction is done on this device, or must be
 /// retried on a later pass (#693 / #661 WS1). Consumed by
 /// [`ingest_group_envelopes_interleaved`] to choose the tombstone's `EnvKind`
@@ -366,7 +373,7 @@ pub async fn catch_up_mls_group_interleaved(
 fn partition_envelopes(
     conversation_ids: Vec<String>,
     envelopes: Vec<pollis_api::directory::EnvelopeWire>,
-) -> (Vec<(String, Vec<EnvelopeRow>)>, Vec<Vec<Option<i64>>>) {
+) -> (PerConversation, Arrival) {
     let mut per_conv: Vec<(String, Vec<EnvelopeRow>)> = conversation_ids
         .iter()
         .map(|cid| (cid.clone(), Vec::new()))
