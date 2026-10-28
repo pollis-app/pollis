@@ -507,6 +507,7 @@ pub fn run() {
             commands::auth::verify_email_change,
             commands::auth::dev_login,
             commands::auth::get_session,
+            commands::auth::get_device_id,
             commands::auth::logout,
             commands::auth::delete_account,
             commands::auth::list_known_accounts,

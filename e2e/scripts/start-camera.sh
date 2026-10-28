@@ -97,6 +97,15 @@ $SUDO modprobe videodev 2>>"$RUN_DIR/modprobe.err" || true
 # makes the node advertise CAPTURE (rather than both CAPTURE+OUTPUT at once)
 # once a producer is streaming — the config real apps (Chrome/OBS→Zoom) rely
 # on, and what lets the app's enumerate treat it as a plain capture device.
+#
+# The node is created root:video 0660, and the runner user (who runs both the
+# ffmpeg feeder and the app) isn't in `video`. A udev rule installed BEFORE the
+# load makes udev itself create the node world-read/writable: a plain chmod
+# after the load loses a race with udev, which applies its default 0660 rule
+# asynchronously and can undo the chmod (#1298: ffmpeg "Permission denied").
+UDEV_RULE=/etc/udev/rules.d/99-pollis-e2e-v4l2loopback.rules
+echo 'SUBSYSTEM=="video4linux", KERNEL=="video[0-9]*", MODE="0666"' | $SUDO tee "$UDEV_RULE" >/dev/null
+$SUDO udevadm control --reload-rules >/dev/null 2>&1 || true
 log "loading v4l2loopback (device $DEVICE, ${WIDTH}x${HEIGHT})"
 if ! $SUDO modprobe v4l2loopback \
       devices=1 \
@@ -121,12 +130,17 @@ if [ ! -e "$DEVICE" ]; then
 fi
 log "$DEVICE created"
 
-# The loopback node is created root:video mode 0660, but the runner user (and
-# the app that reads the device) isn't in the `video` group — ffmpeg then fails
-# to OPEN it for writing with "Permission denied". Group changes need a new
-# session mid-job, so just widen the node's perms: both the ffmpeg feeder
-# (writer) and pollis' V4L2 capture (reader) run as the unprivileged user.
+# Let udev finish processing the add event (the rule above, or the default
+# 0660 one if the rule didn't take), THEN widen the perms as a fallback, and
+# verify the runner user can actually open the node before starting ffmpeg —
+# so a permission problem fails here, naming itself, not as an ffmpeg error.
+$SUDO udevadm settle --timeout=10 >/dev/null 2>&1 || true
 $SUDO chmod 0666 "$DEVICE" || true
+log "$(ls -l "$DEVICE")"
+if [ ! -r "$DEVICE" ] || [ ! -w "$DEVICE" ]; then
+  log "ERROR: $DEVICE is not readable+writable by $(id -un) even after chmod 0666."
+  exit 1
+fi
 
 # Feed a MOVING test pattern (testsrc: a scrolling gradient + a running
 # frame/second counter) as raw YUYV422 at the app's preferred 1280x720@30. `-re`
