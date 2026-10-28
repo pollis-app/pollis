@@ -55,15 +55,15 @@ specifies **no TTL**.
 
 **Device-staleness bound (#720).** Since #720 the floor is bounded by member watermarks **and** by device
 *liveness*: a member device that has not **reported** a watermark within a configured window
-(`POLLIS_DS_WATERMARK_STALE_MONTHS`, **set to 12 months** in both deployed environments; the code
-default when unset is 6) stops pinning retention and is excluded from
+(`POLLIS_DS_WATERMARK_STALE_MONTHS`, **12 months** — the code default since #1486, and set explicitly in
+both deployed environments) stops pinning retention and is excluded from
 the floor, mirroring how a revoked device is excluded (#685). This is **not** a TTL and does not reopen
 the #688 bug: the bound is on the device's own last **report** (`conversation_watermark.reported_at`, a
 server-stamped wall-clock time), never on the message's age. A device that reported yesterday still pins
 every envelope below its cursor, however old. Coming back and reporting makes the device live again
 immediately (reversible; the device is not revoked or removed from any roster).
 
-**Why 12 and not the code default of 6** (decided 2026-08-04). This window is the *only* thing
+**Why 12 and not the original 6** (decided 2026-08-04; the code default followed in #1486). This window is the *only* thing
 standing between a returning user and missing mail, so its length is the blast radius of the third
 accepted loss below. The product principle in `CLAUDE.md` — *"given 'simpler but drops messages' vs
 'more complex but delivers,' pick the one that delivers"* — points at the longer window, and three
@@ -90,8 +90,8 @@ liveness.** A member who joins a busy conversation and keeps at least one device
 conversation's envelopes indefinitely; a member whose every device goes silent past the window stops
 pinning. The cost is a **third accepted message loss** — beyond "messages sent before you joined" and "a
 new device starts empty" — a device dormant past the window that later returns may find gaps. This is a
-deliberate storage/correctness trade. **N is decided: 12 months** (2026-08-04, rationale above), set
-explicitly in both deployed environments rather than left on the code default, and disclosed to users on
+deliberate storage/correctness trade. **N is decided: 12 months** (2026-08-04, rationale above), the code
+default (#1486) and also set explicitly in both deployed environments, and disclosed to users on
 the Learn page rather than only in this document.
 
 **Growth visibility (#720 checkbox 1).** The GC sweep computes an identity-free `message_envelope` growth

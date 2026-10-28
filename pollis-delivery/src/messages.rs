@@ -236,7 +236,7 @@ macro_rules! dm_member_device_rows {
 // so the arm opens one; the DM fragment already ends in `WHERE dcm.dm_channel_id
 // = ?1` so the arm is `AND`-ed onto it.
 //
-// `?2` is a SQLite datetime modifier (e.g. `'-6 months'`), computed in Rust from
+// `?2` is a SQLite datetime modifier (e.g. `'-12 months'`), computed in Rust from
 // config (`watermark_stale_modifier`). Both the sweep and the per-conversation
 // endpoint bind the same value through the one chokepoint
 // `cleanup_conversation_envelopes`, so the two GC paths can never apply different
@@ -278,30 +278,34 @@ DELETE FROM message_envelope
 
 // ── Device-liveness (staleness) window (#720) ────────────────────────────────
 
-/// The **fallback** staleness window, as a SQLite `datetime()` modifier: a member
-/// device that has not reported a watermark in this long stops pinning envelope
-/// retention.
+/// The staleness window when `POLLIS_DS_WATERMARK_STALE_MONTHS` is unset, as a
+/// SQLite `datetime()` modifier: a member device that has not reported a
+/// watermark in this long stops pinning envelope retention.
 ///
-/// This is only what applies when `POLLIS_DS_WATERMARK_STALE_MONTHS` is unset —
-/// e.g. a local run or a test. **Both deployed environments set it explicitly to
-/// 12**, decided 2026-08-04 (`wrangler.{dev,prod}.jsonc`; rationale in
-/// `docs/metadata-retention-policy.md` §1). N governs the third
-/// accepted-message-loss, so the deployed value is a product decision that is
-/// disclosed to users, not a default anyone should rely on silently.
-pub const DEFAULT_WATERMARK_STALE_MODIFIER: &str = "-6 months";
+/// This equals the documented policy, **12 months**, decided 2026-08-04
+/// (rationale in `docs/metadata-retention-policy.md` §1), so the policy holds
+/// without configuration — a self-hosted DS or a test rig that omits the var
+/// gets the same bound as the deployed environments (#1486). Both
+/// `wrangler.{dev,prod}.jsonc` still set it explicitly. N governs the third
+/// accepted message loss, so changing it is a product decision disclosed to
+/// users, not a tuning knob.
+pub const DEFAULT_WATERMARK_STALE_MODIFIER: &str = "-12 months";
 
 /// The configured device-staleness window as a SQLite `datetime()` modifier,
 /// bound as `?2` into the `CLEANUP_*` predicates.
 ///
-/// `POLLIS_DS_WATERMARK_STALE_MONTHS` = N months (default 6). `0` DISABLES the
+/// `POLLIS_DS_WATERMARK_STALE_MONTHS` = N months (default 12). `0` DISABLES the
 /// bound — it returns a window so far in the past (`-1000 years`) that no device
 /// is ever stale, restoring the pre-#720 "watermark-only" behaviour without a
-/// second SQL path.
+/// second SQL path. An unparseable value falls back to the default.
 pub fn watermark_stale_modifier() -> String {
-    match std::env::var("POLLIS_DS_WATERMARK_STALE_MONTHS")
-        .ok()
-        .and_then(|v| v.trim().parse::<u32>().ok())
-    {
+    stale_modifier_from(std::env::var("POLLIS_DS_WATERMARK_STALE_MONTHS").ok().as_deref())
+}
+
+/// [`watermark_stale_modifier`] over an explicit raw value, so the mapping is
+/// testable without mutating the process environment.
+fn stale_modifier_from(raw: Option<&str>) -> String {
+    match raw.and_then(|v| v.trim().parse::<u32>().ok()) {
         Some(0) => "-1000 years".to_string(),
         Some(n) => format!("-{n} months"),
         None => DEFAULT_WATERMARK_STALE_MODIFIER.to_string(),
@@ -6272,5 +6276,29 @@ mod reaction_membership_tests {
             .unwrap();
         assert_eq!(reaction_count(&c, "m-old").await, 1, "still one row");
         assert_eq!(seen_by(&c, "alice", "m-old").await.len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod stale_window_tests {
+    use super::{stale_modifier_from, DEFAULT_WATERMARK_STALE_MODIFIER};
+
+    /// The code default is the documented policy (12 months, CLAUDE.md and
+    /// `docs/metadata-retention-policy.md` §1), so a DS that omits the var does
+    /// not silently get a shorter loss window (#1486).
+    #[test]
+    fn unset_or_unparseable_falls_back_to_the_documented_twelve_months() {
+        assert_eq!(DEFAULT_WATERMARK_STALE_MODIFIER, "-12 months");
+        assert_eq!(stale_modifier_from(None), "-12 months");
+        assert_eq!(stale_modifier_from(Some("")), "-12 months");
+        assert_eq!(stale_modifier_from(Some("twelve")), "-12 months");
+        assert_eq!(stale_modifier_from(Some("-3")), "-12 months");
+    }
+
+    #[test]
+    fn explicit_values_and_zero_disable() {
+        assert_eq!(stale_modifier_from(Some("12")), "-12 months");
+        assert_eq!(stale_modifier_from(Some(" 6 ")), "-6 months");
+        assert_eq!(stale_modifier_from(Some("0")), "-1000 years");
     }
 }
