@@ -12,7 +12,7 @@ tags:
 - takeScreenshot: store-01-groups
 
 - tapOn:
-    text: "General"
+    text: "General.*"
 - extendedWaitUntil:
     visible: ".*sealed before it leaves.*"
     timeout: 60000

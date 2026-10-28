@@ -85,7 +85,7 @@ echo "    peer handle: $HANDLE"
 # maestro-app-id.sh), where `simctl status_bar` does it; anything else is an
 # adb serial, where Android's demo mode does.
 if [[ "$DEVICE" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]; then
-  xcrun simctl status_bar "$DEVICE" override --time 9:41 --batteryState charged --batteryLevel 100 \
+  xcrun simctl status_bar "$DEVICE" override --time 9:41 --batteryState discharging --batteryLevel 100 \
     --dataNetwork wifi --wifiMode active --wifiBars 3 --cellularMode notSupported
   trap 'kill "${PEER_PID:-}" 2>/dev/null || true; rm -rf "$PEER_DIR"; xcrun simctl status_bar "$DEVICE" clear' EXIT
 else
