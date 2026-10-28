@@ -1268,7 +1268,9 @@ async fn register_device(state: &Arc<AppState>, user_id: &str) -> Result<String>
     // still closed and no device signing key is loadable. The old direct
     // `last_seen` touch + watermark backfill on an ALREADY-existing row could
     // neither be device-signed nor performed under a read-only Turso token, so it
-    // is dropped. `ensure_device_id` above already set `state.device_id`, so the
+    // is dropped: the DS now bumps `last_seen` itself on the device's first
+    // verified signed call after unlock (`pollis-delivery/src/last_seen.rs`).
+    // `ensure_device_id` above already set `state.device_id`, so the
     // rest of the flow (and later DS calls) still have it.
     crate::diag!("[auth] device registered: {device_id}");
 

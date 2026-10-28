@@ -457,6 +457,17 @@ pub(crate) fn expire_ds_device_keys(user_id: &str) {
         .invalidate_user(user_id);
 }
 
+/// Stand in for `LAST_SEEN_BUMP_INTERVAL_SECS` elapsing for one user: forget the
+/// in-process DS's `last_seen` throttle stamps for `user_id`, so their devices'
+/// next verified request bumps `user_device.last_seen` again.
+pub(crate) fn expire_ds_last_seen_throttle(user_id: &str) {
+    DS_DEVICE_KEYS
+        .get()
+        .expect("the in-process DS has not booted yet")
+        .last_seen()
+        .forget_user(user_id);
+}
+
 async fn spawn_in_process_delivery(main: Arc<Db>, log: Arc<Db>) -> String {
     use std::sync::mpsc;
 
