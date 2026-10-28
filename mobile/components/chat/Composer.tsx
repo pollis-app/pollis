@@ -3,7 +3,7 @@ import { View, Text, Pressable, Platform, ScrollView, type TextInput } from "rea
 import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
 import { Avatar, Field } from "../ui";
-import { layout, semantic, type as ty, r } from "../../theme/tokens";
+import { fonts, layout, semantic, type as ty, r } from "../../theme/tokens";
 import {
   applyMention,
   mentionQueryAt,
@@ -85,7 +85,11 @@ export function Composer({
   // message the empty composer stayed two lines tall (Android re-measures on
   // its own). Record the field's natural one-line height the first time it
   // lays out empty, and cap an empty field at it. Measured at runtime, so it
-  // follows the system text size instead of hard-coding one.
+  // follows the system text size instead of hard-coding one. That first
+  // layout is one line only because the native input has no placeholder: a
+  // multiline TextInput sizes to its placeholder, so a hint that wrapped made
+  // the empty composer (and this measurement) two lines tall. The hint is
+  // the single-line overlay below instead.
   const [emptyHeight, setEmptyHeight] = useState<number | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const inputRef = useRef<TextInput>(null);
@@ -179,6 +183,7 @@ export function Composer({
   };
 
   const sendDisabled = (!draft.trim() && !canSendEmptyText) || sendPending;
+  const hint = placeholder ?? t("composer.placeholder");
 
   return (
     <View>
@@ -329,63 +334,98 @@ export function Composer({
         >
           <Icon.plus size={22} color={onAttach ? semantic.accent : semantic.dim} />
         </Pressable>
-        <Field
-          ref={inputRef}
-          testID="input-composer"
-          accessibilityLabel={t("composer.inputLabel")}
-          value={draft}
-          onChangeText={handleChangeText}
-          onSelectionChange={(e) => setCaret(e.nativeEvent.selection.end)}
-          placeholder={placeholder ?? t("composer.placeholder")}
-          // Return inserts a newline (the Slack/Discord mobile convention,
-          // #1247); only the send button sends. The field grows with its
-          // lines up to `layout.composerInputMax`, then scrolls inside.
-          multiline
-          autoCapitalize="sentences"
-          editable={editable}
-          containerStyle={{
-            flex: 1,
-            minWidth: 0,
-            alignItems: "flex-end",
-            borderRadius: layout.touchMin / 2,
-            paddingVertical: 0,
-            paddingStart: 16,
-            paddingEnd: 4,
-            gap: 4,
-          }}
-          onLayout={(e) => {
-            if (emptyHeight === null && draft === "") {
-              setEmptyHeight(e.nativeEvent.layout.height);
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Field
+            ref={inputRef}
+            testID="input-composer"
+            accessibilityLabel={t("composer.inputLabel")}
+            // The visible hint is the overlay below, which screen readers skip;
+            // they hear it here instead.
+            accessibilityHint={hint}
+            value={draft}
+            onChangeText={handleChangeText}
+            onSelectionChange={(e) => setCaret(e.nativeEvent.selection.end)}
+            // Return inserts a newline (the Slack/Discord mobile convention,
+            // #1247); only the send button sends. The field grows with its
+            // lines up to `layout.composerInputMax`, then scrolls inside.
+            multiline
+            autoCapitalize="sentences"
+            editable={editable}
+            containerStyle={{
+              alignItems: "flex-end",
+              borderRadius: layout.touchMin / 2,
+              paddingVertical: 0,
+              paddingStart: FIELD_PAD_START,
+              paddingEnd: FIELD_PAD_END,
+              gap: FIELD_GAP,
+            }}
+            onLayout={(e) => {
+              if (emptyHeight === null && draft === "") {
+                setEmptyHeight(e.nativeEvent.layout.height);
+              }
+            }}
+            style={{
+              maxHeight:
+                Platform.OS === "ios" && draft === "" && emptyHeight !== null
+                  ? emptyHeight
+                  : layout.composerInputMax,
+              paddingTop: 11,
+              paddingBottom: 11,
+              textAlignVertical: "center",
+            }}
+            trailing={
+              <Pressable
+                testID="btn-composer-emoji"
+                accessibilityRole="button"
+                accessibilityLabel={t("emoji:picker.triggerLabel")}
+                onPress={() => setPickerOpen(true)}
+                disabled={!editable}
+                hitSlop={4}
+                style={{
+                  width: EMOJI_BUTTON_WIDTH,
+                  height: 42,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Icon.smile size={22} color={semantic.dim} />
+              </Pressable>
             }
-          }}
-          style={{
-            maxHeight:
-              Platform.OS === "ios" && draft === "" && emptyHeight !== null
-                ? emptyHeight
-                : layout.composerInputMax,
-            paddingTop: 11,
-            paddingBottom: 11,
-            textAlignVertical: "center",
-          }}
-          trailing={
-            <Pressable
-              testID="btn-composer-emoji"
-              accessibilityRole="button"
-              accessibilityLabel={t("emoji:picker.triggerLabel")}
-              onPress={() => setPickerOpen(true)}
-              disabled={!editable}
-              hitSlop={4}
+          />
+          {draft === "" ? (
+            // The placeholder, drawn here rather than by the native input so it
+            // is always ONE line: it ellipsizes at the end instead of wrapping,
+            // whatever its length, the language or the system text size. It
+            // spans the text area (start padding to the emoji button), so
+            // start/end follow RTL, and lets every touch through to the input.
+            <View
+              pointerEvents="none"
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
               style={{
-                width: 36,
-                height: 42,
-                alignItems: "center",
+                position: "absolute",
+                top: 0,
+                bottom: 0,
+                start: FIELD_PAD_START,
+                end: FIELD_PAD_END + FIELD_GAP + EMOJI_BUTTON_WIDTH,
                 justifyContent: "center",
               }}
             >
-              <Icon.smile size={22} color={semantic.dim} />
-            </Pressable>
-          }
-        />
+              <Text
+                testID="composer-placeholder"
+                numberOfLines={1}
+                ellipsizeMode="tail"
+                style={{
+                  fontFamily: fonts.regular,
+                  fontSize: 16,
+                  color: semantic.muted,
+                }}
+              >
+                {hint}
+              </Text>
+            </View>
+          ) : null}
+        </View>
         {/* Always the accent fill with a dark glyph and no border (user's
             call). With nothing to send it is announced as disabled and leaves
             the focus order; a tap then does nothing. */}
@@ -419,6 +459,13 @@ export function Composer({
     </View>
   );
 }
+
+// The field's insets and its trailing emoji button, shared with the
+// placeholder overlay so it covers exactly the text area.
+const FIELD_PAD_START = 16;
+const FIELD_PAD_END = 4;
+const FIELD_GAP = 4;
+const EMOJI_BUTTON_WIDTH = 36;
 
 // The suggestion popover above the composer (mentions / emoji shortcodes).
 function suggestionBox() {

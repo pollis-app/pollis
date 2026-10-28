@@ -1,6 +1,6 @@
 {
   "title": "Vault",
-  "placeholder": "Drop a note, link or file — only you can read it…",
+  "placeholder": "Secure notes, links, or files",
   "empty": "Your vault is empty. Notes, links and files you drop here are end-to-end encrypted and follow you to every device.",
   "searchPlaceholder": "Search your vault…",
   "searchEmpty": "Nothing in your vault matches that.",
