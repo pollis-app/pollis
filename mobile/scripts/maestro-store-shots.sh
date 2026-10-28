@@ -50,7 +50,7 @@ export LIVEKIT_URL="${LIVEKIT_URL:-wss://unused.invalid}"
 
 echo "==> building the peer"
 (cd "$REPO" && cargo build -q -p pollis-tui --example store_shots_peer)
-PEER_BIN="$REPO/target/debug/examples/store_shots_peer"
+PEER_BIN="${CARGO_TARGET_DIR:-$REPO/target}/debug/examples/store_shots_peer"
 PEER_DIR="$(mktemp -d)"
 PEER_OUT="$PEER_DIR/peer.out"
 trap 'kill "${PEER_PID:-}" 2>/dev/null || true; rm -rf "$PEER_DIR"' EXIT
@@ -80,17 +80,25 @@ await_peer PEER_HANDLE= 90
 HANDLE="$(sed -n 's/^PEER_HANDLE=//p' "$PEER_OUT")"
 echo "    peer handle: $HANDLE"
 
-# Android demo mode: a fixed 9:41 clock, full battery and signal, no
-# notification icons, so the status bar in every shot is clean.
-adb -s "$DEVICE" shell settings put global sysui_demo_allowed 1
-demo() { adb -s "$DEVICE" shell am broadcast -a com.android.systemui.demo -e command "$@" >/dev/null; }
-demo enter
-demo clock -e hhmm 0941
-demo battery -e level 100 -e plugged false
-demo network -e wifi show -e level 4 -e fully true
-demo network -e mobile hide
-demo notifications -e visible false
-trap 'kill "${PEER_PID:-}" 2>/dev/null || true; rm -rf "$PEER_DIR"; demo exit' EXIT
+# A clean status bar in every shot: a fixed 9:41 clock, full battery and
+# signal, no notification icons. A simulator UDID means iOS (the same test as
+# maestro-app-id.sh), where `simctl status_bar` does it; anything else is an
+# adb serial, where Android's demo mode does.
+if [[ "$DEVICE" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]; then
+  xcrun simctl status_bar "$DEVICE" override --time 9:41 --batteryState charged --batteryLevel 100 \
+    --dataNetwork wifi --wifiMode active --wifiBars 3 --cellularMode notSupported
+  trap 'kill "${PEER_PID:-}" 2>/dev/null || true; rm -rf "$PEER_DIR"; xcrun simctl status_bar "$DEVICE" clear' EXIT
+else
+  adb -s "$DEVICE" shell settings put global sysui_demo_allowed 1
+  demo() { adb -s "$DEVICE" shell am broadcast -a com.android.systemui.demo -e command "$@" >/dev/null; }
+  demo enter
+  demo clock -e hhmm 0941
+  demo battery -e level 100 -e plugged false
+  demo network -e wifi show -e level 4 -e fully true
+  demo network -e mobile hide
+  demo notifications -e visible false
+  trap 'kill "${PEER_PID:-}" 2>/dev/null || true; rm -rf "$PEER_DIR"; demo exit' EXIT
+fi
 
 echo "==> 1/3 phone signs up, makes the group, invites the peer, opens the DM"
 run 1-setup
