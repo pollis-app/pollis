@@ -31,6 +31,10 @@ os-keystore = ["dep:keyring"]
 # Exposes test helpers (Config::for_test, InMemoryKeystore) for the
 # integration harness in src-tauri/tests/flows.rs.
 test-harness = []
+# The narrow surface the detached `fuzz/` crate drives (#1537): framing, the
+# catch-up partition and sealing order, the outbox's row transitions, and the
+# MLS group configuration. Only the fuzz crate turns it on.
+fuzzing = []
 # Desktop real-time media stack: LiveKit engine + libwebrtc, host audio I/O
 # (cpal/rodio), and the WebRTC AudioProcessing module. Selects EXACTLY the
 # modules + deps a non-mobile desktop build gets today; turning it OFF reaches

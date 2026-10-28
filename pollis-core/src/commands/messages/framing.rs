@@ -159,7 +159,7 @@ fn padded_len(n: usize) -> usize {
 /// The returned buffer is what gets handed to `try_mls_encrypt` for a TEXT
 /// message. [`strip`] recovers `plaintext` exactly. Callers must NOT pad
 /// attachment envelopes (see the module docs).
-pub(crate) fn pad(plaintext: &[u8]) -> Vec<u8> {
+pub fn pad(plaintext: &[u8]) -> Vec<u8> {
     let mut buf = Vec::with_capacity(HEADER + plaintext.len());
     buf.push(PAD_FRAMING_V1);
     // Text messages are far under 4 GiB; a u32 length prefix is plenty.
@@ -181,7 +181,7 @@ pub(crate) fn pad(plaintext: &[u8]) -> Vec<u8> {
 /// The malformed-framing fallbacks (too short, or a length prefix past the end)
 /// also return the buffer verbatim; they cannot fire for a buffer produced by
 /// [`pad`] and exist only as defensive belt-and-braces.
-pub(crate) fn strip(buf: &[u8]) -> Vec<u8> {
+pub fn strip(buf: &[u8]) -> Vec<u8> {
     if buf.first() != Some(&PAD_FRAMING_V1) {
         return buf.to_vec();
     }
@@ -189,7 +189,12 @@ pub(crate) fn strip(buf: &[u8]) -> Vec<u8> {
         return buf.to_vec();
     }
     let len = u32::from_le_bytes([buf[1], buf[2], buf[3], buf[4]]) as usize;
-    let end = HEADER + len;
+    // Checked: on a 32-bit target (armeabi-v7a ships) `HEADER + u32::MAX`
+    // wraps in a release build, the bound check passes and the slice below
+    // panics — a member could crash every other member's ingest (#1537).
+    let Some(end) = HEADER.checked_add(len) else {
+        return buf.to_vec();
+    };
     if end > buf.len() {
         return buf.to_vec();
     }
@@ -206,7 +211,7 @@ pub(crate) fn strip(buf: &[u8]) -> Vec<u8> {
 ///   in a focused window, in the conversation the user is looking at. Emitted
 ///   only by an explicit foreground call from the renderer.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum ReceiptKind {
+pub enum ReceiptKind {
     Delivered,
     Read,
 }
@@ -246,7 +251,7 @@ impl ReceiptKind {
 /// plaintext; a "delete for everyone" control message is
 /// [`Frame::Redaction`] carrying the target message id; a delivery/read
 /// acknowledgement is [`Frame::Receipt`] (#857).
-pub(crate) enum Frame {
+pub enum Frame {
     Text {
         text: Vec<u8>,
         /// Set when the sender wrote a thread trailer (#825) — the ULID of the
@@ -269,7 +274,7 @@ pub(crate) enum Frame {
 /// Wrap `target_message_id` in the v1 redaction framing and zero-pad it to its
 /// size bucket. The returned buffer is handed to `try_mls_encrypt` exactly like
 /// a text send, so a redaction is length-indistinguishable from a short message.
-pub(crate) fn pad_redaction(target_message_id: &str) -> Vec<u8> {
+pub fn pad_redaction(target_message_id: &str) -> Vec<u8> {
     let id = target_message_id.as_bytes();
     let mut buf = Vec::with_capacity(HEADER + id.len());
     buf.push(REDACT_FRAMING_V1);
@@ -285,7 +290,7 @@ pub(crate) fn pad_redaction(target_message_id: &str) -> Vec<u8> {
 ///
 /// The buffer is handed to `try_mls_encrypt` exactly like a text send, so a
 /// receipt is length-indistinguishable from a short message.
-pub(crate) fn pad_receipt(kind: ReceiptKind, at: &str, message_ids: &[String]) -> Vec<u8> {
+pub fn pad_receipt(kind: ReceiptKind, at: &str, message_ids: &[String]) -> Vec<u8> {
     let at_bytes = at.as_bytes();
     let mut buf = Vec::with_capacity(2 + 4 + at_bytes.len() + 4 + message_ids.len() * 30);
     buf.push(RECEIPT_FRAMING_V1);
@@ -360,13 +365,14 @@ fn parse_receipt(buf: &[u8]) -> Option<Frame> {
 /// hostile buffer can never panic the ingest path. Such a buffer then fails the
 /// ingest path's `String::from_utf8` check (its lead byte is not valid UTF-8)
 /// and is dropped rather than stored as a visible message.
-pub(crate) fn classify(buf: &[u8]) -> Frame {
+pub fn classify(buf: &[u8]) -> Frame {
     if let Some(receipt) = parse_receipt(buf) {
         return receipt;
     }
     if buf.first() == Some(&REDACT_FRAMING_V1) && buf.len() >= HEADER {
         let len = u32::from_le_bytes([buf[1], buf[2], buf[3], buf[4]]) as usize;
-        let end = HEADER + len;
+        // Checked for the same 32-bit wrap as `strip`.
+        let end = HEADER.saturating_add(len);
         if end <= buf.len() {
             if let Ok(id) = std::str::from_utf8(&buf[HEADER..end]) {
                 return Frame::Redaction(id.to_string());
@@ -384,7 +390,7 @@ pub(crate) fn classify(buf: &[u8]) -> Frame {
 ///
 /// Identical to [`pad`] up to the end of the plaintext — which is exactly what
 /// makes a thread reply readable on a client that has never heard of threads.
-pub(crate) fn pad_threaded(plaintext: &[u8], thread_id: &str) -> Vec<u8> {
+pub fn pad_threaded(plaintext: &[u8], thread_id: &str) -> Vec<u8> {
     let id = thread_id.as_bytes();
     let mut buf = Vec::with_capacity(HEADER + plaintext.len() + HEADER + id.len());
     buf.push(PAD_FRAMING_V1);
@@ -404,7 +410,7 @@ pub(crate) fn pad_threaded(plaintext: &[u8], thread_id: &str) -> Vec<u8> {
 /// messages, for attachment envelopes, and for any malformed trailer — a
 /// message that merely loses its threading is far better than one that fails
 /// to decode, so every ambiguous case degrades to "not in a thread".
-pub(crate) fn thread_of(buf: &[u8]) -> Option<String> {
+pub fn thread_of(buf: &[u8]) -> Option<String> {
     if buf.first() != Some(&PAD_FRAMING_V1) || buf.len() < HEADER {
         return None;
     }
@@ -670,6 +676,12 @@ mod tests {
         overflow.extend_from_slice(&u32::MAX.to_le_bytes());
         overflow.extend_from_slice(b"body");
         assert_eq!(thread_of(&overflow), None);
+        // ...and neither `strip` nor a redaction frame trusts it (#1537).
+        assert_eq!(strip(&overflow), overflow);
+        let mut redaction = vec![REDACT_FRAMING_V1];
+        redaction.extend_from_slice(&u32::MAX.to_le_bytes());
+        redaction.extend_from_slice(b"body");
+        assert!(matches!(classify(&redaction), Frame::Text { .. }));
 
         // Non-UTF-8 thread id.
         let mut bad_utf8 = good[..text_end + 1].to_vec();

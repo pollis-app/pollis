@@ -370,7 +370,7 @@ pub async fn catch_up_mls_group_interleaved(
 /// the same shape (`arrival[ci][ei]` belongs to `per_conv[ci].1[ei]`): the
 /// per-conversation lists are the cursor's order, not the order to DECRYPT in —
 /// see [`into_sealing_order`].
-fn partition_envelopes(
+pub(super) fn partition_envelopes(
     conversation_ids: Vec<String>,
     envelopes: Vec<pollis_api::directory::EnvelopeWire>,
 ) -> (PerConversation, Arrival) {
@@ -426,7 +426,7 @@ fn partition_envelopes(
 /// order IS `seq` order (both are assigned in the transaction that inserts the
 /// row), so each conversation's own order is untouched. An older DS sends no
 /// position; every key is then `None` and the run stays as it was.
-fn into_sealing_order(run: &mut [(usize, usize)], arrival: &[Vec<Option<i64>>]) {
+pub(super) fn into_sealing_order(run: &mut [(usize, usize)], arrival: &[Vec<Option<i64>>]) {
     run.sort_by_key(|&(ci, ei)| arrival.get(ci).and_then(|a| a.get(ei)).copied().flatten());
 }
 
