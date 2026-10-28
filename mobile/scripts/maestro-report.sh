@@ -9,6 +9,8 @@
 # Both devices need a Release build against a dev DS that has /v1/reports, and
 # .maestro/.env filled in.
 set -euo pipefail
+# shellcheck source=maestro-app-id.sh
+source "$(dirname "$0")/maestro-app-id.sh"
 
 REPORTER="${1:?usage: maestro-report.sh <reporter-device-id> <peer-device-id>}"
 PEER="${2:?usage: maestro-report.sh <reporter-device-id> <peer-device-id>}"

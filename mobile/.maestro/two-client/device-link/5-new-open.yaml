@@ -1,4 +1,4 @@
-appId: com.pollis.mobile
+appId: ${MAESTRO_APP_ID}
 ---
 # #1291: one account on two devices. The NEW device opens #General of the
 # group the existing device made, and stays there.

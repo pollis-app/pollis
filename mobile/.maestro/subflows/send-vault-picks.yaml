@@ -1,4 +1,4 @@
-appId: com.pollis.mobile
+appId: ${MAESTRO_APP_ID}
 ---
 # Save what is in the Vault composer's strip. The screen ignores Send while the
 # previous save is still in flight, and a failed save puts the draft back in

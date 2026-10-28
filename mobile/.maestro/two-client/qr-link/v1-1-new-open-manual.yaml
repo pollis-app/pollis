@@ -1,4 +1,4 @@
-appId: com.pollis.mobile
+appId: ${MAESTRO_APP_ID}
 ---
 # v1 (#1207) — new device, BEFORE the signed-in desktop mints a code: no email code — reset,
 # then open "Sign in with another device" at the manual-entry field. A link

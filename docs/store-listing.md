@@ -1,7 +1,7 @@
 # Store listing — App Store + Google Play
 
 Everything the owner needs to fill in App Store Connect and the Play Console for the Pollis
-mobile app (`mobile/`, bundle/package id `com.pollis.mobile`). Compliance-questionnaire drafts
+mobile app (`mobile/`, iOS bundle id `com.pollis.ios`, Android package `com.pollis.mobile`). Compliance-questionnaire drafts
 (privacy manifest, export analysis, Data-safety reasoning) live in
 `docs/mobile-compliance-answers.md`; this file is the listing copy plus the answers in
 fill-the-form order, and repeats a compliance answer only where a store form asks for it.
@@ -24,8 +24,8 @@ Fill these once, when the app record is created. Chosen 2026-08-22.
 | Platform | iOS | The universal binary covers iPad; there is no separate iPad record. |
 | Name | `Pollis` | Globally unique across the App Store — this form is where a clash surfaces. |
 | Primary language | English (U.S.) | |
-| Bundle ID | `com.pollis.mobile` | Already registered on team `9JF7WWYMU2`; pick it from the dropdown. |
-| **SKU** | `com.pollis.mobile` | **Permanent — cannot be changed after creation.** Internal only: never shown to users or reviewers, appears in sales/financial reports. Only has to be unique within the account, so it mirrors the bundle ID rather than inventing a second identifier to remember. |
+| Bundle ID | `com.pollis.ios` | Registered on the Pollis Inc. team (dan@pollis.com) 2026-10-28. `com.pollis.mobile` stays held by the retired personal team, so iOS cannot use it. |
+| **SKU** | `com.pollis.ios` | **Permanent — cannot be changed after creation.** Internal only: never shown to users or reviewers, appears in sales/financial reports. Only has to be unique within the account, so it mirrors the bundle ID rather than inventing a second identifier to remember. |
 
 `ascAppId` appears under App Information once the record exists; it is what any
 later `eas submit` / Transporter automation would need.

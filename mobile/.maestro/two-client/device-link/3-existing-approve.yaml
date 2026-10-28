@@ -1,4 +1,4 @@
-appId: com.pollis.mobile
+appId: ${MAESTRO_APP_ID}
 ---
 # #1360: the request comes to the signed-in device by itself. The existing
 # device is still on the Groups tab from step 1 — nobody opens Security — and

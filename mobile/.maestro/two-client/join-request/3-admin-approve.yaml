@@ -1,4 +1,4 @@
-appId: com.pollis.mobile
+appId: ${MAESTRO_APP_ID}
 ---
 # Admin: the request shows on the Groups tab (row + header badge); approve it.
 - stopApp

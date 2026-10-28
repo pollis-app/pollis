@@ -8,6 +8,8 @@
 #
 # Both devices need a Release build against the dev DS, and .maestro/.env.
 set -euo pipefail
+# shellcheck source=maestro-app-id.sh
+source "$(dirname "$0")/maestro-app-id.sh"
 
 ADMIN="${1:?usage: maestro-group-emoji.sh <admin-device-id> <peer-device-id>}"
 PEER="${2:?usage: maestro-group-emoji.sh <admin-device-id> <peer-device-id>}"
