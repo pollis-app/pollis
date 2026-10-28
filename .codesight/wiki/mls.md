@@ -65,7 +65,7 @@ The remote DB is the source of truth for MLS state. Staging the commit locally, 
 - A libsql stream eviction (hrana idle GC) mid-reconcile cannot advance the local epoch past a commit that never reached the server.
 - A retry after a remote failure sees a clean local state rather than a doomed "local is ahead of remote" configuration.
 
-See commit `83df6ef` for the rationale; breaking this ordering re-introduces the 9-user churn flake.
+See commit `d715ef4` for the rationale; breaking this ordering re-introduces the 9-user churn flake.
 
 
 **No roster banner (#1506).** The inline "X joined / X left" banner and the #1084 two-tree-walk diff behind it (`ReconcileOutcome::tree_before`) are gone: a pending invitee is in the desired roster, so the banner fired at INVITE time in every channel. Group timelines carry no membership lines; a fresh member's messages carry a "new" tag driven by `group_member.joined_at` instead — see [safety.md](./safety.md#membership-changes-are-never-announced-1506).

@@ -612,7 +612,7 @@ one of the hosts the overlay exists to hide the address from.
   holds for the near relay and is blown by the far one, and v0 has no way to prefer the near one.**
 
   Measured from a US-East client against the **live** pool (both nodes healthy, same build
-  `3a28f55`), 8 samples each, median TCP-connect RTT to the relay health port (`:9445`) and to the
+  `3e11042`), 8 samples each, median TCP-connect RTT to the relay health port (`:9445`) and to the
   first-party hosts:
 
   | Leg | Median RTT |

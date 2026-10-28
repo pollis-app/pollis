@@ -309,7 +309,7 @@ the invariant that makes it unrepresentable.
 > Tracked in **[#397](https://github.com/pollis-app/pollis/issues/397)**.
 
 
-- **Phase 0 (done):** stop the bleeding — append-only in code (`adfe518`: no
+- **Phase 0 (done):** stop the bleeding — append-only in code (`a163c8f`: no
   more commit-log deletes) + auto-heal wedged members via external-join.
 - **Phase 1 (done, #691):** I1 — DB triggers making the commit log
   gapless/immutable and protecting the live head *against a regression while

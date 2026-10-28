@@ -1,6 +1,6 @@
 # Baseline: state-derivation audit, 2026-09-13
 
-Line numbers refer to commit `521b551` (`Export attachments with the archive, and bring the export to mobile (#1077)`).
+Line numbers refer to commit `49dc6f6` (`Export attachments with the archive, and bring the export to mobile (#1077)`).
 openmls semantics checked against the pinned rev `34222ef632c87df58baaa7614c8a72ac235c5f07`.
 No X3DH or Double Ratchet code exists in the repo (Signal tables documented as removed at `pollis-core/src/db/local_schema.sql:12-15`).
 

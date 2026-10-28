@@ -809,7 +809,7 @@ class VoiceSessionManager {
         // gate, which is the authority. The participant tile still follows
         // the event — that IS what the room sees.
         const patch: Partial<VoiceSessionState> = { participants };
-        // No muted ⇒ not-speaking band-aid needed (was ec00fc6): muting sets
+        // No muted ⇒ not-speaking band-aid needed (was b5b7532): muting sets
         // audio to `{kind:'muted'}` (already not-speaking), and audioSetSpeaking
         // no-ops while muted, so a stuck active speaker is now unrepresentable.
         this.setState(patch);

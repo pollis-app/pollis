@@ -116,7 +116,7 @@ pub(crate) async fn world() -> &'static TestWorld {
             // tables live ONLY here, so a query routed to the wrong connection
             // hits "no such table" instead of silently finding every table on a
             // single shared file (which masked the #420 cross-signing misroute,
-            // commit e4cfe9e).
+            // commit 3134899).
             let log_db_path = path.join("test_log.db");
             let log = Arc::new(
                 Db::connect_local(log_db_path.to_str().expect("utf-8 path"))
