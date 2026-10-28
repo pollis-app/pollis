@@ -133,7 +133,8 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
   const replyTo = replyToMessage ?? null;
 
   // The "new" member tag (#1506): a filled pill after the name, never a
-  // border. One element for both skins, so its look and label cannot drift.
+  // border. Refined skin only: in the terminal skin's monospace lines a pill
+  // reads as out of place, so that skin draws no tag at all.
   const newTag = isAuthorNew ? (
     <span
       data-testid="message-new-tag"
@@ -418,7 +419,6 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
         >
           {displayName}
         </bdi>
-        {isAuthorNew && <span className="h-6 me-1 flex flex-shrink-0 items-center">{newTag}</span>}
 
         <span
           className="font-mono text-sm select-none me-1 flex-shrink-0 text-muted"
