@@ -15,6 +15,12 @@
 //! a hostile host could serve its own key over its own self-consistent (but
 //! forged) tree and every signature would "verify".
 //!
+//! **Root-signed key set (#754, wired by #1454).** On top of the compiled pins,
+//! every check fetches `/v1/key-set.json`, verifies it under
+//! [`PINNED_LOG_ROOT_KEYS`], and also trusts the signers it authorises for that
+//! tree ([`KeySetTrust`]). An unreachable set means compiled pins only; a served
+//! set that does not verify means compiled pins only *and* an `Alarm`.
+//!
 //! **What lives here.** Only *status derivation* — comparing the verified
 //! published chain against this device's local view of the key. That decision
 //! is factored into pure functions ([`derive_self_audit`], [`derive_peer_audit`])
@@ -30,7 +36,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use verifiable_log_serve::release::{verify_release_via, Layer, ReleaseReport};
+use verifiable_log_serve::release::{verify_release_via_trusting, Layer, ReleaseReport};
 // The real served-document type, not a local stand-in. A hand-rolled struct
 // keeping only `public_key` silently drops the log's rotation-overlap `keys`
 // array, which is how a key changeover became invisible to the client half of
@@ -89,7 +95,8 @@ pub const PINNED_LOG_PUBLIC_KEYS: &[PinnedKey] = &[PinnedKey {
 
 /// A pinned ROOT key — the offline anchor that vouches for signer keys (#754).
 ///
-/// This is what a client will pin instead of a signer. The difference matters only
+/// Pinned alongside the signers: a signer the root authorises in the served key
+/// set is trusted without a release (#1454). The difference matters only
 /// when something goes wrong: pinning the signer means a leaked signing seed can
 /// only be repaired by shipping a release, and that release is itself verified
 /// through the binaries tree the leaked key signs. Pinning the root means the repair
@@ -120,75 +127,58 @@ pub const PINNED_LOG_ROOT_KEYS: &[PinnedRoot] = &[PinnedRoot {
     not_after: None,
 }];
 
-/// What a fetched key set told us about who may sign a given tree.
-#[derive(Debug, PartialEq, Eq)]
-pub enum KeySetOutcome {
-    /// The statement verified under a pinned root; these signer keys (lowercase
-    /// hex) are acceptable for the requested tree right now.
-    Signers(Vec<String>),
-    /// This build pins no root, so the statement cannot be checked against
-    /// anything. Withhold trust; never alarm.
-    NoRootPinned,
-    /// The statement did not verify under any live pinned root, is malformed, or
-    /// has expired. An ALARM condition: something is serving a key set we cannot
-    /// attribute to our root.
-    Untrusted(String),
-}
+// What a fetched key set told us about who may sign a given tree. The type and
+// the decision live in the shared verifier, so the client and `pollis-verify`
+// cannot reach different verdicts on the same key set (#1454).
+pub use verifiable_log_serve::{KeySetOutcome, KeySetTrust};
 
 /// Derive the acceptable signer keys for `context` from a served key-set document.
 ///
 /// Pure: no network, no clock, no I/O — `now_ms` is passed in so expiry is testable.
-/// Every trust decision this feature adds lives here.
+/// A thin adapter over [`verifiable_log_serve::pinned::signers_from_key_set`].
 pub fn signers_from_key_set(
     document: &str,
     roots: &[PinnedRoot],
     context: &[u8],
     now_ms: u64,
 ) -> KeySetOutcome {
-    let live: Vec<&PinnedRoot> = roots
-        .iter()
-        .filter(|r| r.not_after.is_none_or(|exp| now_ms <= exp))
-        .collect();
-    if live.is_empty() {
-        return KeySetOutcome::NoRootPinned;
-    }
+    verifiable_log_serve::pinned::signers_from_key_set(
+        document,
+        roots.iter().map(|r| (r.public_key, r.not_after)),
+        context,
+        now_ms,
+    )
+}
 
-    let statement: verifiable_log_serve::KeySetStatement = match serde_json::from_str(document) {
-        Ok(s) => s,
-        Err(e) => return KeySetOutcome::Untrusted(format!("key set is not readable: {e}")),
-    };
+/// Resolve the served `/v1/key-set.json` against [`PINNED_LOG_ROOT_KEYS`] for one
+/// tree, on the blocking pool and through the overlay like the verifier itself.
+///
+/// The result is used twice — to pin-check the served key, then handed to the
+/// verifier — so the two checks share one decision. A failed fetch is the default
+/// (compiled pins only, no alarm); a served key set that does not verify under the
+/// root carries an alarm.
+async fn fetch_key_set_trust(
+    overlay: Option<&pollis_relay::OverlayHandle>,
+    base: &str,
+    context: &'static [u8],
+) -> std::result::Result<KeySetTrust, String> {
+    let proxy = overlay_proxy(overlay);
+    let base_owned = base.to_string();
+    // The verifier resolves against its mirror of the roots, which a test below
+    // holds identical to PINNED_LOG_ROOT_KEYS.
+    tokio::task::spawn_blocking(move || {
+        verifiable_log_serve::key_set_trust_via(&base_owned, proxy.as_deref(), context)
+            .map_err(|e| format!("could not fetch the log's key set: {e}"))
+    })
+    .await
+    .map_err(|e| format!("key-set task failed: {e}"))?
+}
 
-    let mut verified = false;
-    for r in &live {
-        let Ok(vk) = verifiable_log_serve::root_key_from_hex(r.public_key) else {
-            // A malformed pin is our bug, not the server's; it must not be read as
-            // the server misbehaving.
-            continue;
-        };
-        if statement.verify(&vk).is_ok() {
-            verified = true;
-            break;
-        }
-    }
-    if !verified {
-        return KeySetOutcome::Untrusted(
-            "the served key set is not signed by any root this build pins".into(),
-        );
-    }
-
-    let active = statement.active_signers_for(context, now_ms);
-    if active.is_empty() {
-        // Verified, but grants nothing — an expired statement, or one naming no
-        // signer for this tree. Distinct from a forgery, and reported as such.
-        return KeySetOutcome::Untrusted(
-            "the key set verified but authorises no signer for this tree right now".into(),
-        );
-    }
-    KeySetOutcome::Signers(
-        active
-            .iter()
-            .map(|s| s.public_key.to_ascii_lowercase())
-            .collect(),
+/// Detail for an audit whose served key set could not be attributed to the root.
+fn key_set_alarm_detail(why: &str) -> String {
+    format!(
+        "the transparency log serves a key set this build cannot attribute to its pinned \
+         root ({why}) — refusing to trust the log until that is explained"
     )
 }
 
@@ -328,11 +318,12 @@ pub async fn self_audit_account_key(
     let base = transparency_base_url();
     let overlay = state.overlay_handle();
     match fetch_and_verify(overlay.as_deref(), &base, &my_user_id).await {
-        Ok((report, served_key)) => {
+        Ok((report, served_key, key_set)) => {
             Ok(derive_self_audit(
                 &report,
                 &served_key,
                 PINNED_LOG_PUBLIC_KEYS,
+                &key_set,
                 &my_pub_hex,
                 my_version,
             ))
@@ -362,7 +353,7 @@ pub async fn audit_peer_account_key(
     let base = transparency_base_url();
     let overlay = state.overlay_handle();
     match fetch_and_verify(overlay.as_deref(), &base, &peer_user_id).await {
-        Ok((report, served_key)) => {
+        Ok((report, served_key, key_set)) => {
             let pin = match (&pinned_hex, pinned_version) {
                 (Some(h), Some(v)) => Some((h.as_str(), v)),
                 _ => None,
@@ -371,6 +362,7 @@ pub async fn audit_peer_account_key(
                 &report,
                 &served_key,
                 PINNED_LOG_PUBLIC_KEYS,
+                &key_set,
                 &peer_user_id,
                 pin,
             ))
@@ -432,8 +424,20 @@ pub async fn verify_own_build(state: &Arc<AppState>) -> Result<BuildVerifyReport
     // self-consistent forged tree that "verifies" — the same trap the account
     // self-audit guards against. A served key ≠ the pin is the loud case.
     let overlay = state.overlay_handle();
+    // Root-then-signers (#754, #1454) for the binaries tree: a signer the offline
+    // root authorises counts as pinned, and an unattributable key set is loud.
+    let key_set = match fetch_key_set_trust(
+        overlay.as_deref(),
+        &base,
+        verifiable_log_serve::STH_CONTEXT_BINARIES,
+    )
+    .await
+    {
+        Ok(t) => t,
+        Err(detail) => return Ok(mk_unavailable(detail, my_hash)),
+    };
     match fetch_served_binaries_public_key(overlay.as_deref(), &base).await {
-        Ok(served) => match check_pin(&served, PINNED_LOG_PUBLIC_KEYS) {
+        Ok(served) => match check_pin(&served, PINNED_LOG_PUBLIC_KEYS, &key_set.signers) {
             PinCheck::Match => {}
             PinCheck::Mismatch => {
                 return Ok(BuildVerifyReport {
@@ -451,6 +455,16 @@ pub async fn verify_own_build(state: &Arc<AppState>) -> Result<BuildVerifyReport
         },
         Err(detail) => return Ok(mk_unavailable(detail, my_hash)),
     }
+    if let Some(why) = &key_set.alarm {
+        return Ok(BuildVerifyReport {
+            status: BuildVerifyStatus::Mismatch,
+            detail: key_set_alarm_detail(why),
+            version,
+            commit,
+            my_payload_sha256: my_hash,
+            report: None,
+        });
+    }
 
     // The shared verifier — the SAME function `pollis-verify release` runs. Its
     // HTTP is blocking (ureq), so it runs on the blocking pool. Same overlay seam
@@ -462,7 +476,7 @@ pub async fn verify_own_build(state: &Arc<AppState>) -> Result<BuildVerifyReport
     let base_owned = base.clone();
     let tag_owned = release_tag.clone();
     match tokio::task::spawn_blocking(move || {
-        verify_release_via(&base_owned, &tag_owned, proxy.as_deref())
+        verify_release_via_trusting(&base_owned, &tag_owned, proxy.as_deref(), &key_set)
     })
     .await
     {
@@ -511,7 +525,13 @@ async fn fetch_and_verify(
     overlay: Option<&pollis_relay::OverlayHandle>,
     base: &str,
     user_id: &str,
-) -> std::result::Result<(AccountReport, String), String> {
+) -> std::result::Result<(AccountReport, String, KeySetTrust), String> {
+    // Root-then-signers (#754, #1454): which signers the offline root authorises
+    // for the account tree, on top of the compiled pin. Resolved once and used for
+    // both the pin check (`derive_*`) and the verifier's fetch boundary.
+    let key_set =
+        fetch_key_set_trust(overlay, base, verifiable_log_serve::STH_CONTEXT_ACCOUNT_KEYS).await?;
+
     // The served public key — the input to the pinned-key cross-check. Fetched
     // separately because the shared verifier folds the key into its verdict but
     // does not surface it; a served key that differs from the pin is caught in
@@ -536,18 +556,20 @@ async fn fetch_and_verify(
     let proxy = overlay_proxy(overlay);
     let base_owned = base.to_string();
     let user_owned = user_id.to_string();
+    let trust_owned = key_set.clone();
     let report = tokio::task::spawn_blocking(move || {
-        verifiable_log_serve::account::verify_account_via(
+        verifiable_log_serve::account::verify_account_via_trusting(
             &base_owned,
             &user_owned,
             proxy.as_deref(),
+            &trust_owned,
         )
     })
     .await
     .map_err(|e| format!("account verifier task failed: {e}"))?
     .map_err(|e| format!("verifying the account-key log failed: {e}"))?;
 
-    Ok((report, served_key))
+    Ok((report, served_key, key_set))
 }
 
 /// Fetch `/v1/account-keys/public_key.json` and return its key (lowercase hex).
@@ -722,6 +744,7 @@ pub fn derive_self_audit(
     report: &AccountReport,
     served_public_key: &str,
     log_pin: &[PinnedKey],
+    key_set: &KeySetTrust,
     my_account_id_pub: &str,
     my_identity_version: i64,
 ) -> SelfAuditReport {
@@ -734,8 +757,9 @@ pub fn derive_self_audit(
     };
 
     // Pin first: an unpinned key invalidates every signature check below, so a
-    // mismatch is a hard alarm regardless of how the served tree verifies.
-    match check_pin(served_public_key, log_pin) {
+    // mismatch is a hard alarm regardless of how the served tree verifies. A key
+    // the pinned root authorises in the served key set counts as pinned (#1454).
+    match check_pin(served_public_key, log_pin, &key_set.signers) {
         PinCheck::Match => {}
         PinCheck::Mismatch => {
             return mk(
@@ -746,6 +770,10 @@ pub fn derive_self_audit(
         PinCheck::RotationPending => {
             return mk(AuditStatus::Unavailable, PIN_PENDING_DETAIL.to_string());
         }
+    }
+    // A served key set we cannot attribute to the root: never a silent accept.
+    if let Some(why) = &key_set.alarm {
+        return mk(AuditStatus::Alarm, key_set_alarm_detail(why));
     }
 
     // A head/proof we can't verify is worth nothing — alarm.
@@ -819,6 +847,7 @@ pub fn derive_peer_audit(
     report: &AccountReport,
     served_public_key: &str,
     log_pin: &[PinnedKey],
+    key_set: &KeySetTrust,
     peer_user_id: &str,
     pinned: Option<(&str, i64)>,
 ) -> PeerAuditReport {
@@ -831,7 +860,7 @@ pub fn derive_peer_audit(
         report: Some(report.clone()),
     };
 
-    match check_pin(served_public_key, log_pin) {
+    match check_pin(served_public_key, log_pin, &key_set.signers) {
         PinCheck::Match => {}
         PinCheck::Mismatch => {
             return mk(
@@ -843,6 +872,9 @@ pub fn derive_peer_audit(
         PinCheck::RotationPending => {
             return mk(AuditStatus::Unavailable, PIN_PENDING_DETAIL.to_string(), false);
         }
+    }
+    if let Some(why) = &key_set.alarm {
+        return mk(AuditStatus::Alarm, key_set_alarm_detail(why), false);
     }
     if !report.chain_valid {
         return mk(
@@ -1042,8 +1074,25 @@ pub enum PinCheck {
 /// Expiry is enforced here rather than trusted from the server, so a retired key
 /// stops being accepted on schedule even on a client that never updates again.
 /// An empty (or wholly expired) set withholds trust rather than alarming.
+#[cfg(test)]
 fn check_pin_at(served: &str, pins: &[PinnedKey], now_ms: u64) -> PinCheck {
-    let mut any_live = false;
+    check_pin_trusting_at(served, pins, &[], now_ms)
+}
+
+/// [`check_pin_at`], also accepting `key_set_signers`: the keys a root-signed key
+/// set authorises for this tree right now (#754, #1454). They only ever ADD to the
+/// compiled pins, so an empty list is exactly the compiled-pin behaviour, and
+/// with no live compiled pin a root-authorised signer is still a `Match`.
+fn check_pin_trusting_at(
+    served: &str,
+    pins: &[PinnedKey],
+    key_set_signers: &[String],
+    now_ms: u64,
+) -> PinCheck {
+    if key_set_signers.iter().any(|k| served.eq_ignore_ascii_case(k)) {
+        return PinCheck::Match;
+    }
+    let mut any_live = !key_set_signers.is_empty();
     for p in pins {
         if p.not_after.is_some_and(|exp| now_ms > exp) {
             continue;
@@ -1060,9 +1109,9 @@ fn check_pin_at(served: &str, pins: &[PinnedKey], now_ms: u64) -> PinCheck {
     }
 }
 
-/// [`check_pin_at`] against the current wall clock.
-fn check_pin(served: &str, pins: &[PinnedKey]) -> PinCheck {
-    check_pin_at(served, pins, now_ms())
+/// [`check_pin_trusting_at`] against the current wall clock.
+fn check_pin(served: &str, pins: &[PinnedKey], key_set_signers: &[String]) -> PinCheck {
+    check_pin_trusting_at(served, pins, key_set_signers, now_ms())
 }
 
 /// Wall-clock milliseconds, for pin-expiry checks. A clock that is wrong in the
@@ -1191,21 +1240,21 @@ mod tests {
     #[test]
     fn self_ok_when_latest_matches_my_key() {
         let r = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_self_audit(&r, LOG_PIN, PIN_SET, KEY_A, 1);
+        let out = derive_self_audit(&r, LOG_PIN, PIN_SET, &KeySetTrust::default(), KEY_A, 1);
         assert_eq!(out.status, AuditStatus::Ok);
     }
 
     #[test]
     fn self_ok_is_case_insensitive_on_key() {
         let r = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_self_audit(&r, LOG_PIN, PIN_SET, &KEY_A.to_uppercase(), 1);
+        let out = derive_self_audit(&r, LOG_PIN, PIN_SET, &KeySetTrust::default(), &KEY_A.to_uppercase(), 1);
         assert_eq!(out.status, AuditStatus::Ok);
     }
 
     #[test]
     fn self_pending_when_history_empty() {
         let r = report(vec![], true);
-        let out = derive_self_audit(&r, LOG_PIN, PIN_SET, KEY_A, 1);
+        let out = derive_self_audit(&r, LOG_PIN, PIN_SET, &KeySetTrust::default(), KEY_A, 1);
         assert_eq!(out.status, AuditStatus::Pending);
     }
 
@@ -1213,7 +1262,7 @@ mod tests {
     fn self_pending_when_my_version_newer_than_published() {
         // Published latest is v1; this device already rotated to v2.
         let r = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_self_audit(&r, LOG_PIN, PIN_SET, KEY_B, 2);
+        let out = derive_self_audit(&r, LOG_PIN, PIN_SET, &KeySetTrust::default(), KEY_B, 2);
         assert_eq!(out.status, AuditStatus::Pending);
     }
 
@@ -1221,7 +1270,7 @@ mod tests {
     fn self_alarm_when_same_version_different_key() {
         // Selective targeting: log shows a different key at my current version.
         let r = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_self_audit(&r, LOG_PIN, PIN_SET, KEY_B, 1);
+        let out = derive_self_audit(&r, LOG_PIN, PIN_SET, &KeySetTrust::default(), KEY_B, 1);
         assert_eq!(out.status, AuditStatus::Alarm);
     }
 
@@ -1229,21 +1278,21 @@ mod tests {
     fn self_alarm_when_published_version_higher() {
         // The log shows a rotation this device never performed.
         let r = report(vec![version(1, 0, KEY_A), version(2, 1, KEY_B)], true);
-        let out = derive_self_audit(&r, LOG_PIN, PIN_SET, KEY_A, 1);
+        let out = derive_self_audit(&r, LOG_PIN, PIN_SET, &KeySetTrust::default(), KEY_A, 1);
         assert_eq!(out.status, AuditStatus::Alarm);
     }
 
     #[test]
     fn self_alarm_on_pin_mismatch_even_if_chain_valid() {
         let r = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_self_audit(&r, KEY_B, PIN_SET, KEY_A, 1);
+        let out = derive_self_audit(&r, KEY_B, PIN_SET, &KeySetTrust::default(), KEY_A, 1);
         assert_eq!(out.status, AuditStatus::Alarm);
     }
 
     #[test]
     fn self_alarm_on_invalid_chain() {
         let r = report(vec![version(1, 0, KEY_A)], false);
-        let out = derive_self_audit(&r, LOG_PIN, PIN_SET, KEY_A, 1);
+        let out = derive_self_audit(&r, LOG_PIN, PIN_SET, &KeySetTrust::default(), KEY_A, 1);
         assert_eq!(out.status, AuditStatus::Alarm);
     }
 
@@ -1253,14 +1302,14 @@ mod tests {
     #[test]
     fn no_pin_withholds_trust_without_alarming() {
         let good = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_self_audit(&good, KEY_A, NO_PINS, KEY_A, 1);
+        let out = derive_self_audit(&good, KEY_A, NO_PINS, &KeySetTrust::default(), KEY_A, 1);
         assert_eq!(out.status, AuditStatus::Unavailable);
 
         let bad = report(vec![version(1, 0, KEY_A)], false);
-        let out = derive_self_audit(&bad, KEY_B, NO_PINS, KEY_A, 1);
+        let out = derive_self_audit(&bad, KEY_B, NO_PINS, &KeySetTrust::default(), KEY_A, 1);
         assert_eq!(out.status, AuditStatus::Unavailable);
 
-        let out = derive_peer_audit(&good, KEY_A, NO_PINS, "peer", Some((KEY_A, 1)));
+        let out = derive_peer_audit(&good, KEY_A, NO_PINS, &KeySetTrust::default(), "peer", Some((KEY_A, 1)));
         assert_eq!(out.status, AuditStatus::Unavailable);
     }
 
@@ -1457,7 +1506,7 @@ mod tests {
     #[test]
     fn peer_ok_when_pinned_key_present() {
         let r = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_peer_audit(&r, LOG_PIN, PIN_SET, "peer", Some((KEY_A, 1)));
+        let out = derive_peer_audit(&r, LOG_PIN, PIN_SET, &KeySetTrust::default(), "peer", Some((KEY_A, 1)));
         assert_eq!(out.status, AuditStatus::Ok);
         assert!(!out.key_rotated);
     }
@@ -1465,7 +1514,7 @@ mod tests {
     #[test]
     fn peer_ok_notes_rotation_when_newer_version_exists() {
         let r = report(vec![version(1, 0, KEY_A), version(2, 1, KEY_B)], true);
-        let out = derive_peer_audit(&r, LOG_PIN, PIN_SET, "peer", Some((KEY_A, 1)));
+        let out = derive_peer_audit(&r, LOG_PIN, PIN_SET, &KeySetTrust::default(), "peer", Some((KEY_A, 1)));
         assert_eq!(out.status, AuditStatus::Ok);
         assert!(out.key_rotated);
     }
@@ -1474,35 +1523,35 @@ mod tests {
     fn peer_alarm_when_pinned_key_absent_from_history() {
         // The server showed us KEY_Z but the published history only has KEY_A.
         let r = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_peer_audit(&r, LOG_PIN, PIN_SET, "peer", Some((KEY_Z, 1)));
+        let out = derive_peer_audit(&r, LOG_PIN, PIN_SET, &KeySetTrust::default(), "peer", Some((KEY_Z, 1)));
         assert_eq!(out.status, AuditStatus::Alarm);
     }
 
     #[test]
     fn peer_pending_when_no_local_pin() {
         let r = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_peer_audit(&r, LOG_PIN, PIN_SET, "peer", None);
+        let out = derive_peer_audit(&r, LOG_PIN, PIN_SET, &KeySetTrust::default(), "peer", None);
         assert_eq!(out.status, AuditStatus::Pending);
     }
 
     #[test]
     fn peer_pending_when_peer_never_published() {
         let r = report(vec![], true);
-        let out = derive_peer_audit(&r, LOG_PIN, PIN_SET, "peer", Some((KEY_A, 1)));
+        let out = derive_peer_audit(&r, LOG_PIN, PIN_SET, &KeySetTrust::default(), "peer", Some((KEY_A, 1)));
         assert_eq!(out.status, AuditStatus::Pending);
     }
 
     #[test]
     fn peer_alarm_on_pin_mismatch() {
         let r = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_peer_audit(&r, KEY_B, PIN_SET, "peer", Some((KEY_A, 1)));
+        let out = derive_peer_audit(&r, KEY_B, PIN_SET, &KeySetTrust::default(), "peer", Some((KEY_A, 1)));
         assert_eq!(out.status, AuditStatus::Alarm);
     }
 
     #[test]
     fn peer_alarm_on_invalid_chain() {
         let r = report(vec![version(1, 0, KEY_A)], false);
-        let out = derive_peer_audit(&r, LOG_PIN, PIN_SET, "peer", Some((KEY_A, 1)));
+        let out = derive_peer_audit(&r, LOG_PIN, PIN_SET, &KeySetTrust::default(), "peer", Some((KEY_A, 1)));
         assert_eq!(out.status, AuditStatus::Alarm);
     }
 
@@ -1911,6 +1960,144 @@ mod pinned_root_tests {
         match signers_from_key_set(doc, PINNED_LOG_ROOT_KEYS, b"pollis-verifiable-log:sth:v2", 1_786_400_000_000) {
             KeySetOutcome::Signers(keys) => assert!(!keys.is_empty()),
             other => panic!("committed key set is not usable by this build: {other:?}"),
+        }
+    }
+}
+
+/// The runtime half of #754 (#1454): the served key set is consulted on top of
+/// the compiled pins. Pure. The fetch is exercised in
+/// `verifiable-log-serve/tests/key_set.rs`, which drives the same entry points.
+#[cfg(test)]
+mod key_set_runtime_tests {
+    use super::*;
+
+    const COMPILED: &str = "10900000000000000000000000000000000000000000000000000000000000ff";
+    const ROTATED: &str = "20900000000000000000000000000000000000000000000000000000000000ff";
+    const OUTSIDER: &str = "30900000000000000000000000000000000000000000000000000000000000ff";
+    const KEY_A: &str = "aa00000000000000000000000000000000000000000000000000000000000000";
+    const PINS: &[PinnedKey] = &[PinnedKey {
+        key_id: "0000000000000000",
+        public_key: COMPILED,
+        not_after: None,
+    }];
+
+    fn trust_naming(keys: &[&str]) -> KeySetTrust {
+        KeySetTrust {
+            signers: keys.iter().map(|k| k.to_string()).collect(),
+            alarm: None,
+        }
+    }
+
+    fn forged() -> KeySetTrust {
+        KeySetTrust {
+            signers: Vec::new(),
+            alarm: Some("the served key set is not signed by any root this build pins".into()),
+        }
+    }
+
+    fn good_report() -> AccountReport {
+        AccountReport {
+            user_id: "u1".to_string(),
+            found: true,
+            sth_tree_size: 1,
+            root_hex: "00".to_string(),
+            keys: vec![AccountKeyVersion {
+                identity_version: 1,
+                seq: 0,
+                account_id_pub: KEY_A.to_string(),
+                included: true,
+            }],
+            chain_valid: true,
+            violations: Vec::new(),
+        }
+    }
+
+    /// The verifier and this build must anchor on the same offline root.
+    #[test]
+    fn the_verifier_pins_the_same_roots_as_this_build() {
+        let mine: Vec<(&str, Option<u64>)> = PINNED_LOG_ROOT_KEYS
+            .iter()
+            .map(|r| (r.public_key, r.not_after))
+            .collect();
+        assert_eq!(mine, verifiable_log_serve::PINNED_LOG_ROOT_KEYS.to_vec());
+    }
+
+    #[test]
+    fn rotate_in_a_root_authorised_signer_matches_without_a_compiled_pin() {
+        assert_eq!(check_pin_trusting_at(ROTATED, PINS, &[], 1), PinCheck::Mismatch);
+        assert_eq!(
+            check_pin_trusting_at(&ROTATED.to_uppercase(), PINS, &[ROTATED.to_string()], 1),
+            PinCheck::Match
+        );
+        // Even a build whose compiled pins have all expired trusts it.
+        assert_eq!(check_pin_trusting_at(ROTATED, &[], &[ROTATED.to_string()], 1), PinCheck::Match);
+        let out = derive_self_audit(&good_report(), ROTATED, PINS, &trust_naming(&[ROTATED]), KEY_A, 1);
+        assert_eq!(out.status, AuditStatus::Ok, "{}", out.detail);
+    }
+
+    #[test]
+    fn a_key_outside_both_the_pins_and_the_set_alarms() {
+        let t = trust_naming(&[ROTATED]);
+        assert_eq!(check_pin_trusting_at(OUTSIDER, PINS, &t.signers, 1), PinCheck::Mismatch);
+        assert_eq!(check_pin_trusting_at(OUTSIDER, &[], &t.signers, 1), PinCheck::Mismatch);
+        let out = derive_peer_audit(&good_report(), OUTSIDER, PINS, &t, "peer", Some((KEY_A, 1)));
+        assert_eq!(out.status, AuditStatus::Alarm);
+    }
+
+    #[test]
+    fn rotate_out_a_signer_the_set_no_longer_names_is_refused() {
+        // The set has moved on to ROTATED; OUTSIDER (the retired one) is not
+        // compiled in either.
+        let out = derive_self_audit(&good_report(), OUTSIDER, PINS, &trust_naming(&[ROTATED]), KEY_A, 1);
+        assert_eq!(out.status, AuditStatus::Alarm);
+    }
+
+    #[test]
+    fn a_forged_key_set_alarms_even_when_the_served_key_is_compiled_in() {
+        let out = derive_self_audit(&good_report(), COMPILED, PINS, &forged(), KEY_A, 1);
+        assert_eq!(out.status, AuditStatus::Alarm);
+        assert!(out.detail.contains("key set"), "{}", out.detail);
+        let out = derive_peer_audit(&good_report(), COMPILED, PINS, &forged(), "peer", Some((KEY_A, 1)));
+        assert_eq!(out.status, AuditStatus::Alarm);
+    }
+
+    #[test]
+    fn compiled_pins_keep_working_when_the_key_set_fetch_fails() {
+        let out = derive_self_audit(&good_report(), COMPILED, PINS, &KeySetTrust::default(), KEY_A, 1);
+        assert_eq!(out.status, AuditStatus::Ok, "{}", out.detail);
+        let out = derive_peer_audit(
+            &good_report(),
+            COMPILED,
+            PINS,
+            &KeySetTrust::default(),
+            "peer",
+            Some((KEY_A, 1)),
+        );
+        assert_eq!(out.status, AuditStatus::Ok, "{}", out.detail);
+    }
+
+    /// The shipped pin and the published key set agree, so turning the key set
+    /// on changes nothing for today's log: each tree's compiled signer is also
+    /// root-authorised, with no alarm.
+    #[test]
+    fn todays_log_verifies_the_same_with_the_key_set_on() {
+        let doc = include_str!("../../../key-set.json");
+        for ctx in [
+            verifiable_log_serve::STH_CONTEXT_ACCOUNT_KEYS,
+            verifiable_log_serve::STH_CONTEXT_BINARIES,
+        ] {
+            let t = KeySetTrust::from_document(
+                Some(doc),
+                verifiable_log_serve::PINNED_LOG_ROOT_KEYS.iter().copied(),
+                ctx,
+                1_786_400_000_000,
+            );
+            assert_eq!(t.alarm, None);
+            let served = PINNED_LOG_PUBLIC_KEYS[0].public_key;
+            assert_eq!(
+                check_pin_trusting_at(served, PINNED_LOG_PUBLIC_KEYS, &t.signers, 1_786_400_000_000),
+                PinCheck::Match
+            );
         }
     }
 }

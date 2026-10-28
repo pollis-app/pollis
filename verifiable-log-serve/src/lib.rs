@@ -66,6 +66,9 @@ pub use verifiable_log::{key_id_for, verifying_key_from_hex, KEY_ID_HEX_LEN, STH
 // Root-signed key sets (#754). Re-exported so the client can verify a served
 // key set without taking a second direct dependency on the log crate.
 pub use verifiable_log::{root_key_from_hex, KeySetStatement, SignerEntry};
+pub use pinned::{key_set_trust_via, KeySetOutcome, KeySetTrust, PINNED_LOG_ROOT_KEYS};
+// The per-tree STH contexts a key set authorises signers for.
+pub use verifiable_log::{STH_CONTEXT_ACCOUNT_KEYS, STH_CONTEXT_BINARIES, STH_CONTEXT_COMMIT_LOG};
 pub use error::{Result, ServeError};
 pub use group::{
     verify_group, verify_group_in_bundle, verify_group_in_bundle_at, GroupCommit, GroupReport,

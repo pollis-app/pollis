@@ -98,6 +98,9 @@ COPIES: list[tuple[str, str, str]] = [
     #     key that is not this one, so a rotation that missed this copy would
     #     make every auditor reject the freshly-rotated real log.
     ("verifiable-log-serve/src/pinned.rs", SIGNER, FULL),
+    # 11. The auditor CLI's copy of the offline root (#1454): it verifies the
+    #     served key set before trusting any signer the set names.
+    ("verifiable-log-serve/src/pinned.rs", ROOT_KEY, FULL),
 ]
 
 # Files that may contain a 2624-hex literal without being a pinned-key copy.

@@ -309,6 +309,12 @@ whatever channel users already trust) and a plainly-worded public statement.
 Once §6 lands, recovery is: the offline root signs a key-set statement retiring the compromised key id;
 clients pick it up on their next fetch; no client update is required.
 
+**As built (#1454):** clients and `pollis-verify` fetch and verify the key set at runtime and trust
+its signers *in addition to* the compiled pins. So rotating a signer in, and retiring one that only
+the key set authorised, both need no release. A signer compiled into `PINNED_LOG_PUBLIC_KEYS` (today's
+`6cbd4b2aed5c4bf1`) cannot be revoked by the key set and still needs a release to retire.
+`docs/signing-key-compromise-runbook.md` has the steps.
+
 **Detection is the unsolved half either way.** Nothing today notices a second well-formed signed tree.
 The standard answer is gossip: independent monitors fetch STHs and compare, and clients cross-check the
 STH they saw against what a monitor saw. That is a separate piece of work and should be its own ticket

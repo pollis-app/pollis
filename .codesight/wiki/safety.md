@@ -422,6 +422,38 @@ Rules that keep it honest:
   let the log pick which question it is asked). `--now-ms` pins the clock the
   overlap window is measured against, so a verdict is reproducible.
 
+### Root-signed key set at runtime (#754, #1454)
+
+The offline root (`PINNED_LOG_ROOT_KEYS` in `transparency.rs`, mirrored in
+`verifiable-log-serve/src/pinned.rs`; a pollis-core test and
+`scripts/check-pinned-log-key.py` hold the two copies identical) signs
+`/v1/key-set.json`. Both the client and `pollis-verify` use the same steps for
+every tree, implemented once in `verifiable_log_serve::pinned`:
+
+1. Fetch `/v1/key-set.json` (`key_set_trust_via`).
+2. Verify it under a live pinned root, then take the signers it authorises for
+   this tree's STH context right now. The result is a `KeySetTrust { signers, alarm }`.
+3. Trust those signers **in addition to** the compiled pins, both in the client's
+   served-key check (`check_pin_trusting_at`) and at the verifier's fetch boundary
+   (`require_pinned_with`, via `verify_{account,release,group}_via_trusting`). The
+   client resolves `KeySetTrust` once and hands the same value to both checks.
+
+Failure handling:
+
+- **Fetch fails or no set is published** (404, network): `KeySetTrust::default()`,
+  so compiled pins only and no alarm. Old and self-hosted logs keep working.
+- **A set is served but cannot be attributed to the root** (forged, malformed,
+  expired, or naming no signer for this tree): compiled pins only, plus an alarm.
+  In the app, the self and peer audits report `Alarm` and verify-own-build reports
+  `Mismatch`. In the verifier, the report fails with the key-set violation first.
+  Never a silent accept.
+
+The key set cannot **revoke** a compiled pin. Retiring a compiled-in signer still
+needs a release. Tests: `key_set_runtime_tests` (pollis-core),
+`pinned::tests` and `tests/key_set.rs` (verifiable-log-serve, an end-to-end run
+over HTTP with a log signed by a key that only the key set names). Runbook:
+`docs/signing-key-compromise-runbook.md`.
+
 ### Auditing infrastructure
 
 `pollis-verify account <user_id>` (released CLI), precomputed
