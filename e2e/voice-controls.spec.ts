@@ -26,7 +26,7 @@
  * and reads the mock's gate back.
  */
 
-import { test, expect, type Page, type Locator } from "@playwright/test";
+import { test, expect, type Page, type Locator } from "./lib/zero-loss";
 import { skinAgnosticTest } from "./lib/skins";
 
 const ME = { id: "u_me", email: "me@pollis.test", username: "mia" };

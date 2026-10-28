@@ -50,3 +50,5 @@ tags:
 - tapOn:
     id: "btn-send"
 - takeScreenshot: dms-04-sent
+# Zero message loss (#1524).
+- runFlow: ../subflows/assert-no-loss.yaml

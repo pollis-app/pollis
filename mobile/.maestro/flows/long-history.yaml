@@ -107,3 +107,5 @@ tags:
 - assertVisible:
     id: "input-composer"
 - takeScreenshot: long-history-02-after-send
+# Zero message loss (#1524).
+- runFlow: ../subflows/assert-no-loss.yaml

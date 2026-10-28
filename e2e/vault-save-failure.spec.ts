@@ -8,7 +8,7 @@
  * whose `failSends` makes `send_vault_message` die on the connection.
  */
 
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./lib/zero-loss";
 
 const ME = { id: "u_me", email: "me@pollis.test", username: "mia" };
 

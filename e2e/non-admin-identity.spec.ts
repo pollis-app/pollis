@@ -15,7 +15,7 @@
  * The mobile half is `.maestro/two-client/join-request/5-peer-settings.yaml`.
  */
 
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./lib/zero-loss";
 
 const ME = { id: "u_me", email: "me@pollis.test", username: "mia" };
 const GROUP_ID = "g_identity";

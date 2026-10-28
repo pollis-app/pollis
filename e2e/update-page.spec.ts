@@ -8,7 +8,7 @@
  * same path the invite-link card uses.
  */
 
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./lib/zero-loss";
 
 const ME = { id: "u_me", email: "me@pollis.test", username: "mia" };
 const COMMAND = "yay -Syu pollis-bin";
