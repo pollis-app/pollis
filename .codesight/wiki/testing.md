@@ -515,6 +515,48 @@ uses the same hook against the dev DS for the Maestro flow
 (`mobile/scripts/maestro-lost-message.sh`). Desktop rendering in both skins is
 `e2e/lost-messages.spec.ts`.
 
+## Zero message loss (#1524)
+
+A placeholder proves a loss is *visible*; the suites also prove there is none.
+
+- **Every flow.** `TestClient`'s `Drop` (`harness::assert_no_unexpected_loss`)
+  fails the test if the device's local DB holds any `undecryptable` row or the
+  process logged any `[loss]` line since `wipe()` — the line catches a lost edit,
+  which leaves no row. The pre-join pass (accepted loss 1) is not counted
+  (`pollis_core::diag::loss_tap`, `test-harness` only). A test that loses a
+  message on purpose calls `harness::expect_losses()` (the two forced losses in
+  `lost_messages.rs`, and the Tier-2 prune in `adversarial.rs`);
+  `zero_loss::an_unexpected_loss_fails_the_test` proves the check bites.
+- **One local DB per device.** Each `TestClient` gets its own data directory
+  (`AppState::local_dir`, `test-harness` only). Before #1524 two devices of one
+  account opened the same `pollis_{user_id}.db`, so a sibling device shared its
+  twin's history and MLS store and could never lose a message on its own.
+- **Message-path faults** (`DsFault`, below) and two more kill points:
+  `Crash::AfterSeal` (sealed, not posted — the sender's ratchet already past it)
+  and `Crash::AfterDecrypt` (a receiver's `process_message` spent the key, the row
+  is not written). The latter sits in the replay's epoch hook, which has no error
+  path, so it unwinds (`test_hooks::die`); tests run that ingest in a
+  `tokio::spawn` and expect a panic. It found a real loss: the spent key was
+  persisted while the row was not, and the next pass hit `SecretReuse`. Each
+  envelope's decrypt and row now share one savepoint (`ingest::OneEnvelope`).
+- **`flows/zero_loss.rs`**: each fault and kill point, then
+  `zero_loss_soak_multi_device_multi_channel` — two users, three devices (one
+  account on a desktop and a phone that is away for long stretches and catches up
+  in bursts), three channels in one group, sends / edits / reactions /
+  self-updates / drains with the faults and sender kills armed at random; every
+  device must end with every message once, at its final text, every reaction,
+  and no placeholder. 240 ops by default (~8 s);
+  `POLLIS_ZERO_LOSS_SOAK_OPS` lengthens it, `POLLIS_ZERO_LOSS_SOAK_SEED` replays
+  the printed seed. `cross_channel_ingest::the_senders_own_phone_catches_up_through_a_faulty_resume`
+  is the 2026-10-27 shape on the sender's own sibling device through a faulty resume.
+- **Desktop UI** (`e2e/lib/zero-loss.ts`): every Playwright spec imports `test`
+  from there; an automatic fixture fails a test whose page ends showing a
+  `[data-undecryptable]` row unless it called `expectLosses()`. The mock IPC runs
+  no MLS, so this only stops a spec rendering a loss it did not mean to.
+- **Mobile** (`mobile/.maestro/subflows/assert-no-loss.yaml`): no
+  `text-undecryptable-*` row on screen, at the end of `messaging`, `dms` and
+  `long-history`.
+
 ## Killing a send part-way (#1335)
 
 `test_hooks::crash_next_send(Crash::AfterEnqueue | Crash::AfterPost)` (only in a
@@ -576,6 +618,14 @@ shares the single in-process DS. Assert it fired with `!ds_fault_armed()`.
 | `Fail500PostWrite` | same as above — persists, then 500s | adopt (generalized #411, e.g. on a *removal* commit) |
 | `Fail500PreWrite` | returns 500 **without persisting** — the clean, retryable failure | roll the staged commit back cleanly; never adopt a phantom epoch |
 | `DropWelcome` | commit + GroupInfo land, but the add's Welcomes are **never persisted** (cleared off the body before `submit_commit`) | recover the new member via external-join |
+| `SendLandsThenTimesOut` | a message send or edit **lands**, then the client gets a 504 | mark it failed; the drain's re-post is a replay; everyone holds it once |
+| `SendTimesOutUnlanded` | a send or edit gets a 504 and nothing is stored | the drain delivers it, re-sealed if the epoch moved |
+| `CatchUpTimesOutMidway` | the commit fetch after a catch-up's envelope list gets a 504 | keep what it decrypted; the next pass finishes |
+| `WatermarkTimesOut` | the cursor report after a catch-up gets a 504 and is not stored | re-fetched envelopes are never counted as losses |
+
+The four message-path faults are applied by the `inject_message_fault` middleware
+in front of the real handlers (a 504 stands in for a timeout: the client sets no
+request timeout of its own). `DsFault::MESSAGE_PATH` lists them for random drivers.
 
 The gap-creating fault is **not** a `DsFault` variant. A live submit-path deletion
 of the *head* commit row only lowers the head (the next committer refills it), so

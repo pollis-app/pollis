@@ -16,7 +16,7 @@
  *   pnpm --filter @pollis/e2e e2e:ui -- export-archive.spec.ts
  */
 
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./lib/zero-loss";
 import { skinAgnosticTest } from "./lib/skins";
 
 const USER = { id: "u-alice", email: "alice@example.com", username: "alice" };

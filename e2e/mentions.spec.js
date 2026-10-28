@@ -18,7 +18,7 @@
  */
 
 const path = require("path");
-const { test, expect } = require("@playwright/test");
+const { test, expect } = require("./lib/zero-loss");
 
 // Proof screenshots land beside the WebDriver scenarios' own artifacts.
 const shot = (name) => path.join(__dirname, "artifacts", name);

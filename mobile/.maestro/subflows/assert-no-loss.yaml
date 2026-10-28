@@ -1,0 +1,8 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Zero message loss (#1524): the conversation on screen shows no
+# undecryptable placeholder. Run it at the end of any flow that reads
+# messages; only `two-client/lost-message/` creates a loss on purpose, and it
+# asserts on the placeholder itself instead.
+- assertNotVisible:
+    id: "text-undecryptable-.*"

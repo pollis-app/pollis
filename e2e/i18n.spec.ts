@@ -24,7 +24,7 @@
  *   pnpm --filter @pollis/e2e playwright
  */
 
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./lib/zero-loss";
 import { skinAgnosticTest } from "./lib/skins";
 import fs from "node:fs";
 import path from "node:path";

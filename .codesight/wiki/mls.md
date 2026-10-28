@@ -430,6 +430,9 @@ asks `messages::loss::classify`:
   exists (`record_first_join`), because a recovery rebuild's gap was sent while
   the device was a member and IS a loss. That is the accepted pre-join loss;
   one summary log line counts them.
+- **Not a loss either** — refused with `evicted`: sealed at an epoch this device
+  had been removed from, reached before any re-add moves the floor (#1524). Logged
+  as one `[ingest] … sealed after this device was removed` count.
 - **`stranded`** — the replay started above its epoch, so it was never attempted.
 - **`failed`** — attempted at its own epoch and would not open.
 - **`lineage`** — sealed in a generation this device held but no longer does.
@@ -445,6 +448,14 @@ the TUI has no such page). A run of consecutive placeholders is drawn as ONE
 row that says how many (`collapseUndecryptable` on desktop and mobile,
 `message_lines` in the TUI); the rows themselves stay one per envelope. A
 successful decrypt of the same id later replaces it; a control frame drops it.
+
+Opening an envelope and storing its row are one local transaction (#1524,
+`ingest::OneEnvelope`, a savepoint on the connection the provider writes
+through): `process_message` persists the ratchet step that spends the key before
+it returns, so a process killed between the two used to leave the key spent and
+no row — the next pass hit `secret reuse` and wrote a placeholder for a message
+the device had fully received. A row that will not store is now a `failed`
+(storage) loss rather than a silent one.
 
 A lineage this device held before #1312 has no recorded join; its floor becomes
 one above the epoch the first catch-up after the upgrade started at
