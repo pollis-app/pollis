@@ -163,7 +163,7 @@ for (const skin of SKINS) {
     });
 
     /*
-     * "Search your vault…" and "Drop a note…" sit one above the other, so any
+     * "Search your vault…" and "Secure notes…" sit one above the other, so any
      * difference in face, size or weight reads as a mistake. One is a native
      * `::placeholder`, the other a `::before` on a contentEditable — different
      * mechanisms that must resolve to the same type.
@@ -183,6 +183,43 @@ for (const skin of SKINS) {
       expect(search.family).toBe(composer.family);
       expect(search.size).toBe(composer.size);
       expect(search.weight).toBe(composer.weight);
+    });
+
+    /*
+     * The vault composer's hint is the plain sentence, on ONE line: it
+     * ellipsizes in a narrow window instead of wrapping under the caret, so
+     * the empty field stays one line tall (mobile's Composer does the same).
+     */
+    test("the vault composer hint is one line, even when narrow", async ({ page }) => {
+      await openVault(page, skin);
+
+      const input = page.getByTestId("message-input");
+      await expect(input).toHaveAttribute("data-placeholder", "Secure notes, links, or files");
+
+      const hint = () =>
+        input.evaluate((el) => {
+          const s = getComputedStyle(el, "::before");
+          return {
+            content: s.content,
+            whiteSpace: s.whiteSpace,
+            overflow: s.overflow,
+            textOverflow: s.textOverflow,
+            fieldHeight: el.getBoundingClientRect().height,
+            lineHeight: parseFloat(getComputedStyle(el).lineHeight),
+          };
+        });
+
+      for (const width of [1280, 640]) {
+        await page.setViewportSize({ width, height: 800 });
+        const h = await hint();
+        expect(h.content).toBe('"Secure notes, links, or files"');
+        expect(h.whiteSpace).toBe("nowrap");
+        expect(h.overflow).toBe("hidden");
+        expect(h.textOverflow).toBe("ellipsis");
+        // The empty field is one line tall (plus its vertical padding).
+        expect(h.fieldHeight).toBeLessThan(h.lineHeight * 2);
+        await page.screenshot({ path: `artifacts/vault-composer-hint-${skin}-${width}.png` });
+      }
     });
 
     test("hovering a sidebar row highlights with no fade", async ({ page }) => {

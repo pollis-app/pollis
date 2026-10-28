@@ -353,6 +353,13 @@ input[type="range"]::-moz-range-thumb {
        the hint. */
     position: absolute;
     inset-inline-start: 0.5rem;
+    /* One line, whatever the width: a hint too long for a narrow window ends
+       in an ellipsis instead of wrapping under the caret (the field inherits
+       pre-wrap). */
+    inset-inline-end: 0.5rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .chat-input-textarea.is-focused[data-empty="true"]::before {
