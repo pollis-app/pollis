@@ -156,7 +156,7 @@ Nothing talks to prod. No OTP email is ever sent.
 
   > **Schema bootstrap is a manual, one-time step** (see "Known limitation"
   > below). Note the Rust `flows` integration harness does **not** help here
-  > as of `8b41317` (2026-05-05) — it runs against an embedded local libsql
+  > as of `1a5199d` (2026-05-05) — it runs against an embedded local libsql
   > file, not `.env.test`'s real Turso, so running it does nothing for this
   > DB's schema. Use the CI migration runner directly instead:
   >

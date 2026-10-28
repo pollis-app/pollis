@@ -1,6 +1,6 @@
 # Epic: Path to Launch
 
-> **STATUS — most of this epic has shipped.** Written against base commit `232a001`,
+> **STATUS — most of this epic has shipped.** Written against base commit `5e2c4a9`,
 > when the items below were open. WS1 (the delivery promise), WS2 (latency and cost),
 > WS3 (operator ceremonies) and WS5 (tell the truth) are complete; WS4 (mobile
 > distribution) is blocked on account registration (#723), which is not an engineering
@@ -10,7 +10,7 @@
 > fixed by #688; the section describing it is preserved below as history and explicitly
 > labelled.
 
-**Base commit:** `232a001` · **Derived from:** the 21 open issues, `docs/backend-core-invariants.md`,
+**Base commit:** `5e2c4a9` · **Derived from:** the 21 open issues, `docs/backend-core-invariants.md`,
 `docs/deployments.md`, `mobile/TEST-PLAN.md`, and a full read of the workspace.
 
 Close the delivery-guarantee gap, cut server latency by an order of magnitude, finish the operator

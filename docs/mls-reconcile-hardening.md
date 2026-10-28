@@ -85,7 +85,7 @@ Why this shape:
 
 ## Mapping to work already done (this effort)
 
-- **KEEP** — `adfe518` (merged): no commit deletes in code + external-join
+- **KEEP** — `a163c8f` (merged): no commit deletes in code + external-join
   recovery. Its spirit is enforced by the DS; the code is harmless defense.
 - **KEEP** — the **repair-nuke removal** (branch `mls/repair-and-ds-replan`):
   `repair_mls_group` (re-create the group at epoch 0 + DELETE the commit log)

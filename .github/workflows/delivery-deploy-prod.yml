@@ -202,7 +202,7 @@ jobs:
           echo "Settling ~8s for the rollout to begin…"; sleep 8
           echo "Waiting for $VERSION_URL to report sha=$EXPECTED"
           # A cold container roll takes ~3 min on prod (the 2026-09-04 deploy of
-          # cb9a82f9 went live ~30s after a 120s bound had already failed the
+          # 21e1f876 went live ~30s after a 120s bound had already failed the
           # run), so the bound is 10 min: long enough that red means stalled.
           for i in $(seq 1 100); do
             GOT="$(curl -fsS -m 10 "$VERSION_URL" | jq -r '.sha' 2>/dev/null || echo '')"

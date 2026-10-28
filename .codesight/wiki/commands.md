@@ -6,7 +6,7 @@ The path in each section header below points at the implementation in `pollis-co
 
 > ### ⚠️ This is a PARTIAL listing — read this before trusting it
 >
-> **Last verified: 2026-08-03 (#714), against `src-tauri/src/lib.rs` at `d13c906`.**
+> **Last verified: 2026-08-03 (#714), against `src-tauri/src/lib.rs` at `77abb2b`.**
 >
 > At that point the app registered **167** commands in `tauri::generate_handler![…]`. The prose sections below describe roughly **half** of them; the rest (voice calls/ringing, camera, screenshare, tray, terminal, reactions, safety numbers, retention/eviction, media permissions, transparency self-audit, sound effects, update gating, clipboard, and several groups/messages commands) have **no prose here at all**. Nothing below has been re-verified line by line beyond the corrections noted in this pass, so treat an entry's *arguments and return shape* as a hint, not a contract.
 >
@@ -712,7 +712,7 @@ The mirror image of `overlay` (design §10.2, #813): `overlay` decides whether *
 
 ## Appendix A — full registered-command inventory (names only)
 
-Mechanically extracted from `tauri::generate_handler![…]` in `src-tauri/src/lib.rs` at `d13c906` on **2026-08-03** (#714), plus the two `relay_serving` commands added by #813, the six `emoji` commands added by #848, the two `messages` receipt commands added by #857, the two `autolock` commands added by #851, and the four added by #874 (`messages::read_last_messages`, `r2::upload_public_file`, `r2::get_public_file_url`, `device_enrollment::await_enrollment_approval`), and the three added by #1000 (`r2::upload_media_staged`, `staging::stage_attachment`, `staging::discard_staged_attachment`), and the nine added by #99/#107 (`pinned_messages::{pin_message, unpin_message, list_pinned_messages}`, `vault::{get_vault_messages, send_vault_message, edit_vault_message, set_vault_message_pinned, delete_vault_message, search_vault_messages}`). **212 commands.** Grouped by the `commands::<module>::` path used at the registration site; **names only — no descriptions are given here because they were not verified.** A name in this list that has no prose above is real and callable; read its implementation in `pollis-core/src/commands/` before using it.
+Mechanically extracted from `tauri::generate_handler![…]` in `src-tauri/src/lib.rs` at `77abb2b` on **2026-08-03** (#714), plus the two `relay_serving` commands added by #813, the six `emoji` commands added by #848, the two `messages` receipt commands added by #857, the two `autolock` commands added by #851, and the four added by #874 (`messages::read_last_messages`, `r2::upload_public_file`, `r2::get_public_file_url`, `device_enrollment::await_enrollment_approval`), and the three added by #1000 (`r2::upload_media_staged`, `staging::stage_attachment`, `staging::discard_staged_attachment`), and the nine added by #99/#107 (`pinned_messages::{pin_message, unpin_message, list_pinned_messages}`, `vault::{get_vault_messages, send_vault_message, edit_vault_message, set_vault_message_pinned, delete_vault_message, search_vault_messages}`). **212 commands.** Grouped by the `commands::<module>::` path used at the registration site; **names only — no descriptions are given here because they were not verified.** A name in this list that has no prose above is real and callable; read its implementation in `pollis-core/src/commands/` before using it.
 
 Regenerate with:
 

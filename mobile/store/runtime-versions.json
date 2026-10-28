@@ -5,14 +5,14 @@
       "platform": "android",
       "channel": "play",
       "version": "1.0.14",
-      "commit": "2c9c53f771194db3e763fa218d2636432b8c3c1b",
+      "commit": "0eb105675d70e3b25786a99f1cd7633ffe63c38a",
       "runtimeVersion": "5466ba191d93be2e4fae2ca99c6ccdc2c964ffe4"
     },
     {
       "platform": "android",
       "channel": "sideload",
       "version": "1.0.14",
-      "commit": "2c9c53f771194db3e763fa218d2636432b8c3c1b",
+      "commit": "0eb105675d70e3b25786a99f1cd7633ffe63c38a",
       "runtimeVersion": "cd2015f48976c765d0cf6c3495f5e3d29ef1f2f5",
       "nativeIdenticalTo": "5466ba191d93be2e4fae2ca99c6ccdc2c964ffe4"
     },
@@ -20,14 +20,14 @@
       "platform": "android",
       "channel": "play",
       "version": "1.0.15",
-      "commit": "d6b3370188eca83ec97fb749f061c821267b88ce",
+      "commit": "d69498d0203ff2dd1b5096c1c9194b32f9b1c865",
       "runtimeVersion": "3d24cb87e81195301172ddbc218ced95b3ba89c4"
     },
     {
       "platform": "android",
       "channel": "sideload",
       "version": "1.0.15",
-      "commit": "d6b3370188eca83ec97fb749f061c821267b88ce",
+      "commit": "d69498d0203ff2dd1b5096c1c9194b32f9b1c865",
       "runtimeVersion": "a2ebce84423d3f01e2a1f4805b5da1d1c16d1697",
       "nativeIdenticalTo": "3d24cb87e81195301172ddbc218ced95b3ba89c4"
     },
@@ -35,14 +35,14 @@
       "platform": "android",
       "channel": "play",
       "version": "1.0.16",
-      "commit": "f20d203ac0fdba8a47d70951a2755728a98ff41e",
+      "commit": "a299cbe143e340d5d244f276c9533b6a206993b5",
       "runtimeVersion": "8f1befed077744ecff198dc91a0366852132f4a8"
     },
     {
       "platform": "android",
       "channel": "sideload",
       "version": "1.0.16",
-      "commit": "f20d203ac0fdba8a47d70951a2755728a98ff41e",
+      "commit": "a299cbe143e340d5d244f276c9533b6a206993b5",
       "runtimeVersion": "27b59ee394cc3224b66c6bb87420560a6415eadc",
       "nativeIdenticalTo": "8f1befed077744ecff198dc91a0366852132f4a8"
     },
@@ -50,49 +50,49 @@
       "platform": "android",
       "channel": "play",
       "version": "1.0.17",
-      "commit": "d5c7f6adb4a318e7ee11c9f8d13769c432c61825",
+      "commit": "bac83d844f3ecd28dbd9a640ab653f8dfe9c0bfd",
       "runtimeVersion": "156ed784533bc7cfb343498df1709cc8a37bf86a"
     },
     {
       "platform": "android",
       "channel": "sideload",
       "version": "1.0.17",
-      "commit": "d5c7f6adb4a318e7ee11c9f8d13769c432c61825",
+      "commit": "bac83d844f3ecd28dbd9a640ab653f8dfe9c0bfd",
       "runtimeVersion": "156ed784533bc7cfb343498df1709cc8a37bf86a"
     },
     {
       "platform": "android",
       "channel": "play",
       "version": "1.0.18",
-      "commit": "552f35a5b4deb05770a75de51b56f8c442b29f23",
+      "commit": "488db6b99e368d7100b7b20857f411f755663e33",
       "runtimeVersion": "d2bafa4abf319926b2ad733932f21120c42dabe2"
     },
     {
       "platform": "android",
       "channel": "sideload",
       "version": "1.0.18",
-      "commit": "552f35a5b4deb05770a75de51b56f8c442b29f23",
+      "commit": "488db6b99e368d7100b7b20857f411f755663e33",
       "runtimeVersion": "d2bafa4abf319926b2ad733932f21120c42dabe2"
     },
     {
       "platform": "android",
       "channel": "play",
       "version": "1.0.19",
-      "commit": "8a46e921dd9eff0ba5cc9cde3a6cfab450defb39",
+      "commit": "f988a431b6cc1fde6199719a9821db7404b33079",
       "runtimeVersion": "86b6d207fc7e36c0e209d33ecd0612511c78a8cc"
     },
     {
       "platform": "android",
       "channel": "sideload",
       "version": "1.0.19",
-      "commit": "8a46e921dd9eff0ba5cc9cde3a6cfab450defb39",
+      "commit": "f988a431b6cc1fde6199719a9821db7404b33079",
       "runtimeVersion": "86b6d207fc7e36c0e209d33ecd0612511c78a8cc"
     },
     {
       "platform": "ios",
       "channel": "app-store",
       "version": "1.0.19",
-      "commit": "94ed3d5c4c97590ab529afad153c05444009f699",
+      "commit": "caceb3b36945ad5344cd4cf3e7f070d74692ffa7",
       "runtimeVersion": "e73591e714512327da0a1b3a33a15eb810db5686"
     }
   ]
