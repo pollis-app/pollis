@@ -171,6 +171,20 @@ pub struct EnvelopeWire {
     /// that somehow does not is skipped rather than delivered out of order.
     #[serde(default)]
     pub seq: Option<i64>,
+    /// The order the DS accepted this envelope in, comparable ACROSS the
+    /// conversations of one catch-up (the `message_envelope` rowid). `seq` orders
+    /// one conversation; this orders the whole MLS group, which is the order a
+    /// sender sealed in.
+    ///
+    /// Decryption needs that order, not the per-conversation one: every channel
+    /// of a group shares one MLS group, so a sender's generations run across all
+    /// of them, and openmls opens a generation more than 5 behind the newest one
+    /// it has opened for that sender as "too distant in the past" — gone. A
+    /// device catching up channel by channel after the sender interleaved
+    /// channels lost exactly those messages. Absent from an older DS; the
+    /// client then keeps the per-conversation order it always used.
+    #[serde(default)]
+    pub arrival: Option<i64>,
 }
 
 // ── POST /v1/messages/lookup ─────────────────────────────────────────────────

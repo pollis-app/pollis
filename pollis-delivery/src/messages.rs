@@ -3802,6 +3802,52 @@ mod admin_delete_visibility_tests {
             .collect()
     }
 
+    /// A catch-up spans every channel of a group, and each envelope carries
+    /// where it arrived in the WHOLE group, not just its own channel: a sender's
+    /// MLS generations run across channels, so the client decrypts in this order
+    /// (`ingest::into_sealing_order`). Sent a, b, b, a — the fetch lists them
+    /// channel by channel, the arrival order still says a, b, b, a.
+    #[tokio::test]
+    async fn a_catch_up_carries_the_group_wide_arrival_order() {
+        let (_dir, db) = shared_db().await;
+        let conn = db.connect().expect("conn");
+        let order = [("e1", "chan-a"), ("e2", "chan-b"), ("e3", "chan-b"), ("e4", "chan-a")];
+        for (id, conv) in order {
+            apply_send_message(
+                &conn,
+                None,
+                &SendMessageBody {
+                    id: id.to_string(),
+                    conversation_id: conv.to_string(),
+                    sender_id: Some("sealed".to_string()),
+                    ciphertext: "mls:00".to_string(),
+                    reply_to_id: None,
+                    sent_at: "2026-09-01T00:00:00+00:00".to_string(),
+                    sealed: 1,
+                    generation: None,
+                    epoch: None,
+                    push_to: None,
+                    push_mentions: None,
+                    delete_token_hash: Some(FIXTURE_CAPABILITY_HASH.to_string()),
+                },
+            )
+            .await
+            .expect("send");
+        }
+        let mut got = crate::directory::envelopes_for_conversations(
+            &conn,
+            &["chan-a".to_string(), "chan-b".to_string()],
+            "carol",
+            "carol-dev",
+        )
+        .await
+        .expect("fetch");
+        assert!(got.iter().all(|e| e.arrival.is_some()), "every envelope has a position");
+        got.sort_by_key(|e| e.arrival);
+        let ids: Vec<&str> = got.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, ["e1", "e2", "e3", "e4"]);
+    }
+
     /// Drive the full #661 envelope-layer dance for a given client `sent_at`
     /// shape and assert carol's SECOND fetch sees the admin tombstone. The writes
     /// go through one connection and carol's reads through a DIFFERENT connection

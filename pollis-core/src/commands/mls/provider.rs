@@ -16,6 +16,84 @@ use tls_codec::Serialize as TlsSerialize;
 
 use crate::signal::mls_storage::MlsStore;
 
+// ── Sender-ratchet window ────────────────────────────────────────────────────
+
+/// How far behind the newest generation it has opened for a sender a device
+/// may still open one of that sender's messages (openmls'
+/// `out_of_order_tolerance`; its default is 5).
+///
+/// One sender's generations run across every channel of a group, so any
+/// reordering between sealing and decrypting — two sends in flight at once, a
+/// catch-up that is not perfectly in arrival order — puts some envelopes behind
+/// ones already opened. The decrypt order follows the DS's arrival order
+/// (`ingest::into_sealing_order`, #1526); this is the backstop under it, so a
+/// residual reorder costs nothing instead of losing every message more than 5
+/// behind, permanently.
+///
+/// The cost is forward secrecy within an epoch: a device keeps up to this many
+/// SKIPPED message keys per sender (keys it derived to step past and has not
+/// used yet). They live in the group's message secrets inside the encrypted
+/// local DB and are wiped at the next commit, since `max_past_epochs = 0`
+/// discards the whole epoch's secret tree. 100 covers any reorder a real client
+/// produces with a wide margin; it is not a history-recovery window.
+pub(crate) const OUT_OF_ORDER_TOLERANCE: u32 = 100;
+
+/// openmls' default, kept: how far AHEAD of the newest opened generation a
+/// message may be (a sender who sent that many this device never saw).
+pub(crate) const MAXIMUM_FORWARD_DISTANCE: u32 = 1000;
+
+/// The one sender-ratchet configuration every group this device holds uses.
+/// Built here and nowhere else, so create, Welcome and external join cannot
+/// drift apart.
+pub(crate) fn sender_ratchet_configuration() -> SenderRatchetConfiguration {
+    SenderRatchetConfiguration::new(OUT_OF_ORDER_TOLERANCE, MAXIMUM_FORWARD_DISTANCE)
+}
+
+/// The join configuration for a Welcome or an external join.
+pub(crate) fn join_config() -> MlsGroupJoinConfig {
+    MlsGroupJoinConfig::builder()
+        .use_ratchet_tree_extension(true)
+        .sender_ratchet_configuration(sender_ratchet_configuration())
+        .build()
+}
+
+/// Bring a stored group's sender-ratchet window up to
+/// [`sender_ratchet_configuration`], writing only when it differs. Groups
+/// created before #1526 carry openmls' default window of 5.
+///
+/// openmls reads the window from the group's configuration on every decrypt
+/// (`process_message` copies `configuration().sender_ratchet_configuration()`
+/// and hands it to the secret tree), so a raised value applies at once to
+/// ratchets that already exist: their kept-keys queue simply stops being cut
+/// at 5. Keys already discarded under the old window stay discarded.
+///
+/// Only the sender-ratchet field changes. The rest of the stored config has no
+/// public setters, so it is carried over through its own serialisation.
+pub(crate) fn upgrade_sender_ratchet<S: openmls_traits::storage::StorageProvider<1>>(
+    group: &mut MlsGroup,
+    storage: &S,
+) {
+    if group.configuration().sender_ratchet_configuration() == &sender_ratchet_configuration() {
+        return;
+    }
+    let Ok(mut value) = serde_json::to_value(group.configuration()) else {
+        return;
+    };
+    let Ok(wanted) = serde_json::to_value(sender_ratchet_configuration()) else {
+        return;
+    };
+    let Some(fields) = value.as_object_mut() else {
+        return;
+    };
+    fields.insert("sender_ratchet_configuration".to_string(), wanted);
+    let Ok(upgraded) = serde_json::from_value::<MlsGroupJoinConfig>(value) else {
+        return;
+    };
+    if let Err(e) = group.set_configuration(storage, &upgraded) {
+        crate::diag!("[mls] could not widen the sender-ratchet window: {e:?}");
+    }
+}
+
 // ── Provider ─────────────────────────────────────────────────────────────────
 
 /// An OpenMLS provider: some crypto backend `C` composed with our SQLite-backed
@@ -229,7 +307,9 @@ pub(crate) fn load_stored_group_at(
 ) -> Option<MlsGroup> {
     let store = MlsStore::new(conn);
     let group_id = crate::commands::mls::generation::mls_group_id(conversation_id, generation);
-    MlsGroup::load(&store, &group_id).ok().flatten()
+    let mut group = MlsGroup::load(&store, &group_id).ok().flatten()?;
+    upgrade_sender_ratchet(&mut group, &store);
+    Some(group)
 }
 
 /// The storage half on its own, for the storage-only mutations

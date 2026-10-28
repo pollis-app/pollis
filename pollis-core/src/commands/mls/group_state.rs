@@ -1076,9 +1076,7 @@ where
         super::join_branch::clear(provider.raw_conn(), conversation_id, generation);
     }
 
-    let join_config = MlsGroupJoinConfig::builder()
-        .use_ratchet_tree_extension(true)
-        .build();
+    let join_config = super::provider::join_config();
 
     let (joined_group, commit_bundle) = MlsGroup::external_commit_builder()
         .with_config(join_config)
@@ -1175,6 +1173,7 @@ where
     let config = MlsGroupCreateConfig::builder()
         .ciphersuite(suite)
         .use_ratchet_tree_extension(true)
+        .sender_ratchet_configuration(super::provider::sender_ratchet_configuration())
         .build();
 
     MlsGroup::new_with_group_id(provider, &sig_keys, &config, group_id, cred_with_key)
@@ -1278,11 +1277,12 @@ where
 {
     let group_id = mls_group_id(conversation_id, generation);
 
-    let group = MlsGroup::load(provider.storage(), &group_id)
+    let mut group = MlsGroup::load(provider.storage(), &group_id)
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("mls load: {e}")))?
         .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!(
             "MLS group not found for conversation {conversation_id}"
         )))?;
+    super::provider::upgrade_sender_ratchet(&mut group, provider.storage());
 
     // Retrieve the signature public key stored in the group's leaf node, then
     // read back the full keypair from mls_kv.

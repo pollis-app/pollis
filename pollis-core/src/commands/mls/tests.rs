@@ -2954,6 +2954,11 @@ fn a_run_of_envelopes_loads_the_group_once() {
         .map(|i| try_mls_encrypt(&alice_db, conv_id, format!("m{i}").as_bytes()).unwrap())
         .collect();
 
+    // The first Pollis load of a group joined with openmls' default config
+    // widens its sender-ratchet window (#1526) — one join-config write, once
+    // per group. Do it outside the measurement, which is about steady state.
+    drop(MlsDecryptor::open(&bob_db, conv_id).expect("group is stored"));
+
     let before = crate::signal::mls_storage::counters::snapshot();
     {
         let mut decryptor = MlsDecryptor::open(&bob_db, conv_id).expect("group is stored");
@@ -3874,4 +3879,150 @@ fn a_garbled_body_fails_at_parse_and_a_tampered_one_at_aead() {
     let why = try_mls_decrypt_why(&make_db(), conv_id, &ct).expect_err("no group");
     assert_eq!(why.kind, DecryptFailureKind::NoLocalGroup);
     assert_eq!(why.to_string(), "no local group");
+}
+
+// ── Sender-ratchet window (#1526) ────────────────────────────────────────────
+
+/// Alice creates a group and adds Bob, who joins with openmls' DEFAULT join
+/// config — the window of 5 every group stored before #1526 carries. Returns
+/// the two databases.
+fn alice_and_bob_with_default_window(conv_id: &str) -> (rusqlite::Connection, rusqlite::Connection) {
+    let alice_db = make_db();
+    let bob_db = make_db();
+    create_group(&alice_db, conv_id, "alice");
+    let bob_kp_bytes = gen_key_package(&bob_db, "bob");
+    let welcome_bytes: Vec<u8> = {
+        let alice_provider = PollisProvider::new(&alice_db);
+        let (mut alice_group, alice_signer) =
+            load_group_with_signer(&alice_provider, conv_id, 0).unwrap();
+        let mut kp_reader: &[u8] = &bob_kp_bytes;
+        let kp = KeyPackageIn::tls_deserialize(&mut kp_reader)
+            .unwrap()
+            .validate(alice_provider.crypto(), ProtocolVersion::Mls10)
+            .unwrap();
+        let (_, welcome_msg, _) =
+            alice_group.add_members(&alice_provider, &alice_signer, &[kp]).unwrap();
+        alice_group.merge_pending_commit(&alice_provider).unwrap();
+        welcome_msg.tls_serialize_detached().unwrap()
+    };
+    let bob_provider = PollisProvider::new(&bob_db);
+    let mut reader: &[u8] = &welcome_bytes;
+    let welcome = match MlsMessageIn::tls_deserialize(&mut reader).unwrap().extract() {
+        MlsMessageBodyIn::Welcome(w) => w,
+        _ => panic!("expected Welcome"),
+    };
+    StagedWelcome::new_from_welcome(&bob_provider, &MlsGroupJoinConfig::default(), welcome, None)
+        .unwrap()
+        .into_group(&bob_provider)
+        .unwrap();
+    (alice_db, bob_db)
+}
+
+/// Bob's stored window, read with openmls directly (no Pollis loader, so no
+/// upgrade on the way).
+fn stored_window(db: &rusqlite::Connection, conv_id: &str) -> u32 {
+    let provider = PollisProvider::new(db);
+    MlsGroup::load(provider.storage(), &GroupId::from_slice(conv_id.as_bytes()))
+        .unwrap()
+        .unwrap()
+        .configuration()
+        .sender_ratchet_configuration()
+        .out_of_order_tolerance()
+}
+
+/// The control: under openmls' default window, a message 50 generations behind
+/// the newest one opened from that sender is gone for good.
+#[test]
+fn the_default_window_loses_a_message_fifty_generations_behind() {
+    let conv_id = "01JTEST0000000000000WIN05";
+    let (alice_db, bob_db) = alice_and_bob_with_default_window(conv_id);
+    let cts: Vec<Vec<u8>> = (0..51)
+        .map(|i| try_mls_encrypt(&alice_db, conv_id, format!("m{i}").as_bytes()).unwrap())
+        .collect();
+
+    let provider = PollisProvider::new(&bob_db);
+    let mut group =
+        MlsGroup::load(provider.storage(), &GroupId::from_slice(conv_id.as_bytes())).unwrap().unwrap();
+    let open = |group: &mut MlsGroup, ct: &[u8]| {
+        let mut r: &[u8] = ct;
+        let msg = MlsMessageIn::tls_deserialize(&mut r).unwrap().try_into_protocol_message().unwrap();
+        group.process_message(&provider, msg)
+    };
+    open(&mut group, &cts[50]).expect("the newest opens");
+    let err = open(&mut group, &cts[0]).expect_err("50 behind under a window of 5");
+    assert_eq!(
+        super::group_state::classify_decrypt_error(&err),
+        DecryptFailureKind::TooDistantInThePast
+    );
+}
+
+/// The backstop: the same reorder through the Pollis decrypt path opens every
+/// message — the stored default window is widened on load.
+#[test]
+fn a_message_fifty_generations_behind_still_opens() {
+    let conv_id = "01JTEST0000000000000WIN99";
+    let (alice_db, bob_db) = alice_and_bob_with_default_window(conv_id);
+    let cts: Vec<Vec<u8>> = (0..51)
+        .map(|i| try_mls_encrypt(&alice_db, conv_id, format!("m{i}").as_bytes()).unwrap())
+        .collect();
+
+    let (newest, _) = try_mls_decrypt_why(&bob_db, conv_id, &cts[50]).expect("newest");
+    assert_eq!(newest, b"m50");
+    for (i, ct) in cts.iter().enumerate().take(50) {
+        let (pt, sender) = try_mls_decrypt_why(&bob_db, conv_id, ct)
+            .unwrap_or_else(|why| panic!("m{i}, {} behind, did not open: {why}", 50 - i));
+        assert_eq!(pt, format!("m{i}").as_bytes());
+        assert_eq!(sender, "alice");
+    }
+    // Still one use per key: a replay is refused.
+    let why = try_mls_decrypt_why(&bob_db, conv_id, &cts[10]).expect_err("reused");
+    assert_eq!(why.kind, DecryptFailureKind::SecretReuse);
+}
+
+/// A group stored with openmls' default window is upgraded the first time
+/// Pollis loads it, and the upgrade is written, not just applied in memory.
+/// The rest of the stored config survives it.
+#[test]
+fn a_group_stored_with_the_default_window_is_upgraded_on_load() {
+    let conv_id = "01JTEST0000000000000WINUP";
+    let (_alice_db, bob_db) = alice_and_bob_with_default_window(conv_id);
+    assert_eq!(stored_window(&bob_db, conv_id), 5, "joined with openmls' default");
+
+    let loaded = super::provider::load_stored_group(&bob_db, conv_id).expect("group");
+    assert_eq!(
+        loaded.configuration().sender_ratchet_configuration(),
+        &super::provider::sender_ratchet_configuration()
+    );
+    assert_eq!(stored_window(&bob_db, conv_id), super::provider::OUT_OF_ORDER_TOLERANCE);
+
+    let provider = PollisProvider::new(&bob_db);
+    let raw =
+        MlsGroup::load(provider.storage(), &GroupId::from_slice(conv_id.as_bytes())).unwrap().unwrap();
+    let before = MlsGroupJoinConfig::default();
+    assert_eq!(raw.configuration().wire_format_policy(), before.wire_format_policy());
+    assert_eq!(raw.configuration().padding_size(), before.padding_size());
+    assert_eq!(
+        raw.configuration().sender_ratchet_configuration().maximum_forward_distance(),
+        super::provider::MAXIMUM_FORWARD_DISTANCE
+    );
+
+}
+
+/// Every group this device creates starts with the wide window — stored, not
+/// only applied on load.
+#[test]
+fn a_created_group_starts_with_the_wide_window() {
+    let conv_id = "01JTEST0000000000000WINNEW";
+    let db = make_db();
+    create_mls_group_in_suite(&PollisProvider::new(&db), conv_id, 0, "carol", "carol_dev", CS_PQ)
+        .unwrap();
+    let group_id = super::generation::mls_group_id(conv_id, 0);
+    let provider = PollisProvider::new(&db);
+    let raw = MlsGroup::load(provider.storage(), &group_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        raw.configuration().sender_ratchet_configuration().out_of_order_tolerance(),
+        super::provider::OUT_OF_ORDER_TOLERANCE
+    );
 }
