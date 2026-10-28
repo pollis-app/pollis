@@ -136,7 +136,10 @@ export function PinKeypad({
                 accessibilityRole="button"
                 accessibilityLabel={back ? t("keys.delete") : k}
                 accessibilityState={{ disabled: !!disabled }}
-                onPress={() => {
+                // On touch-down, not release: a digit is undone by the delete
+                // key at no cost, so the pad answers the moment a finger lands
+                // instead of a beat later when it lifts.
+                onPressIn={() => {
                   haptic("keyTap");
                   if (back) {
                     onBackspace();
