@@ -128,6 +128,7 @@ type VerifyingKey = ml_dsa::VerifyingKey<MlDsa44>;
 
 use crate::db::Db;
 use crate::error::AuthRejection;
+use crate::last_seen::LastSeenThrottle;
 
 /// Replay window, in seconds, on either side of the server clock. See module
 /// docs for the tradeoff.
@@ -281,12 +282,23 @@ struct Inner {
 ///
 /// `Clone` is shallow (shared `Arc`), so it rides on the `Clone` `AppState`
 /// exactly like [`crate::session::SessionStore`].
+///
+/// It also carries the `last_seen` throttle ([`LastSeenThrottle`]): the cache
+/// already rides on every cached verification, which is exactly where a device
+/// proves it is alive, so the throttle needs no plumbing of its own.
 #[derive(Clone, Default)]
 pub struct DeviceKeyCache {
     inner: Arc<Mutex<Inner>>,
+    last_seen: LastSeenThrottle,
 }
 
 impl DeviceKeyCache {
+    /// The `last_seen` throttle that rides on this cache (see
+    /// [`crate::last_seen`]).
+    pub fn last_seen(&self) -> &LastSeenThrottle {
+        &self.last_seen
+    }
+
     /// Consult the cache for `(user_id, device_id)`.
     ///
     /// A live, in-TTL key is a [`Lookup::Hit`]. Anything else — no slot, a bare
@@ -779,6 +791,14 @@ async fn verify_request_inner(
     verifying_key
         .verify(&message, &creds.signature)
         .map_err(|_| AuthRejection::Unauthorized)?;
+
+    // The device just proved it is alive: bump its `last_seen`, throttled and
+    // off the critical path (spawned; a failure never fails this request). Only
+    // the cached path — the shipping DS — has a throttle to hang this on and a
+    // pool handle to spawn with; the uncached entry points are test harnesses.
+    if let (Some(c), KeySource::Db(db)) = (cache, source) {
+        c.last_seen().note(db, &creds.user_id, &creds.device_id, now);
+    }
 
     Ok((creds.user_id, creds.device_id))
 }

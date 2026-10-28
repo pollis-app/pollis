@@ -609,6 +609,21 @@ races, and duplicate deliveries. All are additive to the flows above.
     `max_instances` breaks this** — a sibling instance would keep serving a
     revoked device's key for up to the TTL — so it would require dropping the
     cache or replacing eviction with a shared signal.
+- **`user_device.last_seen` is bumped on the auth path** (`pollis-delivery/src/last_seen.rs`).
+  #987 dropped the client's direct `last_seen` touch and nothing replaced it, so
+  Settings → Devices showed every device's creation time. Now, after a cached
+  verification succeeds (`auth::verify_request_inner` — every production
+  device-signed endpoint), the DS spawns `UPDATE user_device SET last_seen =
+  datetime('now') WHERE device_id = ? AND user_id = ? AND revoked_at IS NULL`,
+  bound to both halves of the verified identity. Throttled by an in-process
+  `LastSeenThrottle` (rides inside `DeviceKeyCache`) to one write per device per
+  `LAST_SEEN_BUMP_INTERVAL_SECS` (15 min); fire-and-forget, a failure is logged,
+  releases the slot for a retry, and never fails the request. Not
+  security-relevant if the single-instance assumption breaks (N instances ⇒ ≤ N
+  bumps per interval). Nothing else is recorded (no IP, no user agent). The only
+  reader is `account_reads::devices` (own-device management columns); #720
+  retention staleness keys on `conversation_watermark.reported_at`, not
+  `last_seen`, so it is unaffected.
 
 ## Post-quantum suite: birth, migration, retirement (#454, #669)
 

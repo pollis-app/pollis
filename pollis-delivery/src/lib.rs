@@ -43,6 +43,7 @@ pub mod groups;
 pub mod links;
 pub mod headers;
 pub mod invite_token;
+pub mod last_seen;
 pub mod messages;
 pub mod ops_log;
 pub mod otp;

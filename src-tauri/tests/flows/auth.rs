@@ -1,4 +1,7 @@
-use crate::harness::{expire_ds_device_keys, wipe, world, TestClient, TEST_PIN};
+use crate::harness::{
+    expire_ds_device_keys, expire_ds_last_seen_throttle, wipe, world, writable_remote, TestClient,
+    TEST_PIN,
+};
 use pollis_lib::test_harness::invoke;
 use serde_json::json;
 use serial_test::serial;
@@ -1510,5 +1513,61 @@ async fn a_stale_local_address_index_does_not_strand_an_unenrolled_device() {
         String::from_utf8(persisted).expect("utf8"),
         session_device_id,
         "the adopted id must be the persisted one"
+    );
+}
+
+// ─── Device "last seen" ─────────────────────────────────────────────────────
+
+/// Settings → Devices' "last seen" moves when a device is used. Regression: once
+/// every remote write moved behind the DS (#987) nothing bumped
+/// `user_device.last_seen` after registration, so it read as the creation time
+/// forever. The DS now bumps it on a verified device-signed request.
+///
+/// The row is backdated (creation AND last seen) to stand in for a device that
+/// registered long ago, and the DS's throttle is expired to stand in for the
+/// interval elapsing; then ordinary use must move `last_seen` past `created_at`.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn using_a_device_moves_its_last_seen_past_its_creation() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let profile = alice.sign_up("alice@test.local").await;
+    let uid = profile.id.clone();
+
+    let long_ago = "2020-01-01 00:00:00";
+    let db = writable_remote().await;
+    db.conn()
+        .await
+        .unwrap()
+        .execute(
+            "UPDATE user_device SET created_at = ?2, last_seen = ?2 WHERE user_id = ?1",
+            libsql::params![uid.clone(), long_ago],
+        )
+        .await
+        .unwrap();
+    expire_ds_last_seen_throttle(&uid);
+
+    // A few ordinary operations, each a device-signed DS call.
+    alice.create_group("Last seen").await;
+    alice.list_group_ids().await;
+
+    let mut current = serde_json::Value::Null;
+    for _ in 0..100 {
+        let devices = alice.invoke_json("list_user_devices", json!({ "userId": uid })).await;
+        current = devices
+            .as_array()
+            .and_then(|a| a.iter().find(|d| d["is_current"] == true).cloned())
+            .expect("the current device is listed");
+        if current["last_seen"].as_str() != Some(long_ago) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(current["created_at"], long_ago, "creation time is untouched");
+    let last_seen = current["last_seen"].as_str().expect("last_seen is served");
+    assert!(
+        last_seen > long_ago,
+        "last_seen moves past created_at once the device is used: {current}"
     );
 }

@@ -1358,3 +1358,180 @@ async fn a_failed_key_lookup_never_authenticates_and_is_never_cached() {
         Err(AuthRejection::Unavailable)
     );
 }
+
+// ─── `last_seen` bump on a verified request ──────────────────────────────────
+
+const LONG_AGO: &str = "2020-01-01 00:00:00";
+
+/// Backdate a device's `last_seen` so a bump is observable at second precision.
+async fn set_last_seen(db: &Db, device_id: &str, value: &str) {
+    let conn = db.conn().await.unwrap();
+    conn.execute(
+        "UPDATE user_device SET last_seen = ?2 WHERE device_id = ?1",
+        libsql::params![device_id, value],
+    )
+    .await
+    .unwrap();
+}
+
+async fn last_seen_of(db: &Db, device_id: &str) -> String {
+    let conn = db.conn().await.unwrap();
+    let mut rows = conn
+        .query(
+            "SELECT last_seen FROM user_device WHERE device_id = ?1",
+            libsql::params![device_id],
+        )
+        .await
+        .unwrap();
+    rows.next().await.unwrap().expect("device row").get(0).unwrap()
+}
+
+/// The bump is spawned off the request, so wait (bounded) for it to land.
+async fn await_last_seen_bumped(db: &Db, device_id: &str) {
+    for _ in 0..200 {
+        if last_seen_of(db, device_id).await != LONG_AGO {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!("last_seen of {device_id} was never bumped");
+}
+
+/// Give a (wrongly) spawned write every chance to land before asserting it didn't.
+async fn settle() {
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+}
+
+/// One cached verification of a signed request from `dev-alice`, at clock `t`.
+async fn verify_alice_at(cache: &DeviceKeyCache, db: &Db, sk: &SigningKey<MlDsa44>, t: i64) {
+    let path = "/v1/commits/since";
+    let body = since_body_json("conv1", 0, 1);
+    let headers = signed_headers(path, "alice", "dev-alice", t, sk, &body);
+    verify_request_identity_cached(cache, db, &headers, "POST", path, &body, t)
+        .await
+        .expect("verifies");
+}
+
+/// A signed request through the real router bumps `last_seen` for the signing
+/// device — and for no other device, neither a sibling nor another account's.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_verified_request_bumps_last_seen_of_that_device_only() {
+    let db = fresh_db().await;
+    let alice = gen_signing_key();
+    let sibling = gen_signing_key();
+    let bob = gen_signing_key();
+    seed_device(&db, "alice", "dev-alice", &alice.verifying_key()).await;
+    seed_device(&db, "alice", "dev-alice-2", &sibling.verifying_key()).await;
+    seed_device(&db, "bob", "dev-bob", &bob.verifying_key()).await;
+    for d in ["dev-alice", "dev-alice-2", "dev-bob"] {
+        set_last_seen(&db, d, LONG_AGO).await;
+    }
+
+    let state = AppState::new(Arc::clone(&db), true);
+    let since = since_body_json("conv1", 0, 1);
+    assert_eq!(
+        signed_call(&state, "/v1/commits/since", "alice", "dev-alice", &alice, &since).await,
+        StatusCode::OK
+    );
+
+    await_last_seen_bumped(&db, "dev-alice").await;
+    settle().await;
+    assert_eq!(state.device_keys.last_seen().writes(), 1);
+    assert_eq!(last_seen_of(&db, "dev-alice-2").await, LONG_AGO, "sibling untouched");
+    assert_eq!(last_seen_of(&db, "dev-bob").await, LONG_AGO, "other account untouched");
+}
+
+/// Throttle: further verified requests inside the interval claim no write; one
+/// at the interval does.
+#[tokio::test(flavor = "multi_thread")]
+async fn last_seen_is_bumped_at_most_once_per_interval() {
+    use pollis_delivery::last_seen::LAST_SEEN_BUMP_INTERVAL_SECS;
+    let db = fresh_db().await;
+    let sk = gen_signing_key();
+    seed_device(&db, "alice", "dev-alice", &sk.verifying_key()).await;
+    set_last_seen(&db, "dev-alice", LONG_AGO).await;
+
+    let cache = DeviceKeyCache::default();
+    let t0 = now();
+    verify_alice_at(&cache, &db, &sk, t0).await;
+    await_last_seen_bumped(&db, "dev-alice").await;
+    assert_eq!(cache.last_seen().writes(), 1);
+
+    // Inside the window: no write is claimed, so the backdated value stays.
+    set_last_seen(&db, "dev-alice", LONG_AGO).await;
+    verify_alice_at(&cache, &db, &sk, t0 + 60).await;
+    verify_alice_at(&cache, &db, &sk, t0 + LAST_SEEN_BUMP_INTERVAL_SECS - 1).await;
+    settle().await;
+    assert_eq!(cache.last_seen().writes(), 1, "no second write inside the interval");
+    assert_eq!(last_seen_of(&db, "dev-alice").await, LONG_AGO);
+
+    // At the interval: bumped again.
+    verify_alice_at(&cache, &db, &sk, t0 + LAST_SEEN_BUMP_INTERVAL_SECS).await;
+    await_last_seen_bumped(&db, "dev-alice").await;
+    assert_eq!(cache.last_seen().writes(), 2);
+}
+
+/// A revoked device is refused before any bump is claimed — and the write
+/// itself skips a revoked row, covering a revoke that lands between the
+/// verification and the spawned UPDATE.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_revoked_device_is_never_bumped() {
+    let db = fresh_db().await;
+    let sk = gen_signing_key();
+    seed_revoked_device(&db, "alice", "dev-alice", &sk.verifying_key()).await;
+    set_last_seen(&db, "dev-alice", LONG_AGO).await;
+
+    let state = AppState::new(Arc::clone(&db), true);
+    let since = since_body_json("conv1", 0, 1);
+    assert_eq!(
+        signed_call(&state, "/v1/commits/since", "alice", "dev-alice", &sk, &since).await,
+        StatusCode::UNAUTHORIZED
+    );
+    settle().await;
+    assert_eq!(state.device_keys.last_seen().writes(), 0);
+    assert_eq!(last_seen_of(&db, "dev-alice").await, LONG_AGO);
+
+    let conn = db.conn().await.unwrap();
+    assert_eq!(
+        pollis_delivery::last_seen::touch_last_seen(&conn, "alice", "dev-alice")
+            .await
+            .unwrap(),
+        0,
+        "the UPDATE itself refuses a revoked row"
+    );
+    assert_eq!(last_seen_of(&db, "dev-alice").await, LONG_AGO);
+}
+
+/// Another account's device is never bumped: naming it in the headers fails
+/// verification (the key is looked up by BOTH ids), and the write is bound to
+/// both ids too, so a mismatched pair changes nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn another_accounts_device_is_never_bumped() {
+    let db = fresh_db().await;
+    let alice = gen_signing_key();
+    let bob = gen_signing_key();
+    seed_device(&db, "alice", "dev-alice", &alice.verifying_key()).await;
+    seed_device(&db, "bob", "dev-bob", &bob.verifying_key()).await;
+    set_last_seen(&db, "dev-alice", LONG_AGO).await;
+
+    // Bob, signing with his own key, names Alice's device under his user id.
+    let state = AppState::new(Arc::clone(&db), true);
+    let since = since_body_json("conv1", 0, 1);
+    assert_eq!(
+        signed_call(&state, "/v1/commits/since", "bob", "dev-alice", &bob, &since).await,
+        StatusCode::UNAUTHORIZED
+    );
+    settle().await;
+    assert_eq!(state.device_keys.last_seen().writes(), 0);
+    assert_eq!(last_seen_of(&db, "dev-alice").await, LONG_AGO);
+
+    let conn = db.conn().await.unwrap();
+    assert_eq!(
+        pollis_delivery::last_seen::touch_last_seen(&conn, "bob", "dev-alice")
+            .await
+            .unwrap(),
+        0,
+        "the UPDATE is bound to the owner, not just the device id"
+    );
+    assert_eq!(last_seen_of(&db, "dev-alice").await, LONG_AGO);
+}
