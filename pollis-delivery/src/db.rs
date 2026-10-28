@@ -235,6 +235,10 @@ const REMOTE_PRAGMAS: PerConnPragmas = &[];
 /// handle, one pool, no cross-handle lock contention to time out on.
 const LOCAL_PRAGMAS: PerConnPragmas = &["PRAGMA busy_timeout=5000", "PRAGMA foreign_keys=OFF"];
 
+/// `Clone` is shallow: a clone shares the same `Database` and the same pool, so
+/// a task spawned off a request (e.g. the `last_seen` bump) can own a handle
+/// without opening a second one.
+#[derive(Clone)]
 pub struct Db {
     db: Arc<Database>,
     pool: Arc<Pool>,

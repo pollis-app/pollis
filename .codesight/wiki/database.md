@@ -912,7 +912,7 @@ that class of bug.
 - `user_id` TEXT NOT NULL FK users
 - `device_name` TEXT
 - `created_at` TEXT NOT NULL DEFAULT now
-- `last_seen` TEXT NOT NULL DEFAULT now
+- `last_seen` TEXT NOT NULL DEFAULT now _(set on register; bumped by the DS on a verified device-signed request, at most every 15 min per device — `pollis-delivery/src/last_seen.rs`. Read only by the Devices list)_
 - `device_cert` BLOB _(migration 13; since #668 a **v2** cert — a 2420-byte ML-DSA-44 signature by `account_id_pub` binding BOTH leaf keys below, so neither is uncertified. It was the classic→PQ overlap that needed that; #669 ended the overlap but the cert format and both keys are unchanged)_
 - `cert_issued_at` TEXT _(migration 13)_
 - `cert_identity_version` INTEGER _(migration 13)_
