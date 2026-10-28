@@ -14,6 +14,8 @@
 # Both devices need a Release build against a dev DS that has the link
 # endpoints, and .maestro/.env filled in.
 set -euo pipefail
+# shellcheck source=maestro-app-id.sh
+source "$(dirname "$0")/maestro-app-id.sh"
 
 EXISTING="${1:?usage: maestro-qr-link.sh <signed-in-device-id> <new-device-id>}"
 NEW="${2:?usage: maestro-qr-link.sh <signed-in-device-id> <new-device-id>}"

@@ -1,4 +1,4 @@
-appId: com.pollis.mobile
+appId: ${MAESTRO_APP_ID}
 ---
 # Admin: create a group, then reach it from the Groups tab's group pill strip
 # (no channel). A pill (row-group-<id>) switches the panel in place on the tab

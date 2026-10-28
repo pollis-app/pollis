@@ -18,6 +18,8 @@
 # in, and POLLIS_DEV_ACCESS_KEY for the dev gate (read from Doppler
 # `dev_personal` when unset).
 set -euo pipefail
+# shellcheck source=maestro-app-id.sh
+source "$(dirname "$0")/maestro-app-id.sh"
 
 DEVICE="${1:?usage: maestro-membership.sh <device-id>}"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"

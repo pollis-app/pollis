@@ -12,6 +12,8 @@
 # Both devices need a Release build against the dev DS (see .maestro/README.md)
 # and .maestro/.env filled in. Device ids: `xcrun simctl list devices` / `adb devices`.
 set -euo pipefail
+# shellcheck source=maestro-app-id.sh
+source "$(dirname "$0")/maestro-app-id.sh"
 
 EXISTING="${1:?usage: maestro-device-link.sh <existing-device-id> <new-device-id>}"
 NEW="${2:?usage: maestro-device-link.sh <existing-device-id> <new-device-id>}"

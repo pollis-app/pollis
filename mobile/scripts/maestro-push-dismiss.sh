@@ -20,6 +20,8 @@
 #   4. the app is closed, the peer sends again -> one notification, posted with
 #      no app process; cold start, read from the list -> the tray must be empty.
 set -euo pipefail
+# shellcheck source=maestro-app-id.sh
+source "$(dirname "$0")/maestro-app-id.sh"
 
 DEVICE="${1:?usage: maestro-push-dismiss.sh <android-device-id>}"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"

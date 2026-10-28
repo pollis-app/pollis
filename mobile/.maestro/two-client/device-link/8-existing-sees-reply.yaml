@@ -1,4 +1,4 @@
-appId: com.pollis.mobile
+appId: ${MAESTRO_APP_ID}
 ---
 # #1291: the reverse direction (new device → existing) arrives live too.
 - extendedWaitUntil:
