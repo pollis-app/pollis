@@ -682,6 +682,78 @@ async fn revoking_a_device_records_a_security_event() {
     );
 }
 
+/// Revoking returns once the device is tombstoned, and the leaf removal that
+/// follows in the background still reaches the tree — with a second revoke
+/// landing while that pass runs, which must coalesce into one queued pass
+/// rather than lose or duplicate the work.
+///
+/// `revoke_device` used to reconcile every group and DM before it returned, one
+/// commit per conversation in series, which held "Revoking…" for minutes and
+/// made clearing several stale devices impractical. What has to survive the
+/// change is the outcome: the revoked leaf gone from the tree, with no manual
+/// reconcile or sweep from the test, and the revoking device still in it.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_revoked_device_leaves_the_tree_after_revoke_returns() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let profile = alice.sign_up("alice@test.local").await;
+    let user_id = profile.id.clone();
+    let laptop = crate::harness::enroll_second_device(&alice, "alice@test.local").await;
+    let laptop_id = laptop.state.device_id.lock().await.clone().expect("laptop device id");
+    let alice_id = alice.state.device_id.lock().await.clone().expect("alice device id");
+
+    // A second, leafless sibling — the harness enrolls only one real extra
+    // device — so its revoke arrives while the laptop's pass is running.
+    let w = world().await;
+    let conn = w.remote.conn().await.expect("remote conn");
+    let stale = "stale-sibling-revoke";
+    conn.execute(
+        "INSERT INTO user_device (device_id, user_id, device_name) VALUES (?1, ?2, ?3)",
+        libsql::params![stale, user_id.clone(), "old phone"],
+    )
+    .await
+    .expect("insert stale sibling row");
+
+    let group_id = alice.create_group("RevokeFast").await;
+    let in_tree = |tree: &[(String, String)], device: &str| tree.iter().any(|(_, d)| d == device);
+    let tree = pollis_lib::commands::mls::local_tree_members(&alice.state, &group_id).await;
+    assert!(
+        in_tree(&tree, &laptop_id),
+        "precondition: the laptop is a leaf of the group, got {tree:?}"
+    );
+
+    for device in [laptop_id.as_str(), stale] {
+        invoke::<()>(
+            &alice.webview,
+            "revoke_device",
+            json!({ "userId": user_id, "deviceId": device }),
+        )
+        .await
+        .expect("revoke_device");
+    }
+
+    // The removal runs detached, so wait for it — bounded, and with nothing
+    // from the test that could do the removal itself.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let tree = loop {
+        let tree = pollis_lib::commands::mls::local_tree_members(&alice.state, &group_id).await;
+        if !in_tree(&tree, &laptop_id) {
+            break tree;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the revoked laptop must be committed out of the tree after revoke_device \
+             returns, with no reconcile from the test; still there after 60 s: {tree:?}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    };
+    assert!(in_tree(&tree, &alice_id), "the revoking device stays in the tree, got {tree:?}");
+
+    drop(laptop);
+}
+
 /// Boot-time self-heal and its negative twin (#685, part C): the boot-time sweep
 /// must re-sign a stale LIVE sibling and must NOT re-sign a stale REVOKED one.
 ///
