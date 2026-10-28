@@ -60,7 +60,9 @@ mod common;
 /// The device-liveness staleness window these tests drive GC with (#720). Wide
 /// enough that legacy fixtures (which seed `reported_at = NULL`, treated as live)
 /// are never excluded; the #720 tests set `reported_at` and probe the boundary.
-const STALE: &str = "-6 months";
+/// The DS's own default (12 months, #1486), so the suite runs the window an
+/// unconfigured deployment gets.
+const STALE: &str = pollis_delivery::messages::DEFAULT_WATERMARK_STALE_MODIFIER;
 
 async fn fresh() -> common::TempDb {
     let db = common::TempDb::open("db.db").await;
