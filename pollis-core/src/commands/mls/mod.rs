@@ -73,7 +73,8 @@ pub use welcomes::{
 pub use group_state::{
     envelope_lineage, external_join_group, forget_local_mls_group, has_local_group, init_mls_group,
     process_pending_commits, process_pending_commits_inner, process_pending_commits_inner_with_hook,
-    publish_group_info, try_mls_decrypt, try_mls_encrypt, MlsDecryptor, ReplayBound,
+    publish_group_info, try_mls_decrypt, try_mls_decrypt_why, try_mls_encrypt, DecryptFailure,
+    DecryptFailureKind, MlsDecryptor, ReplayBound,
 };
 // Deterministic interleavings of the Welcome and external-join paths for the
 // flows suite (#1041) — see `group_state::rendezvous`.

@@ -403,7 +403,9 @@ asks `messages::loss::classify`:
 - **`lineage`** — sealed in a generation this device held but no longer does.
 
 A loss writes a `[loss]` line to the on-device log (conversation, envelope,
-sealed position, where the replay went, the join floor) and, for a `message`,
+sealed position, where the replay went, the join floor) — for `failed`, with
+the step that refused it (#1520), e.g. `failed: secret reuse (message at (0, 9),
+group at (0, 9))` — and, for a `message`,
 a placeholder row (`message.undecryptable`). Clients render it as "This message
 couldn't be decrypted on this device" with no author and no message actions,
 only a link to Diagnostics (desktop `/diagnostics`, mobile Self → Diagnostics;
@@ -416,6 +418,23 @@ A lineage this device held before #1312 has no recorded join; its floor becomes
 one above the epoch the first catch-up after the upgrade started at
 (`loss::fallback_floor`), so control frames it posted before `known_envelope`
 existed cannot come back as losses. The price is that one epoch stays silent.
+
+**Why a decrypt failed (#1520).** `MlsDecryptor::decrypt` returns
+`Result<_, DecryptFailure>`: a `DecryptFailureKind` naming the step (malformed
+bytes, not a protocol message, foreign lineage, group id mismatch, no local
+group, not an application message) or the openmls error variant from
+`process_message` (`classify_decrypt_error`: secret reuse, too distant in the
+past, generation too far in the future, wrong epoch, no past epoch data, AEAD
+failure, malformed content, unknown sender, own-sender ratchet, invalid
+signature, evicted, wrong wire format, storage error, unclassified), plus the
+envelope's and the group's `(generation, epoch)`. The sender's leaf index and
+ratchet generation are inside the encrypted sender data and the pinned openmls
+does not put them in its errors, so they are not logged. The reason rides
+`Ingested::Failed` into `record_losses`, and the failure is also logged when it
+happens as `[decrypt] <conv>: <type> <id> would not open — <reason>`, once per
+envelope id per process and again only if the reason changes
+(`ingest::first_sighting`). `try_mls_decrypt` keeps its `Option` shape;
+`try_mls_decrypt_why` returns the reason.
 
 Tests: `src-tauri/tests/flows/lost_messages.rs` forces a strand (a bare commit
 replay) and a decrypt failure (`messages::test_hooks::corrupt_next_send`, a

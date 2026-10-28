@@ -66,8 +66,50 @@ enum Ingested {
     Opened(Option<String>),
     /// The bytes would not open at the epoch they claim. Unless the envelope is
     /// this device's own, what it carried is gone for good once the cursor
-    /// passes it.
-    Failed,
+    /// passes it. Carries why (#1520), for the `[loss]` line.
+    Failed(crate::commands::mls::DecryptFailure),
+}
+
+/// The last failure reason logged per envelope id (#1520), so a decrypt failure
+/// is logged the first time it happens and again only if its reason changes —
+/// not on every ingest pass that retries the same envelope.
+static LOGGED_FAILURES: std::sync::Mutex<
+    Option<HashMap<String, crate::commands::mls::DecryptFailureKind>>,
+> = std::sync::Mutex::new(None);
+
+/// Past this many remembered envelopes the memory is cleared rather than
+/// grown: the worst case is one repeated line per envelope, not a leak.
+const LOGGED_FAILURES_CAP: usize = 4096;
+
+/// Whether this failure of envelope `id` is new to this process — never seen,
+/// or seen with a different reason. Records it either way.
+fn first_sighting(id: &str, kind: crate::commands::mls::DecryptFailureKind) -> bool {
+    let Ok(mut guard) = LOGGED_FAILURES.lock() else {
+        return true;
+    };
+    let seen = guard.get_or_insert_with(HashMap::new);
+    if seen.get(id) == Some(&kind) {
+        return false;
+    }
+    if seen.len() >= LOGGED_FAILURES_CAP {
+        seen.clear();
+    }
+    seen.insert(id.to_string(), kind);
+    true
+}
+
+/// Log a decrypt failure as it happens (#1520), once per envelope and reason.
+/// Ids, positions and the failing step only — never content or key material.
+fn note_decrypt_failure(
+    conversation_id: &str,
+    env_type: &str,
+    id: &str,
+    why: &crate::commands::mls::DecryptFailure,
+) -> Ingested {
+    if first_sighting(id, why.kind) {
+        crate::diag!("[decrypt] {conversation_id}: {env_type} {id} would not open — {why}");
+    }
+    Ingested::Failed(*why)
 }
 
 /// Decide a delete tombstone's fate from its redaction outcome. Pure so the
@@ -571,7 +613,8 @@ async fn ingest_group_envelopes_interleaved(
     // attempted and failed (#1312).
     let mut first_fired_epoch: Option<(i64, u64)> = None;
     let mut fired: HashSet<(i64, u64)> = HashSet::new();
-    let mut failed: HashSet<(usize, usize)> = HashSet::new();
+    let mut failed: HashMap<(usize, usize), crate::commands::mls::DecryptFailure> =
+        HashMap::new();
     // Per-conversation batch of messages newly persisted on this pass — the
     // delivery receipts (#857) this device owes once the replay is done.
     let mut newly_delivered: Vec<Vec<String>> = vec![Vec::new(); per_conv.len()];
@@ -598,7 +641,8 @@ async fn ingest_group_envelopes_interleaved(
                     // The epoch counts as reached, so the cursor passes these
                     // like any per-envelope failure — and like one, they are
                     // recorded as failed (#1312).
-                    failed.extend(indices.iter().copied());
+                    let why = crate::commands::mls::DecryptFailure::no_local_group();
+                    failed.extend(indices.iter().map(|&at| (at, why)));
                     return;
                 };
                 for &(ci, ei) in indices {
@@ -619,8 +663,8 @@ async fn ingest_group_envelopes_interleaved(
                             newly_delivered[ci].push(delivered_id);
                         }
                         Ingested::Opened(None) => {}
-                        Ingested::Failed => {
-                            failed.insert((ci, ei));
+                        Ingested::Failed(why) => {
+                            failed.insert((ci, ei), why);
                         }
                     }
                 }
@@ -789,8 +833,8 @@ struct Replay<'a> {
     reached: (i64, u64),
     /// Every position it reached.
     fired: &'a HashSet<(i64, u64)>,
-    /// `(conversation, envelope)` indices attempted and not opened.
-    failed: &'a HashSet<(usize, usize)>,
+    /// `(conversation, envelope)` indices attempted and not opened, with why.
+    failed: &'a HashMap<(usize, usize), crate::commands::mls::DecryptFailure>,
 }
 
 /// Write a placeholder (and a log line) for every message envelope this pass's
@@ -831,9 +875,9 @@ fn record_losses(
                 continue;
             };
             let attempted = replay.fired.contains(&sealed_at);
-            let failed = replay.failed.contains(&(ci, ei));
+            let why = replay.failed.get(&(ci, ei));
             // Opened (or a control frame, or already held).
-            if attempted && !failed {
+            if attempted && why.is_none() {
                 continue;
             }
             if super::loss::has_real_row(conn, id) || super::loss::is_known_envelope(conn, id) {
@@ -844,12 +888,16 @@ fn record_losses(
                 pre_join += 1;
                 continue;
             };
+            // `failed: secret reuse (...)` — the openmls step that refused it (#1520).
+            let label = match why {
+                Some(why) => format!("{}: {why}", reason.as_str()),
+                None => reason.as_str().to_string(),
+            };
             crate::diag!(
-                "[loss] {cid}: {env_type} {id} sealed at ({}, {}) lost on this device — {} \
+                "[loss] {cid}: {env_type} {id} sealed at ({}, {}) lost on this device — {label} \
                  (device went from ({}, {}) to ({}, {}), joined at {floor:?})",
                 sealed_at.0,
                 sealed_at.1,
-                reason.as_str(),
                 replay.start.0,
                 replay.start.1,
                 replay.reached.0,
@@ -910,10 +958,12 @@ fn decrypt_and_persist_one(
             // ciphertext, NOT the server-writable `message_envelope.sender_id`
             // tuple field (which may be a blinded sentinel under sealed sender).
             // See `docs/metadata-minimization-design.md` §2.
-            let Some((plain, cred_sender)) = decryptor.decrypt(bytes) else {
+            let (plain, cred_sender) = match decryptor.decrypt(bytes) {
+                Ok(opened) => opened,
                 // Whether this is a loss is decided once the cursor's position
-                // is known (`record_losses`), not here.
-                return Ingested::Failed;
+                // is known (`record_losses`), not here; why it failed is logged
+                // now (#1520).
+                Err(why) => return note_decrypt_failure(conversation_id, env_type, id, &why),
             };
             // Whatever it turns out to be, it opened. A control frame leaves no
             // row: remember it opened, and drop any placeholder standing in
@@ -1033,8 +1083,11 @@ fn decrypt_and_persist_one(
                 // authorship is proven here, cryptographically — neither the
                 // server nor another member can edit a message they did not write.
                 // A mismatched or unknown-target edit is silently dropped.
-                let Some((plain, cred_sender)) = decryptor.decrypt(bytes) else {
-                    return Ingested::Failed;
+                let (plain, cred_sender) = match decryptor.decrypt(bytes) {
+                    Ok(opened) => opened,
+                    Err(why) => {
+                        return note_decrypt_failure(conversation_id, env_type, id, &why);
+                    }
                 };
                 // An edit leaves no row under its own id.
                 super::loss::record_opened_envelope(conn, id);
@@ -1142,6 +1195,24 @@ pub async fn ingest_dm_envelopes(
     state: &Arc<AppState>,
 ) -> Result<()> {
     ingest_dm_envelopes_inner(state, &user_id, &dm_channel_id).await
+}
+
+#[cfg(test)]
+mod failure_log_tests {
+    //! #1520: a decrypt failure is logged when it first happens, and again only
+    //! when its reason changes — not on every retry pass of the same envelope.
+    use super::first_sighting;
+    use crate::commands::mls::DecryptFailureKind as K;
+
+    #[test]
+    fn a_failure_is_logged_once_per_envelope_and_reason() {
+        let id = "01JT1520DEDUPEENVELOPE0000";
+        assert!(first_sighting(id, K::AeadFailure), "first failure is logged");
+        assert!(!first_sighting(id, K::AeadFailure), "the same reason on a retry is not");
+        assert!(first_sighting(id, K::SecretReuse), "a changed reason is");
+        assert!(!first_sighting(id, K::SecretReuse));
+        assert!(first_sighting("01JT1520OTHERENVELOPE00000", K::SecretReuse), "per envelope");
+    }
 }
 
 #[cfg(test)]
