@@ -74,7 +74,7 @@ Exactly 30 characters.
 > • No server-side message history mining: the operator cannot read message content, full stop
 >
 > HONEST LIMITS
-> Pollis is an open preview of a proof-of-concept, run by an individual developer. Expect rough
+> Pollis is an open preview of a proof-of-concept, run by Pollis Inc. Expect rough
 > edges in the interface. Message delivery is the part treated as non-negotiable. Messages sent
 > before you joined a conversation are cryptographically unreadable to you, and a brand-new
 > device starts with no history — that is what end-to-end encryption without key escrow means.
@@ -113,7 +113,7 @@ rejection under 2.3.7.
 | Privacy Policy URL (both stores) | `https://pollis.com/privacy.html` |
 | Terms of Service / EULA | `https://pollis.com/terms.html` (App Store: leave "standard Apple EULA" selected unless you want the custom one; Play: enter the URL) |
 | Play account-deletion URL (required — Play asks for a web resource describing deletion) | `https://pollis.com/privacy.html#deletion` |
-| Copyright (App Store field) | `© 2026 Daniel Kral` |
+| Copyright (App Store field) | `© 2026 Pollis Inc.` |
 
 ---
 
