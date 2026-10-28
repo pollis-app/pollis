@@ -92,13 +92,26 @@ tags:
 # to its busy state at once (spinner + "Unlocking…", keys disabled) while
 # Argon2id derives the key and the encrypted database opens, never a frozen
 # pad. The last tap skips Maestro's settle wait: the busy state lasts only as
-# long as the unlock, so the assertion has to look straight away.
+# long as the unlock, so the check has to look straight away.
+#
+# On a fast device or a Release build the unlock can finish before Maestro's
+# first look, so a bare `assertVisible: pin-busy` raced it (#1530). The check
+# is therefore "within a second of the fourth tap the pad is either busy or
+# already gone" — the busy indicator, or a screen the unlock navigates to. A
+# frozen pad (four dots, no spinner, still on the PIN screen) matches neither
+# and fails it. An unlock that finishes inside that second can't be told
+# apart from a sub-second freeze, but neither is a perceptibly frozen screen,
+# which is the rule this guards.
 - stopApp
 - launchApp
 - extendedWaitUntil:
     visible:
       id: "screen-auth-pin"
     timeout: 20000
+# None of the "already gone" screens may be on screen yet, or the check after
+# the fourth tap would pass without the pad doing anything.
+- assertNotVisible:
+    id: "screen-auth-initializing|screen-groups|tab-groups"
 - tapOn:
     id: "btn-pin-1"
 - tapOn:
@@ -108,9 +121,16 @@ tags:
 - tapOn:
     id: "btn-pin-4"
     waitToSettleTimeoutMs: 0
-- assertVisible:
-    id: "pin-busy"
-- takeScreenshot: auth-06-pin-unlocking
+- extendedWaitUntil:
+    visible:
+      id: "pin-busy|screen-auth-initializing|screen-groups|tab-groups"
+    timeout: 1000
+- runFlow:
+    when:
+      visible:
+        id: "pin-busy"
+    commands:
+      - takeScreenshot: auth-06-pin-unlocking
 - extendedWaitUntil:
     visible:
       id: "tab-groups"

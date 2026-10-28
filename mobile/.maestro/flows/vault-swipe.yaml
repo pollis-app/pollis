@@ -28,9 +28,10 @@ tags:
 
 # --- Seed: twelve image entries ---
 # One image per entry, each its own encrypted upload + sealed DS write, so the
-# roll also crosses entry boundaries (grid order = newest entry first). The
-# picker's first cell is picked each round; which library photo it is does not
-# matter — every pick is a separate upload with its own id and filename.
+# roll also crosses entry boundaries (grid order = newest entry first). Each
+# round must attach the photo it just seeded (pick-newest-photo.yaml): the
+# swipe asserts below tell the images apart by filename, so attaching the same
+# library photo every round makes them all read alike.
 - addMedia:
     - "../fixtures/vault-swipe-01.png"
 - runFlow: ../subflows/pick-newest-photo.yaml
