@@ -5,12 +5,13 @@
 # because nothing ran it (#1042).
 #
 # Three triggers, three budgets:
-#   * weekly schedule — the real soak: unlimited runs, 10 min per target
-#     (5 targets ≈ 50 min), then the mutant "teeth" pass proving each
+#   * weekly schedule — the real soak: unlimited runs, 8 min per target
+#     (11 targets ≈ 90 min), then the mutant "teeth" pass proving each
 #     property check still catches a deliberately broken implementation.
 #   * pull_request touching the fuzz surface — a short smoke (the script's
 #     defaults: 200k runs / 20s per target), so a change to fuzz/, the
-#     script, or this workflow proves the targets still build and run.
+#     script, this workflow, or the pollis-core code the stateful and parser
+#     targets drive (#1537) proves the targets still build and run.
 #   * workflow_dispatch — the weekly soak shape, on demand.
 #
 # cargo-fuzz needs NIGHTLY while the repo pins 1.96.0 stable for reproducible
@@ -28,6 +29,11 @@ on:
       - 'fuzz/**'
       - 'scripts/fuzz-check.sh'
       - '.github/workflows/fuzz.yml'
+      - 'pollis-core/src/commands/messages/fuzz_surface.rs'
+      - 'pollis-core/src/commands/messages/framing.rs'
+      - 'pollis-core/src/commands/messages/ingest.rs'
+      - 'pollis-core/src/commands/messages/outbox.rs'
+      - 'pollis-core/src/commands/mls/fuzz_surface.rs'
   workflow_dispatch:
 
 permissions:
@@ -40,7 +46,7 @@ concurrency:
 jobs:
   fuzz:
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
+    timeout-minutes: 210
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -92,13 +98,14 @@ jobs:
 
       # Weekly soak: unlimited runs, wall-clock bounded per target. A crash is
       # a real property violation (P1–P3 no-skip, no-gap-apply,
-      # no-foreign-adopt, recovery-gate, retention floor).
+      # no-foreign-adopt, recovery-gate, retention floor, zero message loss over
+      # real MLS state, parser safety, decrypt order, outbox transitions).
       - name: Fuzz soak (weekly)
         if: github.event_name != 'pull_request'
         env:
           NIGHTLY: nightly-2026-08-30
           FUZZ_RUNS: "-1"
-          FUZZ_MAX_TOTAL_TIME: "600"
+          FUZZ_MAX_TOTAL_TIME: "480"
         run: ./scripts/fuzz-check.sh
 
       # Teeth: each target's deliberately-broken mutant must crash fast — a

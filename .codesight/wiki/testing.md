@@ -965,6 +965,15 @@ no-skip·monotone·liveness; no-gap-apply; no-foreign-adopt / no-own-rollback; t
 recovery-gate biconditional; the retention floor's non-negative · no-loss ·
 unreported-disables-Tier-1) — a violation is a fuzzer crash.
 
+Since #1537 six stateful and untrusted-input targets sit beside them
+(`mls_delivery`, `decrypt_untrusted`, `framing`, `ds_bodies`, `sealing_order`,
+`outbox`; table in `fuzz/README.md`). They reach pollis-core through the
+`fuzzing` feature's `commands::{messages,mls}::fuzz_surface`, which wraps the
+production functions without copying them. `mls_delivery` is the model-based one: real openmls
+groups on pollis-core's provider and decryptor, a model DS with the epoch gate,
+fuzzed sends / commits / adds / removes / absences / kills, and #1524's
+zero-loss invariant as the property.
+
 **Detached on purpose.** `cargo-fuzz` needs nightly, but this repo pins Rust
 1.96.0 stable for reproducible release builds, so `fuzz/` has its own
 `[workspace]` and sits in the root `Cargo.toml`'s `workspace.exclude` — it never
