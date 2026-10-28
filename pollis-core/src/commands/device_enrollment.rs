@@ -1113,7 +1113,7 @@ pub async fn reset_identity_and_recover(
         // Wipe local DB (MLS group state, cached messages — all invalid now)
         state.unload_user_db().await;
         {
-            let data_dir = crate::db::local::dirs_path();
+            let data_dir = state.local_data_dir();
             let db_path = data_dir.join(format!("pollis_{user_id}.db"));
             if db_path.exists() {
                 let _ = std::fs::remove_file(&db_path);

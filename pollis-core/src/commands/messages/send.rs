@@ -767,6 +767,15 @@ pub mod test_hooks {
         AfterEnqueue,
         /// The DS holds the envelope; this device has not recorded that.
         AfterPost,
+        /// The envelope is sealed (the sender's ratchet has moved on) and
+        /// nothing has been posted (#1524).
+        AfterSeal,
+        /// A receiving device: `process_message` opened an envelope (its key is
+        /// spent) and the row is not written yet (#1524). Unlike the send-side
+        /// points this one sits inside the commit replay's epoch hook, which
+        /// has no error path, so it unwinds — a dead process runs nothing
+        /// after that point either.
+        AfterDecrypt,
     }
 
     #[cfg(feature = "test-harness")]
@@ -778,8 +787,15 @@ pub mod test_hooks {
         *NEXT_CRASH.lock().expect("NEXT_CRASH poisoned") = Some(at);
     }
 
+    /// Disarm any crash armed and never reached, so it cannot cut short an
+    /// operation it was not meant for.
+    #[cfg(feature = "test-harness")]
+    pub fn disarm_crash() {
+        *NEXT_CRASH.lock().expect("NEXT_CRASH poisoned") = None;
+    }
+
     /// Consume an armed crash at `at`. Always `false` outside the harness.
-    pub(super) fn take(at: Crash) -> bool {
+    pub(crate) fn take(at: Crash) -> bool {
         #[cfg(feature = "test-harness")]
         {
             let mut armed = NEXT_CRASH.lock().expect("NEXT_CRASH poisoned");
@@ -824,8 +840,14 @@ pub mod test_hooks {
 
     const SIMULATED_CRASH: &str = "simulated process death (test harness)";
 
-    pub(super) fn simulated_crash() -> crate::error::Error {
+    pub(crate) fn simulated_crash() -> crate::error::Error {
         crate::error::Error::Other(anyhow::anyhow!(SIMULATED_CRASH))
+    }
+
+    /// The stand-in for a death where there is no error to return: unwind, so
+    /// nothing after this point runs and every open savepoint rolls back.
+    pub(crate) fn die() -> ! {
+        panic!("{SIMULATED_CRASH}")
     }
 
     /// A dead process marks nothing failed, so neither may its stand-in.

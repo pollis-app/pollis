@@ -920,6 +920,7 @@ fn record_losses(
         );
     }
     let mut pre_join = 0usize;
+    let mut removed = 0usize;
     for (ci, (cid, envs)) in per_conv.iter().enumerate() {
         let Some((cursor, _)) = advanced.get(ci).and_then(|a| a.watermark.as_ref()) else {
             continue;
@@ -940,6 +941,13 @@ fn record_losses(
                 continue;
             }
             if super::loss::has_real_row(conn, id) || super::loss::is_known_envelope(conn, id) {
+                continue;
+            }
+            // Sealed at an epoch this device had been removed from: never
+            // addressed to it — the "while you were out" half of the accepted
+            // pre-join loss, reached before any re-add moves the floor (#1524).
+            if why.is_some_and(|w| w.kind == crate::commands::mls::DecryptFailureKind::Evicted) {
+                removed += 1;
                 continue;
             }
             let floor = crate::commands::mls::first_join(conn, mls_group_id, sealed_at.0);
@@ -973,6 +981,11 @@ fn record_losses(
             "[loss] {mls_group_id}: passed {pre_join} envelope(s) sealed before this device joined"
         );
     }
+    if removed > 0 {
+        crate::diag!(
+            "[ingest] {mls_group_id}: passed {removed} envelope(s) sealed after this device was removed"
+        );
+    }
 }
 
 /// Decrypt one `message` or `edit` envelope at the group's CURRENT epoch and
@@ -988,7 +1001,75 @@ fn record_losses(
 /// everything else: our own messages, re-ingested duplicates, edits, tombstones,
 /// group channels, and control frames (which are never themselves acknowledged,
 /// so a receipt can never trigger a receipt).
+///
+/// ## The decrypt and its row are one transaction (#1524)
+///
+/// `process_message` persists the ratchet step that spends the envelope's key
+/// before it returns ([`crate::commands::mls::MlsDecryptor`]), so a process
+/// that died between it and the row insert used to leave the key gone and no
+/// row: the next fetch hit `SecretReuse`, and a message this device had fully
+/// received was a placeholder. Both writes now sit inside one savepoint on the
+/// connection the provider writes through. A death before the release rolls
+/// the ratchet step back with the missing row, and the envelope opens on the
+/// next pass. Nothing between the two writes awaits, so only a process death
+/// (or a panic) can split them.
 fn decrypt_and_persist_one(
+    conn: &rusqlite::Connection,
+    decryptor: &mut crate::commands::mls::MlsDecryptor<'_>,
+    conversation_id: &str,
+    env: &EnvelopeRow,
+    bytes: &[u8],
+    user_id: &str,
+    is_dm: bool,
+) -> Ingested {
+    let one = OneEnvelope::begin(conn);
+    let out = open_and_persist(conn, decryptor, conversation_id, env, bytes, user_id, is_dm);
+    one.release();
+    out
+}
+
+/// The savepoint [`decrypt_and_persist_one`] holds across one envelope. Rolled
+/// back unless released — on an unwind, and, the case it exists for, never
+/// released at all when the process dies, which SQLite rolls back on the next
+/// open.
+struct OneEnvelope<'c> {
+    conn: Option<&'c rusqlite::Connection>,
+}
+
+impl<'c> OneEnvelope<'c> {
+    const SAVEPOINT: &'static str = "SAVEPOINT ingest_envelope";
+
+    fn begin(conn: &'c rusqlite::Connection) -> Self {
+        match conn.execute_batch(Self::SAVEPOINT) {
+            Ok(()) => Self { conn: Some(conn) },
+            // Not fatal: the envelope is still opened, only without the
+            // guarantee — what every pass did before #1524.
+            Err(e) => {
+                crate::diag!("[ingest] could not open the per-envelope savepoint: {e}");
+                Self { conn: None }
+            }
+        }
+    }
+
+    fn release(mut self) {
+        if let Some(conn) = self.conn.take() {
+            if let Err(e) = conn.execute_batch("RELEASE ingest_envelope") {
+                crate::diag!("[ingest] could not release the per-envelope savepoint: {e}");
+            }
+        }
+    }
+}
+
+impl Drop for OneEnvelope<'_> {
+    fn drop(&mut self) {
+        if let Some(conn) = self.conn.take() {
+            let _ = conn.execute_batch("ROLLBACK TO ingest_envelope; RELEASE ingest_envelope");
+        }
+    }
+}
+
+/// The body of [`decrypt_and_persist_one`], inside its savepoint.
+fn open_and_persist(
     conn: &rusqlite::Connection,
     // The epoch's already-loaded group (#875). Taken rather than re-derived so
     // a run of envelopes at one epoch costs one group load, not one per message.
@@ -1024,6 +1105,11 @@ fn decrypt_and_persist_one(
                 // now (#1520).
                 Err(why) => return note_decrypt_failure(conversation_id, env_type, id, &why),
             };
+            // Test-harness only: the process dies with the key spent and the
+            // row not yet written (#1524).
+            if super::send::test_hooks::take(super::send::test_hooks::Crash::AfterDecrypt) {
+                super::send::test_hooks::die();
+            }
             // Whatever it turns out to be, it opened. A control frame leaves no
             // row: remember it opened, and drop any placeholder standing in
             // for it.
@@ -1085,7 +1171,22 @@ fn decrypt_and_persist_one(
                                undecryptable = NULL
                              WHERE message.undecryptable IS NOT NULL",
                             rusqlite::params![id, conversation_id, cred_sender, bytes, text, reply_to_id, thread_id, sent_at],
-                        ).unwrap_or(0);
+                        );
+                        // The key is spent either way (the savepoint is still
+                        // released: rolling back would only re-open the same
+                        // write failure). A row that would not store is a
+                        // loss to record, not an envelope opened (#1524).
+                        let inserted = match inserted {
+                            Ok(n) => n,
+                            Err(e) => {
+                                crate::diag!("[ingest] {conversation_id}: message {id} opened but its row would not store: {e}");
+                                return Ingested::Failed(crate::commands::mls::DecryptFailure {
+                                    kind: crate::commands::mls::DecryptFailureKind::Storage,
+                                    sealed_at: None,
+                                    group_at: Some(decryptor.lineage()),
+                                });
+                            }
+                        };
                         // Delivered (#857) means exactly this: the envelope was
                         // fetched AND decrypted AND stored, here, now. Only a
                         // DM, only someone else's message, and only the first
