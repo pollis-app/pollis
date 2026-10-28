@@ -1,11 +1,11 @@
-Copyright 2026 Dan Kral (dankral01@gmail.com)
+Copyright 2026 Dan Kral (dan@pollis.com)
 
 Pollis is **source-available**, not OSI "open source." It is free to use for
 noncommercial and personal purposes under the PolyForm Noncommercial License
 1.0.0 reproduced below. Any commercial or business use requires a separate
-commercial license — contact dankral01@gmail.com.
+commercial license — contact dan@pollis.com.
 
-Required Notice: Copyright 2026 Dan Kral (dankral01@gmail.com)
+Required Notice: Copyright 2026 Dan Kral (dan@pollis.com)
 
 ---
 
