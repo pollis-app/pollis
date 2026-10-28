@@ -207,6 +207,22 @@ The replay still reaches head even with zero envelopes, so the cold-launch
 "advance every group to head" guarantee is preserved. Steady state is cheap:
 watermarks make repeat catch-ups return zero envelopes.
 
+**Within an epoch, decrypt in the order senders sealed — not channel by
+channel.** One sender's ratchet generations run across every channel of the
+group, and openmls keeps only the last 5 skipped generations per sender
+(`out_of_order_tolerance`): once it opens generation `n`, anything below `n - 5`
+is `TooDistantInThePast`, gone for good. Each epoch's run used to be built
+conversation by conversation, so a device catching a group up in one pass (a
+phone that was in the background) after a member interleaved channels opened
+the later channel's newer generations first and lost the older ones — while a
+member reading along live, in arrival order, lost nothing. The catch-up now
+carries `EnvelopeWire::arrival` (the `message_envelope` rowid: the DS's
+group-wide acceptance order, which within a conversation coincides with `seq`)
+and `ingest::into_sealing_order` stable-sorts each epoch's run by it; the
+committer's pre-merge sweep does the same. The watermark is unaffected — it is
+still computed per conversation in `seq` order. An older DS sends no `arrival`
+and the run keeps its old order. Test: `flows/cross_channel_ingest.rs`.
+
 ### Join paths never replace a confirmed group (#1220)
 
 The watermark advances past any envelope sealed below the epoch the replay
