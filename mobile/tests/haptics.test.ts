@@ -73,7 +73,7 @@ test("switches tick, from the knob and from the whole row", () => {
 });
 
 test("every PIN keypad key is felt, digits and delete alike", () => {
-  assert.match(src("components/auth/PinPad.tsx"), /onPress=\{\(\) => \{\s*haptic\("keyTap"\);/);
+  assert.match(src("components/auth/PinPad.tsx"), /onPressIn=\{\(\) => \{\s*haptic\("keyTap"\);/);
 });
 
 test("the first tap of every two-tap confirm warns", () => {
