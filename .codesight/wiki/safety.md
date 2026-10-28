@@ -135,7 +135,7 @@ two-tree-walk diff and `ReconcileOutcome::tree_before` went with the banners).
 
 What replaces the join line is the **"new" tag**: a member's messages carry a
 small "new" tag after their name for 7 days after their `group_member.joined_at`,
-in every channel of the group. `joined_at` is stamped by the DS when an invite is
+in every channel of the group (desktop draws it in the refined skin only; the terminal skin shows no tag). `joined_at` is stamped by the DS when an invite is
 ACCEPTED (or a join request / invite link admits them), never at invite time, and
 every input is server data the member list already carries, so every device —
 including one added later — tags the same messages. The group's creator is never

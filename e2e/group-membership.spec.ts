@@ -110,22 +110,26 @@ async function openChannel(page: Page, channelId: string, lastMessageId: string)
 const newTag = (page: Page, messageId: string) =>
   page.getByTestId(`message-${messageId}`).getByTestId("message-new-tag");
 
-for (const skin of ["terminal", "refined"] as const) {
-  test.describe(`new member tag — ${skin} skin`, () => {
-    test("tags a member's messages for 7 days after joining, never the creator", async ({ page }) => {
-      await boot(page, { skin, myRole: "admin" });
-      await openChannel(page, GENERAL, "m_zed");
+test("new member tag: tags a member's messages for 7 days after joining, never the creator", async ({ page }) => {
+  await boot(page, { skin: "refined", myRole: "admin" });
+  await openChannel(page, GENERAL, "m_zed");
 
-      await expect(newTag(page, "m_dana")).toHaveText("new");
-      // The creator joined with the group: never tagged.
-      await expect(newTag(page, "m_mia")).toHaveCount(0);
-      // Joined months ago.
-      await expect(newTag(page, "m_eve")).toHaveCount(0);
-      // Joined Aug 1, posted Aug 9: past the 7-day window.
-      await expect(newTag(page, "m_zed")).toHaveCount(0);
-    });
-  });
-}
+  await expect(newTag(page, "m_dana")).toHaveText("new");
+  // The creator joined with the group: never tagged.
+  await expect(newTag(page, "m_mia")).toHaveCount(0);
+  // Joined months ago.
+  await expect(newTag(page, "m_eve")).toHaveCount(0);
+  // Joined Aug 1, posted Aug 9: past the 7-day window.
+  await expect(newTag(page, "m_zed")).toHaveCount(0);
+});
+
+test("the terminal skin draws no new member tag, even for a new member", async ({ page }) => {
+  await boot(page, { skin: "terminal", myRole: "admin" });
+  await openChannel(page, GENERAL, "m_zed");
+
+  await expect(page.getByTestId("message-m_dana").getByTestId("message-content")).toBeVisible();
+  await expect(newTag(page, "m_dana")).toHaveCount(0);
+});
 
 test("the tag follows the member into every channel of the group", async ({ page }) => {
   await boot(page, { skin: "refined", myRole: "admin" });
