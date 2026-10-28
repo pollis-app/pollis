@@ -65,6 +65,8 @@ mod sealed_sender;
 mod security;
 #[path = "flows/vault.rs"]
 mod vault;
+#[path = "flows/zero_loss.rs"]
+mod zero_loss;
 // voice.rs compile-depends on the media command surface (voice_e2ee helpers +
 // the media-gated state.voice field), so it only builds with `media` on. Every
 // other flow module — MLS/adversarial/model/messaging/etc. — stays in the

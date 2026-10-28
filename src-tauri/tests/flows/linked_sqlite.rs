@@ -52,7 +52,7 @@ async fn the_harness_local_database_is_not_encrypted() {
         pollis_core::db::local::reclaim(db.conn()).expect("checkpoint");
     }
 
-    let path = pollis_core::db::local::dirs_path().join(format!("pollis_{}.db", profile.id));
+    let path = client.state.local_data_dir().join(format!("pollis_{}.db", profile.id));
     let bytes = std::fs::read(&path).expect("read local database file");
     assert_eq!(
         &bytes[..16],

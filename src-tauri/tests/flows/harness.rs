@@ -156,8 +156,9 @@ pub(crate) async fn world() -> &'static TestWorld {
 
 /// One-shot fault menu for the in-process Delivery Service.
 ///
-/// When armed, the next commit submit (`POST /v1/commits`) that the fault
-/// *applies to* is perturbed exactly once and the arm is then atomically
+/// When armed, the next commit submit (`POST /v1/commits`) — or, for the
+/// message-path faults, the next send, edit, commit fetch or cursor report —
+/// that the fault *applies to* is perturbed exactly once and the arm is then atomically
 /// consumed — so a fault set up for one operation can never bleed into a later
 /// one, even though every `#[serial]` test shares the single in-process DS
 /// (`spawn_in_process_delivery`). This generalizes the old
@@ -195,6 +196,34 @@ pub(crate) enum DsFault {
     /// never persisted, so the added member's Welcome never becomes fetchable.
     /// The new member must recover via external-join instead.
     DropWelcome,
+
+    // ── Message path (#1524) ─────────────────────────────────────────────────
+    // A "timeout" is a 504 the client sees in place of the real answer: the
+    // client sets no request timeout of its own (`ds_client`), so what a real
+    // one would hand it is an error with no knowledge of what the DS did —
+    // exactly what this is.
+    /// A message send or edit LANDS, then the client's answer is lost. The
+    /// sender believes it failed while every recipient can already fetch it.
+    SendLandsThenTimesOut,
+    /// A message send or edit times out before the DS stores anything.
+    SendTimesOutUnlanded,
+    /// A catch-up times out part-way: the envelope list arrives (and what is
+    /// sealed at the device's current epoch is decrypted), then the commit
+    /// fetch that would carry the replay further times out.
+    CatchUpTimesOutMidway,
+    /// A catch-up decrypts everything, then its cursor report times out, so
+    /// the next fetch hands the device every one of those envelopes again.
+    WatermarkTimesOut,
+}
+
+impl DsFault {
+    /// Every message-path fault, for a driver that draws one at random.
+    pub(crate) const MESSAGE_PATH: [DsFault; 4] = [
+        DsFault::SendLandsThenTimesOut,
+        DsFault::SendTimesOutUnlanded,
+        DsFault::CatchUpTimesOutMidway,
+        DsFault::WatermarkTimesOut,
+    ];
 }
 
 /// The single armed one-shot DS fault, or `None`. A `Mutex<Option<_>>` (rather
@@ -550,7 +579,8 @@ async fn spawn_in_process_delivery(main: Arc<Db>, log: Arc<Db>) -> String {
                     )
                     .with_state(fault_state)
                     .fallback_service(pollis_delivery::build_router_with_state(real_state))
-                    .layer(axum::middleware::from_fn(record_send_data));
+                    .layer(axum::middleware::from_fn(record_send_data))
+                    .layer(axum::middleware::from_fn(inject_message_fault));
                 // Bind :0 so the OS hands us a free port; read it back before serving.
                 let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
                     .await
@@ -614,6 +644,52 @@ async fn record_send_data(
         });
     }
     resp
+}
+
+/// Apply an armed message-path [`DsFault`] to the request it is for (#1524),
+/// in front of the REAL handler. Consumed only when it applies: a
+/// [`DsFault::SendLandsThenTimesOut`] armed for a send the DS then refuses
+/// (an epoch-behind 409 the client re-seals after) stays armed for the retry.
+async fn inject_message_fault(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    use pollis_api::DsRequest;
+    let path = req.uri().path();
+    let is_post = path == pollis_api::messages::SendMessageBody::PATH
+        || path == pollis_api::messages::EditMessageBody::PATH;
+    let timeout = || {
+        (
+            axum::http::StatusCode::GATEWAY_TIMEOUT,
+            "simulated timeout (test fault injection)",
+        )
+            .into_response()
+    };
+    match peek_ds_fault() {
+        Some(DsFault::SendLandsThenTimesOut) if is_post => {
+            let resp = next.run(req).await;
+            if resp.status().is_success() && take_ds_fault().is_some() {
+                return timeout();
+            }
+            resp
+        }
+        Some(DsFault::SendTimesOutUnlanded) if is_post => {
+            take_ds_fault();
+            timeout()
+        }
+        Some(DsFault::CatchUpTimesOutMidway)
+            if path == pollis_api::reads::ConversationStateBody::PATH =>
+        {
+            take_ds_fault();
+            timeout()
+        }
+        Some(DsFault::WatermarkTimesOut) if path == pollis_api::messages::WatermarkBody::PATH => {
+            take_ds_fault();
+            timeout()
+        }
+        _ => next.run(req).await,
+    }
 }
 
 /// The push audience one `POST /v1/messages/send` asked the DS for (#1431):
@@ -706,7 +782,85 @@ pub(crate) fn wake_up_count(room: &str, pred: impl Fn(&serde_json::Value) -> boo
         .count()
 }
 
+// ─── Zero-loss invariant (#1524) ────────────────────────────────────────────
+//
+// Every flow fails on a message it lost without setting out to: when a
+// `TestClient` is dropped at the end of a test that did not call
+// [`expect_losses`], its local DB must hold no undecryptable placeholder and
+// the process must have logged no `[loss]` line (the accepted pre-join pass
+// excepted — see `pollis_core::diag::loss_tap`). A lost edit leaves no
+// placeholder, only the line, which is why both are checked.
+
+static LOSSES_EXPECTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Opt this test out of the zero-loss check: it creates a loss on purpose and
+/// asserts on it itself. Reset by [`wipe`].
+pub(crate) fn expect_losses() {
+    LOSSES_EXPECTED.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+fn losses_expected() -> bool {
+    LOSSES_EXPECTED.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// `(conversation, message id, reason)` for every placeholder in `client`'s
+/// local DB, or `None` when the DB is closed (a locked or signed-out client)
+/// or stayed busy. The busy wait is bounded: a background drain spawned by an
+/// unlock can hold the lock for a moment past the test body.
+fn placeholder_rows(client: &TestClient) -> Option<Vec<(String, String, String)>> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let guard = loop {
+        if let Ok(g) = client.state.local_db.try_lock() {
+            break g;
+        }
+        if std::time::Instant::now() >= deadline {
+            return None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    let db = guard.as_ref()?;
+    let mut stmt = db
+        .conn()
+        .prepare(
+            "SELECT conversation_id, id, undecryptable FROM message
+             WHERE undecryptable IS NOT NULL",
+        )
+        .ok()?;
+    let rows = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .ok()?
+        .filter_map(|r| r.ok())
+        .collect();
+    Some(rows)
+}
+
+/// The zero-loss check one client runs as it is dropped; see the section docs.
+fn assert_no_unexpected_loss(client: &TestClient) {
+    if std::thread::panicking() || losses_expected() {
+        return;
+    }
+    let lines = pollis_core::diag::loss_tap::take();
+    let placeholders = placeholder_rows(client).unwrap_or_default();
+    if lines.is_empty() && placeholders.is_empty() {
+        return;
+    }
+    let who = client
+        .profile
+        .as_ref()
+        .map(|p| p.id.clone())
+        .unwrap_or_else(|| "<not signed in>".into());
+    panic!(
+        "zero-loss invariant (#1524): a message was lost without the test setting out to \
+         lose one (call `harness::expect_losses()` in a test that does).\n\
+         placeholders on {who}: {placeholders:#?}\n[loss] lines: {lines:#?}"
+    );
+}
+
 pub(crate) async fn wipe() {
+    LOSSES_EXPECTED.store(false, std::sync::atomic::Ordering::SeqCst);
+    pollis_core::diag::loss_tap::take();
+    pollis_core::commands::messages::test_hooks::disarm_crash();
+    clear_ds_fault();
     SENT_WAKE_UPS.lock().expect("wake-up log").clear();
     SENT_PUSH_AUDIENCES.lock().expect("push log").clear();
     let w = world().await;
@@ -1220,6 +1374,14 @@ impl TestClient {
         // covering READS too — holds at compile time, and
         // `pollis-core/tests/no_client_side_remote_reads.rs` pins it.
         let state = Arc::new(AppState::new_with_parts(config, keystore));
+        // Each client is its own device, so it gets its own local database
+        // (#1524): two devices of one account must not share a history or an
+        // MLS store. `accounts.json` and the rest stay in the shared data dir —
+        // `activate` relies on that.
+        static NEXT_DEVICE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = NEXT_DEVICE.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let dir = pollis_core::db::local::dirs_path().join(format!("device-{n}"));
+        state.local_dir.set(dir).expect("a fresh state has no local dir");
         let (app, webview) = build_client_app(state.clone()).expect("build client app");
         Self {
             _app: app,
@@ -1285,7 +1447,7 @@ impl TestClient {
     /// be attributed to whichever client signed up LAST and fail auth (401/403).
     /// Tests are `#[serial]` and each command is fully awaited before the next,
     /// so flipping the active user immediately before dispatch is race-free.
-    fn activate(&self) {
+    pub(crate) fn activate(&self) {
         if let Some(p) = &self.profile {
             let _ = pollis_lib::accounts::upsert_account(&p.id, &p.username, None);
         }
@@ -1308,6 +1470,12 @@ impl TestClient {
     ) -> Result<serde_json::Value, String> {
         self.activate();
         invoke(&self.webview, cmd, args).await
+    }
+}
+
+impl Drop for TestClient {
+    fn drop(&mut self) {
+        assert_no_unexpected_loss(self);
     }
 }
 
@@ -1757,6 +1925,22 @@ impl TestClient {
             }
         }
         all
+    }
+
+    /// Drive the group-level catch-up for `channel_id` without reading a page
+    /// — what a realtime hint or a resume does.
+    pub(crate) async fn ingest_channel(&self, channel_id: &str) {
+        self.invoke_json(
+            "ingest_channel_envelopes",
+            json!({ "userId": self.user_id(), "channelId": channel_id }),
+        )
+        .await;
+    }
+
+    /// Drain the outbox — what a reconnect, a resume or an unlock does. Returns
+    /// the drain's report (`delivered` / `failed` id lists).
+    pub(crate) async fn flush_outbox(&self) -> serde_json::Value {
+        self.invoke_json("flush_outbox", json!({})).await
     }
 
     /// Change a member's role in a group (`"admin"` or `"member"`).
