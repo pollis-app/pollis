@@ -6,12 +6,7 @@ mobile app (`mobile/`, iOS bundle id `com.pollis.ios`, Android package `com.poll
 `docs/mobile-compliance-answers.md`; this file is the listing copy plus the answers in
 fill-the-form order, and repeats a compliance answer only where a store form asks for it.
 
-**Publisher context:** published by **Daniel Kral, an individual developer** (no corporation, no
-D-U-N-S). Developer accounts: **Apple** — `dankral01@gmail.com` (team `9JF7WWYMU2`);
-**Google Play** — `dan@pollis.com`. They differ deliberately for now; consolidating means paying
-for a second Apple membership, deferred until the app earns revenue. The public support contact
-on both listings is `support@pollis.com`. The seller name shown on both stores will be the personal name — that is how individual
-accounts work on both stores, and there is no way around it short of forming an entity.
+**Publisher context:** published by **Pollis Inc.** Developer accounts are both `dan@pollis.com`: **Apple** team `8JT3WH45NZ` (since 2026-10-28; the earlier personal team `9JF7WWYMU2` under `dankral01@gmail.com` is retired, its never-approved app record renamed "Pollis Retired" and still holding `com.pollis.mobile`), and **Google Play**. The public support contact on both listings is `support@pollis.com`, and the seller name shown on both stores is Pollis Inc.
 
 ---
 

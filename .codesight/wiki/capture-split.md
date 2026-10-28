@@ -181,8 +181,7 @@ helper, never killing the host app.
 
 The helper sidecar ships through the Tauri build pipeline:
 - `src-tauri/tauri.macos.conf.json`: `externalBin`
-  `binaries/pollis-capture-macos`, Developer-ID signed, **same team
-  9JF7WWYMU2**.
+  `binaries/pollis-capture-macos`, Developer-ID signed, **same team 8JT3WH45NZ** (Pollis Inc.; was the personal team 9JF7WWYMU2 until 2026-10-28).
 - `src-tauri/build.rs` builds the per-OS helper crate and stages it at
   `src-tauri/binaries/<helper>-<triple>` automatically on every cargo
   build of the `pollis` crate. Skips when the file is already present so
