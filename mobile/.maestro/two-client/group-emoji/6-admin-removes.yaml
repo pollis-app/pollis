@@ -1,4 +1,4 @@
-appId: com.pollis.mobile
+appId: ${MAESTRO_APP_ID}
 ---
 # Admin: #1280 — sees the member's emoji with a remove control, and removing
 # it (two taps: arm, then confirm) takes it off the list.

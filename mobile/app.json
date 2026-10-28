@@ -30,7 +30,7 @@
           "UIInterfaceOrientationLandscapeRight"
         ]
       },
-      "bundleIdentifier": "com.pollis.mobile",
+      "bundleIdentifier": "com.pollis.ios",
       "privacyManifests": {
         "NSPrivacyTracking": false,
         "NSPrivacyTrackingDomains": [],

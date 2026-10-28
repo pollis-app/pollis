@@ -1,4 +1,4 @@
-appId: com.pollis.mobile
+appId: ${MAESTRO_APP_ID}
 ---
 # Attach the newest photo in the device library (the one `addMedia` just
 # seeded) through the SYSTEM picker, by accessibility label, never by

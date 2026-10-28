@@ -174,7 +174,7 @@ def png_size(path):
 def main():
     ap = argparse.ArgumentParser(description="Upload App Store screenshots via the ASC API.")
     ap.add_argument("files", nargs="+", help="PNG screenshots (globs are expanded)")
-    ap.add_argument("--bundle-id", default="com.pollis.mobile")
+    ap.add_argument("--bundle-id", default="com.pollis.ios")
     ap.add_argument("--locale", default="en-US")
     ap.add_argument("--version", help="version string; default is the editable version")
     ap.add_argument("--platform", default="IOS",

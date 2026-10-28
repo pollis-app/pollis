@@ -54,7 +54,7 @@ form factors.
    # No database credential is needed or read since #987 — the client speaks
    # only to the Delivery Service.
    ```
-   See `mobile/CLAUDE.md` for the ubrn/native steps. App id: `com.pollis.mobile`.
+   See `mobile/CLAUDE.md` for the ubrn/native steps. App id: `com.pollis.ios` on iOS, `com.pollis.mobile` on Android — flows read `${MAESTRO_APP_ID}`, which `scripts/maestro-app-id.sh` sets per device. Running `maestro` by hand, export it first.
 
    *After changing the ubrn target set* (e.g. building simulator-only slices),
    re-run `pod install`: CocoaPods bakes the xcframework's slice paths into a

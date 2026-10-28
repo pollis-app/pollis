@@ -1,4 +1,4 @@
-appId: com.pollis.mobile
+appId: ${MAESTRO_APP_ID}
 ---
 # Select the six newest photos in Android's photo picker (multi-select). Its
 # thumbnails are labelled "Photo taken on <date>"; the first two rows are

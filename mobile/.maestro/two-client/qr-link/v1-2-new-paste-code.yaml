@@ -1,4 +1,4 @@
-appId: com.pollis.mobile
+appId: ${MAESTRO_APP_ID}
 ---
 # New device, already on the manual-entry field (v1-1-new-open-manual.yaml):
 # enter the v1 code a signed-in desktop is showing (#1207).

@@ -1,4 +1,4 @@
-appId: com.pollis.mobile
+appId: ${MAESTRO_APP_ID}
 ---
 # #1291: the existing device sends while the other device of the SAME user
 # sits in the conversation, foregrounded. Step 3 left it on Security (pushed

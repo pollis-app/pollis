@@ -1,4 +1,4 @@
-appId: com.pollis.mobile
+appId: ${MAESTRO_APP_ID}
 ---
 # Peer (a plain MEMBER after join-request 1-4): #1280 — may add a custom emoji,
 # and gets no remove control for it, not even on the one they just added.

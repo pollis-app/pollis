@@ -188,7 +188,7 @@ xcodebuild -workspace ios/Pollis.xcworkspace -scheme Pollis \
   -configuration Release -destination id=<udid> \
   -derivedDataPath ios/build build
 xcrun simctl install <udid> ios/build/Build/Products/Release-iphonesimulator/Pollis.app
-xcrun simctl launch <udid> com.pollis.mobile
+xcrun simctl launch <udid> com.pollis.ios
 xcrun simctl io <udid> screenshot shot.png   # no Simulator window to look at
 ```
 

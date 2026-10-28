@@ -1,4 +1,4 @@
-appId: com.pollis.mobile
+appId: ${MAESTRO_APP_ID}
 ---
 # Peer: find the group by its slug and ask to join.
 - runFlow: ../../subflows/sign-in.yaml

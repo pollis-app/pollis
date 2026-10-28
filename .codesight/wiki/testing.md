@@ -897,7 +897,7 @@ list the directory — it must be empty:
 
 ```bash
 # iOS simulator
-ls "$(xcrun simctl get_app_container booted com.pollis.mobile data)/Library/Caches/pollis-media"
+ls "$(xcrun simctl get_app_container booted com.pollis.ios data)/Library/Caches/pollis-media"
 # Android emulator (google_apis image; `adb root` is refused on Play images)
 adb root && adb shell ls /data/data/com.pollis.mobile/cache/pollis-media
 ```
