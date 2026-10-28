@@ -3784,3 +3784,94 @@ fn a_welcome_matching_its_row_still_joins() {
     assert_eq!(raw, conv);
     assert_eq!(member_epoch(&bob_db, conv), 1);
 }
+
+// ── Decrypt failure reasons (#1520) ──────────────────────────────────────────
+
+/// A ciphertext opened twice: the second open finds the generation's key
+/// already consumed, and says so — the openmls `SecretReuseError` the ingest
+/// used to drop. This is the shape a sender reusing a ratchet generation, or
+/// this device consuming a key without storing the row, takes in the logs.
+#[test]
+fn a_replayed_ciphertext_fails_as_secret_reuse() {
+    let conv_id = "01JT1520REPLAYEDCIPHERTEXT";
+    let (alice_db, bob_db) = alice_and_bob(conv_id);
+    let ct = try_mls_encrypt(&alice_db, conv_id, b"once").unwrap();
+
+    let mut decryptor = MlsDecryptor::open(&bob_db, conv_id).expect("group is stored");
+    decryptor.decrypt(&ct).expect("the first open succeeds");
+    let why = decryptor.decrypt(&ct).expect_err("the same ciphertext must not open twice");
+    assert_eq!(why.kind, DecryptFailureKind::SecretReuse, "got {why}");
+    assert_eq!(why.sealed_at, why.group_at, "sealed at the epoch the group is at");
+    assert!(why.to_string().starts_with("secret reuse ("), "got {why}");
+    drop(decryptor);
+
+    // The single-shot path reports the same reason across a fresh group load,
+    // so the consumed key really was persisted.
+    let again = try_mls_decrypt_why(&bob_db, conv_id, &ct).expect_err("still consumed");
+    assert_eq!(again.kind, DecryptFailureKind::SecretReuse);
+}
+
+/// An envelope from another generation of the same conversation's group is a
+/// foreign lineage; one from another group entirely is a group-id mismatch.
+/// Both are refused before `process_message`, and told apart.
+#[test]
+fn a_foreign_lineage_and_a_foreign_group_are_named() {
+    let conv_id = "01JT1520FOREIGNLINEAGE0000";
+    let alice_db = make_db();
+    create_group(&alice_db, conv_id, "alice");
+    let ct_gen0 = try_mls_encrypt(&alice_db, conv_id, b"old lineage").unwrap();
+
+    // Bob holds only the successor lineage of the same conversation.
+    let bob_db = make_db();
+    {
+        let provider = PollisProvider::new(&bob_db);
+        create_mls_group_in_suite(&provider, conv_id, 1, "bob", &test_device_id("bob"), CS_PQ)
+            .unwrap();
+    }
+    // `make_db` holds only `mls_kv`; the generation pointer needs its table.
+    bob_db
+        .execute_batch(
+            "CREATE TABLE mls_generation ( \
+                 conversation_id TEXT PRIMARY KEY, \
+                 generation      INTEGER NOT NULL, \
+                 updated_at      TEXT NOT NULL DEFAULT (datetime('now')) \
+             );",
+        )
+        .unwrap();
+    super::generation::set_local_generation(&bob_db, conv_id, 1);
+    let why = try_mls_decrypt_why(&bob_db, conv_id, &ct_gen0).expect_err("other lineage");
+    assert_eq!(why.kind, DecryptFailureKind::ForeignLineage, "got {why}");
+    assert_eq!(why.sealed_at.map(|(g, _)| g), Some(0));
+    assert_eq!(why.group_at.map(|(g, _)| g), Some(1));
+
+    // A message for a different conversation's group.
+    let other = "01JT1520SOMEOTHERGROUP0000";
+    let carol_db = make_db();
+    create_group(&carol_db, other, "carol");
+    let ct_other = try_mls_encrypt(&carol_db, other, b"elsewhere").unwrap();
+    let why = try_mls_decrypt_why(&alice_db, conv_id, &ct_other).expect_err("other group");
+    assert_eq!(why.kind, DecryptFailureKind::WrongGroup, "got {why}");
+}
+
+/// Bytes that are not an MLS message at all fail at the parse step; a real
+/// header over a tampered body fails at AEAD; no group at all is its own reason.
+#[test]
+fn a_garbled_body_fails_at_parse_and_a_tampered_one_at_aead() {
+    let conv_id = "01JT1520GARBLEDBODY0000000";
+    let (alice_db, bob_db) = alice_and_bob(conv_id);
+
+    let why = try_mls_decrypt_why(&bob_db, conv_id, b"\xffnot an mls message")
+        .expect_err("garbage must not open");
+    assert_eq!(why.kind, DecryptFailureKind::Malformed, "got {why}");
+    assert_eq!(why.sealed_at, None, "nothing parsed, so no position");
+
+    let mut ct = try_mls_encrypt(&alice_db, conv_id, b"tamper me").unwrap();
+    let last = ct.len() - 1;
+    ct[last] ^= 0x01;
+    let why = try_mls_decrypt_why(&bob_db, conv_id, &ct).expect_err("tampered body");
+    assert_eq!(why.kind, DecryptFailureKind::AeadFailure, "got {why}");
+
+    let why = try_mls_decrypt_why(&make_db(), conv_id, &ct).expect_err("no group");
+    assert_eq!(why.kind, DecryptFailureKind::NoLocalGroup);
+    assert_eq!(why.to_string(), "no local group");
+}

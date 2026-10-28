@@ -2,6 +2,7 @@
 //! commit processing / external join / GroupInfo publishing.
 
 use openmls::prelude::group_info::VerifiableGroupInfo;
+use openmls::framing::errors::{MessageDecryptionError, SecretTreeError};
 use openmls::prelude::*;
 use openmls_basic_credential::SignatureKeyPair;
 use openmls_traits::OpenMlsProvider;
@@ -3060,7 +3061,184 @@ pub fn try_mls_decrypt(
     conversation_id: &str,
     ciphertext: &[u8],
 ) -> Option<(Vec<u8>, String)> {
-    MlsDecryptor::open(conn, conversation_id)?.decrypt(ciphertext)
+    try_mls_decrypt_why(conn, conversation_id, ciphertext).ok()
+}
+
+/// [`try_mls_decrypt`], keeping the reason a decrypt failed (#1520).
+pub fn try_mls_decrypt_why(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+    ciphertext: &[u8],
+) -> std::result::Result<(Vec<u8>, String), DecryptFailure> {
+    let Some(mut decryptor) = MlsDecryptor::open(conn, conversation_id) else {
+        return Err(DecryptFailure::no_local_group());
+    };
+    decryptor.decrypt(ciphertext)
+}
+
+/// Which step of opening one envelope failed (#1520).
+///
+/// The point is the diagnostic: a lost message's `[loss]` line used to say only
+/// "failed", and the openmls error that told a sender reusing a ratchet
+/// generation apart from this device consuming a key without storing the row
+/// was dropped. Every variant names a STEP or an openmls error variant, never
+/// anything derived from the plaintext or a key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DecryptFailureKind {
+    /// This device holds no group for the conversation (never joined, or forgotten).
+    NoLocalGroup,
+    /// The bytes do not TLS-deserialize as an MLS message.
+    Malformed,
+    /// An MLS message, but not a protocol message (a Welcome, GroupInfo or KeyPackage).
+    NotAProtocolMessage,
+    /// Sealed in another generation of this conversation's group (a retired or
+    /// successor lineage), which this decryptor does not hold.
+    ForeignLineage,
+    /// Sealed for a different group altogether.
+    WrongGroup,
+    /// openmls `SecretReuseError`: the key for this sender's generation was
+    /// already consumed — either this device opened the same generation before,
+    /// or the sender sealed two messages under one generation.
+    SecretReuse,
+    /// openmls `TooDistantInThePast`: the generation (or the epoch's secrets) fell
+    /// out of the retained window.
+    TooDistantInThePast,
+    /// openmls `TooDistantInTheFuture` / `GenerationOutOfBound`: the generation is
+    /// further ahead of the ratchet than the forward-distance limit.
+    TooDistantInTheFuture,
+    /// openmls `WrongEpoch`: sealed at an epoch above the group's.
+    WrongEpoch,
+    /// openmls `NoPastEpochData`: sealed at an epoch whose secrets are gone.
+    NoPastEpochData,
+    /// AEAD open of the sender data or the content failed.
+    AeadFailure,
+    /// The decrypted sender data or content did not parse.
+    MalformedContent,
+    /// The sender's leaf is not in this group's tree.
+    UnknownSender,
+    /// openmls `RatchetTypeError`: the sender leaf is this device's own.
+    OwnRatchet,
+    /// The sender's signature over the content did not verify.
+    InvalidSignature,
+    /// This device was evicted from the group.
+    Evicted,
+    /// The wire format is not a PrivateMessage, or is barred by the group's policy.
+    WrongWireFormat,
+    /// openmls could not read or write its storage.
+    Storage,
+    /// Opened, but the content is a proposal or commit, not an application message.
+    NotAnApplicationMessage,
+    /// An openmls error this code does not specifically classify.
+    Other,
+}
+
+impl DecryptFailureKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DecryptFailureKind::NoLocalGroup => "no local group",
+            DecryptFailureKind::Malformed => "malformed bytes",
+            DecryptFailureKind::NotAProtocolMessage => "not a protocol message",
+            DecryptFailureKind::ForeignLineage => "foreign lineage",
+            DecryptFailureKind::WrongGroup => "group id mismatch",
+            DecryptFailureKind::SecretReuse => "secret reuse",
+            DecryptFailureKind::TooDistantInThePast => "too distant in the past",
+            DecryptFailureKind::TooDistantInTheFuture => "generation too far in the future",
+            DecryptFailureKind::WrongEpoch => "wrong epoch",
+            DecryptFailureKind::NoPastEpochData => "no past epoch data",
+            DecryptFailureKind::AeadFailure => "AEAD failure",
+            DecryptFailureKind::MalformedContent => "malformed content",
+            DecryptFailureKind::UnknownSender => "unknown sender",
+            DecryptFailureKind::OwnRatchet => "own-sender ratchet",
+            DecryptFailureKind::InvalidSignature => "invalid signature",
+            DecryptFailureKind::Evicted => "evicted",
+            DecryptFailureKind::WrongWireFormat => "wrong wire format",
+            DecryptFailureKind::Storage => "storage error",
+            DecryptFailureKind::NotAnApplicationMessage => "not an application message",
+            DecryptFailureKind::Other => "unclassified openmls error",
+        }
+    }
+}
+
+/// Why [`MlsDecryptor::decrypt`] could not open an envelope (#1520): the
+/// failing step plus the positions involved. The sender's leaf index and ratchet
+/// generation live inside the ENCRYPTED sender data and the pinned openmls does
+/// not surface them in its errors, so they are not here; the epochs, which are
+/// in the clear header, are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DecryptFailure {
+    pub kind: DecryptFailureKind,
+    /// The `(generation, epoch)` the envelope claims, when its header parsed.
+    pub sealed_at: Option<(i64, u64)>,
+    /// The `(generation, epoch)` the decrypting group sat at, when one was loaded.
+    pub group_at: Option<(i64, u64)>,
+}
+
+impl DecryptFailure {
+    pub fn no_local_group() -> Self {
+        Self {
+            kind: DecryptFailureKind::NoLocalGroup,
+            sealed_at: None,
+            group_at: None,
+        }
+    }
+}
+
+impl std::fmt::Display for DecryptFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.kind.as_str())?;
+        match (self.sealed_at, self.group_at) {
+            (Some(m), Some(g)) => {
+                write!(f, " (message at ({}, {}), group at ({}, {}))", m.0, m.1, g.0, g.1)
+            }
+            (None, Some(g)) => write!(f, " (group at ({}, {}))", g.0, g.1),
+            (Some(m), None) => write!(f, " (message at ({}, {}))", m.0, m.1),
+            (None, None) => Ok(()),
+        }
+    }
+}
+
+/// Map an openmls `process_message` error on an APPLICATION message to the step
+/// that failed (#1520). The commit path's [`classify_process_message_error`]
+/// answers a different question (what recovery a commit failure warrants), so
+/// only its eviction case carries over. Matches the error enums, never their
+/// `Display` strings, for the reason given there (#680).
+pub(super) fn classify_decrypt_error<S>(e: &ProcessMessageError<S>) -> DecryptFailureKind {
+    use DecryptFailureKind as K;
+    use ProcessMessageError as E;
+    if classify_process_message_error(e) == RecoverReason::Evicted {
+        return K::Evicted;
+    }
+    match e {
+        E::StorageError(_) => K::Storage,
+        E::IncompatibleWireFormat => K::WrongWireFormat,
+        E::ValidationError(v) => match v {
+            ValidationError::WrongGroupId => K::WrongGroup,
+            ValidationError::WrongEpoch => K::WrongEpoch,
+            ValidationError::NoPastEpochData => K::NoPastEpochData,
+            ValidationError::UnknownMember => K::UnknownSender,
+            ValidationError::InvalidSignature => K::InvalidSignature,
+            ValidationError::WrongWireFormat | ValidationError::UnencryptedApplicationMessage => {
+                K::WrongWireFormat
+            }
+            ValidationError::UnableToDecrypt(d) => match d {
+                MessageDecryptionError::AeadError => K::AeadFailure,
+                MessageDecryptionError::MalformedContent => K::MalformedContent,
+                MessageDecryptionError::WrongWireFormat => K::WrongWireFormat,
+                MessageDecryptionError::GenerationOutOfBound => K::TooDistantInTheFuture,
+                MessageDecryptionError::SecretTreeError(t) => match t {
+                    SecretTreeError::SecretReuseError => K::SecretReuse,
+                    SecretTreeError::TooDistantInThePast => K::TooDistantInThePast,
+                    SecretTreeError::TooDistantInTheFuture => K::TooDistantInTheFuture,
+                    SecretTreeError::IndexOutOfBounds => K::UnknownSender,
+                    SecretTreeError::RatchetTypeError => K::OwnRatchet,
+                    _ => K::Other,
+                },
+                _ => K::Other,
+            },
+            _ => K::Other,
+        },
+        _ => K::Other,
+    }
 }
 
 /// A group loaded **once** for a RUN of envelopes that are all sealed at the
@@ -3120,27 +3298,57 @@ impl<'a> MlsDecryptor<'a> {
     /// Decrypt one envelope. See [`try_mls_decrypt`] for the contract — this is
     /// that function's body, and the `(plaintext, MLS-authenticated sender)`
     /// pair it returns is load-bearing for sealed sender.
-    pub fn decrypt(&mut self, ciphertext: &[u8]) -> Option<(Vec<u8>, String)> {
+    ///
+    /// On failure the error names the step that failed and, for
+    /// `process_message`, the classified openmls error (#1520) — never the
+    /// plaintext or any key material.
+    pub fn decrypt(
+        &mut self,
+        ciphertext: &[u8],
+    ) -> std::result::Result<(Vec<u8>, String), DecryptFailure> {
+        let group_at = Some(self.lineage());
+        let fail = |kind: DecryptFailureKind, sealed_at: Option<(i64, u64)>| DecryptFailure {
+            kind,
+            sealed_at,
+            group_at,
+        };
         let mut reader: &[u8] = ciphertext;
-        let msg_in = MlsMessageIn::tls_deserialize(&mut reader).ok()?;
-        let protocol_msg = msg_in.try_into_protocol_message().ok()?;
+        let msg_in = MlsMessageIn::tls_deserialize(&mut reader)
+            .map_err(|_| fail(DecryptFailureKind::Malformed, None))?;
+        let protocol_msg = msg_in
+            .try_into_protocol_message()
+            .map_err(|_| fail(DecryptFailureKind::NotAProtocolMessage, None))?;
+        let raw_group_id = String::from_utf8_lossy(protocol_msg.group_id().as_slice()).into_owned();
+        let (message_base, message_generation) = super::generation::split_mls_group_id(&raw_group_id);
+        let sealed_at = Some((message_generation, protocol_msg.epoch().as_u64()));
         // Envelopes from a RETIRED lineage cannot be decrypted by the successor,
         // and their predecessor group is gone. Fail fast rather than handing a
         // foreign-group message to `process_message`, whose error would be
         // indistinguishable from a genuine decrypt failure.
         if protocol_msg.group_id() != self.group.group_id() {
-            return None;
+            let own_raw = String::from_utf8_lossy(self.group.group_id().as_slice()).into_owned();
+            let (own_base, _) = super::generation::split_mls_group_id(&own_raw);
+            // Same conversation, other generation: a lineage this group is not.
+            let kind = if message_base == own_base {
+                DecryptFailureKind::ForeignLineage
+            } else {
+                DecryptFailureKind::WrongGroup
+            };
+            return Err(fail(kind, sealed_at));
         }
-        let processed = self.group.process_message(&self.provider, protocol_msg).ok()?;
+        let processed = self
+            .group
+            .process_message(&self.provider, protocol_msg)
+            .map_err(|e| fail(classify_decrypt_error(&e), sealed_at))?;
 
         // Grab the authenticated sender credential BEFORE `into_content` consumes it.
         let sender_user_id = parse_credential_user_id(processed.credential());
 
         match processed.into_content() {
             ProcessedMessageContent::ApplicationMessage(app_msg) => {
-                Some((app_msg.into_bytes(), sender_user_id))
+                Ok((app_msg.into_bytes(), sender_user_id))
             }
-            _ => None,
+            _ => Err(fail(DecryptFailureKind::NotAnApplicationMessage, sealed_at)),
         }
     }
 }
