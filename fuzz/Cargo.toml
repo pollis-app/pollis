@@ -36,6 +36,9 @@ openmls_memory_storage = { git = "https://github.com/openmls/openmls", rev = "34
 [dependencies]
 libfuzzer-sys = "0.4"
 arbitrary = { version = "1", features = ["derive"] }
+serde = "1"
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 # Depend on pollis-core with default features OFF so the fuzz crate does not drag
 # in the Tauri/native/media stack — pollis-core builds headless without them, and
@@ -43,6 +46,15 @@ arbitrary = { version = "1", features = ["derive"] }
 [dependencies.pollis-core]
 path = "../pollis-core"
 default-features = false
+# The narrow surface the stateful and parser targets drive (#1537): framing,
+# the catch-up partition + sealing order, the outbox transitions and the MLS
+# group configuration. openmls, rusqlite and friends are reached through it,
+# so this crate cannot link a second, differently-featured copy.
+features = ["fuzzing"]
+
+# `ds_bodies` parses the DS request bodies through their wire types.
+[dependencies.pollis-api]
+path = "../pollis-api"
 
 # The `prune_floor` target fuzzes the retention floor, which lives in the
 # Delivery Service crate (the sole writer that owns the prune). Pure integer fn —
@@ -92,6 +104,48 @@ bench = false
 [[bin]]
 name = "prune_floor"
 path = "fuzz_targets/prune_floor.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mls_delivery"
+path = "fuzz_targets/mls_delivery.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "decrypt_untrusted"
+path = "fuzz_targets/decrypt_untrusted.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "framing"
+path = "fuzz_targets/framing.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ds_bodies"
+path = "fuzz_targets/ds_bodies.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sealing_order"
+path = "fuzz_targets/sealing_order.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "outbox"
+path = "fuzz_targets/outbox.rs"
 test = false
 doc = false
 bench = false

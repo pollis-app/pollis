@@ -419,7 +419,7 @@ fn attachment_data_on(conn: &rusqlite::Connection, id: &str, n: usize) -> Result
 }
 
 /// Remove an unsent message together with any bytes it still holds.
-fn remove_unsent_on(conn: &rusqlite::Connection, id: &str) -> Result<bool> {
+pub(super) fn remove_unsent_on(conn: &rusqlite::Connection, id: &str) -> Result<bool> {
     let tx = conn.unchecked_transaction()?;
     tx.execute("DELETE FROM outbox_attachment WHERE message_id = ?1", rusqlite::params![id])?;
     let n = tx.execute(
@@ -471,7 +471,7 @@ fn not_signed_in() -> Error {
 }
 
 /// The stored row behind an id, with its send state.
-fn load(conn: &rusqlite::Connection, id: &str) -> Result<Option<(Message, Option<String>)>> {
+pub(super) fn load(conn: &rusqlite::Connection, id: &str) -> Result<Option<(Message, Option<String>)>> {
     Ok(conn
         .query_row(
             "SELECT id, conversation_id, sender_id, content, reply_to_id, thread_id, sent_at, send_state
@@ -587,11 +587,16 @@ pub(super) async fn enqueue(
 pub(super) async fn settle(state: &Arc<AppState>, id: &str) -> Result<String> {
     let guard = state.local_db.lock().await;
     let db = guard.as_ref().ok_or_else(not_signed_in)?;
-    db.conn().execute(
+    settle_on(db.conn(), id)
+}
+
+/// [`settle`] on a connection.
+pub(super) fn settle_on(conn: &rusqlite::Connection, id: &str) -> Result<String> {
+    conn.execute(
         "UPDATE message SET send_state = NULL WHERE id = ?1",
         rusqlite::params![id],
     )?;
-    Ok(db.conn().query_row(
+    Ok(conn.query_row(
         "SELECT sent_at FROM message WHERE id = ?1",
         rusqlite::params![id],
         |row| row.get(0),
@@ -608,7 +613,7 @@ fn mark_failed_on(conn: &rusqlite::Connection, id: &str, permanent: bool) -> Res
 
 /// Set an unsent row's state. A delivered row (`send_state IS NULL`) is never
 /// touched.
-fn mark_state_on(conn: &rusqlite::Connection, id: &str, send_state: &str) -> Result<()> {
+pub(super) fn mark_state_on(conn: &rusqlite::Connection, id: &str, send_state: &str) -> Result<()> {
     conn.execute(
         "UPDATE message SET send_state = ?1 WHERE id = ?2 AND send_state IS NOT NULL",
         rusqlite::params![send_state, id],

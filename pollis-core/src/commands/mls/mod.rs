@@ -16,6 +16,8 @@ mod migrate;
 // `pub(crate)` because the media-only voice key export builds its own provider
 // outside this module.
 pub(crate) mod provider;
+#[cfg(feature = "fuzzing")]
+pub mod fuzz_surface;
 mod reconcile;
 mod self_update;
 mod sweep;
