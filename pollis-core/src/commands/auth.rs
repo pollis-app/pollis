@@ -1613,11 +1613,12 @@ pub async fn list_user_devices(
     Ok(devices)
 }
 
-/// Revoke one of the calling user's devices. Deletes the `user_device` row
-/// and any unclaimed key packages, then drives an MLS reconcile across
-/// every group + DM the user is in so the revoked device's leaf is
-/// removed from each tree. The current device cannot revoke itself —
-/// `logout(delete_data: true)` is the path for that.
+/// Revoke one of the calling user's devices. Tombstones the `user_device` row
+/// and drops any unclaimed key packages, then returns; the MLS reconcile that
+/// removes the device's leaf from every group + DM tree continues in the
+/// background (see the comment above `spawn_revoked_leaf_removal`). The
+/// current device cannot revoke itself — `logout(delete_data: true)` is the
+/// path for that.
 pub async fn revoke_device(
     state: &Arc<AppState>,
     user_id: String,
@@ -1695,33 +1696,13 @@ pub async fn revoke_device(
         crate::diag!("[revoke_device] DS security-event failed (non-fatal): {e}");
     }
 
-    // Collect every conversation the user belongs to (groups + DMs) so
-    // we can reconcile each one as the calling device. One DS read (#987),
-    // scoped by the DS to the signer's own memberships.
-    let mine = crate::commands::ds_reads::conversations(state, &user_id).await?;
-    let conversation_ids: Vec<String> = mine
-        .group_ids
-        .into_iter()
-        .chain(mine.dm_ids)
-        .collect();
-
-    for cid in &conversation_ids {
-        if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
-            state,
-            cid,
-            &user_id,
-        )
-        .await
-        {
-            crate::diag!("[revoke_device] reconcile {cid} failed: {e}");
-        }
-    }
-
     // Cooperative "you've been signed out" nudge. The inbox is per-user, so
     // this reaches every device; each one re-checks its own registration via
     // `is_current_device_registered` and only the revoked device logs out.
     // Advisory UX only — a hostile/offline device that ignores this is still
     // evicted at the MLS layer (honest members reject its self-add). Non-fatal.
+    // Sent before the leaf removals, not after them: the device is already
+    // revoked, so there is no reason to keep it signed in while N commits land.
     let payload = crate::commands::livekit_signalling::device_revoked_payload();
     if let Err(e) =
         crate::commands::livekit::publish_to_user_inbox(state, &user_id, payload).await
@@ -1729,7 +1710,98 @@ pub async fn revoke_device(
         crate::diag!("[revoke_device] inbox nudge failed (non-fatal): {e}");
     }
 
+    // Removing the revoked device's leaf from every group and DM tree runs in
+    // the background, and the command returns now. The revocation itself is
+    // the tombstone above: from that write on, the DS refuses every request
+    // the device signs, so it can neither read nor post. The removals are one
+    // MLS commit per conversation, each a DS round trip under that group's MLS
+    // lock, so waiting for them held "Revoking…" on screen for minutes with a
+    // handful of groups on a slow link, and made clearing several stale
+    // devices impractical. Nothing depends on them finishing before the caller
+    // continues: every member's MLS sweep evicts a revoked leaf on its own
+    // (`leaf_verdict`), so a removal this task does not reach (the app closed,
+    // a commit lost to a race) is still made, by this device or another.
+    spawn_revoked_leaf_removal(state, user_id);
+
     Ok(())
+}
+
+/// How many conversations a leaf-removal pass reconciles at once. Each group
+/// has its own MLS lock and its own commit chain, so there is no ordering
+/// between them; the bound only keeps a pass from arriving at the DS as a
+/// burst.
+const REVOKE_RECONCILE_CONCURRENCY: usize = 4;
+
+/// Per-`AppState` state of the background leaf-removal pass: `true` while a
+/// pass runs, and whether another revoke landed during it. Keyed by the
+/// state's address, not the user, so two devices of one user in the flows
+/// harness never share it.
+static REVOKE_PASSES: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<usize, bool>>,
+> = std::sync::LazyLock::new(Default::default);
+
+/// Reconcile every group and DM `user_id` belongs to, so every revoked device's
+/// leaf is removed from each tree. See [`revoke_device`] for why this runs
+/// detached. Failures are logged and left to the sweep.
+///
+/// One pass removes EVERY device revoked by the time it reaches a conversation
+/// — the reconcile diffs the tree against the live device list — so revokes
+/// coalesce: one made while a pass runs only asks for one more pass after it,
+/// instead of starting a second walk over the same conversations. Clearing ten
+/// stale devices is then two passes, not ten.
+fn spawn_revoked_leaf_removal(state: &Arc<AppState>, user_id: String) {
+    let key = Arc::as_ptr(state) as usize;
+    {
+        let mut passes = REVOKE_PASSES.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(rerun) = passes.get_mut(&key) {
+            *rerun = true;
+            return;
+        }
+        passes.insert(key, false);
+    }
+    let state = state.clone();
+    tokio::spawn(async move {
+        loop {
+            revoked_leaf_removal_pass(&state, &user_id).await;
+            let mut passes = REVOKE_PASSES.lock().unwrap_or_else(|p| p.into_inner());
+            if passes.get(&key) == Some(&true) {
+                passes.insert(key, false);
+                continue;
+            }
+            passes.remove(&key);
+            break;
+        }
+    });
+}
+
+async fn revoked_leaf_removal_pass(state: &Arc<AppState>, user_id: &str) {
+    use futures_util::stream::StreamExt as _;
+    // One DS read (#987), scoped by the DS to the signer's own memberships.
+    let mine = match crate::commands::ds_reads::conversations(state, user_id).await {
+        Ok(mine) => mine,
+        Err(e) => {
+            crate::diag!(
+                "[revoke_device] listing conversations failed: {e} — the sweep will evict the leaf"
+            );
+            return;
+        }
+    };
+    let conversation_ids: Vec<String> = mine.group_ids.into_iter().chain(mine.dm_ids).collect();
+    let started = std::time::Instant::now();
+    futures_util::stream::iter(&conversation_ids)
+        .for_each_concurrent(REVOKE_RECONCILE_CONCURRENCY, |cid| async move {
+            if let Err(e) =
+                crate::commands::mls::reconcile_group_mls_impl(state, cid, user_id).await
+            {
+                crate::diag!("[revoke_device] reconcile {cid} failed: {e}");
+            }
+        })
+        .await;
+    crate::diag!(
+        "[revoke_device] leaf removal pass over {} conversation(s) took {} ms",
+        conversation_ids.len(),
+        started.elapsed().as_millis()
+    );
 }
 
 /// Whether the current device (`state.device_id`) is still an ACTIVE device of
