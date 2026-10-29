@@ -1978,6 +1978,14 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
 
     case 'get_emoji_url': {
       const { contentHash } = args as { contentHash: string };
+      // #1562: hashes listed here fail their FIRST resolve (a transient
+      // outage), so a spec can prove the image recovers without a remount.
+      const failFirst = (window as unknown as Record<string, unknown>)
+        .__POLLIS_EMOJI_FAIL_FIRST__ as string[] | undefined;
+      if (failFirst?.includes(contentHash)) {
+        failFirst.splice(failFirst.indexOf(contentHash), 1);
+        throw new Error('transient: emoji resolve failed once');
+      }
       const emoji = store.customEmoji.find((e) => e.content_hash === contentHash);
       if (!emoji) {
         // An emoji this device cannot resolve — deleted, or never stored.

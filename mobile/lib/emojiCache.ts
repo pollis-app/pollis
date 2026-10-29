@@ -38,6 +38,15 @@ export function resolveEmojiUri(contentHash: string): Promise<string> {
   return promise;
 }
 
+/**
+ * Drop a resolved hash so the next `resolveEmojiUri` asks the bridge again,
+ * which re-downloads and rewrites the file. For an image that failed to draw
+ * from the path it was given (the OS may have purged the cache dir).
+ */
+export function forgetEmojiUri(contentHash: string): void {
+  inFlight.delete(contentHash);
+}
+
 /** Wipe the emoji cache (sign-out hygiene). */
 export async function clearEmojiCache(): Promise<void> {
   inFlight.clear();

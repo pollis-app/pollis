@@ -709,7 +709,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 
 ### `components/Emoji` (9)
 
-- **CustomEmojiImage** — props: contentHash, shortcode, sizeRem, className — `frontend/src/components/Emoji/CustomEmojiImage.tsx`
+- **CustomEmojiImage** — props: contentHash, shortcode, sizeRem, className — `frontend/src/components/Emoji/CustomEmojiImage.tsx`. A failed resolve shows `:shortcode:` and is not final (#1562): `useEmojiImage` retries after 2 s, 10 s and 30 s, then on the window becoming visible or the network coming back. Mobile's `mobile/components/emoji/CustomEmojiImage.tsx` does the same (then on return to the foreground) and holds a plain View until resolved — a source-less RN `<Image>` fires `onError` on iOS, which used to latch every custom emoji into its text fallback there.
 - **EmojiCategoryRail** — props: entries, activeId, onJump — `frontend/src/components/Emoji/EmojiCategoryRail.tsx`
 - **EmojiCell** — props: item, toneIndex, annotations, index, onSelect, onPreview — `frontend/src/components/Emoji/EmojiCell.tsx`
 - **EmojiDropZone** — props: onPick, onReject, disabled, children — `frontend/src/components/Emoji/EmojiDropZone.tsx`. The image-first half of the custom-emoji upload (Discord's model): drop a gif/image anywhere on the window or click to browse, and the file's PATH — never its bytes — goes to the caller. Registers as an *inline* drop target so `AppShell`'s full-window drop overlay stays out of the way and this zone lights up instead; a native drag never reaches the DOM, so "drag-over" is a window-level fact rather than a hover.

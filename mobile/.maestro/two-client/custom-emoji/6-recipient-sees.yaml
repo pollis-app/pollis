@@ -1,0 +1,41 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Recipient (#1562): the sender's static and animated custom emoji render as
+# IMAGES — `emoji-image-<shortcode>` is set only once the image has drawn —
+# and never as the `:shortcode:` fallback text. The recipient never added
+# either emoji, so both come through `get_emoji_path` from the DS + R2.
+- stopApp
+- launchApp
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 30000
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    text: "(?i).*${GROUP_NAME}.*"
+    index: 0
+- tapOn:
+    text: ".*General.*"
+- assertVisible:
+    id: "screen-chat"
+- extendedWaitUntil:
+    visible: ".*emoji.*done.*"
+    timeout: 60000
+- extendedWaitUntil:
+    visible:
+      id: "emoji-image-e2e_static"
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      id: "emoji-image-e2e_anim"
+    timeout: 30000
+- assertNotVisible:
+    id: "emoji-fallback-.*"
+- takeScreenshot: custom-emoji-03-recipient-sees

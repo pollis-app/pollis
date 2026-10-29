@@ -1,0 +1,42 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Add one custom emoji on the open group-emoji screen (`screen-group-emoji`):
+# ${EMOJI_SHORTCODE} from the newest photo in the library, through the SYSTEM
+# photo picker as in flows/media-viewer.yaml. The caller seeds that photo with
+# `addMedia` first (Maestro resolves its path literally, so it cannot come
+# from an env value here).
+# Waits for the emoji's row AND for its image to have drawn (#1562): the row
+# shows the emoji through the same `CustomEmojiImage` the timeline uses, so
+# `emoji-image-<shortcode>` there already proves the download and decode.
+#
+# The picker is single-select. On iOS it is first switched to "Added" order so
+# the first cell is the photo `addMedia` just seeded (see pick-newest-photo).
+- tapOn:
+    id: "input-emoji-shortcode"
+- inputText: "${EMOJI_SHORTCODE}"
+- hideKeyboard
+- tapOn:
+    id: "btn-upload-emoji"
+- waitForAnimationToEnd:
+    timeout: 5000
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - tapOn: "Sort and Filter"
+      - tapOn: "Added"
+      - waitForAnimationToEnd:
+          timeout: 3000
+- tapOn:
+    text: "(Photo|GIF|Animated)(,| taken on) .*"
+    index: 0
+- extendedWaitUntil:
+    visible:
+      id: "row-emoji-${EMOJI_SHORTCODE}"
+    timeout: 60000
+- extendedWaitUntil:
+    visible:
+      id: "emoji-image-${EMOJI_SHORTCODE}"
+    timeout: 30000
+- assertNotVisible:
+    id: "emoji-fallback-${EMOJI_SHORTCODE}"

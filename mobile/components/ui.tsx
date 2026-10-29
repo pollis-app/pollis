@@ -22,6 +22,7 @@ import { semantic, type as ty, fonts, r, space, layout, currentTheme } from "../
 import { buttonColors, checkboxColors, controlDisabled, type ControlSurface } from "../theme/button";
 import { useTheme } from "./theme";
 import { ThemeProbe } from "./ThemeProbe";
+import { EmojiProbe } from "./emoji/EmojiProbe";
 import { useLayoutClass } from "../hooks/useLayoutClass";
 import { PaneEntryContext } from "./pane/paneContext";
 import { activeLocale } from "../i18n";
@@ -217,6 +218,7 @@ export function Screen({
       edges={["top"]}
     >
       <ThemeProbe />
+      <EmojiProbe />
       {/* Keeps a bottom <Field>/<BottomAction>/composer above the keyboard on
           both platforms, in step with its animation (#1246). The app is
           edge-to-edge (#1194), so the window never resizes; keyboard-controller
