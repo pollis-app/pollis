@@ -1,14 +1,8 @@
-// The username rule, as the Delivery Service enforces it on
-// `POST /v1/profile/update` (`pollis-delivery/src/profile.rs`,
-// `is_valid_username`): 3–32 characters of `a-z`, `0-9`, `_`, `.` or `-`.
-//
-// No `@` — that is the load-bearing part. The DS resolves "who is X" by shape:
-// an identifier with an `@` is matched against emails only, anything else
-// against usernames only. That is sound exactly because a username can never
-// contain one. The DS check is the one that counts (and migration `000021`
-// refuses the `@` at the database); this copy lets the settings screen say why
-// before the round trip. A verbatim twin of `frontend/src/utils/username.ts` —
-// mobile imports no desktop TypeScript.
+// The username rule the DS enforces (`is_valid_username` in
+// `pollis-delivery/src/profile.rs`); a twin of `frontend/src/utils/username.ts`.
+// No `@` is load-bearing: the DS resolves an identifier with `@` against emails
+// only, anything else against usernames only. This copy only lets the settings
+// screen explain before the round trip.
 
 export const USERNAME_MIN_LEN = 3;
 export const USERNAME_MAX_LEN = 32;

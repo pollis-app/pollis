@@ -1,6 +1,5 @@
-// The group last selected on the Groups tab, remembered across launches so the
-// tab reopens on the same group. Device-local and user-scoped; best-effort —
-// a failed read or write just falls back to the first group.
+// The group last selected on the Groups tab, device-local and user-scoped.
+// Best-effort: a failed read or write falls back to the first group.
 
 import * as SecureStore from "expo-secure-store";
 

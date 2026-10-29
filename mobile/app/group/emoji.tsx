@@ -51,11 +51,9 @@ function GroupEmoji() {
   const { data: groups = [] } = useUserGroupsWithChannels();
   const group = groups.find((g) => g.id === id);
   const { data: members = [] } = useGroupMembers(id);
-  // The group's own list is a separate DS read that can lag far behind on a
-  // busy bridge (a just-created group is still setting up MLS), which left
-  // this page on "Loading…". The usable set the composer already fetched
-  // holds every emoji of every group the user is in, so its slice for this
-  // group stands in until the group's own list arrives.
+  // The group's own list is a separate DS read that can lag far behind (a
+  // just-created group is still setting up MLS); the composer's usable set
+  // already holds this group's emoji, so its slice stands in until then.
   const groupEmoji = useGroupEmoji(id);
   const usable = useUsableEmoji();
   const fromUsable = useMemo(
@@ -109,7 +107,6 @@ function GroupEmoji() {
 
   const onRemove = (code: string) => {
     if (confirmRemove !== code) {
-      // The first tap arms the confirm: warn by touch (#1286).
       haptic("confirmArm");
       setConfirmRemove(code);
       return;

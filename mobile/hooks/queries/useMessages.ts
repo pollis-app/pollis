@@ -1,16 +1,6 @@
-// Message read + send + ingest hooks. Mirrors the read paths of
-// `frontend/src/hooks/queries/useMessages.ts` — pages are LOCAL reads
-// (`read_channel_messages` / `read_dm_messages`), so a conversation renders
-// at once; envelope ingest (`useIngestConversation`, on chat focus, realtime
-// and push) runs off the render path and invalidates the page when it lands.
-//
-// Pagination: `useMessages` is an infinite query over cursor pages. The
-// cursor for each older page is derived from the PREVIOUS PAGE'S DATA
-// (`getNextPageParam`), never seeded from an effect — desktop PR #958 fixed
-// a bug where a cursor seeded from an effect read the previous
-// conversation's cached pages and permanently capped history at 50. Deriving
-// from page data makes that state unrepresentable: a new conversation key
-// starts from a fresh first page.
+// Pages are local reads; envelope ingest runs separately and invalidates them.
+// Each older page's cursor comes from the previous page's data, never from an
+// effect, so a new conversation key always starts fresh (#958).
 
 import { useCallback, useMemo } from "react";
 import {
@@ -59,18 +49,15 @@ export interface RawChannelMessage {
   deleted_at?: string;
   /** A placeholder for a message this device could not decrypt (#1312). */
   undecryptable?: boolean;
-  /** Our own message the durable outbox has not delivered yet (#1335).
-   *  Absent once delivered, and on everything received. */
+  /** Our own message the durable outbox has not delivered yet (#1335). */
   send_state?: SendState;
 }
 
-/** Mirror of `pollis_core::commands::messages::OutboxReport`. */
 interface OutboxReport {
   delivered: string[];
   failed: string[];
 }
 
-/** Mirror of `pollis_core::commands::messages::ThreadSummary`. */
 export interface ThreadSummary {
   thread_id: string;
   reply_count: number;
@@ -99,27 +86,21 @@ export interface Message {
   created_at: number;
   edited_at?: number;
   deleted_at?: number;
-  /** A placeholder for a message this device could not decrypt (#1312):
-   *  no content, no author, nothing to act on. */
+  /** A placeholder for a message this device could not decrypt (#1312). */
   undecryptable?: boolean;
-  /** How many consecutive placeholders this row stands for — set by
-   *  `collapseUndecryptable` when the timeline is built. */
+  /** How many consecutive placeholders this row stands for (`collapseUndecryptable`). */
   undecryptableCount?: number;
-  /** Local-only optimistic stub flag. Replaced when `send_message` resolves. */
+  /** Local-only optimistic stub flag. */
   pending?: boolean;
-  /** The send failed — a stub's, or a stored unsent row's (#1335). Kept in
-   *  the list, labelled, with Retry / Discard. */
+  /** The send failed — a stub's, or a stored unsent row's (#1335). */
   failed?: boolean;
-  /** The core's id for this outgoing message (#1335) — what Retry and
-   *  Discard name. On stubs and on unsent stored rows only. */
+  /** The core's id for this outgoing message (#1335), used by Retry / Discard. */
   outboxId?: string;
-  /** False when the send failed before the core stored it (an attachment
-   *  upload): there is nothing to retry, only to discard. */
+  /** False when the send failed before the core stored it: discard only. */
   retryable?: boolean;
 }
 
-/** One decoded page: newest-first messages plus the cursor to the next
- *  (older) page, exactly as the Rust `MessagePage` reports it. */
+/** Newest-first messages plus the cursor to the next (older) page. */
 export interface DecodedPage {
   messages: Message[];
   nextCursor: MessageCursor | null;
@@ -146,9 +127,8 @@ function transform(raw: RawChannelMessage): Message {
   };
 }
 
-/** Flatten pages (each newest-first) into one newest-first array, dropping
- *  duplicates — after new arrivals shift the timeline, a refetched page
- *  boundary can briefly overlap its neighbour. */
+/** Flatten newest-first pages, dropping duplicates: after new arrivals a
+ *  refetched page boundary can briefly overlap its neighbour. */
 export function flattenPages(
   data: { pages: DecodedPage[] } | undefined,
 ): Message[] {
@@ -189,15 +169,7 @@ export const lastMessageQueryKeys = {
     ["last-message", "batch", conversationIds.join(",")] as const,
 };
 
-/**
- * Infinite query over a conversation's message history, newest page first.
- * `get_*_messages` runs envelope ingest itself before reading, so each
- * first-page fetch picks up newly delivered messages. Older pages load via
- * `fetchNextPage` (the chat list calls it from `onEndReached` on its
- * inverted list — which RN re-evaluates on content-size changes as well as
- * scroll, so a load that lands with no scroll offset left still advances;
- * desktop PR #958's second bug shape).
- */
+/** Infinite query over a conversation's message history, newest page first. */
 export function useMessages(
   conversationId: string | null,
   kind: ConversationKind | null,
@@ -214,12 +186,8 @@ export function useMessages(
       if (!conversationId || !kind || !currentUser) {
         return { messages: [], nextCursor: null };
       }
-      // Local-only reads, like desktop's useMessages. The `get_*` commands
-      // ingest from the DS before reading, so the first page waited on the
-      // network — and on a just-created channel, on MLS setup — leaving an
-      // empty conversation on "Loading messages…" instead of "No messages
-      // yet". Ingest runs separately (the chat's focus ingest, realtime,
-      // push) and invalidates this query when new envelopes land.
+      // Not `get_*`: those ingest from the DS first, which would hold the
+      // first page on the network (and on MLS setup for a new channel).
       const cmd =
         kind === "channel" ? "read_channel_messages" : "read_dm_messages";
       const args: Record<string, unknown> =
@@ -252,7 +220,6 @@ export function useMessages(
   });
 }
 
-/** Immutably update every cached page's message array. */
 function mapPages(
   cache: MessagesData | undefined,
   fn: (messages: Message[]) => Message[],
@@ -266,19 +233,13 @@ function mapPages(
   };
 }
 
-/** A send that failed before the core stored it (#1335) — an attachment
- *  upload. The stub can only be discarded: there is no stored message. */
+/** A send that failed before the core stored it (#1335): nothing to retry, only discard. */
 class NotQueuedError extends Error {}
 
-/**
- * The stub id `onMutate` chose for each send, keyed by the mutation's
- * variables object (TanStack hands the same object to `onMutate` and
- * `mutationFn`), so the send can tag its stub with the core's message id.
- */
+// Keyed by the mutation's variables object, which TanStack passes to both
+// `onMutate` and `mutationFn`, so the send can tag its stub with the core's id.
 const stubIds = new WeakMap<object, string>();
 
-/** Apply `fn` to every row standing for `outboxId`, in a conversation's
- *  pages and (when given) its open thread. */
 function patchOutboxRows(
   queryClient: ReturnType<typeof useQueryClient>,
   key: readonly unknown[],
@@ -297,14 +258,9 @@ function patchOutboxRows(
 }
 
 /**
- * Send a text message. Optimistic: the new message is prepended to the
- * newest cached page with `pending: true`, then replaced with the
- * server-confirmed row on success, or marked `failed` on failure.
- *
- * Durable since #1335: the core stores the message before any network work,
- * under an id this hook asks it for first, so a send the process never
- * finished is still there — unsent — after a restart, and the outbox
- * delivers it. A failure is a stored `failed` row with Retry.
+ * Send a message optimistically: a `pending` stub is prepended, then swapped
+ * for the stored row or marked `failed`. The core stores the message before
+ * any network work, so an unfinished send survives a restart (#1335).
  */
 export function useSendMessage(
   conversationId: string | null,
@@ -314,7 +270,6 @@ export function useSendMessage(
   const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { mutate: "send" } },
     mutationFn: async (vars: {
       content: string;
@@ -325,9 +280,8 @@ export function useSendMessage(
       if (!conversationId || !currentUser) {
         throw new NotQueuedError("No active conversation");
       }
-      // The core names the message first (#1335), so the stub and the row
-      // the core stores are the same message: a refetch that brings the
-      // stored row in drops the stub instead of showing it twice.
+      // The core names the message first (#1335) so a refetch that brings in
+      // the stored row drops the stub instead of showing it twice.
       const messageId = await invoke<string>("new_message_id").catch((e) => {
         throw new NotQueuedError(String(e));
       });
@@ -345,10 +299,8 @@ export function useSendMessage(
           );
         }
       }
-      // Attachments go to the core un-uploaded (#1335): it reads the picked
-      // files into its encrypted local database together with the row, before
-      // any network work, and the outbox uploads them — after a restart if
-      // the OS killed the app mid-upload. `content` is then the caption.
+      // Attachments go to the core un-uploaded; the outbox uploads them, so a
+      // kill mid-upload loses nothing (#1335). `content` is then the caption.
       const raw = await invoke<RawChannelMessage>("send_message", {
         conversationId,
         senderId: currentUser.id,
@@ -375,7 +327,6 @@ export function useSendMessage(
         sender_id: currentUser.id,
         sender_username: currentUser.username,
         content: vars.content,
-        // Picked-but-uploading images render from their local URI.
         attachments: (vars.attachments ?? []).map((att) => ({
           id: att.id,
           object_key: "",
@@ -412,8 +363,6 @@ export function useSendMessage(
           pageParams: [null],
         });
       }
-      // Thread replies also land optimistically in the open thread's list
-      // (an array cache, unlike the paged conversation cache).
       if (vars.threadId) {
         queryClient.setQueryData<Message[]>(
           messageQueryKeys.thread(vars.threadId),
@@ -423,9 +372,7 @@ export function useSendMessage(
       return { previous, optimisticId, key, threadId: vars.threadId };
     },
     onSuccess: (confirmed, vars, ctx) => {
-      // The row reaches the local store (and its FTS index) only when
-      // send_message resolves — after the optimistic stub is already on
-      // screen. A search that ran in between cached "no matches"; drop it.
+      // A search that ran while the stub was on screen cached "no matches".
       queryClient.invalidateQueries({ queryKey: searchQueryKeys.all });
       if (!ctx) {
         return;
@@ -436,17 +383,14 @@ export function useSendMessage(
         ...confirmed,
         sender_username: confirmed.sender_username ?? currentUser?.username,
       };
-      // The envelope keeps the picked order, so pending and confirmed
-      // attachments pair up by position. A viewer open on the pending copy
-      // follows the swap instead of losing its page.
+      // Pending and confirmed attachments pair up by position (the envelope
+      // keeps picked order), so an open viewer follows the swap.
       (vars.attachments ?? []).forEach((att, i) => {
         const to = confirmed.attachments?.[i]?.id;
         if (to) {
           aliasAttachment(att.id, to);
         }
       });
-      // Swap the stub for the confirmed row — or, if a refetch raced the
-      // send and the stub is gone, put the confirmed row back in front.
       queryClient.setQueryData<MessagesData>(ctx.key, (cache) =>
         cache
           ? {
@@ -468,7 +412,6 @@ export function useSendMessage(
           messageQueryKeys.thread(ctx.threadId),
           (cache) => settleSend(cache ?? [], ctx.optimisticId, settled, "oldestFirst"),
         );
-        // Reply-count chips on the parent rows.
         queryClient.invalidateQueries({
           queryKey: messageQueryKeys.threadSummaries(conversationId),
         });
@@ -478,10 +421,8 @@ export function useSendMessage(
       if (!ctx) {
         return;
       }
-      // Keep the stub and mark it failed rather than rolling it back: a send
-      // that silently vanishes is worse than one labelled "failed". When the
-      // core had stored it, the stored row is failed too and Retry delivers
-      // it; the refetch below swaps the stub for that row.
+      // Mark failed rather than roll back: a send that silently vanishes is
+      // worse than one labelled "failed".
       const retryable = !(e instanceof NotQueuedError);
       const markFailed = (m: Message): Message =>
         m.id === ctx.optimisticId ? { ...m, pending: false, failed: true, retryable } : m;
@@ -504,11 +445,7 @@ export function useSendMessage(
   });
 }
 
-/**
- * Retry one unsent message (#1335): `retry_message` re-runs delivery under
- * the same id, so it can never arrive twice. The row reads as pending while
- * it runs, and the refetch afterwards shows what the core settled on.
- */
+/** Retry one unsent message under the same id, so it can never arrive twice (#1335). */
 export function useRetryMessage(
   conversationId: string | null,
   kind: ConversationKind | null,
@@ -516,7 +453,6 @@ export function useRetryMessage(
 ) {
   const queryClient = useQueryClient();
   return useMutation({
-    // A retry feels like the send it repeats (#1286).
     meta: { haptic: { mutate: "send" } },
     mutationFn: async (outboxId: string) =>
       transform(await invoke<RawChannelMessage>("retry_message", { messageId: outboxId })),
@@ -559,11 +495,8 @@ export function useRetryMessage(
 }
 
 /**
- * Throw away one unsent message (#1335). If an earlier attempt may have reached
- * the server (it was ever sealed), the core withdraws it from everyone first —
- * and refuses the discard if it cannot, so the row stays rather than leaving a
- * delivered copy the sender cannot delete. Also clears a stub the core never
- * stored.
+ * Throw away one unsent message (#1335). A row that was ever sealed is first
+ * withdrawn from everyone; the core refuses the discard if it cannot.
  */
 export function useDiscardUnsent(
   conversationId: string | null,
@@ -572,7 +505,6 @@ export function useDiscardUnsent(
 ) {
   const queryClient = useQueryClient();
   return useMutation({
-    // Throwing a message away feels like deleting one (#1286).
     meta: { haptic: { success: "destructive" } },
     mutationFn: async (outboxId: string) =>
       invoke<boolean>("discard_unsent_message", { messageId: outboxId }),
@@ -603,10 +535,8 @@ export function useDiscardUnsent(
 }
 
 /**
- * Deliver whatever the durable outbox holds (#1335) — run on sign-in, on a
- * return to the foreground and on a realtime reconnect. Event-driven, never
- * on a timer. The core already drains after every unlock; this call waits for
- * that and then refreshes what it changed.
+ * Deliver whatever the durable outbox holds (#1335). Called on sign-in, resume
+ * and realtime reconnect, never on a timer.
  */
 export async function flushOutbox(
   queryClient: ReturnType<typeof useQueryClient>,
@@ -622,13 +552,7 @@ export async function flushOutbox(
   }
 }
 
-/**
- * Replies in one thread, oldest-first — `read_thread_messages` is a local
- * read over already-ingested rows (the conversation fetch ingests) and
- * returns them chronologically, so unlike the conversation pages this is
- * NOT reversed. The root message is not included; the thread screen takes
- * it from the conversation cache.
- */
+/** Replies in one thread, oldest-first; the root message is not included. */
 export function useThreadMessages(threadId: string | null) {
   const queryClient = useQueryClient();
   return useQuery({
@@ -641,7 +565,6 @@ export function useThreadMessages(threadId: string | null) {
         (await invoke<RawChannelMessage[]>("read_thread_messages", {
           threadId,
         })) ?? [];
-      // Same race as the conversation pages: keep an in-flight reply's stub.
       return carryStubs(
         raw.map(transform),
         queryClient.getQueryData<Message[]>(messageQueryKeys.thread(threadId)),
@@ -653,7 +576,6 @@ export function useThreadMessages(threadId: string | null) {
   });
 }
 
-/** Reply-count summaries for a conversation, keyed by thread root id. */
 export function useThreadSummaries(conversationId: string | null) {
   return useQuery({
     queryKey: messageQueryKeys.threadSummaries(conversationId),
@@ -683,7 +605,6 @@ export function useEditMessage(
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "success" } },
     mutationFn: async (vars: { messageId: string; newContent: string }) => {
       if (!currentUser || !conversationId) {
@@ -734,7 +655,6 @@ export function useDeleteMessage(
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "destructive" } },
     mutationFn: async (messageId: string) => {
       if (!currentUser) {
@@ -777,11 +697,7 @@ export interface IngestOptions {
   refreshUnread?: boolean;
 }
 
-/**
- * Imperative ingest trigger — fire-and-forget. Called from `useFocusEffect`
- * in the chat screen when the screen mounts or refocuses, so the user sees
- * any messages delivered while the app was backgrounded.
- */
+/** Fire-and-forget envelope ingest for one conversation. */
 export function useIngestConversation() {
   const currentUser = useObserver(() => appStore.currentUser);
   const queryClient = useQueryClient();
@@ -810,33 +726,22 @@ export function useIngestConversation() {
         queryClient.invalidateQueries({
           queryKey: messageQueryKeys.conversation(conversationId, kind),
         });
-        // Receipt frames ride the same envelope stream — refresh the
-        // conversation's receipt map alongside the messages (event-driven;
-        // the receipts query itself never polls).
+        // Receipt frames ride the same envelope stream.
         queryClient.invalidateQueries({
           queryKey: ["receipts", conversationId],
         });
-        // Freshly ingested envelopes may be thread replies — refresh every
-        // open thread and this conversation's reply-count chips.
         queryClient.invalidateQueries({
           queryKey: messageQueryKeys.threads,
         });
         queryClient.invalidateQueries({
           queryKey: messageQueryKeys.threadSummaries(conversationId),
         });
-        // Newly decrypted rows are newly searchable.
         queryClient.invalidateQueries({ queryKey: searchQueryKeys.all });
-        // And may be the newest in their conversation: refresh the list
-        // previews, which read the same local store.
         queryClient.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
-        // And may be unread: the badges come from the persisted cursors, so
-        // this is what makes a message that landed while the app was away
-        // (push receipt, resume / reconnect catch-up) show where it landed.
         if (opts.refreshUnread !== false) {
           refreshUnread(queryClient);
         }
       } catch (e) {
-        // Best-effort — ingest is advisory. The next refetch will retry.
         console.warn("[useIngestConversation] ingest failed:", e);
       }
     },
@@ -844,26 +749,16 @@ export function useIngestConversation() {
   );
 }
 
-
-/** Newest message per conversation, keyed by conversation id. */
 export type LastMessageMap = Record<string, Message>;
 
 /**
- * The newest message for every conversation in `conversationIds`, in ONE
- * bridge call — mirrors desktop's `useLastMessages` (#874/#936): one batched
- * `read_last_messages` per list, never one call per row, and no focus/interval
- * polling — realtime events invalidate `lastMessageQueryKeys.all` instead.
- *
- * Previews come from the LOCAL store (the message table only holds what this
- * device has ingested and decrypted), so a conversation with no local
- * messages is simply absent from the map — callers treat "no entry" as "no
- * preview" and render the row without one.
+ * The newest local message for every conversation, in one bridge call
+ * (#874/#936). A conversation with no local messages is absent from the map.
  */
 export function useLastMessages(conversationIds: string[]) {
   const currentUser = useObserver(() => appStore.currentUser);
 
-  // Sorted + de-duplicated so the cache key is a property of the SET, not of
-  // the render order the caller happened to produce.
+  // Sorted + de-duplicated so the cache key depends on the set, not render order.
   const idsKey = conversationIds.join(",");
   const ids = useMemo(
     () => Array.from(new Set(conversationIds)).sort(),
@@ -891,10 +786,7 @@ export function useLastMessages(conversationIds: string[]) {
   });
 }
 
-/**
- * One-line preview text for a conversation row. Deleted messages and
- * attachment-only messages get placeholders instead of raw envelope JSON.
- */
+/** One-line preview text for a conversation row. */
 export function previewText(message: Message | undefined): string | null {
   if (!message) {
     return null;

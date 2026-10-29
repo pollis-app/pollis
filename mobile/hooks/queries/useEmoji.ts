@@ -1,7 +1,3 @@
-// Custom per-group emoji hooks (#848 / #890). Mirrors the desktop command
-// surface in pollis-core/src/commands/emoji.rs — all fields snake_case as
-// serde serializes them.
-
 import {
   useMutation,
   useQuery,
@@ -11,7 +7,6 @@ import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
 
-/** Mirror of `pollis_core::commands::emoji::CustomEmoji`. */
 export interface CustomEmoji {
   group_id: string;
   group_name: string;
@@ -32,12 +27,7 @@ export const emojiQueryKeys = {
   group: (groupId: string | null) => ["emoji", "group", groupId] as const,
 };
 
-/**
- * Every custom emoji the current user can use — all emoji from all groups
- * they belong to, usable in any conversation (Discord's rule). Feeds the
- * picker's custom sections and the `<:name:hash>` renderer's shortcode
- * fallbacks.
- */
+/** Every custom emoji from all the user's groups, usable in any conversation. */
 export function useUsableEmoji() {
   const currentUser = useObserver(() => appStore.currentUser);
   const userId = currentUser?.id ?? null;
@@ -54,7 +44,6 @@ export function useUsableEmoji() {
   });
 }
 
-/** A group's emoji set — members only; feeds the management screen. */
 export function useGroupEmoji(groupId: string | null) {
   const currentUser = useObserver(() => appStore.currentUser);
   return useQuery({
@@ -75,15 +64,10 @@ export function useGroupEmoji(groupId: string | null) {
   });
 }
 
-/**
- * Upload a new group emoji from a local image file. The Rust side re-encodes
- * to a <=48 KiB webp/gif, uploads, and registers it; `path` accepts a
- * `file://` URI.
- */
+/** Upload a group emoji from a local image; Rust re-encodes it to a <=48 KiB webp/gif. */
 export function useUploadGroupEmoji(groupId: string | null) {
   const queryClient = useQueryClient();
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "success" } },
     mutationFn: async (vars: { shortcode: string; path: string }) => {
       if (!groupId) {
@@ -104,7 +88,6 @@ export function useUploadGroupEmoji(groupId: string | null) {
 export function useRemoveGroupEmoji(groupId: string | null) {
   const queryClient = useQueryClient();
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "destructive" } },
     mutationFn: async (shortcode: string) => {
       if (!groupId) {

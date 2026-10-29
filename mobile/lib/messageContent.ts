@@ -1,16 +1,11 @@
-// The message content string, both directions. Pure (no react-native), so
-// node tests can pin it. Chat messages, pinned-message snapshots (`lib/pins.ts`)
-// and Vault entries (#107) share this
-// one shape: plain text, or the attachment envelope
+// The message content string, both directions; pure, for node tests. Shared by
+// chat messages, pin snapshots and Vault entries: plain text, or the envelope
 // `{"_att":[{"key":"media/…","name":"…","ct":"…","size":N,…}],"_txt":"caption"}`.
-//
-// Must stay in lockstep with desktop's parseContent
-// (frontend/src/hooks/queries/useMessages.ts) and the writer in
-// lib/attachments.ts.
+// Keep in lockstep with desktop's parseContent
+// (frontend/src/hooks/queries/useMessages.ts) and the writer in lib/attachments.ts.
 
 import type { AttachmentKeyScope, ContentOrigin, MessageAttachment } from "../types";
 
-// Wire shape of a single attachment inside the `_att` array.
 export interface AttachmentWire {
   // Absent on an entry the outbox has not uploaded yet (#1335).
   key?: string;
@@ -19,7 +14,7 @@ export interface AttachmentWire {
   hash?: string;
   // Which key of the conversation's file key ring sealed it; 0 in the Vault.
   kv?: number;
-  // Plaintext SHA-256, verified after decrypt.
+  // Plaintext SHA-256, verified after decrypt (carried only inside the envelope).
   sha?: string;
   name: string;
   ct: string;
@@ -29,8 +24,7 @@ export interface AttachmentWire {
   h?: number;
 }
 
-/** The key an attachment reference names, or null when it cannot be opened
- *  from here: uploading, a pre-#1382 reference, or a preview-only origin. */
+/** Null when it cannot be opened from here: uploading, pre-#1382, or a preview-only origin. */
 function keyScopeFor(a: AttachmentWire, origin: ContentOrigin): AttachmentKeyScope | null {
   if (origin === null || !a.key || !a.sha || typeof a.kv !== "number") {
     return null;
@@ -43,8 +37,7 @@ function keyScopeFor(a: AttachmentWire, origin: ContentOrigin): AttachmentKeySco
     : null;
 }
 
-/** Split a content string into its caption and attachments. Plain-text
- *  content passes through as-is. `origin` names each attachment's key. */
+/** `origin` names each attachment's key. */
 export function parseContent(raw: string | undefined, origin: ContentOrigin): {
   text: string;
   attachments: MessageAttachment[];
@@ -63,8 +56,7 @@ export function parseContent(raw: string | undefined, origin: ContentOrigin): {
     }
     return {
       text: typeof parsed._txt === "string" ? parsed._txt : "",
-      // An entry with no `key` is one the outbox has not uploaded yet (#1335):
-      // drawn like an optimistic stub's attachment, pending.
+      // An entry with no `key` is not uploaded yet (#1335): drawn pending.
       attachments: (parsed._att as AttachmentWire[]).map((a, i) => ({
         id: a.key ?? `uploading-${i}`,
         object_key: a.key ?? "",

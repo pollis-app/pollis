@@ -1,7 +1,5 @@
-// Conversation info — member roster + shared media for a channel or DM.
-// Mobile counterpart of desktop's right-hand context panel (#826): Discord's
-// member list over Messenger's shared-media grid. The chat screen's members
-// button and channel menu navigate here with { id, kind, groupId?, name? }.
+// Conversation info — member roster + shared media for a channel or DM, the
+// counterpart of desktop's right-hand context panel (#826).
 
 import { useMemo } from "react";
 import { View, Text, Pressable, useWindowDimensions } from "react-native";
@@ -32,10 +30,8 @@ import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useThemeRerender } from "../../components/theme";
 
-// Cap on grid tiles, matching desktop's MembersPanel (#826): each tile
-// resolves its own bytes through the media transport, so an unbounded grid
-// on a media-heavy conversation would fan out into hundreds of decrypt
-// round-trips the moment the screen opens.
+// Cap on grid tiles, as desktop: each tile resolves its own bytes, so an
+// unbounded grid would fan out into hundreds of decrypt round-trips on open.
 const MEDIA_LIMIT = 30;
 
 function ConversationInfo() {
@@ -64,9 +60,8 @@ function ConversationInfo() {
   const { data: groupMembers = [] } = useGroupMembers(groupId);
   const dmChannel = useDMChannel(kind === "dm" ? conversationId : null);
 
-  // Role-then-alphabetical, mirroring desktop's members panel intent —
-  // desktop orders online-first, but mobile has no presence source yet, so
-  // presence ordering awaits one.
+  // Role-then-alphabetical. Desktop orders online-first, but mobile has no
+  // presence source yet.
   const roster = useMemo(() => {
     if (kind === "channel") {
       return sortMembersByRole(groupMembers).map((m) => ({

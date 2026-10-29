@@ -1,14 +1,11 @@
-// Where an install updates from (#1443): the build's install channel, baked in
-// by app.config.js (`extra.installChannel`), mapped to the place Self -> App ->
-// Update opens. Pure — no react-native — so tests/install-channel.test.ts pins
-// the mapping directly. The channel itself is read in lib/buildInfo.ts.
+// Where an install updates from (#1443): the channel app.config.js bakes in
+// (`extra.installChannel`, read in lib/buildInfo.ts) mapped to what Self -> App
+// -> Update opens. Pure, so the node tests pin the mapping.
 
-/** What app.config.js bakes into a build. */
 export type InstallChannel = "store" | "sideload" | "dev";
 
 export type UpdatePlatform = "ios" | "android";
 
-/** Which place the Update row opens, by name. */
 export type UpdateDestinationKind = "play" | "appstore" | "testflight" | "web";
 
 export type UpdateDestination = {
@@ -21,20 +18,14 @@ export type UpdateDestination = {
 
 export const ANDROID_PACKAGE = "com.pollis.mobile";
 
-// The App Store record's numeric Apple ID ("ascAppId", App Store Connect ->
-// App Information). iOS is on TestFlight only until the App Store listing is
-// live; set this then and the store channel opens the listing instead. It is
-// JS, so an OTA update carries the change to every binary already shipped.
+// The App Store record's numeric Apple ID ("ascAppId"). Null while iOS is on
+// TestFlight only; set it when the listing is live (JS, so an OTA carries it).
 export const IOS_APP_STORE_ID: string | null = null;
 
-/** The pollis.com page that offers the signed APK (and the Play link). */
 export const SIDELOAD_PAGE_URL = "https://pollis.com/android";
 export const WEBSITE_URL = "https://pollis.com/";
 
-/**
- * The channel a build embedded, or null when it embedded none — every binary
- * built before #1443, which an OTA update can still bring this code to.
- */
+/** Null for a binary built before #1443, which an OTA can still bring this code to. */
 export function parseInstallChannel(value: unknown): InstallChannel | null {
   if (value === "store" || value === "sideload" || value === "dev") {
     return value;
@@ -58,9 +49,8 @@ function appleDestination(appStoreId: string | null): UpdateDestination {
       fallbackUrl: `https://apps.apple.com/app/id${appStoreId}`,
     };
   }
-  // One iOS binary serves TestFlight and (later) the App Store, so the build
-  // cannot tell them apart; while there is no listing, TestFlight is where
-  // every store install came from.
+  // One iOS binary serves TestFlight and the App Store, so the build cannot
+  // tell them apart; with no listing yet, TestFlight is the source.
   return { kind: "testflight", url: "itms-beta://", fallbackUrl: "https://testflight.apple.com/" };
 }
 
@@ -79,14 +69,12 @@ export function updateDestination(
     case "dev":
       return { kind: "web", url: WEBSITE_URL };
     case null:
-      // A binary from before the channel was baked in. iOS only ever shipped
-      // through Apple; an Android one is Play or the APK, and the APK page
-      // links to both, so it is right for either.
+      // Pre-#1443 binary. iOS only shipped through Apple; for Android the APK
+      // page links both Play and the APK, so it suits either.
       return platform === "ios" ? appleDestination(appStoreId) : { kind: "web", url: SIDELOAD_PAGE_URL };
   }
 }
 
-/** A short form of an OTA update id for display: its first eight hex digits. */
 export function shortUpdateId(updateId: string): string {
   return updateId.replace(/-/g, "").slice(0, 8).toLowerCase();
 }

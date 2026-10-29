@@ -1,12 +1,5 @@
-// Reaction read hooks. `get_reactions` is a local SQLite read grouped per
-// message (mirror of pollis-core/src/commands/messages/reactions.rs).
-//
-// Granularity note: desktop's original reactions UI ran one React Query
-// observer + one invoke PER MESSAGE ROW, and that pattern was deleted in the
-// #874 perf audit (#936). There is no batched core command, so mobile keeps
-// ONE query per conversation that fans out the (cheap, local) per-message
-// reads inside a single queryFn and returns a map — one observer, no
-// per-row cache entries.
+// One query per conversation that fans out the cheap local per-message reads
+// in a single queryFn, never one observer per row (#874/#936).
 
 import {
   useMutation,
@@ -20,7 +13,6 @@ import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
 import type { ConversationKind } from "./useMessages";
 
-/** Mirror of `pollis_core::commands::messages::reactions::Reaction`. */
 export interface Reaction {
   emoji: string;
   user_ids: string[];
@@ -36,18 +28,14 @@ export const reactionQueryKeys = {
 };
 
 /**
- * Reactions for every loaded message in a conversation, keyed by message id.
- * Messages with no reactions are absent from the map. The id list is part of
- * the query key (so newly loaded pages extend the fetch) but
- * `keepPreviousData` holds the last map during the refetch, so pills don't
- * flicker as pages load.
+ * Reactions for every loaded message in a conversation, keyed by message id;
+ * messages with none are absent.
  */
 export function useConversationReactions(
   conversationId: string | null,
   kind: ConversationKind | null,
   messageIds: readonly string[],
 ) {
-  // Stable across renders for the same set; changes when pages load.
   const idsKey = messageIds.length > 0 ? messageIds.join("|") : "";
   return useQuery({
     queryKey: [
@@ -74,8 +62,7 @@ export function useConversationReactions(
       );
       for (const { messageId, reactions } of results) {
         if (reactions.length > 0) {
-          // The Rust side groups via HashMap, so ordering is
-          // non-deterministic — sort for stable pill order.
+          // The Rust side groups via HashMap, so order is non-deterministic.
           map.set(
             messageId,
             [...reactions].sort((a, b) => a.emoji.localeCompare(b.emoji)),
@@ -91,21 +78,8 @@ export function useConversationReactions(
 }
 
 /**
- * Toggle a reaction. The caller passes the resolved `mode` (derived from
- * whether the current user is already in the pill's `user_ids`); this hook
- * dispatches the intent and refreshes the conversation's reaction map.
- *
- * **Optimistic.** The pill moves on the tap, not on the round trip. The
- * outcome of a reaction tap is fully known client-side — it adds you to that
- * emoji or takes you off it — so waiting for `add_reaction` and then for the
- * refetch it invalidates made a decided gesture feel unacknowledged twice
- * over. `applyReactionToggle` computes exactly what the query will report, so
- * the refetch that eventually replaces this confirms it rather than correcting
- * it, and nothing visibly settles.
- *
- * The write is still the authority: a failure restores the snapshot taken
- * before the tap, and `onSettled` invalidates either way so the server's answer
- * is what survives.
+ * Toggle a reaction optimistically; the caller passes the resolved `mode`. A
+ * failure restores the pre-tap snapshot.
  */
 export function useToggleReaction(
   conversationId: string | null,
@@ -114,7 +88,6 @@ export function useToggleReaction(
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: {
       mutate: (vars: { mode: "add" | "remove" }) =>
         vars.mode === "add" ? "reactionAdd" : "reactionRemove",
@@ -139,9 +112,7 @@ export function useToggleReaction(
       if (!currentUser || !conversationId || !kind) {
         return { previous: [] };
       }
-      // The live key carries the loaded-id list as a final segment, so match on
-      // the conversation PREFIX — otherwise the entry actually on screen is the
-      // one entry left un-updated.
+      // The live key ends with the loaded-id list, so match on the prefix.
       const queryKey = reactionQueryKeys.conversation(kind, conversationId);
 
       // An in-flight read would land after this write and overwrite it with
@@ -167,9 +138,6 @@ export function useToggleReaction(
       }
     },
 
-    // On both paths, not just success: a rolled-back failure still needs the
-    // server's version of the truth, and a success needs the reaction another
-    // device may have added in the meantime.
     onSettled: () => {
       if (conversationId && kind) {
         queryClient.invalidateQueries({

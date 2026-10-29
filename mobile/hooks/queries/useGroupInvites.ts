@@ -1,8 +1,3 @@
-// Pending group-invite hooks for the receiving (invitee) side, plus the
-// send-side mutation for the inviter (used from group/[id]/invite). The
-// member-list + leave-group hooks live here too because they all sit on
-// the group detail screen and share invalidation patterns.
-
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
@@ -39,17 +34,12 @@ export interface GroupInvite {
 export const groupInviteQueryKeys = {
   pending: (userId: string | null) => ["group-invites", "pending", userId] as const,
   members: (groupId: string | null) => ["groups", groupId, "members"] as const,
-  // A group's outgoing pending invites (#1506) — desktop's key.
   groupInvites: (groupId: string | null) => ["group-invites", "group", groupId] as const,
 };
 
 const ROLE_RANK: Record<string, number> = { owner: 0, admin: 1 };
 
-/**
- * Roster display order for member lists: role first (owner, admins, members),
- * then alphabetical. Desktop's members panel orders online-first, but mobile
- * has no presence source yet — presence ordering awaits one.
- */
+/** Role first (owner, admins, members), then alphabetical; mobile has no presence source. */
 export function sortMembersByRole(members: GroupMember[]): GroupMember[] {
   return [...members].sort((a, b) => {
     const ar = ROLE_RANK[a.role] ?? 2;
@@ -84,17 +74,14 @@ export function useAcceptGroupInvite() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "success" } },
     mutationFn: async (inviteId: string) => {
       if (!currentUser) {
         throw new Error("No current user");
       }
       await invoke("accept_group_invite", { inviteId, userId: currentUser.id });
-      // The MLS welcome may have already landed in Turso (the inviter
-      // queued it when sending the invite). Pull it now so the new group
-      // appears in the user's sidebar immediately instead of waiting for
-      // the next ingest-on-focus.
+      // The inviter queued the MLS welcome with the invite; pull it now so
+      // the group appears without waiting for the next ingest.
       try {
         await invoke("poll_mls_welcomes", { userId: currentUser.id });
       } catch (e) {
@@ -119,7 +106,6 @@ export function useDeclineGroupInvite() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "destructive" } },
     mutationFn: async (inviteId: string) => {
       if (!currentUser) {
@@ -138,7 +124,6 @@ export function useDeclineGroupInvite() {
 export function useSendGroupInvite(groupId: string | null) {
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "success" } },
     mutationFn: async (inviteeIdentifier: string) => {
       if (!currentUser || !groupId) {
@@ -172,7 +157,7 @@ export function useGroupMembers(groupId: string | null) {
   });
 }
 
-/** The group's pending invites: who was invited, by whom, and when (#1506). */
+/** The group's pending invites (#1506). */
 export function useGroupInvites(groupId: string | null) {
   const currentUser = useObserver(() => appStore.currentUser);
 
@@ -200,7 +185,6 @@ export function useRevokeGroupInvite(groupId: string | null) {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "destructive" } },
     mutationFn: async (inviteId: string) => {
       if (!currentUser || !groupId) {
@@ -224,7 +208,6 @@ export function useUpdateGroup(groupId: string | null) {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "success" } },
     mutationFn: async (vars: {
       name?: string;
@@ -257,7 +240,6 @@ export function useDeleteGroup() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "destructive" } },
     mutationFn: async (groupId: string) => {
       if (!currentUser) {
@@ -283,7 +265,6 @@ export function useUpdateChannel(groupId: string | null) {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "success" } },
     mutationFn: async (vars: {
       channelId: string;
@@ -315,7 +296,6 @@ export function useDeleteChannel(groupId: string | null) {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "destructive" } },
     mutationFn: async (channelId: string) => {
       if (!currentUser) {
@@ -341,7 +321,6 @@ export function useRemoveMember(groupId: string | null) {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "destructive" } },
     mutationFn: async (userId: string) => {
       if (!currentUser || !groupId) {
@@ -365,7 +344,6 @@ export function useSetMemberRole(groupId: string | null) {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "toggle" } },
     mutationFn: async (vars: { userId: string; role: "admin" | "member" }) => {
       if (!currentUser || !groupId) {
@@ -420,10 +398,8 @@ export function useGroupJoinRequests(groupId: string | null) {
 }
 
 /**
- * Pending join requests for every group the viewer administers, as
- * groupId → count. Desktop's `useAllPendingJoinRequests` twin: only admin
- * groups are asked (the core refuses a non-admin), and each query shares the
- * per-group cache key, so approving on the requests screen updates this too.
+ * Pending join-request counts per administered group. Shares the per-group
+ * cache key, so approving on the requests screen updates this too.
  */
 export function useAdminPendingJoinRequestCounts(adminGroupIds: string[]): Map<string, number> {
   const currentUser = useObserver(() => appStore.currentUser);
@@ -471,7 +447,6 @@ export function useRequestGroupAccess() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "success" } },
     mutationFn: async (groupId: string) => {
       if (!currentUser) {
@@ -495,7 +470,6 @@ export function useApproveJoinRequest(groupId: string | null) {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "success" } },
     mutationFn: async (requestId: string) => {
       if (!currentUser) {
@@ -521,7 +495,6 @@ export function useRejectJoinRequest(groupId: string | null) {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "destructive" } },
     mutationFn: async (requestId: string) => {
       if (!currentUser) {
@@ -547,9 +520,7 @@ export function useGroupBySlug(slug: string | null) {
       if (!slug) {
         return null;
       }
-      // Mirrors the Rust `GroupPreview` (#917) — the deliberately minimal
-      // public projection, and nothing more. The previously declared `slug`
-      // field was never returned by the command; the caller derives it.
+      // The Rust `GroupPreview` (#917), a deliberately minimal public projection.
       return await invoke<{
         id: string;
         name: string;
@@ -561,12 +532,8 @@ export function useGroupBySlug(slug: string | null) {
   });
 }
 
-// ── #847 shareable invite links (desktop parity: frontend useGroups.ts) ──────
-
-// A freshly minted invite link. Mirrors `CreatedInviteLink` in
-// `pollis-core/src/commands/groups/types.rs`. `token`/`url` arrive exactly
-// once, from the create call — the server stores only `sha256(secret)`, so
-// once this value is discarded the link can never be displayed again.
+// `token`/`url` arrive exactly once: the server stores only `sha256(secret)`,
+// so a discarded link can never be shown again (#847).
 export interface CreatedInviteLink {
   id: string;
   token: string;
@@ -575,9 +542,7 @@ export interface CreatedInviteLink {
   max_uses?: number | null;
 }
 
-// An existing link as shown in the management list. Mirrors
-// `InviteLinkSummary` — deliberately has no token field; the server has no
-// token to give back.
+// No token field: the server has none to give back.
 export interface InviteLinkSummary {
   id: string;
   created_at: string;
@@ -589,7 +554,6 @@ export interface InviteLinkSummary {
   is_live: boolean;
 }
 
-// Mirrors `RedeemedInvite`.
 export interface RedeemedInvite {
   group_id: string;
   group_name?: string | null;
@@ -621,7 +585,6 @@ export function useCreateGroupInviteLink(groupId: string | null) {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "success" } },
     mutationFn: async (vars: {
       expiresInHours: number | null;
@@ -649,7 +612,6 @@ export function useRevokeGroupInviteLink(groupId: string | null) {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "destructive" } },
     mutationFn: async (linkId: string) => {
       if (!currentUser) {
@@ -672,7 +634,6 @@ export function useRedeemGroupInviteLink() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "success" } },
     mutationFn: async (token: string): Promise<RedeemedInvite> => {
       if (!currentUser) {
@@ -684,8 +645,7 @@ export function useRedeemGroupInviteLink() {
       });
     },
     onSuccess: () => {
-      // The redeemer just crossed into a group they could not see before, so
-      // most group-scoped caches are stale. Invalidate broadly, like desktop.
+      // A group the redeemer could not see before: most group caches are stale.
       queryClient.invalidateQueries({ queryKey: groupQueryKeys.all });
     },
   });
@@ -695,7 +655,6 @@ export function useLeaveGroup() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "destructive" } },
     mutationFn: async (groupId: string) => {
       if (!currentUser) {

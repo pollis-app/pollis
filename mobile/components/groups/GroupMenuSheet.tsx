@@ -9,9 +9,7 @@ import { semantic } from "../../theme/tokens";
 import { useLeaveGroup } from "../../hooks/queries";
 import { haptic } from "../../lib/haptics";
 
-// The group header's menu (Main.dc.html: name + chevron-down): the group's
-// pages, then — on its own, after a separation — Leave group, which needs a
-// second tap to confirm.
+// The group header's menu; Leave group sits apart and needs a second tap.
 export function GroupMenuSheet({
   groupId,
   groupName,
@@ -27,7 +25,6 @@ export function GroupMenuSheet({
   onClose: () => void;
 }) {
   const { t } = useTranslation("mobile");
-  // iPad two-pane: group pages open in the detail pane (useNav).
   const router = useNav();
   const leaveGroup = useLeaveGroup();
   const [armed, setArmed] = useState(false);
@@ -39,7 +36,6 @@ export function GroupMenuSheet({
 
   const onLeave = () => {
     if (!armed) {
-      // The first tap arms the confirm: warn by touch (#1286).
       haptic("confirmArm");
       setArmed(true);
       return;

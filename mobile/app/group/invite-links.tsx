@@ -40,7 +40,6 @@ export default function GroupInviteLinks() {
 
   const onRevoke = (linkId: string) => {
     if (confirmRevoke !== linkId) {
-      // The first tap arms the confirm: warn by touch (#1286).
       haptic("confirmArm");
       setConfirmRevoke(linkId);
       return;

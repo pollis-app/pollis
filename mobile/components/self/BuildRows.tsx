@@ -1,6 +1,6 @@
-// Self -> App: which build this is and where it updates from (#1443).
-// Two rows, exported separately because `Group` draws its dividers between
-// direct children.
+// Self -> App: which build this is and where it updates from (#1443). Two
+// rows, exported separately because `Group` draws dividers between direct
+// children.
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ListRow } from "../ui";
@@ -53,7 +53,6 @@ export function VersionRow() {
   );
 }
 
-/** Opens the store listing / page this install updates from. */
 export function UpdateRow() {
   const { t } = useTranslation("mobile");
   const { destination } = getBuildInfo();

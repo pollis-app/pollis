@@ -8,12 +8,7 @@ import { fonts, semantic, type as ty, r } from "../../theme/tokens";
 
 const GLYPH = 22;
 
-/**
- * Long-press sheet for a Vault entry: the entry quoted in a plain card, then
- * desktop's three row actions — pin/unpin and edit, and delete in its own
- * group (destructive = label + trash icon + separation, no third hue).
- * Delete does not act here: it hands over to the delete bar, which asks first.
- */
+/** Long-press sheet for a Vault entry. Delete does not act here: it hands over to the delete bar, which asks first. */
 export function VaultEntrySheet({
   quote,
   quoteTime,

@@ -1,17 +1,6 @@
-//! Conversation + message READ layer (M2).
-//!
-//! Thin, typed wrappers over the exact `pollis_core::commands::*` read surface
-//! the desktop app reaches over Tauri `invoke` (spec §8, the command→screen
-//! table). We do **not** reshape or fork the core return types — a wrapper just
-//! fixes the argument order the UI wants and, for the conversation tree, bundles
-//! the three list calls (§6's "conversation enumeration") behind one call so the
-//! sync loop and the left pane share one source of truth.
-//!
-//! Reads go to the Delivery Service (#987 — the client has no database
-//! credential and `pollis-core` does not link `libsql`); the message reads
-//! additionally pull + decrypt any newly-delivered envelopes
-//! (`get_channel_messages` / `get_dm_messages` run ingest before returning),
-//! which is what surfaces a peer's message locally.
+//! Conversation + message read layer: typed wrappers over the core read
+//! surface (spec §8). The message reads run envelope ingest + decrypt before
+//! returning, which is what surfaces a peer's message locally.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,20 +14,13 @@ use pollis_core::commands::messages::{
 };
 use pollis_core::state::AppState;
 
-/// The default page size for a message fetch, matching the core default
-/// (`read.rs` uses 50 when `limit` is `None`). Surfaced here so the UI and the
-/// sync loop agree on "one page".
+/// One page of messages; matches the core default in `read.rs`.
 pub const DEFAULT_PAGE: i64 = 50;
 
-/// Every conversation a user participates in, in one snapshot: the groups (each
-/// carrying its channels), the accepted DM channels, and the still-pending DM
-/// requests. This is exactly the enumeration §6 wants before running
-/// `process_pending_commits` per conversation, and it's what the left pane
-/// renders.
+/// Every conversation a user is in (the §6 enumeration and the left pane).
 ///
-/// DM *requests* are included deliberately: a member added to a DM sees it as a
-/// pending request until they accept, but the MLS group already exists and may
-/// have commits/messages to catch up on — so the sync loop must process it too.
+/// DM requests are included: the MLS group already exists before the accept and
+/// may have commits/messages to catch up on.
 #[derive(Debug, Clone)]
 pub struct ConversationTree {
     pub groups: Vec<GroupWithChannels>,
@@ -47,10 +29,8 @@ pub struct ConversationTree {
 }
 
 impl ConversationTree {
-    /// The per-conversation ids `process_pending_commits` must be run for: every
-    /// channel id (group channels each map to their group's MLS group; the core
-    /// resolves that), plus every DM id (channel + request). Commit processing is
-    /// keyed by MLS group / conversation, so this is the exact set §6 iterates.
+    /// The ids `process_pending_commits` must run for: every channel id (the
+    /// core resolves its group) plus every DM id.
     pub fn conversation_ids(&self) -> Vec<String> {
         let mut ids = Vec::new();
         for group in &self.groups {
@@ -64,10 +44,8 @@ impl ConversationTree {
         ids
     }
 
-    /// Total conversation count (channels + DM channels + DM requests) — handy
-    /// for a "3 conversations" status line and for tests. Counted rather than
-    /// measured off `conversation_ids`, which would clone every id: the status
-    /// line calls this on every rendered frame.
+    /// Counted, not `conversation_ids().len()`: the status line calls this every
+    /// frame and that would clone every id.
     pub fn len(&self) -> usize {
         self.groups.iter().map(|g| g.channels.len()).sum::<usize>()
             + self.dm_channels.len()
@@ -79,9 +57,8 @@ impl ConversationTree {
     }
 }
 
-/// Load the full conversation tree for `user_id` (§6 enumeration; the §8 "Group
-/// list" and "DM list" rows). One call fans out to the three core list functions
-/// so the caller never forgets the DM-requests leg.
+/// One call over the three core list functions, so no caller forgets the
+/// DM-requests leg.
 pub async fn load_conversations(state: &Arc<AppState>, user_id: &str) -> Result<ConversationTree> {
     let mut groups = list_user_groups_with_channels(user_id.to_string(), state).await?;
     drop_voice_channels(&mut groups);
@@ -94,10 +71,8 @@ pub async fn load_conversations(state: &Arc<AppState>, user_id: &str) -> Result<
     })
 }
 
-/// Read one page of a group channel's messages, newest-first (§8 "Open channel").
-/// Runs envelope ingest first, so a peer's just-delivered message shows up. Pass
-/// `cursor = page.next_cursor` from a prior page to scroll into history; pass
-/// `None` for the first page.
+/// One page of a channel's messages, newest-first, ingesting first. Pass a
+/// prior page's `next_cursor` to scroll into history, `None` for the first.
 pub async fn channel_messages(
     state: &Arc<AppState>,
     user_id: &str,
@@ -115,8 +90,7 @@ pub async fn channel_messages(
     Ok(page)
 }
 
-/// Read one page of a DM's messages, newest-first (§8 "Open DM"). Same
-/// ingest-then-read + cursor semantics as [`channel_messages`].
+/// Same semantics as [`channel_messages`], for a DM.
 pub async fn dm_messages(
     state: &Arc<AppState>,
     user_id: &str,
@@ -158,10 +132,8 @@ pub async fn thread_counts(state: &Arc<AppState>, conv_id: &str) -> Result<HashM
         .collect())
 }
 
-/// The TUI is built without `media`, so a voice channel has nothing to open —
-/// drop them from the tree entirely, exactly as mobile does
-/// (`mobile/hooks/queries/useUserGroups.ts`). Voice channels carry no messages,
-/// so the sync loop loses nothing by not enumerating them.
+/// Built without `media`, so voice channels (which carry no messages) are
+/// dropped, as mobile does (`mobile/hooks/queries/useUserGroups.ts`).
 fn drop_voice_channels(groups: &mut [GroupWithChannels]) {
     for group in groups {
         group.channels.retain(|c| c.channel_type != "voice");
@@ -177,8 +149,6 @@ pub async fn thread_replies(state: &Arc<AppState>, root_id: &str) -> Result<Vec<
 mod tests {
     use super::*;
 
-    // A tree with no conversations yields no ids and reports empty — the
-    // fresh-signup state the sync loop starts from.
     #[test]
     fn empty_tree_has_no_conversations() {
         let tree = ConversationTree {
@@ -191,8 +161,6 @@ mod tests {
         assert!(tree.conversation_ids().is_empty());
     }
 
-    // Voice channels never reach the tree — neither the sidebar nor the sync
-    // loop's conversation ids — while text channels survive untouched.
     #[test]
     fn voice_channels_are_dropped_from_the_tree() {
         use pollis_core::commands::groups::Channel;

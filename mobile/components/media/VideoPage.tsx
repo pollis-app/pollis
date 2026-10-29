@@ -1,9 +1,7 @@
-// One video page of the media viewer (#1248): expo-video with the platform's
-// own playback controls, as desktop's lightbox uses the `<video controls>`
-// element. The file is the named local copy of the decrypted bytes
-// (`useNamedMediaUri`) — AVPlayer picks a decoder by extension — and is
-// taken only while the page is on screen, so a roll of videos never holds
-// more than the visible one in plaintext.
+// One video page of the media viewer (#1248). The file is the named local copy
+// of the decrypted bytes (AVPlayer picks a decoder by extension), taken only
+// while the page is on screen, so a roll of videos never holds more than the
+// visible one in plaintext.
 
 import { useEffect } from "react";
 import { View } from "react-native";
@@ -32,7 +30,6 @@ export function VideoPage({
     p.loop = false;
   });
 
-  // Swiping away pauses: a hidden page must not keep playing.
   useEffect(() => {
     if (!active) {
       player.pause();

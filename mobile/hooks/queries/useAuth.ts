@@ -1,9 +1,3 @@
-// Auth mutation hooks. Wraps the request_otp / verify_otp / set_pin /
-// unlock / initialize_identity flow that all four `(auth)/*` screens
-// share. Mirrors the auth shape in `frontend/src/hooks/queries/useAuth.ts`
-// where the desktop equivalents live — there's no public hook there, so
-// this file is a fresh start scoped to mobile's screen sequence.
-
 import { useMutation } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
 import { endSession } from "../../lib/session";
@@ -20,9 +14,6 @@ export interface RawUserProfile {
 
 export interface UnlockOutcome {
   user_id: string;
-  // Whatever else `crate::commands::pin::UnlockOutcome` carries — opaque
-  // to the UI; we read user_id and trust the Rust side to have set
-  // AppState.unlock for downstream commands.
 }
 
 export interface UnlockStateSnapshot {
@@ -44,7 +35,6 @@ export function profileToUser(p: RawUserProfile): User {
 
 export function useRequestOtp() {
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: {} },
     mutationFn: async (email: string) => {
       await invoke("request_otp", { email });
@@ -58,7 +48,6 @@ export function useVerifyOtp() {
   const setPendingSecretKey = appStore.setPendingSecretKey;
 
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "success" } },
     mutationFn: async (vars: { email: string; code: string }) => {
       const profile = await invoke<RawUserProfile>("verify_otp", {
@@ -71,8 +60,7 @@ export function useVerifyOtp() {
       const user = profileToUser(profile);
       setCurrentUser(user);
       setUsername(profile.username);
-      // Stash the recovery key (returned only on first-device signup) so
-      // the PIN screen can hand it off to the Emergency Kit display.
+      // Returned only on first-device signup, for the Emergency Kit screen.
       if (profile.new_secret_key) {
         setPendingSecretKey(profile.new_secret_key);
       }
@@ -90,7 +78,6 @@ export function useUnlockState() {
 
 export function useSetPin() {
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "success" } },
     mutationFn: async (vars: { oldPin?: string; newPin: string }) => {
       await invoke("set_pin", {
@@ -103,7 +90,6 @@ export function useSetPin() {
 
 export function useUnlock() {
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "success" } },
     mutationFn: async (vars: { userId: string; pin: string }) => {
       return await invoke<UnlockOutcome>("unlock", {
@@ -130,19 +116,13 @@ export function useLogout() {
     mutationFn: async (vars: { deleteData?: boolean } | void) => {
       await invoke("logout", { deleteData: vars?.deleteData ?? false });
     },
-    // Settled, not just success: a failed `logout` still lands on sign-in,
-    // so it must not leave the old session's state behind (desktop's
-    // sign-out does the same).
+    // Settled, not success: a failed `logout` still lands on sign-in, so it
+    // must not leave the old session's state behind.
     onSettled: () => endSession(),
   });
 }
 
-/**
- * One-shot session-restore call. Used by `app/index.tsx` to decide where
- * to send the user at app start: existing session → tabs, no session →
- * auth flow. Returns the profile (and side-effects the store) when there
- * is one; returns null when not signed in.
- */
+/** Restore the session into the store; null when not signed in. */
 export async function restoreSession(): Promise<RawUserProfile | null> {
   const profile = await invoke<RawUserProfile | null>("get_session");
   if (!profile) {

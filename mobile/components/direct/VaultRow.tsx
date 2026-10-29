@@ -3,11 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
 import { semantic, fonts, r, space, layout } from "../../theme/tokens";
 
-/**
- * The Vault entry at the top of the Direct list (#1316). Desktop puts the
- * Vault — a chat with yourself — first in its DM list, where people look for
- * Note to Self; this is that row. Always shown, even with no conversations.
- */
+/** The Vault row at the top of the Direct list (#1316), where desktop puts it; always shown. */
 export function VaultRow({ onPress }: { onPress: () => void }) {
   const { t } = useTranslation("mobile");
   const name = t("vault:title");

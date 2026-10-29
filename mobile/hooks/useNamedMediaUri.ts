@@ -1,12 +1,6 @@
-// React lifecycle over the named media copy (#1248) — `useMediaUri`'s twin
-// for consumers that need the file typed by extension: the video and audio
-// players (AVPlayer reads the extension), the photo library and the share
-// sheet. See `resolveNamedMediaUri` in lib/media/cache.
-//
-//   const { uri, error } = useNamedMediaUri(attachment, enabled);
-//
-// `enabled: false` takes no reference and resolves nothing, so a viewer page
-// can defer the copy until it is on screen or the user asks to save it.
+// `useMediaUri`'s twin for a copy typed by its extension (#1248), which the
+// players (AVPlayer), the photo library and the share sheet need.
+// `enabled: false` takes no reference, so a viewer page can defer the copy.
 
 import { useEffect, useState } from "react";
 import {
@@ -68,8 +62,6 @@ export function useNamedMediaUri(
 
     return () => {
       active = false;
-      // Pairs with the reference taken above; the last release unlinks the
-      // named plaintext copy.
       void releaseNamedMediaUri(
         { object_key: objectKey ?? "", content_hash: contentHash ?? "" },
         resolvedIn,

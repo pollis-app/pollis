@@ -1,41 +1,30 @@
-// PORT: copy of frontend/src/utils/mentions.ts — keep the two in sync (the
-// Rust matcher in pollis-core/src/commands/messages/send.rs is the source of
-// truth for both).
+// PORT: copy of frontend/src/utils/mentions.ts; keep the two in sync. The Rust
+// matcher in pollis-core/src/commands/messages/send.rs is the source of truth.
 //
-// Mirror of `mentions_all()` in pollis-core/src/commands/messages/send.rs.
-// Keep the two in sync: the backend is the source of truth for whether a
-// message actually pings everyone, and this drives the composer hint that
-// tells the sender it will. A standalone `@all` token matches (whitespace-
-// delimited, trailing punctuation ignored) so "@all" and "@all," match but
-// "@allison" and "email@allcorp" do not. Case-insensitive.
+// Mirrors `mentions_all()`: a standalone, case-insensitive `@all` ("@all," yes;
+// "@allison", "email@allcorp" no). Drives the composer's ping-everyone hint.
 export function mentionsAll(content: string): boolean {
   return content.split(/\s+/).some((word) => {
-    // Trim trailing characters that are neither alphanumeric nor '@', the
-    // same predicate the Rust matcher uses.
+    // Same trailing-trim predicate as the Rust matcher.
     const trimmed = word.replace(/[^\p{L}\p{N}@]+$/u, "");
     return trimmed.toLowerCase() === "@all";
   });
 }
 
-// Characters that may appear INSIDE a username after the leading '@'. Mirrors
-// `is_mention_body_char()` in send.rs — deliberately wide (the `users.username`
-// column has no charset constraint) but closed over sentence punctuation.
+// Mirrors `is_mention_body_char()`: deliberately wide (`users.username` has no
+// charset constraint) but closed over sentence punctuation.
 const MENTION_BODY = /[\p{L}\p{N}_.-]/u;
 
-// A mention opens only at the start of the string or right after whitespace,
-// which is what stops "email@allcorp" and "a@b.com" from reading as mentions.
-// The body is captured greedily; trailing '.', '-' and '_' are trimmed by the
-// callers below so "@dana." mentions `dana`.
+// A mention opens only at the start or after whitespace (so "a@b.com" is not
+// one); trailing '.', '-', '_' are trimmed so "@dana." mentions `dana`.
 const MENTION_RE = /(^|\s)@([\p{L}\p{N}_.-]+)/gu;
 
-// Trailing punctuation the Rust side trims off a mention body.
 const MENTION_TRAIL = /[.\-_]+$/;
 
-/** One `@mention` found in a string, with the slice it occupies. */
 export interface MentionMatch {
   /** Username as typed, without the leading '@'. */
   raw: string;
-  /** Lowercased username — what matching compares on. */
+  /** Lowercased; what matching compares on. */
   name: string;
   /** Index of the '@' in the source string. */
   start: number;
@@ -44,13 +33,9 @@ export interface MentionMatch {
 }
 
 /**
- * Every `@mention` in `text`, in order, including `@all`.
- *
- * MIRROR: `mention_tokens()` in pollis-core/src/commands/messages/send.rs,
- * except that this keeps `@all` (the renderer highlights it; the backend
- * handles it through `mentions_all()` instead). The two must agree on what
- * counts as a mention or the composer will promise a ping the backend does
- * not send.
+ * Every `@mention` in `text`, in order. Mirrors `mention_tokens()` in send.rs
+ * except that it keeps `@all`; the two must agree, or the composer promises a
+ * ping the backend does not send.
  */
 export function findMentions(text: string): MentionMatch[] {
   const out: MentionMatch[] = [];
@@ -67,25 +52,19 @@ export function findMentions(text: string): MentionMatch[] {
       raw: body,
       name: body.toLowerCase(),
       start,
-      // +1 for the '@' itself.
       end: start + 1 + body.length,
     });
   }
   return out;
 }
 
-/**
- * Lowercased usernames named in `text`, excluding `@all`. Mirrors
- * `mention_tokens()` exactly — this is the set the backend resolves against
- * the channel roster.
- */
+/** Lowercased usernames in `text` minus `@all`: the set the backend resolves. */
 export function mentionTokens(text: string): string[] {
   return findMentions(text)
     .map((m) => m.name)
     .filter((n) => n !== "all");
 }
 
-/** An in-progress `@…` the caret is sitting inside. */
 export interface MentionQuery {
   /** Index of the '@'. */
   start: number;
@@ -96,35 +75,25 @@ export interface MentionQuery {
 }
 
 /**
- * The mention the caret is currently typing, or null.
- *
- * Only an unterminated run of mention-body characters immediately before the
- * caret counts, so the suggestion disappears the moment the user types a
- * space — matching Slack/Discord, where a completed mention stops offering
- * alternatives.
+ * The mention the caret is typing, or null. Only an unterminated run right
+ * before the caret counts, so a typed space ends the suggestion.
  */
 export function mentionQueryAt(text: string, caret: number): MentionQuery | null {
   let i = caret;
   while (i > 0 && MENTION_BODY.test(text[i - 1])) {
     i -= 1;
   }
-  // The character before the run must be the '@' that opens the mention.
   if (i === 0 || text[i - 1] !== "@") {
     return null;
   }
   const at = i - 1;
-  // …and that '@' must itself start the string or follow whitespace.
   if (at > 0 && !/\s/.test(text[at - 1])) {
     return null;
   }
   return { start: at, end: caret, query: text.slice(i, caret).toLowerCase() };
 }
 
-/**
- * Replace the mention query at `caret` with `@username `, returning the new
- * text and where the caret should land. A trailing space is appended so the
- * user can keep typing straight away (Slack/Discord do the same).
- */
+/** Replace the query at `caret` with `@username ` (trailing space included). */
 export function applyMention(
   text: string,
   caret: number,
@@ -139,7 +108,6 @@ export function applyMention(
   return { text: next, caret: q.start + inserted.length };
 }
 
-/** A person who can be mentioned — normalized across group members and DMs. */
 export interface MentionCandidate {
   userId: string;
   username: string;
@@ -147,16 +115,12 @@ export interface MentionCandidate {
   avatarUrl?: string;
 }
 
-/** Max suggestions shown at once, matching Slack's composer list depth. */
 export const MENTION_SUGGESTION_LIMIT = 8;
 
 /**
- * Candidates matching `query`, best first.
- *
- * Prefix matches rank above substring matches (so "da" offers `dana` before
- * `adam`), ties break alphabetically, and an empty query lists everyone. The
- * pool is only ever the members the user can already see — this function never
- * widens it, which is what keeps mentions from becoming a user directory.
+ * Candidates matching `query`: prefix matches before substring ones, ties
+ * alphabetical, empty query lists all. Never widens the pool beyond members the
+ * user can already see, so mentions never become a user directory.
  */
 export function rankMentionCandidates(
   candidates: MentionCandidate[],

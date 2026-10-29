@@ -26,24 +26,13 @@ import type { CustomEmoji } from "../../hooks/queries/useEmoji";
 import type { PickedAttachment } from "../../lib/attachments";
 
 /**
- * Bottom composer bar (Chat.dc.html): a 44pt round attach button, a raised
- * pill field that grows with its text (emoji button inside at the end), and
- * a 44pt round accent send button. When
- * `mentionCandidates` is provided, typing `@…` opens a suggestion list
- * above the input (#886) — candidates come from the visible roster only,
- * ranked like desktop (prefix beats substring, alphabetical within rank).
- *
- * Typing `:…` opens the same list for emoji, and typing the closing `:` of a
- * complete shortcode substitutes it outright, Slack-style. Both tracks mirror
- * desktop: a trigger only opens at a word start (so `http://` and `10:30` are
- * inert), custom emoji beat standard ones, and everything is substituted HERE,
- * before send — a standard emoji becomes the literal character, a custom one
- * the existing `<:shortcode:hash>` token, so the wire format is unchanged.
- *
- * PRECEDENCE: an open mention query suppresses the emoji one. The two cannot
- * in fact both be open — neither body alphabet contains the other's trigger —
- * but the order is fixed so a future widening has one place to be reasoned
- * about.
+ * Bottom composer bar. Typing `@…` opens mention suggestions from the visible
+ * roster (#886); typing `:…` opens emoji suggestions, and the closing `:` of a
+ * complete shortcode substitutes it Slack-style. A trigger only opens at a
+ * word start (so `http://` and `10:30` are inert), and everything is
+ * substituted before send — a standard emoji as the character, a custom one
+ * as the `<:shortcode:hash>` token — so the wire format is unchanged. An open
+ * mention query suppresses the emoji one.
  */
 export function Composer({
   draft,
@@ -71,7 +60,6 @@ export function Composer({
   onAttach?: () => void;
   pendingAttachments?: PickedAttachment[];
   onRemoveAttachment?: (id: string) => void;
-  /** True when attachments alone make the message sendable. */
   canSendEmptyText?: boolean;
   // Each increase focuses the field (a reply starting, #1270). 0 never does.
   focusRequest?: number;
@@ -80,16 +68,11 @@ export function Composer({
 }) {
   const { t } = useTranslation("common");
   const [caret, setCaret] = useState(0);
-  // iOS: a multiline field grows with its lines but keeps that height when its
-  // `value` is reset to "" (the send clears the draft), so after a two-line
-  // message the empty composer stayed two lines tall (Android re-measures on
-  // its own). Record the field's natural one-line height the first time it
-  // lays out empty, and cap an empty field at it. Measured at runtime, so it
-  // follows the system text size instead of hard-coding one. That first
-  // layout is one line only because the native input has no placeholder: a
-  // multiline TextInput sizes to its placeholder, so a hint that wrapped made
-  // the empty composer (and this measurement) two lines tall. The hint is
-  // the single-line overlay below instead.
+  // iOS keeps a multiline field's height when `value` is reset to "", so after
+  // a two-line message the empty composer stayed two lines tall. Record the
+  // field's one-line height the first time it lays out empty and cap an empty
+  // field at it. That needs the native input to have no placeholder (a
+  // multiline TextInput sizes to it), hence the overlay hint below.
   const [emptyHeight, setEmptyHeight] = useState<number | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const inputRef = useRef<TextInput>(null);
@@ -118,8 +101,7 @@ export function Composer({
     setCaret(next.caret);
   };
 
-  // The standard half is ~1600 rows off a table this app already bundles for
-  // the picker, so it is built once per mount rather than per keystroke.
+  // ~1600 standard rows, so built once per mount rather than per keystroke.
   const shortcodeEntries = useMemo(
     () => [...customShortcodeEntries(customEmoji ?? []), ...standardShortcodeEntries()],
     [customEmoji],
@@ -147,12 +129,10 @@ export function Composer({
     setCaret(next.caret);
   };
 
-  // Slack's direct substitution, on the way through: the ':' that CLOSES a
-  // known shortcode is swallowed and the emoji takes its place. Gated on a
-  // single-character insertion so a paste ending in a colon is left alone.
-  // RN's `onChangeText` carries no caret, so this only fires for a colon typed
-  // at the END of the draft — the overwhelmingly common case, and editing back
-  // into the middle of a line still has the suggestion list.
+  // The ':' that closes a known shortcode is swallowed and the emoji takes its
+  // place. Gated on a single-character insertion so a paste ending in a colon
+  // is left alone; `onChangeText` carries no caret, so this only fires for a
+  // colon typed at the end of the draft.
   const handleChangeText = (next: string) => {
     if (next.length === draft.length + 1 && next.endsWith(":")) {
       const closed = completedShortcodeAt(next, next.length);
@@ -173,8 +153,6 @@ export function Composer({
     onChangeDraft(next);
   };
 
-  // The in-field emoji button inserts the picked emoji (or custom token) at
-  // the caret.
   const insertEmoji = (insert: string) => {
     const at = Math.min(caret, draft.length);
     onChangeDraft(draft.slice(0, at) + insert + draft.slice(at));
@@ -327,8 +305,7 @@ export function Composer({
             borderRadius: layout.touchMin / 2,
             alignItems: "center",
             justifyContent: "center",
-            // No border. Unavailable: the solid raised disc + a dim glyph
-            // (accent when available), never a fade.
+            // No border; unavailable is a solid disc + dim glyph, never a fade.
             backgroundColor: pressed && onAttach ? semantic.high : semantic.raised,
           })}
         >
@@ -345,9 +322,7 @@ export function Composer({
             value={draft}
             onChangeText={handleChangeText}
             onSelectionChange={(e) => setCaret(e.nativeEvent.selection.end)}
-            // Return inserts a newline (the Slack/Discord mobile convention,
-            // #1247); only the send button sends. The field grows with its
-            // lines up to `layout.composerInputMax`, then scrolls inside.
+            // Return inserts a newline (#1247); only the send button sends.
             multiline
             autoCapitalize="sentences"
             editable={editable}
@@ -393,11 +368,9 @@ export function Composer({
             }
           />
           {draft === "" ? (
-            // The placeholder, drawn here rather than by the native input so it
-            // is always ONE line: it ellipsizes at the end instead of wrapping,
-            // whatever its length, the language or the system text size. It
-            // spans the text area (start padding to the emoji button), so
-            // start/end follow RTL, and lets every touch through to the input.
+            // Drawn here rather than by the native input so it is always ONE
+            // line (it ellipsizes instead of wrapping); lets every touch
+            // through to the input.
             <View
               pointerEvents="none"
               accessibilityElementsHidden
@@ -426,9 +399,8 @@ export function Composer({
             </View>
           ) : null}
         </View>
-        {/* Always the accent fill with a dark glyph and no border (user's
-            call). With nothing to send it is announced as disabled and leaves
-            the focus order; a tap then does nothing. */}
+        {/* With nothing to send it is announced as disabled and leaves the
+            focus order. */}
         <Pressable
           onPress={onSend}
           disabled={sendDisabled}
@@ -467,7 +439,6 @@ const FIELD_PAD_END = 4;
 const FIELD_GAP = 4;
 const EMOJI_BUTTON_WIDTH = 36;
 
-// The suggestion popover above the composer (mentions / emoji shortcodes).
 function suggestionBox() {
   return {
     marginHorizontal: 12,

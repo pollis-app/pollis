@@ -18,10 +18,9 @@ import {
 import { useThemeRerender } from "../../components/theme";
 
 /**
- * Message requests, opened from the single "Message requests" row on the
- * Direct tab. The same rows, hooks and actions the Direct tab used to render
- * inline: Accept, or Block the sender — mirrors desktop's RequestsPage /
- * dm-request bar (there is no decline command in pollis-core).
+ * Message requests, opened from the Direct tab's "Message requests" row:
+ * Accept, or Block the sender, as desktop's RequestsPage (there is no decline
+ * command in pollis-core).
  */
 export default function DMRequests() {
   useThemeRerender();

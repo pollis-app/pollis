@@ -1,8 +1,5 @@
-// Who can be mentioned in the open conversation (#886). Mirrors desktop's
-// useMentionCandidates: the pool is ONLY the visible roster — the group's
-// member list for channels, the single peer for DMs. There is deliberately
-// no directory/user enumeration. The current user is always excluded (you
-// can't mention yourself; self-highlighting is a render concern).
+// Mention candidates are only the visible roster, deliberately never a
+// directory enumeration (#886). The current user is excluded.
 
 import { useMemo } from "react";
 import { useObserver } from "mobx-react-lite";

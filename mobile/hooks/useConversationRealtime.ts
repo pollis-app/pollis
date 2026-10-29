@@ -1,17 +1,5 @@
-// Foreground realtime for the open conversation.
-//
-// Supplements the focus-effect ingest in the chat screen: while a chat is
-// open we also hold a LiveKit data-channel connection to the conversation's
-// room, and re-run the same envelope ingest the moment a relevant event
-// arrives — so a message sent by a peer shows up without waiting for the
-// next screen focus. The focus-effect ingest remains the fallback and the
-// catch-up-after-background path; this hook only adds liveness on top.
-//
-// Entirely best-effort: if realtime is unavailable (no LiveKit URL, no
-// token command, connect error) the subscription stays inert and this
-// hook is a clean no-op. Subscriptions are ref-counted per room (see
-// lib/realtime/client), so sharing a room with the inbox realtime reuses
-// one LiveKit connection instead of evicting it.
+// Live ingest for the open conversation on top of the chat screen's focus
+// ingest, which stays the fallback. Best-effort: a no-op without realtime.
 
 import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -30,8 +18,7 @@ export function useConversationRealtime(
   const ingest = useIngestConversation();
   const queryClient = useQueryClient();
 
-  // Refs keep the (stable-identity) data handler reading current values
-  // without forcing a reconnect on every render.
+  // Refs so the handler reads current values without forcing a reconnect.
   const ingestRef = useRef(ingest);
   ingestRef.current = ingest;
   const qcRef = useRef(queryClient);
@@ -43,21 +30,15 @@ export function useConversationRealtime(
     if (!conversationId || !kind) {
       return;
     }
-    // A GROUP uses one room (its group_id) covering all its channels; a DM
-    // uses a room named by its conversation_id.
+    // One room per group covers all its channels; a DM's room is its own id.
     const roomName = kind === "channel" ? groupId : conversationId;
     if (!roomName) {
       return;
     }
 
     const handleEvent = (event: RealtimeEvent) => {
-      // Membership / role events arrive on the conversation (group) room.
-      // Data refresh only — invalidate the affected queries so the member
-      // list and group/DM lists reflect live changes. Membership is never
-      // announced in the timeline (#1506), on mobile or desktop.
+      // Membership is never announced in the timeline (#1506): data refresh only.
       if (event.type === "member_role_changed") {
-        // Mirror desktop: refresh the affected group's member list and the
-        // groups list (which embeds the current user's role).
         void qcRef.current.invalidateQueries({
           queryKey: groupInviteQueryKeys.members(event.group_id),
         });
@@ -65,8 +46,6 @@ export function useConversationRealtime(
         return;
       }
       if (event.type === "roster_changed") {
-        // Refresh the affected conversation's members and pending invites
-        // plus the groups and DM lists, as desktop does. No timeline line.
         void qcRef.current.invalidateQueries({
           queryKey: groupInviteQueryKeys.members(event.conversation_id),
         });
@@ -78,8 +57,7 @@ export function useConversationRealtime(
         return;
       }
       if (event.type === "realtime_reconnected") {
-        // Wake-ups published while the connection was down are lost; catch
-        // the open conversation up (a group ingest covers every channel).
+        // Wake-ups published while the connection was down are lost; catch up.
         void ingestRef.current(conversationIdRef.current ?? conversationId, kind);
         return;
       }
@@ -91,15 +69,12 @@ export function useConversationRealtime(
         return;
       }
       if (kind === "channel") {
-        // Any channel_id arriving on the group room belongs to this group;
-        // ingest that specific channel so its message cache refreshes even
-        // if it isn't the one currently on screen.
+        // Any channel of this group, not only the one on screen.
         if (event.channel_id) {
           void ingestRef.current(event.channel_id, "channel");
         }
         return;
       }
-      // DM room: only events for the open conversation are relevant.
       if (
         event.conversation_id &&
         event.conversation_id === conversationIdRef.current
@@ -108,8 +83,7 @@ export function useConversationRealtime(
       }
     };
 
-    // Ref-counted: if the inbox realtime already holds this room, this just
-    // attaches a listener to the shared connection (see lib/realtime/client).
+    // Ref-counted, so a room the inbox already holds shares its connection.
     const sub = subscribeRealtime(roomName, handleEvent);
     return () => {
       sub.close();

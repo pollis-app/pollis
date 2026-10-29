@@ -28,7 +28,6 @@ export function accentPresetFor(hex: string): AccentPreset | null {
   return ACCENT_PRESETS.find((p) => p.c.toLowerCase() === wanted) ?? null;
 }
 
-/** Display name for the current accent: the preset's name, else "Custom". */
 export function accentDisplayName(t: TFunction, hex: string): string {
   const preset = accentPresetFor(hex);
   return preset ? accentPresetLabel(t, preset.n) : t("mobile:self.hub.customAccent");

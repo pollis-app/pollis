@@ -55,8 +55,7 @@ export default function LinkSignIn() {
 
   return (
     <Screen testID="screen-auth-link" centered>
-      {/* Back to email. The id predates the top bar: the tour flow taps it
-          to return from this screen. */}
+      {/* Back to email. The tour flow taps this id to return from here. */}
       <Header
         bordered={false}
         backTestID="btn-link-use-email"

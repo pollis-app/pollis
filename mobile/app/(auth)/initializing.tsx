@@ -30,8 +30,7 @@ function Initializing() {
   const initIdentity = useInitializeIdentity();
   const [error, setError] = useState<string | null>(null);
 
-  // Real core version from the bridge's `version` command (pollis-core's
-  // CARGO_PKG_VERSION) — replaces the design handoff's hardcoded string.
+  // pollis-core's CARGO_PKG_VERSION, from the bridge's `version` command.
   const { data: coreVersion } = useQuery({
     queryKey: ["core-version"],
     queryFn: () => invoke<string>("version"),
@@ -41,11 +40,9 @@ function Initializing() {
   const ranRef = useState({ ran: false })[0];
   const navTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Identity init often finishes in well under a frame. Navigating away the
-  // instant it's done made the "Setting up" screen flash for a few frames —
-  // too fast to read, so it registered as a glitch. Hold the screen for a
-  // minimum dwell, then fade through to the app (the fade lives on the root
-  // (tabs) screen).
+  // Identity init often finishes in under a frame, which made this screen
+  // flash like a glitch. Hold it for a minimum dwell, then fade to the app (the
+  // fade lives on the root (tabs) screen).
   const MIN_VISIBLE_MS = 900;
 
   useEffect(() => {

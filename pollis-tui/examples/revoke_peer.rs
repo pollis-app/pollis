@@ -1,16 +1,10 @@
 //! Dev-DS peer for the mobile Maestro `device-revoked` two-device flow (#1338).
 //!
-//! A revoked device must learn it was revoked even when it was not listening
-//! for the live nudge. This peer is the account's FIRST device: it signs up on
-//! the DS named by `POLLIS_DELIVERY_URL` (the dev DS — it fixes the OTP) and
-//! prints the account's recovery key, which the phone under test uses to enroll
-//! as the second device. Once that device appears, and the driving script has
-//! closed the app on the phone (`touch $POLLIS_REVOKE_GO`), it revokes the
-//! phone and prints `PEER_REVOKED`. `mobile/scripts/maestro-device-revoked.sh`
-//! drives both sides.
-//!
-//! Not a shipping binary: examples build against pollis-tui's
-//! dev-dependencies.
+//! The account's first device: signs up on the dev DS (`POLLIS_DELIVERY_URL`)
+//! and prints the recovery key the phone uses to enroll as the second device.
+//! Once that device appears and the script has closed the app on the phone
+//! (`touch $POLLIS_REVOKE_GO`), it revokes the phone and prints
+//! `PEER_REVOKED`. `mobile/scripts/maestro-device-revoked.sh` drives both sides.
 //!
 //!   POLLIS_DATA_DIR=$(mktemp -d) POLLIS_DELIVERY_URL=https://api-dev.pollis.com \
 //!   POLLIS_DEV_ACCESS_KEY=… POLLIS_REVOKE_GO=/tmp/go \

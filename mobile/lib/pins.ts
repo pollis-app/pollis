@@ -1,15 +1,9 @@
-// Pinned messages (#99, mobile #1315): what a row of the pinned list shows.
-// Pure, so the node tests pin it.
-//
-// A pin is a SNAPSHOT of the message taken at pin time, sealed in Rust
-// (pollis-core/src/commands/pinned_messages.rs). Its `content` is the same
-// string shape the message table caches, so it goes through the same parser
-// as a timeline row; an edit or delete after the pin does not change it, the
-// same as desktop's PinnedPanel.
+// Pinned messages (#1315): what a row of the pinned list shows; pure. A pin is
+// a SNAPSHOT sealed at pin time, so a later edit or delete does not change it.
 
 import { parseContent } from "./messageContent.ts";
 
-/** Mirrors the Rust `PinnedMessage` (snake_case, as serde serializes it). */
+/** Mirrors the Rust `PinnedMessage`. */
 export interface PinnedMessage {
   id: string;
   conversation_id: string;
@@ -23,9 +17,8 @@ export interface PinnedMessage {
 }
 
 export type PinPreview = {
-  // The caption or message text, untrimmed (the row clamps its lines).
+  // Untrimmed; the row clamps its lines.
   text: string;
-  // Attached files' names, in order; the row lists them under the text.
   filenames: string[];
 };
 
@@ -37,7 +30,6 @@ export function pinPreview(content: string): PinPreview {
   };
 }
 
-/** The pinned message ids, for the message sheet's Pin / Unpin label. */
 export function pinnedIds(pins: readonly Pick<PinnedMessage, "message_id">[]): Set<string> {
   return new Set(pins.map((p) => p.message_id));
 }

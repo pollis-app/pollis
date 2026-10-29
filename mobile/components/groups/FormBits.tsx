@@ -2,9 +2,6 @@ import { Text, View } from "react-native";
 import { semantic, type as ty, space } from "../../theme/tokens";
 import { Icon } from "../icons";
 
-// Small form pieces for the group screens: a sentence-case field label with
-// hint and error, a paragraph of help text, and an inline error line.
-
 export function LabeledField({
   label,
   hint,
@@ -32,7 +29,6 @@ export function Hint({ children }: { children: React.ReactNode }) {
   return <Text style={[ty.secondary, { lineHeight: 20 }]}>{children}</Text>;
 }
 
-// Errors are told apart by the alert icon and wording, not by a hue.
 export function ErrorText({ children, testID }: { children: React.ReactNode; testID?: string }) {
   return (
     <View

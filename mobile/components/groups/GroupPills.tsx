@@ -11,12 +11,8 @@ export interface GroupPill {
   unread: boolean;
 }
 
-// The horizontal strip of group-name pills at the top of the Groups tab: 32pt
-// pills in 44pt targets, no borders. Selected = accent fill + dark (onAccent)
-// text; the rest are the inverse, a dark fill + accent text. Unread = a dot
-// before the name, plus a bolder label, so it is not told by colour alone.
-// Ends with "+" (create or find a group) as an accent circle with a dark
-// glyph. Tapping a pill selects that group in place.
+// The strip of group pills at the top of the Groups tab. Unread is a dot plus
+// a bolder label, so it is not told by colour alone.
 export function GroupPills({
   groups,
   selectedId,

@@ -1,14 +1,8 @@
-// The Vault (#107; mobile #1316): a private, end-to-end-encrypted space that
-// works like a chat with yourself — Signal's Note to Self, with Drive
-// semantics. Entries sync across every enrolled device (the account key
-// decrypts them, so a new device starts FULL here, not empty), files ride
-// the normal attachment pipeline, and the Media toggle shows the same
-// content as a Photos-style grid. Port of desktop's
-// frontend/src/pages/Vault.tsx over the same core commands.
-//
-// Native patterns where desktop has pointer ones: a long press opens the
-// entry sheet (desktop's hover pin/edit/delete), and edit and delete replace
-// the composer exactly as desktop's bars do.
+// The Vault (#1316): a private chat with yourself, ported from desktop's
+// frontend/src/pages/Vault.tsx over the same core commands. Entries sync
+// across every enrolled device (the account key decrypts them, so a new
+// device starts FULL here, not empty). A long press opens the entry sheet in
+// place of desktop's hover actions.
 
 import { useCallback, useMemo, useState } from "react";
 import { FlatList, Text, View } from "react-native";
@@ -171,7 +165,6 @@ function VaultScreen() {
 
   const armDelete = useCallback((entry: VaultMessage) => {
     setEditTarget(null);
-    // The first tap of a two-tap confirm warns by touch (#1286).
     haptic("confirmArm");
     setPendingDeleteId(entry.id);
   }, []);

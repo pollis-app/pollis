@@ -3,11 +3,8 @@ import { Icon } from "../icons";
 import { semantic, type as ty, fonts, r, space, layout } from "../../theme/tokens";
 
 /**
- * One accent preset: a colour disc with its name under it. No ring: selected
- * is said by a dark check on the disc, a larger disc (52pt against 44), a
- * filled `high` backing tile behind the whole cell (it sits in a raised
- * Group) and bold text — plus the radio's checked state for screen readers.
- * It fills its grid cell (see `ChoiceGrid`) so the preset row is even.
+ * One accent preset. No ring: selected is a check, a larger disc, a backing
+ * tile and bold text — plus the radio's checked state for screen readers.
  */
 const DISC = layout.touchMin;
 const DISC_SELECTED = layout.touchMin + 8;

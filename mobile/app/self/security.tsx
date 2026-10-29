@@ -226,7 +226,6 @@ export default function Security() {
 
   const onRevoke = (deviceId: string) => {
     if (confirmRevoke !== deviceId) {
-      // The first tap arms the confirm: warn by touch (#1286).
       haptic("confirmArm");
       setConfirmRevoke(deviceId);
       return;
@@ -263,7 +262,6 @@ export default function Security() {
           gap: space.xxxl,
         }}
       >
-        {/* ── Part 1: this account's devices and keys ── */}
         {pendingEnrollments.length > 0 ? (
           <View style={sectionGap}>
             <Group title={t("mobile:self.security.pairHeading")}>
@@ -395,7 +393,6 @@ export default function Security() {
           ) : null}
         </View>
 
-        {/* ── Part 2: what has happened to the account ── */}
         <View style={sectionGap} onLayout={sectionLayout("events")}>
           <Group title={t("security.eventsHeading")}>
             {events.slice(0, visibleEvents).map((ev) => {
@@ -445,7 +442,6 @@ export default function Security() {
           ) : null}
         </View>
 
-        {/* ── Part 3: protecting and leaving the account ── */}
         <View onLayout={sectionLayout("safety")}>
           <Group title={t("mobile:self.security.safetyHeading")}>
             <ListRow

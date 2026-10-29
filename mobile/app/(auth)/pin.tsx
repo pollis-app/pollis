@@ -124,13 +124,11 @@ function AuthPIN() {
         {
           onSuccess: async () => {
             appStore.setLocked(false);
-            // Now that `set_pin` has opened the local DB, finalize this
-            // device: publish its cert and external-join the account's
-            // groups/DMs. Required after device-linking and Secret-Key
-            // recovery, a no-op for a fresh signup — run unconditionally,
-            // mirroring desktop's handlePinCreated. Best-effort: a failure
-            // here must not strand the user on the PIN screen; the next
-            // unlock re-publishes the cert and welcomes still deliver.
+            // `set_pin` has opened the local DB, so finalize this device (publish its
+            // cert, external-join the account's groups/DMs). Required after device
+            // linking and Secret-Key recovery, a no-op for a fresh signup. Best-effort:
+            // the next unlock re-publishes the cert, so a failure must not strand the
+            // user on the PIN screen.
             try {
               await finalize.mutateAsync();
             } catch (e) {
@@ -240,8 +238,7 @@ function AuthPIN() {
   return (
     <Screen testID="screen-auth-pin" centered>
       {regular ? (
-        // iPad: heading, dots and keypad as one block centred vertically —
-        // pinned to the bottom, the keypad sat ~500pt below the dots.
+        // iPad: heading, dots and keypad as one vertically centred block.
         <View style={{ flex: 1, justifyContent: "center", gap: 32 }}>
           <View style={{ paddingHorizontal: 24, gap: 24 }}>{pinContent}</View>
           {keypad}

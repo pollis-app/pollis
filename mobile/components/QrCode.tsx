@@ -10,10 +10,6 @@ const DARK = "#000000";
 const LIGHT = "#ffffff";
 const QUIET = 2;
 
-/**
- * A QR code drawn with react-native-svg from `qrcode`'s module matrix — the
- * encoder only, no canvas. Used for the QR device link (#1207).
- */
 export function QrCode({
   value,
   size,
@@ -28,9 +24,8 @@ export function QrCode({
   testID?: string;
   dark?: string;
   light?: string;
-  // Extra margin of the light field around the code, in points, drawn as a
-  // rounded tile (`radius`) — keeps the scanner-safe polarity at the edge
-  // instead of the screen colour.
+  // Margin of the light field around the code, drawn as a rounded tile, so
+  // the edge keeps the scanner-safe polarity.
   frame?: number;
   radius?: number;
 }) {

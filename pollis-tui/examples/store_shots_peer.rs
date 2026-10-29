@@ -1,15 +1,10 @@
 //! Dev-DS peer for the store-screenshot run (`mobile/scripts/maestro-store-shots.sh`).
 //!
-//! The store shots need a second person in the conversation, so the phone is
-//! never talking to itself. This peer signs up a fresh account on the dev DS,
-//! prints its handle, then waits for the phone to invite it to a group and to
-//! open a DM with it. It accepts both and posts its half of the conversation:
+//! Signs up on the dev DS, prints its handle, then waits for the phone to
+//! invite it to a group and to open a DM with it. It accepts both and posts:
 //! two DM replies and a channel message (`PEER_SENT`). Once the phone has
 //! answered in the channel it reacts to that answer, sends one more line and
 //! exits (`PEER_DONE`).
-//!
-//! Not a shipping binary: examples build against pollis-tui's
-//! dev-dependencies.
 //!
 //!   POLLIS_DATA_DIR=$(mktemp -d) POLLIS_DELIVERY_URL=https://api-dev.pollis.com \
 //!   POLLIS_DEV_ACCESS_KEY=… cargo run -p pollis-tui --example store_shots_peer -- <email>
@@ -113,7 +108,6 @@ async fn main() -> Result<()> {
     }
     println!("PEER_SENT");
 
-    // Wait for the phone's channel answer, react to it, close the scene.
     let started = Instant::now();
     loop {
         let page = pollis_tui::data::channel_messages(&state, &me.id, &channel_id, None).await?;

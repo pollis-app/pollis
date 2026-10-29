@@ -7,8 +7,8 @@ import { AuthError } from "./AuthError";
 import { semantic, type as ty, fonts, r, space } from "../../theme/tokens";
 import { awaitDeviceOffer, cancelDeviceOffer, createDeviceOffer, type DeviceOfferHandle } from "../../hooks/queries";
 
-/// How many codes in a row this screen shows on its own before it asks. Each
-/// lives two minutes: about ten minutes of an unattended sign-in screen.
+// Codes shown in a row before it asks; each lives two minutes, so about ten
+// minutes of an unattended sign-in screen.
 const AUTO_REFRESHES = 5;
 
 // Lets a long unbroken code wrap at any character.
@@ -17,10 +17,8 @@ function breakAnywhere(text: string): string {
 }
 
 /**
- * The code this NEW phone shows for a signed-in device to scan (#1361) —
- * desktop's `OfferCode`. It carries this device's ephemeral public key and a
- * link id, never a secret. Waiting is one awaited Rust call per code; a code
- * that lapses is replaced, up to `AUTO_REFRESHES`.
+ * The code this NEW phone shows for a signed-in device to scan (#1361). It
+ * carries this device's ephemeral public key and a link id, never a secret.
  */
 export function OfferCodeView({ deviceName, onSignedIn }: { deviceName: string; onSignedIn: () => void }) {
   const { t } = useTranslation("auth");

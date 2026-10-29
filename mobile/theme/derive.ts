@@ -1,11 +1,5 @@
 // Pure colour derivation for the mobile theme, free of react-native so
 // `node --test` can load it (tests/theme-contrast.test.ts).
-//
-// The theme has exactly TWO base colours: the accent and the background.
-// Every other token is derived from them by mixing the background toward
-// white (lighter neutrals), mixing the accent into a neutral (tint), or
-// applying the accent at an alpha (hairlines). Change either base and the
-// whole ramp re-derives.
 
 export type Rgb = [number, number, number];
 
@@ -24,14 +18,12 @@ export function parseColor(input: string): Rgb {
   return [parts[0], parts[1], parts[2]];
 }
 
-/** Channels → "#rrggbb". */
 export function toHex(c: Rgb): string {
   const to = (n: number) =>
     Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, "0");
   return `#${to(c[0])}${to(c[1])}${to(c[2])}`;
 }
 
-/** Channels + alpha → "rgba(r, g, b, a)". */
 export function toRgba(c: Rgb, alpha: number): string {
   return `rgba(${c.map((n) => Math.round(n)).join(", ")}, ${alpha})`;
 }
@@ -79,11 +71,9 @@ export function contrast(a: string, b: string): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
-// The recipe. Each tier is `accent` mixed into a neutral that is itself the
-// background lightened toward white, so a different background re-derives
-// the neutrals and a different accent re-tints them. With the default
-// background (#0a0907) the neutrals land on the mockups' #f3f1ec / #b9b3a9 /
-// #958f84 / #100e0b / #161411 / #1d1a16 / #3b3833.
+// Each tier is `accent` mixed into a neutral that is itself the background
+// lightened toward white, so a different background re-derives the neutrals
+// and a different accent re-tints them.
 //   [accent weight, background lightened by]
 const RECIPE = {
   text: [0.22, 0.95],

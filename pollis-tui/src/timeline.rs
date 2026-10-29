@@ -1,9 +1,4 @@
-//! The message pane's layout: messages → wrapped, styled terminal lines (#1337).
-//!
-//! The pane used to render one `Line` per message, so a multi-line message ran
-//! its lines together, a long one was cut off at the pane edge, and an
-//! attachment showed as its raw JSON envelope. This module turns the messages
-//! the pane displays into [`Block`]s of display lines that fit a given width:
+//! The message pane's layout: messages → wrapped, styled [`Block`]s (#1337).
 //!
 //! ```text
 //! ── Today ─────────────────────────────
@@ -15,12 +10,8 @@
 //!       ↪ 3 replies · t to open                  (thread root)
 //! ```
 //!
-//! Everything is a pure function of its inputs (no clock read, no I/O), so
-//! the shapes are unit-tested here and the renderer and the key handler — which
-//! needs line counts to keep the selected message on screen — share one
-//! layout. Lines own their text: a frame lays out at most a few hundred
-//! messages, and owning keeps the borrow of the message buffer out of the
-//! render signature.
+//! Pure (no clock, no I/O) so the renderer and the key handler (which needs
+//! line counts to keep the selection on screen) share one layout.
 
 use std::collections::HashMap;
 
@@ -43,7 +34,6 @@ const QUOTE_CHARS: usize = 48;
 /// The placeholder for a lost message — the same words desktop and mobile use.
 pub const UNDECRYPTABLE_TEXT: &str = "This message couldn't be decrypted on this device";
 
-/// A solid selection background (no glow — repo rule).
 pub const SELECTED_BG: Color = Color::Rgb(45, 55, 75);
 
 /// One laid-out item of the pane: a message (selectable, carries its id) or a
@@ -54,15 +44,11 @@ pub struct Block {
     pub lines: Vec<Line<'static>>,
 }
 
-/// Everything a layout depends on besides the messages themselves.
 pub struct Context<'a> {
-    /// The signed-in user — whose messages are "own", whose reactions are
-    /// highlighted.
     pub me_id: &'a str,
-    /// The signed-in user's username — whose `@mentions` are highlighted.
     pub me_name: &'a str,
     pub reactions: &'a HashMap<String, Vec<Reaction>>,
-    /// Thread root id → reply count (`list_thread_summaries`).
+    /// Thread root id → reply count.
     pub thread_counts: &'a HashMap<String, i64>,
     /// Resolves a `reply_to_id` to the quoted message, when it is loaded.
     pub lookup: &'a dyn Fn(&str) -> Option<&'a ChannelMessage>,
@@ -70,7 +56,6 @@ pub struct Context<'a> {
     /// In a thread view the root shows no "N replies" line — the replies are
     /// right below it.
     pub in_thread: bool,
-    /// The viewer's local date, for "Today" / "Yesterday" separators.
     pub today: NaiveDate,
 }
 
@@ -104,8 +89,7 @@ pub fn build(messages: &[&ChannelMessage], ctx: &Context<'_>, width: u16) -> Vec
     blocks
 }
 
-/// Lay out what an open conversation's pane displays (the channel, or the
-/// open thread) — the one entry point the renderer and the key handler share.
+/// The one entry point the renderer and the key handler share.
 pub fn layout_open(open: &OpenConversation, me_id: &str, me_name: &str, width: u16) -> Vec<Block> {
     let displayed = open.displayed();
     let lookup = |id: &str| open.find(id);
@@ -122,7 +106,6 @@ pub fn layout_open(open: &OpenConversation, me_id: &str, me_name: &str, width: u
     build(&displayed, &ctx, width)
 }
 
-/// Total display lines across `blocks`.
 pub fn line_count(blocks: &[Block]) -> usize {
     blocks.iter().map(|b| b.lines.len()).sum()
 }
@@ -152,8 +135,6 @@ pub fn scroll_to_show(blocks: &[Block], message_id: &str, viewport: usize, scrol
     scroll
 }
 
-/// Parse a stored `sent_at` (RFC 3339, written by `envelope_sent_at`) into the
-/// viewer's local time.
 pub fn local_time(sent_at: &str) -> Option<DateTime<Local>> {
     DateTime::parse_from_rfc3339(sent_at)
         .ok()
@@ -215,14 +196,12 @@ fn message_block(m: &ChannelMessage, ctx: &Context<'_>, width: usize) -> Block {
 
     let mut lines: Vec<Line<'static>> = Vec::new();
 
-    // The header: `HH:MM sender  ` then the body runs on from there.
     let mut head: Vec<(String, Style)> = vec![
         (format!("{time} "), dim),
         (sender_of(m).to_string(), sender_style),
         ("  ".to_string(), Style::default()),
     ];
 
-    // Quote-reply context, on its own line above the message.
     if let Some(reply_to) = &m.reply_to_id {
         let quoted = match (ctx.lookup)(reply_to) {
             Some(q) if q.deleted_at.is_some() => format!("↳ {}: (deleted)", sender_of(q)),
@@ -316,19 +295,15 @@ fn message_block(m: &ChannelMessage, ctx: &Context<'_>, width: usize) -> Block {
     finish(m, ctx, lines, width)
 }
 
-/// What a message the durable outbox could not deliver says under itself
-/// (#1335) — the apps' "failed" label with their Retry / Discard, as keys. A
-/// `pending` one is drawn like a sent one, as in the apps; `rejected` (no
-/// retry can fix it, so the outbox stopped trying) reads the same as `failed`.
+/// Shown under a message the durable outbox could not deliver (#1335).
+/// `pending` draws like sent; `rejected` reads the same as `failed`.
 pub const UNSENT_MARK: &str = "✗ not sent — R retry · x discard";
 
-/// Whether `m` is one of ours the outbox failed to deliver.
 pub fn is_unsent_failure(m: &ChannelMessage) -> bool {
     matches!(m.send_state.as_deref(), Some("failed") | Some("rejected"))
 }
 
-/// Reactions + thread count + selection highlight — the tail every message
-/// block gets, deleted or not.
+/// The tail every message block gets, deleted or not.
 fn finish(
     m: &ChannelMessage,
     ctx: &Context<'_>,
@@ -418,11 +393,8 @@ fn highlight_mentions(text: &str, me: &str) -> Vec<(String, Style)> {
     out
 }
 
-/// Word-wrap styled `segments` to `width` columns. The first line takes the
-/// segments as given (including any leading indent they carry); continuation
-/// lines are indented by `indent`. Breaks after a space where one exists on
-/// the line, else mid-word (a URL longer than the pane still shows in full,
-/// over several lines). Tabs become spaces; other control characters are
+/// Word-wrap styled `segments` to `width` columns, continuation lines indented
+/// by `indent`; hard-breaks a word longer than the line. Control characters are
 /// dropped so a message cannot move the terminal's cursor.
 pub fn wrap(segments: Vec<(String, Style)>, width: usize, indent: usize) -> Vec<Line<'static>> {
     let indent = indent.min(width.saturating_sub(1));
@@ -445,8 +417,6 @@ pub fn wrap(segments: Vec<(String, Style)>, width: usize, indent: usize) -> Vec<
             }
             let w = width_of(c);
             if used + w > width && line.len() > floor {
-                // Carry the partial word to the next line when there is a space
-                // to break at; otherwise hard-break here.
                 let carry: Vec<(char, Style)> = match break_at {
                     Some(b) if b > floor => line.split_off(b),
                     _ => Vec::new(),
@@ -480,7 +450,6 @@ pub fn wrap(segments: Vec<(String, Style)>, width: usize, indent: usize) -> Vec<
     out.into_iter().map(to_line).collect()
 }
 
-/// Group a run of styled characters back into spans.
 fn to_line(chars: Vec<(char, Style)>) -> Line<'static> {
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut current = String::new();
@@ -598,7 +567,6 @@ mod tests {
         assert!(separators[1].contains("Today"), "{lines:?}");
     }
 
-    /// `multi\nline\nmessage` used to render as `multilinemessage`.
     #[test]
     fn newlines_are_kept() {
         let f = Fixture::new();
@@ -609,7 +577,6 @@ mod tests {
         assert_eq!(lines[3], "      message");
     }
 
-    /// A long message wraps at word boundaries instead of being cut off.
     #[test]
     fn long_lines_wrap_at_words_and_nothing_is_lost() {
         let f = Fixture::new();
@@ -639,7 +606,6 @@ mod tests {
         assert!(joined.contains(&url), "{lines:?}");
     }
 
-    /// The raw `{"_att":…}` envelope used to be the whole message.
     #[test]
     fn an_attachment_shows_its_caption_and_a_readable_line() {
         let f = Fixture::new();
@@ -810,7 +776,6 @@ mod tests {
         // Viewport of 1 line, pinned to the bottom: "b" sits 1 line up and is
         // 2 tall, so the view moves up to show its top.
         assert_eq!(scroll_to_show(&blocks, "b", 1, 0), 2);
-        // Already visible: unchanged.
         assert_eq!(scroll_to_show(&blocks, "b", 10, 0), 0);
         // Scrolled past it upward: comes back down to it.
         assert_eq!(scroll_to_show(&blocks, "c", 2, 3), 0);

@@ -1,31 +1,13 @@
-// Auto-lock after inactivity (#899) — the RN layer's own implementation.
+// Auto-lock after inactivity (#899). Desktop's deadline lives in Rust and
+// arrives as a Tauri event, which mobile cannot receive, so mobile keeps its own
+// deadline here against the plain `lock` arm; do not wire
+// `set_auto_lock_timeout` / `report_user_activity` from mobile.
 //
-// Desktop's idle deadline lives in Rust (`pollis-core/src/commands/autolock.rs`)
-// because a hidden WebView throttles its timers; the expiry is pushed to the
-// renderer as a Tauri event. Mobile cannot receive Tauri events, so the
-// deadline lives HERE, against the existing `lock` bridge arm only — do not
-// wire `set_auto_lock_timeout` / `report_user_activity` from mobile.
-//
-// Two clocks cover the two ways a phone goes idle:
-//   1. Backgrounded — an AppState listener records when the app left the
-//      foreground; on return it locks if the elapsed time ≥ the window.
-//      (JS timers don't run reliably in the background, so this is a
-//      timestamp comparison, not a timer.)
-//   2. Foregrounded-but-untouched — a single timer aimed at a deadline that
-//      touch activity pushes forward. Activity only moves the deadline
-//      variable (throttled); the timer re-aims itself when it fires early
-//      instead of being torn down per event.
-//
-// Locking = `invoke("lock")` (drops key material + closes the local DB) +
-// `queryClient.clear()` (decrypted message bodies survive in the query cache
-// otherwise — desktop learned this) + appStore lock state + route to the PIN
-// screen. Unlock flows back through `/(auth)/pin` → `get_unlock_state` →
-// `unlock` exactly like a cold start.
-//
-// The window choice is deliberately device-local (expo-secure-store), same
-// windows as desktop's `AUTO_LOCK_OPTIONS`: Off / 1 / 5 / 15 / 60 minutes,
-// default Off — silently locking someone out of their own app is worse than
-// not locking.
+// Two clocks: a background timestamp compared on return (JS timers don't run
+// reliably in the background), and one foreground timer aimed at a deadline
+// that touch pushes forward. Locking also clears the query cache, which holds
+// decrypted message bodies. The window is device-local and defaults to Off:
+// silently locking someone out is worse than not locking.
 
 import React, {
   useCallback,
@@ -51,7 +33,6 @@ export const AUTO_LOCK_OPTIONS_MINUTES: readonly (number | null)[] = [
   60,
 ];
 
-/** Human label for a window value (Off / 1 min / …). */
 export function autoLockLabel(minutes: number | null): string {
   if (minutes === null) {
     return i18n.t("settings:security.autoLockOff");
@@ -61,12 +42,9 @@ export function autoLockLabel(minutes: number | null): string {
 
 const STORE_KEY = "pollis_auto_lock_minutes";
 
-// Same rationale as desktop's ACTIVITY_REPORT_THROTTLE_MS: touch moves the
-// deadline at most once per gap. 15s is far below the shortest window (60s),
-// so a deadline can never expire inside one throttle gap.
+// Touch moves the deadline at most once per gap; 15s is far below the shortest
+// window (60s), so a deadline can never expire inside one gap.
 const ACTIVITY_THROTTLE_MS = 15_000;
-
-// ── Device-local setting ─────────────────────────────────────────────────
 
 let cachedMinutes: number | null = null;
 let cacheLoaded = false;
@@ -77,14 +55,14 @@ function coerceMinutes(raw: string | null): number | null {
     return null;
   }
   const minutes = parseInt(raw, 10);
-  // An unknown / corrupt value means "the user has not asked for this".
+  // An unknown or corrupt value means "the user has not asked for this".
   if (!AUTO_LOCK_OPTIONS_MINUTES.some((o) => o === minutes)) {
     return null;
   }
   return minutes;
 }
 
-/** Read the stored window (cached after first read). `null` = Off. */
+/** Cached after the first read. `null` = Off. */
 export async function loadAutoLockMinutes(): Promise<number | null> {
   if (cacheLoaded) {
     return cachedMinutes;
@@ -99,7 +77,6 @@ export async function loadAutoLockMinutes(): Promise<number | null> {
   return cachedMinutes;
 }
 
-/** Persist the window and notify subscribers. `null` clears it (Off). */
 export async function persistAutoLockMinutes(
   minutes: number | null,
 ): Promise<void> {
@@ -119,7 +96,6 @@ export async function persistAutoLockMinutes(
   }
 }
 
-/** Setting hook for the Security screen — reads + live-updates the window. */
 export function useAutoLockMinutes(): {
   minutes: number | null;
   setMinutes: (m: number | null) => void;
@@ -145,12 +121,7 @@ export function useAutoLockMinutes(): {
   return { minutes, setMinutes };
 }
 
-// ── Locking ──────────────────────────────────────────────────────────────
-
-/**
- * The manual/automatic lock primitive. Safe to call redundantly — it no-ops
- * when signed out or already locked.
- */
+/** The lock primitive; no-ops when signed out or already locked. */
 export function useLockNow(): () => Promise<void> {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -160,25 +131,20 @@ export function useLockNow(): () => Promise<void> {
     }
     appStore.setLocked(true);
     try {
-      // Drops in-memory key material and closes the local DB.
       await invoke("lock");
     } catch (e) {
-      // Still proceed to the locked UI — a failed bridge call must not leave
-      // the app visibly unlocked when the user asked for a lock.
+      // Still lock the UI: a failed bridge call must not leave the app
+      // visibly unlocked when the user asked for a lock.
       console.warn("[autolock] lock command failed:", e);
     }
-    // Decrypted message bodies live in the query cache; drop them.
     queryClient.clear();
     router.replace("/(auth)/pin");
   }, [router, queryClient]);
 }
 
-// ── Engine + touch capture ───────────────────────────────────────────────
-
 /**
- * Mounted once around the root <Stack> (see app/_layout.tsx). Captures touch
- * starts (without consuming them) to refresh the foreground deadline, and
- * owns the AppState background/foreground bookkeeping.
+ * Mounted once around the root <Stack>. Captures touch starts (without
+ * consuming them) to refresh the foreground deadline.
  */
 export function AutoLockProvider({ children }: { children: React.ReactNode }) {
   const { minutes } = useAutoLockMinutes();
@@ -191,11 +157,9 @@ export function AutoLockProvider({ children }: { children: React.ReactNode }) {
   const lockNowRef = useRef(lockNow);
   lockNowRef.current = lockNow;
 
-  // Foreground idle deadline (ms epoch), moved forward by activity.
   const deadlineRef = useRef<number | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastActivityNoteRef = useRef(0);
-  // When the app left the foreground; null while foregrounded.
   const backgroundedAtRef = useRef<number | null>(null);
 
   const clearTimer = useCallback(() => {
@@ -206,9 +170,7 @@ export function AutoLockProvider({ children }: { children: React.ReactNode }) {
     deadlineRef.current = null;
   }, []);
 
-  // Aim the single timer at the current deadline. When it fires early
-  // (activity moved the deadline), it re-aims at the remainder instead of
-  // locking.
+  // When it fires early (activity moved the deadline), re-aim at the remainder.
   const armTimer = useCallback(() => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
@@ -234,8 +196,7 @@ export function AutoLockProvider({ children }: { children: React.ReactNode }) {
     }, fireIn);
   }, [clearTimer]);
 
-  // Touch activity: cheap throttle, moves the deadline without touching the
-  // timer.
+  // Moves the deadline only; the timer re-aims itself.
   const noteActivity = useCallback(() => {
     const m = minutesRef.current;
     if (m === null || deadlineRef.current === null) {
@@ -249,8 +210,6 @@ export function AutoLockProvider({ children }: { children: React.ReactNode }) {
     deadlineRef.current = now + m * 60_000;
   }, []);
 
-  // (Re)start the whole engine whenever the window, the user, or the lock
-  // state changes.
   useEffect(() => {
     if (minutes === null || !userId || isLocked) {
       clearTimer();
@@ -261,15 +220,14 @@ export function AutoLockProvider({ children }: { children: React.ReactNode }) {
     return clearTimer;
   }, [minutes, userId, isLocked, armTimer, clearTimer]);
 
-  // Background/foreground transitions.
   useEffect(() => {
     const sub = AppState.addEventListener("change", (next) => {
       if (next === "background" || next === "inactive") {
         if (backgroundedAtRef.current === null) {
           backgroundedAtRef.current = Date.now();
         }
-        // JS timers are unreliable in the background — the timestamp above is
-        // the authority; kill the timer so it can't fire on a stale wake.
+        // The timestamp is the authority in the background; kill the timer so
+        // it can't fire on a stale wake.
         clearTimer();
         return;
       }
@@ -286,7 +244,6 @@ export function AutoLockProvider({ children }: { children: React.ReactNode }) {
         void lockNowRef.current();
         return;
       }
-      // Fresh foreground session — restart the idle deadline.
       deadlineRef.current = Date.now() + m * 60_000;
       armTimer();
     });

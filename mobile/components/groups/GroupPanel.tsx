@@ -20,17 +20,13 @@ import { GroupMenuSheet } from "./GroupMenuSheet";
 import { CreateChannelSheet } from "./CreateChannelSheet";
 import { useThemeRerender } from "../theme";
 
-// Re-reads of an empty roster (a just-created group's read can lag the
-// create): a few, spaced out, then give up and show no count.
+// A just-created group's roster read can lag the create: retry an empty one a
+// few times, then show no count.
 const ROSTER_RETRIES = 3;
 const ROSTER_RETRY_MS = 1500;
 
-// One group's channel sheet (Main.dc.html, the panel under the group strip):
-// group header (name + chevron → group menu, member count) with Invite, a
-// "Search <group>" button, then "Text channels" (+ create, for admins) and
-// "This group" (Members, Group settings, Join requests). Shared by the Groups
-// tab (under the pill strip) and the /group/[id] route (under a back bar), so
-// both entry points render the same thing.
+// One group's channel panel, shared by the Groups tab and the /group/[id]
+// route so both entry points render the same thing.
 function GroupPanelImpl({
   groupId,
   selectedChannelId,
@@ -53,21 +49,17 @@ function GroupPanelImpl({
 }) {
   useThemeRerender();
   const { t } = useTranslation("mobile");
-  // iPad two-pane: group pages open in the detail pane (useNav).
   const router = useNav();
   const [menuOpen, setMenuOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
 
-  // Reuse the cached groups list for the group's metadata; the per-group
-  // channel query is the fresher source once it has loaded.
   const { data: groups = [] } = useUserGroupsWithChannels();
   const group = groups.find((g) => g.id === groupId);
   const channelsQuery = useGroupChannels(groupId);
   const channels = channelsQuery.data ?? group?.channels ?? [];
   const membersQuery = useGroupMembers(groupId);
-  // A member is always in their own group's roster, so an empty or missing
-  // roster means it has not loaded yet (or the read lagged a just-created
-  // group): show no count rather than a wrong "0 members".
+  // A member is always in their own roster, so an empty one has not loaded
+  // yet: show no count rather than a wrong "0 members".
   const members = membersQuery.data ?? [];
   const membersKnown = members.length > 0;
   const refetchMembers = membersQuery.refetch;
@@ -97,8 +89,7 @@ function GroupPanelImpl({
     refetchMembers,
   ]);
   const { data: joinRequests = [] } = useGroupJoinRequests(groupId);
-  // Muted channels (#1431) are dimmed and marked; the testID gains `-muted`
-  // so the device tier can see the state (Maestro reads ids, not colours).
+  // Muted channels (#1431): the testID gains `-muted` so Maestro can see it.
   const { data: mutedChannels } = useMutedChannels();
   const unreadCounts = appStore.unreadCounts;
   const me = appStore.currentUser?.id;
@@ -122,7 +113,6 @@ function GroupPanelImpl({
         overflow: "hidden",
       }}
     >
-      {/* Group header: the name opens the group menu. */}
       <View
         style={{
           flexDirection: "row",
@@ -168,7 +158,6 @@ function GroupPanelImpl({
         />
       </View>
 
-      {/* Looks like a field; opens Search. */}
       <View style={{ paddingHorizontal: space.xxl, paddingBottom: space.lg }}>
         <Pressable
           testID="btn-search-group"

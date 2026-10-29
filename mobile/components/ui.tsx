@@ -28,10 +28,9 @@ import { activeLocale } from "../i18n";
 import { Icon, isIconElement } from "./icons";
 import { haptic } from "../lib/haptics";
 
-// Primitives for the redesigned app (design: Main/Chat/Messages/Actions/You
-// .dc.html). Rules every primitive follows: 44pt minimum touch targets; one
-// spoken label per control; start/end edges, never left/right; no coloured
-// stripe on one edge of a rounded box; Text keeps system font scaling.
+// Rules every primitive follows: 44pt minimum touch targets; one spoken label
+// per control; start/end edges, never left/right; no coloured stripe on one
+// edge of a rounded box; Text keeps system font scaling.
 
 type TypeKey =
   | "display"
@@ -42,9 +41,7 @@ type TypeKey =
   | "section"
   | "meta";
 
-/* ── Text ─────────────────────────────────────────────────────────── */
-// Themed Text. `variant` picks a step of the type scale (default body);
-// `style` overrides it.
+// `variant` picks a step of the type scale (default body); `style` overrides it.
 export function Txt({
   children,
   style,
@@ -86,14 +83,10 @@ export function Txt({
   );
 }
 
-/* ── Bottom inset ─────────────────────────────────────────────────── */
-// The space bottom chrome (tab bar, BottomAction, sheets) keeps below itself.
-// iOS: exactly the home-indicator inset, as before. Android: the gesture /
-// navigation-bar inset the root SafeAreaProvider reports (the app is always
-// edge-to-edge, so it draws under that bar) — but never less than
-// ANDROID_MIN_BOTTOM, because a device or emulator that reports no
-// navigation bar (an inset of 0) otherwise leaves labels and CTAs flush with
-// the glass edge (review #5).
+// The space bottom chrome (tab bar, BottomAction, sheets) keeps below itself:
+// the home-indicator inset on iOS; on Android the navigation-bar inset, but
+// never less than ANDROID_MIN_BOTTOM, because a device that reports an inset
+// of 0 otherwise leaves labels and CTAs flush with the glass edge.
 const ANDROID_MIN_BOTTOM = space.lg;
 
 export function useBottomInset(): number {
@@ -104,7 +97,6 @@ export function useBottomInset(): number {
   return insets.bottom;
 }
 
-/* ── Screen ───────────────────────────────────────────────────────── */
 // How far a full-width hairline must reach past each side of the content
 // column to span the whole screen. 0 on compact width, on `wide` screens,
 // and outside a <Screen>.
@@ -115,21 +107,15 @@ const ScreenBleedContext = React.createContext(0);
 // two-pane screen) must not avoid the keyboard a second time.
 const KeyboardAvoidedContext = React.createContext(false);
 
-/**
- * The bleed (pt) on each side of the current <Screen>'s centred column. A
- * hairline that should run edge to edge (a Header's bottom rule, a
- * BottomAction's top rule) extends by this much on both sides; see
- * <BleedHairline>.
- */
+/** The bleed (pt) on each side of the current <Screen>'s centred column; see <BleedHairline>. */
 export function useScreenBleed(): number {
   return React.useContext(ScreenBleedContext);
 }
 
 /**
- * A 1px hairline across the whole screen, even when it is drawn inside a
- * <Screen>'s centred column (review6 #16): absolutely positioned on the
- * `edge` of its parent and extended by the column's bleed on both sides.
- * The parent must not clip (`overflow: "hidden"`).
+ * A 1px hairline across the whole screen, even inside a <Screen>'s centred
+ * column: absolutely positioned on the `edge` of its parent and extended by
+ * the column's bleed. The parent must not clip (`overflow: "hidden"`).
  */
 export function BleedHairline({ edge }: { edge: "top" | "bottom" }) {
   const bleed = useScreenBleed();
@@ -150,17 +136,11 @@ export function BleedHairline({ edge }: { edge: "top" | "bottom" }) {
 }
 
 // Root of every route: background, safe area, keyboard avoidance. Put a
-// <Header> (or a tab's large title) as the first child — titles live at the
-// TOP of the screen.
-//
-// On `regular` width (iPad) the content sits in a centred column at most
-// `layout.screenMaxWidth` wide (review6 #3), so fields and buttons never
-// stretch across a 1300pt window; hairlines drawn by Header / BottomAction /
-// BleedHairline still run the full width. That one width is shared by every
-// full-screen page and every page drawn in the two-pane's right pane; only
-// the auth steps pass `centered` for the narrower `layout.authMaxWidth`.
-// Screens that are genuinely wide — a chat, a two-pane master-detail — pass
-// `wide` to opt out. On `compact` (phones, narrow panes) nothing changes.
+// <Header> (or a tab's large title) as the first child.
+// On `regular` width content sits in a centred column at most
+// `layout.screenMaxWidth` wide (hairlines still run the full width); auth
+// steps pass `centered` for `layout.authMaxWidth`, and genuinely wide screens
+// (a chat, a two-pane) pass `wide` to opt out.
 export function Screen({
   children,
   testID,
@@ -183,15 +163,12 @@ export function Screen({
   // area, so the screen must not pad by it again.
   aboveTabBar?: boolean;
 }) {
-  // Subscribe to the theme so the screen's own surfaces (and the probe below)
-  // re-render when a base colour changes. This does NOT re-render `children`
-  // — the route created those — which is why every route component
-  // subscribes itself (#1447; see components/theme.tsx).
+  // Re-renders the screen's own surfaces on a theme change, but NOT
+  // `children`, which is why every route component subscribes itself (#1447).
   useTheme();
   const cls = useLayoutClass();
   const { width: windowWidth } = useWindowDimensions();
-  // The screen's own width (a detail pane is narrower than the window).
-  // Until it is measured, assume the window.
+  // A detail pane is narrower than the window.
   const [measured, setMeasured] = React.useState<number | null>(null);
   const width = measured ?? windowWidth;
   // Inside the iPad detail pane every page uses the same column, so a pane
@@ -216,21 +193,10 @@ export function Screen({
       edges={["top"]}
     >
       <ThemeProbe />
-      {/* Keeps a bottom <Field>/<BottomAction>/composer above the keyboard on
-          both platforms, in step with its animation (#1246). The app is
-          edge-to-edge (#1194), so the window never resizes; keyboard-controller
-          reads the real IME inset and pads by however much of the keyboard
-          overlaps this view (tab bar and bottom inset included). A screen
-          that mounts with the keyboard already up (email → OTP) starts from
-          the current keyboard height, so it never waits for a show event.
-          No `automaticOffset` (#1432): it pairs the layout event's height with
-          a window position fetched asynchronously, and on Android that fetch
-          can land before the view is mounted below the status bar (y=0, not
-          the inset). Nothing re-measures, so every keyboard on that screen
-          stopped a status bar short and hid the composer, most often in a
-          long conversation, whose first mount is slow. Without it the frame
-          comes from the layout event alone, relative to this SafeAreaView,
-          which is a full screen whose top is the window's top. */}
+      {/* Keeps a bottom <Field>/<BottomAction>/composer above the keyboard
+          (#1246). No `automaticOffset` (#1432): on Android it can measure
+          before the view sits below the status bar; see mobile/CLAUDE.md →
+          Keyboard. */}
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior="padding"
@@ -259,15 +225,12 @@ export function Screen({
   );
 }
 
-/* ── Disabled glyph ───────────────────────────────────────────────── */
 // True for a caller-supplied `<Icon.* />` element, the only node a control
 // recolours. A composed node (a View holding a glyph) is left alone.
 function isTintableGlyph(node: React.ReactNode): node is React.ReactElement<{ color?: string }> {
   return React.isValidElement<{ color?: string }>(node) && isIconElement(node);
 }
 
-// A caller-supplied icon element (Icon.* takes `color`) recoloured to the
-// disabled tier. Anything else passes through untouched.
 function disabledGlyph(node: React.ReactNode, disabled: boolean | undefined): React.ReactNode {
   if (!disabled || !isTintableGlyph(node)) {
     return node;
@@ -275,8 +238,6 @@ function disabledGlyph(node: React.ReactNode, disabled: boolean | undefined): Re
   return React.cloneElement(node, { color: controlDisabled(currentTheme()).fg });
 }
 
-// A caller-supplied icon element recoloured to `color` (a Button's label
-// colour), so a glyph always matches the text beside it.
 function tintGlyph(node: React.ReactNode, color: string): React.ReactNode {
   if (!isTintableGlyph(node)) {
     return node;
@@ -284,18 +245,10 @@ function tintGlyph(node: React.ReactNode, color: string): React.ReactNode {
   return React.cloneElement(node, { color });
 }
 
-/* ── IconButton ───────────────────────────────────────────────────── */
-// A 44×44 icon-only control. `accessibilityLabel` is required — the icon is
-// silent. `filled` gives it the round raised background (Direct's "New
-// message", Groups' "Invite people").
-//
-// Glyph colour (review6 #15): an icon button is a secondary control, so its
-// glyph is the ACCENT by default — whatever colour the caller gave the
-// Icon.* element is replaced. `tone="neutral"` paints it `text` instead
-// (the Header back chevron, per the mockups); `tone="inherit"` keeps the
-// caller's colour (a composed or deliberately coloured glyph). A composed
-// node (e.g. a View holding a glyph) is never recoloured. Disabled is
-// always the shared `dim` glyph.
+// A 44×44 icon-only control; `accessibilityLabel` is required (the icon is
+// silent). The glyph is the ACCENT by default, replacing the caller's colour;
+// `tone="neutral"` paints it `text`, `tone="inherit"` keeps the caller's.
+// Disabled is always the shared `dim` glyph.
 export function IconButton({
   icon,
   onPress,
@@ -335,9 +288,8 @@ export function IconButton({
           borderRadius: layout.touchMin / 2,
           alignItems: "center",
           justifyContent: "center",
-          // No border in any state. Disabled: the solid raised disc + dim
-          // glyph, never a fade (Android fades children separately — review
-          // #3/#4).
+          // No border in any state. Disabled is a solid disc + dim glyph,
+          // never a fade: Android fades children separately.
           backgroundColor: disabled
             ? controlDisabled(currentTheme()).fill
             : filled
@@ -356,19 +308,12 @@ export function IconButton({
   );
 }
 
-// Header-bar action: an IconButton, named for where it sits.
 export const HeaderAction = IconButton;
 
-/* ── Header ───────────────────────────────────────────────────────── */
-// Top bar for every screen. `variant="bar"` (default, pushed screens): a
-// 44×44 back chevron at the start, title (17/700) + optional subtitle, then
-// `actions` (IconButton/HeaderAction, 44×44 each) at the end, over a hairline.
-// `variant="large"`: a tab root's 28/700 title with actions and no back.
-// Back calls `onBack` or router.back(); the native edge swipe keeps working
-// because the stack itself is untouched. The back button keeps the
-// `btn-back` testID e2e flows use. Leave `title` out for a back-only bar
-// (auth steps, whose large heading sits in the body); pair it with
-// `bordered={false}`.
+// Top bar for every screen. `variant="bar"` (pushed screens): back chevron,
+// title + optional subtitle, `actions`, a hairline. `variant="large"`: a tab
+// root's title, no back. Leave `title` out for a back-only bar (pair it with
+// `bordered={false}`). The back button keeps the `btn-back` testID.
 export function Header({
   title,
   subtitle,
@@ -466,8 +411,6 @@ export function Header({
         paddingBottom: large ? space.lg : space.sm,
       }}
     >
-      {/* The rule under the bar runs the full screen width even when the
-          bar sits in a <Screen>'s centred column (review6 #16). */}
       {!large && bordered ? <BleedHairline edge="bottom" /> : null}
       {showBack ? (
         <IconButton
@@ -501,12 +444,8 @@ export function Header({
   );
 }
 
-/* ── Section title ────────────────────────────────────────────────── */
-// 13/600 dim, sentence case, never uppercased or tracked. `right` is an
-// optional trailing control (e.g. an IconButton "Create a channel").
-// Default padding (20 h) suits a full-bleed list. Inside a padded content
-// column pass `paddingHorizontal: 0` so the title shares the column's left
-// edge with field labels and body text — never a 4pt nudge (review #11).
+// Inside a padded content column pass `paddingHorizontal: 0` so the title
+// shares the column's left edge with field labels and body text.
 export function SectionTitle({
   children,
   right,
@@ -541,9 +480,8 @@ export function SectionTitle({
   );
 }
 
-/* ── Dot ──────────────────────────────────────────────────────────── */
-// Unread marker (8pt, text colour). Pair it with bold text and, where known,
-// a count — state is never colour alone.
+// Unread marker. Pair it with bold text and, where known, a count — state is
+// never colour alone.
 export function Dot({ size = 8, color }: { size?: number; color?: string }) {
   return (
     <View
@@ -558,8 +496,6 @@ export function Dot({ size = 8, color }: { size?: number; color?: string }) {
   );
 }
 
-/* ── Divider ──────────────────────────────────────────────────────── */
-// 1px hairline. `inset` indents it from the start edge.
 export function Divider({ inset = 0, style }: { inset?: number; style?: StyleProp<ViewStyle> }) {
   return (
     <View
@@ -568,14 +504,8 @@ export function Divider({ inset = 0, style }: { inset?: number; style?: StylePro
   );
 }
 
-/* ── Chip / Pill ──────────────────────────────────────────────────── */
-// Rounded pill, 32pt visual inside a ≥44×44 hit area (the group strip in
-// Main.dc.html). Never a border — shape comes from the fill, as in
-// GroupPills. Variants: `default` raised fill + accent label; `outline` the
-// same on a `raised` row or card (a `high` fill, so it still reads as a
-// shape); `on` / `selected` and `solid` accent fill + dark onAccent label;
-// `subtle` no fill + dim label. `leading`/`trailing` take a Dot, Badge or
-// icon.
+// Rounded pill, 32pt visual inside a ≥44×44 hit area. Never a border — the
+// shape comes from the fill; `outline` is for a chip on a `raised` row or card.
 export function Chip({
   children,
   variant = "default",
@@ -596,8 +526,7 @@ export function Chip({
   style?: StyleProp<ViewStyle>;
   testID?: string;
   accessibilityLabel?: string;
-  // Press suppressed, state announced; drawn in the shared disabled look
-  // (solid surface fill, dim label, no border).
+  // Press suppressed, state announced.
   disabled?: boolean;
   leading?: React.ReactNode;
   trailing?: React.ReactNode;
@@ -637,10 +566,8 @@ export function Chip({
       accessibilityState={{ disabled: !!disabled, selected: v === "on" }}
       style={[
         {
-          // The 44×44 hit area (review6 #7): the Pressable is at least 44pt
-          // in BOTH dimensions around the 32pt visual pill, so a short label
-          // ("1 use") is still a full target. Rows of chips need no extra
-          // gap: each one's hit area already includes the air around it.
+          // At least 44pt in both dimensions around the 32pt pill, so a short
+          // label is still a full target and rows of chips need no extra gap.
           minHeight: onPress ? layout.touchMin : undefined,
           minWidth: onPress ? layout.touchMin : undefined,
           justifyContent: "center",
@@ -681,23 +608,14 @@ export function Chip({
   );
 }
 
-// Alias: the design calls these pills.
 export const Pill = Chip;
 
-/* ── Button ───────────────────────────────────────────────────────── */
-// Text button, min 44pt (52 when `full`). Never a border, in any state.
-// `primary`: accent fill + onAccent text — one per screen. `secondary`
-// (alias `default`): the inverse, a dark raised fill + accent label.
-// `subtle`: no fill, accent label. `danger` looks like secondary —
-// destructive is said by the label (and a confirm step), not a third hue.
-// Disabled: solid raised fill + dim label, ≥4.5:1 — except PRIMARY, which
-// keeps its identity as a dimmed accent fill (`accentDisabled`) with a light
-// `text` label (review6 #10), so it never reads as a secondary button. Pass
-// `surface="raised"` when the button sits on a raised card, so its fill
-// steps up to `high` and still reads as a shape.
-// `loading`: the action is in flight. The button disables itself, swaps its
-// icons for a spinner and is announced as busy, so a slow call shows feedback
-// from the first frame and cannot be submitted twice by a fast double tap.
+// Text button, min 44pt (52 when `full`), never a border. `primary` is one per
+// screen; `danger` looks like secondary — destructive is said by the label,
+// not a third hue. A disabled primary stays a dimmed accent fill so it never
+// reads as a secondary button. Pass `surface="raised"` on a raised card.
+// `loading` disables the button and shows a spinner, so a slow call shows
+// feedback from the first frame and cannot be submitted twice.
 export function Button({
   children,
   variant = "secondary",
@@ -739,7 +657,7 @@ export function Button({
       accessibilityLabel={accessibilityLabel ?? children}
       accessibilityState={{ disabled: off, busy: !!loading }}
       // Disabled is solid colours (theme/button.ts), never a faded button:
-      // Android fades each child separately, which sank the label (#3/#4).
+      // Android fades each child separately.
       style={({ pressed }) => ({
         opacity: !off && pressed ? 0.85 : 1,
         flexDirection: "row",
@@ -773,11 +691,8 @@ export function Button({
   );
 }
 
-/* ── Avatar ───────────────────────────────────────────────────────── */
-// Circle with the label's first letter (high fill, dim text); a user icon
-// when there is no label. `variant="self"` (alias `amber`) is your own
-// avatar: accent tint + accent letter. `solid`: accent fill. `shape="rounded"`
-// is the Vault tile (radius 14).
+// Circle with the label's first letter. `variant="self"` (alias `amber`) is
+// your own avatar; `shape="rounded"` is the Vault tile.
 export function Avatar({
   label,
   size = "md",
@@ -838,9 +753,7 @@ export function Avatar({
   );
 }
 
-/* ── Badge ────────────────────────────────────────────────────────── */
-// Count pill: accent fill + onAccent text (`tone="neutral"`: high fill +
-// text, for counts that are not unread — e.g. waiting requests). Hidden from
+// Count pill (`tone="neutral"` for counts that are not unread). Hidden from
 // screen readers: the row's label already says the count.
 export function Badge({
   children,
@@ -884,13 +797,8 @@ export function Badge({
   );
 }
 
-/* ── ListRow ──────────────────────────────────────────────────────── */
-// One tappable row = one control with one spoken label. Min height 44
-// (channels), 52 (settings/actions, the default) or 64 (conversations).
-// `glyph`: 20–22pt icon or an Avatar. `name`: 16pt title (bold when
-// `unread`, accent when `selected`). `sub`: 14pt dim subtitle. Trailing:
-// `value` (14pt muted), `badge` (count), `chevron`, or any `end` node.
-// Inside a <Group> rows sit flush; standalone rows get rounded selection.
+// One tappable row = one control with one spoken label. Inside a <Group> rows
+// sit flush; standalone rows get rounded selection.
 export function ListRow({
   glyph,
   name,
@@ -942,7 +850,6 @@ export function ListRow({
         disabled || !onLongPress
           ? undefined
           : () => {
-              // Every long press confirms itself by touch (#1286).
               haptic("longPress");
               onLongPress();
             }
@@ -1014,14 +921,12 @@ export function ListRow({
           {end}
         </View>
       )}
-      {/* A disabled row leads nowhere, so it drops its chevron — the
-          non-colour cue beside the dim name. */}
+      {/* A disabled row leads nowhere, so it drops its chevron. */}
       {chevron && !disabled ? <Icon.chevronRight size={18} color={semantic.muted} /> : null}
     </Pressable>
   );
 }
 
-/* ── ActionRow ────────────────────────────────────────────────────── */
 // A grouped-list row that carries its own button (Unblock, Revoke…). Unlike
 // ListRow the row itself is not one accessible element — that would swallow
 // the button — so the text block is one element with the full spoken label
@@ -1074,10 +979,8 @@ export function ActionRow({
   );
 }
 
-/* ── Group ────────────────────────────────────────────────────────── */
-// Grouped list (You.dc.html): radius 14, raised fill, rows separated by
-// hairSoft lines. Pass ListRows as children; `title` adds a SectionTitle
-// above. `surface="high"` for groups inside a sheet (Actions.dc.html).
+// Grouped list; `title` adds a SectionTitle above. `surface="high"` for groups
+// inside a sheet.
 export function Group({
   children,
   title,
@@ -1117,8 +1020,8 @@ export function Group({
   }
   return (
     <View style={[{ gap: space.sm }, style]}>
-      {/* Flush with the group's edge, so a column of field labels, body
-          text and group titles shares one left edge (review #11). */}
+      {/* Flush with the group's edge, so field labels, body text and group
+          titles share one left edge. */}
       <SectionTitle style={{ paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0 }}>
         {title}
       </SectionTitle>
@@ -1127,9 +1030,7 @@ export function Group({
   );
 }
 
-/* ── Card ─────────────────────────────────────────────────────────── */
-// Plain rounded container (radius 14, raised fill, 16pt padding) for
-// free-form content. Lists of rows use <Group> instead.
+// Free-form content; lists of rows use <Group> instead.
 export function Card({
   children,
   style,
@@ -1158,13 +1059,9 @@ export function Card({
   );
 }
 
-/* ── Field ────────────────────────────────────────────────────────── */
-// Text input: a borderless filled box — `raised` on the screen, `high` with
-// `surface="raised"` (a field on a raised card) so it still reads as a
-// shape; `amber` swaps in the accentSoft fill (a highlighted box). Radius 12,
-// min 44pt, 16pt text; focus shows as the accent cursor and selection, not
-// a ring. Accepts every TextInput prop; `icon` / `trailing` sit inside the
-// box. `ref` reaches the TextInput (React 19 passes it as a plain prop).
+// Borderless filled text input; focus shows as the accent cursor and
+// selection, not a ring. `ref` reaches the TextInput (React 19 passes it as a
+// plain prop).
 export function Field({
   ref,
   icon,
@@ -1239,10 +1136,8 @@ export function Field({
   );
 }
 
-/* ── Toggle ───────────────────────────────────────────────────────── */
-// On/off switch: 44×26 borderless track (accent when on, high when off)
-// inside a 44pt hit area; the knob's side says on/off, not colour alone.
-// Exposes switch semantics with the checked state.
+// On/off switch inside a 44pt hit area; the knob's side says on/off, not
+// colour alone.
 export function Toggle({
   on,
   onPress,
@@ -1263,7 +1158,6 @@ export function Toggle({
         disabled || !onPress
           ? undefined
           : () => {
-              // A switch ticks as it flips (#1286).
               haptic("toggle");
               onPress();
             }
@@ -1279,8 +1173,7 @@ export function Toggle({
         height: 26,
         borderRadius: 13,
         // Toggles sit in raised rows, so the off and disabled tracks are
-        // `high`. Disabled: a dim knob (enabled-off's is `text`), and on/off
-        // still read from the knob's side.
+        // `high`; on/off still read from the knob's side.
         backgroundColor: disabled
           ? controlDisabled(currentTheme(), "raised").fill
           : on
@@ -1303,13 +1196,9 @@ export function Toggle({
   );
 }
 
-/* ── Checkbox ─────────────────────────────────────────────────────── */
-// A 24pt borderless box (review6 #9). Unchecked: a light `muted` square
-// that reads as a shape on a raised or high card (≥3:1 against both);
-// checked: an accent fill with a dark onAccent check. The check glyph, not
-// the hue, carries the state. With `onPress` it is its own 44×44 control
-// (checkbox role, checked state); without, it is a silent visual for a row
-// that is the control — use <CheckRow> for the common labelled row.
+// A 24pt borderless box; the check glyph, not the hue, carries the state.
+// With `onPress` it is its own 44×44 control; without, a silent visual for a
+// row that is the control (see <CheckRow>).
 export function Checkbox({
   checked,
   onPress,
@@ -1362,10 +1251,7 @@ export function Checkbox({
   );
 }
 
-/* ── CheckRow ─────────────────────────────────────────────────────── */
-// A full-width checkbox row: one control, one spoken label, its state in the
-// box (<Checkbox>) — e.g. the emergency kit's "I've saved my recovery key".
-// A raised, borderless fill (high while pressed); the label wraps.
+// A full-width checkbox row: one control, one spoken label.
 export function CheckRow({
   checked,
   onPress,
@@ -1410,7 +1296,6 @@ export function CheckRow({
   );
 }
 
-/* ── Bottom action zone ───────────────────────────────────────────── */
 // Pinned footer for a screen's primary action(s), above the keyboard.
 export function BottomAction({ children }: { children: React.ReactNode }) {
   return (
@@ -1422,16 +1307,13 @@ export function BottomAction({ children }: { children: React.ReactNode }) {
         backgroundColor: semantic.bg,
       }}
     >
-      {/* Full-width top rule, even inside a centred column (review6 #16). */}
       <BleedHairline edge="top" />
       {children}
     </View>
   );
 }
 
-/* ── Scrollable body ──────────────────────────────────────────────── */
-// The scrolling content area under a Header. Taps reach fields/buttons
-// while the keyboard is up.
+// Taps reach fields/buttons while the keyboard is up.
 export function Body({
   children,
   contentContainerStyle,

@@ -2,12 +2,7 @@ import { Text, type StyleProp, type TextStyle } from "react-native";
 import { splitEmojiSegments } from "./emojiTokens";
 import { CustomEmojiImage } from "./CustomEmojiImage";
 
-/**
- * Inline fragments for a slice of text with `<:name:hash>` custom-emoji
- * tokens rendered as images. Returned as an array so callers composing
- * larger bodies (mention highlighting, etc.) can nest them inside their own
- * <Text>.
- */
+/** Returned as an array so callers composing larger bodies can nest them inside their own <Text>. */
 export function renderEmojiSegments(
   text: string,
   keyPrefix: string,
@@ -28,11 +23,7 @@ export function renderEmojiSegments(
   );
 }
 
-/**
- * Message text with `<:name:hash>` custom-emoji tokens rendered as inline
- * images (port of desktop's EmojiText.tsx). Plain text renders through a
- * single fast path.
- */
+/** Message text with `<:name:hash>` custom-emoji tokens rendered as inline images. */
 export function EmojiText({
   text,
   style,

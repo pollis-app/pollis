@@ -1,12 +1,7 @@
-//! The §6 polling sync model (M2).
+//! The §6 polling sync model: media-off means no LiveKit realtime inbox, so
+//! the TUI runs the catch-up sequence on a timer (`.codesight/wiki/pollis-tui.md`).
 //!
-//! Media-off means no LiveKit realtime inbox, so the TUI **polls**. A client
-//! stays caught up by running the canonical catch-up sequence on a timer. This
-//! module owns that sequence ([`sync_once`]) and the background task that repeats
-//! it ([`spawn_loop`]). It is the data-plane the M2b three-pane UI will consume;
-//! here it is written to be correct and independently testable.
-//!
-//! ## The canonical order (spec §6, mirroring `flows/harness.rs`)
+//! Canonical order (spec §6, mirroring `flows/harness.rs`):
 //!
 //! ```text
 //! 1. poll_mls_welcomes(user)          — drain queued Welcomes (may JOIN new groups/DMs)
@@ -16,12 +11,9 @@
 //!        get_channel_messages / get_dm_messages — ingest + interleaved decrypt
 //! ```
 //!
-//! Order matters: welcomes run **first** (a Welcome can create the very group the
-//! commits then replay into), and the message read runs **last** — it is what
-//! triggers the interleaved replay+decrypt that surfaces a peer's message. A
-//! single round can leave a recovering member and a committer mid-handshake, so
-//! [`sync_once`] is cheap to call repeatedly; the spec notes ~4 rounds settle an
-//! interleaved catch-up.
+//! Welcomes run first (a Welcome can create the group the commits replay
+//! into); the message read runs last (it triggers the interleaved
+//! replay+decrypt). ~4 rounds settle an interleaved catch-up.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -34,28 +26,19 @@ use tokio::task::JoinHandle;
 
 use crate::data;
 
-/// Run one full welcomes → commits(all conversations) → read(all) pass for
-/// `user_id` (§6). Idempotent and safe to call in a loop; returns the
-/// conversation tree the round enumerated, so callers (the loop's snapshot,
-/// the UI) can reuse it without re-querying remote. Errors from an individual
-/// conversation's commit/read are surfaced — a broken conversation should be
-/// visible, not silently swallowed (the "messages must work" doctrine).
+/// One welcomes → commits → reads pass (§6). Idempotent; returns the tree the
+/// round enumerated so callers needn't re-query. A conversation's commit/read
+/// error is surfaced, not swallowed.
 pub async fn sync_once(state: &Arc<AppState>, user_id: &str) -> Result<data::ConversationTree> {
-    // 1. Welcomes first — draining them may join brand-new groups/DMs, which the
-    //    enumeration below then picks up.
     poll_mls_welcomes(state, user_id.to_string()).await?;
 
-    // Enumerate AFTER welcomes so a group joined this round is included.
+    // Enumerate after welcomes so a group joined this round is included.
     let tree = data::load_conversations(state, user_id).await?;
 
-    // 2. Advance each conversation's MLS group to the head epoch. Per-conversation
-    //    because commit processing is keyed by MLS group.
     for conversation_id in tree.conversation_ids() {
         process_pending_commits(state, conversation_id, user_id.to_string()).await?;
     }
 
-    // 3. Read each conversation last — the fetch drives the interleaved
-    //    replay+decrypt that surfaces newly-ingested messages.
     for group in &tree.groups {
         for channel in &group.channels {
             data::channel_messages(state, user_id, &channel.id, None).await?;
@@ -68,10 +51,8 @@ pub async fn sync_once(state: &Arc<AppState>, user_id: &str) -> Result<data::Con
     Ok(tree)
 }
 
-/// Run [`sync_once`] exactly `rounds` times. Stopping early once a round makes
-/// no difference would need change-detection the core doesn't expose cheaply, so
-/// a fixed count is used instead — which is how §6 settles an interleaved
-/// catch-up (~4 rounds). Returns `rounds`, unless one of them errors.
+/// Run [`sync_once`] exactly `rounds` times; a fixed count because the core
+/// exposes no cheap change-detection to stop early.
 pub async fn sync_rounds(state: &Arc<AppState>, user_id: &str, rounds: usize) -> Result<usize> {
     for _ in 0..rounds {
         sync_once(state, user_id).await?;
@@ -79,18 +60,15 @@ pub async fn sync_rounds(state: &Arc<AppState>, user_id: &str, rounds: usize) ->
     Ok(rounds)
 }
 
-/// What a completed sync round produced: a monotonically-increasing round
-/// number and the conversation tree that round enumerated. Published over a
-/// `watch` channel so the UI can re-read state the loop already fetched
-/// instead of issuing its own remote queries on every refresh tick.
+/// A completed round, published over `watch` so the UI reuses what the loop
+/// fetched instead of querying remote itself.
 pub struct SyncSnapshot {
     pub round: u64,
     pub tree: data::ConversationTree,
 }
 
-/// A running background sync loop and its shutdown switch. Dropping it does
-/// **not** stop the task — call [`SyncLoop::cancel`] on shutdown, which lets the
-/// current round finish.
+/// A running background sync loop. Dropping it does not stop the task; call
+/// [`SyncLoop::cancel`], which lets the current round finish.
 pub struct SyncLoop {
     handle: JoinHandle<()>,
     shutdown: watch::Sender<bool>,
@@ -99,26 +77,23 @@ pub struct SyncLoop {
 }
 
 impl SyncLoop {
-    /// Signal the loop to stop after its current round. The task exits on the
-    /// next select; `await` the returned handle if you need to join it.
+    /// Signal the loop to stop after its current round; `await` the returned
+    /// handle to join it.
     pub fn cancel(self) -> JoinHandle<()> {
-        // Ignore send errors: a closed receiver means the task already exited.
+        // A closed receiver means the task already exited.
         let _ = self.shutdown.send(true);
         self.handle
     }
 }
 
-/// Spawn a background task that runs [`sync_once`] for `user_id` every `cadence`
-/// (spec §6: ~3–5 s while foregrounded). The task runs on the current Tokio
-/// runtime and never blocks a render loop — the M2b UI can drive redraws off a
-/// separate signal. Returns a [`SyncLoop`] handle to cancel it on shutdown.
+/// Spawn a background task running [`sync_once`] every `cadence` (spec §6:
+/// ~3–5 s while foregrounded) on the current Tokio runtime.
 pub fn spawn_loop(state: Arc<AppState>, user_id: String, cadence: Duration) -> SyncLoop {
     let (shutdown, mut rx) = watch::channel(false);
     let (snapshot_tx, snapshot) = watch::channel(None);
     let handle = tokio::spawn(async move {
         let mut ticker = tokio::time::interval(cadence);
-        // Skip the immediate first tick's burst semantics on lag — we only care
-        // about steady cadence, not catching up missed ticks.
+        // Steady cadence; don't burst to catch up missed ticks.
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut round: u64 = 0;
         loop {
@@ -127,8 +102,7 @@ pub fn spawn_loop(state: Arc<AppState>, user_id: String, cadence: Duration) -> S
                     match sync_once(&state, &user_id).await {
                         Ok(tree) => {
                             round += 1;
-                            // Ignore send errors: no receiver just means the UI
-                            // is gone, and the shutdown switch will follow.
+                            // No receiver means the UI is gone; shutdown follows.
                             let _ = snapshot_tx.send(Some(Arc::new(SyncSnapshot { round, tree })));
                         }
                         // A failed round is logged, not fatal — the next tick retries.
@@ -136,7 +110,6 @@ pub fn spawn_loop(state: Arc<AppState>, user_id: String, cadence: Duration) -> S
                     }
                 }
                 changed = rx.changed() => {
-                    // Sender dropped, or asked to stop → exit.
                     if changed.is_err() || *rx.borrow() {
                         break;
                     }
@@ -151,14 +124,9 @@ pub fn spawn_loop(state: Arc<AppState>, user_id: String, cadence: Duration) -> S
 mod tests {
     use super::*;
 
-    // The loop is unit-constructible and cancelable without ever touching a DB:
-    // a long cadence means the first sync tick never fires before we cancel, so
-    // this exercises spawn/cancel wiring in isolation (no AppState needed beyond
-    // the type — we cancel before the first tick).
     #[tokio::test(flavor = "multi_thread")]
     async fn spawn_loop_cancels_cleanly() {
-        // A cadence far longer than the test: guarantees we cancel before the
-        // first sync round would run, so no DB access happens.
+        // A cadence far longer than the test, so no round (and no DB) runs.
         let (shutdown, rx) = watch::channel(false);
         let handle = tokio::spawn(async move {
             let mut rx = rx;
@@ -175,7 +143,6 @@ mod tests {
         });
         let (_snapshot_tx, snapshot) = watch::channel(None);
         let loop_ = SyncLoop { handle, shutdown, snapshot };
-        // Graceful cancel returns the join handle; it should complete promptly.
         let joined = loop_.cancel();
         tokio::time::timeout(Duration::from_secs(5), joined)
             .await

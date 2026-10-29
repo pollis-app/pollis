@@ -1,26 +1,18 @@
-// Pure pieces of the OTA publish pipeline (#1250): manifest building, code
-// signing and verification, the bundle/env safety checks, multipart parsing,
-// and the transparency-log records. No I/O beyond what callers pass in, and
-// ONLY `node:` built-ins — the signing job runs this file from a bare checkout
-// with no node_modules, so it cannot be handed a poisoned dependency tree.
-//
-// The CLI that drives it is mobile/scripts/ota-publish.ts; tests are
-// mobile/tests/ota-*.test.ts.
+// Pure pieces of the OTA publish pipeline (#1250). ONLY `node:` built-ins: the
+// signing job runs this file from a bare checkout with no node_modules, so it
+// cannot be handed a poisoned dependency tree.
 
 import { createHash, sign, verify, X509Certificate, createPrivateKey } from "node:crypto";
 
 export const PROD_DS = "https://api.pollis.com";
 export const PROD_DS_HOST = "api.pollis.com";
 export const DEV_DS_HOST = "api-dev.pollis.com";
-// The update server is the DS front-door Worker (pollis-delivery/worker/updates.ts),
-// answering under /updates/ on the prod DS host without touching the container.
+// Served by the DS front-door Worker (pollis-delivery/worker/updates.ts).
 export const UPDATES_BASE_URL = `${PROD_DS}/updates`;
 export const MANIFEST_URL = `${UPDATES_BASE_URL}/api/manifest`;
-// The update store is the `ota/` prefix of the public release bucket (`pollis`,
-// the one behind cdn.pollis.com). Every update-store key this pipeline reads or
-// writes is relative to it, exactly as the Worker reads them
-// (pollis-delivery/worker/updates.ts OTA_KEY_PREFIX; mobile/tests/ota-worker.test.ts
-// pins that the two agree).
+// Every update-store key is relative to the `ota/` prefix of the public release
+// bucket, exactly as the Worker reads them (mobile/tests/ota-worker.test.ts pins
+// that the two agree).
 export const OTA_BUCKET = "pollis";
 export const OTA_KEY_PREFIX = "ota/";
 export const CHANNEL = "production";
@@ -42,9 +34,8 @@ export const PUBLIC_EXPO_VARS = [
   "EXPO_PUBLIC_R2_PUBLIC_URL",
 ] as const;
 
-// Read by the app in DEV builds only (#1242: the dev DS gate key). The read is
-// allowed, but an OTA must never be built with one set: assertPublicEnv refuses
-// any of these in the environment, so the bundle inlines `undefined`.
+// Read by the app in DEV builds only (#1242). assertPublicEnv refuses any of
+// these in the environment, so an OTA bundle inlines `undefined`.
 export const DEV_ONLY_EXPO_VARS = ["EXPO_PUBLIC_POLLIS_DEV_ACCESS_KEY"] as const;
 
 export function sha256Hex(bytes: Buffer | string): string {
@@ -62,10 +53,6 @@ export function md5Hex(bytes: Buffer | string): string {
 export function base64UrlToHex(b64url: string): string {
   return Buffer.from(b64url, "base64url").toString("hex");
 }
-
-// ---------------------------------------------------------------------------
-// Same checks as a store build
-// ---------------------------------------------------------------------------
 
 export function assertPublicEnv(env: Record<string, string | undefined>): void {
   const problems: string[] = [];
@@ -104,8 +91,7 @@ export function assertPublicEnv(env: Record<string, string | undefined>): void {
 }
 
 // Every `process.env.EXPO_PUBLIC_X` read in the app's sources. A read is what
-// inlines a value (an unread .env entry is inert), so this is the check that
-// would have caught #995.
+// inlines a value; an unread .env entry is inert (#995).
 export function findEnvReads(files: { path: string; text: string }[]): { name: string; path: string }[] {
   const out: { name: string; path: string }[] = [];
   const re = /process\.env(?:\.|\[\s*["'])(EXPO_PUBLIC_[A-Z0-9_]+)/g;
@@ -156,10 +142,6 @@ export function assertNoSecretValues(bundle: Buffer, env: Record<string, string 
     }
   }
 }
-
-// ---------------------------------------------------------------------------
-// Manifests and directives (Expo Updates protocol v1)
-// ---------------------------------------------------------------------------
 
 const CONTENT_TYPES: Record<string, string> = {
   png: "image/png",
@@ -305,10 +287,6 @@ export function assertManifestShape(body: string, expect: { runtimeVersion: stri
   return m;
 }
 
-// ---------------------------------------------------------------------------
-// Code signing (RSASSA-PKCS1-v1_5 / SHA-256 over the exact body bytes)
-// ---------------------------------------------------------------------------
-
 export function signatureHeader(signatureBase64: string, keyid: string = KEY_ID): string {
   return `sig="${signatureBase64}", keyid="${keyid}", alg="${ALG}"`;
 }
@@ -382,10 +360,6 @@ export function assertKeyMatchesCertificate(privateKeyPem: string, certPem: stri
   verifyBody(probe, signBody(probe, privateKeyPem), certPem);
 }
 
-// ---------------------------------------------------------------------------
-// multipart/mixed (what the Worker returns)
-// ---------------------------------------------------------------------------
-
 export interface Part {
   headers: Record<string, string>;
   body: Buffer;
@@ -436,10 +410,6 @@ export function partName(part: Part): string | null {
   const m = /name="([^"]+)"/.exec(part.headers["content-disposition"] ?? "");
   return m ? m[1] : null;
 }
-
-// ---------------------------------------------------------------------------
-// The publish plan — what the build job hands the signer
-// ---------------------------------------------------------------------------
 
 export type EntryKind = "manifest" | "directive";
 
@@ -503,10 +473,6 @@ export function assetListFile(entry: PlanEntry): string {
     .sort();
   return lines.join("\n") + (lines.length > 0 ? "\n" : "");
 }
-
-// ---------------------------------------------------------------------------
-// Binary transparency leaves (verifiable-log-builder BinaryRecord, unchanged)
-// ---------------------------------------------------------------------------
 
 // Field order is the frozen leaf encoding (verifiable-log-builder/src/binaries.rs);
 // the builder re-serialises from its struct, but keeping the same order here
@@ -599,14 +565,11 @@ export function mergeRecords(accumulator: BinaryRecord[], records: BinaryRecord[
   return [...accumulator, ...records];
 }
 
-// ---------------------------------------------------------------------------
-// The store-build ledger (#1427): mobile/store/runtime-versions.json
-// ---------------------------------------------------------------------------
-
-// One binary in a store or on pollis.com, and the runtime version baked into it
-// (the AAB/APK's `assets/fingerprint`, the IPA's
-// `Pollis.app/EXUpdates.bundle/fingerprint`). An update reaches the binaries
-// whose runtime version it names, plus those recorded as native-identical to it.
+// One binary in the store-build ledger (mobile/store/runtime-versions.json,
+// #1427) and the runtime version baked into it (the AAB/APK's
+// `assets/fingerprint`, the IPA's `Pollis.app/EXUpdates.bundle/fingerprint`).
+// An update reaches the binaries whose runtime version it names, plus those
+// recorded as native-identical to it.
 export interface StoreBuild {
   platform: Platform;
   channel: string;

@@ -1,24 +1,13 @@
-//! The message content string, as the other clients write it (#1337).
-//!
-//! A message body is either plain text or the attachment envelope
+//! The message content string, as the other clients write it (#1337): plain
+//! text or the envelope
 //! `{"_att":[{"key":"media/…","name":"…","ct":"…","size":N,…}],"_txt":"caption"}`.
-//! The terminal client used to print that envelope verbatim, hiding the
-//! caption. [`parse_content`] is a line-for-line port of the shared reader —
-//! `parseContent` in `mobile/lib/messageContent.ts`, itself kept in lockstep
-//! with desktop's in `frontend/src/hooks/queries/useMessages.ts` — so all three
-//! clients agree on what a body means: same `{` gate, same legacy
-//! `_txt`-only reduction, same fall-back to the raw string on anything that
-//! does not parse.
 //!
-//! The CLI is text-only (no R2 download), so an attachment becomes a readable
-//! line — `[image: photo.png, 2 KB]` — rather than a preview.
-//!
-//! Also here: the other pure text helpers the message pane needs (the
-//! `@mention` scan, the reply-preview snippet), so `ui.rs` stays layout only.
+//! [`parse_content`] is a line-for-line port of `parseContent` in
+//! `mobile/lib/messageContent.ts` (itself in lockstep with desktop's
+//! `frontend/src/hooks/queries/useMessages.ts`); keep all three in step.
 
 use serde::Deserialize;
 
-/// One attachment named in an `_att` envelope — the fields the CLI shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Attachment {
     pub name: String,
@@ -26,17 +15,14 @@ pub struct Attachment {
     pub size: u64,
 }
 
-/// A message body split into its caption and its attachments.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Content {
     pub text: String,
     pub attachments: Vec<Attachment>,
 }
 
-/// Wire shape of one `_att` entry. Every field optional on the way in: a
-/// malformed entry still renders as *an* attachment rather than discarding the
-/// message, and fields this client does not show (`key`, `hash`, `bh`, `w`,
-/// `h`) are ignored.
+/// Every field optional, so a malformed entry still renders as an attachment
+/// rather than discarding the message.
 #[derive(Deserialize)]
 struct AttachmentWire {
     #[serde(default)]
@@ -47,8 +33,7 @@ struct AttachmentWire {
     size: Option<serde_json::Value>,
 }
 
-/// Split a content string into its caption and attachments. Plain-text content
-/// passes through as-is. See the module comment for the contract.
+/// Plain text and anything that is not a valid envelope pass through as-is.
 pub fn parse_content(raw: &str) -> Content {
     let plain = || Content {
         text: raw.to_string(),
@@ -107,7 +92,6 @@ pub fn attachment_label(a: &Attachment) -> String {
     }
 }
 
-/// The word an attachment's MIME type reads as.
 fn attachment_kind(content_type: &str) -> &'static str {
     let major = content_type.split('/').next().unwrap_or("");
     match major {
@@ -118,10 +102,8 @@ fn attachment_kind(content_type: &str) -> &'static str {
     }
 }
 
-/// Human file size: powers of 1024, one decimal place where it matters, empty
-/// for zero — the same rule as desktop's `formatFileSize`
-/// (`frontend/src/utils/format.ts`), with a space before the unit for a
-/// terminal.
+/// Same rule as desktop's `formatFileSize` (`frontend/src/utils/format.ts`);
+/// empty for zero.
 pub fn format_file_size(bytes: u64) -> String {
     if bytes == 0 {
         return String::new();
@@ -141,9 +123,8 @@ pub fn format_file_size(bytes: u64) -> String {
     }
 }
 
-/// The text a message shows when it is quoted by a reply or named in a
-/// prompt: its caption (or the first attachment's label when it has none),
-/// whitespace collapsed to single spaces, cut to `max_chars` with an ellipsis.
+/// A quoted message's snippet: its caption (else the first attachment's label),
+/// whitespace collapsed, cut to `max_chars`.
 pub fn preview(raw: &str, max_chars: usize) -> String {
     let content = parse_content(raw);
     let source = if content.text.trim().is_empty() {
@@ -172,9 +153,7 @@ pub fn truncate_chars(s: &str, max: usize) -> String {
     out
 }
 
-/// Fit `s` into `cols` terminal columns, ending in `…` when it had to be cut
-/// — the sidebar used to clip long names mid-character with no sign anything
-/// was missing (`@ pollis-e2e_peer1619_f8`).
+/// Fit `s` into `cols` terminal columns, ending in `…` when it had to be cut.
 pub fn fit_width(s: &str, cols: usize) -> String {
     use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
     if UnicodeWidthStr::width(s) <= cols {
@@ -199,11 +178,8 @@ pub fn fit_width(s: &str, cols: usize) -> String {
 }
 
 /// Byte ranges of the `@mentions` in `text` that address `username` (or
-/// `@all`). Same rule as `mention_tokens` in pollis-core's `send.rs` and
-/// `findMentions` in `frontend/src/utils/mentions.ts`: an `@` opens a mention
-/// only at the start of the text or after whitespace, the body is letters,
-/// digits, `_`, `-`, `.`, trailing `.`/`-`/`_` are not part of it, and the
-/// comparison ignores case.
+/// `@all`). Must match `mention_tokens` in pollis-core's `send.rs` and
+/// `findMentions` in `frontend/src/utils/mentions.ts`.
 pub fn mention_ranges(text: &str, username: &str) -> Vec<(usize, usize)> {
     let me = username.to_lowercase();
     let mut out = Vec::new();
@@ -238,9 +214,8 @@ pub fn mention_ranges(text: &str, username: &str) -> Vec<(usize, usize)> {
     out
 }
 
-/// The body an edit should store: `new_text` as the caption of `raw`'s
-/// attachment envelope when it has one — so editing a captioned photo changes
-/// the caption and keeps the photo — else `new_text` itself.
+/// The body an edit should store: editing a captioned attachment replaces only
+/// its caption.
 pub fn replace_caption(raw: &str, new_text: &str) -> String {
     if raw.starts_with('{') {
         if let Ok(serde_json::Value::Object(mut map)) = serde_json::from_str(raw) {
@@ -257,9 +232,8 @@ pub fn replace_caption(raw: &str, new_text: &str) -> String {
     new_text.to_string()
 }
 
-/// The shortcode table desktop's emoji picker is generated from
-/// (`scripts/emoji-shortcodes.json`, gemoji v4.1.0, MIT), vendored rather than
-/// re-typed so `:joy:` means the same emoji here as there.
+/// Desktop's shortcode table (gemoji v4.1.0, MIT), so `:joy:` means the same
+/// emoji everywhere.
 const SHORTCODES_JSON: &str = include_str!("../../scripts/emoji-shortcodes.json");
 
 fn shortcodes() -> &'static std::collections::HashMap<String, String> {
@@ -276,14 +250,9 @@ fn shortcodes() -> &'static std::collections::HashMap<String, String> {
     })
 }
 
-/// What the user typed at the react prompt, as the emoji to react with.
-///
-/// `:joy:`, `joy`, `+1` resolve through the shortcode table; a literal emoji is
-/// taken as typed. Either way the result is the bare base form — U+FE0F
-/// stripped — because that is the form desktop and mobile store (the picker's
-/// `char`, see `frontend/src/components/Emoji/emojiData.ts`), and a reaction
-/// is matched by exact string: `❤` and `❤️` would otherwise be two different
-/// reactions. `None` for text that is neither.
+/// The react prompt's input as an emoji: a shortcode (`:joy:`, `joy`, `+1`) or
+/// a literal. U+FE0F is stripped because desktop and mobile store the bare form
+/// and reactions match by exact string (`❤` vs `❤️`).
 pub fn resolve_reaction(input: &str) -> Option<String> {
     let trimmed = input.trim();
     let name = trimmed.trim_matches(':').to_lowercase();
@@ -297,7 +266,6 @@ pub fn resolve_reaction(input: &str) -> Option<String> {
             .collect();
         return emoji;
     }
-    // A literal emoji: no ASCII letters/digits in it.
     if trimmed.chars().any(|c| c.is_ascii_alphanumeric()) {
         return None;
     }

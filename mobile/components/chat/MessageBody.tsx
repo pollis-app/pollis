@@ -3,13 +3,9 @@ import { MentionToken } from "./MentionToken";
 import { findMentions } from "../../lib/mentions";
 
 /**
- * A message body: resolved `@username` tokens highlighted (self-mentions
- * loud), everything between them rendered through the emoji pipeline (port
- * of desktop's MessageBody composition). Only mentions that resolve against
- * `mentionNames` highlight — `@notauser` stays plain text.
- *
- * Returns inline fragments — the caller provides the wrapping <Text> so
- * (edited) suffixes and shared styles stay where they are.
+ * A message body: mentions that resolve against `mentionNames` highlighted,
+ * everything between them through the emoji pipeline. Returns inline
+ * fragments; the caller provides the wrapping <Text>.
  */
 export function MessageBodyInline({
   text,

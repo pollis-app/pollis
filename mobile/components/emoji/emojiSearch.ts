@@ -1,10 +1,5 @@
-/**
- * Search, display, and recency logic for the emoji picker.
- *
- * Ported from frontend/src/components/Emoji/emojiSearch.ts. Pure functions;
- * the recents/tone storage lives in lib/emojiPrefs.ts (file-backed — RN has
- * no localStorage).
- */
+// Pure search/display/recency logic for the emoji picker (a port of desktop's
+// emojiSearch.ts); recents/tone storage lives in lib/emojiPrefs.ts.
 
 import type { CustomEmoji } from "../../hooks/queries/useEmoji";
 import { applySkinTone, STANDARD_EMOJI, type StandardEmoji } from "./emojiData";
@@ -23,13 +18,10 @@ export function pickerEmojiId(item: PickerEmoji): string {
 }
 
 /**
- * The character to actually display (and insert) for a standard emoji.
- *
- * `emojiData.ts` stores bare codepoints with no variation selector. The
- * selector is added here, at render time: never when a skin tone was applied
- * (a Fitzpatrick modifier already implies emoji presentation), and only for
- * single-codepoint bases below U+1F000 (the legacy BMP pictographs that
- * default to text presentation).
+ * The character to display (and insert) for a standard emoji. `emojiData.ts`
+ * stores bare codepoints; the variation selector is added here, never after a
+ * skin tone (the modifier implies emoji presentation), and only for
+ * single-codepoint bases below U+1F000, which default to text presentation.
  */
 export function emojiDisplayChar(
   emoji: StandardEmoji,
@@ -50,11 +42,7 @@ export function emojiDisplayChar(
   return `${emoji.char}️`;
 }
 
-/**
- * What a chosen cell turns into: a standard emoji becomes the displayed
- * character (skin tone + variation selector baked in); a custom emoji becomes
- * its `<:shortcode:hash>` wire token.
- */
+/** A standard emoji becomes its displayed character; a custom one its `<:shortcode:hash>` wire token. */
 export function pickerEmojiInsertText(
   item: PickerEmoji,
   toneIndex: number,
@@ -65,13 +53,7 @@ export function pickerEmojiInsertText(
   return emojiTokenText(item.emoji.shortcode, item.emoji.content_hash);
 }
 
-/**
- * Rank `query` against the whole standard table plus `custom`.
- *
- * `annotations` is the active locale's table followed by English's (from
- * `useEmojiAnnotations`); without it only the Unicode names are searched. The
- * ranking itself lives in `emojiRank.ts`, where it is unit-tested.
- */
+/** `annotations` is the active locale's table then English's; without it only Unicode names are searched. */
 export function searchEmoji(
   query: string,
   custom: readonly CustomEmoji[],
@@ -80,10 +62,7 @@ export function searchEmoji(
   return rankEmoji(query, STANDARD_EMOJI, custom, annotations);
 }
 
-/**
- * Resolve recents ids back to live emoji. Ids that no longer resolve are
- * dropped silently (deleted custom emoji, lost group access).
- */
+/** Ids that no longer resolve (deleted custom emoji, lost group access) are dropped silently. */
 export function resolveRecents(
   ids: readonly string[],
   custom: readonly CustomEmoji[],

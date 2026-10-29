@@ -31,9 +31,8 @@ import type { Channel } from "../../types";
 import { ChatView } from "../chat/[id]";
 import { useThemeRerender } from "../../components/theme";
 
-// The Groups tab (Main.dc.html): a strip of group pills, then the selected
-// group's channel panel. Picking a pill switches the group in place; the
-// choice is remembered across launches.
+// The Groups tab: a strip of group pills, then the selected group's channel
+// panel. The picked group is remembered across launches.
 function Groups() {
   useThemeRerender();
   const { t } = useTranslation("mobile");
@@ -99,13 +98,11 @@ function Groups() {
     }, [isRegular]),
   );
 
-  // Regular width: a selected group with no conversation open shows its
-  // first channel (#General) in the right pane rather than "Select a
-  // conversation" — e.g. right after creating a group, or switching pills.
-  // Only while this tab is focused: the tab stays mounted under Direct, and
-  // selecting a channel there would close the open DM. When the selection is
-  // a group the list has not refetched yet (just created), wait for it rather
-  // than opening a channel of the fallback group. Compact never auto-opens.
+  // Regular width: a selected group with no conversation open shows its first
+  // channel in the right pane. Only while this tab is focused: the tab stays
+  // mounted under Direct, and selecting a channel there would close the open
+  // DM. A just-created group the list has not refetched yet is waited for,
+  // rather than opening a channel of the fallback group.
   const focused = useIsFocused();
   const autoChannel =
     isRegular &&
@@ -142,8 +139,6 @@ function Groups() {
   const openChannel = (groupId: string, c: Channel) => {
     selectGroup(groupId);
     appStore.setSelectedChannelId(c.id);
-    // Opening a conversation clears its unread count (desktop does the same
-    // in its Channel page).
     markConversationRead(c.id);
     // Re-opening the channel already shown closes any page over it.
     resetPane();

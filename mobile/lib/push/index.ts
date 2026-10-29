@@ -1,25 +1,7 @@
-// Push-notification client (expo-notifications).
-//
-// Pushes are content-free / data-only by design: the server never sees
-// message plaintext, so a push never carries it. On tap we navigate to the
-// conversation; in foreground we re-run the same envelope ingest the chat
-// screen uses to pull the actual (encrypted) message and decrypt it locally.
-//
-// #1122: the payload no longer names the conversation either. Expo, APNs and
-// FCM are outside the overlay by design, so anything in `data` is disclosed to
-// three third parties on every message — and "which conversation, when" is
-// precisely the signal we claim not to leak. The payload now carries an opaque
-// `h`, minted per notification, which `resolve_push_handle` trades for the
-// routing fields over our own authenticated channel.
-//
-// #1157 removed `conversationId` from the payload entirely, so there is no
-// fallback to read: a notification either resolves its handle or opens the app.
-// Safe to do in one step because mobile has never been distributed — no shipped
-// client reads the old field (see the PR).
-//
-// Everything degrades gracefully: denied permission, a missing EAS
-// projectId, or a failed `register_push_token` call all resolve without
-// throwing, leaving the app working exactly as it does today. A failed
+// Push-notification client (expo-notifications). Pushes are data-only and carry
+// only an opaque per-notification handle `h` (#1122, #1157): Expo, APNs and FCM
+// are third parties, so the payload names neither the message nor the
+// conversation. Every failure degrades to "no push", never a throw; a failed
 // registration is retried on the next foreground, unlock or chat open (#1423).
 
 import { Platform, Linking } from "react-native";
@@ -32,9 +14,8 @@ import { createPushRegistrar, type EnsureOptions } from "./registration";
 import { handleOfPresented, trayHandles, type Presented } from "./dismiss";
 import { dismissHandles } from "./dismissTask";
 
-// Present foreground notifications as a banner / in the list, content-free
-// (no sound, no badge). This is pure config and safe at module load — it
-// touches no native module that could crash boot.
+// Content-free foreground presentation (no sound, no badge). Safe at module
+// load: it touches no native module that could crash boot.
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowBanner: true,
@@ -44,11 +25,7 @@ Notifications.setNotificationHandler({
   }),
 });
 
-/**
- * The Android notification channel notifications post to. Android 8+ silently
- * drops any notification that has no channel, so this must exist before the
- * first one arrives. Idempotent — safe to call repeatedly.
- */
+/** Android 8+ drops any notification without a channel, so this must exist first. */
 async function ensureAndroidChannel(): Promise<void> {
   if (Platform.OS !== "android") {
     return;
@@ -56,22 +33,17 @@ async function ensureAndroidChannel(): Promise<void> {
   await Notifications.setNotificationChannelAsync("default", {
     name: i18n.t("mobile:push.channelMessages"),
     importance: Notifications.AndroidImportance.DEFAULT,
-    // Content-free, in keeping with the privacy model — no custom sound.
     showBadge: false,
   });
 }
 
-// The registration state machine (`./registration.ts`, #1423) over the real
-// native calls. It marks a user registered only once `register_push_token` has
-// succeeded, so a failure is retried on the next foreground, unlock or chat
-// open instead of sticking for the session.
+// Marks a user registered only once `register_push_token` succeeded (#1423).
 const registrar = createPushRegistrar({
   getPermissions: () => Notifications.getPermissionsAsync(),
   requestPermissions: () => Notifications.requestPermissionsAsync(),
   prepare: ensureAndroidChannel,
   getToken: async () => {
-    // projectId is required to mint an Expo push token. In bare/dev builds
-    // without EAS configured it's absent — degrade rather than throw.
+    // Absent in bare/dev builds without EAS: degrade rather than throw.
     const projectId =
       Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
     if (!projectId) {
@@ -93,26 +65,11 @@ const registrar = createPushRegistrar({
 });
 
 /**
- * Permission + registration.
- *
- * With `prompt` (the default) this is the contextual moment — a conversation
- * opened, the Preferences toggle — where notifications are obviously useful,
- * so the one-shot OS prompt may fire. Never at login.
- *
- * The OS permission prompt is one-shot: once a user answers, you can't show
- * it again in-app. So we pre-check with `getPermissionsAsync` and only fire
- * the prompt when the system still allows it (`undetermined`). If already
- * granted we skip straight to registration; if denied we do nothing (turning
- * it back on is a Settings trip — see `openNotificationSettings`).
- *
- * `prompt: false` registers only if permission is already granted; the app
- * calls it on sign-in/unlock and every return to the foreground
- * (`usePushRegistration`). `refresh: true` re-fetches the token even when
- * already registered — a token rotation.
- *
- * Returns the Expo push token, or null if not granted / already handled / no
- * EAS projectId / the `register_push_token` call fails. Best-effort
- * throughout: never throws, never blocks the UI.
+ * Permission + registration. With `prompt` (the default) the one-shot OS prompt
+ * may fire, but only while the permission is still `undetermined`; call it only
+ * at a contextual moment, never at login. `prompt: false` registers only if
+ * already granted; `refresh: true` re-fetches the token (rotation). Returns the
+ * Expo push token or null; never throws.
  */
 export function ensurePushRegistration(
   userId: string,
@@ -122,11 +79,9 @@ export function ensurePushRegistration(
 }
 
 /**
- * Re-register when the OS hands the app a new push token (#1423). FCM rotates
- * tokens; without this the DS kept pushing to the dead one until a later chat
- * open in a later session. The listener's own token is the native device
- * token, not the Expo one, so this re-fetches the Expo token and re-registers
- * only if it changed. Returns a disposer.
+ * Re-register when the OS rotates the push token (#1423). The listener's token
+ * is the native one, not the Expo one, so this re-fetches the Expo token.
+ * Returns a disposer.
  */
 export function addPushTokenRotationListener(userId: string): () => void {
   const sub = Notifications.addPushTokenListener(() => {
@@ -137,20 +92,14 @@ export function addPushTokenRotationListener(userId: string): () => void {
   };
 }
 
-/**
- * Whether notifications are currently authorized — for a Settings screen to
- * reflect state and decide whether to show an "enable in Settings" affordance.
- */
 export async function isPushAuthorized(): Promise<boolean> {
   const status = await Notifications.getPermissionsAsync();
   return status.granted;
 }
 
 /**
- * Current permission state for a Settings affordance: `granted` drives the
- * on/off display, and `canAskAgain` decides whether tapping should fire the
- * in-app OS prompt (still undetermined) or deep-link to system Settings
- * (already answered — the prompt can't be shown again).
+ * `canAskAgain` decides whether tapping fires the in-app OS prompt or must
+ * deep-link to system Settings (the prompt can't be shown twice).
  */
 export async function getPushPermissionInfo(): Promise<{
   granted: boolean;
@@ -160,40 +109,22 @@ export async function getPushPermissionInfo(): Promise<{
   return { granted: status.granted, canAskAgain: status.canAskAgain };
 }
 
-/**
- * Deep-link to this app's OS Settings page. Use when permission was denied
- * and `canAskAgain` is false — the in-app prompt can no longer be shown, so
- * re-enabling has to happen in Settings.
- */
 export function openNotificationSettings(): Promise<void> {
   return Linking.openSettings();
 }
 
 export interface PushHandlers {
-  // A notification was tapped. Passes the payload's data blob unresolved: the
-  // caller may have to hold the tap until the app is unlocked, and resolving
-  // the handle is a signed DS call (`resolveNotificationRouting`).
+  // Passed unresolved: the tap may be held until unlock, and resolving the
+  // handle is a signed DS call (`resolveNotificationRouting`).
   onTap: (data: unknown) => void;
-  // A notification arrived (foreground / data) — pull + decrypt locally.
+  // Foreground receipt: pull + decrypt locally.
   onDataReceived: (conversationId: string, kind: string) => void;
 }
 
 export type Routing = { conversationId: string; kind: string };
 
-// Pull the routing fields out of a notification's data blob, preferring the
-// opaque handle (#1122) and falling back to the plain id.
-//
-// The client ONLY reads these — it never expects message plaintext.
-//
-// Returns null when there is nothing to act on, which is the same outcome as a
-// handle that fails to resolve: the tap opens the app rather than a
-// conversation, and a background push is skipped until the next poll.
-// Resolve a payload to something routable, doing I/O only when the payload
-// gave us a handle.
-//
-// Returns null when there is nothing to act on, which is also what a failed
-// resolve produces: the tap opens the app rather than a conversation, and a
-// background push is skipped until the next poll.
+// Resolve a payload's handle to a conversation. Null (nothing to act on, or the
+// resolve failed) means a tap opens the app and a background push is skipped.
 export async function resolveNotificationRouting(data: unknown): Promise<Routing | null> {
   const decided = readPayloadRouting(data);
   if (decided === null) {
@@ -211,21 +142,16 @@ export async function resolveNotificationRouting(data: unknown): Promise<Routing
       return resolved;
     }
   } catch {
-    // Offline, or the handle expired / was swept. Nothing to fall back to: a
-    // payload carrying `h` is from a DS that may no longer send the plain id,
-    // and guessing is worse than degrading to opening the app.
+    // Offline, or the handle expired. No plain-id fallback exists (#1157), and
+    // guessing is worse than opening the app.
   }
   return null;
 }
 
 /**
- * The tap that launched the app, if one has not been handled yet (#1422).
- *
- * On a cold start the OS delivers the tap before any listener exists — the
- * session is still being restored — so the response listener never sees it,
- * and the tap used to just open the app. expo-notifications keeps the most
- * recent response; take it once and clear it, so it is never routed twice.
- * The live listener below clears it too, for the same reason.
+ * The tap that cold-started the app, taken once (#1422). It arrives before any
+ * listener exists, so it is read from expo-notifications' last response and
+ * cleared so it is never routed twice.
  */
 export function takeLaunchNotificationData(): unknown | null {
   try {
@@ -241,27 +167,19 @@ export function takeLaunchNotificationData(): unknown | null {
   }
 }
 
-/**
- * Wire notification listeners: tap (response) → `onTap`, receipt in
- * foreground → `onDataReceived`. Returns a disposer that removes both
- * subscriptions.
- */
 export function addPushListeners(handlers: PushHandlers): () => void {
   const responseSub = Notifications.addNotificationResponseReceivedListener(
     (response) => {
       try {
         Notifications.clearLastNotificationResponse();
       } catch {
-        // Not available on this build: a later launch check could find this
-        // tap again and open the same conversation, which is harmless.
+        // Not available: a later launch check may re-route this tap, harmlessly.
       }
       handlers.onTap(response.notification.request.content.data);
     },
   );
 
-  // Async: resolving the handle (#1122) is a network call. `void` because
-  // expo-notifications ignores a returned promise — the work continues, it is
-  // simply not awaited by the subscription.
+  // `void`: expo-notifications ignores a returned promise.
   const receivedSub = Notifications.addNotificationReceivedListener(
     (notification) => {
       void (async () => {
@@ -279,11 +197,8 @@ export function addPushListeners(handlers: PushHandlers): () => void {
   };
 }
 
-// ── Clearing read notifications (#1508) ──────────────────────────────────────
-//
-// See `./dismiss.ts` for the three paths and how a tray notification's handle
-// is found. The background (silent push) path is `./dismissTask.ts`; these two
-// run in the app.
+// Clearing read notifications (#1508): see `./dismiss.ts` and
+// `.codesight/wiki/notifications.md`.
 
 async function presentedTray(): Promise<Presented[]> {
   const presented = await Notifications.getPresentedNotificationsAsync();
@@ -294,14 +209,9 @@ async function presentedTray(): Promise<Presented[]> {
 }
 
 /**
- * This device opened `conversationId` (from the tray, the list, Search or a
- * link): clear its notifications now, without waiting for the DS's silent push.
- *
- * Each tray notification's handle is resolved to its conversation over the
- * same `resolve_push_handle` a tap uses (cached in the core, so a notification
- * that was already resolved costs nothing). Best-effort: a handle that does
- * not resolve (offline, expired) is left for the silent push and the
- * foreground catch-up.
+ * This device opened `conversationId`: clear its tray notifications now, by
+ * resolving each handle. A handle that does not resolve is left for the silent
+ * push and the foreground catch-up.
  */
 export async function dismissConversationNotifications(conversationId: string): Promise<void> {
   try {
@@ -318,21 +228,13 @@ export async function dismissConversationNotifications(conversationId: string): 
     );
     await dismissHandles(matches.filter((h): h is string => h !== null));
   } catch {
-    // Not available on this build, or the tray could not be read: the other
-    // two paths still clear it.
+    // Not available, or the tray could not be read: the other two paths still clear it.
   }
 }
 
 /**
- * Catch up on reads from other devices: ask the DS which of the tray's
- * notifications were read since, and clear those. Run on landing in the app
- * and on every return to the foreground — the moments a missed silent push
- * (iOS after a force-quit, Android in Doze) would otherwise leave stale
- * notifications behind.
- *
- * Never guesses from local unread counts: a notification whose message this
- * device has not ingested yet would look read, and clearing it would hide an
- * unread message. Only the DS's record of an actual read clears one.
+ * Clear tray notifications the DS records as read on another device. Never
+ * guesses from local unread counts: a not-yet-ingested message would look read.
  */
 export async function reconcileReadNotifications(userId: string): Promise<void> {
   try {

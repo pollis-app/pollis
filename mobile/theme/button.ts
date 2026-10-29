@@ -1,24 +1,12 @@
 // Button colours per variant and state, pure (no react-native) so
-// tests/button-contrast.test.ts can check every pair against the derived
-// theme for every accent preset.
+// tests/button-contrast.test.ts can check every pair for every accent preset.
 //
-// No button has a border, in any state: shape comes from the fill. Primary is
-// an accent fill with a dark (onAccent) label; secondary / default / danger
-// are the inverse, a dark surface fill with an accent label; subtle has no
-// fill. On a `raised` card the dark fill steps up to `high` so the button
-// still reads as a shape.
-//
-// Disabled is drawn with SOLID derived tokens, never `opacity` on the whole
-// button: on Android a translucent parent fades each child separately (no
-// offscreen compositing), so the label blended into the faded fill and fell
-// far below 4.5:1 (#3/#4). Disabled is told apart from enabled by more than
-// hue: the label leaves the accent / onAccent tiers, and the control is
-// announced and skipped as disabled. Secondary / default / danger / subtle
-// share the plain surface fill + `dim` label. Disabled PRIMARY keeps its own
-// identity (review6 #10) so it never reads as a secondary button: a dimmed
-// accent fill (`accentDisabled`: 40% accent over the background)
-// with a light `text` label. A dark label on that fill cannot reach 4.5:1 for
-// every preset (it tops out near 3:1), while `text` stays above 5.9:1.
+// No button has a border: shape comes from the fill. Disabled uses SOLID
+// derived tokens, never `opacity` on the whole button: on Android a
+// translucent parent fades each child separately, so the label blends into
+// the fill and drops below 4.5:1. Disabled PRIMARY stays a dimmed accent fill
+// with a light `text` label so it never reads as a secondary button; a dark
+// label on that fill tops out near 3:1 for some presets.
 
 import type { Theme } from "./derive";
 
@@ -67,10 +55,9 @@ export function disabledPrimary(theme: Theme): { fill: string; fg: string } {
 }
 
 /**
- * A checkbox box (review6 #9). No border in any state. Unchecked: a light
- * `muted` square that reads as a shape on a raised or high card (≥3:1 vs
- * both). Checked: an accent fill with a dark onAccent check glyph — the
- * glyph, not the hue, carries the state.
+ * A checkbox box. No border in any state. Unchecked: a light `muted` square
+ * (≥3:1 vs raised and high). Checked: an accent fill with a dark onAccent
+ * check glyph — the glyph, not the hue, carries the state.
  */
 export function checkboxColors(
   theme: Theme,

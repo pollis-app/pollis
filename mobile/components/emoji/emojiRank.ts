@@ -1,26 +1,20 @@
 /**
- * The picker's search ranking, as a pure function over its inputs.
- *
- * Split out of `emojiSearch.ts` so it can be unit-tested under `node --test`
- * against the real generated tables: this module has type-only imports, and
- * the test hands it `STANDARD_EMOJI` and a locale's annotation table itself.
- * The mobile app carries a copy differing only in the `CustomEmoji` import
- * (`scripts/i18n-check.mjs` fails when anything else drifts) — edit this one
- * and copy it across.
+ * The picker's search ranking, as a pure function so `node --test` can run it
+ * against the real generated tables (type-only imports). The desktop copy
+ * differs only in the `CustomEmoji` import (`scripts/i18n-check.mjs` fails
+ * when anything else drifts).
  */
 
 import type { CustomEmoji } from "../../hooks/queries/useEmoji";
 import type { StandardEmoji } from "./emojiData";
 import type { EmojiAnnotations, EmojiAnnotationStack } from "./emojiAnnotations";
 
-/** A picker cell: either a Unicode emoji or a custom per-group one. */
 export type PickerEmoji =
   | { kind: "standard"; emoji: StandardEmoji }
   | { kind: "custom"; emoji: CustomEmoji };
 
 /**
- * How well a haystack matches, lower is better. Names (the Unicode name, a
- * localized name, a custom shortcode) outrank keywords at the same tier, so
+ * Match tiers, lower is better. Names outrank keywords at the same tier, so
  * "cat" surfaces 🐈 (named "cat") above every emoji merely tagged with it.
  */
 const NAME_EXACT = 0;
@@ -34,18 +28,15 @@ interface Match {
   length: number;
 }
 
-// Combining marks in the scripts we ship (Latin, Cyrillic, Hebrew, Arabic,
-// plus the general combining blocks), spelled as ranges rather than `\p{M}`
-// so the same source runs on Hermes.
+// Combining marks in the scripts we ship, spelled as ranges rather than
+// `\p{M}` so the same source runs on Hermes.
 const COMBINING_MARKS =
   /[\u0300-\u036f\u0483-\u0489\u0591-\u05bd\u05bf\u05c1\u05c2\u05c4\u05c5\u05c7\u0610-\u061a\u064b-\u065f\u0670\u06d6-\u06dc\u06df-\u06e4\u06e7\u06e8\u06ea-\u06ed\u1ab0-\u1aff\u1dc0-\u1dff\u20d0-\u20ff\ufe20-\ufe2f]/g;
 
 /**
- * Fold a string for matching: lowercase, then strip diacritics, so `corazon`
- * finds "corazón" and `cafe` finds "café". Phones without dead keys make the
- * unaccented spelling the common one, not the exception. Applied to both the
- * needle and every haystack, so the fold never has to be exact — only
- * consistent.
+ * Fold a string for matching: lowercase, then strip diacritics, so `cafe`
+ * finds "café". Applied to both needle and haystack, so it only has to be
+ * consistent, not exact.
  */
 export function foldForSearch(value: string): string {
   return value.toLowerCase().normalize("NFD").replace(COMBINING_MARKS, "");
@@ -56,11 +47,7 @@ interface FoldedAnnotation {
   keywords: readonly string[];
 }
 
-/**
- * A table's names and keywords folded once, on the first search against it,
- * and kept for as long as the table itself lives. Folding ~20k short strings
- * per keystroke would be felt; folding them once per language is not.
- */
+/** Tables folded once on first search and kept as long as the table lives (~20k strings). */
 const foldedTables = new WeakMap<EmojiAnnotations, Map<string, FoldedAnnotation>>();
 
 function folded(table: EmojiAnnotations): Map<string, FoldedAnnotation> {
@@ -113,10 +100,6 @@ function better(a: Match | null, b: Match | null): Match | null {
   return a.length <= b.length ? a : b;
 }
 
-/**
- * The best match for a standard emoji across its Unicode name and every
- * annotation table in the stack.
- */
 function matchStandard(
   emoji: StandardEmoji,
   needle: string,
@@ -137,11 +120,9 @@ function matchStandard(
 }
 
 /**
- * A custom shortcode has no keywords, so its only tiers are the name ones. A
- * substring hit on it is lifted to the keyword-exact tier: someone who typed
- * three letters in a server full of custom emoji is far more likely to mean
- * one of those than an emoji merely tagged with the word, and the custom
- * bonus then wins the tie. It still loses to a standard emoji NAMED that.
+ * A custom shortcode has only name tiers; a substring hit on it is lifted to
+ * the keyword-exact tier, so in a server full of custom emoji they win the
+ * tie. It still loses to a standard emoji NAMED that.
  */
 function matchCustom(emoji: CustomEmoji, needle: string): Match | null {
   const match = matchName(emoji.shortcode.toLowerCase(), needle);
@@ -152,18 +133,11 @@ function matchCustom(emoji: CustomEmoji, needle: string): Match | null {
 }
 
 /**
- * Rank `query` against the emoji set.
- *
- * Tiers, in the order a person expects: an exact name match, a name prefix, an
- * exact keyword, a keyword prefix, then any substring. Within a tier the
- * shorter haystack wins — searching "cat" should surface "cat" above "cat with
- * wry smile". A standard emoji is matched on its Unicode name plus every table
- * in `tables` (the active locale's and English's), so `corazón`, `corazon`
- * and `heart` all find ❤ for a Spanish user (diacritics are folded on both
- * sides — see `foldForSearch`).
- *
- * Custom emoji rank ahead of standard ones at equal tier, and a custom
- * substring hit counts as a keyword-exact one (`matchCustom`).
+ * Rank `query` against the emoji set: exact name, name prefix, exact keyword,
+ * keyword prefix, then any substring; within a tier the shorter haystack wins.
+ * A standard emoji matches on its Unicode name plus every table in `tables`
+ * (the active locale's and English's). Custom emoji rank ahead of standard
+ * ones at equal tier.
  */
 export function rankEmoji(
   query: string,

@@ -1,11 +1,6 @@
-// "Your data" (#856): export what this phone holds, optionally complete the
-// attachments, then hand the zip to the share sheet. One component so the
-// Security screen (account) and the two conversation-info screens
-// (conversation) render the identical flow.
-//
-// Copy comes from the SAME `settings:security.export*` keys desktop renders;
-// only the share-sheet step, which desktop does not have, lives under
-// `mobile:self.export`.
+// "Your data" export (#856), shared by the Security and conversation-info
+// screens. Copy reuses desktop's `settings:security.export*` keys; only the
+// share-sheet step lives under `mobile:self.export`.
 import { useState } from "react";
 import { View, Text } from "react-native";
 import { useTranslation } from "react-i18next";

@@ -21,35 +21,23 @@ interface UnlockStateSnapshot {
 
 type Phase = "working" | "confirm" | "joining" | "signedOut" | "locked" | "failed";
 
-// #847 (mobile) — where a shared invite link lands.
+// Where a shared `pollis://invite/<token>` link lands, warm or cold start
+// (#847). The `https://pollis.com/invite/<token>` form would need universal /
+// app links, deliberately not configured.
 //
-// expo-router maps `pollis://invite/<token>` here on warm AND cold starts (it
-// wires `Linking.getInitialURL()` into the navigation container itself, so a
-// link tapped while the app is killed still arrives as this route's initial
-// screen). The desktop-rendered `https://pollis.com/invite/<token>` form needs
-// iOS universal links / Android app links (associated-domains + server files)
-// before it opens the app — deliberately not configured here.
+// Arriving here does NOT join anything (#1094): anyone can put a pollis://
+// link in front of the user, and joining discloses their username and device
+// identity to every member. So this screen resolves the session, then STOPS
+// and asks. No group-name preview either: resolving a token without redeeming
+// would be a new oracle.
 //
-// #1094: arriving here does NOT join anything. `pollis://invite/<token>` is
-// reachable by anyone who can put a link in front of the user — an SMS, another
-// app, a web page with an `<a href="pollis://…">` — and joining a group
-// discloses their username and device identity to every member of it. So this
-// screen resolves the session, then STOPS and asks. One tap must never be
-// enough. (Slack and Discord both confirm before joining.)
-//
-// Deliberately no group-name preview: resolving a token to group metadata
-// without redeeming would be a new oracle, and it is not what closes the hole —
-// the deliberate press is.
-//
-// On failure this renders ONE opaque message for every cause. The Delivery
-// Service deliberately cannot tell us whether a token was wrong, expired,
-// revoked or used up — distinguishing them would confirm to an attacker that
-// a token was real but stale.
+// Every failure renders ONE opaque message: the DS deliberately cannot say
+// whether a token was wrong, expired, revoked or used up, which would confirm
+// to an attacker that a token was real but stale.
 export default function InviteLanding() {
   useThemeRerender();
   const { t } = useTranslation("mobile");
   const router = useRouter();
-  // Phones land on the group page; iPad on the Groups tab's two-pane.
   const { openGroup } = useOpenConversation();
   const queryClient = useQueryClient();
   const { token } = useLocalSearchParams<{ token?: string }>();

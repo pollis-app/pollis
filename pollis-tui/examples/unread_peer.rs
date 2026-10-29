@@ -1,14 +1,10 @@
 //! Dev-DS peer for the mobile Maestro `unread` flow (#1422).
 //!
-//! Signs up a fresh account on the DS named by `POLLIS_DELIVERY_URL` (the dev
-//! DS — it fixes the OTP), prints its handle, waits for the phone under test to
-//! open a DM with it, accepts and prints `PEER_READY`. It then sends in two
-//! batches, each released by the script touching a file in the directory named
-//! by `UNREAD_PEER_SIGNAL_DIR` — `go-1` while the phone's app is backgrounded,
-//! `go-2` while it is closed — so the phone must show the unread count for
-//! messages it never saw arrive live.
-//!
-//! Not a shipping binary: examples build against pollis-tui's dev-dependencies.
+//! Signs up on the dev DS (`POLLIS_DELIVERY_URL`), prints its handle, waits
+//! for the phone to open a DM with it, accepts and prints `PEER_READY`. It then
+//! sends in two batches, each released by the script touching a file in
+//! `UNREAD_PEER_SIGNAL_DIR`: `go-1` while the phone's app is backgrounded,
+//! `go-2` while it is closed.
 //!
 //!   POLLIS_DATA_DIR=$(mktemp -d) POLLIS_DELIVERY_URL=https://api-dev.pollis.com \
 //!   UNREAD_PEER_SIGNAL_DIR=$(mktemp -d) POLLIS_DEV_ACCESS_KEY=… \

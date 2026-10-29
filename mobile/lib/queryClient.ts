@@ -1,7 +1,4 @@
-// Mobile React Query client. Mirrors the desktop client's defaults in
-// frontend/src/main.tsx so hooks ported across produce equivalent caching
-// behavior on both platforms. Tweak per-query options at the hook level
-// (staleTime, refetchOnReconnect, etc.) the same way desktop hooks do.
+// Mirrors the desktop client's defaults (frontend/src/main.tsx).
 
 import { MutationCache, QueryClient } from "@tanstack/react-query";
 import { resolveHaptic, type MutationHaptic } from "./hapticEvents";
@@ -11,8 +8,7 @@ function hapticOf(meta: Record<string, unknown> | undefined): MutationHaptic | u
   return meta?.haptic as MutationHaptic | undefined;
 }
 
-// Tactile feedback for user actions (#1286), in one place: a mutation tagged
-// `meta: { haptic }` plays it here (lib/hapticEvents.ts, MutationHaptic).
+// Haptics for tagged mutations (#1286; see MutationHaptic in lib/hapticEvents.ts).
 const mutationCache = new MutationCache({
   onMutate: (vars, mutation) => {
     const event = resolveHaptic(hapticOf(mutation.meta)?.mutate, vars);
@@ -40,10 +36,8 @@ export const queryClient = new QueryClient({
     queries: {
       staleTime: 1000 * 60,
       gcTime: 1000 * 60 * 5,
-      // RN has no "window focus" event in the browser sense, but
-      // react-query polyfills it via AppState (foreground/background).
-      // Match desktop and rely on realtime push + explicit invalidations
-      // instead of focus-driven refetch storms.
+      // react-query maps focus to AppState; rely on realtime + explicit
+      // invalidations instead of foreground refetch storms, as desktop does.
       refetchOnWindowFocus: false,
       refetchOnReconnect: true,
       retry: 1,

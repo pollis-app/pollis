@@ -1,10 +1,7 @@
-// One image page of the media viewer (#1248): pinch to zoom, double-tap to
-// zoom in on the tapped point (and again to reset), drag to pan while zoomed.
-// The bytes come through `MediaImage`, i.e. the same `useMediaUri` decrypt
-// path the chat thumbnail uses — never a second fetch.
-//
-// The pager owns horizontal swipes, so the pan gesture only exists while the
-// image is zoomed; `onZoomChange` tells the pager to stop scrolling then.
+// One image page of the media viewer (#1248). The bytes come through
+// `MediaImage`, the same decrypt path the chat thumbnail uses — never a second
+// fetch. The pager owns horizontal swipes, so the pan gesture only exists while
+// the image is zoomed.
 
 import { useCallback, useEffect, useState } from "react";
 import { View } from "react-native";
@@ -47,8 +44,8 @@ export function ZoomableImage({
   const savedTx = useSharedValue(0);
   const savedTy = useSharedValue(0);
   const zoomed = useSharedValue(false);
-  // Mirrors `zoomed` on the JS side: the pan gesture is rebuilt with it, so
-  // at 1× there is no pan to compete with the pager's swipe.
+  // The pan gesture is rebuilt with this, so at 1× there is no pan to compete
+  // with the pager's swipe.
   const [isZoomed, setIsZoomed] = useState(false);
   const handleZoom = useCallback(
     (next: boolean) => {
@@ -71,7 +68,6 @@ export function ZoomableImage({
     }
   }, [active, scale, savedScale, tx, ty, savedTx, savedTy, zoomed]);
 
-  // Keep the scaled image covering the page: never pan past its edges.
   const clampX = (value: number, s: number) => {
     "worklet";
     const max = Math.max(0, (width * s - width) / 2);
@@ -142,7 +138,6 @@ export function ZoomableImage({
         reset();
         return;
       }
-      // Zoom towards the tapped point: move it to the page centre.
       const target = DOUBLE_TAP_SCALE;
       const nextX = clampX((width / 2 - e.x) * (target - 1), target);
       const nextY = clampY((height / 2 - e.y) * (target - 1), target);

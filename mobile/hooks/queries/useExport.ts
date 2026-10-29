@@ -1,10 +1,6 @@
-// On-device export (#856) — the mobile counterpart of desktop's
-// `ExportArchiveButton`. Same three Rust commands, plus `bundle_export`:
-// a sandboxed app has no "save as", so the archive is written under the
-// app's cache dir and handed to the OS share sheet as one zip.
-//
-// Only `useFetchExportAttachments` touches the network, and only when the
-// user presses its own button after the archive is already on disk.
+// On-device export (#856). A sandboxed app has no "save as", so the archive is
+// written under the cache dir and shared as one zip. Only
+// `useFetchExportAttachments` touches the network.
 
 import { useMutation } from "@tanstack/react-query";
 import * as FileSystem from "expo-file-system/legacy";
@@ -24,7 +20,6 @@ export { EXPORT_DIR } from "../../lib/exportDir";
 
 export function useExportArchive() {
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "success" } },
     mutationFn: async (conversationId: string | null): Promise<ExportSummary> => {
       await FileSystem.makeDirectoryAsync(EXPORT_DIR, { intermediates: true });

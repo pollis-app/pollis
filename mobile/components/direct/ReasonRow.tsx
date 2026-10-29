@@ -2,11 +2,7 @@ import { Pressable, Text, View } from "react-native";
 import { Icon } from "../icons";
 import { semantic, fonts, space } from "../../theme/tokens";
 
-/**
- * One choice in a single-select list (the report reasons): a 52pt row inside
- * a <Group>, radio semantics, and the selection said by a check mark and
- * bold text as well as the accent tint — never by colour alone.
- */
+/** One radio choice; the selection is a check and bold text as well as the tint, never colour alone. */
 export function ReasonRow({
   label,
   selected,

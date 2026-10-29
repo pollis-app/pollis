@@ -20,11 +20,9 @@ import type { TFunction } from "i18next";
 // The presets live in theme/accents.ts so the contrast test can check each.
 const SWATCHES = ACCENT_PRESETS;
 
-// NOTE: read receipts are deliberately NOT in this list — they are not a
-// mobile-local behavior toggle but the synced, desktop-shared top-level
-// `send_read_receipts` key the Rust receipt chokepoints read (default true).
-// The old `mobile_behavior.read_receipts` entry was a no-op: nested under a
-// namespace the core never looks at, with an inverted default.
+// Read receipts are deliberately NOT in this list: they are the synced,
+// desktop-shared top-level `send_read_receipts` key the Rust receipt
+// chokepoints read (default true), not a mobile-local toggle.
 const BEHAVIOR_KEYS = [
   { key: "show_inline_timestamps", defaultOn: true },
   { key: "show_member_avatars", defaultOn: true },

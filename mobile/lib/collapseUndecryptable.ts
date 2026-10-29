@@ -1,11 +1,7 @@
 /**
- * Merge each run of consecutive lost-message placeholders (#1312) into one row
- * — desktop's `frontend/src/utils/collapseUndecryptable.ts`, copied because
- * mobile imports no frontend TypeScript.
- *
- * The run keeps its FIRST placeholder (id, time, place in the timeline) and
- * records how many it stands for in `undecryptableCount`. `messages` must be in
- * display order; anything else between two placeholders ends the run.
+ * Merge each run of consecutive lost-message placeholders (#1312) into its
+ * FIRST row, counting the run in `undecryptableCount`; a copy of desktop's
+ * `collapseUndecryptable.ts`. `messages` must be in display order.
  */
 export function collapseUndecryptable<T extends { undecryptable?: boolean; undecryptableCount?: number }>(
   messages: T[],

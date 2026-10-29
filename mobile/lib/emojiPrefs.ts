@@ -1,12 +1,7 @@
-// Device-local emoji picker preferences: skin tone + recently used.
-//
-// Desktop keeps these in `localStorage` (see
-// frontend/src/components/Emoji/emojiSearch.ts); RN has no localStorage, so
-// this is the same contract over a small JSON file in the app sandbox —
-// hydrated once at startup into an in-memory copy so reads stay synchronous
-// for the picker, persisted write-through on change. Deliberately tolerant:
-// a corrupt or missing file yields the defaults rather than throwing,
-// because a broken preference must never stop the picker from opening.
+// Device-local emoji picker preferences (skin tone + recents): desktop's
+// `localStorage` contract over a JSON file, hydrated once so picker reads stay
+// synchronous. A corrupt or missing file yields the defaults: a broken
+// preference must never stop the picker from opening.
 
 import * as FileSystem from "expo-file-system/legacy";
 
@@ -29,7 +24,6 @@ function sanitizeTone(value: unknown): number {
   return Math.floor(n);
 }
 
-/** Load persisted prefs into the in-memory copy. Idempotent, best-effort. */
 export async function hydrateEmojiPrefs(): Promise<void> {
   if (hydrated) {
     return;
@@ -58,8 +52,7 @@ export async function hydrateEmojiPrefs(): Promise<void> {
 }
 
 function persist(): void {
-  // Fire-and-forget: losing a preference write costs the user their recents
-  // list and nothing else — never the picker.
+  // Fire-and-forget: a lost write costs the recents list, never the picker.
   void FileSystem.writeAsStringAsync(PREFS_URI, JSON.stringify(prefs)).catch(
     () => {},
   );
@@ -78,7 +71,6 @@ export function readRecentEmojiIds(): string[] {
   return prefs.recents.slice();
 }
 
-/** Push `id` to the front of the recents list, de-duplicated and capped. */
 export function recordRecentEmojiId(id: string): string[] {
   prefs.recents = [id, ...prefs.recents.filter((v) => v !== id)].slice(
     0,

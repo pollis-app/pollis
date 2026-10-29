@@ -1,18 +1,11 @@
 //! Dev-DS peer for the mobile Maestro `composing` two-client flow (#1507).
 //!
-//! A message that lands in the open conversation while the phone's user is
-//! typing must leave the composer where it was: above the keyboard. This peer
-//! signs up a fresh account on the DS named by `POLLIS_DELIVERY_URL` (the dev
-//! DS — it fixes the OTP), prints its handle, accepts the phone's invite to
-//! its group, posts more than a screen of lines into the group's text channel
-//! (so the list scrolls, and the phone's first receive is not the one under
-//! test) and prints `PEER_READY`. Then,
-//! each time the driving script touches `go-<n>` in `COMPOSING_PEER_SIGNAL_DIR`
-//! (n = 1, 2), it sends three lines a second apart and prints `PEER_SENT_<n>`.
-//! `mobile/scripts/maestro-composing.sh` drives both sides.
-//!
-//! Not a shipping binary: examples build against pollis-tui's
-//! dev-dependencies.
+//! Signs up on the dev DS (`POLLIS_DELIVERY_URL`), prints its handle, accepts
+//! the phone's group invite, posts more than a screen of lines and prints
+//! `PEER_READY`. Then each time the script touches `go-<n>` in
+//! `COMPOSING_PEER_SIGNAL_DIR` (n = 1, 2), it sends three lines a second apart
+//! and prints `PEER_SENT_<n>`. `mobile/scripts/maestro-composing.sh` drives
+//! both sides.
 //!
 //!   POLLIS_DATA_DIR=$(mktemp -d) POLLIS_DELIVERY_URL=https://api-dev.pollis.com \
 //!   COMPOSING_PEER_SIGNAL_DIR=$(mktemp -d) POLLIS_DEV_ACCESS_KEY=… \
@@ -67,7 +60,6 @@ async fn main() -> Result<()> {
     pollis_tui::auth::set_pin_and_init(&state, &me.id, "0000").await?;
     println!("PEER_HANDLE={}", me.username);
 
-    // The phone invites us to its group.
     let started = Instant::now();
     loop {
         if let Some(inv) = groups::get_pending_invites(me.id.clone(), &state).await?.into_iter().next() {
@@ -106,8 +98,7 @@ async fn main() -> Result<()> {
             }
         }
     }
-    // More than a screen of history, so the list scrolls like a real
-    // conversation's rather than sitting short under the header.
+    // More than a screen, so the list scrolls.
     for n in 1..=HISTORY {
         send(&state, &me.id, &me.username, &channel_id, &format!("peer history {n}")).await?;
     }

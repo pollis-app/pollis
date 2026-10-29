@@ -34,7 +34,6 @@ function ChangeEmail() {
   const currentCodeRef = useRef<TextInput>(null);
 
   const requestOtp = useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: {} },
     mutationFn: async (email: string) => {
       if (!currentUser) {
@@ -49,7 +48,6 @@ function ChangeEmail() {
   });
 
   const verify = useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "success" } },
     mutationFn: async () => {
       if (!currentUser) {
@@ -85,9 +83,8 @@ function ChangeEmail() {
     }
   };
 
-  // #1231: with the number pad up, the second code field could sit behind the
-  // keyboard. Once the first code is complete, move focus on to the second and
-  // scroll it into view.
+  // With the number pad up, the second code field could sit behind the
+  // keyboard: once the first code is complete, focus and scroll to the second.
   const onCodeChange = (v: string) => {
     const next = v.replace(/[^0-9]/g, "").slice(0, CODE_LENGTH);
     setCode(next);

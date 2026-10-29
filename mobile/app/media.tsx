@@ -1,23 +1,10 @@
-// Full-screen media viewer (#1248) — mobile's port of desktop's attachment
-// lightbox (AttachmentDisplay) and its walkable roll (MediaGalleryView).
+// Full-screen media viewer (#1248, #1492): a pushed page, never a modal.
 //
-// A pushed page, never a modal: Close/back at the top-start, the system edge
-// swipe pops it, and so does a downward drag on the media (#1492) — both
-// only while nothing is zoomed, when a drag pans instead. An image or video
-// walks the conversation's images and videos (from the Vault: the media
-// grid's, in grid order) by horizontal swipe or with the previous/next
-// buttons (desktop's arrows, wrapping like desktop's roll), with "12 / 100"
-// under the filename; audio and other files open alone. Save to photos
-// (images, video) and Share (anything) replace desktop's Download, and act
-// on the page on screen.
-//
-// The pager is virtualised for rolls of hundreds: only the page on screen
-// and one each side are mounted. An image page decrypts on mount and
-// releases (unlinks) its plaintext file on unmount; a video page takes its
-// file only while on screen, and pauses when swiped away.
-//
-// Every byte shown here is the locally decrypted file the chat already uses
-// (`useMediaUri` / `get_media_path`); nothing is fetched in plaintext.
+// The pager is virtualised for rolls of hundreds: only the page on screen and
+// one each side are mounted. An image page decrypts on mount and releases
+// (unlinks) its plaintext file on unmount; a video page takes its file only
+// while on screen. Every byte shown is the locally decrypted file the chat
+// already uses (`useMediaUri` / `get_media_path`).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, FlatList, Linking, Text, View } from "react-native";

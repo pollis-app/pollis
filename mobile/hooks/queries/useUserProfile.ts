@@ -1,11 +1,3 @@
-// Reference hook for the mobile data-fetching pattern. Mirrors the shape
-// of `frontend/src/hooks/queries/useUserProfile.ts` so future hooks copy
-// this layout (query key fn, queryFn that calls `invoke()`, store-derived
-// enable flag, staleTime in ms). `get_user_profile` is wired through the
-// `pollis-core` bridge, so this returns real data once
-// `initializeNativeBridge()` has run; register a mock with
-// `registerMockCommand("get_user_profile", …)` to drive it in dev.
-
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
@@ -60,7 +52,6 @@ export function useUpdateProfile() {
   const setUsername = appStore.setUsername;
 
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "success" } },
     mutationFn: async ({
       username,

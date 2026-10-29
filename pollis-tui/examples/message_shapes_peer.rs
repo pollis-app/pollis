@@ -9,9 +9,6 @@
 //! reply and a quote reply to the first message, and a reaction on it. Prints
 //! `PEER_SENT` when done and exits.
 //!
-//! Not a shipping binary: examples build against pollis-tui's
-//! dev-dependencies.
-//!
 //!   POLLIS_DATA_DIR=$(mktemp -d) POLLIS_DELIVERY_URL=https://api-dev.pollis.com \
 //!   POLLIS_DEV_ACCESS_KEY=… cargo run -p pollis-tui --example message_shapes_peer -- <email>
 

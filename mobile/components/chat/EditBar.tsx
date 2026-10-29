@@ -4,11 +4,7 @@ import { Icon } from "../icons";
 import { Field } from "../ui";
 import { layout, semantic, type as ty } from "../../theme/tokens";
 
-/**
- * Replaces the composer while editing a message: cancel, input, save — the
- * composer's own layout (44pt round buttons around a pill field), headed by
- * an "Edit message" label so the mode is named, not only tinted.
- */
+/** Replaces the composer while editing; an "Edit message" label names the mode, not only a tint. */
 export function EditBar({
   draft,
   onChangeDraft,
@@ -70,8 +66,7 @@ export function EditBar({
           autoFocus
           amber
           placeholder={t("mobile:chat.editPlaceholder")}
-          // Return inserts a newline, as in the composer (#1247); only the
-          // save button saves.
+          // Return inserts a newline (#1247); only the save button saves.
           multiline
           autoCapitalize="sentences"
           containerStyle={{
@@ -102,7 +97,6 @@ export function EditBar({
             borderRadius: layout.touchMin / 2,
             alignItems: "center",
             justifyContent: "center",
-            // No border: disabled is the solid raised disc + a muted check.
             backgroundColor: saveDisabled ? semantic.raised : semantic.accent,
           }}
         >

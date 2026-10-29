@@ -65,9 +65,8 @@ function Direct() {
   const [query, setQuery] = useState("");
   const needle = query.trim().toLowerCase();
 
-  // One batched preview fetch for every DM row (desktop #874/#936) — never
-  // one call per row. A conversation with no locally-ingested messages is
-  // absent from the map and its row simply renders without a preview.
+  // One batched preview fetch for every DM row, never one call per row. A
+  // conversation with no locally-ingested messages renders without a preview.
   const dmIds = useMemo(() => dms.map((d) => d.id), [dms]);
   const { data: lastMessages = {} } = useLastMessages(dmIds);
 
@@ -231,11 +230,8 @@ function Direct() {
                 // Re-opening the conversation already shown closes any page
                 // over it.
                 resetPane();
-                // Opening a conversation clears its unread count (desktop
-                // does the same in its DM page).
                 markConversationRead(d.id);
-                // On regular the right pane updates in place; on compact push
-                // the conversation as today.
+                // On regular the right pane updates in place; on compact push.
                 if (!isRegular) {
                   router.push({
                     pathname: "/chat/[id]",

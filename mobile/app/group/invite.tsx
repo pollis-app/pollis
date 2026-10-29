@@ -72,7 +72,6 @@ export default function InviteToGroup() {
   const { data: groups = [] } = useUserGroupsWithChannels();
   const group = groups.find((g) => g.id === groupId);
 
-  // ── #847 shareable link mint state ──────────────────────────────────
   const [expiryHours, setExpiryHours] = useState<number | null>(24 * 7);
   const [maxUses, setMaxUses] = useState<number | null>(null);
   const [created, setCreated] = useState<CreatedInviteLink | null>(null);

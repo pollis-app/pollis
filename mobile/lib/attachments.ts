@@ -1,19 +1,14 @@
-// Attachment upload + message-content envelope (mobile half of desktop's
-// frontend/src/utils/attachmentEnvelope.ts — the envelope must match
-// byte-for-byte so cross-platform messages parse everywhere).
-//
+// Attachment upload + message-content envelope: the mobile half of desktop's
+// frontend/src/utils/attachmentEnvelope.ts, which it must match byte-for-byte.
 // `upload_media` (the Vault's path; chat attachments go through the outbox)
-// does everything heavy in Rust: read the file, seal it under the Vault file
-// key (#1382), presigned PUT via the DS, blurhash + dimensions for images. Reference registration happens inside Rust
-// `send_message` by re-parsing the `_att` JSON, so sending the same
-// envelope string keeps refcounting working for free.
+// does the heavy work in Rust; `send_message` re-parses `_att` to register
+// references.
 
 import { invoke } from "./native";
 
-/** An image the user picked but hasn't sent yet. */
 export interface PickedAttachment {
   id: string;
-  /** `file://` URI from the picker — `upload_media` accepts it directly. */
+  /** `file://` URI; `upload_media` accepts it directly. */
   uri: string;
   name: string;
   mimeType: string;
@@ -21,7 +16,6 @@ export interface PickedAttachment {
   height?: number;
 }
 
-/** Mirror of `pollis_core::commands::r2::MediaUploadResult`. */
 export interface MediaUploadResult {
   key: string;
   url: string;
@@ -39,8 +33,7 @@ export interface MediaUploadResult {
   height?: number | null;
 }
 
-/** What `send_message` takes for an attachment the durable outbox uploads
- *  itself (#1335). Mirrors `pollis_core::commands::messages::OutgoingAttachment`. */
+/** Mirrors `pollis_core::commands::messages::OutgoingAttachment` (#1335). */
 export interface OutgoingAttachment {
   path: string;
   filename: string;
@@ -50,10 +43,9 @@ export interface OutgoingAttachment {
 }
 
 /**
- * Hand picked attachments to the outbox instead of uploading them here
- * (#1335): the row is on screen from the moment the user sends, so the upload
- * has to survive the app being killed. The core copies each file into its
- * encrypted local database with the row (the bridge strips `file://`).
+ * Chat attachments go to the durable outbox (#1335), which copies each file
+ * into the encrypted local DB with the row, so the upload survives the app
+ * being killed.
  */
 export function outgoingAttachments(attachments: PickedAttachment[]): OutgoingAttachment[] {
   return attachments.map((att) => ({
@@ -65,16 +57,12 @@ export function outgoingAttachments(attachments: PickedAttachment[]): OutgoingAt
   }));
 }
 
-/** Uploads that already succeeded, by picked attachment (#1497). Weak, so a
- *  draft that is dropped takes its entries with it. */
+/** Successful uploads per picked attachment (#1497); weak, so a dropped draft frees them. */
 const uploaded = new WeakMap<PickedAttachment, MediaUploadResult>();
 
 /**
- * Upload every attachment, then build the message content string. With no
- * attachments the caption passes through untouched (plain-text fast path).
- * Matches desktop's envelope exactly: `_att` entries carry
- * {key, url, name, ct, size, hash, bh, w, h}; `_txt` is OMITTED entirely
- * when the caption is empty (not "").
+ * Upload every attachment, then build the content string. `_txt` is OMITTED
+ * when the caption is empty (not ""), as on desktop.
  */
 export async function buildMessageContent(
   attachments: PickedAttachment[],
@@ -83,10 +71,8 @@ export async function buildMessageContent(
   if (attachments.length === 0) {
     return contentText;
   }
-  // Every upload runs to completion before a failure is reported, and each
-  // one that succeeded is remembered against its attachment (#1497): the
-  // Vault hands a failed draft back to the composer as the SAME objects, so a
-  // retry uploads only what failed instead of all twelve photos again.
+  // All uploads settle before a failure is reported. The Vault hands a failed
+  // draft back as the SAME objects, so a retry uploads only what failed (#1497).
   const settled = await Promise.allSettled(
     attachments.map((att) => {
       const done = uploaded.get(att);

@@ -1,8 +1,6 @@
-// The audio page of the media viewer (#1248): desktop's audio lightbox
-// (`AudioPlayer`, autoplaying) on expo-audio. Play/pause, ten-second seeks
-// and a tappable progress track that is also a screen-reader "adjustable".
-// The file is the named local copy of the decrypted bytes
-// (`useNamedMediaUri`), because AVPlayer picks a decoder by extension.
+// The audio page of the media viewer (#1248). The file is the named local copy
+// of the decrypted bytes (`useNamedMediaUri`) because AVPlayer picks a decoder
+// by extension.
 
 import { useEffect, useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
@@ -39,15 +37,14 @@ export function AudioPage({
   const [trackWidth, setTrackWidth] = useState(0);
   const autoplayed = useRef(false);
 
-  // Play through the ringer switch, as every messenger's voice/audio
-  // playback does.
+  // Play through the ringer switch, as every messenger's audio playback does.
   useEffect(() => {
     void setAudioModeAsync({ playsInSilentMode: true }).catch(() => {
       // Best effort: playback still works, just respects the silent switch.
     });
   }, []);
 
-  // Desktop's audio lightbox autoplays; so does this, once, when loaded.
+  // Autoplays once when loaded, like desktop's audio lightbox.
   useEffect(() => {
     if (active && status.isLoaded && !autoplayed.current) {
       autoplayed.current = true;
@@ -94,7 +91,6 @@ export function AudioPage({
       player.pause();
       return;
     }
-    // A finished track starts over rather than doing nothing.
     if (duration > 0 && current >= duration - 0.25) {
       void player.seekTo(0);
     }
@@ -125,7 +121,6 @@ export function AudioPage({
           </View>
         </View>
 
-        {/* Tap anywhere on the track to seek there. */}
         <Pressable
           testID="slider-media-audio"
           accessibilityRole="adjustable"

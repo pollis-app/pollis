@@ -1,10 +1,5 @@
-// Mobile type definitions — mirrors `frontend/src/types/index.ts` for the
-// shapes the mobile UI cares about. Mobile intentionally drops voice/
-// screen-share types (see mobile/CLAUDE.md — "No voice").
-//
-// Keep these synchronized with the desktop frontend types AND the Rust
-// structs in `pollis-core`. When `pollis-native` exposes generated TS
-// bindings, prefer importing those over hand-rolled shapes.
+// Keep in sync with `frontend/src/types/index.ts` and the Rust structs in
+// `pollis-core`.
 
 export interface User {
   id: string;
@@ -48,14 +43,7 @@ export interface DMConversation {
   updated_at: number;
 }
 
-// A file attached to a message. Mirrors `MessageAttachment` in
-// `frontend/src/types/index.ts` and the Rust struct in `pollis-core`.
-// `object_key` + `content_hash` are what the media transport (see
-// `lib/media`) needs to fetch + decrypt the bytes.
-/**
- * Which key an attachment is sealed under (#1382). Mirrors
- * `pollis_core::commands::r2::AttachmentKeyScope` and desktop's type.
- */
+/** Which key an attachment is sealed under (#1382). */
 export type AttachmentKeyScope =
   | { kind: "conversation"; conversation_id: string; key_version: number }
   | { kind: "vault" };
@@ -66,12 +54,12 @@ export type ContentOrigin = { conversationId: string } | "vault" | null;
 
 export interface MessageAttachment {
   id: string;
-  // R2 object key — empty string while an upload is still in progress.
+  // Empty while an upload is still in progress.
   object_key: string;
   // The object's random file id (#1382). NOT derived from the content: the
   // key comes from the conversation's MLS-wrapped key ring (or the Vault key).
   content_hash: string;
-  // Plaintext SHA-256, verified after decrypt.
+  // SHA-256 of the decrypted bytes, verified after decrypt.
   sha256: string;
   // null while uploading, for a pre-#1382 reference, or from a preview-only origin.
   key_scope: AttachmentKeyScope | null;
@@ -82,8 +70,7 @@ export interface MessageAttachment {
   blurhash?: string;
   width?: number;
   height?: number;
-  // Local `file://` preview for optimistic display before upload — never
-  // persisted or sent to the server.
+  // Optimistic display only; never persisted or sent.
   localPreviewUri?: string;
 }
 
@@ -97,23 +84,18 @@ export interface MessageQueueItem {
 }
 
 export interface AppState {
-  // Current user
   currentUser: User | null;
 
-  // Selected views
   selectedGroupId: string | null;
   selectedChannelId: string | null;
   selectedConversationId: string | null;
 
-  // Data (messages managed by data layer, not Zustand — same rule as desktop)
   groups: Group[];
   channels: Record<string, Channel[]>;
   dmConversations: DMConversation[];
 
-  // Message queue
   messageQueue: MessageQueueItem[];
 
-  // UI state
   replyToMessageId: string | null;
   isLoading: boolean;
   error: string | null;

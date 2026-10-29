@@ -1,7 +1,5 @@
-// What this install is (#1443): the native version and build number, the OTA
-// update it is running (if any), and the install channel the BINARY was built
-// for. Every value comes from the native side, so an OTA update — which
-// replaces the JS and its copy of the app config — cannot change any of them.
+// What this install is (#1443). Every value comes from the native side, so an
+// OTA update (which replaces the JS and its app config) cannot change any.
 import { Linking, Platform } from "react-native";
 import { requireOptionalNativeModule } from "expo";
 import * as Application from "expo-application";
@@ -22,10 +20,8 @@ export type BuildInfo = {
   destination: UpdateDestination;
 };
 
-// The app config expo-constants embedded at native build time (APK/AAB
-// `assets/app.config`, IPA `EXConstants.bundle/app.config`). Deliberately not
-// `Constants.expoConfig`: once an OTA update runs, that is the UPDATE's config,
-// built by the OTA job, which knows nothing about the binary's channel.
+// The config embedded at native build time. Not `Constants.expoConfig`: under
+// an OTA that is the UPDATE's config, which knows nothing of the binary's channel.
 function embeddedInstallChannel(): InstallChannel | null {
   const native = requireOptionalNativeModule<{ manifest?: unknown }>("ExponentConstants");
   let config = native?.manifest;
@@ -68,7 +64,6 @@ export function getBuildInfo(): BuildInfo {
   return cached;
 }
 
-/** Open where this install updates from; false when nothing could open. */
 export async function openUpdateDestination(dest: UpdateDestination): Promise<boolean> {
   try {
     await Linking.openURL(dest.url);

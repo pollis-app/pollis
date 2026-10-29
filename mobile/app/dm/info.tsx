@@ -40,7 +40,6 @@ function DMInfo() {
 
   const onLeave = () => {
     if (!confirmLeave) {
-      // The first tap arms the confirm: warn by touch (#1286).
       haptic("confirmArm");
       setConfirmLeave(true);
       return;

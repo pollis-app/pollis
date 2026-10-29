@@ -1,15 +1,8 @@
 /**
- * Device-local language preference.
- *
- * Same contract as desktop's `i18n/storage.ts` — device-scoped, with a
- * per-user override so two Pollis users on one device keep separate choices,
- * and never the synced preferences blob: that needs a signed-in user and an
- * unlocked local DB, and the sign-in, OTP and PIN screens are the first thing
- * a user who does not read English sees.
- *
- * Stored in `expo-secure-store`, which is already how the auto-lock timeout
- * persists (`lib/autolock.tsx`). Its keys may not contain `:`, so the desktop
- * key shape is spelled with dots here.
+ * Device-local language preference, same contract as desktop's
+ * `i18n/storage.ts`: device-scoped with a per-user override, and never the
+ * synced preferences blob, which needs a signed-in user and an unlocked local
+ * DB — the sign-in, OTP and PIN screens need the language first.
  */
 
 import * as SecureStore from "expo-secure-store";

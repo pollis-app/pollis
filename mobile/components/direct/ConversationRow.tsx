@@ -11,11 +11,9 @@ import {
 } from "../../theme/tokens";
 
 /**
- * One conversation in the Direct list (Messages.dc.html): 64pt row, 44pt
- * avatar (two overlapped 30pt avatars for a group DM), name over a one-line
- * preview, time + unread count at the end. Unread is said three ways — bold
- * name and preview, accent time, a count badge — never by colour alone. The
- * whole row is one control with one spoken label.
+ * One conversation in the Direct list. Unread is said three ways — bold text,
+ * accent time, a count badge — never by colour alone. The whole row is one
+ * control with one spoken label.
  */
 export function ConversationRow({
   name,
@@ -33,7 +31,6 @@ export function ConversationRow({
   // One label for a 1:1 DM; two or more draws the overlapped group avatar.
   avatarLabels: string[];
   preview?: string | null;
-  // The last message is the viewer's own: prefixed "You:".
   own?: boolean;
   time?: string | null;
   unread?: number;
@@ -145,7 +142,6 @@ export function ConversationRow({
   );
 }
 
-// 44pt circle with an initial, or two overlapped 30pt circles for a group.
 function ConversationAvatar({ labels }: { labels: string[] }) {
   if (labels.length < 2) {
     return <Avatar label={labels[0]} size={layout.touchMin} />;

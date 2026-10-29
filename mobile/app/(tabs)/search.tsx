@@ -47,7 +47,6 @@ const SEARCH_FILTERS = [
 export default function Search() {
   useThemeRerender();
   const router = useRouter();
-  // Phones push the conversation/group; iPad opens it in its tab's two-pane.
   const { openConversation, openGroup } = useOpenConversation();
   const { t } = useTranslation("mobile");
   const [q, setQ] = useState("");
@@ -73,10 +72,8 @@ export default function Search() {
   const { data: groups = [] } = useUserGroupsWithChannels();
   const { data: dms = [] } = useDMChannels();
 
-  // `search_messages` rows carry only a conversation_id — no kind — so a DM
-  // hit navigated as kind:"channel" opened the wrong conversation type.
-  // Resolve the kind by cross-referencing the id against the cached channel
-  // and DM lists (the same sources the tabs render from).
+  // Fallback kind for hits without `conversation_kind`: cross-reference the id
+  // against the cached channel and DM lists (the sources the tabs render from).
   const conversationKinds = useMemo(() => {
     const kinds = new Map<
       string,
@@ -93,9 +90,8 @@ export default function Search() {
     return kinds;
   }, [groups, dms]);
 
-  // Client-side filter of cached groups/channels. The Rust DB doesn't
-  // expose a single "search everything" command — desktop also stitches
-  // these on the frontend.
+  // Client-side filter of cached groups/channels; there is no single "search
+  // everything" command (desktop stitches these on the frontend too).
   const filtered = useMemo(() => {
     if (trimmed.length < 2) {
       return {
@@ -410,8 +406,7 @@ export default function Search() {
                 columnGap: space.sm,
               }}
             >
-              {/* The one result count (desktop's "About N results"); a second
-                  total under the field only repeated it. Announced as it
+              {/* The one result count (desktop's "About N results"), announced as it
                   changes while typing. */}
               <Txt
                 variant="meta"
@@ -514,5 +509,4 @@ export default function Search() {
   );
 }
 
-// Section headings inside the padded results column.
 const sectionStyle = { paddingHorizontal: 0, paddingTop: space.xxl };

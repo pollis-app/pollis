@@ -3,11 +3,8 @@ import { semantic, fonts, r, space, layout } from "../../theme/tokens";
 import { Badge, Dot } from "../ui";
 import { Icon } from "../icons";
 
-// One row of the group panel's channel list (Main.dc.html): 44pt, a small
-// 16pt glyph, 16pt name. Selected = accentSoft fill + accent text; unread =
-// bold text + trailing dot (or a count badge when `count` is given); read =
-// dim. The row is ONE accessible element — callers pass the full spoken
-// label (name + selection / unread state).
+// One row of the group panel's channel list. The row is ONE accessible element
+// — callers pass the full spoken label (name + selection / unread state).
 export function ChannelRow({
   icon,
   name,
@@ -28,16 +25,15 @@ export function ChannelRow({
   unread?: boolean;
   // A trailing count badge (mentions / waiting requests); replaces the dot.
   count?: number;
-  // A trailing muted value (e.g. the member count).
   value?: string;
   onPress: () => void;
   testID?: string;
   accessibilityLabel: string;
   // Channel rows dim when read; "This group" rows always dim.
   dimWhenRead?: boolean;
-  // A muted channel (#1431): drawn a tier quieter than a read one, never
-  // bold, with a trailing bell-off glyph so the state is not colour alone.
-  // The caller adds "muted" to the spoken label.
+  // A muted channel (#1431): a tier quieter than read, never bold, with a
+  // bell-off glyph so the state is not colour alone. The caller adds "muted"
+  // to the spoken label.
   muted?: boolean;
 }) {
   const color = selected

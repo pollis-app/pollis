@@ -3,15 +3,10 @@
  * before any screen that calls `useTranslation` renders.
  *
  * Language resolution order on boot, matching desktop:
- *   1. the device-local choice on this device (`storage.ts`, async — see
- *      `hydrateLanguage`, which the root layout awaits behind the splash)
+ *   1. the device-local choice (`storage.ts`, async — see `hydrateLanguage`,
+ *      which the root layout awaits behind the splash)
  *   2. the device locale, if we ship a catalogue for it
  *   3. English
- *
- * The catalogues are the desktop's own files (`resources.ts`), so a key is
- * addressed exactly as it is there: `t("settings:language.heading")`, or
- * `t("language.heading")` under `useTranslation("settings")`. Copy that
- * exists only on mobile lives in the `mobile` namespace.
  */
 
 import { I18nManager } from "react-native";
@@ -61,9 +56,8 @@ export function activeLocale(): string {
 }
 
 /**
- * Uppercase translated copy for the label style (`SELF`, `PREFERENCES`,
- * `ACCENT`). The one sanctioned spelling — bare `toUpperCase()` is the
- * locale-invariant mapping, which is wrong in Turkish and a no-op in Arabic.
+ * Uppercase translated copy. Bare `toUpperCase()` is locale-invariant: wrong
+ * in Turkish and a no-op in Arabic.
  */
 export function upper(value: string): string {
   return localeUpperCase(value, activeLocale());
@@ -92,11 +86,9 @@ function applyLayoutDirection(language: string): void {
 }
 
 // No `applyLayoutDirection` at module load: `i18n.language` is still the
-// device-locale guess here, not the stored choice, and Android's Fabric
-// re-reads the persisted direction on every root measure, so writing the
-// guess (e.g. `forceRTL(false)` for an Arabic pick on an English phone)
-// during the async `hydrateLanguage` window un-mirrors the whole launch.
-// `hydrateLanguage` applies the direction once the real language is known.
+// device-locale guess, and Android's Fabric re-reads the persisted direction
+// on every root measure, so writing the guess during the async
+// `hydrateLanguage` window un-mirrors the whole launch (tests/rtl-boot.test.ts).
 
 /**
  * Apply the stored device choice, if any. Resolves once the language on

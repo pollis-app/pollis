@@ -1,14 +1,10 @@
 // The accent's device-local copy (#1447). Pure (no react-native) so
 // tests/theme-startup.test.ts can drive it with a fake store.
 //
-// The user's accent is a synced preference (`accent_hex` in the preferences
-// blob), but that blob needs a signed-in user and a DS round trip, so it lands
-// well after the first frame. Until then every screen (the PIN screen
-// included) drew the default amber. The device therefore keeps the last
-// accent it showed in a store it can read SYNCHRONOUSLY, and theme/tokens.ts
-// reads it while the module loads, before anything renders. The synced value
-// still wins once it arrives (`accentFromPreferences`), and is written back
-// here so the next cold start opens in it.
+// The synced `accent_hex` preference lands only after sign-in and a DS round
+// trip, so the device keeps the last accent it showed in a store it can read
+// SYNCHRONOUSLY before the first frame. The synced value still wins once it
+// arrives (`accentFromPreferences`) and is written back here.
 
 import { DEFAULT_ACCENT_HEX } from "./accents.ts";
 

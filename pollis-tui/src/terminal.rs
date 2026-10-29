@@ -1,7 +1,5 @@
-//! Terminal lifecycle: enter the alternate screen + raw mode on construction,
-//! restore the user's terminal on drop. The RAII guard guarantees the terminal
-//! is restored on *every* exit path — clean quit, `?`-propagated error, or panic
-//! — so the user is never left in a broken raw-mode shell.
+//! Raw-mode + alternate-screen RAII guard: the terminal is restored on every
+//! exit path (clean quit, `?` error, or panic).
 
 use std::io::{self, Stdout};
 
@@ -28,9 +26,8 @@ impl TerminalGuard {
         Ok(Self { terminal })
     }
 
-    /// Best-effort restore, factored out so both `Drop` and the panic hook can
-    /// call it. Ignores errors — there is nothing useful to do if restoring the
-    /// terminal itself fails while we are already tearing down.
+    /// Best-effort restore, shared by `Drop` and the panic hook; errors are
+    /// ignored because we are already tearing down.
     pub fn restore() {
         let _ = disable_raw_mode();
         let _ = execute!(io::stdout(), LeaveAlternateScreen);

@@ -13,9 +13,7 @@ export default function Discover() {
   const { t } = useTranslation("search");
   const [slug, setSlug] = useState("");
   // Looked up on Search / return, never per keystroke: slug lookups share a
-  // tight per-IP budget on the DS (60 per 10 min), and a slug typed one
-  // character at a time spent ~one lookup per character (#1216). Desktop's
-  // Find Group works the same way.
+  // tight per-IP budget on the DS (#1216).
   const [submitted, setSubmitted] = useState("");
   const search = useGroupBySlug(submitted || null);
   const submit = () => {

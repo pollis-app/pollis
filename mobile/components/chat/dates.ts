@@ -1,6 +1,3 @@
-// Day/time formatting helpers for the chat timeline. Labels are sentence
-// case ("Today", "Mar 4") — the redesign drops tracked capitals.
-
 import i18n, { activeLocale } from "../../i18n";
 
 export function dayKey(ts: number): string {
@@ -28,6 +25,6 @@ export function timeLabel(ts: number): string {
   });
 }
 
-// Consecutive messages from one sender within this window collapse under a
-// single avatar + name header (Discord-style grouping).
+// Consecutive messages from one sender within this window collapse under one
+// header.
 export const GROUP_WINDOW_MS = 5 * 60 * 1000;

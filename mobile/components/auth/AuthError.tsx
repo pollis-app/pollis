@@ -4,13 +4,9 @@ import { CopyDiagnosticsButton } from "../self/CopyDiagnosticsButton";
 import { semantic, type as ty } from "../../theme/tokens";
 
 /**
- * An inline error under an auth form. The alert glyph (not only the colour)
- * marks it as an error, and it is announced as soon as it appears.
- *
- * `offerDiagnostics` adds "Copy diagnostics" beneath it (#1305): a sign-in
- * failure's text alone often cannot say which step broke, and before a session
- * exists the Diagnostics screen is out of reach. Off for errors the user can
- * fix themselves (a mistyped PIN), where it would only be noise.
+ * An inline error under an auth form, announced as soon as it appears.
+ * `offerDiagnostics` adds "Copy diagnostics" (#1305): before a session exists
+ * the Diagnostics screen is out of reach. Off for errors the user can fix.
  */
 export function AuthError({
   message,

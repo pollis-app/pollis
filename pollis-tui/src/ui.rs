@@ -1,7 +1,4 @@
-//! Rendering. One `render` entry point draws the whole frame from `&App` —
-//! ratatui's immediate-mode model means the view is a pure function of state.
-//! The auth screens (M1) render a centered card; the signed-in Home screen (M2b)
-//! renders the three-pane client (sidebar · messages · status + key hints).
+//! Rendering: `render` draws the whole frame as a pure function of `&App`.
 
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -17,26 +14,19 @@ use crate::enroll_flow::EnrollChoice;
 use crate::home::{visible_window, ComposeTarget, ConvKind, Focus, HomeMode, HomeState};
 use crate::timeline;
 
-/// A solid selection background (no glow — repo rule): reverse-style highlight.
 const SEL_BG: Color = Color::Rgb(45, 45, 52);
 const SEL_BG_FOCUSED: Color = Color::Rgb(58, 92, 140);
 
-/// The accent a focused pane's border and title wear.
 const ACCENT: Color = Color::Rgb(90, 140, 200);
 
-/// The left pane's fixed width, in columns.
 const SIDEBAR_WIDTH: u16 = 28;
 
-/// Rows under the Home body: the status line and the key-hint bar. The hints
-/// get their own row so they are on screen from the first frame of Home — they
-/// used to share one line with the status, so the "You're signed in." that
-/// greets a new session hid them until the user happened to press Esc (#1337).
+/// The status line and the key-hint bar; hints get their own row so a status
+/// message never hides them (#1337).
 const HOME_FOOTER_ROWS: u16 = 2;
 
-/// Height of the compose / prompt / confirm bar.
 const INPUT_BAR_ROWS: u16 = 3;
 
-/// Spinner frames for the sync indicator (solid Braille dots, cycled per refresh).
 const SPINNER: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 
 pub fn render(frame: &mut Frame, app: &App) {
@@ -48,11 +38,8 @@ pub fn render(frame: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            // header
             Constraint::Length(1),
-            // body
             Constraint::Min(1),
-            // status (+ key hints on Home)
             Constraint::Length(footer),
         ])
         .split(frame.area());
@@ -70,9 +57,8 @@ pub fn render(frame: &mut Frame, app: &App) {
     render_status(frame, chunks[2], app);
 }
 
-/// Where the Home screen's panes go inside its body area. One function for the
-/// renderer and [`message_viewport`], so the size the key handler scrolls by
-/// is the size that is drawn.
+/// Shared by the renderer and [`message_viewport`], so the size the key
+/// handler scrolls by is the size that is drawn.
 struct HomeLayout {
     sidebar: Rect,
     messages: Rect,
@@ -100,11 +86,8 @@ fn home_layout(area: Rect, home: &HomeState) -> HomeLayout {
     }
 }
 
-/// The message pane's inner `(width, height)` for a full-frame `area` — what
-/// the input loop records so page keys jump a screen and selection keeps the
-/// highlighted message on screen. Mirrors [`render`]: header (1) and footer
-/// off the frame, the input bar when one is open, the sidebar, then the
-/// pane's own border.
+/// The message pane's inner `(width, height)` for a full-frame `area`. Must
+/// mirror [`render`]'s layout.
 pub fn message_viewport(area: Rect, app: &App) -> (u16, usize) {
     let body = Rect::new(
         area.x,
@@ -130,7 +113,6 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(Color::Gray),
         ));
     }
-    // On Home, name the open conversation and show the sync indicator on the right.
     if app.screen == Screen::Home {
         if let Some(open) = &app.home.open {
             spans.push(Span::styled("· ", Style::default().fg(Color::DarkGray)));
@@ -152,8 +134,6 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
     }
 }
 
-/// The header's right-side sync indicator: a cycling spinner plus a live
-/// conversation count. Honest about what's happening (spec §8) without a glow.
 fn sync_indicator(home: &HomeState) -> Vec<Span<'static>> {
     let frame = SPINNER[(home.refreshes as usize) % SPINNER.len()];
     let count = home.tree.as_ref().map(|t| t.len()).unwrap_or(0);
@@ -166,10 +146,7 @@ fn sync_indicator(home: &HomeState) -> Vec<Span<'static>> {
     ]
 }
 
-/// The three-pane client body: sidebar tree on the left, message list on the
-/// right, plus a bottom input bar (compose, prompt or delete confirmation) when
-/// the screen is in an input mode — the desktop app's "replace the input bar"
-/// pattern, never a modal overlay.
+/// Input modes replace the bottom bar (the desktop pattern), never a modal.
 fn render_home(frame: &mut Frame, area: Rect, app: &App) {
     let layout = home_layout(area, &app.home);
     if let Some(input) = layout.input {
@@ -179,11 +156,7 @@ fn render_home(frame: &mut Frame, area: Rect, app: &App) {
     render_messages(frame, layout.messages, app);
 }
 
-/// A pane's frame. Focus has to be unmistakable — it decides what ↑/↓ and
-/// Enter do, and an invisible focus is how a user ended up scrolling the
-/// message pane while trying to reach a DM they had just started (#1337) — so
-/// the focused pane gets a thick accent border and an accent title bar, and
-/// the other a thin dim border. Solid colours only, no glow.
+/// Focus must be unmistakable since it decides what ↑/↓ and Enter do (#1337).
 fn pane_block(title: String, focused: bool) -> Block<'static> {
     if focused {
         Block::default()
@@ -205,10 +178,6 @@ fn pane_block(title: String, focused: bool) -> Block<'static> {
     }
 }
 
-/// The bottom input bar: a solid-bordered line labeled with what it's collecting
-/// (compose = the conversation, reply, edit; prompt = the action; or the delete
-/// question), showing the live buffer with a caret. No glow — a plain accent
-/// border.
 fn render_input_bar(frame: &mut Frame, area: Rect, app: &App) {
     let home = &app.home;
     let name = home.open.as_ref().map_or("Message", |o| o.name.as_str());
@@ -245,8 +214,8 @@ fn render_input_bar(frame: &mut Frame, area: Rect, app: &App) {
             Span::raw(" keep"),
         ])
     } else {
-        // A line break shows as ⏎; when the text outgrows the bar, the end —
-        // where the caret is — stays in view.
+        // When the text outgrows the bar, the end (where the caret is) stays
+        // in view.
         let shown = app.input.replace('\n', "⏎ ");
         let room = (inner.width as usize).saturating_sub(4);
         let count = shown.chars().count();
@@ -285,8 +254,7 @@ fn render_sidebar(frame: &mut Frame, area: Rect, home: &HomeState) {
         .iter()
         .enumerate()
         .map(|(i, row)| {
-            // Rows are only ever depth 0 (group/section) or 1 (child) — see
-            // `home::build_sidebar_rows` — so the indent needs no allocation.
+            // Rows are only depth 0 or 1 (`home::build_sidebar_rows`).
             let indent = if row.depth == 0 { "" } else { "  " };
             let selected = i == home.selected && row.selectable();
             let mut style = Style::default();
@@ -295,13 +263,10 @@ fn render_sidebar(frame: &mut Frame, area: Rect, home: &HomeState) {
                     .bg(if focused { SEL_BG_FOCUSED } else { SEL_BG })
                     .add_modifier(Modifier::BOLD);
             } else if !row.selectable() {
-                // Section headers are dim and non-interactive.
                 style = style
                     .fg(Color::DarkGray)
                     .add_modifier(Modifier::BOLD);
             }
-            // Cut to the pane with an ellipsis, so a long name says it is long
-            // rather than being clipped mid-word.
             let label = fit_width(&row.label, width.saturating_sub(indent.len()));
             Line::from(vec![Span::styled(indent, style), Span::styled(label, style)])
         })
@@ -310,12 +275,11 @@ fn render_sidebar(frame: &mut Frame, area: Rect, home: &HomeState) {
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
-/// Existing device: type the verification code shown on the NEW device (#1096).
+/// Existing device: type the verification code shown on the new device (#1096).
 ///
-/// Deliberately shows no code of its own — there is none to show, because
-/// nothing fetched one. What the user types goes on one side of the comparison
-/// and the code Rust derives from the ephemeral key IT fetched goes on the
-/// other, so a substituted key fails here instead of passing unnoticed.
+/// Deliberately shows no code of its own: the typed code is compared against
+/// one derived from the ephemeral key this device fetched, so a substituted
+/// key fails here.
 fn render_approve_enrollment(frame: &mut Frame, area: Rect, app: &App) {
     use pollis_core::commands::device_enrollment::ENROLLMENT_SAS_LEN;
 
@@ -326,7 +290,6 @@ fn render_approve_enrollment(frame: &mut Frame, area: Rect, app: &App) {
         .map_or("?", |r| r.new_device_id.as_str());
 
     let typed = app.input.chars().count();
-    // Underscores for the characters still to come, so the width is obvious.
     let field = format!(
         "{}{}",
         app.input,
@@ -401,8 +364,7 @@ fn render_messages(frame: &mut Frame, area: Rect, app: &App) {
         return;
     }
 
-    // Lay the displayed messages out at the pane's width, then show a
-    // bottom-anchored window of display lines (newest at the bottom).
+    // A bottom-anchored window of display lines (newest at the bottom).
     let blocks = timeline::layout_open(
         open,
         app.signed_in_user_id().unwrap_or(""),
@@ -417,8 +379,7 @@ fn render_messages(frame: &mut Frame, area: Rect, app: &App) {
     for _ in 0..top_pad {
         lines.push(Line::from(""));
     }
-    // A hint that older history is still loadable, in the padding above the
-    // oldest loaded message (never in place of a message line).
+    // The older-history hint goes in the padding, never over a message line.
     if start == 0 && top_pad > 0 && !open.at_beginning && open.thread.is_none() {
         lines[top_pad - 1] = Line::from(Span::styled(
             "  ↑ more history — scroll up to load",
@@ -430,8 +391,8 @@ fn render_messages(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
-/// First-device signup: the Secret Key / Emergency Kit card (#1337). Shown
-/// once; the user saves it (optionally as a file with `s`), then types it back.
+/// First-device signup: the Secret Key card (#1337). Shown once; the user
+/// saves it, then types it back.
 fn render_save_secret_key(frame: &mut Frame, area: Rect, app: &App) {
     let card = centered(area, 72, 15);
     let warn = Style::default().fg(Color::Yellow);
@@ -508,7 +469,6 @@ fn render_save_secret_key(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(Paragraph::new(lines).block(block), card);
 }
 
-/// The centered-card auth body (M1 screens).
 fn render_auth_body(frame: &mut Frame, area: Rect, app: &App) {
     let card = centered(area, 60, 9);
 
@@ -516,19 +476,16 @@ fn render_auth_body(frame: &mut Frame, area: Rect, app: &App) {
         Screen::Booting => ("Starting up", "Checking for an existing session…", String::new()),
         Screen::Email => ("Sign in", "Email:", app.input.clone()),
         Screen::Otp => ("Verify", "Code:", app.input.clone()),
-        // Rendered by render_save_secret_key; never shown in a plain card.
         Screen::SaveSecretKey => ("Secret Key", "", String::new()),
         Screen::SetPin => ("Set PIN", "New PIN:", mask(&app.input)),
         Screen::Unlock => ("Unlock", "PIN:", mask(&app.input)),
-        // The Secret Key is long and pasted, not memorized — show it plainly so
-        // the user can spot a typo before submitting.
+        // Shown plainly: it is long and pasted, so the user must spot typos.
         Screen::RecoverKey => ("Recover", "Secret Key:", app.input.clone()),
-        // Rendered by their own functions; these arms keep the match exhaustive.
+        // Rendered by their own functions.
         Screen::EnrollChoice => ("Enroll", "", String::new()),
         Screen::EnrollWaiting => ("Enroll", "", String::new()),
         Screen::PendingEnrollments => ("Enrollments", "", String::new()),
         Screen::ApproveEnrollment => ("Approve", "", String::new()),
-        // Home is rendered by render_home; Fatal shows a simple message.
         Screen::Home => ("Home", "", String::new()),
         Screen::Fatal => ("Error", "Press any key to exit.", String::new()),
     };
@@ -538,7 +495,6 @@ fn render_auth_body(frame: &mut Frame, area: Rect, app: &App) {
         app.screen,
         Screen::Booting | Screen::Home | Screen::Fatal
     ) {
-        // Input line with a cursor caret.
         lines.push(Line::from(vec![
             Span::styled("  › ", Style::default().fg(Color::Cyan)),
             Span::raw(value),
@@ -556,9 +512,6 @@ fn render_auth_body(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(para, card);
 }
 
-/// Second device: the enroll-choice screen — a centered card listing the two
-/// paths (sibling approval / Secret-Key recovery) with the highlighted one shown
-/// selected. No modal; a plain bordered card like the other auth screens.
 fn render_enroll_choice(frame: &mut Frame, area: Rect, app: &App) {
     let card = centered(area, 62, 9);
     let mut lines = vec![
@@ -589,8 +542,6 @@ fn render_enroll_choice(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(Paragraph::new(lines).block(block), card);
 }
 
-/// Second device: the waiting-for-approval screen — the verification code shown
-/// big and clear, with a prompt to enter it on the existing device.
 fn render_enroll_waiting(frame: &mut Frame, area: Rect, app: &App) {
     let card = centered(area, 62, 11);
     let code = app
@@ -629,15 +580,9 @@ fn render_enroll_waiting(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(Paragraph::new(lines).block(block), card);
 }
 
-/// Existing device: the full-screen "Pending device enrollments" list.
-///
-/// Each row shows the requesting device id and nothing else. It used to show a
-/// verification code, fetched from the Delivery Service, and `a` approved with
-/// that same value — so the comparison the code exists for was performed by
-/// nobody, and a DS that swapped the new device's ephemeral key and its stored
-/// code to match passed on one keystroke (#1096). `a` now opens
-/// [`render_approve_enrollment`], where the approver types what the NEW device
-/// is showing.
+/// Existing device: the pending-enrollments list. Rows show no verification
+/// code: a DS-supplied code would make the comparison meaningless (#1096); see
+/// [`render_approve_enrollment`].
 fn render_pending_enrollments(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::default().borders(Borders::ALL).title(Span::styled(
         " Pending device enrollments ",
@@ -684,7 +629,6 @@ fn render_status(frame: &mut Frame, area: Rect, app: &App) {
         spans.push(Span::styled(status.as_str(), Style::default().fg(Color::Gray)));
     }
 
-    // Home: the status on the first row, the key hints ALWAYS on the second.
     if app.screen == Screen::Home {
         let rows = Layout::default()
             .direction(Direction::Vertical)
@@ -743,8 +687,7 @@ fn hint_line(hints: &'static str) -> Line<'static> {
     Line::from(spans)
 }
 
-/// The key hints for the Home screen, for the pane that has focus and the
-/// input mode — the in-app discovery surface for every Home key.
+/// The Home key hints for the focused pane and input mode.
 pub fn home_help(home: &HomeState) -> &'static str {
     let in_thread = home.open.as_ref().is_some_and(|o| o.thread.is_some());
     match (&home.mode, home.focus) {
@@ -763,12 +706,10 @@ pub fn home_help(home: &HomeState) -> &'static str {
     }
 }
 
-/// Mask a PIN/secret as bullets so it never renders in the clear.
 fn mask(s: &str) -> String {
     "•".repeat(s.chars().count())
 }
 
-/// A `w`×`h` rectangle centered inside `area` (clamped to fit).
 fn centered(area: Rect, w: u16, h: u16) -> Rect {
     let w = w.min(area.width);
     let h = h.min(area.height);
@@ -782,7 +723,6 @@ mod tests {
     use super::*;
     use crate::home::{OpenConversation, PromptKind};
 
-    /// The hint bar names the keys of whichever pane has focus.
     #[test]
     fn hints_follow_the_focused_pane_and_mode() {
         let mut home = HomeState::new();
@@ -808,7 +748,6 @@ mod tests {
         assert_eq!(home_help(&home), "y delete · n keep");
     }
 
-    /// The hint line bolds each key and keeps every word.
     #[test]
     fn a_hint_line_keeps_every_key_and_action() {
         let line = hint_line("↑/↓ move · Enter open");

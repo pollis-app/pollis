@@ -25,7 +25,6 @@ export default function NewDM() {
   const [query, setQuery] = useState("");
   // Exact-match lookup on Find / return only, never while typing: per-key
   // lookups let anyone walk the directory one prefix at a time (#1216).
-  // Desktop's Start DM looks up on submit the same way.
   const [submitted, setSubmitted] = useState("");
   const search = useUserSearch(submitted);
   const submit = () => {

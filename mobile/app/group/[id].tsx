@@ -10,8 +10,7 @@ import { useIsRegular } from "../../hooks/useLayoutClass";
 import { useThemeRerender } from "../../components/theme";
 
 // A single group's page on phones, reached by route (invite links, deep
-// links, search results). Creating a group lands on the Groups tab instead. Renders the same panel the Groups tab shows under
-// its pill strip, under a top back bar.
+// links, search results): the Groups tab's channel panel under a back bar.
 function GroupDetail() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -50,7 +49,6 @@ function GroupDetail() {
           onOpenChannel={(c) => {
             appStore.setSelectedGroupId(groupId);
             appStore.setSelectedChannelId(c.id);
-            // Opening a conversation clears its unread count.
             markConversationRead(c.id);
             router.push({
               pathname: "/chat/[id]",

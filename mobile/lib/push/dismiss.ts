@@ -1,32 +1,8 @@
-// Which tray notifications to clear once their messages are read (#1508) —
-// decided with NO imports and no I/O, so it runs under `node --test`.
-//
-// A message notification used to stay in the tray after the message was read,
-// unless it was the one the user tapped: opening the conversation from the
-// list, from Search or from a link, or reading it on desktop or another phone,
-// left it there. Three paths now clear it, all matching on the notification's
-// opaque handle `h` (minted per notification by the DS, #1122):
-//
-//   * this phone opened the conversation — resolve each tray notification's
-//     handle and clear those for that conversation (`lib/push/index.ts`);
-//   * any client read it — the DS sends a silent, data-only push `{ d: [h…] }`
-//     that the background task (`./dismissTask.ts`) clears from the tray, even
-//     with the app killed;
-//   * the silent push never arrived (iOS does not wake a force-quit app;
-//     Android may hold a normal-priority push in Doze) — on foreground and
-//     unlock the app asks the DS which of its tray handles were read
-//     (`dismissed_push_handles`) and clears those.
-//
-// Finding the handle of a notification already in the tray differs by how it
-// got there. One the app presented itself (it arrived in the foreground) keeps
-// its whole payload, so `data.h` is there. One the system posted while the app
-// was in the background keeps none of the payload on Android — only the tag,
-// which the DS sets to the handle — and expo-notifications reports such a
-// "foreign" notification under an identifier of the form
-// `expo-notifications://foreign_notifications?tag=<tag>&id=<id>`. iOS keeps the
-// payload on every delivered notification.
+// Which tray notifications to clear once their messages are read (#1508). No
+// imports and no I/O, so it runs under `node --test`. The three clearing paths
+// and the Android "foreign notification" tag trick are in
+// `.codesight/wiki/notifications.md`.
 
-/** A tray notification, reduced to what matching needs. */
 export interface Presented {
   identifier: string;
   data: unknown;
@@ -42,7 +18,6 @@ function isHandle(v: unknown): v is string {
 
 const FOREIGN_PREFIX = "expo-notifications://foreign_notifications?";
 
-/** The handle a tray notification was minted with, or null if it has none. */
 export function handleOfPresented(n: Presented): string | null {
   if (typeof n.data === "object" && n.data !== null) {
     const h = (n.data as { h?: unknown }).h;
@@ -69,13 +44,9 @@ export function handleOfPresented(n: Presented): string | null {
 }
 
 /**
- * The handles a silent dismissal push names, or null when the payload is not
- * one (an ordinary message push, or anything malformed).
- *
- * Accepts the payload as the listener sees it (`{ d: [...] }`) and as the
- * background task receives it, where both platforms hand over the data blob
- * as a JSON string under `dataString` (Android also spreads the raw FCM data
- * beside it).
+ * The handles a silent dismissal push names, or null when it is not one.
+ * Accepts the listener's `{ d: [...] }` and the background task's shape, where
+ * the blob arrives as a JSON string under `dataString`.
  */
 export function readDismissPayload(payload: unknown): string[] | null {
   if (typeof payload !== "object" || payload === null) {
@@ -110,7 +81,6 @@ export function readDismissPayload(payload: unknown): string[] | null {
   return handles.length > 0 ? handles : null;
 }
 
-/** Identifiers of the tray notifications whose handle is in `handles`. */
 export function pickDismissals(presented: Presented[], handles: Iterable<string>): string[] {
   const wanted = new Set(handles);
   const out: string[] = [];

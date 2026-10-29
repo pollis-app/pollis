@@ -1,13 +1,9 @@
-// Saved messages (bookmarks, #887) + permalink resolution. Mirrors
-// desktop's useBookmarks.ts over the device-local core commands in
-// pollis-core/src/commands/bookmarks.rs — all snake_case fields as serde
-// serializes them.
+// Saved messages (device-local, #887) and permalink resolution.
 
 import { useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
 
-/** Mirror of `pollis_core::commands::bookmarks::SavedMessage`. */
 export interface SavedMessage {
   message_id: string;
   conversation_id: string;
@@ -20,7 +16,6 @@ export interface SavedMessage {
   sent_at: string | null;
 }
 
-/** Mirror of `pollis_core::commands::bookmarks::PermalinkTarget`. */
 export interface PermalinkTarget {
   found: boolean;
   conversation_id: string | null;
@@ -41,7 +36,6 @@ export function useSavedMessages() {
   });
 }
 
-/** The saved ids as a set — one query feeds every row's saved state. */
 export function useSavedMessageIds(): Set<string> {
   const { data } = useSavedMessages();
   return new Set((data ?? []).map((m) => m.message_id));
@@ -51,7 +45,6 @@ export function useSavedMessageIds(): Set<string> {
 export function useToggleSavedMessage() {
   const queryClient = useQueryClient();
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "toggle" } },
     mutationFn: async (messageId: string) =>
       await invoke<boolean>("toggle_saved_message", { messageId }),
@@ -64,7 +57,6 @@ export function useToggleSavedMessage() {
 export function useUnsaveMessage() {
   const queryClient = useQueryClient();
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "toggle" } },
     mutationFn: async (messageId: string) =>
       await invoke<boolean>("unsave_message", { messageId }),
@@ -75,9 +67,8 @@ export function useUnsaveMessage() {
 }
 
 /**
- * Imperative permalink resolution. A thrown lookup is returned as a miss —
- * a failed lookup is indistinguishable from a message this device does not
- * hold, on purpose (non-oracle).
+ * Imperative permalink resolution. A failed lookup returns a miss, on purpose
+ * indistinguishable from a message this device does not hold (non-oracle).
  */
 export function useResolvePermalink() {
   return useCallback(

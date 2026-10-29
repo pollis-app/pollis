@@ -1,15 +1,13 @@
 //! Dev-DS peer for the mobile Maestro `lost-message` flow (#1312).
 //!
-//! Signs up a fresh account on the DS named by `POLLIS_DELIVERY_URL` (the dev
-//! DS — it fixes the OTP), prints its handle, waits for the phone under test to
-//! open a DM with it, then sends four messages: one ordinary, two whose
-//! ciphertext is corrupted before it leaves (`test_hooks::corrupt_next_send`,
-//! which only exists in a `test-harness` build, i.e. this example), and one
-//! ordinary. The phone's real ingest then meets two messages it cannot open,
-//! and the flow asserts ONE collapsed placeholder sits between the other two.
+//! Signs up on the dev DS (`POLLIS_DELIVERY_URL`), prints its handle, waits
+//! for the phone to open a DM with it, then sends four messages: one ordinary,
+//! two whose ciphertext is corrupted before it leaves
+//! (`test_hooks::corrupt_next_send`), and one ordinary. The flow asserts one
+//! collapsed placeholder sits between the other two.
 //!
-//! Not a shipping binary: examples build against pollis-tui's dev-dependencies,
-//! which is the only place pollis-core carries `test-harness`.
+//! Examples build against pollis-tui's dev-dependencies, the only place
+//! pollis-core carries `test-harness`.
 //!
 //!   POLLIS_DATA_DIR=$(mktemp -d) POLLIS_DELIVERY_URL=https://api-dev.pollis.com \
 //!   POLLIS_DEV_ACCESS_KEY=… cargo run -p pollis-tui --example lost_message_peer -- <email>

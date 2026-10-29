@@ -20,13 +20,11 @@ import GroupInviteLinks from "../app/group/invite-links";
 import GroupEmoji from "../app/group/emoji";
 import JoinRequests from "../app/group/requests";
 
-// Two-pane master-detail primitives for the regular (iPad) layout — issue #622.
-// Only rendered when `useLayoutClass() === "regular"`; the compact tree never
-// mounts these, so phone behavior is untouched.
+// Two-pane master-detail primitives for the regular (iPad) layout (#622);
+// the compact tree never mounts these.
 
-// The page drawn for each pane route — the very same component the route file
-// renders on phones. They read params with `useRouteParams` and navigate with
-// `useNav`, so inside the pane they get the entry's params and pane pushes.
+// The same component each route file renders on phones; `useRouteParams` and
+// `useNav` give it the pane entry's params and pane pushes.
 const PANE_SCREENS: Record<PanePath, ComponentType> = {
   "/chat/thread": ThreadScreen,
   "/conversation/info": ConversationInfo,
@@ -41,7 +39,6 @@ const PANE_SCREENS: Record<PanePath, ComponentType> = {
   "/group/requests": JoinRequests,
 };
 
-// Right-pane empty state — shown when nothing is selected yet.
 export function DetailPlaceholder() {
   const { t } = useTranslation("mobile");
   return (
@@ -60,8 +57,8 @@ export function DetailPlaceholder() {
   );
 }
 
-// Provides a tab's pane stack to everything under it: the left column (group
-// pages opened from the group panel push into the pane) and the right pane.
+// Provides a tab's pane stack to the left column (group pages opened from the
+// group panel push into the pane) and the right pane.
 export function PaneProvider({
   pane,
   children,
@@ -72,10 +69,8 @@ export function PaneProvider({
   return <PaneContext.Provider value={pane}>{children}</PaneContext.Provider>;
 }
 
-// The right pane: its root (the open conversation, or the placeholder) with
-// the pages pushed over it. Every page stays mounted while it is covered —
-// only the top one is displayed — so going back returns to the conversation
-// with its draft and scroll position intact, the way a stack pop does.
+// Every pushed page stays mounted while covered, so going back returns to the
+// conversation with its draft and scroll position intact.
 export function DetailPane({
   pane,
   root,
@@ -118,8 +113,6 @@ export function DetailPane({
   );
 }
 
-// Left list column (fixed `listPaneWidth`) + 1px hairline divider + flexible
-// right detail column, mirroring desktop's sidebar+content split.
 export function TwoPane({
   list,
   detail,
@@ -136,9 +129,8 @@ export function TwoPane({
   );
 }
 
-// A tab's empty state on regular width: no two-pane (there is nothing to
-// select), one column centred on the screen — the same width as every other
-// full-screen page (`layout.screenMaxWidth`).
+// A tab's empty state on regular width: no two-pane, one centred column at
+// `layout.screenMaxWidth`.
 export function CenteredColumn({ children }: { children: ReactNode }) {
   return (
     <View

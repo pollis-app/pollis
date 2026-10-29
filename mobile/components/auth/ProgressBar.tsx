@@ -6,11 +6,7 @@ import { useReduceMotion } from "./useReduceMotion";
 const HEIGHT = 6;
 const SWEEP_MS = 1400;
 
-/**
- * A thin rounded progress track. `percent` is the static fill; while
- * `indeterminate`, a short segment sweeps along the track instead — unless
- * Reduce Motion is on, when the static fill stays put.
- */
+/** `indeterminate` sweeps a segment along the track, unless Reduce Motion is on. */
 export function ProgressBar({
   percent,
   indeterminate,

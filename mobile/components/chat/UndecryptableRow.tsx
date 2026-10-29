@@ -9,15 +9,10 @@ const AVATAR = 40;
 const AVATAR_GAP = 12;
 
 /**
- * A message this device was entitled to read and could not decrypt (#1312) —
- * or a run of them (`count`), which the timeline collapses into one row.
- *
- * It stands where the message would have been, so a loss shows instead of
- * vanishing. Nothing readable says who sent it, so there is no avatar or
- * name; nothing can be done with the message, so there is no swipe or long
- * press. Its one control opens Diagnostics, where each loss has its own log
- * line. One accessible element, like every message row: screen readers reach
- * the link through the row's activate action.
+ * A message (or a collapsed run, `count`) this device was entitled to read and
+ * could not decrypt (#1312), shown so a loss is visible instead of vanishing.
+ * Its one control opens Diagnostics; one accessible element, like every
+ * message row.
  */
 export function UndecryptableRow({
   messageId,

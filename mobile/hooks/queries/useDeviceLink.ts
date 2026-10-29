@@ -1,30 +1,21 @@
-// QR device links. Mirrors pollis-core `commands::device_link`; the desktop
-// twin is frontend/src/services/api.ts. Protocol and guardrails:
-// docs/qr-device-link-design.md.
-//
-// Mobile plays three of the four roles: the new phone scans a code a desktop
-// shows (v1, #1207, `useClaimDeviceLink`) or shows its own (v2, #1361), and a
-// signed-in phone scans a new device's code (v2). It no longer SHOWS a v1 code
-// for others to scan: that is the scanner's job now.
+// QR device links; protocol in docs/qr-device-link-design.md. Mobile never
+// shows a v1 code, only scans one (#1207); v2 it both shows and scans (#1361).
 
 import { useMutation } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
 import { profileToUser, type RawUserProfile } from "./useAuth";
 
-/** Forget a link this device was following (the scanner's accepted code). */
 export async function cancelDeviceLink(linkId: string): Promise<void> {
   await invoke("cancel_device_link", { linkId });
 }
 
 /**
- * Sign in by a scanned or pasted QR payload. Sets the signed-in user exactly
- * as `useVerifyOtp` does; the profile always requires enrollment (the key is
- * handed over when the device that showed the QR approves).
+ * Sign in by a scanned or pasted QR payload. The profile always requires
+ * enrollment: the key arrives when the device that showed the QR approves.
  */
 export function useClaimDeviceLink() {
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "success" } },
     mutationFn: async (vars: { payload: string; deviceName: string }) =>
       await invoke<RawUserProfile>("claim_device_link", vars),
@@ -35,13 +26,11 @@ export function useClaimDeviceLink() {
   });
 }
 
-// ── v2 (#1361): the NEW device shows the code, a signed-in device scans it ──
-
 export interface DeviceOfferHandle {
   link_id: string;
   /** `pollis-link:v2:<link_id>:<ephemeral public key>` — carries no secret. */
   qr_payload: string;
-  /** Unix seconds, server-set. Show a fresh code after this. */
+  /** Unix seconds, server-set. */
   expires_at: number;
 }
 
@@ -64,10 +53,8 @@ export async function createDeviceOffer(deviceName: string): Promise<DeviceOffer
 }
 
 /**
- * New device: resolve when a signed-in device accepts the code (this device is
- * then signed in and must enroll) or when it lapses. One awaited call — the
- * backoff and the deadline live in Rust. Sets the signed-in user exactly as
- * `useVerifyOtp` does.
+ * New device: resolves when a signed-in device accepts the code or it lapses.
+ * The backoff and the deadline live in Rust.
  */
 export async function awaitDeviceOffer(linkId: string): Promise<DeviceOfferWait> {
   const wait = await invoke<DeviceOfferWait>("await_device_offer", { linkId });
@@ -93,8 +80,7 @@ export async function acceptDeviceOffer(
 
 /**
  * Signed-in device: wait for the accepted device's enrollment request and wrap
- * the account key to it — only if its key is the one the code showed. One
- * awaited call.
+ * the account key to it, only if its key is the one the code showed.
  */
 export async function finishDeviceOffer(userId: string, linkId: string): Promise<DeviceOfferOutcome> {
   return await invoke<DeviceOfferOutcome>("finish_device_offer", { userId, linkId });

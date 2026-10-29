@@ -5,14 +5,10 @@ import { semantic, type as ty } from "../../theme/tokens";
 import type { MessageReceipts } from "../../hooks/queries/useReceipts";
 
 /**
- * Delivery/read state on an own DM message (#892). Port of desktop's
- * ReceiptIndicator state machine:
- *   - nothing until at least one delivery lands — "not delivered",
- *     "receipts off", and "not a DM" are deliberately indistinguishable,
- *     so the UI never leaks that receipts are disabled;
- *   - single check = delivered, double check = read by some (muted) /
- *     read by everyone (accent);
- *   - a count suffix appears only with more than one peer.
+ * Delivery/read state on an own DM message (#892), desktop's state machine.
+ * Nothing shows until a delivery lands: "not delivered", "receipts off" and
+ * "not a DM" are deliberately indistinguishable, so the UI never leaks that
+ * receipts are disabled.
  */
 export function ReceiptIndicator({
   receipts,

@@ -10,8 +10,7 @@ import type { Message } from "../../hooks/queries";
 
 const QUICK_EMOJI = ["👍", "❤️", "😂", "🎉", "🔥", "🙏"];
 
-// #897: copy feedback is verified — the state comes from the clipboard
-// call's boolean, never assumed. Matches desktop's 2s reset.
+// Copy feedback comes from the clipboard call's boolean, never assumed (#897).
 type CopyState = "idle" | "copied" | "failed";
 const COPY_FEEDBACK_MS = 2000;
 
@@ -23,12 +22,8 @@ function copyColor(state: CopyState) {
 }
 
 /**
- * Long-press action sheet for a message (Actions.dc.html): the message
- * quoted in a plain card, quick reactions, then grouped 52pt rows — reply in
- * thread, add reaction, copy text / copy link (verified feedback; the sheet
- * stays open so the outcome shows where the tap happened), save, pin — and a
- * separate group for edit/delete on the sender's own messages or report on
- * anyone else's.
+ * Long-press action sheet for a message. Copy rows show verified feedback and
+ * keep the sheet open so the outcome shows where the tap happened.
  */
 export function MessageActionsSheet({
   target,
@@ -51,27 +46,23 @@ export function MessageActionsSheet({
   onClose,
 }: {
   target: Message;
-  // Display name and time for the quoted message.
   quoteName: string;
   quoteTime: string;
   isOwn: boolean;
   isSaved: boolean;
-  /** Pinned in its conversation for every member (#99, #1315). */
   isPinned: boolean;
   onReact: (emoji: string) => void;
   onOpenPicker: () => void;
-  // Quote reply in the composer (#1270), desktop's "Reply".
   onReply: () => void;
   onReplyInThread: () => void;
   onToggleSave: () => void;
-  /** Pin / unpin for everyone; any member may do either. Omitted where the
-   *  surface has no pins (desktop pins from the main timeline only). */
+  /** Omitted where the surface has no pins (desktop pins from the main timeline only). */
   onTogglePin?: () => void;
   onCopyText: () => Promise<boolean>;
   onCopyLink: () => Promise<boolean>;
   onEdit: () => void;
   onDelete: () => void;
-  /** Report the sender (#1213). Shown only on other people's messages. */
+  /** Shown only on other people's messages. */
   onReport?: () => void;
   onClose: () => void;
 }) {
@@ -123,14 +114,11 @@ export function MessageActionsSheet({
       onClose={onClose}
       closeTestID="btn-action-cancel"
     >
-      {/* Scrolls when large text makes the sheet taller than the screen. */}
       <ScrollView
         style={{ maxHeight: height * 0.72 }}
         contentContainerStyle={{ gap: 12 }}
         bounces={false}
       >
-        {/* The message being acted on: a plain panel card on the sheet —
-            the fill separates it, so no border and no edge stripe. */}
         <View
           accessible
           style={{

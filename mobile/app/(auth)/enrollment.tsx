@@ -44,11 +44,8 @@ export default function Enrollment() {
   );
 
   // When the existing device approves, go straight to PIN-create. Finalize
-  // (publish this device's cert, external-join the account's groups) needs
-  // the local DB, which only `set_pin` opens — so it runs on the PIN screen
-  // after `set_pin`, exactly as desktop's handlePinCreated does. Calling it
-  // here, before the PIN, failed every device-linking sign-in with "not
-  // signed in for DS request signing".
+  // needs the local DB, which only `set_pin` opens, so it runs on the PIN
+  // screen after `set_pin` (as desktop's handlePinCreated), never here.
   useEffect(() => {
     if (status.data?.status === "approved") {
       router.replace("/(auth)/pin");

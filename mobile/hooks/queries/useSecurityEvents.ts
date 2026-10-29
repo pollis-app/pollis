@@ -1,9 +1,5 @@
-// Security-event audit trail for the Security screen. Backed by
-// `list_security_events` — enrollments, rejections, revocations, identity
-// resets, secret-key rotations (#958). Mirrors desktop's SecurityPage list;
-// the `device_revoked` event is the last place a revoked device's name is
-// readable (the `user_device` row is deleted on revoke), carried as
-// `metadata: "name=<device name>"` (#947).
+// A `device_revoked` event is the last place a revoked device's name is
+// readable, as `metadata: "name=<device name>"` (#947).
 
 import { useQuery } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
@@ -23,8 +19,7 @@ export const securityEventQueryKeys = {
   list: (userId: string | null) => ["securityEvents", userId] as const,
 };
 
-// The backend clamps `limit` to 1..=500 and defaults to 100; fetch the
-// default and let the screen slice for display.
+// The backend clamps `limit` to 1..=500.
 export function useSecurityEvents(limit = 100) {
   const currentUser = useObserver(() => appStore.currentUser);
   return useQuery({

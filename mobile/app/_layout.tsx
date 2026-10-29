@@ -31,13 +31,9 @@ import { onDeviceRevoked, setSessionNotice } from "../lib/deviceRevoked";
 
 SplashScreen.preventAutoHideAsync();
 
-// App-level signed-in services, mounted under the providers so they have a
-// QueryClient + router and only run after the bridge is ready. Each hook is a
-// no-op until a user is signed in: push installs notification listeners; inbox
-// realtime keeps the groups/DM lists live while foregrounded; a new device's
-// approval request opens the approval screen (#1360); unread badges follow
-// the persisted read cursors (#1422); the language re-resolves so a user's
-// own stored choice wins over the pre-auth screens'.
+// App-level signed-in services, under the providers so they have a
+// QueryClient + router and run only after the bridge is ready. Each hook is a
+// no-op until a user is signed in.
 function SignedInServicesGate() {
   usePushNotifications();
   useInboxRealtime();
@@ -61,9 +57,6 @@ function RootStack({ children }: { children: React.ReactNode }) {
       screenOptions={{
         headerShown: false,
         contentStyle: { backgroundColor: semantic.bg },
-        // Drilling further into a route (tab → group → channel) pushes
-        // the new screen in from the right; back reverses it. Timing
-        // lives in lib/transitions.
         ...drillIn,
       }}
     >
@@ -84,11 +77,9 @@ export default function RootLayout() {
   const [languageReady, setLanguageReady] = useState(false);
   const [sweepReady, setSweepReady] = useState(false);
 
-  // Delete plaintext a crashed or killed run left on disk (decrypted media,
-  // export archives) before the boot screen restores any session (#1256).
-  // Here rather than in app/index.tsx, which is re-entered mid-session; and
-  // once per process (lib/session), so a remount of this layout can't sweep
-  // media out from under mounted screens either.
+  // Delete plaintext a crashed or killed run left on disk before any session
+  // restores (#1256). Not in app/index.tsx, which is re-entered mid-session;
+  // once per process, so a remount can't sweep media from mounted screens.
   useEffect(() => {
     sweepStalePlaintext().finally(() => setSweepReady(true));
   }, []);
@@ -135,9 +126,7 @@ export default function RootLayout() {
     })
       .then(() => setBridgeReady(true))
       .catch((e) => {
-        // Surfacing the error here at least makes it obvious during dev
-        // that the bridge didn't come up — the alternative is silent
-        // "every command throws" later, which is harder to diagnose.
+        // Otherwise the failure only shows later as every command throwing.
         console.error("[bridge] initializeNativeBridge failed:", e);
         setBridgeError(e);
         setBridgeReady(true);
@@ -154,9 +143,7 @@ export default function RootLayout() {
     return null;
   }
 
-  // Bridge errors are non-fatal at the layout level — the auth screen will
-  // surface a clearer error when the user tries to sign in. We still log
-  // above so device logs show what went wrong.
+  // Non-fatal here: the auth screen surfaces a clearer error on sign-in.
   void bridgeError;
 
   return (
@@ -195,14 +182,10 @@ export default function RootLayout() {
               <Stack.Screen name="conversation/pins" />
               <Stack.Screen name="chat/[id]" />
               <Stack.Screen name="chat/thread" />
-              {/* Full-screen attachment viewer (#1248): a page, not a modal. */}
               <Stack.Screen name="media" />
-              {/* The Vault (#107/#1316): reached from the top of Direct. */}
               <Stack.Screen name="vault" />
               <Stack.Screen name="user/[id]" />
               <Stack.Screen name="report" options={settingsPage} />
-              {/* Personal settings pages (settingsPage = drillIn since the
-                  redesign, so the edge swipe pops them like any push). */}
               <Stack.Screen
                 name="self/preferences"
                 options={settingsPage}

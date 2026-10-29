@@ -1,5 +1,4 @@
-// Message permalinks (#887). Port of the parsing/formatting half of
-// frontend/src/utils/urlRouting.ts — the wire format is
+// Message permalinks (#887), ported from frontend/src/utils/urlRouting.ts:
 // `pollis://m/<conversation_id>/<message_id>` on every platform.
 
 import i18n from "../i18n";
@@ -35,10 +34,7 @@ export function parseMessagePermalink(
   return { conversationId, messageId };
 }
 
-/**
- * Desktop's exact non-oracle miss copy — a failed resolve renders this and
- * navigates nowhere, indistinguishable from a lookup error on purpose.
- */
+/** A miss is indistinguishable from a lookup error on purpose (no oracle). */
 export function permalinkMissCopy(): string {
   return i18n.t("saved:page.unresolved");
 }

@@ -1,9 +1,6 @@
-// The one place a mobile session ends (#1256). Sign-out, account deletion
-// and the forced sign-out of a revoked device all route through
-// `endSession()`, so everything a session leaves behind on the device — UI
-// state, the query cache, decrypted media, export archives, the emoji
-// cache — is cleaned up in one spot rather than at each call site.
-// `sweepStalePlaintext()` is the startup half: what a crashed run left.
+// The one place a mobile session ends (#1256): sign-out, account deletion and a
+// revoked device's forced sign-out all call `endSession()`.
+// `sweepStalePlaintext()` is the startup half, for what a crashed run left.
 
 import { router } from "expo-router";
 import { appStore } from "../../stores/appStore";
@@ -17,8 +14,8 @@ export function endSession(): Promise<void> {
   return tearDownSession({
     resetStore: appStore.logout,
     leaveSignedInScreens: () => {
-      // Pop the whole stack first: a plain replace swaps only the top
-      // screen and leaves e.g. an open chat mounted underneath sign-in.
+      // Pop the whole stack: a plain replace leaves e.g. an open chat mounted
+      // underneath sign-in.
       if (router.canDismiss()) {
         router.dismissAll();
       }

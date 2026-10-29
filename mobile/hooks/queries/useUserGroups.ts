@@ -1,7 +1,3 @@
-// Group/channel listing hooks. Mirrors `frontend/src/hooks/queries/useGroups.ts`
-// for the read paths the mobile UI needs. Mutations (create_group,
-// invite_to_group, etc.) come later when we add those flows.
-
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
@@ -11,11 +7,9 @@ import { groupInviteQueryKeys, type GroupMember } from "./useGroupInvites";
 
 export interface GroupWithChannels extends Group {
   channels: Channel[];
-  /** The viewer's role in this group ("admin" | "member"), from the core's
-   *  `GroupWithChannels.current_user_role`. */
+  /** The viewer's role in this group ("admin" | "member"). */
   current_user_role?: string;
-  /** The group's creator, as the core's `GroupWithChannels.owner_id` names
-   *  it. Never carries the "new" member tag (#1506). */
+  /** The group's creator; never carries the "new" member tag (#1506). */
   owner_id?: string;
 }
 
@@ -29,14 +23,8 @@ export const groupQueryKeys = {
 };
 
 /**
- * The channels this account muted (#1431), as a set of channel ids. Mirrors
- * desktop's `useMutedChannels`.
- *
- * Stored on the DS for the whole account: the push fan-out reads it to skip a
- * muted member unless they are @named, so a muted channel's chatter and @all
- * never reach this phone as a push — backgrounded or foreground. Every device
- * reads the same row; the DS nudges the account's other devices
- * (`channel_mutes_changed`, handled in `useInboxRealtime`) to refetch.
+ * The channels this account muted (#1431). Stored on the DS per account, where
+ * the push fan-out skips muted members unless @named.
  */
 export function useMutedChannels() {
   const currentUser = useObserver(() => appStore.currentUser);
@@ -55,17 +43,14 @@ export function useMutedChannels() {
   });
 }
 
-/**
- * Mute or unmute one channel for this account (#1431). Optimistic: the
- * switch and the dimmed row flip on the same frame, and a failure rolls back.
- */
+/** Mute or unmute one channel for this account (#1431), optimistically. */
 export function useSetChannelMuted() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   const key = groupQueryKeys.mutedChannels(currentUser?.id ?? null);
 
   return useMutation({
-    // Tactile feedback (#1286): the ToggleRow ticks on flip; only a failure plays here.
+    // The ToggleRow ticks on flip; only a failure plays here (#1286).
     meta: { haptic: {} },
     mutationFn: async (vars: { channelId: string; muted: boolean }) => {
       if (!currentUser) {
@@ -129,10 +114,7 @@ export function useUserGroupsWithChannels() {
         "list_user_groups_with_channels",
         { userId: currentUser.id },
       );
-      // VOICE-CHANNEL FILTER: mobile has no voice UI yet (#185), so a voice
-      // channel can't be opened or used — drop them here so they never render
-      // in any channel list. This is the single source for that filtering on
-      // the groups-tab path; the per-group path filters in useGroupChannels.
+      // Mobile has no voice UI (#185); useGroupChannels filters the same way.
       return groups.map((g) => ({
         ...g,
         channels: g.channels.filter((c) => c.channel_type !== "voice"),
@@ -148,7 +130,6 @@ export function useCreateGroup() {
   const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "success" } },
     mutationFn: async (vars: {
       name: string;
@@ -163,7 +144,6 @@ export function useCreateGroup() {
         description: vars.description ?? null,
         ownerId: currentUser.id,
         createDefaultTextChannel: vars.createDefaultTextChannel ?? false,
-        // Mobile drops voice — never create the default voice channel.
         createDefaultVoiceChannel: false,
       });
     },
@@ -174,11 +154,8 @@ export function useCreateGroup() {
       queryClient.invalidateQueries({
         queryKey: groupQueryKeys.userGroupsWithChannels(currentUser?.id ?? null),
       });
-      // The app lands on the new group's panel straight away. Its roster read
-      // can lag the create, so seed it with the one member it is known to
-      // have — the creator, as admin (core inserts that row with the group) —
-      // and the panel shows "1 member" on landing instead of no count. The
-      // seed is fresh for the query's staleTime; later reads replace it.
+      // The roster read can lag the create; seed it with the creator as admin
+      // so the panel lands on "1 member" instead of no count.
       if (currentUser) {
         const creator: GroupMember = {
           user_id: currentUser.id,
@@ -191,7 +168,6 @@ export function useCreateGroup() {
           (cached) => (cached && cached.length > 0 ? cached : [creator]),
         );
       }
-      // The channel list (#General, when opted in) is read on landing too.
       queryClient.invalidateQueries({
         queryKey: groupQueryKeys.channels(group.id),
       });
@@ -204,7 +180,6 @@ export function useCreateChannel(groupId: string | null) {
   const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "success" } },
     mutationFn: async (vars: { name: string; description?: string }) => {
       if (!currentUser || !groupId) {
@@ -242,9 +217,7 @@ export function useGroupChannels(groupId: string | null) {
         groupId,
         requesterId: currentUser.id,
       });
-      // VOICE-CHANNEL FILTER: mobile has no voice UI yet (#185) — never surface
-      // voice channels in the list. Mirrors the filter in
-      // useUserGroupsWithChannels.
+      // Mobile has no voice UI (#185).
       return channels.filter((c) => c.channel_type !== "voice");
     },
     enabled: !!groupId && !!currentUser,

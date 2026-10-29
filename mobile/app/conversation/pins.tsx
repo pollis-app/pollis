@@ -1,18 +1,10 @@
-// Pinned messages (#99; mobile #1315) — the conversation's pins, newest
-// first. Mobile counterpart of desktop's right-panel PinnedPanel: the chat
-// header's pin button pushes it with { id, kind, name } (on iPad, inside the
-// detail pane).
+// Pinned messages (#1315), the counterpart of desktop's PinnedPanel. The rules
+// live in pollis-core and the DS: a row shows the sealed snapshot taken at pin
+// time, and a device still waiting for the pin key gets "not available yet".
 //
-// Same semantics as desktop, because the rules live in pollis-core and the
-// DS: every member sees the same list, any member may unpin, and a row shows
-// the message as it was when it was pinned (a sealed snapshot — a later edit
-// or delete does not change it). A device still waiting for the
-// conversation's pin key gets desktop's "not available yet" copy.
-//
-// Tapping a row goes back to the conversation scrolled to the message: the
-// same local `resolve_message_permalink` the permalink route and Saved use
-// (a miss shows their non-oracle copy and goes nowhere), then the jump rides
-// `messageJumpStore`.
+// Tapping a row returns to the conversation scrolled to the message, via the
+// same local `resolve_message_permalink` as permalinks and Saved (a miss shows
+// their non-oracle copy and goes nowhere), then `messageJumpStore`.
 
 import { useState } from "react";
 import { View, Text, FlatList, Pressable } from "react-native";

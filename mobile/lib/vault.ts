@@ -1,6 +1,5 @@
-// Pure rules behind the Vault screen (#107, mobile #1316). No react-native or
-// expo imports, so tests/vault.test.ts pins them under plain node. Each one
-// is a port of the same rule in desktop's frontend/src/pages/Vault.tsx.
+// Pure rules behind the Vault screen (#1316), each a port of the same rule in
+// desktop's frontend/src/pages/Vault.tsx. No react-native imports (node tests).
 
 import type { MessageAttachment } from "../types";
 import { parseContent, type AttachmentWire } from "./messageContent.ts";
@@ -9,24 +8,21 @@ import { isRollMedia, mediaKind, type ViewerItems } from "./media/viewer.ts";
 /** Mirror of `pollis_core::commands::vault::VaultMessage`. */
 export interface VaultMessage {
   id: string;
-  /** Same content-string shape as chat messages — plain text or the
-   *  `{"_att":[...],"_txt":"..."}` envelope; parse with `parseContent`. */
+  /** Plain text or the `_att`/`_txt` envelope; parse with `parseContent`. */
   content: string;
   pinned: boolean;
   created_at: string;
   updated_at: string;
 }
 
-/** Whether an entry was rewritten after it was made. Pin/unpin is a rewrite
- *  too (the flag lives inside the ciphertext), exactly as on desktop. */
+/** Pin/unpin counts as an edit too: the flag lives inside the ciphertext. */
 export function isVaultEntryEdited(entry: VaultMessage): boolean {
   return entry.updated_at !== entry.created_at;
 }
 
 /**
- * Client-side search over decrypted entries — the server cannot search what
- * it cannot read. Case-insensitive substring over the caption and every
- * attachment's filename; a blank query keeps every entry. Order is kept.
+ * Client-side search (the server cannot read entries): case-insensitive
+ * substring over the caption and every filename; order kept.
  */
 export function filterVaultEntries(
   entries: readonly VaultMessage[],
@@ -43,8 +39,7 @@ export function filterVaultEntries(
   });
 }
 
-/** Every attachment across the vault, newest entry first, each object once —
- *  the media view. `entries` arrive oldest first, as the core returns them. */
+/** Every attachment, newest entry first, each once. `entries` arrive oldest first. */
 export function vaultAttachments(entries: readonly VaultMessage[]): MessageAttachment[] {
   const out: MessageAttachment[] = [];
   const seen = new Set<string>();
@@ -60,10 +55,8 @@ export function vaultAttachments(entries: readonly VaultMessage[]): MessageAttac
 }
 
 /**
- * The content string an edit saves, or null when there is nothing to save.
- * An entry with files keeps them across a text edit: the same envelope is
- * rebuilt around the new caption (with `_txt` omitted when it is empty, as
- * `buildMessageContent` does). A text-only entry saves the trimmed text.
+ * The content string an edit saves, or null. An entry with files keeps them:
+ * the envelope is rebuilt around the new caption (`_txt` omitted when empty).
  */
 export function editedVaultContent(original: string, draft: string): string | null {
   const text = draft.trim();
@@ -88,11 +81,8 @@ export function editedVaultContent(original: string, draft: string): string | nu
 }
 
 /**
- * The full-screen viewer's pages for an attachment tapped in the Vault's
- * media view (#1492): the grid's own images and videos, in the grid's order
- * (newest entry first), so a swipe walks exactly what the grid shows — as
- * desktop's MediaGalleryView walks its roll. Audio and other files open
- * alone; an id the vault no longer holds yields nothing.
+ * Viewer pages for an attachment tapped in the Vault grid (#1492): the grid's
+ * images and videos in grid order, so a swipe walks exactly what it shows.
  */
 export function vaultViewerItems(
   entries: readonly VaultMessage[],
@@ -110,16 +100,12 @@ export function vaultViewerItems(
   return { items, index: items.indexOf(tapped) };
 }
 
-/** Why a save failed, as far as the user can act on it (#1497). */
 export type VaultSaveFailure = "offline" | "tooLarge" | "other";
 
 /**
- * Sort a failed save into what the user can do about it. The core's errors
- * reach JS as text, so this reads the shapes `pollis-core` produces: a
- * connection that failed or timed out, or a 5xx from the DS or R2, is
- * "offline" (sending again is the fix); a file over the upload cap is
- * "tooLarge" (sending again is not). Anything else stays generic. A port of
- * desktop's `vaultSaveFailure` (frontend/src/utils/vaultSaveFailure.ts).
+ * Port of desktop's `vaultSaveFailure`. Core errors reach JS as text, so this
+ * matches pollis-core's shapes: connection failures and 5xx are "offline"
+ * (retry helps), an over-cap file is "tooLarge" (retry does not).
  */
 export function vaultSaveFailure(err: unknown): VaultSaveFailure {
   const text = err instanceof Error ? err.message : String(err ?? "");

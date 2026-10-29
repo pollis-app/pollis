@@ -2,10 +2,9 @@ import { useCallback, useRef } from "react";
 import type { LayoutChangeEvent, ScrollView } from "react-native";
 
 /**
- * Scrolls a settings page to one named section once that section has laid
- * out — used when a Self-tab row (Language, Notifications, Auto-lock) opens a
- * page that holds several settings. Sections must be direct children of the
- * ScrollView's content so their layout `y` is in content coordinates.
+ * Scrolls a settings page to one named section once it has laid out. Sections
+ * must be direct children of the ScrollView's content so their layout `y` is
+ * in content coordinates.
  */
 export function useSectionScroll(target: string | undefined) {
   const scrollRef = useRef<ScrollView>(null);

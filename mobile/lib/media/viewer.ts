@@ -1,11 +1,10 @@
-// Pure rules behind the full-screen media viewer (#1248). No react-native or
-// expo imports, so `tests/media-viewer.test.ts` can pin them under plain node.
+// Pure rules behind the full-screen media viewer (#1248); no react-native or
+// expo imports, so plain-node tests can pin them.
 
 import type { MessageAttachment } from "../../types";
 
 export type MediaKind = "image" | "video" | "audio" | "file";
 
-/** What the viewer draws for an attachment, from its MIME type. */
 export function mediaKind(contentType: string): MediaKind {
   if (contentType.startsWith("image/")) {
     return "image";
@@ -19,27 +18,18 @@ export function mediaKind(contentType: string): MediaKind {
   return "file";
 }
 
-/**
- * Whether "Save to photos" applies. The photo library takes stills and
- * video only (iOS rejects audio outright); everything else goes through the
- * share sheet.
- */
+/** The photo library takes stills and video only (iOS rejects audio). */
 export function canSaveToLibrary(kind: MediaKind): boolean {
   return kind === "image" || kind === "video";
 }
 
-/**
- * Whether the item walks with its neighbours. Desktop's roll
- * (MediaGalleryView) holds images and videos; audio and files open alone,
- * as desktop's own audio lightbox does.
- */
+/** Images and videos walk with their neighbours; audio and files open alone. */
 export function isRollMedia(kind: MediaKind): boolean {
   return kind === "image" || kind === "video";
 }
 
-// Common extensions per MIME type, for a filename that arrived without one.
-// The photo library (iOS) and AVPlayer pick the decoder by extension, and the
-// decrypted cache file is named by content hash alone.
+// For a filename with no extension: the iOS photo library and AVPlayer pick the
+// decoder by extension.
 const EXTENSIONS: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/jpg": "jpg",
@@ -72,25 +62,21 @@ const EXTENSIONS: Record<string, string> = {
   "text/plain": "txt",
 };
 
-/** The extension a MIME type implies, or null when it implies none. */
 export function extensionFor(contentType: string): string | null {
   const base = contentType.split(";")[0].trim().toLowerCase();
   return EXTENSIONS[base] ?? null;
 }
 
 /**
- * The name the exported copy carries into the photo library or the share
- * sheet: the sender's filename, made safe for one path segment, with an
- * extension the platform can type it by. Falls back to the content hash when
- * the filename is unusable.
+ * The sender's filename made safe for one path segment, with an extension the
+ * platform can type it by; falls back to the content hash.
  */
 export function exportFilename(
   filename: string,
   contentType: string,
   contentHash: string,
 ): string {
-  // Path separators, control characters and the characters Android's
-  // MediaStore or FAT-backed shares reject.
+  // Separators, control characters, and what MediaStore / FAT shares reject.
   const cleaned = filename
     .replace(/[\u0000-\u001f\u007f]/g, "")
     .replace(/[\\/:*?"<>|]/g, "_")
@@ -98,8 +84,7 @@ export function exportFilename(
     .replace(/^\.+/, "");
   const fallback = `pollis-${contentHash.slice(0, 12) || "file"}`;
   let name = cleaned.length > 0 ? cleaned : fallback;
-  // Keep the name short enough for every filesystem (255 bytes), leaving
-  // room for an appended extension.
+  // Under every filesystem's 255-byte limit, leaving room for an extension.
   if (name.length > 120) {
     const dot = name.lastIndexOf(".");
     const ext = dot > 0 && name.length - dot <= 10 ? name.slice(dot) : "";
@@ -113,7 +98,6 @@ export function exportFilename(
   return ext ? `${name}.${ext}` : name;
 }
 
-/** The fields of a message the viewer reads. */
 export interface ViewerMessage {
   id: string;
   attachments?: MessageAttachment[];
@@ -128,10 +112,8 @@ export interface ViewerItems {
 
 /**
  * The viewer's pages for a tapped attachment. An image or video walks the
- * conversation's images and videos in timeline order (oldest first, so a
- * swipe towards the end goes forward in time, like the chat). Audio and other
- * files open alone. `messages` may arrive in any order; an attachment that is
- * not found yields no items.
+ * conversation's images and videos oldest first (a forward swipe goes forward
+ * in time); audio and files open alone.
  */
 export function collectViewerItems(
   messages: readonly ViewerMessage[],
@@ -177,9 +159,8 @@ export function collectViewerItems(
   return { items, index };
 }
 
-// A picked attachment is on screen (optimistic send) under the picker's id;
-// once the send settles the confirmed message carries the R2 key instead. A
-// viewer opened on the pending copy follows the id across that swap.
+// An optimistic attachment is on screen under the picker's id until the send
+// settles; a viewer opened on it follows the id across that swap.
 const attachmentAliases = new Map<string, string>();
 
 /** Record that attachment `from` (a pending copy) is now `to`. */
@@ -189,7 +170,6 @@ export function aliasAttachment(from: string, to: string): void {
   }
 }
 
-/** The attachment's current id, following any pending → confirmed swap. */
 export function currentAttachmentId(id: string): string {
   let next = id;
   // Bounded: an alias never points back at a pending id, but don't trust it.
@@ -199,19 +179,15 @@ export function currentAttachmentId(id: string): string {
   return next;
 }
 
-// Swipe down to dismiss (#1492), Google Photos style: the drag must pass a
-// fifth of the page, or be flung, to close the viewer; anything less springs
-// back. Runs on the UI thread inside the pager's pan gesture, hence the
-// worklet directive (inert under plain node, where the tests call it).
-// Upward drags never start the gesture (see app/media.tsx).
+// Swipe down to dismiss (#1492): past a fifth of the page, or flung; otherwise
+// it springs back. A worklet because it runs inside the pager's pan gesture.
 export const DISMISS_FRACTION = 0.2;
 export const DISMISS_VELOCITY = 900;
 
-/** Whether a downward drag of `dy` px ending at `vy` px/s closes the viewer. */
+/** `dy` in px, `vy` in px/s. */
 export function shouldDismiss(dy: number, vy: number, pageHeight: number): boolean {
   "worklet";
-  // Nothing pulled down, or the finger was heading back up when it let go:
-  // the user changed their mind.
+  // Heading back up when released: the user changed their mind.
   if (dy <= 0 || vy < -DISMISS_VELOCITY / 3) {
     return false;
   }

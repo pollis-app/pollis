@@ -1,13 +1,5 @@
-//! The M2b three-pane client state — the interactive shell on top of the
-//! already-gated read/sync layer (`pollis_tui::{data, sync}`).
-//!
-//! This module owns the pure, in-memory model of the Home screen: the flattened
-//! sidebar (groups → channels + DMs + requests), which pane has focus, the open
-//! conversation's message buffer, and the scroll/pagination bookkeeping. The
-//! async work (loading the tree, loading a page of messages) lives in `app.rs`;
-//! everything here is a **pure function of state** so the render stays an
-//! immediate-mode projection and the tricky bits — tree flattening, selection
-//! movement, scroll windowing, page merging — are unit-tested in isolation.
+//! The pure Home-screen model: flattened sidebar, focus, the open
+//! conversation's buffer, scroll/pagination. Async work lives in `app.rs`.
 
 use std::collections::{HashMap, HashSet};
 
@@ -15,11 +7,10 @@ use pollis_core::commands::messages::{ChannelMessage, MessageCursor, Reaction};
 
 use crate::data::ConversationTree;
 
-/// How close to the top of the loaded buffer the user must scroll before we
-/// prefetch the next older page — keeps history loading a beat ahead of the eye.
+/// Lines from the top of the loaded buffer at which the next older page is
+/// prefetched.
 pub const PREFETCH_MARGIN: usize = 5;
 
-/// Which pane currently receives navigation keys.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
     #[default]
@@ -27,28 +18,21 @@ pub enum Focus {
     Messages,
 }
 
-/// What a bottom-bar text prompt (a create/invite flow) is collecting. The
-/// active buffer lives on [`crate::app::App::input`] so rendering reads one
-/// field; this only records *which* action the collected text feeds and any
-/// context (the target group) the submit needs. Kept a small pure enum so its
-/// label + validation are unit-testable in isolation, like the rest of this
-/// module.
+/// Which action a bottom-bar prompt feeds; the buffer itself lives on
+/// [`crate::app::App::input`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PromptKind {
-    /// New group; the buffer is the group name.
     NewGroup,
-    /// New channel in an existing group; the buffer is the channel name.
     NewChannel { group_id: String, group_name: String },
-    /// Start a DM; the buffer is the other user's username/email.
+    /// The buffer is a username or email.
     StartDm,
-    /// Invite a user to a group; the buffer is the invitee's username/email.
+    /// The buffer is a username or email.
     Invite { group_id: String, group_name: String },
-    /// React to a message; the buffer is an emoji or a `:shortcode:`.
+    /// The buffer is an emoji or a `:shortcode:`.
     React { message_id: String },
 }
 
 impl PromptKind {
-    /// The label shown on the bottom input bar, naming what's being collected.
     pub fn label(&self) -> String {
         match self {
             PromptKind::NewGroup => "New group name".to_string(),
@@ -66,57 +50,46 @@ impl PromptKind {
     }
 }
 
-/// How the Home screen is currently consuming keystrokes: navigating the tree,
-/// composing a message for the open conversation, or filling a create/invite
-/// prompt. The text buffer for the latter two lives on [`crate::app::App`].
+/// How the Home screen is consuming keystrokes. The text buffer lives on
+/// [`crate::app::App`].
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub enum HomeMode {
-    /// Navigation + command keys (the default).
     #[default]
     Navigate,
-    /// Typing a message into the open conversation.
     Compose,
-    /// Filling a create/invite prompt (bottom input bar).
     Prompt(PromptKind),
-    /// Confirming the deletion of one of the user's own messages, in the input
-    /// bar (`y` deletes, `n`/Esc keeps it) — the desktop "replace the input
-    /// bar" pattern, never a modal.
+    /// Delete confirmation in the input bar, never a modal.
     ConfirmDelete { message_id: String, preview: String },
 }
 
-/// What the compose bar's Enter does with the buffer.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub enum ComposeTarget {
-    /// A new message (into the open thread, when one is open).
+    /// Into the open thread, when one is open.
     #[default]
     New,
-    /// A quote reply to `message_id` (`reply_to_id`).
     Reply {
         message_id: String,
         sender: String,
         preview: String,
     },
-    /// Replace the body of the user's own `message_id`.
     Edit { message_id: String },
 }
 
-/// The open thread, when the message pane shows one instead of the channel.
 #[derive(Debug, Default)]
 pub struct ThreadView {
     pub root_id: String,
-    /// Replies, oldest first (`read_thread_messages`).
+    /// Oldest first.
     pub replies: Vec<ChannelMessage>,
 }
 
-/// Whether a collected buffer is worth submitting: non-empty after trimming.
-/// Shared by compose (empty send is a no-op) and every prompt (empty submit is
-/// rejected), so an all-whitespace value can never reach the write layer.
+/// Shared by compose and every prompt, so an all-whitespace value never
+/// reaches the write layer.
 pub fn is_blank(s: &str) -> bool {
     s.trim().is_empty()
 }
 
-/// The three kinds of thing the message pane can be showing, which decides
-/// whether we read via `data::channel_messages` or `data::dm_messages`.
+/// Decides whether the pane reads via `data::channel_messages` or
+/// `data::dm_messages`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConvKind {
     Channel,
@@ -124,7 +97,6 @@ pub enum ConvKind {
     DmRequest,
 }
 
-/// A concrete, openable conversation: enough to fetch and title it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConvRef {
     pub id: String,
@@ -132,67 +104,56 @@ pub struct ConvRef {
     pub kind: ConvKind,
 }
 
-/// What activating a sidebar row does.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RowTarget {
-    /// A group heading — Enter toggles its expansion. Carries the group index.
+    /// Index into `tree.groups`.
     ToggleGroup(usize),
-    /// A leaf conversation — Enter opens it.
     Open(ConvRef),
-    /// A non-interactive section label ("Direct Messages", "Requests").
+    /// A non-interactive section label.
     Header,
 }
 
-/// One rendered line of the left pane.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SidebarRow {
     pub label: String,
-    /// Indentation level (0 = group/section, 1 = child).
+    /// 0 = group/section, 1 = child.
     pub depth: u16,
     pub target: RowTarget,
 }
 
 impl SidebarRow {
-    /// Whether navigation is allowed to land on this row (headers are skipped).
     pub fn selectable(&self) -> bool {
         !matches!(self.target, RowTarget::Header)
     }
 }
 
-/// The open conversation's message buffer plus its scroll/pagination state.
-/// Messages are kept **oldest-first** (display order: newest at the bottom).
+/// The open conversation's buffer, kept oldest-first.
 #[derive(Debug, Default)]
 pub struct OpenConversation {
     pub conv_id: String,
     pub name: String,
     pub kind: Option<ConvKind>,
-    /// Loaded messages, oldest-first.
     pub messages: Vec<ChannelMessage>,
-    /// Cursor for the next *older* page; `None` once history is exhausted or
-    /// before the first load completes.
+    /// Cursor for the next older page; `None` once exhausted or before the
+    /// first load.
     pub older_cursor: Option<MessageCursor>,
-    /// True once a page came back short — the beginning of history is loaded.
+    /// Set once a page came back short.
     pub at_beginning: bool,
     /// Lines scrolled up from the bottom (0 = pinned to newest).
     pub scroll: usize,
-    /// True while the first page is still loading (drives the empty state).
     pub loading: bool,
-    /// Reactions per message id, for the messages on screen.
     pub reactions: HashMap<String, Vec<Reaction>>,
-    /// Thread root id → reply count this device holds.
+    /// Thread root id → reply count.
     pub thread_counts: HashMap<String, i64>,
-    /// The highlighted message, by id (ids survive a page merge; indices do
-    /// not). `None` = nothing selected, view follows the newest message.
+    /// By id, since ids survive a page merge and indices do not. `None` follows
+    /// the newest message.
     pub selected: Option<String>,
-    /// `Some` while a thread is open in the pane.
     pub thread: Option<ThreadView>,
 }
 
 impl OpenConversation {
-    /// The messages the pane shows, in display order. The channel view hides
-    /// thread replies — other clients file them under their thread, and the
-    /// root shows a reply count instead. A thread view is the root followed by
-    /// its replies.
+    /// Display order. The channel view hides thread replies (as other clients
+    /// do); a thread view is the root followed by its replies.
     pub fn displayed(&self) -> Vec<&ChannelMessage> {
         match &self.thread {
             Some(t) => self
@@ -205,7 +166,6 @@ impl OpenConversation {
         }
     }
 
-    /// A loaded message by id, from the channel buffer or the open thread.
     pub fn find(&self, id: &str) -> Option<&ChannelMessage> {
         self.messages
             .iter()
@@ -213,15 +173,12 @@ impl OpenConversation {
             .find(|m| m.id == id)
     }
 
-    /// The selected message, if it is still loaded.
     pub fn selected_message(&self) -> Option<&ChannelMessage> {
         self.selected.as_deref().and_then(|id| self.find(id))
     }
 
-    /// Move the message selection by `dir` (+1 newer, -1 older) over what is
-    /// displayed. Up from nothing selects the newest; down past the newest
-    /// clears the selection (back to following new messages). Lost-message
-    /// placeholders are skipped — there is nothing to act on.
+    /// `dir` +1 newer, -1 older. Up from nothing selects the newest; down past
+    /// the newest clears the selection. Lost-message placeholders are skipped.
     pub fn step_selection(&mut self, dir: i32) {
         let ids: Vec<String> = self
             .displayed()
@@ -233,7 +190,6 @@ impl OpenConversation {
     }
 }
 
-/// Pure core of [`OpenConversation::step_selection`].
 pub fn step_message(ids: &[String], selected: Option<&str>, dir: i32) -> Option<String> {
     if ids.is_empty() {
         return None;
@@ -248,24 +204,18 @@ pub fn step_message(ids: &[String], selected: Option<&str>, dir: i32) -> Option<
     }
 }
 
-/// The whole Home screen model.
 #[derive(Debug, Default)]
 pub struct HomeState {
     pub tree: Option<ConversationTree>,
-    /// Group ids whose channels are currently shown.
+    /// Expanded group ids.
     pub expanded: HashSet<String>,
-    /// Flattened sidebar, rebuilt whenever the tree or `expanded` changes.
     pub rows: Vec<SidebarRow>,
-    /// Index into `rows` of the highlighted row.
     pub selected: usize,
     pub focus: Focus,
-    /// The conversation shown in the main pane, if any.
     pub open: Option<OpenConversation>,
-    /// Advances once per background-sync refresh — drives the sync spinner.
+    /// Drives the sync spinner.
     pub refreshes: u64,
-    /// How the screen is currently consuming keystrokes (nav / compose / prompt).
     pub mode: HomeMode,
-    /// What the compose bar is for (new / reply / edit) while composing.
     pub compose: ComposeTarget,
 }
 
@@ -277,10 +227,8 @@ impl HomeState {
         }
     }
 
-    /// Replace the tree (from `data::load_conversations`) and rebuild the
-    /// sidebar, preserving the selection and expansion where still valid. On the
-    /// very first load, groups start expanded so the user immediately sees their
-    /// channels.
+    /// Rebuild the sidebar from a new tree, keeping selection and expansion
+    /// where still valid. On the first load every group starts expanded.
     pub fn set_tree(&mut self, tree: ConversationTree, user_id: &str) {
         if self.tree.is_none() {
             for group in &tree.groups {
@@ -291,8 +239,6 @@ impl HomeState {
         self.rebuild_rows(user_id);
     }
 
-    /// Recompute `rows` from the current tree + expansion, then clamp the
-    /// selection onto a still-selectable row.
     pub fn rebuild_rows(&mut self, user_id: &str) {
         self.rows = match &self.tree {
             Some(tree) => build_sidebar_rows(tree, &self.expanded, user_id),
@@ -301,19 +247,16 @@ impl HomeState {
         self.selected = clamp_selection(&self.rows, self.selected);
     }
 
-    /// The currently-highlighted row, if any.
     pub fn current_row(&self) -> Option<&SidebarRow> {
         self.rows.get(self.selected)
     }
 
-    /// Move the sidebar highlight by `dir` (+1 down, -1 up), skipping headers.
     pub fn move_selection(&mut self, dir: i32) {
         self.selected = step_selection(&self.rows, self.selected, dir);
     }
 
-    /// Highlight the sidebar row that opens conversation `conv_id`, returning
-    /// it. Used to land on a just-created group / channel / DM, which used to
-    /// leave the highlight wherever it was (#1337).
+    /// Highlight the row that opens `conv_id`, e.g. a just-created
+    /// conversation (#1337).
     pub fn select_conversation(&mut self, conv_id: &str) -> Option<ConvRef> {
         let (i, conv) = self.rows.iter().enumerate().find_map(|(i, r)| match &r.target {
             RowTarget::Open(c) if c.id == conv_id => Some((i, c.clone())),
@@ -323,8 +266,7 @@ impl HomeState {
         Some(conv)
     }
 
-    /// The id of the selected sidebar row iff it's a **pending DM request** —
-    /// the target of the "accept" key. `None` for any other row.
+    /// The selected row's id iff it is a pending DM request.
     pub fn selected_dm_request(&self) -> Option<String> {
         match &self.current_row()?.target {
             RowTarget::Open(conv) if conv.kind == ConvKind::DmRequest => Some(conv.id.clone()),
@@ -332,20 +274,15 @@ impl HomeState {
         }
     }
 
-    /// The (id, name) of the group that scopes a "new channel" / "invite"
-    /// action for the current selection: the nearest group heading at or above
-    /// the highlighted row. Returns `None` if the selection sits in the DM /
-    /// Requests sections (past a section header), where no group applies.
+    /// The group that scopes "new channel" / "invite" for the selection.
     pub fn context_group(&self) -> Option<(String, String)> {
         let tree = self.tree.as_ref()?;
         context_group(&self.rows, tree, self.selected)
     }
 }
 
-/// The group heading governing `selected`: walk up from the selection, resolving
-/// the first [`RowTarget::ToggleGroup`] against `tree.groups`, but stop (→ `None`)
-/// at a section header, so a DM/request selection has no group context. Pure so
-/// the walk-up + boundary rules are unit-tested.
+/// The nearest group heading at or above `selected`; `None` once a section
+/// header is crossed (DM/request rows have no group).
 pub fn context_group(
     rows: &[SidebarRow],
     tree: &ConversationTree,
@@ -361,19 +298,15 @@ pub fn context_group(
                 let g = tree.groups.get(*i)?;
                 return Some((g.id.clone(), g.name.clone()));
             }
-            // Crossed into the DM / Requests sections — no group applies.
             RowTarget::Header => return None,
-            // A channel row under a group — keep walking up to its heading.
             RowTarget::Open(_) => {}
         }
     }
     None
 }
 
-/// Flatten a [`ConversationTree`] into the ordered list of sidebar rows given
-/// which groups are expanded. Order: each group heading (its channels nested
-/// when expanded), then a Direct-Messages section, then a Requests section.
-/// `user_id` is used to title DMs by the *other* member.
+/// Groups (channels nested when expanded), then Direct Messages, then
+/// Requests. `user_id` titles DMs by the other member.
 pub fn build_sidebar_rows(
     tree: &ConversationTree,
     expanded: &HashSet<String>,
@@ -447,8 +380,6 @@ pub fn build_sidebar_rows(
     rows
 }
 
-/// Title a DM by the member who isn't the current user (falling back to a
-/// generic label if the metadata is missing or it's a self-note).
 fn dm_label(dm: &pollis_core::commands::dm::DmChannel, user_id: &str) -> String {
     let names: Vec<String> = dm
         .members
@@ -463,14 +394,12 @@ fn dm_label(dm: &pollis_core::commands::dm::DmChannel, user_id: &str) -> String 
     }
 }
 
-/// Clamp `selected` to the nearest selectable row at or after it, else the last
-/// selectable row, else 0. Keeps a rebuilt sidebar from landing on a header.
+/// The nearest selectable row at or after `selected`, else before it.
 pub fn clamp_selection(rows: &[SidebarRow], selected: usize) -> usize {
     if rows.is_empty() {
         return 0;
     }
     let start = selected.min(rows.len() - 1);
-    // Search forward from the clamped position, then backward.
     for (i, row) in rows.iter().enumerate().skip(start) {
         if row.selectable() {
             return i;
@@ -484,8 +413,7 @@ pub fn clamp_selection(rows: &[SidebarRow], selected: usize) -> usize {
     start
 }
 
-/// Move `from` by `dir` (+1/-1) to the next selectable row, staying put at the
-/// ends. Headers are transparently skipped.
+/// Step to the next selectable row, staying put at the ends.
 pub fn step_selection(rows: &[SidebarRow], from: usize, dir: i32) -> usize {
     if rows.is_empty() {
         return 0;
@@ -495,7 +423,6 @@ pub fn step_selection(rows: &[SidebarRow], from: usize, dir: i32) -> usize {
     loop {
         let next = i + dir;
         if next < 0 || next > last {
-            // Past an end — keep the last valid selectable position.
             return i.clamp(0, last) as usize;
         }
         i = next;
@@ -505,16 +432,13 @@ pub fn step_selection(rows: &[SidebarRow], from: usize, dir: i32) -> usize {
     }
 }
 
-/// The slice of a message buffer to render and how many blank lines to pad above
-/// it, for a bottom-anchored list. Returns `(start, end, top_pad)`: render
-/// `messages[start..end]` preceded by `top_pad` blank lines. `scroll` counts
-/// lines up from the bottom and is clamped so it can never scroll past the top.
+/// A bottom-anchored window: render `[start..end]` after `top_pad` blank
+/// lines. `scroll` counts lines up from the bottom, clamped at the top.
 pub fn visible_window(total: usize, viewport: usize, scroll: usize) -> (usize, usize, usize) {
     if viewport == 0 {
         return (total, total, 0);
     }
     if total <= viewport {
-        // Everything fits — pin it to the bottom by padding the top.
         return (0, total, viewport - total);
     }
     let max_scroll = total - viewport;
@@ -524,22 +448,17 @@ pub fn visible_window(total: usize, viewport: usize, scroll: usize) -> (usize, u
     (start, end, 0)
 }
 
-/// Whether the user has scrolled close enough to the top of the loaded buffer
-/// that we should prefetch the next older page.
 pub fn should_load_older(scroll: usize, loaded: usize, has_more: bool, loading: bool) -> bool {
     has_more && !loading && scroll + PREFETCH_MARGIN >= loaded
 }
 
-/// Merge a freshly-fetched page (core order: newest-first) into an existing
-/// oldest-first buffer, deduping by id (the incoming copy wins, so edits/
-/// deletes overwrite) and re-sorting by `(sent_at, id)`. Uniform across a
-/// newest-page refresh and an older-page fetch: both just contribute rows.
+/// Merge a fetched page into the oldest-first buffer. The incoming copy wins
+/// on a duplicate id, so edits/deletes overwrite; sorted by `(sent_at, id)`.
 pub fn merge_messages(
     existing: Vec<ChannelMessage>,
     incoming: Vec<ChannelMessage>,
 ) -> Vec<ChannelMessage> {
     let mut all = existing;
-    // Drop any existing rows the incoming page supersedes, then append.
     let incoming_ids: HashSet<&str> = incoming.iter().map(|m| m.id.as_str()).collect();
     all.retain(|m| !incoming_ids.contains(m.id.as_str()));
     all.extend(incoming);
@@ -655,7 +574,7 @@ mod tests {
     fn dm_label_prefers_the_other_member() {
         let d = dm("d", "bob", Some("bob"));
         assert_eq!(dm_label(&d, "me"), "bob");
-        // Missing username falls back to the id; self-only DM gets a generic name.
+        // A missing username falls back to the id.
         let anon = dm("d", "xyz", None);
         assert_eq!(dm_label(&anon, "me"), "xyz");
     }

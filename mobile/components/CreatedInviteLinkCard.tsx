@@ -1,16 +1,9 @@
-// #847 (mobile) — the one and only view of a freshly minted invite link.
+// The one and only view of a freshly minted invite link (#847): the server
+// stores only `sha256(secret)`, so it cannot be shown again.
 //
-// The server stores only `sha256(secret)`, so unlike Slack or Discord — which
-// keep the code in plaintext and let you re-open it forever — this link
-// genuinely cannot be shown again by anyone, including us. The card says so
-// out loud instead of hiding it behind a support question later.
-//
-// Copy is VERIFIED (#897/#958 semantics): `Clipboard.setStringAsync` resolves
-// to a boolean, and a rejected or false write surfaces as a visible failed
-// state — a link that is only ever shown once and was never actually copied is
-// the worst possible thing to report as a success. We deliberately do NOT
-// read the clipboard back to double-check: on iOS 14+ a clipboard read fires
-// the system "pasted from Pollis" banner on every tap.
+// Copy is verified: a rejected or false `setStringAsync` shows a failed state.
+// The clipboard is deliberately not read back: on iOS that fires the system
+// "pasted from Pollis" banner on every tap.
 
 import { useEffect, useRef, useState } from "react";
 import { View, Text, Share } from "react-native";
@@ -25,7 +18,6 @@ import { haptic } from "../lib/haptics";
 
 type CopyState = "idle" | "copied" | "failed";
 
-// How long an outcome stays on the button before it returns to idle.
 const COPY_FEEDBACK_MS = 2000;
 
 export function CreatedInviteLinkCard({ link }: { link: CreatedInviteLink }) {
@@ -33,8 +25,6 @@ export function CreatedInviteLinkCard({ link }: { link: CreatedInviteLink }) {
   const [copyState, setCopyState] = useState<CopyState>("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Clear the outcome a couple of seconds after it appears, and never leave a
-  // timer behind that would set state on an unmounted card.
   useEffect(() => {
     if (copyState === "idle") {
       return;
@@ -48,17 +38,16 @@ export function CreatedInviteLinkCard({ link }: { link: CreatedInviteLink }) {
   }, [copyState]);
 
   const onCopy = async () => {
-    // Back to idle first so a second tap on an already-failed button is a
-    // visible state change, and so the feedback timer restarts.
+    // Back to idle first so a second tap on a failed button is a visible
+    // change and the feedback timer restarts.
     setCopyState("idle");
     const copied = await Clipboard.setStringAsync(link.url).catch(() => false);
-    // A copy confirms by touch, and a failed one says so (#1286).
     haptic(copied ? "success" : "error");
     setCopyState(copied ? "copied" : "failed");
   };
 
   const onShare = () => {
-    // Native share sheet. Failures (user dismissed) are not an error state.
+    // A dismissed share sheet is not an error state.
     Share.share({ message: link.url }).catch(() => {});
   };
 

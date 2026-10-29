@@ -17,22 +17,14 @@ import { haptic } from "../../lib/haptics";
 import { useThemeRerender } from "../../components/theme";
 
 /**
- * Scan to sign in a device (#1361): the device being signed in — a desktop at
- * "Sign in with another device", or a new phone — shows a QR; this signed-in
- * phone scans it, confirms with its PIN, and the other device is in, nothing
- * typed or pasted.
+ * Scan to sign in a device (#1361): the new device shows a QR; this signed-in
+ * phone scans it and confirms with its PIN.
  *
  * The code carries the new device's ephemeral public key and a link id, never
  * a secret. The PIN is verified in Rust before anything is sent; Rust then
  * wraps the account key ONLY to an enrollment request whose key is
  * byte-for-byte the one scanned here, so neither the server nor anyone who
- * photographed the code can substitute their own. Waiting is one awaited Rust
- * call, never a poll.
- *
- * This replaced the QR this screen used to SHOW (#1207's direction): a phone
- * scans better than it is scanned, a desktop cannot scan at all, and a
- * 70-character code read off a phone and typed into a desktop was the only
- * way that ever worked. Desktop still shows its own code for a new phone.
+ * photographed the code can substitute their own.
  */
 
 type Step =

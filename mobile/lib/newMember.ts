@@ -1,24 +1,14 @@
-// The "new" tag next to a fresh member's name (#1506).
-//
-// Group channels carry no membership lines at all — no "X joined", no "X
-// left". Instead a member's messages carry a small "new" tag for a week after
-// they joined. The window is anchored on the server's `group_member.joined_at`,
-// which the DS stamps when the invite is ACCEPTED (or the join request / invite
-// link is approved), never when someone is merely invited. Every input is
-// server data the member list already carries, so every device — including one
-// added later — tags exactly the same messages.
-//
-// The desktop's `frontend/src/utils/newMember.ts` is the same rule, byte for
-// byte from the window constant down (`frontend/tests/new-member.test.ts`
-// checks) — mobile imports no frontend TypeScript, so it is a copy.
+// The "new" tag on a fresh member's messages for a week after joining (#1506);
+// group channels carry no membership lines. Anchored on server
+// `group_member.joined_at` (stamped when the invite is ACCEPTED), so every
+// device tags the same messages. A copy of desktop's
+// `frontend/src/utils/newMember.ts`; keep them identical.
 
-/** How long after joining a member's messages carry the tag. */
 export const NEW_MEMBER_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
- * Tolerance for a message stamped slightly before `joined_at` by a sender
- * whose clock runs behind. Messages genuinely older than the join (a member
- * who left and came back) are not tagged.
+ * Tolerance for a sender whose clock runs behind. Messages genuinely older than
+ * the join (a member who left and came back) are not tagged.
  */
 const CLOCK_SKEW_MS = 5 * 60 * 1000;
 
@@ -26,9 +16,8 @@ const CLOCK_SKEW_MS = 5 * 60 * 1000;
 const SQLITE_UTC = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?$/;
 
 /**
- * Epoch ms of a server timestamp, or null when it does not parse. A zone-less
- * value is UTC: that is what the DS writes, and `new Date()` would otherwise
- * read it in the viewer's zone and shift the window by their offset.
+ * Epoch ms, or null. A zone-less value is UTC (what the DS writes); `new Date()`
+ * would read it in the viewer's zone and shift the window.
  */
 export function parseServerTimestamp(value: string | null | undefined): number | null {
   if (!value) {
@@ -44,9 +33,8 @@ export function parseServerTimestamp(value: string | null | undefined): number |
 }
 
 /**
- * user id → joined-at ms for every member who can carry the tag. The group's
- * creator never does: in a brand-new group they would otherwise wear it on
- * every message for its first week.
+ * user id → joined-at ms. The group's creator is excluded, or they would wear
+ * the tag on every message of a brand-new group's first week.
  */
 export function newMemberJoins(
   members: ReadonlyArray<{ user_id: string; joined_at: string }>,
@@ -65,7 +53,6 @@ export function newMemberJoins(
   return out;
 }
 
-/** Whether a message sent at `sentAtMs` by `senderId` carries the tag. */
 export function isNewMemberMessage(
   joins: ReadonlyMap<string, number>,
   senderId: string,

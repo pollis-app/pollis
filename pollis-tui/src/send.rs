@@ -1,23 +1,5 @@
-//! Conversation + group WRITE layer (M3).
-//!
-//! Thin, typed wrappers over the exact `pollis_core::commands::*` **write**
-//! surface the desktop app reaches over Tauri `invoke` (spec §8, the
-//! command→screen table). As with [`crate::data`], we do **not** fork or reshape
-//! any command logic — every wrapper forwards straight into the one core
-//! function, which routes the write through the Delivery Service (spec §2:
-//! "writes go through the DS"). The wrappers exist so the M3b compose/create UI
-//! calls exactly one function per action.
-//!
-//! Two layers, matching the two audiences:
-//! - **Typed passthroughs** ([`send_message`], [`create_group`],
-//!   [`create_channel`], [`create_dm_channel`], [`accept_dm_request`],
-//!   [`invite_to_group`]) — one wrapper per core write, same argument shape the
-//!   §8 table names, taking `&str` where the core takes an owned `String` so a
-//!   UI event handler can pass borrowed input directly.
-//! - **Ergonomic shorthands** ([`send_text`], [`new_group`], [`new_channel`],
-//!   [`start_dm`], [`accept_dm`], [`invite`]) — the defaults the UI wants baked
-//!   in (a group gets a default text channel, a new channel is `text`, a DM has
-//!   exactly the two members), so M3b is a single call per keystroke-action.
+//! Conversation + group write layer: typed passthroughs over the core write
+//! surface (spec §8), plus shorthands with the UI's defaults baked in.
 
 use std::sync::Arc;
 
@@ -27,21 +9,14 @@ use pollis_core::commands::groups::{self, Channel, Group};
 use pollis_core::commands::messages::{self, Message};
 use pollis_core::state::AppState;
 
-// ── Typed passthroughs (one per core write; §8 command→screen map) ────────────
-
-/// Send a text message to a conversation (§8 "Send message"). `conversation_id`
-/// is a group channel id or a DM channel id — the core resolves which. Returns
-/// the stored [`Message`]. The write is routed through the DS by the core.
+/// `conversation_id` is a group channel or DM channel id; the core resolves which.
 pub async fn send_message(
     conversation_id: &str,
     sender_id: &str,
     content: &str,
     reply_to_id: Option<String>,
-    // ULID of the thread root this message replies into (#825). Threaded through
-    // rather than hardcoded `None` at the core call: the TUI has no thread UI yet,
-    // but the wrapper stays a faithful passthrough so adding one is a caller
-    // change, not a signature change — and so a thread reply can never be
-    // silently flattened into the channel by this path.
+    // Thread root ULID (#825); passed through so a thread reply is never
+    // flattened into the channel by this path.
     thread_id: Option<String>,
     sender_username: Option<String>,
     state: &Arc<AppState>,
@@ -59,9 +34,8 @@ pub async fn send_message(
     Ok(message)
 }
 
-/// Create a group owned by `owner_id` (§8 "Create group"). `create_default_*`
-/// toggle the auto-created #General text / Voice Chat channels — pass `None` to
-/// take the core default (both off). Returns the new [`Group`].
+/// `create_default_*` toggle the auto-created #General / Voice Chat channels;
+/// `None` takes the core default (both off).
 pub async fn create_group(
     name: &str,
     description: Option<String>,
@@ -82,9 +56,8 @@ pub async fn create_group(
     Ok(group)
 }
 
-/// Create a channel in `group_id` (§8 "Create channel"). `channel_type` is
-/// `Some("text")` / `Some("voice")`; `None` takes the core default (`text`).
-/// Returns the new [`Channel`].
+/// `channel_type`: `Some("text")` / `Some("voice")`; `None` takes the core
+/// default (`text`).
 pub async fn create_channel(
     group_id: &str,
     name: &str,
@@ -105,10 +78,8 @@ pub async fn create_channel(
     Ok(channel)
 }
 
-/// Open a DM (§8 "Start DM"). `member_ids` must include at least one user other
-/// than `creator_id`; the core reconciles the other members into the MLS tree
-/// and queues their Welcome. 2-person DMs are deduped by the core. Returns the
-/// [`DmChannel`] (existing or freshly created).
+/// `member_ids` must include someone other than `creator_id`. The core dedupes
+/// 2-person DMs, so this may return an existing channel.
 pub async fn create_dm_channel(
     creator_id: &str,
     member_ids: Vec<String>,
@@ -119,8 +90,6 @@ pub async fn create_dm_channel(
     Ok(channel)
 }
 
-/// Accept a pending DM request (§8 "Accept DM request"). Flips the accepting
-/// user's own `accepted_at` via the DS.
 pub async fn accept_dm_request(
     dm_channel_id: &str,
     user_id: &str,
@@ -130,9 +99,7 @@ pub async fn accept_dm_request(
     Ok(())
 }
 
-/// Invite a user to a group (§8 "Invite to group"; core `send_group_invite`).
-/// `invitee_identifier` is the username/email the invite form collects. Only a
-/// group admin may invite — the core enforces it.
+/// `invitee_identifier` is a username or email. The core enforces admin-only.
 pub async fn invite_to_group(
     group_id: &str,
     inviter_id: &str,
@@ -149,10 +116,6 @@ pub async fn invite_to_group(
     Ok(())
 }
 
-// ── Ergonomic shorthands (M3b calls exactly one per action) ───────────────────
-
-/// Send `text` from `user_id` (display name `username`) to conversation
-/// `conv_id`, no reply. The everyday "type and hit Enter" path.
 pub async fn send_text(
     state: &Arc<AppState>,
     user_id: &str,
@@ -160,14 +123,11 @@ pub async fn send_text(
     conv_id: &str,
     text: &str,
 ) -> Result<Message> {
-    // No thread UI in the TUI yet — an ordinary channel message.
     send_message(conv_id, user_id, text, None, None, username, state).await
 }
 
-/// Send `text` into `conv_id` as a quote reply to `reply_to_id` and/or into
-/// the thread rooted at `thread_id` (#1337) — the same `send_message` the
-/// desktop composer calls, with the two optional fields it sets for a reply
-/// and a thread reply.
+/// Send as a quote reply to `reply_to_id` and/or into the thread rooted at
+/// `thread_id` (#1337).
 pub async fn send_text_with(
     state: &Arc<AppState>,
     user_id: &str,
@@ -180,8 +140,6 @@ pub async fn send_text_with(
     send_message(conv_id, user_id, text, reply_to_id, thread_id, username, state).await
 }
 
-/// Edit the user's own message (core `edit_message`: re-encrypts and publishes
-/// an edit envelope; the local copy updates immediately).
 pub async fn edit(
     state: &Arc<AppState>,
     conv_id: &str,
@@ -200,30 +158,26 @@ pub async fn edit(
     Ok(())
 }
 
-/// Delete a message (core `delete_message`; the core decides self-delete vs
-/// admin-delete from the local author and refuses what the user may not do).
+/// The core decides self- vs admin-delete and refuses what the user may not do.
 pub async fn delete(state: &Arc<AppState>, message_id: &str, user_id: &str) -> Result<()> {
     messages::delete_message(message_id.to_string(), user_id.to_string(), state).await?;
     Ok(())
 }
 
-/// One more delivery attempt for a message the durable outbox holds (#1335),
-/// under the same id — the CLI's `R`. Same core call as the apps' Retry.
+/// Retry a message the durable outbox holds, under the same id (#1335).
 pub async fn retry(state: &Arc<AppState>, message_id: &str) -> Result<()> {
     messages::retry_message(message_id.to_string(), state).await?;
     Ok(())
 }
 
-/// Throw away an unsent message (#1335) — the CLI's `x` on a row marked not
-/// sent. The core withdraws it from everyone first if an attempt may have
-/// reached the DS. Returns whether there was anything to discard.
+/// Discard an unsent message (#1335); the core withdraws it first if an attempt
+/// may have reached the DS. Returns whether there was anything to discard.
 pub async fn discard(state: &Arc<AppState>, message_id: &str) -> Result<bool> {
     Ok(messages::discard_unsent_message(message_id.to_string(), state).await?)
 }
 
-/// Toggle `emoji` on a message the way desktop's reaction pill does: remove it
-/// when the user already reacted with it (`already_mine`), add it otherwise.
-/// Returns whether the reaction is now present.
+/// Remove `emoji` if `already_mine`, add it otherwise. Returns whether the
+/// reaction is now present.
 pub async fn toggle_reaction(
     state: &Arc<AppState>,
     message_id: &str,
@@ -252,13 +206,11 @@ pub async fn toggle_reaction(
     }
 }
 
-/// Create a group named `name` owned by `user_id`, with the default text
-/// channel **on** and no voice channel — the sensible default for a text TUI.
+/// Default text channel on, no voice channel.
 pub async fn new_group(state: &Arc<AppState>, user_id: &str, name: &str) -> Result<Group> {
     create_group(name, None, user_id, Some(true), Some(false), state).await
 }
 
-/// Create a text channel named `name` in `group_id`, created by `user_id`.
 pub async fn new_channel(
     state: &Arc<AppState>,
     group_id: &str,
@@ -268,7 +220,6 @@ pub async fn new_channel(
     create_channel(group_id, name, None, Some("text".to_string()), user_id, state).await
 }
 
-/// Start a 2-person DM from `user_id` to `other_user_id`.
 pub async fn start_dm(
     state: &Arc<AppState>,
     user_id: &str,
@@ -282,12 +233,10 @@ pub async fn start_dm(
     .await
 }
 
-/// Accept the pending DM request `dm_id` as `user_id`.
 pub async fn accept_dm(state: &Arc<AppState>, user_id: &str, dm_id: &str) -> Result<()> {
     accept_dm_request(dm_id, user_id, state).await
 }
 
-/// Invite `invitee_id` to `group_id` as `inviter_id`.
 pub async fn invite(
     state: &Arc<AppState>,
     group_id: &str,

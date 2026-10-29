@@ -7,18 +7,12 @@ import { deviceAccentBackend } from "./deviceAccent";
 
 export { DEFAULT_ACCENT_HEX, DEFAULT_BACKGROUND_HEX, ACCENT_PRESETS } from "./accents";
 
-// Pollis Mobile — design tokens.
-//
-// Exactly TWO base colours: the accent and the background. Every other colour
-// is derived from them in `theme/derive.ts` (pure, unit-tested by
-// tests/theme-contrast.test.ts). Both bases are runtime-configurable; the
-// `palette` / `semantic` / `type` colours are getters over the current derived
-// theme, so changing a base re-derives everything on the next render.
+// Exactly TWO base colours, the accent and the background; every other colour
+// is derived from them in `theme/derive.ts`. `palette` / `semantic` / `type`
+// colours are getters over the live derived theme.
 
-// The accent starts as the one this device last showed (#1447), read
-// synchronously while this module loads — before any component renders and
-// before any module could capture a colour — so a cold start opens in the
-// user's palette instead of flashing amber until the synced preference lands.
+// The accent this device last showed (#1447), read synchronously at module
+// load so a cold start's first frame is already in the user's palette.
 const _bootAccentHex = loadBootAccent(deviceAccentBackend);
 let _accentRgb = hexToRgbTriplet(_bootAccentHex);
 let _bgRgb = hexToRgbTriplet(DEFAULT_BACKGROUND_HEX);
@@ -36,17 +30,14 @@ export function setBackgroundRgb(rgb: string) {
   _theme = deriveTheme(_accentRgb, _bgRgb);
 }
 
-/** Sets the accent from "#rrggbb". */
 export function setAccentHex(hex: string) {
   setAccentRgb(hexToRgbTriplet(hex));
 }
 
-/** Sets the background from "#rrggbb". */
 export function setBackgroundHex(hex: string) {
   setBackgroundRgb(hexToRgbTriplet(hex));
 }
 
-/** The live accent as "#rrggbb". */
 export function currentAccentHex(): string {
   return rgbTripletToHex(_accentRgb);
 }
@@ -56,17 +47,14 @@ export function bootAccentHex(): string {
   return _bootAccentHex;
 }
 
-/** The live background as "#rrggbb". */
 export function currentBackgroundHex(): string {
   return rgbTripletToHex(_bgRgb);
 }
 
-/** The current derived theme (every colour token as a string). */
 export function currentTheme(): Theme {
   return _theme;
 }
 
-/** "#rrggbb" → "r, g, b". */
 export function hexToRgbTriplet(hex: string): string {
   const h = hex.replace("#", "");
   const r = parseInt(h.slice(0, 2), 16);
@@ -75,7 +63,6 @@ export function hexToRgbTriplet(hex: string): string {
   return `${r}, ${g}, ${b}`;
 }
 
-/** "r, g, b" → "#rrggbb". */
 export function rgbTripletToHex(rgb: string): string {
   const [r, g, b] = rgb.split(",").map((n) => parseInt(n.trim(), 10));
   const to = (n: number) => n.toString(16).padStart(2, "0");
@@ -112,9 +99,7 @@ export const palette = {
   },
 };
 
-// Getter object — every read resolves against the live derived theme.
 export const semantic = {
-  /* ── Current names ── */
   // Body text, names, titles.
   get text() {
     return _theme.text;
@@ -195,7 +180,7 @@ export const semantic = {
     return _theme.raised;
   },
 
-  /* ── Deprecated aliases (old ramp names) — migrate to the names above ── */
+  /* Deprecated aliases (old ramp names). */
   get ink() {
     return _theme.text;
   },
@@ -219,7 +204,7 @@ export const semantic = {
   },
 };
 
-// Corner radii (mockups): chips/pills are fully rounded (height / 2).
+// Corner radii: chips/pills are fully rounded (height / 2).
 export const r = {
   xs: 4,
   sm: 10,
@@ -230,7 +215,6 @@ export const r = {
   pill: 999,
 };
 
-// Spacing scale.
 export const space = { xs: 6, sm: 8, md: 10, lg: 12, xl: 14, xxl: 16, xxxl: 20 };
 
 // System monospace — no bundled font. iOS has no generic "monospace" alias,
@@ -325,7 +309,7 @@ export const type = {
   },
   mono: { fontFamily: fonts.mono400, fontSize: 13 },
 
-  /* ── Deprecated aliases — migrate to the names above ── */
+  /* Deprecated aliases. */
   h1: { fontFamily: fonts.bold, fontSize: 20, letterSpacing: -0.2 },
   h2: { fontFamily: fonts.bold, fontSize: 17 },
   rowN: { fontFamily: fonts.medium, fontSize: 16 },

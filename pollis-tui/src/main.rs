@@ -2,10 +2,6 @@
 //! `pollis-core` with no Tauri, no IPC and no WebView. See
 //! `docs/pollis-tui-spec.md` and `.codesight/wiki/pollis-tui.md`.
 
-// The UI state machine (`app`/`ui`/`home`/`enroll_flow`) and the data/sync/auth
-// core all live in the library crate (`pollis_tui`) so the in-box smoke + e2e
-// tests can link them; the binary reaches them through the lib. Only `terminal`
-// (the real crossterm raw-mode / alt-screen guard) stays binary-only here.
 mod terminal;
 
 use std::io::IsTerminal;
@@ -23,16 +19,12 @@ use crate::terminal::TerminalGuard;
 use pollis_tui::app::{Action, App, Screen};
 use pollis_tui::{cli, ui};
 
-/// How often the UI re-reads local state to surface what the background sync
-/// loop wrote. Deliberately shorter than the sync cadence so a synced message
-/// appears within a frame or so of landing in the local DB.
+/// How often the UI re-reads local state the sync loop wrote; shorter than the
+/// sync cadence so a synced message appears promptly.
 const UI_REFRESH: Duration = Duration::from_millis(750);
 
-/// Arguments first, then the terminal check, then the client — in that order,
-/// so `--help` / `--version` work with no TTY and no environment at all (a dev
-/// build without its env used to die on `missing env var: R2_S3_ENDPOINT`
-/// before it could say anything), and running without a terminal says so on
-/// stderr instead of exiting 1 with the reason only in the log (#1337).
+/// Arguments, then the terminal check, then the client: `--help` / `--version`
+/// need no TTY and no env, and a missing terminal is reported on stderr (#1337).
 fn main() -> ExitCode {
     match cli::parse(std::env::args().skip(1)) {
         cli::Command::Help => {
@@ -73,9 +65,8 @@ fn main() -> ExitCode {
     match runtime.block_on(run_client()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            // Lands on the terminal for a failure before the log redirect (bad
-            // config), in the log after it — `run_client` has then already put
-            // it on stdout too.
+            // After the log redirect this lands in the log; `run_client` has
+            // already printed it to stdout.
             eprintln!("pollis: {e:#}");
             ExitCode::FAILURE
         }
@@ -83,13 +74,9 @@ fn main() -> ExitCode {
 }
 
 async fn run_client() -> Result<()> {
-    // Build the client the same way AppState::new does for the desktop app:
-    // Config::from_env + the local DB + the device keystore, which picks the OS
-    // keychain or the machine-bound encrypted file at runtime (#882) — so this
-    // works over SSH with no secret-service. POLLIS_DELIVERY_URL is required for
-    // everything: since #987 the TUI holds no database credential either, so
-    // reads and writes alike are signed POSTs to the DS. Set POLLIS_DATA_DIR so
-    // the TUI enrolls as its own device.
+    // The keystore falls back to the machine-bound encrypted file where there is
+    // no OS keychain (#882), so this works over SSH. POLLIS_DATA_DIR makes the
+    // TUI enroll as its own device.
     let config = Config::from_env()
         .context("loading config from env (need POLLIS_DELIVERY_URL, R2_* placeholders)")?;
     let state = Arc::new(
@@ -98,27 +85,22 @@ async fn run_client() -> Result<()> {
             .context("connecting AppState (local DB + keystore)")?,
     );
 
-    // Honor POLLIS_OVERLAY at boot via the runtime apply path (build the client
-    // direct, then apply the mode). Non-fatal: on failure stay direct.
+    // Honor POLLIS_OVERLAY at boot; on failure stay direct.
     let boot_mode = state.config.overlay_mode;
     if let Err(e) = pollis_core::commands::overlay::apply_overlay_mode(&state, boot_mode).await {
         eprintln!("[overlay] boot apply ({boot_mode:?}) failed, staying direct: {e}");
     }
 
-    // pollis-core logs with bare `eprintln!` (fine under the desktop shell,
-    // where stderr is a dev terminal). Here stderr IS the UI's terminal — any
-    // write scrolls the screen under ratatui and corrupts the layout — so
-    // redirect fd 2 to a log file for the whole session. This also catches
-    // native-library chatter that no Rust-level capture could.
+    // pollis-core logs with bare `eprintln!`, and here stderr is the UI's
+    // terminal (any write corrupts the ratatui layout), so fd 2 goes to a log
+    // file; that also catches native-library output.
     let log_path = redirect_stderr_to_log();
 
-    // Restore the terminal even if the render loop panics, so a crash never
-    // strands the user in raw mode.
     install_panic_hook();
 
     let mut guard = TerminalGuard::enter().context("entering raw mode / alt screen")?;
     let result = run(&mut guard, state).await;
-    // Explicit restore before printing any error to the (now-normal) terminal.
+    // Restore before printing any error to the terminal.
     drop(guard);
 
     if let Some(path) = log_path {
@@ -132,14 +114,9 @@ async fn run_client() -> Result<()> {
     result
 }
 
-/// Point fd 2 at `pollis-tui.log` in this device's data dir — `POLLIS_DATA_DIR`,
-/// else the platform default `pollis_core` keeps the database and keystore in
-/// (`db::local::dirs_path`) — for the lifetime of the process. Returns the log
-/// path, or `None` if the file couldn't be opened — in that case stderr is left
-/// alone rather than lost.
-///
-/// Unix only: it dup2's onto fd 2. On Windows this is a no-op stub (stderr left
-/// as-is) until a ConPTY-based redirect is wired, mirroring `terminal_windows.rs`.
+/// Point fd 2 at `pollis-tui.log` in the device's data dir for the process
+/// lifetime. `None` if the file couldn't be opened (stderr is then left alone).
+/// A no-op stub off Unix.
 #[cfg(not(unix))]
 fn redirect_stderr_to_log() -> Option<std::path::PathBuf> {
     None
@@ -149,18 +126,13 @@ fn redirect_stderr_to_log() -> Option<std::path::PathBuf> {
 fn redirect_stderr_to_log() -> Option<std::path::PathBuf> {
     use std::os::fd::AsRawFd;
 
-    // The same directory the local DB and keystore live in. It used to fall
-    // back to the shared OS temp dir when `POLLIS_DATA_DIR` was unset, which
-    // put the log somewhere world-writable and nowhere near the device it
-    // belongs to (#1337).
+    // The data dir, never the shared world-writable temp dir (#1337).
     let dir = pollis_core::db::local::dirs_path();
-    // First run: the data dir may not exist yet (pollis-core creates it later,
-    // during identity setup) — without this the redirect would silently no-op
-    // and the whole first session would render over log spam.
+    // On first run the data dir doesn't exist yet; without this the redirect
+    // would silently no-op.
     pollis_core::private_fs::create_dir_all(&dir).ok();
     let path = dir.join("pollis-tui.log");
-    // Owner-only, and created that way rather than chmod-ed afterwards. Every
-    // line this file receives is one some code path wrote to stderr.
+    // Created owner-only rather than chmod-ed afterwards.
     let file = {
         use std::os::unix::fs::OpenOptionsExt;
         std::fs::OpenOptions::new()
@@ -170,8 +142,7 @@ fn redirect_stderr_to_log() -> Option<std::path::PathBuf> {
             .open(&path)
             .ok()?
     };
-    // The mode above applies only when the open CREATED the file, so a log left
-    // by an older build keeps whatever it had. Tighten it through the handle.
+    // The mode applies only on create; tighten a pre-existing file too.
     let _ = pollis_core::private_fs::restrict_open_handle(&file);
     // SAFETY: dup2 onto fd 2 is the standard daemon-style redirect; the source
     // fd stays open (leaked) so fd 2 never dangles.
@@ -182,17 +153,13 @@ fn redirect_stderr_to_log() -> Option<std::path::PathBuf> {
     Some(path)
 }
 
-/// The render/input loop. Owns an input thread that forwards key presses over an
-/// mpsc channel, keeping `crossterm`'s blocking `read` off the async runtime.
-/// The loop selects over {key input, a periodic UI-refresh tick}: the refresh
-/// tick re-reads local state so the background sync loop's writes surface without
-/// blocking input (spec §6 — "a slow sync round must not freeze input").
+/// The render/input loop: selects over key input and a UI-refresh tick, so a
+/// slow sync round never freezes input (spec §6).
 async fn run(guard: &mut TerminalGuard, state: Arc<AppState>) -> Result<()> {
     let (tx, mut rx) = mpsc::unbounded_channel::<event::KeyEvent>();
     spawn_input_thread(tx);
 
     let mut app = App::new(state);
-    // First thing after boot: probe for an existing session.
     let mut pending = Some(app.initial_action());
 
     let mut refresh = tokio::time::interval(UI_REFRESH);
@@ -205,10 +172,8 @@ async fn run(guard: &mut TerminalGuard, state: Arc<AppState>) -> Result<()> {
             break;
         }
 
-        // A queued async action runs after a "working…" frame is painted. Its
-        // follow-up (if any) is processed on the next iteration. Timer-driven
-        // actions skip the busy hint: painting "working…" every refresh tick
-        // strobes the status line.
+        // A queued action runs after a "working…" frame is painted. Timer-driven
+        // actions skip it: painting it every refresh tick strobes the status line.
         if let Some(action) = pending.take() {
             let background = action.is_background();
             if !background {
@@ -220,18 +185,13 @@ async fn run(guard: &mut TerminalGuard, state: Arc<AppState>) -> Result<()> {
             continue;
         }
 
-        // Otherwise wait for either a key press or the next refresh tick.
         tokio::select! {
             key = rx.recv() => match key {
                 Some(key) => pending = app.on_key(key),
-                // Input thread ended (stdin closed) — exit cleanly.
+                // stdin closed.
                 None => break,
             },
             _ = refresh.tick() => {
-                // Screens with something to re-read on the timer: the live Home
-                // screen (background-synced data), the new device's enrollment
-                // wait (poll `enrollment_status`), and the existing device's
-                // pending-approvals list (surface newly-arrived requests).
                 pending = match app.screen {
                     Screen::Home => Some(Action::Refresh),
                     Screen::EnrollWaiting => app.enrollment_poll_action(),
@@ -242,14 +202,13 @@ async fn run(guard: &mut TerminalGuard, state: Arc<AppState>) -> Result<()> {
         }
     }
 
-    // Stop the background poll loop before the terminal is restored.
     app.shutdown().await;
 
     Ok(())
 }
 
-/// Draw one frame, first recording the message pane's size so the key handler
-/// can page-scroll by the right amount and keep the selected message on screen.
+/// Records the message pane's size first so the key handler can page-scroll
+/// correctly.
 fn draw(guard: &mut TerminalGuard, app: &mut App) -> Result<()> {
     let (width, height) = ui::message_viewport(guard.terminal.get_frame().area(), app);
     app.set_msg_viewport(width, height);
@@ -260,14 +219,12 @@ fn draw(guard: &mut TerminalGuard, app: &mut App) -> Result<()> {
     Ok(())
 }
 
-/// Read terminal events on a dedicated OS thread and forward key *presses* to the
-/// async loop. `crossterm::event::read` is blocking; isolating it here keeps the
-/// tokio runtime free. The thread exits when the receiver is dropped.
+/// `crossterm::event::read` blocks, so it runs on its own OS thread; the thread
+/// exits when the receiver is dropped.
 fn spawn_input_thread(tx: mpsc::UnboundedSender<event::KeyEvent>) {
     std::thread::spawn(move || loop {
         match event::read() {
-            // Filter to Press: some terminals also emit Release/Repeat, which
-            // would double every keystroke.
+            // Some terminals also emit Release/Repeat, doubling every keystroke.
             Ok(Event::Key(key)) if key.kind == KeyEventKind::Press => {
                 if tx.send(key).is_err() {
                     break;
@@ -279,8 +236,7 @@ fn spawn_input_thread(tx: mpsc::UnboundedSender<event::KeyEvent>) {
     });
 }
 
-/// Chain a terminal-restore onto the default panic hook so a panic in the render
-/// loop doesn't leave the user in raw mode with a garbled screen.
+/// Chain a terminal restore onto the default panic hook.
 fn install_panic_hook() {
     let default = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {

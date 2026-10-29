@@ -1,15 +1,8 @@
 /**
- * The set of languages Pollis ships a catalogue for — the mobile mirror of
- * `frontend/src/i18n/languages.ts`.
- *
- * The catalogues themselves are SHARED with desktop (see `metro.config.js` and
- * `resources.ts`); this list is duplicated because mobile cannot import
- * frontend TypeScript. `tests/i18n.test.ts` fails if it drifts from the locale
- * directories that actually ship, so adding a locale is: add it to the desktop
- * registry, translate, then add the same row here.
- *
- * No React, no React Native imports: the resolution rules are pure and
- * unit-tested under `node --test`.
+ * The languages Pollis ships a catalogue for — a copy of
+ * `frontend/src/i18n/languages.ts`, since mobile cannot import frontend
+ * TypeScript. `tests/i18n.test.ts` fails if it drifts from the locale
+ * directories. Pure (no React Native) so it runs under `node --test`.
  */
 
 export interface LanguageOption {
@@ -88,12 +81,9 @@ export function resolveDeviceLanguage(candidates: readonly string[] | undefined)
 }
 
 /**
- * The device locale, as Hermes reports it.
- *
- * `Intl.DateTimeFormat().resolvedOptions().locale` is the OS locale on both
- * platforms (Hermes backs `Intl` with Foundation on iOS and ICU on Android),
- * which makes it the device's answer without a native module — the same
- * answer `expo-localization` would give, minus a prebuild.
+ * The device locale. Hermes answers `Intl.DateTimeFormat().resolvedOptions()`
+ * with the OS locale on both platforms, so no `expo-localization` prebuild is
+ * needed.
  */
 export function deviceLanguageCandidates(): string[] {
   try {
@@ -105,10 +95,9 @@ export function deviceLanguageCandidates(): string[] {
 }
 
 /**
- * Uppercase already-translated copy the way the language itself does — the
- * locale-invariant `toUpperCase()` spells Turkish wrong and is a no-op
- * pretending to work in Arabic and Chinese. Mobile's label style (`SELF`,
- * `PREFERENCES`) makes this the common case, not the edge.
+ * Uppercase already-translated copy the way the language itself does; the
+ * locale-invariant `toUpperCase()` spells Turkish wrong and is a no-op in
+ * Arabic and Chinese.
  */
 export function localeUpperCase(value: string, language: string): string {
   return value.toLocaleUpperCase(language);

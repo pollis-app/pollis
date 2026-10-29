@@ -1,7 +1,5 @@
-// Opens the full-screen media viewer (#1248) on an attachment. Always a push
-// on the ROOT stack — on iPad too, where the conversation sits in the
-// two-pane's detail pane: the viewer covers the whole window rather than
-// opening inside the pane (`useNav` would push it there).
+// Always a push on the root stack, so on iPad the viewer covers the whole
+// window rather than the pane (`useNav` would push it there) (#1248).
 
 import { useCallback } from "react";
 import { useRouter } from "expo-router";

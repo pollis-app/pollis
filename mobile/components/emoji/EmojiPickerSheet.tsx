@@ -34,13 +34,12 @@ import { emojiDisplayName, type EmojiAnnotationStack } from "./emojiAnnotations"
 import { useEmojiAnnotations } from "./useEmojiAnnotations";
 
 // Cells are at least this wide (≥44pt targets); the column count follows the
-// sheet width, so a narrow phone gets 7 and a wide one more.
+// sheet width.
 const MIN_CELL = 46;
 // The sheet's horizontal padding (SheetOverlay: 16 each side).
 const SHEET_INSET = 32;
 
-// Same base glyph as desktop's SkinTonePicker — a single string so the
-// shaper joins the modifier.
+// A single string so the shaper joins the modifier.
 const TONE_BASE = "\u{270B}";
 
 type PickerListItem =
@@ -130,11 +129,7 @@ function Cell({
   );
 }
 
-/**
- * Full emoji picker (search, categories, skin tones, custom group emoji) in
- * the standard sheet. `title` names the sheet (default "Add reaction"). `onSelect` receives the insert text: the
- * displayed Unicode character, or a `<:name:hash>` token for custom emoji.
- */
+/** `onSelect` receives the insert text: the Unicode character, or a `<:name:hash>` token for custom emoji. */
 export function EmojiPickerSheet({
   title,
   onSelect,
@@ -182,7 +177,6 @@ export function EmojiPickerSheet({
       });
       out.push(...chunkRows(recents.slice(0, columns * 2), "recents", columns));
     }
-    // Custom emoji, one section per owning group.
     const byGroup = new Map<string, CustomEmoji[]>();
     for (const e of customEmoji) {
       const list = byGroup.get(e.group_id) ?? [];
@@ -261,8 +255,6 @@ export function EmojiPickerSheet({
                 alignItems: "center",
                 justifyContent: "center",
                 borderRadius: layout.touchMin / 2,
-                // No ring: selected is the accent disc, the rest a dark
-                // `high` disc on the raised sheet.
                 backgroundColor:
                   toneIndex === index ? semantic.accent : semantic.high,
               }}

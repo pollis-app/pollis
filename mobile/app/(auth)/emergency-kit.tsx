@@ -15,19 +15,12 @@ import { useThemeRerender } from "../../components/theme";
 
 /**
  * Emergency Kit — shown once, right after a brand-new account's PIN is set.
- * The recovery key emitted by `verify_otp` lives in the MobX store
- * (`pendingSecretKey`) for one screen-jump only. The user must explicitly
- * acknowledge they've saved it before we drop it from memory.
+ * The recovery key from `verify_otp` lives in the store (`pendingSecretKey`)
+ * for this one screen and is dropped once the user acknowledges saving it;
+ * then the same /(auth)/initializing path a returning user takes.
  *
- * After ACK we route to /(auth)/initializing — exactly the same path a
- * returning user takes — so the rest of the launch sequence stays the
- * same regardless of whether this was a new account or not.
- *
- * The key is shown exactly once and is unrecoverable afterwards, so it needs
- * real ways OFF this screen. `selectable` text alone was not one: it is an
- * undiscoverable long-press, it selects a 40-odd character mono string by
- * hand, and it is the single worst string in the product to mis-transcribe.
- * Copy and Save below mirror the desktop `SaveSecretKeyScreen` affordances.
+ * The key is unrecoverable afterwards, so Copy and Save are real ways off this
+ * screen (desktop's `SaveSecretKeyScreen`), not just `selectable` text.
  */
 
 // How long a copy outcome stays on the button before returning to idle.
@@ -37,11 +30,9 @@ const COPY_FEEDBACK_MS = 2000;
 type CopyState = "idle" | "copied" | "failed";
 
 /**
- * The emergency-kit document, byte-for-byte the same text desktop writes to
- * `pollis-emergency-kit-*.txt` — the shared `auth:emergencyKit.document`
- * catalogue entry. Whatever the user saves on a phone should be the same
- * artifact they would have saved on a laptop — a kit that reads differently
- * per platform is a support problem the day someone compares them.
+ * The emergency-kit document, byte-for-byte the text desktop writes to
+ * `pollis-emergency-kit-*.txt` (the shared `auth:emergencyKit.document`
+ * catalogue entry), so a kit reads the same on every platform.
  */
 function emergencyKitDocument(secretKey: string): string {
   return i18n.t("auth:emergencyKit.document", {
@@ -88,11 +79,9 @@ function EmergencyKit() {
     router.replace("/(auth)/initializing");
   };
 
-  // VERIFIED copy (#897/#958 semantics): `setStringAsync` resolves to a
-  // boolean, and a rejected or false write shows as a visible failure. A key
-  // that is shown once and silently failed to copy is the worst possible thing
-  // to report as success. We deliberately do NOT read the clipboard back —
-  // on iOS 14+ that fires the system "pasted from Pollis" banner every tap.
+  // VERIFIED copy: a rejected or false `setStringAsync` shows as a failure.
+  // Deliberately no read-back: on iOS 14+ that fires the "pasted from Pollis"
+  // banner every tap.
   const onCopy = async () => {
     // Back to idle first so a second tap on an already-failed button is a
     // visible state change, and so the feedback timer restarts.
@@ -100,19 +89,13 @@ function EmergencyKit() {
     const copied = await Clipboard.setStringAsync(pendingSecretKey).catch(
       () => false,
     );
-    // A copy confirms by touch, and a failed one says so (#1286).
     haptic(copied ? "success" : "error");
     setCopyState(copied ? "copied" : "failed");
   };
 
-  // Hand the whole kit to the OS share sheet — password manager, Notes, Mail,
-  // AirDrop to a laptop. Deliberately passed as `message`, NOT written to a
-  // file first: #1001 closed the plaintext-on-disk leaks and staged pasted
-  // attachments in memory rather than through a temp file, and the recovery
-  // key is the most sensitive string the app ever holds. Desktop can write a
-  // .txt because it hands it straight to the OS download flow; here a file
-  // would have to sit in the app sandbox first, so this stays in memory.
-  // Dismissing the sheet is a normal outcome, not an error state.
+  // Hand the kit to the OS share sheet as `message`, NOT a file: a file would
+  // sit in the app sandbox first, and this is the most sensitive string the app
+  // holds (#1001). Dismissing the sheet is a normal outcome.
   const onShare = () => {
     Share.share({ message: emergencyKitDocument(pendingSecretKey) }).catch(
       () => {},

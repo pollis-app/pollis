@@ -4,10 +4,7 @@ import { Stack } from "expo-router";
 export default function AuthLayout() {
   return (
     <Stack screenOptions={{ headerShown: false, gestureEnabled: false }}>
-      {/* PIN → Initializing is an instant handoff (the loading setup screen),
-          so it shouldn't slide — it cuts straight in with no animation. The
-          subsequent Initializing → tabs hop fades (configured on the root
-          (tabs) screen). Other auth screens keep the default transition. */}
+      {/* PIN → Initializing is an instant handoff, so it cuts in unanimated. */}
       <Stack.Screen name="initializing" options={{ animation: "none" }} />
     </Stack>
   );

@@ -24,10 +24,8 @@ const NOTIFICATION = {
 };
 
 /**
- * Plays the tactile feedback for `event` (#1286; the table is in
- * lib/hapticEvents.ts). Fire-and-forget: feedback is a nicety, so a device
- * without a haptic engine, or any failure, is silent and never blocks the
- * interaction that triggered it.
+ * Plays `event` (#1286). Fire-and-forget: a failure is silent and never blocks
+ * the interaction.
  */
 export function haptic(event: HapticEvent): void {
   const spec = HAPTICS[event];

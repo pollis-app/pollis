@@ -6,14 +6,9 @@ import { semantic, fonts, layout, space } from "../../theme/tokens";
 const CHOICE_MIN_HEIGHT = layout.touchMin + 4;
 
 /**
- * One option of a single-choice set laid out in a `ChoiceGrid`: fills its
- * cell, at least 48pt tall (a clear margin over the 44pt minimum, review6
- * #7) so the visible shape is the whole hit area. No
- * border: it sits in a raised Group, so unselected options are a `high` fill
- * with an accent label (the shape says "tappable"); selected is the inverse,
- * an accent fill with a dark onAccent check and label, plus the radio's
- * checked state — never by colour alone. The label wraps rather than
- * truncates at large text sizes.
+ * One option of a single-choice set in a `ChoiceGrid`. It fills its cell so
+ * the visible shape is the whole hit area; selected adds a check and the
+ * radio's checked state — never colour alone.
  */
 export function ChoiceChip({
   label,

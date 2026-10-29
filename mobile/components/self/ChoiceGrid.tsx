@@ -3,11 +3,9 @@ import { View, type StyleProp, type ViewStyle } from "react-native";
 import { space } from "../../theme/tokens";
 
 /**
- * Lays its children out in a fixed number of equal-width columns, row by row.
- * Unlike a flexWrap row, the grid does not depend on how wide the platform's
- * font renders each label, so iOS and Android show the same shape and no
- * option is ever left alone on a line. A short last row is padded with empty
- * cells so every cell keeps the same width.
+ * Equal-width columns, row by row. Unlike a flexWrap row it does not depend on
+ * how wide each platform renders a label, so iOS and Android show the same
+ * shape; a short last row is padded with empty cells.
  */
 export function ChoiceGrid({
   columns,

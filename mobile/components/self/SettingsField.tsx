@@ -2,11 +2,7 @@ import { Text, View } from "react-native";
 import { Icon } from "../icons";
 import { semantic, type as ty, space, fonts, r, layout } from "../../theme/tokens";
 
-/**
- * One labelled input on a settings page: sentence-case label above, the
- * input, then an optional hint and error. The error leads with an alert icon
- * so it is never told apart from the hint by colour alone.
- */
+/** The error leads with an alert icon so it is never told from the hint by colour alone. */
 export function SettingsField({
   label,
   hint,
@@ -30,7 +26,6 @@ export function SettingsField({
   );
 }
 
-/** Inline error line: alert icon + text in the accent (the only danger hue). */
 export function ErrorText({
   children,
   testID,
@@ -56,7 +51,6 @@ export function ErrorText({
   );
 }
 
-/** Explanatory paragraph under a section title. */
 export function Note({ children, testID }: { children: string; testID?: string }) {
   return (
     <Text testID={testID} style={ty.secondary}>
@@ -66,11 +60,9 @@ export function Note({ children, testID }: { children: string; testID?: string }
 }
 
 /**
- * A value the person can see but not edit here (e.g. the email), drawn in the
- * same box as a Field. A Text rather than a non-editable TextInput: Android
- * scrolls a TextInput to the end of a long value, clipping its start, while a
- * Text always shows the start and ends in an ellipsis on both platforms.
- * `multiline` lets a longer value (a group description) wrap in full instead.
+ * A read-only value drawn in a Field's box. A Text, not a non-editable
+ * TextInput: Android scrolls a TextInput to the end of a long value, clipping
+ * its start. `multiline` lets a longer value wrap in full.
  */
 export function ReadOnlyField({
   value,

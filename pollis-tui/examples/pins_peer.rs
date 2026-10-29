@@ -1,16 +1,10 @@
 //! Dev-DS peer for the mobile Maestro `pins` two-client flow (#1315).
 //!
-//! Pins are conversation state every member shares, so the device tier has to
-//! show one member's pin reaching another, both ways. This peer signs up a
-//! fresh account on the DS named by `POLLIS_DELIVERY_URL` (the dev DS — it
-//! fixes the OTP), prints its handle, waits for the phone under test to open a
-//! DM with it, sends a message and PINS it (minting the DM's pin key), prints
-//! `PEER_PINNED`, then waits for the phone's own pin to appear in its list
+//! Signs up on the dev DS (`POLLIS_DELIVERY_URL`), prints its handle, waits
+//! for the phone to open a DM, sends a message and pins it (minting the DM's
+//! pin key), prints `PEER_PINNED`, then waits for the phone's own pin to appear
 //! (`PEER_SAW_DEVICE_PIN`) and for the phone to unpin the peer's
 //! (`PEER_SAW_UNPIN`). `mobile/scripts/maestro-pins.sh` drives both sides.
-//!
-//! Not a shipping binary: examples build against pollis-tui's
-//! dev-dependencies.
 //!
 //!   POLLIS_DATA_DIR=$(mktemp -d) POLLIS_DELIVERY_URL=https://api-dev.pollis.com \
 //!   POLLIS_DEV_ACCESS_KEY=… cargo run -p pollis-tui --example pins_peer -- <email>

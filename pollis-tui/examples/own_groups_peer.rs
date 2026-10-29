@@ -1,23 +1,18 @@
 //! Dev-DS peer for the mobile Maestro `own-groups` two-device flow.
 //!
-//! A group one of a user's devices creates must reach the user's OTHER devices
-//! without a refresh, in both directions. This peer is the account's FIRST
-//! device (standing in for the user's desktop): it signs up on the DS named by
-//! `POLLIS_DELIVERY_URL` (the dev DS — it fixes the OTP) and prints the
-//! account's recovery key, which the phone under test uses to enroll as the
-//! second device. Then:
+//! The account's first device: signs up on the dev DS (`POLLIS_DELIVERY_URL`)
+//! and prints the recovery key the phone uses to enroll as the second device.
+//! Then:
 //!
 //! 1. The phone creates a group with #General and posts in it. The peer must
 //!    list that group and read the post — so the phone's create added this
 //!    device to the MLS group (`PEER_READ_PHONE_MESSAGE`).
 //! 2. Once the driving script says go (`touch $POLLIS_OWN_GROUPS_GO`), the peer
 //!    creates a group named `$POLLIS_PEER_GROUP_NAME` and prints its id
-//!    (`PEER_CREATED_GROUP=`). The phone, which never leaves the Groups tab,
-//!    must show it on its own — the inbox wake-up `create_group` sends is the
-//!    only thing that can tell it.
+//!    (`PEER_CREATED_GROUP=`); only `create_group`'s inbox wake-up can tell the
+//!    phone.
 //!
-//! `mobile/scripts/maestro-own-groups.sh` drives both sides. Not a shipping
-//! binary: examples build against pollis-tui's dev-dependencies.
+//! `mobile/scripts/maestro-own-groups.sh` drives both sides.
 //!
 //!   POLLIS_DATA_DIR=$(mktemp -d) POLLIS_DELIVERY_URL=https://api-dev.pollis.com \
 //!   POLLIS_DEV_ACCESS_KEY=… POLLIS_OWN_GROUPS_GO=/tmp/go POLLIS_PEER_GROUP_NAME=… \
@@ -114,7 +109,7 @@ async fn main() -> Result<()> {
     }
     println!("PEER_READ_PHONE_MESSAGE");
 
-    // 2. The other direction, on the script's word.
+    // 2. The other direction.
     let started = Instant::now();
     while !std::path::Path::new(&go).exists() {
         if started.elapsed() > WAIT {

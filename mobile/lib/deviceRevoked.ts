@@ -1,9 +1,7 @@
-// #1338: once the DS has said this device was removed from the account, the
-// core rejects every command with `device_revoked`. Every command passes
-// through the native bridge, so that is where it is noticed — whichever
-// command happened to hit it first — and the registered handler ends the
-// session once, however many in-flight commands fail together. Pure (no
-// react-native), so the node tests reach it.
+// #1338: a revoked device's core rejects every command with `device_revoked`.
+// The native bridge notices it on whichever command fails first, and the
+// handler ends the session once, however many commands fail together. Pure, so
+// the node tests reach it.
 
 type Handler = () => void | Promise<void>;
 
@@ -15,13 +13,11 @@ const listeners = new Set<() => void>();
 export function isDeviceRevokedError(error: unknown): boolean {
   const message =
     typeof error === "string" ? error : error instanceof Error ? error.message : String(error);
-  // The core's `Error::DeviceRevoked` displays as exactly `device_revoked`; a
-  // command that wraps it appends it after ": ". Anything else that merely
-  // mentions the word (a security-event kind, a nudge payload) is not it.
+  // `Error::DeviceRevoked` displays as exactly `device_revoked`, or after ": "
+  // when wrapped. Text that merely mentions the word is not it.
   return message === "device_revoked" || message.endsWith(": device_revoked");
 }
 
-/** Register what to do when this device turns out to be revoked. Returns an unsubscribe. */
 export function onDeviceRevoked(next: Handler): () => void {
   handler = next;
   return () => {
@@ -48,10 +44,7 @@ export function noticeDeviceRevoked(error: unknown): void {
   });
 }
 
-/**
- * Run the handler for a revocation learned some other way (the live
- * `device_revoked` nudge), so every path ends the session the same way.
- */
+/** For a revocation learned another way (the live nudge), so every path ends the session the same. */
 export function deviceWasRevoked(): void {
   noticeDeviceRevoked("device_revoked");
 }

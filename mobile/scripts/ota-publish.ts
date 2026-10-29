@@ -1,28 +1,7 @@
 #!/usr/bin/env node
-// Over-the-air JS update pipeline for the mobile app (#1250).
-//
-//   node scripts/ota-publish.ts <command> [options]          (from mobile/)
-//
-// Each command is one step of .github/workflows/mobile-ota-release.yml and can
-// be run by hand with the same result (runbook: mobile/CLAUDE.md "OTA updates").
-//
-//   build                 expo export with prod EXPO_PUBLIC values, runtime
-//                         versions from the fingerprint, safety checks, unsigned
-//                         manifests            → <dir>/plan.json + <dir>/files/
-//                         Refuses an update no recorded store build would take
-//                         (store/runtime-versions.json); `--unreached warn` only warns.
-//                         Each update is also issued, re-signed, under every
-//                         ledger runtime version aliased to its own (#1446)
-//   prepare-republish     re-serve an earlier group's bytes under new update ids
-//                         (rollback to a known-good update)
-//   prepare-rollback      rollBackToEmbedded directives (rollback to the store
-//                         binary's own bundle)
-//   sign                  re-check everything, then sign with OTA_CODE_SIGNING_KEY
-//                         (the only step that sees the key)
-//   upload                assets, archive, then the live pointers, to R2
-//   attest                stage the files + BinaryRecord leaves for the log
-//   log-append            merge the leaves into the transparency accumulator
-//   verify                re-fetch through the Worker; check signature + hashes
+// Over-the-air JS update pipeline for the mobile app (#1250). Each command is
+// one step of .github/workflows/mobile-ota-release.yml and can be run by hand
+// (runbook: mobile/CLAUDE.md "OTA updates").
 //
 // Only node: built-ins at the top level. `build` loads Expo from node_modules
 // lazily, so `sign` runs from a bare checkout.
@@ -81,10 +60,6 @@ const REPO = resolve(MOBILE, "..");
 const CERT_PATH = join(MOBILE, "store", "ota-code-signing.pem");
 const ACCUMULATOR_KEY = "internal/binary-records.json";
 const LEDGER_PATH = join(MOBILE, "store", "runtime-versions.json");
-
-// ---------------------------------------------------------------------------
-// small helpers
-// ---------------------------------------------------------------------------
 
 function fail(message: string): never {
   console.error(`ota-publish: ${message}`);
@@ -239,10 +214,6 @@ function emitSummary(plan: Plan, dir: string, extra = ""): void {
   }
   console.log(text);
 }
-
-// ---------------------------------------------------------------------------
-// build
-// ---------------------------------------------------------------------------
 
 interface ExportMetadata {
   fileMetadata: Record<string, { bundle: string; assets: { path: string; ext: string }[] }>;
@@ -446,10 +417,6 @@ function reachSummary(reach: Reach[]): string {
   return lines.join("\n") + "\n";
 }
 
-// ---------------------------------------------------------------------------
-// R2 (S3 API through the aws CLI, exactly as the release workflows do it)
-// ---------------------------------------------------------------------------
-
 interface R2 {
   bucket: string;
   endpoint: string;
@@ -471,11 +438,9 @@ function aws(args: string[]): string {
   return run("aws", args, { env: AWS_ENV });
 }
 
-// The update store is the `ota/` prefix of the release bucket. These three
-// helpers (and the live-pointer listing in prepare-rollback) are the only
-// update-store I/O, and they take keys relative to that prefix — the same keys
-// the Worker reads (pollis-delivery/worker/updates.ts). The transparency
-// accumulator (log-append) lives in its own bucket and is not prefixed.
+// Update-store keys are relative to the `ota/` prefix, the same keys the Worker
+// reads (pollis-delivery/worker/updates.ts). The transparency accumulator
+// (log-append) lives in its own bucket and is not prefixed.
 function storeKey(key: string): string {
   return `${OTA_KEY_PREFIX}${key}`;
 }
@@ -503,10 +468,6 @@ function writeTemp(contents: string | Buffer): string {
   writeFileSync(p, contents);
   return p;
 }
-
-// ---------------------------------------------------------------------------
-// republish / rollback
-// ---------------------------------------------------------------------------
 
 interface UpdateArchive {
   platform: Platform;
@@ -644,10 +605,6 @@ function cmdPrepareRollback(opts: Record<string, string>): void {
   emitSummary(plan, out);
 }
 
-// ---------------------------------------------------------------------------
-// sign — the approval-gated step
-// ---------------------------------------------------------------------------
-
 function cmdSign(opts: Record<string, string>): void {
   const dir = resolve(need(opts, "in"));
   const key = process.env.OTA_CODE_SIGNING_KEY;
@@ -707,10 +664,6 @@ function cmdSign(opts: Record<string, string>): void {
   writePlan(dir, plan);
   console.log(`signed ${plan.entries.length} entr${plan.entries.length === 1 ? "y" : "ies"} of group ${plan.groupId}`);
 }
-
-// ---------------------------------------------------------------------------
-// upload
-// ---------------------------------------------------------------------------
 
 // `--phase content` uploads the bytes and the archive (nothing a phone sees);
 // `--phase live` flips the pointers. The workflow appends to the transparency
@@ -792,10 +745,6 @@ function uploadPointers(r2: R2, plan: Plan): void {
   }
 }
 
-// ---------------------------------------------------------------------------
-// transparency log
-// ---------------------------------------------------------------------------
-
 function cmdAttest(opts: Record<string, string>): void {
   const dir = resolve(need(opts, "in"));
   const out = resolve(need(opts, "out"));
@@ -858,10 +807,6 @@ function cmdLogAppend(opts: Record<string, string>): void {
   }
   fail("could not append to the accumulator after 5 attempts");
 }
-
-// ---------------------------------------------------------------------------
-// verify — through the Worker, as a phone would
-// ---------------------------------------------------------------------------
 
 async function fetchUpdate(baseUrl: string, platform: Platform, runtimeVersion: string): Promise<{ status: number; headers: Headers; body: Buffer }> {
   const res = await fetch(`${baseUrl}/api/manifest`, {
@@ -927,8 +872,6 @@ async function cmdVerify(opts: Record<string, string>): Promise<void> {
   }
   await verifyOne(baseUrl, cert, need(opts, "platform") as Platform, need(opts, "runtime-version"));
 }
-
-// ---------------------------------------------------------------------------
 
 const HELP = `usage: node scripts/ota-publish.ts <command> [options]
 

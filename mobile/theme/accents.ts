@@ -4,7 +4,6 @@
 
 // Brand amber — same as the desktop app + website.
 export const DEFAULT_ACCENT_HEX = "#fabf5a";
-// Just-above-black.
 export const DEFAULT_BACKGROUND_HEX = "#0a0907";
 
 // `n` is the stable wire/lookup name; the rendered label is translated.

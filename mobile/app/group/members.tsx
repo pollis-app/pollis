@@ -44,9 +44,8 @@ function Members() {
     return ms === null ? createdAt : new Date(ms).toLocaleDateString(activeLocale());
   };
 
-  // Role-then-alphabetical, mirroring desktop's members panel intent —
-  // desktop orders online-first, but mobile has no presence source yet, so
-  // presence ordering awaits one.
+  // Role-then-alphabetical (desktop orders online-first; mobile has no
+  // presence source).
   const sortedMembers = useMemo(() => sortMembersByRole(members), [members]);
 
   const myRole = useMemo(
@@ -59,7 +58,6 @@ function Members() {
 
   const onRemove = (memberId: string) => {
     if (confirmRemove !== memberId) {
-      // The first tap arms the confirm: warn by touch (#1286).
       haptic("confirmArm");
       setConfirmRemove(memberId);
       return;

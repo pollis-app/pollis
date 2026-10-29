@@ -4,10 +4,8 @@ import type { SearchSnippet } from "../../hooks/queries/useSearch";
 import { splitSnippet } from "../../lib/searchSnippet";
 
 /**
- * A search snippet with its matched terms marked. `highlights` are
- * `[start, end)` pairs in UTF-16 code units — plain JS string indices — so the
- * text is sliced directly, never rendered as markup (the snippet is user
- * content). Mirrors desktop's `HighlightedSnippet`.
+ * `highlights` are `[start, end)` UTF-16 indices, so the text is sliced
+ * directly and never rendered as markup (the snippet is user content).
  */
 export function HighlightedSnippet({
   snippet,

@@ -1,8 +1,5 @@
-// Conversation id → chat-route params (mobile analogue of desktop's
-// `routeForConversation` in utils/urlRouting.ts): an id that matches a known
-// channel routes as that channel (selecting its group so realtime joins the
-// right room); anything else routes as a DM. Used by the Saved screen and
-// the pollis://m/… deep link after a successful permalink resolve.
+// Conversation id → chat-route params: a known channel routes as that channel
+// (selecting its group so realtime joins the right room), anything else as a DM.
 
 import { useCallback } from "react";
 import { useUserGroupsWithChannels, useDMChannels } from "./queries";
@@ -31,8 +28,7 @@ export function useConversationRoute() {
       if (dm) {
         return { kind: "dm", name: dm.user2_identifier };
       }
-      // Not in any local list — a DM the list hasn't refreshed for. The
-      // permalink already resolved locally, so the chat screen can load it.
+      // A DM the list hasn't refreshed for; the permalink already resolved locally.
       return { kind: "dm" };
     },
     [groups, dms],

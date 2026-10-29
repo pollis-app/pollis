@@ -4,13 +4,10 @@ import { semantic, fonts } from "../../theme/tokens";
 import { resolveEmojiUri } from "../../lib/emojiCache";
 
 /**
- * One custom emoji, rendered inline. Resolves the content hash to a cached
- * `file://` image; while unresolved it holds a fixed-size placeholder (no
- * reflow), and on failure it degrades to the literal `:shortcode:` text —
- * which is the entire reason the shortcode travels alongside the hash.
- *
- * Uses the core RN <Image> (not expo-image) so it participates in inline
- * <Text> layout.
+ * One custom emoji, inline: a fixed-size placeholder while unresolved (no
+ * reflow), the literal `:shortcode:` text on failure — the reason the
+ * shortcode travels alongside the hash. Core RN <Image> (not expo-image) so it
+ * participates in inline <Text> layout.
  */
 export function CustomEmojiImage({
   shortcode,

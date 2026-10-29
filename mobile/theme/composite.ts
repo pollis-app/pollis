@@ -1,6 +1,5 @@
 // Pure colour math, free of react-native so `node --test` can load it.
 
-/** "r, g, b" triplet → [r, g, b]. */
 function channels(triplet: string): number[] {
   return triplet.split(",").map((n) => parseInt(n.trim(), 10));
 }

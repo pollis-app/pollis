@@ -5,8 +5,6 @@ import { controlDisabled } from "../../theme/button";
 import { Icon } from "../icons";
 import { haptic } from "../../lib/haptics";
 
-// Key diameter and the gaps between keys. 72pt circles keep every key well
-// above the 44pt minimum and leave room for 28pt digits.
 const KEY = 72;
 const COL_GAP = 24;
 const ROW_GAP = 14;
@@ -19,11 +17,7 @@ const ROWS = [
   ["", "0", "bk"],
 ];
 
-/**
- * The PIN progress dots. A filled dot is a solid disc; an empty one is a
- * hollow ring — so the count reads by shape, not colour. Spoken as one
- * element ("2 of 4 digits entered").
- */
+/** The PIN dots: filled vs hollow, so the count reads by shape, not colour. */
 export function PinCells({ length, size = 4 }: { length: number; size?: number }) {
   const { t } = useTranslation("mobile");
   return (
@@ -59,17 +53,15 @@ export function PinCells({ length, size = 4 }: { length: number; size?: number }
 }
 
 /**
- * What the PIN screens show under the dots the moment the fourth digit is in
- * and the slow work starts (Argon2id key derivation, opening the encrypted
- * database, a DS round trip): a spinner and one line saying what is
- * happening, announced politely. Rendered until the screen navigates away or
- * the call fails, alongside a disabled keypad.
+ * Shown under the dots while the slow work after the fourth digit runs
+ * (Argon2id, opening the encrypted DB, a DS round trip), alongside a disabled
+ * keypad.
  */
 export function PinBusy({ label, testID = "pin-busy" }: { label: string; testID?: string }) {
   return (
     <View
       testID={testID}
-      // A real native view so the e2e flows can find it by id (Fabric would
+      // A real native view so e2e flows can find it by id (Fabric would
       // otherwise flatten a background-less wrapper away).
       collapsable={false}
       accessible
@@ -90,12 +82,7 @@ export function PinBusy({ label, testID = "pin-busy" }: { label: string; testID?
   );
 }
 
-/**
- * The numeric keypad the PIN screens use: 72pt round keys on the raised
- * surface with 28pt digits, no borders. Keys carry `btn-pin-<digit>` / `btn-pin-back`
- * testIDs, which the Maestro PIN subflow taps, and speak as their digit or
- * "Delete".
- */
+/** The PIN keypad. Keys carry `btn-pin-<digit>` / `btn-pin-back` testIDs, which the Maestro PIN subflow taps. */
 export function PinKeypad({
   onDigit,
   onBackspace,
@@ -108,11 +95,9 @@ export function PinKeypad({
   const { t } = useTranslation("common");
   return (
     <View
-      // Must stay a real native view. With no background or border, Fabric
-      // flattens it away while enabled and re-creates it when pointerEvents
-      // flips to "none" (busy); on Android that churn races view
-      // preallocation and the next padding update crashes the app ("Unable
-      // to find viewState for tag N" in updatePadding) on PIN submit.
+      // Must stay a real native view: Fabric flattens it while enabled and
+      // re-creates it when pointerEvents flips to "none" (busy), which on
+      // Android crashed PIN submit ("Unable to find viewState for tag N").
       collapsable={false}
       style={{
         alignItems: "center",
@@ -136,9 +121,8 @@ export function PinKeypad({
                 accessibilityRole="button"
                 accessibilityLabel={back ? t("keys.delete") : k}
                 accessibilityState={{ disabled: !!disabled }}
-                // On touch-down, not release: a digit is undone by the delete
-                // key at no cost, so the pad answers the moment a finger lands
-                // instead of a beat later when it lifts.
+                // On touch-down, not release: a digit is undone by delete at
+                // no cost, so the pad answers the moment a finger lands.
                 onPressIn={() => {
                   haptic("keyTap");
                   if (back) {
@@ -147,17 +131,14 @@ export function PinKeypad({
                     onDigit(k);
                   }
                 }}
-                // A tap briefly fills the key with the soft accent tier: an
-                // acknowledgement without anything flashy.
                 style={({ pressed }) => ({
                   width: KEY,
                   height: KEY,
                   borderRadius: KEY / 2,
                   alignItems: "center",
                   justifyContent: "center",
-                  // No border in any state. Disabled (busy): the solid
-                  // disabled fill and dim digits instead of fading the pad —
-                  // review #3/#4. Delete has no disc in any state.
+                  // No border; disabled (busy) is a solid fill + dim digits,
+                  // never a faded pad. Delete has no disc in any state.
                   backgroundColor: back
                     ? pressed && !disabled
                       ? semantic.accentSoft

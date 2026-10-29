@@ -1,8 +1,6 @@
-// One attachment in a message row. Every kind opens the full-screen media
-// viewer on tap (#1248) — desktop's AttachmentDisplay opens its lightbox the
-// same way: images as a decrypted thumbnail, video as its blurhash under a
-// play glyph (expo-image cannot draw a video frame), audio and other files
-// as a named chip.
+// One attachment in a message row; every kind opens the media viewer on tap
+// (#1248). Video shows its blurhash under a play glyph: expo-image cannot draw
+// a video frame.
 
 import { useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
@@ -15,8 +13,6 @@ import { LONG_PRESS_MS } from "../../lib/pressFeedback";
 import { r, semantic, type as ty } from "../../theme/tokens";
 import type { MessageAttachment } from "../../types";
 
-// Image sizing: fixed max width, height follows the aspect ratio within
-// sane bounds; unknown dimensions get a square fallback.
 const IMAGE_MAX_W = 220;
 function imageSize(att: MessageAttachment): { width: number; height: number } {
   if (att.width && att.height) {
@@ -35,7 +31,6 @@ export function AttachmentTile({
   onLongPress,
 }: {
   attachment: MessageAttachment;
-  // Absent where the row cannot open a viewer (no conversation context).
   onOpen?: (attachment: MessageAttachment) => void;
   // The row's own long press (message actions), so pressing an attachment
   // still reaches it.
@@ -43,7 +38,6 @@ export function AttachmentTile({
 }) {
   const { t } = useTranslation("chat");
   const kind = mediaKind(attachment.content_type);
-  // An upload still in flight with no local file has nothing to show yet.
   const openable =
     !!onOpen && (!!attachment.object_key || !!attachment.localPreviewUri);
   const testID = `btn-attachment-${attachment.id}`;
@@ -120,7 +114,6 @@ export function AttachmentTile({
     );
   }
 
-  // Audio and other files: a named chip.
   return (
     <Pressable
       {...press}

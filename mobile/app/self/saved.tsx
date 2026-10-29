@@ -45,7 +45,6 @@ function timeAgo(iso: string): string {
 export default function SavedScreen() {
   useThemeRerender();
   const { t } = useTranslation("saved");
-  // Phones push the conversation; iPad opens it in its tab's two-pane.
   const { openConversation } = useOpenConversation();
   const { data: saved = [], isLoading } = useSavedMessages();
   const unsave = useUnsaveMessage();

@@ -3,11 +3,7 @@ import { Trans, useTranslation } from "react-i18next";
 import { Icon } from "../icons";
 import { fonts, layout, semantic, type as ty } from "../../theme/tokens";
 
-/**
- * Sits on top of the composer while a reply is being written (#1270),
- * desktop's ReplyPreview: who is being answered, one line of what they
- * said, and a 44pt dismiss. Tapping the quote scrolls to the original.
- */
+/** Sits on top of the composer while a reply is written (#1270); tapping the quote scrolls to the original. */
 export function ReplyBar({
   name,
   snippet,

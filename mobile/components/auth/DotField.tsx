@@ -7,11 +7,7 @@ const COUNT = 90;
 const W = 390;
 const H = 844;
 
-/**
- * The Initializing screen's quiet backdrop: a sparse, static field of small
- * accent squares behind the card. Decorative only — hidden from screen
- * readers, never animated.
- */
+/** The Initializing screen's decorative backdrop: hidden from screen readers, never animated. */
 export function DotField() {
   return (
     <View

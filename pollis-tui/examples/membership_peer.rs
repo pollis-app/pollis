@@ -1,10 +1,7 @@
 //! Dev-DS peer for the mobile Maestro `membership` flow (#1506).
 //!
-//! Group channels carry no membership lines; a fresh member's messages carry a
-//! "new" tag instead, and the member page lists pending invites with a revoke.
-//! This peer plays a group's creator against the phone under test. It runs
-//! against the DS named by `POLLIS_DELIVERY_URL` (the dev DS — it fixes the
-//! OTP) in one of two modes:
+//! Plays a group's creator against the phone, on the dev DS
+//! (`POLLIS_DELIVERY_URL`), in one of two modes:
 //!
 //! * `signup <email>` — sign up and print `PEER_HANDLE=`, then exit. The
 //!   script uses it for the account that stays a PENDING invitee.
@@ -16,8 +13,7 @@
 //!   (`PEER_PROMOTED`); then wait for the phone to revoke that invite
 //!   (`PEER_SAW_REVOKE`) and exit 0.
 //!
-//! `mobile/scripts/maestro-membership.sh` drives both sides. Not a shipping
-//! binary: examples build against pollis-tui's dev-dependencies.
+//! `mobile/scripts/maestro-membership.sh` drives both sides.
 //!
 //!   POLLIS_DATA_DIR=$(mktemp -d) POLLIS_DELIVERY_URL=https://api-dev.pollis.com \
 //!   POLLIS_DEV_ACCESS_KEY=… POLLIS_GROUP_NAME=… \
@@ -115,7 +111,6 @@ async fn admin(email: &str, phone: &str, pending: &str) -> Result<()> {
     })
     .await?;
     println!("PEER_SAW_PHONE_JOIN");
-
 
     groups::send_group_invite(group_id.clone(), me.clone(), pending.to_string(), &state)
         .await

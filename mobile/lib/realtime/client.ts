@@ -1,49 +1,26 @@
-// Foreground realtime transport — a thin wrapper over LiveKit `Room`s
-// used in DATA-ONLY mode (no audio/video tracks are ever published or
-// subscribed). Each room's data channel carries the JSON `RealtimeEvent`
-// wire format (see ./events.ts); mobile uses it purely to learn that a
-// conversation has new activity and re-run the same envelope ingest the
-// chat screen runs on focus.
+// Foreground realtime: LiveKit rooms in DATA-ONLY mode, used only to learn that
+// a conversation has new activity (wire format in ./events.ts).
 //
-// Connections are REF-COUNTED and shared per room name. Two hooks can hold
-// the same room (the inbox hook holds every group/DM room for unread badges
-// while the open chat's hook holds its own room for liveness) without
-// opening two LiveKit connections — that matters because the DS mints one
-// identity per device per room (an opaque pseudonym since #836, but still a
-// deterministic function of room + user + device), and LiveKit evicts the
-// existing session when the same identity joins a room twice. The first
-// subscriber opens the room, later subscribers attach a listener, and the
-// room disconnects when the last subscriber closes.
-//
-// Everything here degrades to a no-op when realtime isn't available: no
-// `EXPO_PUBLIC_LIVEKIT_URL`, no `get_livekit_token` bridge command, or a
-// connect failure all leave the subscription inert, keeping the app behaving
-// exactly as it does without realtime (focus-effect ingest only). A failed
-// connect clears the entry so a later subscribe retries.
+// Connections are ref-counted and shared per room name: the DS mints one
+// identity per device per room, and LiveKit evicts the existing session when the
+// same identity joins twice. Everything degrades to a no-op when realtime is
+// unavailable; a failed connect drops the entry so a later subscribe retries.
 
-// livekit-client + @livekit/react-native are imported LAZILY inside the
-// connect path (dynamic import), never at module load. Both eagerly touch
-// web globals Hermes lacks (DOMException, the webrtc stack) at module-eval,
-// so a static import throws during bundle evaluation and crashes app boot —
-// even though realtime is a runtime-gated no-op until EXPO_PUBLIC_LIVEKIT_URL
-// is set. `Room` stays a type-only import (erased at compile, no runtime eval).
+// livekit-client and @livekit/react-native touch web globals Hermes lacks at
+// module-eval, so a static import crashes boot. They are imported lazily in the
+// connect path; `Room` is type-only.
 import type { Room } from "livekit-client";
 import { invoke } from "../native";
 import { decodeRealtimeEvent, isTrustedOrigin, type RealtimeEvent } from "./events";
 
-// registerGlobals() installs the react-native-webrtc globals LiveKit needs.
-// It must run before a Room connects, but calling it at module load can
-// crash boot when the webrtc native module isn't configured (it isn't in
-// this build — voice is installed-but-not-activated, see mobile/CLAUDE.md).
-// So we call it lazily on the first connect, guarded, and only once.
+// Called lazily on first connect: at module load it can crash boot while the
+// webrtc native module is not configured (voice is not activated, #343).
 let globalsRegistered = false;
 function ensureGlobals(registerGlobals: () => void): void {
   if (globalsRegistered) {
     return;
   }
   // Hermes has no DOMException, which livekit-client references at module-eval.
-  // Install a minimal polyfill before the webrtc globals so the lazy import in
-  // the connect path can't crash once realtime is actually activated.
   const g = globalThis as Record<string, unknown>;
   if (typeof g.DOMException === "undefined") {
     g.DOMException = class DOMException extends Error {
@@ -58,17 +35,11 @@ function ensureGlobals(registerGlobals: () => void): void {
   } catch (e) {
     console.warn("[realtime] registerGlobals failed (webrtc not configured?):", e);
   }
-  // Mark as attempted regardless — a failure here means webrtc is absent,
-  // and retrying on every connect would just log the same error.
+  // Attempted once: a failure means webrtc is absent, and retrying only re-logs it.
   globalsRegistered = true;
 }
 
-/**
- * Mint a LiveKit access token for `room` via the Rust core's
- * `get_livekit_token` bridge arm (`pollis-core/src/bridge.rs`), which asks the
- * DS to mint it. Returns `null` on any failure so the caller can treat
- * realtime as unavailable rather than throwing.
- */
+/** Returns `null` on any failure, so the caller treats realtime as unavailable. */
 export async function fetchRealtimeToken(
   room: string,
 ): Promise<{ token: string; url: string } | null> {
@@ -80,8 +51,6 @@ export async function fetchRealtimeToken(
   }
 }
 
-/** Handle returned by `subscribeRealtime`; `close()` detaches the listener
- *  and disconnects the underlying room once no subscriber remains. */
 export interface RealtimeSubscription {
   close(): void;
 }
@@ -93,9 +62,8 @@ type RoomEntry = {
 
 const entries = new Map<string, RoomEntry>();
 
-// Remove `entry` from the registry only if it is still the mapped one — a
-// close-then-resubscribe during an in-flight connect replaces the entry, and
-// the stale cleanup must not evict its successor.
+// Only if still the mapped entry: a close-then-resubscribe during an in-flight
+// connect replaces it, and the stale cleanup must not evict its successor.
 function dropEntry(roomName: string, entry: RoomEntry): void {
   if (entries.get(roomName) === entry) {
     entries.delete(roomName);
@@ -103,11 +71,8 @@ function dropEntry(roomName: string, entry: RoomEntry): void {
 }
 
 async function openRoom(roomName: string, entry: RoomEntry): Promise<void> {
-  // The server address comes back WITH the token, because a LiveKit JWT is only
-  // valid at the server that issued it. `EXPO_PUBLIC_LIVEKIT_URL` remains as a
-  // build-time fallback for local dev against a DS that has no LIVEKIT_URL set,
-  // but it is no longer how production finds the SFU — otherwise moving the SFU
-  // would require shipping a new app binary.
+  // The URL comes with the token (a LiveKit JWT is valid only at its issuer), so
+  // the SFU can move without a new binary; the env var is a local-dev fallback.
   const minted = await fetchRealtimeToken(roomName);
   if (!minted) {
     dropEntry(roomName, entry);
@@ -120,8 +85,6 @@ async function openRoom(roomName: string, entry: RoomEntry): Promise<void> {
     return;
   }
 
-  // Lazy-load the webrtc/livekit stack only now that realtime is actually in
-  // use — never at module load (see the import note at the top of this file).
   const { registerGlobals } = await import("@livekit/react-native");
   ensureGlobals(registerGlobals);
   const { Room, RoomEvent } = await import("livekit-client");
@@ -137,8 +100,8 @@ async function openRoom(roomName: string, entry: RoomEntry): Promise<void> {
         listener(event);
       }
     });
-    // A healed connection drops every wake-up published while it was down —
-    // and nothing re-sends them. Tell the listeners so they catch up.
+    // A healed connection drops every wake-up sent while it was down, and
+    // nothing re-sends them, so tell the listeners to catch up.
     room.on(RoomEvent.Reconnected, () => {
       for (const listener of entry.listeners) {
         listener({ type: "realtime_reconnected", room: roomName });
@@ -159,19 +122,14 @@ async function openRoom(roomName: string, entry: RoomEntry): Promise<void> {
   }
 }
 
-/**
- * Whether `roomName` is connected or connecting. False once its connect failed
- * (the entry is dropped), so a caller holding a handle can re-subscribe.
- */
+/** False once its connect failed, so a caller holding a handle can re-subscribe. */
 export function isRoomOpen(roomName: string): boolean {
   return entries.has(roomName);
 }
 
 /**
- * Subscribe to a LiveKit room in data-only mode; `onEvent` fires for each
- * decoded `RealtimeEvent` on the room's data channel. Returns synchronously —
- * the connection is established (or shared with an existing subscriber) in
- * the background. Call `close()` on the returned handle when done.
+ * Subscribe to a room's `RealtimeEvent`s. Returns synchronously; the connection
+ * opens (or is shared) in the background.
  */
 export function subscribeRealtime(
   roomName: string,

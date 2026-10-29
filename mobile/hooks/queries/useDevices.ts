@@ -1,9 +1,5 @@
-// Device list / revoke hooks for the Security screen. Backed by
-// `list_user_devices` and `revoke_device`.
-//
-// The Rust side blocks revoking the current device — `logout(delete_data:
-// true)` is the path for "sign out of this device" — so the UI's revoke
-// button is hidden on the row marked `is_current`.
+// Rust refuses to revoke the current device (that is `logout`), so the UI
+// hides revoke on the `is_current` row.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
@@ -44,7 +40,6 @@ export function useRevokeDevice() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "destructive" } },
     mutationFn: async (deviceId: string) => {
       if (!currentUser) {

@@ -48,10 +48,8 @@ function NewGroup() {
           if (appStore.currentUser) {
             writeLastGroupId(appStore.currentUser.id, group.id);
           }
-          // Land on the Groups tab with the new group selected (pill strip,
-          // its channel panel, the tab bar) — not a standalone group page.
-          // Its #General (if opted in) renders once the groups list
-          // refetches. dismissTo pops this form back to the tabs.
+          // Land on the Groups tab with the new group selected, not a standalone
+          // group page; its #General renders once the groups list refetches.
           router.dismissTo("/(tabs)/groups");
         },
       },
