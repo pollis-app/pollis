@@ -55,7 +55,9 @@
     "placeholder": "Напишіть повідомлення…",
     "previewAlt": "Попередній перегляд",
     "removeAttachment": "Прибрати {{name}}",
-    "send": "Надіслати повідомлення"
+    "send": "Надіслати повідомлення",
+    "markSensitive": "Позначити {{name}} як делікатне",
+    "unmarkSensitive": "Зняти позначку «делікатне» з {{name}}"
   },
   "mentions": {
     "listLabel": "Підказки згадок",

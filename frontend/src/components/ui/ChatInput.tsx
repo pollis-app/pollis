@@ -9,10 +9,11 @@ import {
   stageAttachment,
   discardStagedAttachment,
 } from "../../bridge";
-import { ChevronRight, Plus, X, Film, Music } from "lucide-react";
+import { ChevronRight, Plus, X, Film, Music, Eye, EyeOff } from "lucide-react";
 import { EmojiPickerButton } from "../Emoji/EmojiPickerButton";
 import { getFileIcon, mimeFromName } from "../../utils/fileIcon";
-import { captureVideoPoster } from "../../utils/imageProcessing";
+import { blurhashFromUrl, captureVideoPoster } from "../../utils/imageProcessing";
+import { SensitiveCover } from "../Media/SensitiveCover";
 import { formatFileSize } from "../../utils/format";
 import { observer } from "mobx-react-lite";
 import { dropTargetStore } from "../../stores/dropTargetStore";
@@ -74,6 +75,11 @@ export interface Attachment {
   preview?: string;  // blob URL for image/video poster previews
   type: "image" | "video" | "audio" | "file";
   loading?: boolean; // true while source/preview is still being prepared
+  // Marked sensitive (#1568): sent with `sens`, so receivers see it blurred.
+  sensitive?: boolean;
+  // The blurhash the sensitive cover is drawn with, worked out from the
+  // preview when the attachment is first marked.
+  blurhash?: string;
 }
 
 /** The staged handle of an attachment, or null when its bytes are a real file. */
@@ -130,16 +136,26 @@ function typeFromMime(mime: string): Attachment["type"] {
   return "file";
 }
 
-const PREVIEW_SIZE = 80;
+// The tray's card: a square half again as tall as the old 80px thumb, so the
+// picture is easier to see and the toolbar has room (#1568).
+const PREVIEW_SIZE = 120;
+
+// The card's corner toolbar buttons: filled, never bordered.
+const TOOLBAR_BUTTON =
+  "flex h-6 w-6 items-center justify-center rounded bg-black/60 text-white hover:bg-black/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent";
 
 const AttachmentPreview: React.FC<{
   attachment: Attachment;
   onRemove: (id: string) => void;
+  onToggleSensitive: (id: string) => void;
   onExpand: (url: string, type: "image" | "video") => void;
-}> = ({ attachment, onRemove, onExpand }) => {
+}> = ({ attachment, onRemove, onToggleSensitive, onExpand }) => {
   const { t } = useTranslation("common");
   const hasVisualPreview = attachment.type === "image" || attachment.type === "video";
-  const canExpand = hasVisualPreview && !!attachment.preview && !attachment.loading;
+  const sensitive = attachment.sensitive === true;
+  // A sensitive card stays covered in the composer too: opening it would put
+  // the media on screen, which is what marking it was for.
+  const canExpand = hasVisualPreview && !!attachment.preview && !attachment.loading && !sensitive;
   // Opening the preview is free to undo: a mouse press acts on pointer-down
   // (#1529). Remove, beside it, stays on click.
   const expandPress = usePressActivation<HTMLDivElement>(
@@ -148,9 +164,14 @@ const AttachmentPreview: React.FC<{
   );
 
   return (
-    <div className="relative flex-shrink-0" style={{ width: PREVIEW_SIZE }}>
+    <div
+      className="relative flex-shrink-0"
+      style={{ width: PREVIEW_SIZE }}
+      data-testid="composer-attachment"
+      data-sensitive={sensitive ? "true" : "false"}
+    >
       <div
-        className="flex items-center justify-center overflow-hidden border-2 border-line bg-surface-high"
+        className="relative flex items-center justify-center overflow-hidden bg-surface-high"
         style={{
           width: PREVIEW_SIZE,
           height: PREVIEW_SIZE,
@@ -159,17 +180,19 @@ const AttachmentPreview: React.FC<{
         }}
         {...expandPress}
       >
-        {attachment.loading ? (
+        {sensitive ? (
+          <SensitiveCover blurhash={attachment.blurhash} />
+        ) : attachment.loading ? (
           <span className="text-sm font-mono text-muted" style={{ animation: "pulse 1.5s ease-in-out infinite" }}>…</span>
         ) : attachment.preview ? (
-          <img src={attachment.preview} alt={attachment.name} className="w-full h-full object-cover" style={{ borderRadius: 6 }} />
+          <img src={attachment.preview} alt={attachment.name} className="w-full h-full object-cover" style={{ borderRadius: 8 }} />
         ) : attachment.type === "video" ? (
-          <Film size={28} className="text-dim" />
+          <Film size={32} className="text-dim" />
         ) : attachment.type === "audio" ? (
-          <Music size={28} className="text-dim" />
+          <Music size={32} className="text-dim" />
         ) : (() => {
           const Icon = getFileIcon(attachment.name);
-          return <Icon size={28} className="text-dim" />;
+          return <Icon size={32} className="text-dim" />;
         })()}
       </div>
       <div
@@ -179,20 +202,32 @@ const AttachmentPreview: React.FC<{
       >
         {attachment.name}
       </div>
-      <button
-        onClick={() => onRemove(attachment.id)}
-        aria-label={t("composer.removeAttachment", { name: attachment.name })}
-        className="absolute flex items-center justify-center bg-surface-high border border-line-strong text-dim"
-        style={{
-          top: -6,
-          right: -6,
-          width: 22,
-          height: 22,
-          borderRadius: 4,
-        }}
-      >
-        <X className="w-3.5 h-3.5" />
-      </button>
+      {/* Corner toolbar. The eye says what is true now: open while the media
+          shows, crossed out once it is marked sensitive. Pictures and videos
+          only — a file has nothing on screen to hide. */}
+      <div className="absolute flex items-center gap-1" style={{ top: 4, insetInlineEnd: 4 }}>
+        {hasVisualPreview && (
+          <button
+            type="button"
+            data-testid="attachment-sensitive-toggle"
+            onClick={() => onToggleSensitive(attachment.id)}
+            aria-pressed={sensitive}
+            aria-label={t(sensitive ? "composer.unmarkSensitive" : "composer.markSensitive", { name: attachment.name })}
+            title={t(sensitive ? "composer.unmarkSensitive" : "composer.markSensitive", { name: attachment.name })}
+            className={TOOLBAR_BUTTON}
+          >
+            {sensitive ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => onRemove(attachment.id)}
+          aria-label={t("composer.removeAttachment", { name: attachment.name })}
+          className={TOOLBAR_BUTTON}
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
     </div>
   );
 };
@@ -816,6 +851,30 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     return false;
   }, [handleBrowserFile, handlePaths]);
 
+  // Mark or unmark an attachment sensitive (#1568).
+  const toggleSensitive = useCallback((id: string) => {
+    setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, sensitive: !a.sensitive } : a)));
+  }, []);
+
+  // A marked attachment's cover is its blurhash, worked out from the preview
+  // once — when it is marked, or when its preview arrives if it was marked
+  // while still loading. Without one the cover is a plain surface.
+  const blurhashAttemptedRef = useRef(new Set<string>());
+  useEffect(() => {
+    for (const att of attachments) {
+      if (!att.sensitive || att.blurhash || !att.preview || blurhashAttemptedRef.current.has(att.id)) {
+        continue;
+      }
+      blurhashAttemptedRef.current.add(att.id);
+      void blurhashFromUrl(att.preview).then((meta) => {
+        if (!meta) {
+          return;
+        }
+        setAttachments((prev) => prev.map((a) => (a.id === att.id ? { ...a, blurhash: meta.hash } : a)));
+      });
+    }
+  }, [attachments]);
+
   const removeAttachment = useCallback((id: string) => {
     setAttachments((prev) => {
       const att = prev.find((a) => a.id === id);
@@ -886,6 +945,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
               key={att.id}
               attachment={att}
               onRemove={removeAttachment}
+              onToggleSensitive={toggleSensitive}
               onExpand={(url, type) => setExpandedPreview({ url, type })}
             />
           ))}

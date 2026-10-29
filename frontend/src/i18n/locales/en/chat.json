@@ -101,7 +101,9 @@
     "lightboxFetch": "fetch",
     "lightboxDone": "[ done ]",
     "lightboxDownload": "[download]",
-    "lightboxClose": "[esc]"
+    "lightboxClose": "[esc]",
+    "sensitiveReveal": "Show sensitive media: {{filename}}",
+    "sensitiveHide": "Hide {{filename}}"
   },
   "unfurl": {
     "loadImage": "Load image",

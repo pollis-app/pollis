@@ -6,6 +6,10 @@ import { AttachmentDisplay } from "../Message/AttachmentDisplay";
 import { useSkin } from "../../hooks/queries/usePreferences";
 import type { MessageAttachment } from "../../types";
 import { PressButton } from "../ui/PressButton";
+import { observer } from "mobx-react-lite";
+import { useSensitiveReveal } from "../../hooks/useSensitiveReveal";
+import { SensitiveCover } from "./SensitiveCover";
+import { SensitiveHideButton } from "./SensitiveHideButton";
 
 interface MediaGalleryViewProps {
   /** Every attachment in the surface, newest first — the caller orders. */
@@ -149,11 +153,15 @@ interface GalleryTileProps {
 
 /** One square tile. Same resolution path as the right panel's `MediaTile`,
  * plus a click target and a play badge for videos. */
-const GalleryTile: React.FC<GalleryTileProps> = ({
+const GalleryTile = observer(({
   attachment,
   isTerminal,
   onOpen,
-}) => {
+}: GalleryTileProps) => {
+  const { t } = useTranslation("chat");
+  // Sensitive media (#1568): the tile is covered until revealed, and the
+  // reveal is the one the message log shares.
+  const sensitivity = useSensitiveReveal(attachment);
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const isVideo = attachment.content_type.startsWith("video/");
@@ -180,15 +188,35 @@ const GalleryTile: React.FC<GalleryTileProps> = ({
     };
   }, [isPending, url, failed, attachment.object_key, attachment.content_hash, attachment.content_type]);
 
-  return (
+  const shape = `relative aspect-square overflow-hidden border border-line bg-surface-raised ${
+    isTerminal ? "" : "rounded"
+  }`;
+  if (sensitivity.hidden) {
+    // One click reveals, and does nothing else — a video does not open.
+    return (
+      <PressButton
+        type="button"
+        activateOn="click"
+        onClick={sensitivity.reveal}
+        title={attachment.filename}
+        aria-label={t("attachment.sensitiveReveal", { filename: attachment.filename })}
+        data-testid="media-gallery-tile"
+        data-sensitive="hidden"
+        className={`${shape} w-full`}
+      >
+        <SensitiveCover blurhash={attachment.blurhash} />
+      </PressButton>
+    );
+  }
+
+  const tile = (
     <PressButton
       type="button"
       onClick={onOpen}
       title={attachment.filename}
       data-testid="media-gallery-tile"
-      className={`relative aspect-square overflow-hidden border border-line bg-surface-raised ${
-        isTerminal ? "" : "rounded"
-      }`}
+      data-sensitive={sensitivity.sensitive ? "revealed" : undefined}
+      className={`${shape} ${sensitivity.sensitive ? "w-full" : ""}`}
       style={{ cursor: "zoom-in" }}
     >
       {url && !isVideo ? (
@@ -221,7 +249,16 @@ const GalleryTile: React.FC<GalleryTileProps> = ({
       )}
     </PressButton>
   );
-};
+  if (!sensitivity.sensitive) {
+    return tile;
+  }
+  return (
+    <div className="relative">
+      {tile}
+      <SensitiveHideButton filename={attachment.filename} onHide={sensitivity.hide} />
+    </div>
+  );
+});
 
 interface GalleryViewerProps {
   attachment: MessageAttachment;
@@ -234,14 +271,18 @@ interface GalleryViewerProps {
 
 /** The full-screen roll viewer — the `AttachmentDisplay` lightbox shape with
  * walk controls. */
-const GalleryViewer: React.FC<GalleryViewerProps> = ({
+const GalleryViewer = observer(({
   attachment,
   position,
   hasMultiple,
   onStep,
   onClose,
-}) => {
+}: GalleryViewerProps) => {
   const { t } = useTranslation("vault");
+  const { t: tChat } = useTranslation("chat");
+  // Walking the roll onto a sensitive item the user has not revealed shows
+  // its cover, never the media (#1568).
+  const sensitivity = useSensitiveReveal(attachment);
   const [url, setUrl] = useState<string | null>(null);
   const isVideo = attachment.content_type.startsWith("video/");
 
@@ -305,7 +346,17 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
       )}
 
       <div onClick={(event) => event.stopPropagation()}>
-        {url && isVideo ? (
+        {sensitivity.hidden ? (
+          <button
+            type="button"
+            data-testid="media-gallery-viewer-cover"
+            onClick={sensitivity.reveal}
+            aria-label={tChat("attachment.sensitiveReveal", { filename: attachment.filename })}
+            className="relative block h-[60vh] w-[60vh] max-w-[90vw] overflow-hidden rounded"
+          >
+            <SensitiveCover blurhash={attachment.blurhash} />
+          </button>
+        ) : url && isVideo ? (
           // eslint-disable-next-line jsx-a11y/media-has-caption
           <video
             src={url}
@@ -340,4 +391,4 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
       )}
     </div>
   );
-};
+});

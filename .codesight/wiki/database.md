@@ -1328,6 +1328,7 @@ envelope, so the loss shows in the conversation instead of vanishing. See
 - `filename`, `content_type` TEXT NOT NULL
 - `data` BLOB NOT NULL — the attachment's plaintext bytes
 - `blurhash` TEXT, `width` / `height` INTEGER — renderer-computed metadata (a video's poster); the upload's own values win
+- `sensitive` INTEGER NOT NULL DEFAULT 0 CHECK IN (0, 1) — marked sensitive in the composer (#1568); written into both envelopes as `sens: true`. Added through `ADDITIVE_COLUMNS`, so a row queued by an older build reads as not sensitive
 
 Attachment bytes an unsent message still has to upload, each written in its own
 short insert before the message row and before any network work, so a kill

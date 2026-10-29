@@ -55,7 +55,9 @@
     "placeholder": "اكتب رسالة…",
     "previewAlt": "معاينة",
     "removeAttachment": "إزالة {{name}}",
-    "send": "إرسال الرسالة"
+    "send": "إرسال الرسالة",
+    "markSensitive": "وضع علامة حساس على {{name}}",
+    "unmarkSensitive": "إزالة علامة حساس عن {{name}}"
   },
   "mentions": {
     "listLabel": "اقتراحات الإشارة",

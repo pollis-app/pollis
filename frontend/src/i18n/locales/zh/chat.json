@@ -80,7 +80,9 @@
     "lightboxFetch": "获取",
     "lightboxDone": "[ 完成 ]",
     "lightboxDownload": "[  下载  ]",
-    "lightboxClose": "[esc]"
+    "lightboxClose": "[esc]",
+    "sensitiveReveal": "显示敏感内容：{{filename}}",
+    "sensitiveHide": "隐藏 {{filename}}"
   },
   "unfurl": {
     "loadImage": "加载图片",

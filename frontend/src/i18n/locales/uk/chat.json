@@ -98,7 +98,9 @@
     "lightboxFetch": "отримати",
     "lightboxDone": "[ готово ]",
     "lightboxDownload": "[завантажити]",
-    "lightboxClose": "[esc]"
+    "lightboxClose": "[esc]",
+    "sensitiveReveal": "Показати делікатний вміст: {{filename}}",
+    "sensitiveHide": "Приховати {{filename}}"
   },
   "unfurl": {
     "loadImage": "Завантажити зображення",

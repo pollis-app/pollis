@@ -67,6 +67,8 @@ interface AttachmentWire {
   bh?: string;
   w?: number;
   h?: number;
+  /** Sensitive media (#1568); omitted unless set. */
+  sens?: boolean;
 }
 
 type RawMessage = {
@@ -124,7 +126,9 @@ type RawDmChannel = {
 
 // Parses structured attachment JSON embedded in message content.
 // Plain-text messages are returned as-is. Content with attachments looks like:
-//   {"_att":[{"key":"media/…","url":"…","name":"…","ct":"…","size":N,"hash":"…","kv":N,"sha":"…","bh":"…","w":N,"h":N}],"_txt":"caption"}
+//   {"_att":[{"key":"media/…","url":"…","name":"…","ct":"…","size":N,"hash":"…","kv":N,"sha":"…","bh":"…","w":N,"h":N,"sens":true}],"_txt":"caption"}
+// `sens` (#1568) is present only on an attachment marked sensitive; a client
+// that predates it ignores the key and draws the media unblurred.
 // Exported for the surfaces that render the SAME content-string shape from
 // other sources — pinned-message snapshots (#99) and vault entries (#107) —
 // so there is one decoder for the envelope, not three. `origin` says where
@@ -158,6 +162,7 @@ export function parseContent(
         blurhash: a.bh,
         width: a.w,
         height: a.h,
+        sensitive: a.sens === true,
       })),
     };
   } catch {

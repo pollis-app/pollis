@@ -110,7 +110,9 @@
     "lightboxFetch": "جلب",
     "lightboxDone": "[ تم ]",
     "lightboxDownload": "[تنزيل]",
-    "lightboxClose": "[esc]"
+    "lightboxClose": "[esc]",
+    "sensitiveReveal": "إظهار محتوى حساس: {{filename}}",
+    "sensitiveHide": "إخفاء {{filename}}"
   },
   "unfurl": {
     "loadImage": "تحميل الصورة",
