@@ -115,7 +115,7 @@ test("every ingest re-reads the counts unless the caller bumps them itself", () 
 test("every place that cleared a badge also advances the persisted cursor", () => {
   for (const p of [
     "app/group/[id].tsx",
-    "app/(tabs)/search.tsx",
+    "components/search/GlobalSearchResults.tsx",
     "app/(tabs)/direct.tsx",
     "app/(tabs)/groups.tsx",
     "hooks/useOpenConversation.ts",

@@ -100,16 +100,28 @@ tags:
 - waitForAnimationToEnd:
     timeout: 3000
 - takeScreenshot: tour-08-direct-empty
+# The shield (#1550): a shortcut to Scan to sign in a device; back returns
+# to the tab it was tapped from.
 - tapOn:
-    id: "tab-search"
+    id: "tab-link-device"
 - waitForAnimationToEnd:
     timeout: 3000
-- takeScreenshot: tour-09-search-empty
+- takeScreenshot: tour-09-sign-in-device
+- tapOn:
+    id: "btn-back"
 - tapOn:
     id: "tab-self"
 - waitForAnimationToEnd:
     timeout: 3000
 - takeScreenshot: tour-10-self
+# Search sits at the top of Self; focusing it swaps the menu for its hints.
+- tapOn:
+    id: "input-search"
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: tour-10b-search-empty
+- tapOn:
+    id: "btn-search-cancel"
 
 # A group with a message.
 - tapOn:
@@ -275,7 +287,7 @@ tags:
     id: "btn-back"
     optional: true
 - tapOn:
-    id: "tab-search"
+    id: "tab-self"
 - tapOn:
     id: "input-search"
 - inputText: "handoff"
@@ -284,7 +296,7 @@ tags:
       id: "search-sort-relevant"
     timeout: 15000
     optional: true
-# Dismiss the keyboard before the shot. Not a point tap: the redesigned Search
+# Dismiss the keyboard before the shot. Not a point tap: Self's search
 # puts the field at the top and the hits right under it, so a tap in the middle
 # of the screen lands on a result and opens the conversation. The search field
 # has a normal keyboard with a return key (unlike the number pad), so
@@ -294,7 +306,7 @@ tags:
     timeout: 3000
 - takeScreenshot: tour-25-search-results
 
-# Self pages.
+# Self pages. A second tap on the Self tab ends the search (menu back).
 - tapOn:
     id: "tab-self"
 - tapOn:

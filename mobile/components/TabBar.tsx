@@ -1,6 +1,7 @@
 import { View, Text, Platform } from "react-native";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
+import { useRouter, type Href } from "expo-router";
 import type { TFunction } from "i18next";
 import { semantic, fonts, layout } from "../theme/tokens";
 import { useTheme } from "./theme";
@@ -9,17 +10,26 @@ import { useBottomInset, PressInPressable } from "./ui";
 import { appStore } from "../stores/appStore";
 import { useDMChannels, useUserGroupsWithChannels } from "../hooks/queries";
 
-// Groups / Direct / Search / Self (Main.dc.html): 22pt icon over a 12pt
-// label, set 10pt below the bar's top hairline; active = accent icon and
+// Groups / Direct / Sign in device / Self (Main.dc.html): 22pt icon over a
+// 12pt label, set 10pt below the bar's top hairline; active = accent icon and
 // label, a bolder label, and a short rounded accent bar at the top of the
 // cell (so where you are is not told by colour alone); inactive = dim. The
 // `tab-<name>` testIDs and the `badge-<name>` anchors are load-bearing in
 // e2e flows.
+//
+// The shield (#1550) is not a tab: it is a shortcut that pushes "Scan to
+// sign in a device" (the same screen as Self → Security) onto the root
+// stack, so back returns to whichever tab you were on. It is never the
+// selected cell and is announced as a button. Search moved into Self.
 const ICON = 22;
 const TABS: {
   name: string;
   label: (t: TFunction) => string;
   glyph: (c: string) => React.ReactNode;
+  // A shortcut entry: pushes this route instead of switching tabs.
+  push?: Href;
+  // Spoken label, when the visible one is shortened for the bar.
+  a11yLabel?: (t: TFunction) => string;
 }[] = [
   { name: "groups", label: (t) => t("tabs.groups"), glyph: (c) => <Icon.users size={ICON} color={c} /> },
   {
@@ -27,13 +37,20 @@ const TABS: {
     label: (t) => t("tabs.direct"),
     glyph: (c) => <Icon.messageCircle size={ICON} color={c} />,
   },
-  { name: "search", label: (t) => t("tabs.search"), glyph: (c) => <Icon.search size={ICON} color={c} /> },
+  {
+    name: "link-device",
+    label: (t) => t("tabs.signInDevice"),
+    a11yLabel: (t) => t("self.scanDevice.heading"),
+    glyph: (c) => <Icon.shield size={ICON} color={c} />,
+    push: { pathname: "/self/link-device", params: { from: "tab" } },
+  },
   { name: "self", label: (t) => t("tabs.self"), glyph: (c) => <Icon.user size={ICON} color={c} /> },
 ];
 
 export const TabBar = observer(function TabBar({ state, navigation }: any) {
   useTheme();
   const { t } = useTranslation("mobile");
+  const router = useRouter();
   // Home-indicator inset on iOS; on Android the nav-bar inset, floored so
   // the labels never sit on the glass edge (see useBottomInset).
   const bottomInset = useBottomInset();
@@ -65,23 +82,47 @@ export const TabBar = observer(function TabBar({ state, navigation }: any) {
         backgroundColor: semantic.panel,
       }}
     >
-      {TABS.map((tab, i) => {
-        const focused = state.index === i;
+      {TABS.map((tab) => {
+        // Matched by route name, not index: the shortcut cell has no route.
+        const route = tab.push
+          ? undefined
+          : state.routes.find((r: { name: string }) => r.name === tab.name);
+        const focused = !!route && state.routes[state.index]?.key === route.key;
         const color = focused ? semantic.accent : semantic.dim;
         const label = tab.label(t);
+        const spoken = tab.a11yLabel?.(t) ?? label;
         const count = badgeByTab[tab.name] ?? 0;
+        const onPress = () => {
+          if (tab.push) {
+            router.push(tab.push);
+            return;
+          }
+          if (!route) {
+            return;
+          }
+          // Lets the focused tab react to a second tap (Self ends a search).
+          const event = navigation.emit({
+            type: "tabPress",
+            target: route.key,
+            canPreventDefault: true,
+          });
+          if (!focused && !event.defaultPrevented) {
+            navigation.navigate(tab.name);
+          }
+        };
         return (
-          // Switching tabs is free to undo, so it acts on touch-down (#1529).
+          // Switching tabs, and opening the shortcut's page, are free to
+          // undo, so they act on touch-down (#1529).
           <PressInPressable
             key={tab.name}
             pressIn
-            onPress={() => navigation.navigate(tab.name)}
+            onPress={onPress}
             testID={`tab-${tab.name}`}
-            accessibilityRole="tab"
+            accessibilityRole={tab.push ? "button" : "tab"}
             accessibilityLabel={
-              count > 0 ? t("tabs.withUnread", { label, count }) : label
+              count > 0 ? t("tabs.withUnread", { label: spoken, count }) : spoken
             }
-            accessibilityState={{ selected: focused }}
+            accessibilityState={tab.push ? undefined : { selected: focused }}
             style={{
               flex: 1,
               alignItems: "center",

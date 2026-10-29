@@ -9,7 +9,6 @@ export default function TabsLayout() {
     >
       <Tabs.Screen name="groups" />
       <Tabs.Screen name="direct" />
-      <Tabs.Screen name="search" />
       <Tabs.Screen name="self" />
     </Tabs>
   );

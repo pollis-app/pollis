@@ -999,21 +999,22 @@ app/
   _layout.tsx          root Stack (every route registered), fonts, splash gate
   index.tsx            redirect → /(auth)/email
   (auth)/              email → otp → pin → initializing (gestureEnabled: false)
-  (tabs)/              groups · direct · search · self (custom <TabBar>)
+  (tabs)/              groups · direct · self (custom <TabBar>; its 3rd cell is the shield shortcut, not a tab)
   group/[id].tsx       one group's channel panel (phones: pushed, no tab bar; iPad: redirects to the Groups tab)
   group/*              new, invite, invite-links, members, settings, emoji, requests, discover
   chat/[id].tsx        conversation (Header + list + composer); chat/thread.tsx
   dm/{new,info,requests}.tsx · conversation/{info,pins}.tsx · user/[id].tsx · report.tsx
   media.tsx            full-screen attachment viewer (#1248, #1492): zoom, swipe pager, swipe-down dismiss, video, audio, save/share
   vault.tsx            the Vault (#1316): chat-with-yourself + media grid, opened from the top of Direct
-  self/*               preferences, user-settings, security, blocked, saved, …
+  self/*               preferences, user-settings, security, link-device, blocked, saved, …
 components/
   ui.tsx               primitives: Txt, Screen, Header, IconButton, SectionTitle,
                        ListRow, ActionRow, Group, Card, Field, Avatar, Chip/Pill,
                        Badge, Button, Toggle, Dot, Divider, BottomAction, Body
   chat/SheetOverlay.tsx the one bottom sheet (every *Sheet is built on it)
   icons.tsx            lucide wrapper (Icon.*, stroke 1.75)
-  TabBar.tsx           custom bottom tab bar (accent active, unread badges)
+  TabBar.tsx           custom bottom tab bar (accent active, unread badges, shield → self/link-device)
+  search/GlobalSearchResults.tsx  the global search results Self shows under its field
   auth|chat|direct|groups|search|self/   per-area pieces (rows, sheets, pads)
 theme/tokens.ts        semantic / type / fonts / r / space / layout (derive.ts: colour math)
 ```
@@ -1028,6 +1029,19 @@ the body); `backLabel` / `backTestID` override the spoken label and id.
 There is no bottom back strip any more (`Ctx`/`Crumb` are gone). Auth
 screens disable the edge swipe, so their top-left back is the only way out.
 Sub-screens are stack pushes outside `(tabs)`.
+
+Tabs and search (#1550): the bar is Groups · Direct · shield · Self. The
+shield (`tab-link-device`, "Sign in device") is a shortcut, not a tab: it
+pushes `self/link-device` (Scan to sign in a device, the same page and PIN
+confirm as Self → Security) onto the root stack, so back returns to the tab
+it was tapped from, and it is never the selected cell. `TabBar` matches cells
+to routes by name, never by index, and emits `tabPress` so the focused tab can
+react to a second tap. Global search is not a tab: it sits at the top of Self
+under the large title, Settings-style — focusing the field or typing swaps
+the Self menu for `GlobalSearchResults` in place (no navigation); Cancel, the
+clear button, a second tap on the Self tab or Android back restore the menu.
+The state survives opening a hit and coming back. A group's "Search <group>"
+field navigates to `/(tabs)/self?search=1`, which focuses it.
 
 iPad (regular width, `hooks/useLayoutClass`): Groups and Direct are a
 two-pane (`components/MasterDetail.tsx`) — list left, conversation right, tab
@@ -1150,7 +1164,7 @@ Current state:
   peer `pollis-tui/examples/pins_peer.rs`).
 - **Vault (#1316, desktop parity for #107):** `app/vault.tsx`, reached from a row
   at the top of the Direct tab (desktop puts it first in the DM list) and from the
-  Search tab's page quick-jumps. Same core commands as desktop
+  page quick-jumps of the search at the top of Self. Same core commands as desktop
   (`get_vault_messages` / `send_vault_message` / `edit_vault_message` /
   `set_vault_message_pinned` / `delete_vault_message` — `bridge.rs` already had the
   arms, so no native change), hooks in `hooks/queries/useVault.ts`, pure rules in

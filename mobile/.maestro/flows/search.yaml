@@ -7,15 +7,41 @@ tags:
 # footer (what this device can search), quick-jump to a settings page, and
 # the "why no results" explanation. Self-contained: creates a group and posts
 # the message it then searches for.
+#
+# Search lives at the top of Self (#1550), Settings-style: focusing the field
+# swaps the Self menu for results in place, Cancel (or the clear button, or a
+# second tap on the Self tab) brings the menu back.
 
 - runFlow: ../subflows/sign-in.yaml
 - tapOn:
-    id: "tab-search"
+    id: "tab-self"
 - assertVisible:
-    id: "screen-search"
+    id: "screen-self"
+- assertVisible:
+    id: "row-self-security"
+- takeScreenshot: search-00-self-menu
+- tapOn:
+    id: "input-search"
 - assertVisible:
     id: "search-filter-hint"
+- assertNotVisible:
+    id: "row-self-security"
 - takeScreenshot: search-01-empty
+# Cancel restores the menu.
+- tapOn:
+    id: "btn-search-cancel"
+- assertVisible:
+    id: "row-self-security"
+- assertNotVisible:
+    id: "search-filter-hint"
+# Typing then clearing restores it too.
+- tapOn:
+    id: "input-search"
+- inputText: "se"
+- tapOn:
+    id: "btn-search-clear"
+- assertVisible:
+    id: "row-self-security"
 
 # Seed a message to find.
 - tapOn:
@@ -71,7 +97,7 @@ tags:
 
 # Message hit, count, sort, corpus.
 - tapOn:
-    id: "tab-search"
+    id: "tab-self"
 - tapOn:
     id: "input-search"
 - inputText: "pelican"
@@ -92,15 +118,16 @@ tags:
 - tapOn: ".*pelican migration notes.*"
 - assertVisible:
     id: "screen-chat"
-# Phones: back to Search. iPad: the hit opened in the Groups tab's two-pane,
-# which has no back button; the next step taps the Search tab anyway.
+# Phones: back to Self, still showing the results. iPad: the hit opened in
+# the Groups tab's two-pane, which has no back button; the next step taps the
+# Self tab anyway.
 - tapOn:
     id: "btn-back"
     optional: true
 
 # Quick-jump to a settings page.
 - tapOn:
-    id: "tab-search"
+    id: "tab-self"
 - tapOn:
     id: "input-search"
 - eraseText: 20
@@ -114,10 +141,16 @@ tags:
     id: "screen-self-security"
 - tapOn:
     id: "btn-back"
+# Back on Self the search is where it was left.
+- assertVisible:
+    id: "row-page-security"
+# A second tap on the Self tab ends the search, like a tab root popping.
+- tapOn:
+    id: "tab-self"
+- assertVisible:
+    id: "row-self-security"
 
 # Nothing matches: say why, honestly.
-- tapOn:
-    id: "tab-search"
 - tapOn:
     id: "input-search"
 - eraseText: 20

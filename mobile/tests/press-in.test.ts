@@ -243,7 +243,7 @@ test("rows inside a scroller and message surfaces stay on release", () => {
   for (const rel of [
     "app/(tabs)/groups.tsx",
     "app/(tabs)/self.tsx",
-    "app/(tabs)/search.tsx",
+    "components/search/GlobalSearchResults.tsx",
     "app/conversation/pins.tsx",
     "app/conversation/info.tsx",
     "app/self/saved.tsx",

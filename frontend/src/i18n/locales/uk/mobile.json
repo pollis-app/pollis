@@ -333,6 +333,7 @@
   },
   "search": {
     "channels": "Канали",
+    "clear": "Очистити пошук",
     "hint": "Введіть щонайменше 2 символи для пошуку. Щоб знайти людину, введіть точне ім’я користувача й натисніть «Enter».",
     "filtersLabel": "Фільтри",
     "messages": "Повідомлення",
@@ -495,8 +496,8 @@
   "tabs": {
     "direct": "Особисті",
     "groups": "Групи",
-    "search": "Пошук",
     "self": "Профіль",
+    "signInDevice": "Вхід пристрою",
     "withUnread_few": "{{label}}, {{count}} непрочитані",
     "withUnread_many": "{{label}}, {{count}} непрочитаних",
     "withUnread_one": "{{label}}, {{count}} непрочитане",

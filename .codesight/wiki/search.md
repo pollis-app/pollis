@@ -232,6 +232,18 @@ Registered in `pollis-core/src/bridge.rs`, `src-tauri/src/commands/messages.rs`,
   back opens an **anchored window** rather than being merged into the live one
   (#1039) — see [UI → The windowed log](./ui.md#the-windowed-log-874).
 
+**Mobile** runs the same `search_messages` (`mobile/hooks/queries/useSearch.ts`)
+from the top of the **Self** tab, not a tab of its own (#1550): a field under
+Self's large title, iOS / Android Settings style. Focusing it or typing swaps
+the Self menu for `mobile/components/search/GlobalSearchResults.tsx` in place —
+filter pills, page quick-jumps, groups, channels, the return-only exact-match
+account lookup (#1216), message hits with the sort toggle, "About N results",
+the corpus footer and the "why no results" list. Cancel, the clear button, a
+second tap on the Self tab or Android back bring the menu back. The bar's old
+Search cell is now a shield that pushes Scan to sign in a device
+(`mobile/app/self/link-device.tsx`), which is why desktop's `auth:link.qrIntro`
+names the shield. Maestro: `flows/search.yaml`, `flows/sign-in-device.yaml`.
+
 ## Honesty (§6 of the ticket)
 
 Search covers what THIS device holds, which is narrower than users assume. The

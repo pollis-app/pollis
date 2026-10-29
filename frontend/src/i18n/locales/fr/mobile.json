@@ -317,6 +317,7 @@
   },
   "search": {
     "channels": "Canaux",
+    "clear": "Effacer la recherche",
     "hint": "Saisissez au moins 2 caractères pour rechercher. Pour trouver une personne, saisissez son nom d'utilisateur exact et appuyez sur Entrée.",
     "filtersLabel": "Filtres",
     "messages": "Messages",
@@ -469,8 +470,8 @@
   "tabs": {
     "direct": "Messages",
     "groups": "Groupes",
-    "search": "Recherche",
     "self": "Moi",
+    "signInDevice": "Lier un appareil",
     "withUnread_one": "{{label}}, {{count}} non lu",
     "withUnread_other": "{{label}}, {{count}} non lus"
   },

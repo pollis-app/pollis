@@ -1,0 +1,69 @@
+appId: ${MAESTRO_APP_ID}
+---
+# SIGN IN DEVICE SHORTCUT (#1550) — the tab bar's third cell is a shield that
+# pushes "Scan to sign in a device" (self/link-device) from any tab, and back
+# returns to the tab it was tapped from. It is a shortcut, not a tab: the
+# same page (and PIN confirm) is still under Self → Security.
+# Self-contained; a v2 code typed by hand stands in for the scanned QR, which
+# is enough to reach the PIN confirm (finishing needs a second device).
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-direct"
+- assertVisible:
+    id: "screen-direct"
+- assertVisible:
+    id: "tab-link-device"
+- takeScreenshot: sign-in-device-01-tab-bar
+
+# The shield opens the scanner page on top of Direct.
+- tapOn:
+    id: "tab-link-device"
+- assertVisible:
+    id: "screen-link-device"
+- takeScreenshot: sign-in-device-02-scanner
+# Typed code → the same PIN confirm as Self → Security → Scan to sign in.
+- tapOn:
+    id: "btn-scan-toggle-manual"
+- tapOn:
+    id: "input-scan-code"
+- inputText: "pollis-link:v2:e2e-shortcut"
+- tapOn:
+    id: "btn-scan-code-continue"
+- assertVisible:
+    id: "scan-device-confirm"
+- takeScreenshot: sign-in-device-03-pin
+# Back lands where the shield was tapped, not on Self.
+- tapOn:
+    id: "btn-back"
+- assertVisible:
+    id: "screen-direct"
+- assertNotVisible:
+    id: "screen-link-device"
+
+# From Self too, and the Security route to the same page is still there.
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "tab-link-device"
+- assertVisible:
+    id: "screen-link-device"
+- tapOn:
+    id: "btn-back"
+- assertVisible:
+    id: "screen-self"
+- tapOn:
+    id: "row-self-security"
+- scrollUntilVisible:
+    element:
+      id: "row-link-device"
+    direction: DOWN
+    centerElement: true
+- tapOn:
+    id: "row-link-device"
+- assertVisible:
+    id: "screen-link-device"
+- tapOn:
+    id: "btn-back"
+- assertVisible:
+    id: "screen-self-security"
