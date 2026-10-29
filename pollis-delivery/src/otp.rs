@@ -1,36 +1,11 @@
-//! Server-side OTP: generation, salted-hash storage, attempt-limited
-//! constant-time verification, and the Resend email send — all moved off the
-//! client (which used to hold a baked-in Resend key + an in-process OTP map).
-//! See `docs/otp-server-bootstrap-design.md`.
+//! Server-side OTP: generation, salted-hash storage, attempt-limited constant-time
+//! verification and the Resend send. See `docs/otp-server-bootstrap-design.md`.
 //!
-//! This also FIXES the client-side OTP's unlimited-guess bug: each code now has
-//! a per-email attempt counter, locks out (and is deleted) past
-//! [`OtpConfig::max_attempts`], compares in constant time, and is deleted on the
-//! first success (single-use).
-//!
-//! **Store:** in-memory (the DS is single-container — mirrors the OTP map the
-//! client used to keep). Behind [`OtpStore`] so a scaled-out DS can swap it for a
-//! Turso table without touching the handlers.
-//!
-//! **That store is not durable, and the guess budget depends on it (#1142).**
-//! Single-container buys *consistency* — no second instance holding a divergent
-//! counter — not persistence. The container scales to zero after
-//! `PollisDelivery.sleepAfter` (`worker/index.ts`), so in a quiet hour every
-//! mailbox's `failed` count and `locked_until` are dropped routinely, not only
-//! across a redeploy.
-//!
-//! This is safe **only because `sleepAfter >= ttl_secs`**. Triggering the reset
-//! costs an attacker total silence for `sleepAfter` — their own requests keep
-//! the container warm — and that same silence expires the code they were
-//! guessing, so they come back to a fresh counter AND a dead code. The budget
-//! stays bounded by the code's lifetime rather than by the lockout, which is why
-//! the practical exposure is a 300-second head start on re-requesting, not a
-//! brute-force window.
-//!
-//! Invert the inequality and the reasoning inverts: the counter would reset
-//! while the code is still live, giving repeated fresh [`OtpConfig::max_attempts`]
-//! bursts against ONE code for the price of pausing between them.
-//! `tests/otp_state_durability.rs` pins the inequality across the two languages.
+//! The store is in-memory and not durable: the container scales to zero after
+//! `PollisDelivery.sleepAfter` (`worker/index.ts`), dropping every guess counter
+//! and lockout (#1142). That is safe only while `sleepAfter >= ttl_secs`, because
+//! the silence that resets a counter also expires the code being guessed.
+//! `tests/otp_state_durability.rs` pins the inequality.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -51,11 +26,7 @@ use crate::session::SessionStore;
 use crate::writes::bad_request;
 use crate::AppState;
 
-// The request bodies for this module's endpoints live in `pollis-api`, the
-// crate pollis-core builds its requests from — one declaration, both ends, so
-// a client field that does not exist here is a compile error rather than a
-// silently-absent JSON key. Re-exported so `pollis_delivery::otp::*Body`
-// keeps resolving for handlers, tests and the flows harness.
+// Re-exported so `pollis_delivery::otp::*Body` resolves for handlers and tests.
 pub use pollis_api::otp::*;
 
 /// Tunables for the OTP + session machinery, read from DS env in
@@ -65,9 +36,7 @@ pub struct OtpConfig {
     /// Resend API key (DS env `RESEND_API_KEY`). `None` → email send is skipped
     /// (every request still 200s; useful only with `dev_otp`).
     pub resend_api_key: Option<String>,
-    /// `DEV_OTP` override — when set, the email send is skipped and this exact
-    /// code is the only one that verifies. Mirrors pollis-core's `DEV_OTP` so the
-    /// integration harness + local dev keep working without a real mailbox.
+    /// `DEV_OTP` override: skip the email send and accept only this exact code.
     pub dev_otp: Option<String>,
     /// OTP lifetime, seconds (env `OTP_TTL_SECS`, default 600).
     pub ttl_secs: u64,
@@ -81,30 +50,19 @@ pub struct OtpConfig {
     /// How long a mailbox stays locked after `max_attempts` wrong guesses.
     /// Persisted on the mailbox record, so a fresh `request-otp` cannot clear it.
     pub lockout_secs: u64,
-    /// How many codes one mailbox may be sent inside a `ttl_secs` window. The
-    /// cap exists because a re-request no longer invalidates the outstanding
-    /// code (#1088) — without it an attacker could mint unbounded concurrently
-    /// valid codes for a victim's mailbox.
+    /// How many codes one mailbox may be sent inside a `ttl_secs` window. Needed
+    /// because a re-request does not invalidate the outstanding code (#1088).
     pub max_sends_per_window: u32,
-    /// The one account App Store / Play review signs in with (env
-    /// `APP_REVIEW_LOGIN`). Reviewers cannot read a mailbox we own, so for this
-    /// single address the code is fixed instead of random and no email is sent.
-    /// See [`ReviewLogin`].
+    /// The store-review account (env `APP_REVIEW_LOGIN`); see [`ReviewLogin`].
     pub review_login: Option<ReviewLogin>,
 }
 
-/// A store-review sign-in: one exact address and the fixed code that signs it
-/// in. Parsed from `APP_REVIEW_LOGIN=<email>:<6 digits>` — one value rather
-/// than two env vars so "an address with no code" is not configurable.
+/// A store-review sign-in: one address and the fixed code that signs it in,
+/// parsed from `APP_REVIEW_LOGIN=<email>:<6 digits>`.
 ///
-/// The fixed code replaces only the *random generation* and the *email send*.
-/// Everything else is the ordinary path: the code is still stored salted and
-/// hashed, still expires after `ttl_secs`, is still single-use, and the mailbox
-/// still locks out after `max_attempts` wrong guesses — so a stranger guessing
-/// at the review address has exactly the budget they have against any other.
-/// Sign-in only: an email-change challenge to this address is a normal random
-/// code, because the fixed code exists to get a reviewer *in*, not to authorize
-/// anything once there.
+/// The fixed code replaces only random generation and the email send; storage,
+/// expiry, single use and lockout are the ordinary path. Sign-in only: an
+/// email-change challenge to this address gets a random code.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReviewLogin {
     email: String,
@@ -112,9 +70,7 @@ pub struct ReviewLogin {
 }
 
 impl ReviewLogin {
-    /// Fields are private so this is the only constructor: a `ReviewLogin` is
-    /// always a normalized address and a code the client's six-cell input can
-    /// actually type.
+    /// The only constructor: always a normalized address and six digits.
     pub fn parse(raw: &str) -> Result<Self, &'static str> {
         let (email, code) = raw.trim().rsplit_once(':').ok_or("expected <email>:<code>")?;
         let email = normalize_email(email);
@@ -149,13 +105,10 @@ impl Default for OtpConfig {
 }
 
 impl OtpConfig {
-    /// Build from DS environment. `RESEND_API_KEY` (the key the client no longer
-    /// ships), `DEV_OTP` (harness/local override), `OTP_TTL_SECS` (optional).
+    /// Build from DS environment.
     ///
-    /// **Raising `OTP_TTL_SECS` above the container's `sleepAfter` re-opens
-    /// #1142** — see the module header. `tests/otp_state_durability.rs` guards
-    /// the compiled-in default, but it cannot see a deploy-time env override, so
-    /// that one is on whoever sets it.
+    /// Raising `OTP_TTL_SECS` above the container's `sleepAfter` re-opens #1142; the
+    /// test guards only the compiled-in default.
     pub fn from_env() -> Self {
         let defaults = Self::default();
         Self {
@@ -196,16 +149,9 @@ struct CodeSlot {
     expires_at: u64,
 }
 
-/// State for ONE mailbox. The unit of throttling and lockout is the mailbox, not
-/// the code (#1088): a fresh `request-otp` used to replace the record outright,
-/// which reset the guess budget (so "5 attempts" was really 6 guesses per
-/// requested code, unbounded in aggregate) and let anyone invalidate the code a
-/// victim was about to type simply by asking for a new one.
-///
-/// So this record is created on the first request for the mailbox and then only
-/// ever *amended*: `failed` and `locked_until` survive every subsequent
-/// `prepare`, and a new code is ADDED to `codes` rather than replacing what is
-/// there. Every code stays valid until its own TTL expires.
+/// State for ONE mailbox, the unit of throttling and lockout (#1088). Created on
+/// the first request and then only amended: `failed` and `locked_until` survive
+/// every `prepare`, and a new code is added beside the outstanding ones.
 struct MailboxState {
     /// Codes still inside their TTL, oldest first. Bounded by
     /// `max_sends_per_window`; expired slots are dropped lazily.
@@ -267,12 +213,8 @@ impl MailboxState {
     }
 }
 
-/// Map size past which [`prepare`](OtpStore::prepare) sweeps records that carry
-/// no state worth keeping. Records used to be self-clearing (an expired or
-/// locked-out code deleted its own entry), but the whole point of #1088 is that
-/// mailbox state outlives its codes — so something has to collect the mailboxes
-/// nobody ever came back to, or the map grows with every address anyone asks
-/// about. Amortised: the sweep is O(map) and runs only above this size.
+/// Map size past which [`prepare`](OtpStore::prepare) sweeps mailboxes that hold
+/// no state, since mailbox state outlives its codes (#1088).
 const SWEEP_AT: usize = 1024;
 
 /// In-memory OTP store keyed on the normalized email. `Clone` is shallow (shared
@@ -286,11 +228,8 @@ pub struct OtpStore {
 /// window that has already elapsed. Anything still carrying one of those is
 /// load-bearing and stays.
 ///
-/// The bound this sets on the guess budget: abandoning a mailbox for a full
-/// `ttl_secs` with no outstanding code resets its failed-guess count. So the
-/// budget refills at most once per OTP lifetime, versus once per *request*
-/// before #1088 — and the per-IP window (`ratelimit.rs`) bounds how many
-/// mailboxes one client can cycle that way.
+/// An abandoned mailbox's guess count thus refills at most once per OTP
+/// lifetime; the per-IP limiter bounds how many mailboxes one client cycles.
 fn sweep(map: &mut HashMap<String, MailboxState>, ttl_secs: u64, now: u64) {
     map.retain(|_, rec| {
         rec.prune(now);
@@ -335,9 +274,8 @@ pub enum PrepareOutcome {
     /// Within the resend-throttle window, or at the per-mailbox send budget for
     /// this window; do NOT email, but still 200 the caller.
     Throttled,
-    /// The mailbox is locked out by failed guesses. Do NOT email and do NOT
-    /// store a code — the whole point of a persisted lockout is that asking for
-    /// a new code cannot clear it. Still 200 the caller (anti-enumeration).
+    /// The mailbox is locked out: no email and no stored code, so a new request
+    /// cannot clear it. Still 200 the caller (anti-enumeration).
     LockedOut,
 }
 
@@ -368,8 +306,7 @@ impl OtpStore {
         let rec = guard.entry(key).or_insert_with(|| MailboxState::new(now));
         rec.prune(now);
 
-        // A persisted lockout is not clearable by requesting a new code — that
-        // was the hole: `prepare` replaced the record and with it the counter.
+        // A persisted lockout cannot be cleared by requesting a new code.
         if rec.locked(now) {
             return PrepareOutcome::LockedOut;
         }
@@ -400,11 +337,9 @@ impl OtpStore {
     /// `cfg.max_attempts`, locks the mailbox for `cfg.lockout_secs` and drops
     /// every outstanding code.
     ///
-    /// On a CORRECT code the record is **left in place** — the caller must call
-    /// [`OtpStore::consume`] only after the dependent account-write + session
-    /// mint succeed, so a transient/config failure downstream (e.g. a bad DB
-    /// token) can't permanently burn a valid code and masquerade as "invalid
-    /// code" (#518). Wrong-guess accounting is never rolled back.
+    /// A correct code is left in place: the caller calls [`OtpStore::consume`] only
+    /// after the account write and session mint succeed, so a downstream failure
+    /// cannot burn a valid code (#518). Wrong-guess accounting is never rolled back.
     pub fn check(&self, email: &str, code: &str, cfg: &OtpConfig, now: u64) -> VerifyOutcome {
         let key = normalize_email(email);
         let mut guard = self.inner.lock().expect("otp store mutex poisoned");
@@ -447,19 +382,14 @@ impl OtpStore {
         VerifyOutcome::Invalid
     }
 
-    /// Consume (single-use) the OTPs for `email` once the dependent
-    /// account-write and session mint have succeeded: a completed sign-in drops
-    /// the whole mailbox record, which is also what resets the failed-guess
-    /// counter. Idempotent. Pairs with [`OtpStore::check`] to make consumption
-    /// contingent on the whole verify-otp operation succeeding (#518).
+    /// Consume the mailbox's codes once the account write and session mint have
+    /// succeeded (#518); dropping the record also resets the guess counter.
     pub fn consume(&self, email: &str) {
         let key = normalize_email(email);
         let mut guard = self.inner.lock().expect("otp store mutex poisoned");
         guard.remove(&key);
     }
 }
-
-// ── POST /v1/auth/request-otp ────────────────────────────────────────────────
 
 /// POST /v1/auth/request-otp — generate + store a 6-digit OTP and email it via
 /// Resend. **Always 200** regardless of whether the email maps to an account
@@ -479,22 +409,14 @@ pub async fn request_otp(State(state): State<AppState>, body: axum::body::Bytes)
     ok_200()
 }
 
-/// Generate + store an OTP for `email` and (unless DEV_OTP is set or no Resend
-/// key is configured) email it via Resend. Extracted from the handler so the
-/// in-process integration harness drives the exact same store + throttle +
-/// DEV_OTP logic against the shared OTP store.
+/// Generate, store and (unless `DEV_OTP` or no Resend key) email an OTP. Public
+/// so the in-process harness drives the same logic.
 pub async fn process_request_otp(otp: &OtpStore, cfg: &OtpConfig, email: &str) {
     process_request_otp_for(otp, cfg, email, OtpPurpose::SignIn).await
 }
 
-/// What a code is being sent FOR — it selects the email the recipient reads, and
-/// nothing else. The store, throttle, lockout and DEV_OTP behaviour are
-/// identical for every purpose.
-///
-/// This exists because an unexplained "Your Pollis sign-in code" arriving at the
-/// address you are about to move OFF is both confusing and phishing-shaped: the
-/// one thing that mail has to say is which action it authorizes, so that a code
-/// requested by somebody else reads as an alarm rather than as noise.
+/// What a code is sent FOR. It selects only the email text, so a code requested
+/// by somebody else reads as an alarm rather than as noise.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum OtpPurpose {
     /// Signup / sign-in to the address that will own the session.
@@ -532,7 +454,6 @@ pub async fn process_request_otp_for(
             );
         }
         PrepareOutcome::Send(code) => {
-            // DEV_OTP: skip the real send entirely.
             if cfg.dev_otp.is_some() {
                 tracing::info!("DEV_OTP active — skipping email send for {}", mask_email(email));
                 return;
@@ -561,15 +482,9 @@ pub async fn process_request_otp_for(
     }
 }
 
-/// Hand the code to Resend.
-///
-/// The caller (`process_request_otp`) AWAITS this before the `/v1/auth/request-otp`
-/// handler answers, so before #913 — when this call had no deadline — a Resend
-/// that accepted the connection and then went quiet held the sign-in request open
-/// indefinitely, and held one of the shared client's pooled connections with it.
-/// [`crate::util::Upstream::Resend`] bounds that. A timeout lands in the same
-/// `Err` arm as any other send failure: logged, and the endpoint still answers
-/// 200, because the response must not reveal whether an address exists.
+/// Hand the code to Resend, under the [`crate::util::Upstream::Resend`] deadline
+/// (#913) since the request-otp handler awaits it. A failure is logged and the
+/// endpoint still answers 200.
 async fn send_otp_email(api_key: &str, email: &str, code: &str) -> anyhow::Result<()> {
     let body = serde_json::json!({
         "from": "Pollis <noreply@mail.pollis.com>",
@@ -591,13 +506,10 @@ async fn send_otp_email(api_key: &str, email: &str, code: &str) -> anyhow::Resul
 
 /// Ask the CURRENT address to authorize moving the account off it (#1161).
 ///
-/// Sent to the address that is about to be replaced, BEFORE the change commits.
-/// The device signature proves the account and the new-address code proves the
-/// new mailbox, but both of those are satisfied by whoever is holding the
-/// unlocked device; this is the one proof that reaches the party who actually
-/// controls the account today. The text therefore names the destination, so that
-/// a code the owner did not ask for is legible as an attack in progress rather
-/// than as a routine verification mail.
+///
+/// The one proof that reaches whoever controls the account today, not just the
+/// unlocked device; the text names the action so an unrequested code reads as an
+/// attack in progress.
 async fn send_email_change_challenge(
     api_key: &str,
     current_email: &str,
@@ -629,16 +541,9 @@ async fn send_email_change_challenge(
     Ok(())
 }
 
-/// Tell the address an account has just MOVED OFF that it happened (L3).
-///
-/// Sent to the OLD mailbox, after the change has committed, and never allowed to
-/// fail it — the change is done, and swallowing the notice would only make the
-/// change quieter. The body names the new address so the owner can tell a change
-/// they made from one they did not, and says what to do about it.
-///
-/// `pub(crate)` rather than private because the caller is
-/// [`crate::email_change`]; it lives here beside [`send_otp_email`] so there is
-/// one place that knows how this service talks to Resend.
+/// Tell the old address, after the change has committed, that the account moved
+/// off it. Never allowed to fail the change. Lives here so one place knows how
+/// this service talks to Resend.
 pub(crate) async fn send_email_change_notice(
     api_key: &str,
     old_email: &str,
@@ -667,8 +572,6 @@ pub(crate) async fn send_email_change_notice(
     }
     Ok(())
 }
-
-// ── POST /v1/auth/verify-otp ─────────────────────────────────────────────────
 
 /// POST /v1/auth/verify-otp — constant-time, attempt-limited code check; then
 /// create-or-load the account and mint an OTP-session token. On success returns
@@ -726,10 +629,8 @@ pub enum VerifyOtpResult {
     LockedOut,
 }
 
-/// Validate the submitted OTP, create-or-load the account, and mint a session
-/// token — all the DB + store work behind `verify-otp`, extracted from the
-/// handler so the in-process integration harness drives the identical logic
-/// against the shared main DB + OTP/session stores.
+/// Validate the OTP, create-or-load the account and mint a session token. Public
+/// so the in-process harness drives the identical logic.
 pub async fn apply_verify_otp(
     conn: &libsql::Connection,
     otp: &OtpStore,
@@ -739,11 +640,8 @@ pub async fn apply_verify_otp(
     code: &str,
     device_id: &str,
 ) -> anyhow::Result<VerifyOtpResult> {
-    // Validate WITHOUT consuming: a correct code stays valid until the account-write
-    // and session mint below succeed, so a transient/config DB failure returns a
-    // clean 5xx and the *same* code still works on retry, instead of being burned
-    // and disguised as "invalid code" (#518). Wrong/expired/locked codes are
-    // rejected here and their attempt accounting stands.
+    // Validate WITHOUT consuming, so a downstream DB failure is a clean 5xx and the
+    // same code works on retry (#518).
     match otp.check(email, code, cfg, crate::util::now_unix()) {
         VerifyOutcome::Ok => {}
         VerifyOutcome::LockedOut => return Ok(VerifyOtpResult::LockedOut),
@@ -752,30 +650,13 @@ pub async fn apply_verify_otp(
         }
     }
 
-    // Code is good: create or load the account — server-gen ULID id + a default
-    // username from the email prefix plus a 4-char ULID suffix for uniqueness.
-    // Any error here `?`-propagates to a 5xx WITHOUT consuming the code (the
-    // retry then heals).
+    // Create or load the account. Any error propagates as a 5xx without consuming
+    // the code.
     //
-    // `pollis-core` used to carry a client twin of this
-    // (`auth::resolve_or_create_user_by_email`); #910 deleted it along with the
-    // dev-only login that was its sole caller, so this is now the ONE
-    // implementation of resolve-or-create in the workspace.
-    //
-    // Canonicalize here rather than relying on the handler having done it:
-    // `users.email` is `NOT NULL UNIQUE`, so the string IS the account identity,
-    // and the only place that can guarantee "one address, one row" is the
-    // function holding the INSERT. `apply_verify_otp` is also called directly by
-    // the in-process test harnesses, which do not go through the handler's trim.
-    //
-    // Lowercase as well as trim (#1088). Mailboxes are case-insensitive in
-    // practice, and the OTP store has always keyed on `trim(lower(..))` — so
-    // `Alice@x.com` and `alice@x.com` were one mailbox to the code that sends
-    // the code and two rows to the table that stores the account. Whoever typed
-    // the second spelling landed in a fresh empty account while their real one,
-    // its groups and its devices stayed where they were. Migration
-    // `000026_email_case_insensitive` backfills the existing rows and adds a
-    // unique index on `lower(trim(email))` so the database agrees.
+    // Canonicalize (trim + lowercase, #1088) here, at the function holding the
+    // INSERT: `users.email` is the account identity, and the test harnesses call
+    // this without the handler's trim. Migration `000026_email_case_insensitive`
+    // enforces the same in the database.
     let canonical = normalize_email(email);
     let email = canonical.as_str();
 
@@ -868,22 +749,11 @@ pub fn verify_otp_response(result: VerifyOtpResult) -> Response {
     }
 }
 
-/// The username a brand-new account starts with: the email's local part, an
-/// underscore, and the last four characters of the account's ULID, squeezed
-/// into the shape `profile::is_valid_username` accepts.
-///
-/// The squeeze matters because the DS is the one issuing these, and a name it
-/// mints must pass the rule it enforces on `/v1/profile/update` — a user whose
-/// starting name is refused by their own profile form is a defect. So: the
-/// whole thing is lower-cased (a ULID suffix is upper-case Crockford base32),
-/// every character outside `[a-z0-9_.-]` in the local part becomes `_`
-/// (`alice+work` → `alice_work`), and the local part is cut so the total fits
-/// `USERNAME_MAX_LEN`. The suffix alone is `_xxxx` — five characters — so the
-/// minimum length holds even for an address with an empty local part, and
-/// because the local part cannot contain `@` the result never does either.
-///
-/// Uniqueness still rides on the ULID suffix; lower-casing it is a bijection
-/// on the Crockford alphabet, so it loses nothing.
+/// The username a brand-new account starts with: the email's local part, `_`,
+/// and the last four characters of the account's ULID, squeezed into the shape
+/// `profile::is_valid_username` accepts (a name the DS mints must pass its own
+/// rule). Lower-cased, characters outside `[a-z0-9_.-]` become `_`, and the local
+/// part is cut to fit `USERNAME_MAX_LEN`; the 5-char suffix keeps the minimum.
 pub fn default_username(email: &str, user_id: &str) -> String {
     let suffix = &user_id[user_id.len().saturating_sub(4)..];
     let suffix = suffix.to_ascii_lowercase();
@@ -905,8 +775,6 @@ pub fn default_username(email: &str, user_id: &str) -> String {
         .collect();
     format!("{local}_{suffix}")
 }
-
-// ── small response helpers ───────────────────────────────────────────────────
 
 /// `POST /v1/auth/request-otp` answers the shared `{"status":"ok"}` — and
 /// answers it whether or not an account exists, which is the point (an OTP
@@ -930,14 +798,11 @@ mod tests {
     use crate::db::Db;
     use crate::session::SessionStore;
 
-
     // A local libsql connection for the account-write path. `with_users` toggles
     // whether the `users` table exists — omitting it makes the write fail, which is
     // exactly the transient/config DB failure #518 is about.
-    /// Returns the `TempDir` first so the caller binds and holds it: it deletes
-    /// the directory the database lives in when it drops, and this used to be
-    /// `std::mem::forget(dir)`, which kept the directory alive by never cleaning
-    /// it up at all (#942).
+    /// Returns the `TempDir` first so the caller holds it; dropping it deletes the
+    /// database directory.
     async fn conn_with(with_users: bool) -> (tempfile::TempDir, Db, crate::db::ConnGuard) {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("otp-test.db");
@@ -970,8 +835,7 @@ mod tests {
         let store = OtpStore::default();
         let cfg = cfg();
         store.prepare("a@x.com", "123456", &cfg, 1000);
-        // A correct code checks Ok — and stays valid; checking again still Ok (the
-        // #518 fix: check alone must not burn the code).
+        // A correct code checks Ok and stays valid (#518).
         assert_eq!(store.check("a@x.com", "123456", &cfg, 1000), VerifyOutcome::Ok);
         assert_eq!(store.check("a@x.com", "123456", &cfg, 1000), VerifyOutcome::Ok);
         // Single-use is enforced by consume, not by check.
@@ -1005,9 +869,7 @@ mod tests {
         assert_ne!(store.check("a@x.com", "123456", &cfg, 1000), VerifyOutcome::Ok);
     }
 
-    /// The #1088 bug: `prepare` used to replace the whole record, so the guess
-    /// budget was per *requested code* rather than per mailbox — 5 guesses, ask
-    /// for a new code, 5 more, forever. The counter must survive the request.
+    /// #1088: the guess budget is per mailbox, so a new request must not refill it.
     #[test]
     fn a_fresh_request_does_not_refill_the_guess_budget() {
         let store = OtpStore::default();
@@ -1019,7 +881,7 @@ mod tests {
                 VerifyOutcome::Invalid
             );
         }
-        // Ask for a new code — under the old store this reset `attempts` to 0.
+        // Ask for a new code.
         store.prepare("a@x.com", "654321", &cfg, 1000);
         assert_eq!(
             store.check("a@x.com", "000000", &cfg, 1000),
@@ -1028,9 +890,8 @@ mod tests {
         );
     }
 
-    /// And once locked, requesting a new code must not clear the lockout or mint
-    /// a usable code — the old `!rec.locked` branch was dead because the record
-    /// (and with it `locked`) was thrown away on every `prepare`.
+    /// Once locked, requesting a new code must not clear the lockout or mint a
+    /// usable code.
     #[test]
     fn a_locked_mailbox_cannot_be_unlocked_by_requesting_a_new_code() {
         let store = OtpStore::default();
@@ -1058,10 +919,7 @@ mod tests {
         assert_eq!(store.check("a@x.com", "654321", &cfg, after), VerifyOutcome::Ok);
     }
 
-    /// The other half of #1088: requesting a new code used to invalidate the one
-    /// the victim was about to type, so anyone who knew an address could stall
-    /// that person's sign-in indefinitely. Codes now accumulate and each stays
-    /// valid for its own TTL.
+    /// #1088: a new request must not invalidate the code the user is about to type.
     #[test]
     fn a_new_request_leaves_the_outstanding_code_valid() {
         let store = OtpStore::default();
@@ -1096,10 +954,8 @@ mod tests {
         ));
     }
 
-    /// Mailbox state outliving its codes needs a collector, or the map grows
-    /// with every address anyone asks about. A record with a live code, a
-    /// standing lockout, or an open send window is load-bearing and must
-    /// survive; one with none of the three is garbage.
+    /// A record with a live code, a standing lockout or an open send window
+    /// survives the sweep; one with none of the three is dropped.
     #[test]
     fn the_sweep_drops_only_mailboxes_that_hold_nothing() {
         let store = OtpStore::default();
@@ -1249,11 +1105,8 @@ mod tests {
             .expect("verify-otp must succeed")
     }
 
-    /// `users.email` is `NOT NULL UNIQUE`, so the address string IS the account's
-    /// identity: two spellings of one address must land on one row. The handler
-    /// trims, but `apply_verify_otp` is also called directly (the desktop and TUI
-    /// in-process harnesses do), so the guarantee has to live here — at the
-    /// function that holds the INSERT.
+    /// Two spellings of one address must land on one row, enforced in
+    /// `apply_verify_otp` because the harnesses call it directly.
     #[tokio::test]
     async fn the_same_address_spelled_two_ways_resolves_to_one_account() {
         let (_dir, _db, conn) = conn_with(true).await;
@@ -1277,10 +1130,7 @@ mod tests {
         assert_eq!(user_count(&conn).await, 1, "one address must never own two accounts");
     }
 
-    /// #1088: the same address in different CASE is the same mailbox — the OTP
-    /// store always thought so (it keys on `trim(lower(..))`), but `users.email`
-    /// was byte-exact UNIQUE, so the second spelling opened a fresh empty
-    /// account beside the real one.
+    /// #1088: the same address in a different case is the same account.
     #[tokio::test]
     async fn the_same_address_in_a_different_case_resolves_to_one_account() {
         let (_dir, _db, conn) = conn_with(true).await;
@@ -1435,9 +1285,7 @@ mod tests {
         );
 
         // Heal the DB and retry the SAME code — it must succeed (was not burned).
-        // Production is Turso, where foreign-key enforcement is off; libsql's LOCAL
-        // backend turns it ON by default, so say so explicitly rather than
-        // inherit a constraint no deploy has (`Db::connect_local` does the same).
+        // Foreign keys off, as in `conn_with`.
         conn.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
         pollis_schema::apply::single_db(&conn).await.expect("schema");
         let second =
@@ -1484,9 +1332,8 @@ mod tests {
         let locked =
             apply_verify_otp(&conn, &otp, &sessions, &cfg, "a@x.com", "000000", "dev-1").await;
         assert!(matches!(locked, Ok(VerifyOtpResult::LockedOut)));
-        // The correct code is gone too — and the caller is told the mailbox is
-        // locked rather than "invalid code", because the lockout is now persisted
-        // on the mailbox instead of being implied by a deleted record (#1088).
+        // The correct code is gone too, and the caller is told the mailbox is locked
+        // (the lockout is persisted on the mailbox, #1088).
         let after =
             apply_verify_otp(&conn, &otp, &sessions, &cfg, "a@x.com", "123456", "dev-1").await;
         assert!(matches!(after, Ok(VerifyOtpResult::LockedOut)));

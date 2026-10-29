@@ -1,9 +1,5 @@
-//! Redaction helpers so application logs don't scatter user PII (#345).
-//!
-//! The server already holds emails in the `users` table, but that's access-
-//! controlled storage; log sinks are a separate, often broader-retention tier.
-//! Masking the local part keeps logs useful for debugging (the domain still
-//! distinguishes a Resend/provider issue) without recording who the user is.
+//! Redaction helpers so logs don't record user PII (#345): log sinks are a
+//! broader-retention tier than the access-controlled `users` table.
 
 /// Mask an email's local part, keeping the domain: `alice@example.com` →
 /// `***@example.com`. Anything without a domain → `***`.

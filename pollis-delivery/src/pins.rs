@@ -1,33 +1,8 @@
-//! Pinned messages (#99) — the wrapped pin-key state and the pin rows.
+//! Pinned messages (#99): the wrapped pin-key state and the pin rows. Design:
+//! `.codesight/wiki/mls.md` → pinned messages.
 //!
-//! Follows the domain-module shape verbatim: one `*Body` per endpoint in
-//! `pollis-api`, a pure `apply_*(conn, authed, body)` embedding BOTH the
-//! authorization decision and the write, and a thin axum handler that gates,
-//! parses, and maps the outcome. Reads follow `account_reads`: authenticate,
-//! membership-gate, serve ciphertext back byte-exactly.
-//!
-//! ## What the DS holds, in one paragraph
-//!
-//! Two ciphertexts per pinning conversation, keys to neither. `pin_keystate`
-//! is the conversation's 32-byte pin master key (`Kpin`) WRAPPED under a KEK
-//! the members derive from the current MLS epoch's exporter secret — one
-//! mutable row per MLS conversation, re-wrapped (~60 bytes) whenever the epoch
-//! advances, guarded by the same lexicographic `(generation, epoch)` CAS as
-//! `mls_group_info` so a stale wrap can never roll the row back to an epoch a
-//! removed member could still derive. `pinned_message` rows are content
-//! snapshots sealed directly under `Kpin`, written once at pin time and never
-//! re-encrypted; a removed member stops being able to read FUTURE pins because
-//! it can no longer unwrap the re-wrapped `Kpin`, which is the honest
-//! guarantee (plaintexts it saw while a member were always beyond recall).
-//!
-//! ## Authorization
-//!
-//! Everything here is membership-gated via [`crate::writes::is_member`]: the
-//! keystate is addressed by the MLS conversation id (group or DM), pins by the
-//! channel or DM id, and `is_member` accepts all three id kinds. Any current
-//! member may pin and unpin (Slack's model — a pin is conversation furniture,
-//! not the pinner's property). On the no-auth path the identity comes from the
-//! body actor, mirroring the other write modules.
+//! Everything is membership-gated via [`crate::writes::is_member`], which accepts
+//! group, channel and DM ids. Any current member may pin and unpin.
 
 use axum::{
     extract::State,
@@ -50,14 +25,8 @@ use crate::writes::{
 use crate::AppState;
 use crate::util::{b64, b64_decode};
 
-// The request bodies for this module's endpoints live in `pollis-api`, the
-// crate pollis-core builds its requests from — one declaration, both ends, so
-// a client field that does not exist here is a compile error rather than a
-// silently-absent JSON key. Re-exported so `pollis_delivery::pins::*Body`
-// keeps resolving for handlers, tests and the flows harness.
+// Re-exported so `pollis_delivery::pins::*Body` resolves for handlers and tests.
 pub use pollis_api::pins::*;
-
-// ── Bounds ───────────────────────────────────────────────────────────────────
 
 /// AES-256-GCM nonce length — the one length the construction has.
 const PIN_NONCE_LEN: usize = 12;
@@ -92,8 +61,6 @@ where
         PinOutcome::Invalid(why) => bad_request(why),
     })
 }
-
-// ── POST /v1/pins/keystate ───────────────────────────────────────────────────
 
 /// The keystate CAS answer: did the wrap land? Separate from [`PinOutcome`]
 /// because a refused CAS is a normal race outcome the client acts on, not an
@@ -141,22 +108,12 @@ pub async fn upsert_keystate(
 
 /// Insert-or-CAS the conversation's wrapped `Kpin`.
 ///
-/// Authz: the actor must be a current member of the MLS conversation. The CAS
-/// mirrors `writes::upsert_group_info` exactly — lexicographic on
-/// `(generation, epoch)`, strictly greater or refused — because the wrap is
-/// derived from the same object those columns version (the group's exporter),
-/// and an epoch-only guard would strand a suite migration's successor lineage.
-/// `updated: false` (zero rows) is the race answer, not an error: it tells a
-/// minting loser to refetch and adopt the winner's key, and a re-wrapping
-/// device that somebody newer already covered it.
-///
-/// And, like `mls_group_info`, the CAS is CEILINGED at the commit log's head
-/// (`writes::refuse_above_head`). Monotone-but-unbounded is not a bound: one
-/// member publishing `generation = 2^62` would freeze the row for the life of
-/// the conversation, so every later re-wrap is refused and every member removed
-/// after that point keeps a KEK that still opens the stored `Kpin`. The pair the
-/// wrap names must be an exporter that actually exists, which is exactly "at or
-/// below the head of the lineage it claims".
+/// Authz: current member of the MLS conversation. The CAS mirrors
+/// `writes::upsert_group_info`: lexicographic on `(generation, epoch)`, strictly
+/// greater or refused, and ceilinged at the commit log's head
+/// (`writes::refuse_above_head`) so one huge `generation` cannot freeze the row
+/// and leave removed members a KEK that still opens `Kpin`. `updated: false` is
+/// the race answer, not an error: a losing minter refetches and adopts the key.
 pub async fn apply_upsert_keystate(
     conn: &Connection,
     log_conn: &Connection,
@@ -248,8 +205,6 @@ pub async fn apply_upsert_keystate(
     })
 }
 
-// ── POST /v1/pins/pin ────────────────────────────────────────────────────────
-
 pub async fn pin_message(
     State(state): State<AppState>,
     req: RawRequest,
@@ -266,10 +221,7 @@ pub async fn pin_message(
 /// `(conversation_id, message_id)`: the second pin of the same message is a
 /// no-op rather than an error, whoever got there first keeps the row.
 ///
-/// Authz: current membership of the pin's conversation. What is validated is
-/// the ENVELOPE — base64 that decodes, the one nonce length AES-GCM has, a
-/// bounded blob — and nothing about the content, because the DS holds no key
-/// for it and never will.
+/// Only the envelope is validated; the DS holds no key for the content.
 pub async fn apply_pin_message(
     conn: &Connection,
     authed: Option<&str>,
@@ -313,8 +265,6 @@ pub async fn apply_pin_message(
     Ok(PinOutcome::Ok)
 }
 
-// ── POST /v1/pins/unpin ──────────────────────────────────────────────────────
-
 pub async fn unpin_message(
     State(state): State<AppState>,
     req: RawRequest,
@@ -348,8 +298,6 @@ pub async fn apply_unpin_message(
     .await?;
     Ok(crate::writes::WriteOutcome::Ok)
 }
-
-// ── POST /v1/read/pin-keystate ───────────────────────────────────────────────
 
 /// POST `/v1/read/pin-keystate` — the conversation's current wrapped `Kpin`.
 ///
@@ -395,8 +343,6 @@ pub async fn read_keystate(
         keystate,
     }))
 }
-
-// ── POST /v1/read/pins ───────────────────────────────────────────────────────
 
 /// POST `/v1/read/pins` — one conversation's pins, newest first.
 /// Membership-gated like the keystate read; rows come back ciphertext and all,

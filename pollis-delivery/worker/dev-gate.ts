@@ -1,37 +1,9 @@
-// The dev Delivery Service gate (#1242): only our own clients reach api-dev.
-//
-// api-dev.pollis.com is public, and dev is deliberately soft: `DEV_OTP` signs
-// any mailbox in with one fixed code, request-otp is unlimited, and it brokers
-// dev R2 and LiveKit tokens on the SAME SFU prod uses. Anyone holding only the
-// hostname could have all of that. So every dev client (pollis-core, on desktop,
-// CLI and mobile) sends `X-Pollis-Dev-Key`, and the dev Worker checks it before
-// a request reaches the container. A request without a valid key gets a bare
-// 404, so dev looks like nothing is there.
-//
-// INERT ON PROD, STRUCTURALLY. The gate runs only when `DEV_GATE_MODE` is set,
-// and only wrangler.dev.jsonc sets it (and binds the key). Prod sets neither, so
-// `gateModeFrom` returns undefined, nothing is checked, nothing is counted, and
-// even `/__gate` is forwarded to the container like any other path.
-// worker-tests/dev-gate.test.ts pins that prod config binds neither.
-//
-//   DEV_GATE_MODE=off      configured but checking nothing (rollback)
-//   DEV_GATE_MODE=report   lets everything through, counts the verdicts
-//   DEV_GATE_MODE=enforce  404s every request without a valid key
-//
-// An unrecognised value is treated as `report`: a typo while rolling back must
-// not take dev offline, and `/__gate` reports the mode actually in force.
-//
-// NO CLIENT IP, ANYWHERE. Report mode counts `{verdict} × {path class} × {UA
-// family}` and nothing else: no address, no rate-limit bucket, no full user
-// agent, no timestamp per request. The counts are read on `GET /__gate` with the
-// operator bearer (`POLLIS_DS_METRICS_TOKEN`), which the Worker already binds.
-//
-// The key is NOT a strong secret. It is inlined in every dev mobile build and
-// sits in plain text in local env files, so it stops people who only have the
-// URL (scanners, crawlers, a hostname seen in a screenshot or a CT log), not
-// anyone holding a dev build. Rotation is the answer to a leak: the binding may
-// hold a comma-separated list, so set "old,new", rebuild the clients, then
-// "new".
+// The dev Delivery Service gate (#1242): only our own clients, which send
+// `X-Pollis-Dev-Key`, reach api-dev; anything else gets a bare 404. Inert on
+// prod: only wrangler.dev.jsonc sets `DEV_GATE_MODE` (off | report | enforce; an
+// unknown value is `report`, so a rollback typo cannot take dev offline).
+// Counts hold no client IP. Modes, rotation and reading `/__gate`:
+// docs/deployments.md → "Dev gate".
 //
 // No imports, so worker-tests/ can load this file under plain Node.
 
@@ -41,8 +13,7 @@ export type Verdict = "ok" | "missing" | "bad";
 export const DEV_KEY_HEADER = "x-pollis-dev-key";
 export const GATE_STATS_PATH = "/__gate";
 
-// Answered without a key: the deploy workflow polls /version for the new SHA,
-// and /health is the readiness probe. Neither does anything a stranger can use.
+// The deploy polls /version; /health is the readiness probe.
 export const EXEMPT_PATHS: ReadonlySet<string> = new Set(["/health", "/version"]);
 
 // Unset (prod) → undefined → the gate does not exist.
@@ -57,7 +28,7 @@ export function gateModeFrom(raw: string | undefined): GateMode | undefined {
   return "report";
 }
 
-// Every key currently accepted. More than one only during a rotation.
+// More than one only during a rotation.
 export function acceptedKeys(raw: string | undefined): string[] {
   return (raw ?? "")
     .split(",")
@@ -69,9 +40,8 @@ async function digest(value: string): Promise<Uint8Array> {
   return new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
 }
 
-// Constant-time over SHA-256 digests, so neither the length nor the content of
-// the presented value leaks through timing. Written out rather than using the
-// Workers-only `crypto.subtle.timingSafeEqual` so the tests run under Node.
+// Constant-time over SHA-256 digests, so neither length nor content leaks.
+// Not `crypto.subtle.timingSafeEqual` (Workers-only), so the tests run under Node.
 export async function sameSecret(presented: string, expected: string): Promise<boolean> {
   const [a, b] = await Promise.all([digest(presented), digest(expected)]);
   let diff = 0;
@@ -94,8 +64,7 @@ export async function verdictFor(presented: string | null, keys: string[]): Prom
   return ok ? "ok" : "bad";
 }
 
-// Coarse, so a count says which part of dev a stranger was after without
-// recording what they asked for.
+// Coarse on purpose: which part of dev, not what was asked for.
 export function pathClass(pathname: string): string {
   if (pathname.startsWith("/v1/auth/")) {
     return "auth";
@@ -119,8 +88,7 @@ export function pathClass(pathname: string): string {
   return "other";
 }
 
-// pollis-core's reqwest client sends no User-Agent at all, so our own traffic
-// is `none`; a family is enough to tell it from browsers, curl and crawlers.
+// pollis-core sends no User-Agent, so our own traffic is `none`.
 export function uaFamily(ua: string | null): string {
   if (!ua) {
     return "none";
@@ -141,8 +109,7 @@ export function uaFamily(ua: string | null): string {
   return "other";
 }
 
-// Where the counts live. The Durable Object passes its own storage so they
-// survive the object idling out between a soak run and reading /__gate.
+// The Durable Object passes its own storage so counts survive an idle sleep.
 export interface CountStore {
   get<T>(key: string): Promise<T | undefined>;
   put<T>(key: string, value: T): Promise<void>;
@@ -196,8 +163,7 @@ export interface GateInputs {
 const NOT_FOUND = () => new Response(null, { status: 404 });
 
 // Returns the response to send instead of forwarding, or undefined to forward.
-// The caller strips DEV_KEY_HEADER before forwarding; the container never needs
-// it.
+// The caller strips DEV_KEY_HEADER before forwarding.
 export async function gate(request: Request, inputs: GateInputs): Promise<Response | undefined> {
   const { pathname } = new URL(request.url);
 

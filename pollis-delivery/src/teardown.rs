@@ -1,57 +1,21 @@
-//! Explicit teardown — the deletes that `ON DELETE CASCADE` was supposed to do
-//! and never did on any deployment.
+//! Explicit teardown. Production Turso runs with `foreign_keys=OFF`, so the
+//! schema's `ON DELETE CASCADE` clauses never fire: every row that should go is
+//! deleted by name here.
 //!
-//! # Why this module exists
+//! A new remote table naming a user, group, channel or DM must be added to the
+//! matching function and list below, or to an exemption list with a reason;
+//! `tests/teardown.rs` reads the live schema and enforces it.
 //!
-//! The baseline schema decorates almost every child table with `REFERENCES
-//! users(id) ON DELETE CASCADE` (and the same for `groups`, `channels`,
-//! `dm_channel`). **Production Turso runs with `foreign_keys=OFF`**, so not one
-//! of those clauses has ever fired on a real deploy — see
-//! [`crate::db::LOCAL_PRAGMAS`], which mirrors the production setting in this
-//! crate's own fixtures, and migration `000016`, which keeps the conversation
-//! registry append-only for precisely this reason.
-//!
-//! The consequence was a data-retention bug, not a cosmetic one. "Delete my
-//! account" ran `DELETE FROM users` and trusted the cascade for the device
-//! roster, DM membership, invites, recovery blob, security-event log and a dozen
-//! other tables. Every one of those rows survived. For a messenger whose product
-//! claim is that the server holds metadata you can actually remove, that claim
-//! was false.
-//!
-//! So: no implicit deletes anywhere. Every row that should go is named here.
-//!
-//! # The rule for adding a table
-//!
-//! Any new remote table carrying a user, group, channel or DM identifier MUST be
-//! added to the matching function below, or added to [`EXEMPT_FROM_USER_PURGE`] /
-//! [`EXEMPT_FROM_CONVERSATION_PURGE`] with a reason. `tests/teardown.rs`
-//! reads the live schema and fails if a table is in neither list, so a table
-//! cannot be forgotten the way these were. That test is the actual guarantee;
-//! this doc comment is only its explanation.
-//!
-//! # Scoping — the #878 defect class
-//!
-//! #878 was "authorised on one field, deleted by another". Every statement here
-//! is bound to the id of the thing being torn down, and where a delete has to
-//! reach rows via another table it does so through a subquery anchored on that
-//! same id (never a join that could widen). Nothing here re-derives a target
-//! from client input; callers pass an id they have already authorised.
-//!
-//! # Ordering
-//!
-//! Children before parents, anchor row last. Callers run these inside one
-//! transaction, so ordering is not what makes them atomic — it is what makes a
-//! *partial* application (a crash mid-teardown on a deploy where the transaction
-//! is degraded, a manual replay) monotone toward the goal instead of leaving an
-//! anchor row whose children are unreachable. Re-running any of these functions
-//! is a no-op, by design.
+//! Every statement is bound to the id being torn down, reaching other rows only
+//! through subqueries anchored on that id (#878). Children go before parents,
+//! anchor row last, so a partial application stays monotone; re-running is a
+//! no-op.
 
 use libsql::Connection;
 
-/// Every table [`purge_user_rows`] clears (plus `users`, which its caller
-/// deletes). Paired with [`EXEMPT_FROM_USER_PURGE`] this is the complete
-/// partition of the schema with respect to account deletion, and
-/// `tests/teardown.rs` asserts exactly that against the live schema.
+/// Every table account deletion clears ([`purge_user_rows`] plus the caller's
+/// `users` delete and log-DB purges). With [`EXEMPT_FROM_USER_PURGE`] it
+/// partitions the schema.
 pub const USER_PURGED_TABLES: &[&str] = &[
     "account_recovery",
     "directory_lookup_budget",
@@ -71,10 +35,8 @@ pub const USER_PURGED_TABLES: &[&str] = &[
     "message_envelope",
     "message_reaction",
     "mls_key_package",
-    // The two commit-log-DB tables in this list. `mls_welcome` is purged by
-    // `writes::purge_welcomes` and `mls_commit_since` by `purge_user_log_rows`,
-    // both called from the `/v1/account/delete` handler once the main
-    // transaction has committed.
+    // Log-DB tables, purged by `writes::purge_welcomes` and
+    // `purge_user_log_rows` after the main transaction commits.
     "mls_commit_since",
     "mls_welcome",
     "pinned_message",
@@ -123,9 +85,8 @@ pub const CONVERSATION_PURGED_TABLES: &[&str] = &[
     "push_handle",
 ];
 
-/// Tables that deliberately survive an account deletion, and why. Read by
-/// `tests/teardown.rs`, which fails on any table that is neither
-/// purged nor listed here — the list is a decision record, not a suppression.
+/// Tables that deliberately survive an account deletion, and why. A decision
+/// record, read by `tests/teardown.rs`.
 pub const EXEMPT_FROM_USER_PURGE: &[(&str, &str)] = &[
     (
         "account_key_log",
@@ -220,27 +181,15 @@ pub const EXEMPT_FROM_CONVERSATION_PURGE: &[(&str, &str)] = &[
     ),
 ];
 
-/// Delete every main-DB row keyed to `user_id`, **except** the `users` row
-/// itself, which the caller deletes last.
-///
-/// Split that way because account deletion removes the anchor row while identity
-/// reset ([`crate::account::apply_reset_recover`]) keeps it — the set of
-/// dependent rows is otherwise identical, and having one list is the point.
-///
-/// Every statement is `WHERE <user column> = ?1`, so nothing here can reach a
-/// row that does not name this user. The two `OR`-ed predicates (`user_block`,
-/// `group_invite`) name the same user on both sides of a pair, which is the
-/// whole row's subject in each case.
+/// Delete every main-DB row keyed to `user_id` except the `users` row, which
+/// account deletion removes last and identity reset
+/// ([`crate::account::apply_reset_recover`]) keeps.
 pub async fn purge_user_rows(conn: &Connection, user_id: &str) -> anyhow::Result<()> {
     let uid = || libsql::params![user_id.to_string()];
     let uid2 = || libsql::params![user_id.to_string(), user_id.to_string()];
 
-    // Rows hanging off this user's own envelopes, BEFORE those envelopes go —
-    // afterwards the subquery matches nothing and they are orphaned, which is
-    // the whole failure mode. The reactions removed here can belong to other
-    // users; that is correct, because the message being reacted to ceases to
-    // exist. Deleting the attachment references also releases the shared
-    // objects for collection (#690).
+    // Children of this user's envelopes, before the envelopes go (or the
+    // subquery matches nothing). Includes other users' reactions on them.
     conn.execute(
         "DELETE FROM attachment_ref WHERE message_id IN \
          (SELECT id FROM message_envelope WHERE sender_id = ?1)",
@@ -254,23 +203,14 @@ pub async fn purge_user_rows(conn: &Connection, user_id: &str) -> anyhow::Result
     )
     .await?;
 
-    // Envelopes this user sent. Sealed-sender envelopes (#607) carry a fixed
-    // non-identifying sentinel in `sender_id` rather than this id, so they are
-    // deliberately NOT matched here — they are unattributable by construction.
-    // They go with their conversation, or via the #720 watermark sweep.
+    // Sealed-sender envelopes (#607) carry a sentinel `sender_id` and are not
+    // matched; they go with their conversation or the #720 watermark sweep.
     conn.execute("DELETE FROM message_envelope WHERE sender_id = ?1", uid()).await?;
 
-    // Reactions this user made on anyone's messages. They carry the reacting
-    // user in the clear, so they are removable and must be removed.
     conn.execute("DELETE FROM message_reaction WHERE user_id = ?1", uid()).await?;
 
-    // The directory-lookup budget (#1089) is per-user bookkeeping with nothing
-    // to preserve: a recreated account gets a new `user_id`, so keeping the row
-    // would bound nobody and only leave a residue of how much this person
-    // searched.
     conn.execute("DELETE FROM directory_lookup_budget WHERE user_id = ?1", uid()).await?;
 
-    // Membership and the social graph.
     conn.execute("DELETE FROM group_member WHERE user_id = ?1", uid()).await?;
     conn.execute("DELETE FROM dm_channel_member WHERE user_id = ?1", uid()).await?;
     conn.execute(
@@ -278,10 +218,6 @@ pub async fn purge_user_rows(conn: &Connection, user_id: &str) -> anyhow::Result
         uid2(),
     )
     .await?;
-    // Abuse reports filed BY or ABOUT this user, and any suspension (#1213).
-    // They hold ids only, but an id that outlives its account is residue the
-    // retention policy promises not to keep, and a deleted account's id is
-    // never reused, so a suspension row would bind nobody.
     conn.execute(
         "DELETE FROM user_report WHERE reporter_id = ?1 OR reported_id = ?2",
         uid2(),
@@ -289,18 +225,14 @@ pub async fn purge_user_rows(conn: &Connection, user_id: &str) -> anyhow::Result
     .await?;
     conn.execute("DELETE FROM account_suspension WHERE user_id = ?1", uid()).await?;
 
-    // Invites, in both directions, plus the links this user minted. Honour the
-    // declared `ON DELETE SET NULL` on the redemption audit trail BEFORE the
-    // links go: those rows can belong to OTHER users, so they are nulled, never
-    // deleted — only this user's own redemptions are removed.
     conn.execute(
         "DELETE FROM group_invite WHERE inviter_id = ?1 OR invitee_id = ?2",
         uid2(),
     )
     .await?;
     conn.execute("DELETE FROM group_join_request WHERE requester_id = ?1", uid()).await?;
-    // `reviewed_by` is a nullable audit pointer on ANOTHER user's request row.
-    // Blank the reference rather than deleting someone else's request.
+    // Audit pointers on other users' rows are nulled, not deleted: the
+    // declared `ON DELETE SET NULL`, done by hand, before the links go.
     conn.execute(
         "UPDATE group_join_request SET reviewed_by = NULL WHERE reviewed_by = ?1",
         uid(),
@@ -315,44 +247,28 @@ pub async fn purge_user_rows(conn: &Connection, user_id: &str) -> anyhow::Result
     conn.execute("DELETE FROM group_invite_link_redemption WHERE user_id = ?1", uid()).await?;
     conn.execute("DELETE FROM group_invite_link WHERE created_by = ?1", uid()).await?;
 
-    // Custom emoji this user contributed. Migration 000015 states the intent
-    // ("account teardown deletes by creator") and adds `idx_group_emoji_created_by`
-    // for it. `created_by` is NOT NULL, so the alternative to deleting the row is
-    // retaining a deleted user's id in it forever. Deleting also releases the
-    // shared object for `POST /v1/emoji/gc`.
+    // `created_by` is NOT NULL, so the row goes; the object is released for
+    // `POST /v1/emoji/gc`.
     conn.execute("DELETE FROM group_emoji WHERE created_by = ?1", uid()).await?;
 
-    // Devices and per-device state.
     conn.execute("DELETE FROM user_device WHERE user_id = ?1", uid()).await?;
     conn.execute("DELETE FROM device_enrollment_request WHERE user_id = ?1", uid()).await?;
     conn.execute("DELETE FROM mls_key_package WHERE user_id = ?1", uid()).await?;
     conn.execute("DELETE FROM conversation_watermark WHERE user_id = ?1", uid()).await?;
-    // #1423: tickets awaiting a receipt name only a token, so they go via the
-    // user's tokens, before those are deleted.
+    // Tickets name only a token, so they go via the user's tokens first (#1423).
     conn.execute(
         "DELETE FROM push_ticket WHERE token IN (SELECT token FROM push_token WHERE user_id = ?1)",
         uid(),
     )
     .await?;
     conn.execute("DELETE FROM push_token WHERE user_id = ?1", uid()).await?;
-    // #1122: the only durable record that a notification for some conversation
-    // went to this user. A deleted account must not leave it behind.
     conn.execute("DELETE FROM push_handle WHERE user_id = ?1", uid()).await?;
 
-    // Account-scoped records.
     conn.execute("DELETE FROM account_recovery WHERE user_id = ?1", uid()).await?;
     conn.execute("DELETE FROM user_preferences WHERE user_id = ?1", uid()).await?;
-    // The encrypted read-cursor blob (#844). Unreadable to the server, which is
-    // exactly why it would otherwise sit here forever: nothing about it looks
-    // like user data to anyone auditing the tables by eye.
     conn.execute("DELETE FROM read_cursor_sync WHERE user_id = ?1", uid()).await?;
-    // Channel mutes (#1431): plaintext "this user muted this channel" rows the
-    // push fan-out reads. They name the user, so they go with the account.
     conn.execute("DELETE FROM channel_mute WHERE user_id = ?1", uid()).await?;
-    // The vault (#107): references first, while the subquery can still see the
-    // entries, then the entries. Dropping the references is what releases the
-    // shared attachment objects for collection, exactly like `attachment_ref`
-    // above.
+    // Vault references first, while the subquery can still see the entries.
     conn.execute(
         "DELETE FROM vault_attachment_ref WHERE vault_message_id IN \
          (SELECT id FROM vault_message WHERE user_id = ?1)",
@@ -360,58 +276,24 @@ pub async fn purge_user_rows(conn: &Connection, user_id: &str) -> anyhow::Result
     )
     .await?;
     conn.execute("DELETE FROM vault_message WHERE user_id = ?1", uid()).await?;
-    // Pins this user placed (#99). The snapshot inside is ciphertext under the
-    // conversation's Kpin, but the row itself names the pinner in the clear, so
-    // it is removable and must be removed. The conversation keeps its other
-    // members' pins.
     conn.execute("DELETE FROM pinned_message WHERE pinned_by = ?1", uid()).await?;
     conn.execute("DELETE FROM security_event WHERE user_id = ?1", uid()).await?;
 
-    // Derived directory index (migration 000009). Nothing reads it today, which
-    // is exactly why it would have gone on holding a deleted user's membership
-    // graph indefinitely.
-
-    // Rows that SURVIVE but still point at this user by id.
     hand_over_dangling_pointers(conn, user_id).await?;
 
     Ok(())
 }
 
-/// Deal with the columns that name a user on a row belonging to something that
-/// outlives them: `groups.owner_id`, `dm_channel.created_by` and
-/// `dm_channel_member.added_by`.
-///
-/// Deleting those rows is not an option — they belong to a conversation other
-/// people are still using — and all three columns are `NOT NULL`, so they cannot
-/// simply be blanked. Each is therefore handed to a remaining participant, or
-/// (for the pure audit field) collapsed to a self-reference.
-///
-/// Two of the three are more than tidiness:
-///
-/// * **`dm_channel.created_by` is an authorization input.** `apply_remove_dm_member`
-///   lets the channel creator remove someone else. Left naming a deleted user,
-///   that power belongs to an account that can never authenticate again, so the
-///   DM can never have a member removed. Handing it to a remaining member
-///   restores the capability to somebody who actually holds it — the same shape
-///   as the group sole-admin promotion.
-/// * **`groups.owner_id` is a display field, not an authz input**
-///   (`pollis-core::commands::groups::membership`), so reassigning it grants
-///   nothing. It is handed over because otherwise a deleted user's id is
-///   displayed as the owner of a live group forever. Note this runs for EVERY
-///   group they owned, not just the ones where a sole-admin promotion happened —
-///   a group with two admins promotes nobody, and used to keep the dead
-///   `owner_id` on that path.
-///
-/// Every statement is anchored on `= ?1` for this user and picks its replacement
-/// from the surviving membership of that same conversation, so nothing here can
-/// touch a conversation the user had no part in.
+/// Hand over the `NOT NULL` columns naming this user on rows that outlive them:
+/// `groups.owner_id` (display only) and `dm_channel.created_by` (an authz input
+/// for `apply_remove_dm_member`, so it must name someone who can still sign in)
+/// go to a remaining member; the audit field `dm_channel_member.added_by`
+/// collapses to a self-reference.
 async fn hand_over_dangling_pointers(conn: &Connection, user_id: &str) -> anyhow::Result<()> {
     let uid = || libsql::params![user_id.to_string()];
 
-    // Prefer an admin, fall back to any member. A group with no members left is
-    // being torn down by the caller, so the subquery yielding NULL is fine: the
-    // guard keeps the row unchanged rather than writing NULL into a NOT NULL
-    // column.
+    // Prefer an admin. The EXISTS guard leaves a memberless group (being torn
+    // down by the caller) unchanged rather than writing NULL.
     conn.execute(
         "UPDATE groups SET owner_id = ( \
              SELECT gm.user_id FROM group_member gm \
@@ -437,9 +319,6 @@ async fn hand_over_dangling_pointers(conn: &Connection, user_id: &str) -> anyhow
     )
     .await?;
 
-    // Pure audit field, never read for authorization. Collapsing it to the
-    // member's own id says "who added them is no longer recorded" without
-    // inventing a sentinel or dropping somebody else's membership row.
     conn.execute(
         "UPDATE dm_channel_member SET added_by = user_id WHERE added_by = ?1",
         uid(),
@@ -449,18 +328,9 @@ async fn hand_over_dangling_pointers(conn: &Connection, user_id: &str) -> anyhow
     Ok(())
 }
 
-/// Delete every main-DB row belonging to one conversation's message history:
-/// envelopes, the reactions and attachment references hanging off them, and the
-/// per-device cursors.
-///
-/// `conversation_id` is a channel id or a DM channel id — `message_envelope`,
-/// `conversation_watermark` and the registry all key on the same namespace
-/// (migration 000016), which is why one function serves both.
-///
-/// The two subqueries are anchored on `conversation_id`, so they can only reach
-/// messages of this conversation. They run BEFORE the envelopes are deleted —
-/// afterwards the subquery would return nothing and the child rows would be
-/// orphaned, which is the bug this whole module is about.
+/// Delete every main-DB row of one conversation's history. `conversation_id` is
+/// a channel or DM channel id (one namespace, migration 000016). The child
+/// subqueries run before the envelopes are deleted.
 pub async fn purge_conversation_rows(
     conn: &Connection,
     conversation_id: &str,
@@ -473,8 +343,7 @@ pub async fn purge_conversation_rows(
         cid(),
     )
     .await?;
-    // By the envelope while it survives, and by the conversation the reaction
-    // was gated against (#1433) once GC has collected it.
+    // By conversation too (#1433), for reactions whose envelope GC collected.
     conn.execute(
         "DELETE FROM message_reaction WHERE conversation_id = ?1 OR message_id IN \
          (SELECT id FROM message_envelope WHERE conversation_id = ?1)",
@@ -483,31 +352,20 @@ pub async fn purge_conversation_rows(
     .await?;
     conn.execute("DELETE FROM message_envelope WHERE conversation_id = ?1", cid()).await?;
     conn.execute("DELETE FROM conversation_watermark WHERE conversation_id = ?1", cid()).await?;
-    // The delivery-sequence counter (#1087). GC must NEVER remove this — the
-    // whole point is that it outlives the envelopes it numbers — but a teardown
-    // must, because the conversation and every cursor pointing into it are going
-    // together. Leaving it would also let a recreated id inherit a stale
-    // high-water mark.
+    // GC must never remove the sequence counter (#1087); teardown must.
     conn.execute("DELETE FROM conversation_seq WHERE conversation_id = ?1", cid()).await?;
-    // #1122: handles naming a conversation that no longer exists resolve to
-    // nothing useful, and holding them would outlive the thing they describe.
     conn.execute("DELETE FROM push_handle WHERE conversation_id = ?1", cid()).await?;
-    // Pins live on the channel/DM id (#99); the keystate row lives on the MLS
-    // conversation id, which for a DM is this same id and for a group channel
-    // is the group id (removed by `purge_group` below). Both statements are
-    // no-ops where the id kind does not match.
+    // Keystate rows are keyed by the MLS conversation id: this id for a DM, the
+    // group id for a channel (see `purge_group`).
     conn.execute("DELETE FROM pinned_message WHERE conversation_id = ?1", cid()).await?;
     conn.execute("DELETE FROM pin_keystate WHERE conversation_id = ?1", cid()).await?;
     conn.execute("DELETE FROM file_keystate WHERE conversation_id = ?1", cid()).await?;
-    // Mutes of this channel (#1431). A no-op for a DM id, which nobody can mute.
     conn.execute("DELETE FROM channel_mute WHERE channel_id = ?1", cid()).await?;
     Ok(())
 }
 
-/// Drop `user_id`'s channel mutes (#1431) for every channel of `group_id` -- the
-/// half of leaving or being removed from a group that the mutes need. Without
-/// it a mute would outlive the membership it was set under and come back if
-/// the user rejoined.
+/// Drop `user_id`'s channel mutes (#1431) for every channel of `group_id` on
+/// leave or removal, so a mute does not come back on rejoin.
 pub async fn purge_member_channel_mutes(
     conn: &Connection,
     group_id: &str,
@@ -522,16 +380,11 @@ pub async fn purge_member_channel_mutes(
     Ok(())
 }
 
-/// Tear a whole group down: every channel's history, then the group's own rows.
-///
-/// Returns the conversation ids that no longer exist (the group's channels), so
-/// the caller can purge their commit-log-DB rows after the main transaction
-/// commits — those live on a different database and cannot join this one's
-/// transaction.
+/// Tear a whole group down. Returns the destroyed channel ids for the caller's
+/// [`purge_conversation_log`] after the main transaction commits.
 pub async fn purge_group(conn: &Connection, group_id: &str) -> anyhow::Result<Vec<String>> {
     let gid = || libsql::params![group_id.to_string()];
 
-    // Channels first: their history is only reachable through them.
     let mut channel_ids: Vec<String> = Vec::new();
     {
         let mut rows = conn
@@ -546,13 +399,9 @@ pub async fn purge_group(conn: &Connection, group_id: &str) -> anyhow::Result<Ve
     }
     conn.execute("DELETE FROM channels WHERE group_id = ?1", gid()).await?;
 
-    // Emoji references the group held (#848) — released here, collected by
-    // `POST /v1/emoji/gc`.
     crate::emoji::release_group_emoji(conn, group_id).await?;
 
-    // Invites and links. Redemption rows can belong to other users, so their
-    // dangling `link_id` is nulled (the declared `ON DELETE SET NULL`) rather
-    // than the row being deleted.
+    // Redemption rows can belong to other users: null `link_id`, don't delete.
     conn.execute(
         "UPDATE group_invite_link_redemption SET link_id = NULL \
          WHERE link_id IN (SELECT id FROM group_invite_link WHERE group_id = ?1)",
@@ -564,20 +413,16 @@ pub async fn purge_group(conn: &Connection, group_id: &str) -> anyhow::Result<Ve
     conn.execute("DELETE FROM group_join_request WHERE group_id = ?1", gid()).await?;
     conn.execute("DELETE FROM group_member WHERE group_id = ?1", gid()).await?;
 
-    // The group's pin key (#99) — keyed by the MLS conversation id, which for
-    // a group is the group id itself (channels' pin rows went with
-    // `purge_conversation_rows` above).
     conn.execute("DELETE FROM pin_keystate WHERE conversation_id = ?1", gid()).await?;
     conn.execute("DELETE FROM file_keystate WHERE conversation_id = ?1", gid()).await?;
 
-    // The anchor row last.
     conn.execute("DELETE FROM groups WHERE id = ?1", gid()).await?;
 
     Ok(channel_ids)
 }
 
-/// Tear a whole DM channel down. Caller must already have established that the
-/// channel has no members left (or that it is being destroyed regardless).
+/// Tear a whole DM channel down. The caller has established it has no members
+/// left, or is destroying it regardless.
 pub async fn purge_dm_channel(conn: &Connection, dm_channel_id: &str) -> anyhow::Result<()> {
     let did = || libsql::params![dm_channel_id.to_string()];
 
@@ -587,23 +432,9 @@ pub async fn purge_dm_channel(conn: &Connection, dm_channel_id: &str) -> anyhow:
     Ok(())
 }
 
-/// Purge the commit-log DB's rows that name `user_id` and are not part of an
-/// append-only guarantee.
-///
-/// Today that is `mls_commit_since`, the per-device commit catch-up high-water
-/// (`migrations-log/000003`). Nothing has ever deleted from it: it is upserted on
-/// every catch-up and was never cleaned on account deletion, so it retained a
-/// `(conversation_id, user_id, device_id)` triple for every conversation a
-/// deleted user was ever in, indefinitely. It is not a storage-pinning bug —
-/// `commit.rs`'s retention floor is taken over CURRENT member devices, so a
-/// departed user's row does not hold commits back — but it is exactly the
-/// metadata the retention policy promises to remove.
-///
-/// `mls_welcome` is handled by [`crate::writes::purge_welcomes`], which already
-/// existed for identity reset. `mls_commit_log` is deliberately untouched — see
-/// [`EXEMPT_FROM_USER_PURGE`].
-///
-/// Callers run this AFTER the main transaction commits, for the same reason as
+/// Purge `user_id`'s `mls_commit_since` rows from the commit-log DB.
+/// `mls_welcome` is [`crate::writes::purge_welcomes`]'s; `mls_commit_log` is
+/// exempt. Run after the main transaction commits, like
 /// [`purge_conversation_log`].
 pub async fn purge_user_log_rows(log_conn: &Connection, user_id: &str) -> anyhow::Result<()> {
     log_conn
@@ -615,9 +446,7 @@ pub async fn purge_user_log_rows(log_conn: &Connection, user_id: &str) -> anyhow
     Ok(())
 }
 
-/// Purge one device's commit-log-DB state. Used by device revocation and logout,
-/// which already drop that device's key packages and fetch cursors on the main
-/// DB but left its catch-up high-water behind.
+/// Purge one device's commit-log-DB state (device revocation and logout).
 pub async fn purge_device_log_rows(
     log_conn: &Connection,
     user_id: &str,
@@ -632,22 +461,10 @@ pub async fn purge_device_log_rows(
     Ok(())
 }
 
-/// Purge the commit-log DB's rows for conversations that no longer exist.
-///
-/// Separate from the main-DB functions because these three tables live on the
-/// commit-log database (`AppState::log_db`), which in a split deploy is a
-/// different Turso and therefore cannot share the main transaction.
-///
-/// **Callers must run this AFTER the main transaction commits.** If the main
-/// transaction rolls back, the conversation still exists, and having already
-/// deleted its GroupInfo and commit history would be destructive to live
-/// members. Running it after means the worst case is leftover rows for a dead
-/// conversation — retention debt, recoverable by re-running — instead of data
-/// loss for a living one. Deleting too little beats deleting too much.
-///
-/// Only ever called with ids of conversations this same operation destroyed, so
-/// the append-only guarantee of `mls_commit_log` is not weakened: there is no
-/// member left to read the chain.
+/// Purge the commit-log DB's rows for conversations that no longer exist. The
+/// log DB cannot share the main transaction, so callers must run this after
+/// the main transaction commits: a rollback then leaves only recoverable
+/// leftovers, never a live conversation without its history.
 pub async fn purge_conversation_log(
     log_conn: &Connection,
     conversation_ids: &[String],

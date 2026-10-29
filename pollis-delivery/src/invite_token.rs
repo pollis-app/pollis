@@ -1,17 +1,7 @@
-//! #847 — server side of the invite-link token format.
-//!
-//! Mirrors `pollis-core/src/commands/groups/invite_token.rs`. The two crates
-//! share no code by design (the DS does not depend on `pollis-core`, and it does
-//! not depend on the DS) — the same arrangement the repo uses for the device-cert
-//! wire format and for account-creation-from-email
-//! (`otp::apply_verify_otp`, which since #910 is the only implementation —
-//! `pollis-core`'s client twin is gone).
-//! **A change to the token format must land in both files.**
-//!
-//! The server half is deliberately smaller than the client half: the DS never
-//! MINTS a token. The client generates it, hashes the secret locally, and posts
-//! only `(selector, sha256(secret))`. So this module only needs to parse a
-//! presented token, re-derive the hash, and compare — it has no `mint`.
+//! Server side of the invite-link token format (#847). Mirrors
+//! `pollis-core/src/commands/groups/invite_token.rs` (the crates share no code),
+//! so **a change to the token format must land in both files.** The DS never
+//! mints a token; it only parses, re-hashes and compares.
 
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
@@ -27,8 +17,7 @@ pub fn parse(token: &str) -> Option<(String, String)> {
     if selector.is_empty() || secret.is_empty() {
         return None;
     }
-    // Well-formedness check on attacker-supplied input. Not a secret-dependent
-    // branch: it tells the attacker only that their own input was malformed.
+    // Not a secret-dependent branch: it reveals only that the input was malformed.
     let ok = |s: &str| {
         s.chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
@@ -47,16 +36,9 @@ pub fn hash_secret(secret: &str) -> String {
     hex::encode(hasher.finalize())
 }
 
-/// Constant-time equality for two hex hash strings.
-///
-/// Compares the DECODED bytes so the comparison is over a fixed 32-byte width
-/// regardless of how the stored string is cased or padded. A stored value that
-/// is not valid hex, or not 32 bytes, can never match — that is a corrupt row,
-/// and treating it as a non-match fails closed.
-///
-/// The length check ahead of the compare is not a leak: both operands' lengths
-/// are fixed by the format (64 hex chars), so length carries no information
-/// about the secret.
+/// Constant-time equality over the decoded 32 bytes of two hex hashes. A
+/// malformed stored value never matches (fails closed); the length check leaks
+/// nothing, since the format fixes both lengths.
 pub fn hash_eq(a: &str, b: &str) -> bool {
     let (Ok(a), Ok(b)) = (hex::decode(a), hex::decode(b)) else {
         return false;
@@ -71,13 +53,9 @@ pub fn hash_eq(a: &str, b: &str) -> bool {
 mod tests {
     use super::*;
 
-    // The DS must reproduce byte-for-byte what pollis-core computed at mint
-    // time. This vector is the contract between the two crates: if either side's
-    // `hash_secret` changes, this fails and the mirror has drifted.
+    // This vector is the contract with pollis-core's `hash_secret`.
     #[test]
     fn hash_secret_matches_the_pollis_core_vector() {
-        // sha256("test-secret") — the same value pollis-core's hash_secret
-        // produces for the same input, since both hash the base64 TEXT.
         assert_eq!(
             hash_secret("test-secret"),
             "9caf06bb4436cdbfa20af9121a626bc1093c4f54b31c0fa937957856135345b6"
@@ -95,12 +73,9 @@ mod tests {
     #[test]
     fn hash_eq_fails_closed_on_malformed_stored_values() {
         let good = hash_secret("alpha");
-        // Not hex.
         assert!(!hash_eq(&good, "zzzz"));
-        // Hex but wrong width — a truncated column must never match.
         assert!(!hash_eq(&good, "abcd"));
         assert!(!hash_eq(&good, ""));
-        // A stored empty/garbage value must not match an empty presented one.
         assert!(!hash_eq("", ""));
     }
 

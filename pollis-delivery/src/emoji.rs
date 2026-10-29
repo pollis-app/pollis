@@ -1,57 +1,17 @@
-//! Domain F — custom per-group emoji (#848).
+//! Custom per-group emoji (#848). Storage model and collection rules:
+//! `.codesight/wiki/database.md` (`custom_emoji_object`, `group_emoji`).
 //!
-//! Follows domain B ([`crate::groups`]) verbatim: one `*Body` per endpoint, a
-//! pure `apply_*(conn, authed, body)` that embeds BOTH the authorization
-//! decision and the write, and a thin axum handler that gates, parses, and maps
-//! the outcome. The handler and the tests call the same `apply_*`, so nothing is
-//! authorized twice or authorized only in one of them.
+//! Everything a client sends about an object is re-derived or bounded here:
+//! `r2_key` is computed from `(content_hash, content_type)` (a client naming the
+//! key could bind its hash to someone else's object), `content_type` is the
+//! re-encoder's two outputs, `size_bytes` is bounded and bound into the presign,
+//! and `shortcode` is `[a-z0-9_]{2,32}` so it cannot carry markup or break the
+//! `<:name:hash>` token grammar.
 //!
-//! ## The storage model in one paragraph
-//!
-//! A custom emoji is a **content-addressed object** (`custom_emoji_object`,
-//! keyed by SHA-256 of the re-encoded bytes) plus **one row per group that uses
-//! it** (`group_emoji`). Fifteen groups adding party-parrot produce fifteen rows
-//! and one object — the "no fifteen party-parrots" requirement is a consequence
-//! of the schema, not of a dedup pass. The object is collectable exactly when no
-//! `group_emoji` row names its hash; that count is DERIVED (see
-//! [`object_is_referenced`]), so releasing a reference is simply the
-//! disappearance of the row, and no caller can forget to decrement.
-//!
-//! ## What this module refuses, and why
-//!
-//! Everything a client sends about an object is either re-derived or bounded
-//! here, because the DS is the only chokepoint that sees every upload:
-//!
-//!   - **`r2_key` is not accepted.** It is COMPUTED from `(content_hash,
-//!     content_type)`. A client that could name the key could register its hash
-//!     against somebody else's object.
-//!   - **`content_type` is a two-value allowlist** (`image/webp`, `image/gif`) —
-//!     the only two the re-encoder emits. Not the browser's declared MIME, and
-//!     not anything a decoder would have to guess at.
-//!   - **`size_bytes` must be `1..=EMOJI_MAX_BYTES`.** Paired with the
-//!     content-length-bound presign in [`crate::broker`], this is what actually
-//!     stops a runaway object: the presigned PUT is signed over the exact byte
-//!     count the client declared here, so R2 itself rejects a body of any other
-//!     size.
-//!   - **`shortcode` must match `[a-z0-9_]{2,32}`.** A shortcode is echoed into
-//!     rendered message text; a charset with no `<`, `&`, `:` or whitespace
-//!     cannot carry markup or break the `<:name:hash>` token grammar.
-//!   - **A creator may hold at most [`EMOJI_MAX_PER_USER`] rows** across every
-//!     group they are in. There is deliberately NO per-group cap (#848 is
-//!     explicit about that); the bound is per-PERSON, which is the party whose
-//!     cost you can actually attribute and the one an attacker has to pay for.
-//!
-//! ## Permission rule (Discord's, exactly)
-//!
-//! *Adding* an emoji to a group requires current membership of that group.
-//! *Using* one is broader: a user may use any emoji registered to any group they
-//! are currently a member of, in ANY conversation — and a recipient who is in
-//! none of those groups still RENDERS it. [`user_can_use_emoji`] is the single
-//! predicate for the "use" half; [`pollis_core`'s `commands::emoji`] enforces it
-//! at composition time (the DS cannot enforce it at send time — message content
-//! is E2EE, so the DS never learns which emoji a message carries, which is the
-//! point of the product). Rendering is unauthorized by design: the object is
-//! public-ish and unencrypted precisely so a non-member can fetch it.
+//! Adding requires membership; using an emoji is allowed in any conversation
+//! for a member of any group that registered it ([`user_can_use_emoji`],
+//! enforced by `pollis-core` at composition time since content is E2EE).
+//! Rendering is unauthorized by design.
 
 use axum::{
     extract::State,
@@ -65,45 +25,22 @@ use crate::error::{AppError, AuthRejection};
 use crate::writes::{bad_request, gate, gate_and_parse, resolve_actor, RawRequest, WriteOutcome};
 use crate::AppState;
 
-// The request bodies for this module's endpoints live in `pollis-api`, the
-// crate pollis-core builds its requests from — one declaration, both ends, so
-// a client field that does not exist here is a compile error rather than a
-// silently-absent JSON key. Re-exported so `pollis_delivery::emoji::*Body`
-// keeps resolving for handlers, tests and the flows harness.
 pub use pollis_api::emoji::*;
 
-// ── Bounds ───────────────────────────────────────────────────────────────────
-
-/// Hard ceiling on ONE stored emoji object, in bytes.
-///
-/// Deliberately tiny. `pollis-core`'s re-encoder treats this as a postcondition
-/// — it degrades resolution and frame count until the output fits, and fails
-/// rather than emit something larger — so this number is not a hope, it is the
-/// contract. The DS re-checks it here (a client could lie) and
-/// [`crate::broker`] binds it into the presigned PUT's signature, so R2 rejects
-/// an oversized body without the DS ever seeing the bytes.
+/// Hard ceiling on one stored emoji object, in bytes. `pollis-core`'s
+/// re-encoder treats it as a postcondition; [`crate::broker`] binds it into the
+/// presigned PUT so R2 rejects an oversized body.
 pub const EMOJI_MAX_BYTES: u64 = 48 * 1024;
 
-/// Hard ceiling on how many `group_emoji` rows ONE creator may hold, across
-/// every group.
-///
-/// #848 forbids a per-GROUP cap, so this is where "no runaway file counts" is
-/// actually enforced. The storage story falls out of the two numbers: a single
-/// user can be responsible for at most `EMOJI_MAX_PER_USER` rows and therefore
-/// at most `EMOJI_MAX_PER_USER * EMOJI_MAX_BYTES` = 48 MiB of objects — and
-/// usually far less, because dedup means their second copy of a popular emoji
-/// costs a row and no bytes at all.
+/// Hard ceiling on `group_emoji` rows one creator may hold, across every
+/// group. #848 forbids a per-group cap, so the bound is per person.
 pub const EMOJI_MAX_PER_USER: i64 = 1000;
 
-/// Shortest / longest permitted shortcode.
 const SHORTCODE_MIN: usize = 2;
 const SHORTCODE_MAX: usize = 32;
 
-// ── Validation helpers (pure — unit-tested directly) ─────────────────────────
-
-/// `[a-z0-9_]{2,32}`. Hand-rolled because `pollis-delivery` deliberately carries
-/// no regex dependency, and because the rule is small enough that a regex would
-/// obscure it.
+/// `[a-z0-9_]{2,32}`. Hand-rolled: `pollis-delivery` carries no regex
+/// dependency.
 pub fn shortcode_is_valid(shortcode: &str) -> bool {
     let len = shortcode.len();
     if !(SHORTCODE_MIN..=SHORTCODE_MAX).contains(&len) {
@@ -114,11 +51,8 @@ pub fn shortcode_is_valid(shortcode: &str) -> bool {
         .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
 
-/// A SHA-256 digest in the exact form the rest of the system writes it:
-/// 64 LOWERCASE hex characters. Case matters because the hash is a primary key
-/// and an R2 key stem — accepting both cases would let one image occupy two
-/// rows and two blobs, which is precisely the dedup failure this feature exists
-/// to avoid.
+/// 64 lowercase hex characters. Case matters: the hash is a primary key and an
+/// R2 key stem, so accepting both cases would store one image twice.
 pub fn content_hash_is_valid(hash: &str) -> bool {
     hash.len() == 64
         && hash
@@ -126,8 +60,8 @@ pub fn content_hash_is_valid(hash: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
-/// The file extension for an allowed emoji content type. `None` rejects the
-/// type outright — this doubles as the content-type allowlist.
+/// The file extension for an allowed emoji content type; doubles as the
+/// content-type allowlist.
 pub fn emoji_ext_for_content_type(content_type: &str) -> Option<&'static str> {
     match content_type {
         "image/webp" => Some("webp"),
@@ -136,16 +70,14 @@ pub fn emoji_ext_for_content_type(content_type: &str) -> Option<&'static str> {
     }
 }
 
-/// The R2 key for an emoji object. DERIVED, never accepted from a client — see
-/// the module docs. Public because `pollis-core` must compute the identical key
-/// to upload to, and one function is how the two stay in step.
+/// The R2 key for an emoji object, derived, never accepted from a client.
+/// Public so `pollis-core` computes the identical key.
 pub fn emoji_r2_key(content_hash: &str, ext: &str) -> String {
     format!("emoji/{content_hash}.{ext}")
 }
 
 /// The content hash embedded in an emoji R2 key (`emoji/<hash>.<ext>`), or
-/// `None` for any key not of that shape. Used by [`crate::broker`] to route a
-/// presign through the emoji reference gate.
+/// `None` for any key not of that shape.
 pub fn content_hash_from_emoji_key(key: &str) -> Option<&str> {
     let rest = key.strip_prefix("emoji/")?;
     let (hash, ext) = rest.rsplit_once('.')?;
@@ -155,33 +87,20 @@ pub fn content_hash_from_emoji_key(key: &str) -> Option<&str> {
     Some(hash)
 }
 
-// ── Outcomes ─────────────────────────────────────────────────────────────────
-
-/// The result of an emoji write. Wider than [`WriteOutcome`] because this domain
-/// has two failure modes that genuinely are not "forbidden": a malformed
-/// shortcode is the caller's mistake (400), and a quota refusal is a conflict
-/// with state rather than a permission problem (409). Collapsing either into 403
-/// would tell a user to go ask an admin for a permission that does not exist.
+/// The result of an emoji write. Wider than [`WriteOutcome`]: a malformed body
+/// is a 400 and a quota or shortcode refusal a 409, not a 403.
 #[derive(Debug)]
 pub enum EmojiOutcome {
     Ok,
-    /// The actor may not do this — not a member (add), or not an admin (remove).
     Forbidden,
-    /// The body is malformed. The `&'static str` is safe to return verbatim (no
-    /// user input is interpolated into it).
+    /// Returned verbatim; no user input is interpolated into it.
     Invalid(&'static str),
-    /// The actor is at [`EMOJI_MAX_PER_USER`].
     QuotaExceeded,
-    /// The `(group_id, shortcode)` pair is already taken.
     ShortcodeTaken,
 }
 
-/// Map an [`EmojiOutcome`] to its HTTP response.
-///
-/// Generic over the endpoint's request type (#922) for the same reason
-/// [`crate::writes::outcome_response`] is: the success arm is the shared
-/// `{"status":"ok"}`, and the bound is what proves THIS endpoint is declared to
-/// answer that rather than something richer.
+/// Map an [`EmojiOutcome`] to its HTTP response. Generic over the request type
+/// for the same reason as [`crate::writes::outcome_response`] (#922).
 fn emoji_outcome_response<B>(outcome: EmojiOutcome) -> Result<Response, AppError>
 where
     B: pollis_api::DsRequest<Response = pollis_api::StatusOk>,
@@ -206,16 +125,9 @@ where
     })
 }
 
-// ── Shared predicates ────────────────────────────────────────────────────────
-
-/// True when at least one `group_emoji` row still names `content_hash`.
-///
-/// The single source of truth for BOTH the conditional collect in
-/// [`apply_remove_emoji`] / [`sweep_unreferenced_emoji`] and the R2
-/// `put`/`delete` presign gates in [`crate::broker`]. An object may be
-/// collected — in Turso or in R2 — only when this is `false`. Mirrors
-/// `messages::object_is_referenced` deliberately: same shape, same guarantee,
-/// so a reader who understands attachment refcounting already understands this.
+/// True when at least one `group_emoji` row still names `content_hash`. The
+/// R2 `put`/`delete` presign gates in [`crate::broker`] use it; an object may be
+/// collected only when this is `false`.
 pub async fn object_is_referenced(conn: &Connection, content_hash: &str) -> anyhow::Result<bool> {
     let mut rows = conn
         .query(
@@ -229,30 +141,18 @@ pub async fn object_is_referenced(conn: &Connection, content_hash: &str) -> anyh
     })
 }
 
-/// Collect the shared object iff NO group still references it. ONE conditional
-/// `DELETE`, no Rust-side count, so the row cannot go while a referencing
-/// `group_emoji` row survives even under concurrent removes (CLAUDE.md "invalid
-/// states unrepresentable").
+/// Collect the shared object iff no group still references it. One conditional
+/// `DELETE`, no Rust-side count, so concurrent removes cannot strand a
+/// reference.
 const COLLECT_UNREFERENCED_EMOJI_SQL: &str = "\
 DELETE FROM custom_emoji_object \
  WHERE content_hash = ?1 \
    AND NOT EXISTS (SELECT 1 FROM group_emoji WHERE content_hash = ?1)";
 
-/// **The permission rule (#848).** True when `user_id` may USE the custom emoji
-/// `content_hash` — i.e. it is registered to at least one group the user is a
-/// current member of.
-///
-/// The worked example from the ticket, and what this returns for each party:
-/// user A adds the emoji to group A → `true` for A. User B is also in group A →
-/// `true` for B, *including when B is typing in group B*, because the predicate
-/// asks about the user's membership set, never about the conversation. User C is
-/// only in group B → `false`; C cannot send it. C still renders it when B does,
-/// because rendering fetches an unencrypted, ungated object and never consults
-/// this function.
-///
-/// Note what is deliberately absent: any conversation argument. Scoping "use" to
-/// the conversation is the obvious-looking rule and it is the wrong one — it is
-/// exactly the Discord behaviour #848 asks for that it would break.
+/// The permission rule (#848): `user_id` may use `content_hash` when it is
+/// registered to any group the user is a current member of. Deliberately takes
+/// no conversation: scoping use to the conversation would break the Discord
+/// behaviour #848 asks for.
 pub async fn user_can_use_emoji(
     conn: &Connection,
     user_id: &str,
@@ -273,7 +173,6 @@ pub async fn user_can_use_emoji(
     })
 }
 
-/// How many `group_emoji` rows `user_id` has created, across every group.
 async fn creator_row_count(conn: &Connection, user_id: &str) -> anyhow::Result<i64> {
     let mut rows = conn
         .query(
@@ -287,13 +186,7 @@ async fn creator_row_count(conn: &Connection, user_id: &str) -> anyhow::Result<i
     })
 }
 
-// Membership / admin come from [`crate::groups`] — this module used to keep its
-// own pair, and the copy's `row.get::<String>(0).ok()` turned a decode error on
-// the `role` column into `false` (a silent deny) where the original propagates
-// it. #875 deleted the copy rather than fixing it twice.
 use crate::groups::{is_admin as is_group_admin, is_member as is_group_member};
-
-// ── POST /v1/emoji/create ────────────────────────────────────────────────────
 
 pub async fn create_emoji(
     State(state): State<AppState>,
@@ -308,19 +201,9 @@ pub async fn create_emoji(
 }
 
 /// Register the shared object (idempotent) and bind it to `(group_id,
-/// shortcode)`.
-///
-/// Authz: the actor is a current MEMBER of the group. Not admin — #848 wants
-/// members to be able to add emoji, and the cost is bounded per-person by
-/// [`EMOJI_MAX_PER_USER`] rather than by gatekeeping. Removal is admin-only
-/// (#1280); see [`apply_remove_emoji`].
-///
-/// The object INSERT is `OR IGNORE`: it is content-addressed and byte-identical
-/// for every uploader, so the second person to add party-parrot writes no object
-/// row and (having found the hash already present) uploaded no bytes either. The
-/// `group_emoji` INSERT is NOT `OR IGNORE` — a colliding `(group, shortcode)`
-/// must be reported, not silently swallowed, or a user would think they had
-/// added an emoji that is actually someone else's image.
+/// shortcode)`. Any current member may add (#848); the cost is bounded by
+/// [`EMOJI_MAX_PER_USER`]. A colliding `(group, shortcode)` is reported as
+/// [`EmojiOutcome::ShortcodeTaken`], never swallowed.
 pub async fn apply_create_emoji(
     conn: &Connection,
     authed: Option<&str>,
@@ -331,7 +214,7 @@ pub async fn apply_create_emoji(
         Err(_) => return Ok(EmojiOutcome::Forbidden),
     };
 
-    // Shape first — a malformed body is never a permission question.
+    // Shape first: a malformed body is never a permission question.
     if body.group_id.trim().is_empty() {
         return Ok(EmojiOutcome::Invalid("group_id required"));
     }
@@ -354,20 +237,15 @@ pub async fn apply_create_emoji(
         return Ok(EmojiOutcome::Invalid("size_bytes out of range"));
     }
 
-    // Authz: current member of the target group. Skipped on the no-auth path,
-    // mirroring every other domain.
     if authed.is_some() && !is_group_member(conn, &body.group_id, &actor).await? {
         return Ok(EmojiOutcome::Forbidden);
     }
 
-    // Per-creator quota. Checked before the write, and again implicitly by the
-    // PK on retry — a racing pair of requests can at worst overshoot by the
-    // number of concurrent requests, which is a bound, not a leak.
+    // Racing requests can overshoot by at most the number in flight.
     if creator_row_count(conn, &actor).await? >= EMOJI_MAX_PER_USER {
         return Ok(EmojiOutcome::QuotaExceeded);
     }
 
-    // The key is DERIVED. Nothing the client sent decides where the bytes live.
     let r2_key = emoji_r2_key(&body.content_hash, ext);
 
     let tx = conn.transaction().await?;
@@ -404,8 +282,6 @@ pub async fn apply_create_emoji(
     Ok(EmojiOutcome::Ok)
 }
 
-// ── POST /v1/emoji/remove ────────────────────────────────────────────────────
-
 pub async fn remove_emoji(
     State(state): State<AppState>,
     req: RawRequest,
@@ -419,25 +295,8 @@ pub async fn remove_emoji(
 }
 
 /// Remove `(group_id, shortcode)` and collect the shared object if that was its
-/// last reference.
-///
-/// Authz: an ADMIN of the group, and nobody else — not even the emoji's
-/// creator (#1280). Adding is open to every member because its cost lands on
-/// the adder (quota); removing costs everyone who was using the emoji, so it is
-/// a moderation action and sits with the people who moderate. There is no
-/// rename/edit endpoint: a shortcode change is a remove plus an add, so gating
-/// remove is what gates "edit" too.
-///
-/// ## The admin check comes FIRST, and that is not cosmetic (L3)
-///
-/// A missing row answers `Ok` (an admin's retried remove is idempotent, not a
-/// 404) and an existing one the caller may not touch answers `Forbidden`. Run
-/// in that order with no up-front gate, the pair is an EXISTENCE ORACLE: a
-/// stranger could probe `(group_id, shortcode)` and read a group's whole emoji
-/// set off the difference between 200 and 403. Checking the role before the
-/// row is read collapses every answer to `Forbidden` for anyone who is not an
-/// admin, so the oracle only ever answers people who can already enumerate the
-/// set through `/v1/read/emoji`.
+/// last reference. Group admins only, not even the creator (#1280): removal is
+/// a moderation action, and also gates "edit" (a rename is remove plus add).
 pub async fn apply_remove_emoji(
     conn: &Connection,
     authed: Option<&str>,
@@ -453,14 +312,13 @@ pub async fn apply_remove_emoji(
         ));
     }
 
-    // Admin BEFORE the row read, so a non-admin's answer never depends on
-    // whether the shortcode exists. A non-member has no role, so this is also
-    // the membership gate.
+    // Admin check before the row read: otherwise `Ok` for a missing row vs
+    // `Forbidden` for an existing one is an existence oracle for non-admins.
+    // A non-member has no role, so this is also the membership gate.
     if authed.is_some() && !is_group_admin(conn, &body.group_id, &actor).await? {
         return Ok(EmojiOutcome::Forbidden);
     }
 
-    // Read the row: we need its hash to run the conditional collect.
     let mut rows = conn
         .query(
             "SELECT content_hash FROM group_emoji \
@@ -469,7 +327,7 @@ pub async fn apply_remove_emoji(
         )
         .await?;
     let Some(row) = rows.next().await? else {
-        // Already gone. Idempotent — a retried remove is a success, not a 404.
+        // Idempotent: a retried remove is a success, not a 404.
         return Ok(EmojiOutcome::Ok);
     };
     let content_hash: String = row.get(0)?;
@@ -480,8 +338,8 @@ pub async fn apply_remove_emoji(
         libsql::params![body.group_id.clone(), body.shortcode.clone()],
     )
     .await?;
-    // Same transaction as the release, so the collect sees the post-release
-    // state and two concurrent removes cannot each conclude "still referenced".
+    // Same transaction as the release, so two concurrent removes cannot each
+    // conclude "still referenced".
     tx.execute(
         COLLECT_UNREFERENCED_EMOJI_SQL,
         libsql::params![content_hash.clone()],
@@ -491,19 +349,10 @@ pub async fn apply_remove_emoji(
     Ok(EmojiOutcome::Ok)
 }
 
-// ── POST /v1/emoji/gc ────────────────────────────────────────────────────────
-
-/// POST /v1/emoji/gc — collect EVERY `custom_emoji_object` no group references
-/// any more, and return the R2 keys that were collected so the caller can delete
-/// the blobs.
-///
-/// Event-driven, never on a timer (the repo bans periodic polling). The remove
-/// path already collects the object it just released; this sweep exists for the
-/// references that are dropped WITHOUT going through it — a deleted group takes
-/// its `group_emoji` rows with it, and nothing in that path knows or should know
-/// about emoji objects. Any authenticated device may run it: it is idempotent,
-/// it can only ever remove rows that are already unreferenced, and gating it to
-/// an operator would mean the sweep runs only when someone remembers.
+/// POST /v1/emoji/gc: collect every unreferenced `custom_emoji_object` and
+/// return the collected R2 keys so the caller can delete the blobs. Covers
+/// references dropped outside the remove path (group deletion). Any
+/// authenticated device may run it: it can only remove unreferenced rows.
 pub async fn emoji_gc(
     State(state): State<AppState>,
     req: RawRequest,
@@ -519,9 +368,8 @@ pub async fn emoji_gc(
     }))
 }
 
-/// Collect every unreferenced object, returning their R2 keys. Reads the keys
-/// first so the caller can clean R2 — the row is the only record of where the
-/// blob lives, so it has to be read before it is deleted.
+/// Collect every unreferenced object, returning their R2 keys (the row is the
+/// only record of where the blob lives).
 pub async fn sweep_unreferenced_emoji(conn: &Connection) -> anyhow::Result<Vec<String>> {
     let mut rows = conn
         .query(
@@ -537,9 +385,8 @@ pub async fn sweep_unreferenced_emoji(conn: &Connection) -> anyhow::Result<Vec<S
 
     let mut collected = Vec::with_capacity(doomed.len());
     for (hash, key) in doomed {
-        // Re-check the predicate inside the DELETE rather than trusting the
-        // SELECT: a group could have re-added the emoji between the two. The
-        // conditional delete makes that race a no-op instead of a stranded blob.
+        // The conditional DELETE re-checks the predicate: a group could have
+        // re-added the emoji since the SELECT.
         let removed = conn
             .execute(
                 COLLECT_UNREFERENCED_EMOJI_SQL,
@@ -553,13 +400,8 @@ pub async fn sweep_unreferenced_emoji(conn: &Connection) -> anyhow::Result<Vec<S
     Ok(collected)
 }
 
-/// Release every emoji reference a group held. Called from
-/// [`crate::groups::apply_delete_group`] — a deleted group's shortcodes are
-/// meaningless, and leaving the rows would pin their objects forever.
-///
-/// Deliberately does NOT collect: it releases, and `POST /v1/emoji/gc` collects.
-/// Keeping release and collect separate is what lets EVERY future teardown path
-/// release correctly by doing nothing more than deleting its own rows.
+/// Release every emoji reference a group held (group deletion). Does not
+/// collect; `POST /v1/emoji/gc` does.
 pub async fn release_group_emoji(conn: &Connection, group_id: &str) -> anyhow::Result<()> {
     conn.execute(
         "DELETE FROM group_emoji WHERE group_id = ?1",
@@ -569,10 +411,8 @@ pub async fn release_group_emoji(conn: &Connection, group_id: &str) -> anyhow::R
     Ok(())
 }
 
-/// Bridge to [`WriteOutcome`] for callers that only care whether the write
-/// landed. Not used by this module's handlers (they want the wider mapping) —
-/// present so a future domain can compose an emoji write into a `WriteOutcome`
-/// pipeline without re-deriving the collapse.
+/// Collapse to [`WriteOutcome`] for callers that only care whether the write
+/// landed.
 impl From<EmojiOutcome> for WriteOutcome {
     fn from(outcome: EmojiOutcome) -> Self {
         match outcome {
@@ -597,7 +437,6 @@ mod validation_tests {
         assert!(!shortcode_is_valid("Party"), "uppercase would alias");
         assert!(!shortcode_is_valid("a-b"), "hyphen not in charset");
         assert!(!shortcode_is_valid("a b"), "whitespace splits the token");
-        // The injection cases the charset exists to make unrepresentable.
         assert!(!shortcode_is_valid("<img src=x onerror=alert(1)>"));
         assert!(!shortcode_is_valid("a:b"), "colon breaks <:name:hash>");
         assert!(!shortcode_is_valid("&amp;"));
@@ -619,8 +458,6 @@ mod validation_tests {
     fn only_the_two_re_encoder_outputs_are_accepted() {
         assert_eq!(emoji_ext_for_content_type("image/webp"), Some("webp"));
         assert_eq!(emoji_ext_for_content_type("image/gif"), Some("gif"));
-        // Everything a browser might declare, and everything a decoder would
-        // have to guess at.
         assert_eq!(emoji_ext_for_content_type("image/svg+xml"), None);
         assert_eq!(emoji_ext_for_content_type("image/png"), None);
         assert_eq!(emoji_ext_for_content_type("text/html"), None);

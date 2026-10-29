@@ -1,18 +1,9 @@
-//! HTTP error mapping. Any internal failure becomes a 500 with a terse JSON
-//! body; the logged detail stays server-side. (A rejected commit is NOT an
-//! error — it's a normal 409 response carrying the head + missing commits.)
-//! A transient database failure — the connection to Turso dropped, an expired
-//! hrana stream, `SQLITE_BUSY` — is a 503 `{"error":"unavailable"}` instead
-//! (#1500): nothing about the request was wrong, and the same request may
-//! succeed a moment later.
+//! HTTP error mapping. An internal failure is a 500 with a terse body (the detail
+//! stays in the log); a transient database failure is a 503 `unavailable`, since
+//! the same request may succeed a moment later (#1500).
 //!
-//! [`AuthRejection`] is the one *expected* refusal: a write that failed
-//! device-certificate-signature auth. It maps to 401 (couldn't prove which
-//! device/user signed) or 403 (proved identity, but `sender_id` doesn't match
-//! the authenticated user). We never fail open — every verification error on
-//! the auth path is a refusal, never acceptance. A database error while looking
-//! up the device's key is a refusal too, but a 503, not a 401: the DS could not
-//! check the signature, which says nothing about whether it was valid.
+//! [`AuthRejection`] is the one expected refusal. Every verification error on the
+//! auth path is a refusal, never acceptance.
 
 use axum::{
     http::StatusCode,
@@ -20,9 +11,6 @@ use axum::{
     Json,
 };
 
-/// `Debug` is derived so tests can `.expect(...)` on a `Result<_, AppError>`.
-/// It forwards to `anyhow::Error`'s, which prints the whole cause chain — the
-/// only rendering worth having when a test reports one.
 #[derive(Debug)]
 pub struct AppError(pub anyhow::Error);
 
@@ -118,28 +106,19 @@ fn is_transient_libsql_error(err: &libsql::Error) -> bool {
 
 /// A write rejected by device-certificate-signature auth.
 ///
-/// `Unauthorized` (401): the request couldn't be tied to a known device key —
-/// missing headers, bad timestamp (replay window), unknown/revoked device, or
-/// an invalid signature. Also the catch-all for any non-database error on the
-/// auth path, so we never fail open.
-///
-/// `Forbidden` (403): the signature verified for `(user_id, device_id)`, but
-/// the commit's `sender_id` is some *other* user — a validly-signed request
-/// trying to write as someone else.
-///
-/// `Unavailable` (503): the device's key could not be read because the database
-/// failed. Still a refusal — the request is not authenticated — but one the
-/// client treats as "try again", not "signed out" (#1500).
+/// - `Unauthorized` (401): not tied to a known device key (missing headers,
+///   replay window, unknown device, bad signature). Also the catch-all for any
+///   non-database error on the auth path, so we never fail open.
+/// - `Forbidden` (403): the signature verified, but `sender_id` is another user.
+/// - `Unavailable` (503): the key lookup failed on the database, so the client
+///   retries instead of signing out (#1500).
 #[derive(Debug, PartialEq, Eq)]
 pub enum AuthRejection {
     Unauthorized,
     Forbidden,
-    /// The request is signed by the device's own key, and that device has been
-    /// revoked (#1338). Told apart from [`AuthRejection::Unauthorized`] so the
-    /// device can sign itself out instead of retrying forever. Only a holder of
-    /// the revoked device's private key can earn this answer, so it tells the
-    /// caller nothing it could not already infer; an unknown device or a bad
-    /// signature still gets the bare `unauthorized`.
+    /// Signed by a revoked device's own key (#1338), so the device can sign itself
+    /// out instead of retrying. Only that key's holder can earn this answer, so it
+    /// leaks nothing; an unknown device or bad signature stays `unauthorized`.
     DeviceRevoked,
     /// The device-key lookup failed on the database (#1500).
     Unavailable,

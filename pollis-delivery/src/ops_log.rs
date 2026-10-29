@@ -1,36 +1,19 @@
-//! Dev-only observability for `request-otp` and for every rate-limited request.
+//! Dev-only observability for `request-otp` and for every rate-limited request:
+//! enough to tell callers apart, never enough to identify one.
 //!
-//! **Why:** on 2026-10-08 the dev DS's raised `request-otp` budget (then 200
-//! per 10 minutes per client; the OTP tiers are now `off` on dev,
-//! `wrangler.dev.jsonc`) still ran out during a mobile e2e run. The limiter could say THAT a client was over budget
-//! but nothing could say WHO had spent it: the counters are anonymous by design,
-//! Workers Logs are off, and container stdout is not retained. This module
-//! records enough to tell the callers apart — never enough to identify one.
+//! **Gate:** [`crate::AppState::ops_log`] is `Some` only when `POLLIS_DS_OPS_LOG`
+//! is on ([`enabled_from_value`]); only `wrangler.dev.jsonc` sets it, and
+//! `tests/otp_ops_log.rs` fails if `wrangler.prod.jsonc` ever does. Off, the
+//! middleware never calls [`observe`] and `GET /v1/ops/otp-requests` answers 404.
 //!
-//! **Gate:** [`crate::AppState::ops_log`] is `Some` only when the DS starts with
-//! `POLLIS_DS_OPS_LOG` set to an on value ([`enabled_from_value`]). Only
-//! `wrangler.dev.jsonc` sets it; production sets none, so in production there is
-//! no [`OpsLog`] object, the middleware branch that would call [`observe`] is
-//! never taken, and `GET /v1/ops/otp-requests` answers 404.
-//! `tests/otp_ops_log.rs` fails the build if `wrangler.prod.jsonc` ever sets it.
+//! **An event holds only:** time, endpoint, tier, outcome, status; the limiter's
+//! client pseudonym ([`crate::ratelimit::ClientKey`]), never an IP; the
+//! truncated, IP-redacted `User-Agent` and `X-Pollis-Client-Version`; and for
+//! `request-otp`, the email's domain plus a per-process keyed tag
+//! ([`crate::ratelimit::RateLimiter::email_tag`]), never the address.
 //!
-//! **What an event holds** (and nothing else):
-//! - time, endpoint path, rate-limit tier, outcome and HTTP status;
-//! - the client's PSEUDONYM — the same per-process keyed HMAC the limiter's map
-//!   already holds ([`crate::ratelimit::ClientKey`]), never an IP;
-//! - the `User-Agent`, truncated, and an `X-Pollis-Client-Version` if one is
-//!   sent (no client sends one today), both with any IP-shaped token redacted;
-//! - for `request-otp` only, the email's DOMAIN and a short keyed TAG of the
-//!   normalized address ([`crate::ratelimit::RateLimiter::email_tag`]) — the tag
-//!   tells "the same address again" from "a new address each time" and cannot be
-//!   reversed or compared across a restart. Never the address itself.
-//!
-//! **Where it goes:** one `tracing` line per event (target
-//! `pollis_delivery::ops`, readable on a local run), plus a bounded in-memory
-//! ring of the last [`MAX_EVENTS`] events and a per-client summary, served on
-//! `GET /v1/ops/otp-requests` behind the operator bearer token
-//! (`POLLIS_DS_METRICS_TOKEN`). Memory only: it is gone at the next restart or
-//! scale-to-zero sleep.
+//! Memory only (a bounded ring plus per-client summary, behind
+//! `POLLIS_DS_METRICS_TOKEN`), lost on restart or scale-to-zero.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -48,32 +31,25 @@ use serde::Serialize;
 use crate::ratelimit::{too_many_requests, ClientKey, RateLimiter, OTP_REQUEST_TIER};
 use crate::AppState;
 
-/// The gate. Read once at startup in [`crate::build_app_state`].
+/// Read once at startup in [`crate::build_app_state`].
 pub const ENV_VAR: &str = "POLLIS_DS_OPS_LOG";
 
-/// Events kept in the ring; the oldest is dropped first.
 pub const MAX_EVENTS: usize = 1000;
-/// Clients kept in the summary; the least recently seen is dropped first.
+/// The least recently seen client is dropped first.
 pub const MAX_CLIENTS: usize = 1000;
-/// Distinct user agents / client versions kept per client summary.
 const MAX_LABELS_PER_CLIENT: usize = 5;
-/// Characters kept from a `User-Agent`.
 pub const USER_AGENT_MAX_CHARS: usize = 120;
-/// Characters kept from a client version.
 const CLIENT_VERSION_MAX_CHARS: usize = 40;
-/// Characters kept from an email domain.
 const EMAIL_DOMAIN_MAX_CHARS: usize = 64;
-/// The same ceiling axum's `Bytes` extractor applies to the handler's body by
-/// default, so buffering here rejects exactly what the handler would.
+/// axum's default `Bytes` extractor ceiling, so buffering here rejects exactly
+/// what the handler would.
 const BODY_LIMIT_BYTES: usize = 2 * 1024 * 1024;
 
-/// An optional client-version header. Recorded when present; no Pollis client
-/// sends one yet (the app's HTTP client sends no `User-Agent` either, which is
-/// itself a useful signal: an absent agent is the app, `curl/…` is a script).
+/// No Pollis client sends this yet, nor a `User-Agent`: an absent agent is the
+/// app, `curl/…` is a script.
 pub const CLIENT_VERSION_HEADER: &str = "x-pollis-client-version";
 
-/// Parse the gate's value. Only an explicit on value enables it; anything else,
-/// including a typo, leaves it off.
+/// Only an explicit on value enables it; anything else, including a typo, leaves it off.
 pub fn enabled_from_value(value: Option<&str>) -> bool {
     matches!(
         value.map(|v| v.trim().to_ascii_lowercase()).as_deref(),
@@ -81,27 +57,22 @@ pub fn enabled_from_value(value: Option<&str>) -> bool {
     )
 }
 
-/// [`enabled_from_value`] over the process environment.
 pub fn enabled_from_env() -> bool {
     enabled_from_value(std::env::var("POLLIS_DS_OPS_LOG").ok().as_deref())
 }
 
-/// How the DS answered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Outcome {
-    /// The handler answered 2xx. For `request-otp` that is the code issued and
-    /// mailed — unless the per-email resend throttle or `DEV_OTP` held the mail
-    /// back, which the anti-enumeration 200 deliberately does not reveal.
+    /// 2xx. For `request-otp` the mail may still have been held back (resend
+    /// throttle, `DEV_OTP`); the anti-enumeration 200 does not reveal which.
     Accepted,
-    /// The per-client limiter answered 429.
     RateLimited,
-    /// The handler answered anything else (a malformed body, etc.).
+    /// Any other status (a malformed body, etc.).
     Rejected,
 }
 
-/// One observed request. Every field is listed in the module docs; nothing here
-/// can hold an IP or an email address.
+/// One observed request. No field can hold an IP or an email address.
 #[derive(Clone, Debug, Serialize)]
 pub struct OpsEvent {
     pub ts: u64,
@@ -139,9 +110,8 @@ struct ClientSummary<'a> {
     rejected: u64,
     first_ts: u64,
     last_ts: u64,
-    /// Distinct email tags seen from this client (`request-otp` only), capped at
-    /// [`MAX_EVENTS`]. Many requests over few tags is a retry loop; one tag per
-    /// request is a signup suite.
+    /// Capped at [`MAX_EVENTS`]. Many requests over few tags is a retry loop;
+    /// one tag per request is a signup suite.
     distinct_emails: usize,
     user_agents: &'a BTreeSet<String>,
     client_versions: &'a BTreeSet<String>,
@@ -156,15 +126,13 @@ struct Inner {
     since: u64,
 }
 
-/// The in-memory ring + per-client summary. Shallow-`Clone` (shared `Arc`) so it
-/// rides on the `Clone` `AppState`.
+/// Shallow-`Clone` (shared `Arc`) so it rides on the `Clone` `AppState`.
 #[derive(Clone, Default)]
 pub struct OpsLog {
     inner: Arc<Mutex<Inner>>,
 }
 
 impl OpsLog {
-    /// Record one event: a log line, the ring, and the client's summary.
     pub fn record(&self, ev: OpsEvent) {
         tracing::info!(
             target: "pollis_delivery::ops",
@@ -229,8 +197,7 @@ impl OpsLog {
         g.events.push_back(ev);
     }
 
-    /// The operator view: per-client summary (busiest first) and the retained
-    /// events (newest first).
+    /// Per-client summary (busiest first) and retained events (newest first).
     pub fn snapshot(&self, now: u64) -> serde_json::Value {
         let g = self.inner.lock().expect("ops log mutex poisoned");
         let mut clients: Vec<ClientSummary<'_>> = g
@@ -302,14 +269,9 @@ fn email_fields(limiter: &RateLimiter, body: &[u8]) -> (Option<String>, Option<S
     (domain, Some(limiter.email_tag(&normalized)))
 }
 
-/// Answer the request exactly as the limiter decided, and record it.
-///
-/// Called by [`crate::ratelimit::rate_limit`] only when the ops log is on and the
-/// request is a `request-otp` or was just rate-limited. `limited` is the
-/// limiter's verdict, already counted; this function never changes it. A limited
-/// request gets the same [`too_many_requests`] the limiter returns; anything else
-/// goes to the handler. For `request-otp` the body is buffered (to read the
-/// email's domain) and handed on unchanged.
+/// Answer the request exactly as the limiter decided (`limited`, already
+/// counted; never changed here), and record it. For `request-otp` the body is
+/// buffered to read the email's domain and handed on unchanged.
 pub async fn observe(
     ops: &OpsLog,
     limiter: &RateLimiter,
@@ -336,9 +298,7 @@ pub async fn observe(
                     next.run(Request::from_parts(parts, Body::from(bytes))).await
                 }
             }
-            // Over the size the handler's extractor accepts (or unreadable): the
-            // handler would have refused it the same way, unless the limiter
-            // already had.
+            // The handler's extractor would have refused it the same way.
             Err(_) if limited => too_many_requests(),
             Err(_) => StatusCode::PAYLOAD_TOO_LARGE.into_response(),
         }
@@ -371,9 +331,8 @@ pub async fn observe(
     response
 }
 
-/// `GET /v1/ops/otp-requests` — the ops log's operator view. 404 unless the ops
-/// log is on AND an operator token is configured (fail-closed, like
-/// `/v1/retention/metrics`); 401 without the right bearer token.
+/// `GET /v1/ops/otp-requests`. 404 unless the ops log is on AND an operator
+/// token is configured (fail-closed); 401 without the right bearer token.
 pub async fn otp_requests(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let (Some(ops), Some(expected)) = (state.ops_log.as_ref(), state.metrics_token.as_deref()) else {
         return StatusCode::NOT_FOUND.into_response();

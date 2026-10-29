@@ -1,58 +1,9 @@
-//! Pseudonymous LiveKit room names (#828).
-//!
-//! Rooms used to be named with the raw `group.id` / `dm_channel.id`, and inboxes
-//! with `inbox-<user_id>`. Room membership is visible to the SFU operator by
-//! construction, so that handed LiveKit a full map of **which users belong to
-//! which conversations** — a second, independent copy of the social graph living
-//! outside Turso.
-//!
-//! `docs/security-whitepaper.md` §1.2 accepts the graph being visible *on Turso*
-//! as irreducible for a store-and-forward server. It does not account for the
-//! same graph also sitting on the media plane. Today that is academic — one SFU,
-//! ours. It stops being academic the moment there are regional SFUs, or a
-//! third-party one.
-//!
-//! ## Why this is server-only
-//!
-//! A LiveKit JWT carries the room inside its `video` grant, and `Room::connect`
-//! takes no room argument — the client dials whatever room its token grants. The
-//! client also tags realtime events with its own local conversation id rather
-//! than reading the room name back off the wire. So the mapping can live entirely
-//! in the Delivery Service: **the logical name is authorized, the pseudonym is
-//! what reaches LiveKit**, and no client ships the mapping or the key.
-//!
-//! That property is the point. If clients derived the pseudonym, anyone with a
-//! release binary could extract the key and re-link every room to its
-//! conversation, which would defeat the exercise.
-//!
-//! ## Keying
-//!
-//! Derived from `LIVEKIT_API_SECRET` under a domain-separation label rather than
-//! introducing a secret that has to be provisioned separately and can drift out
-//! of sync. Rotating the API secret therefore re-keys room names — which is
-//! self-healing, not a break: rotation already invalidates every outstanding
-//! LiveKit token, so clients re-request one and receive the new name in the same
-//! round trip they were going to make anyway.
-//!
-//! ## What this does and does not buy
-//!
-//! **Does:** the SFU can no longer join a room name to a row in Turso. Absent the
-//! key, `r-<hex>` is opaque, and the input space (ULIDs) is far too large to
-//! enumerate.
-//!
-//! **Does not, on its own:** room names say nothing about *who* is in a room.
-//! That was the residual #828 left and #836 closed — participant identity was
-//! still the raw `{user_id}:{device_id}`, so the operator saw which users share
-//! a room and could cluster the social graph by co-membership even without
-//! being able to name the conversations. Identity is now a per-room pseudonym
-//! too; see [`crate::participant_id`], which is the other half of this and
-//! explains why it is reversible where room names are not.
-//!
-//! **Not rotated.** These are stable pseudonyms, not unlinkable ones: a given
-//! conversation keeps one room name for the life of the API secret. Rotating per
-//! epoch would buy unlinkability over time at the cost of dropping every live
-//! connection at each rotation, which is a real availability trade and wants its
-//! own decision.
+//! Pseudonymous LiveKit room names (#828): the DS authorizes on the logical name
+//! and only the HMAC pseudonym reaches LiveKit. Server-only by design: a key
+//! shipped in a client could re-link every room to its conversation. Keyed off
+//! `LIVEKIT_API_SECRET`, so rotating it re-keys every name. Participant identity
+//! is the other half, in [`crate::participant_id`]. See
+//! `.codesight/wiki/secrets-broker.md` → "Room names are pseudonymous".
 
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
@@ -63,26 +14,17 @@ type HmacSha256 = Hmac<Sha256>;
 /// LiveKit JWTs, so the label keeps the two uses from ever colliding.
 const ROOM_LABEL: &[u8] = b"pollis-livekit-room-pseudonym-v1";
 
-/// Truncation width in hex characters. 32 hex = 128 bits — far beyond birthday
-/// range for any plausible number of conversations, and short enough to stay
-/// readable in LiveKit's dashboards and logs.
+/// 32 hex = 128 bits: far beyond birthday range, short enough for LiveKit logs.
 const ROOM_HEX_LEN: usize = 32;
 
-/// Map a **logical** room name to the opaque name LiveKit actually sees.
-///
-/// The logical name is whatever the rest of the DS authorizes on — a conversation
-/// id, `inbox-<user_id>`, or `call-<ulid>`. Authorization happens on the logical
-/// name; only the return value crosses to LiveKit.
-///
-/// Deterministic: the same logical room always maps to the same pseudonym for a
-/// given secret, which is what lets independent DS instances and successive
-/// requests agree without coordination.
+/// Map a logical room name (conversation id, `inbox-<user_id>`, `call-<ulid>`)
+/// to the opaque name LiveKit sees. Deterministic per secret, so DS instances
+/// agree without coordination.
 pub fn room_pseudonym(api_secret: &str, logical_room: &str) -> String {
     let mut mac = HmacSha256::new_from_slice(api_secret.as_bytes())
         .expect("HMAC accepts a key of any length");
     mac.update(ROOM_LABEL);
-    // Length-prefix the label/input boundary so no two distinct logical names can
-    // ever produce the same MAC input by concatenation.
+    // Length-prefix so no two logical names share a MAC input by concatenation.
     mac.update(&(logical_room.len() as u64).to_be_bytes());
     mac.update(logical_room.as_bytes());
     let digest = mac.finalize().into_bytes();

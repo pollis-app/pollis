@@ -1,19 +1,10 @@
 //! Device-certificate-signature authentication for write requests.
 //!
-//! Pollis has **no server-side session/token system**. The only server-side
-//! credential that maps to a `user_id` is the device's MLS signing key:
-//! `user_device.mls_signature_pub_pq` — the device's raw 1312-byte ML-DSA-44
-//! public key, one of the two leaf keys wrapped in `device_cert` and verified by
-//! pollis-core's `verify_device_cert`. So DS auth reuses that cross-signing
-//! device identity: the client **signs each write with its ML-DSA-44 device
-//! private key**, and the DS verifies the signature against the registered
-//! public key. No new token table, no shared secret at rest.
-//!
-//! Request auth is post-quantum (#668) because a harvest-now-decrypt-later
-//! adversary who breaks Ed25519 later could otherwise forge writes against the
-//! captured `mls_signature_pub`. The classic key stays in `mls_signature_pub`
-//! for the classic MLS suite's leaves — it is simply no longer an auth
-//! credential.
+//! The client signs each write with its device's ML-DSA-44 MLS signing key
+//! (`user_device.mls_signature_pub_pq`, bound by its `device_cert`) and the DS
+//! verifies against that registered key: no session token, no shared secret at
+//! rest. Post-quantum (#668) so an adversary who later breaks Ed25519 cannot
+//! forge writes against captured keys.
 //!
 //! ## Signing contract (the client MUST produce exactly this)
 //!
@@ -26,10 +17,8 @@
 //! | `X-Pollis-Timestamp`  | unix seconds, decimal ASCII                       |
 //! | `X-Pollis-Signature`  | base64 (STANDARD) of the 2420-byte ML-DSA-44 sig |
 //!
-//! The signature header is ~3228 base64 characters. That is well inside every
-//! default header-size limit on the path (hyper 16 KiB/header, Cloudflare 16
-//! KiB total) but it is the reason no proxy in front of the DS may be
-//! configured below an 8 KiB header budget.
+//! The ~3228-character signature header is why no proxy in front of the DS may
+//! set a header budget below 8 KiB.
 //!
 //! The signature is over this **canonical message** (a UTF-8 byte string, `\n`
 //! = 0x0A, no trailing newline):
@@ -47,69 +36,28 @@
 //!     body hash stops a captured signature from being replayed over a
 //!     *different* commit.
 //!
-//! The signature is **ML-DSA-44** (deterministic, hedged variant disabled) over
-//! that message, produced by the device's PQ MLS signing private key; the
-//! verifying key is the raw 1312-byte `mls_signature_pub_pq` stored in
-//! `user_device` — no length prefix, no TLS wrapper (that is exactly what
-//! openmls `SignatureKeyPair::to_public_vec()` returns for the `MLDSA44`
-//! signature scheme, and what pollis-core's `verify_device_cert` consumes).
+//! The signature is deterministic ML-DSA-44 over that message; the verifying key
+//! is the raw 1312-byte `mls_signature_pub_pq` (openmls `to_public_vec()` for
+//! `MLDSA44`), no length prefix.
 //!
 //! ## Replay window
 //!
-//! A request is rejected if its timestamp is more than [`REPLAY_WINDOW_SECS`]
-//! away from the server's clock in either direction. 300s (±5 min) is the
-//! standard tradeoff (mirrors AWS SigV4 / Stripe webhooks): wide enough to
-//! tolerate device/server clock skew without a time-sync handshake, narrow
-//! enough that a captured signature is only briefly replayable. The body-hash
-//! binding already prevents cross-request replay; the window bounds *identical*
-//! request replay. A true nonce/once-store would close the window entirely but
-//! needs shared write state the DS deliberately avoids — out of scope here.
+//! A timestamp more than [`REPLAY_WINDOW_SECS`] (±5 min, as AWS SigV4) from the
+//! server clock is rejected. The body hash stops cross-request replay; the window
+//! bounds identical-request replay. A nonce store would close it but needs shared
+//! write state the DS avoids.
 //!
 //! ## Never fail open
 //!
-//! Any error on the auth path — missing/garbled header, malformed pubkey,
-//! signature decode error — resolves to [`AuthRejection::Unauthorized`]. A
-//! failed device-key lookup (the database could not be read) resolves to
-//! [`AuthRejection::Unavailable`], a 503 (#1500): still a refusal, but one that
-//! does not tell a client with a perfectly good key that it is signed out. We
-//! never let an error become acceptance.
-//!
-//! The cached entry points take the [`Db`], not a connection, and check one out
-//! only on a cache miss. A checkout on every request, used only on a miss, kept
-//! putting a pooled connection back as if it had just been used (#1500).
+//! Any error on the auth path is [`AuthRejection::Unauthorized`]; a failed
+//! device-key lookup is [`AuthRejection::Unavailable`], a 503 (#1500). The cached
+//! entry points take the [`Db`] and check a connection out only on a miss.
 //!
 //! ## Device-pubkey cache (#658)
 //!
-//! [`lookup_device_pubkey`] was the ONE thing every device-signed endpoint did
-//! that the fast unsigned bootstrap endpoints did not: a Turso round trip on
-//! EVERY request. From the Cloudflare Container's network position that query
-//! alone cost 2000–4700 ms server-side, and a first message in a fresh mobile
-//! group chains ~14 sequential signed calls — 15–60 s of user-visible latency.
-//! Signature verification itself is sub-millisecond, so the fix is to stop
-//! re-reading an almost-never-changing row.
-//!
-//! [`DeviceKeyCache`] holds `(user_id, device_id) -> verifying key` in process
-//! memory. Four properties make it safe:
-//!
-//!   1. **Every mutation of `user_device` evicts.** Revoke, logout, resign,
-//!      identity rotation, account delete, reset-recover, device registration and
-//!      the cert publish all call [`DeviceKeyCache::invalidate_device`] /
-//!      [`DeviceKeyCache::invalidate_user`]. See the type docs for the full list.
-//!   2. **A per-key generation counter closes the read-then-evict race (#721).**
-//!      A miss captures the generation before it reads the row; an invalidation
-//!      bumps it; an insert whose generation is stale is discarded, so a revoke
-//!      that commits during an in-flight read can never be resurrected. See the
-//!      type docs.
-//!   3. **A short absolute TTL** ([`DEVICE_KEY_CACHE_TTL_SECS`]) backstops a
-//!      missed eviction hook, so a stale entry can never live indefinitely.
-//!   4. **Positive entries only.** A miss is never cached — see
-//!      [`DeviceKeyCache`] for why.
-//!
-//! The cache is only ever consulted AFTER [`parse_credentials`] has passed
-//! (headers present, timestamp inside the replay window, signature well-formed),
-//! and it only ever supplies the *verifying key* — the ML-DSA-44 signature is
-//! still checked in full on every single request. A cache hit therefore removes
-//! a DB read, never a cryptographic check.
+//! [`DeviceKeyCache`] supplies only the verifying key, and only after
+//! [`parse_credentials`] passes; the signature is still checked in full on every
+//! request. Its safety properties: `.codesight/wiki/mls.md` → device-pubkey cache.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -130,53 +78,26 @@ use crate::db::Db;
 use crate::error::AuthRejection;
 use crate::last_seen::LastSeenThrottle;
 
-/// Replay window, in seconds, on either side of the server clock. See module
-/// docs for the tradeoff.
+/// Replay window, in seconds, on either side of the server clock.
 pub const REPLAY_WINDOW_SECS: i64 = 300;
 
-/// How long a cached device pubkey may be served before it is re-read from
-/// Turso, in seconds — measured from INSERTION, never refreshed on use.
-///
-/// **This is a backstop, not the invalidation mechanism.** Every endpoint that
-/// mutates `user_device` evicts explicitly (see [`DeviceKeyCache`]); the TTL only
-/// bounds the damage if some future endpoint forgets to. 30s is chosen because:
-///
-///   - it is the *maximum* window in which a revoked/logged-out device could
-///     still authenticate if an eviction hook were ever missed, and 30s of
-///     residual access is recoverable (the MLS reconcile that actually removes
-///     the device from each group is a separate client-side commit anyway);
-///   - it is far shorter than the ±300s [`REPLAY_WINDOW_SECS`] already accepted
-///     on this path, so the cache is not the weakest link in the auth story;
-///   - it still absorbs essentially all of #658's damage: the pathological case
-///     is a burst of ~14 sequential signed calls, which completes well inside
-///     30s once the first call has warmed the entry.
-///
-/// The TTL is ABSOLUTE (from insertion), not sliding. A sliding TTL would let a
-/// continuously-active device keep a stale entry alive forever, which is exactly
-/// the attacker profile the backstop exists for.
+/// How long a cached device pubkey may be served, measured from insertion and
+/// never refreshed on use (a sliding TTL would let an active device keep a stale
+/// entry forever). A backstop for a missed eviction hook, not the invalidation
+/// mechanism, and well inside the ±300 s replay window already accepted.
 pub const DEVICE_KEY_CACHE_TTL_SECS: i64 = 30;
 
-/// Soft cap on live cache entries. Entries are only created for devices that
-/// really exist in `user_device`, so this can only be reached by a genuinely
-/// enormous fleet — it exists so a pathological case degrades into extra DB
-/// reads rather than unbounded memory. Overflow clears the map, which is always
-/// safe (clearing can only cause a re-read, never an acceptance).
+/// Soft cap on live entries. Overflow clears the map, which can only cause a
+/// re-read, never an acceptance.
 const DEVICE_KEY_CACHE_MAX_ENTRIES: usize = 10_000;
 
-/// One slot in the cache map for a `(user_id, device_id)`.
-///
-/// A slot outlives its cached key. An invalidation drops `key` to `None` but
-/// bumps and KEEPS `generation`, because an in-flight read that already captured
-/// the old generation must still be told, at insert time, that the world moved
-/// under it (see [`DeviceKeyCache`] on the read-then-evict race). A slot with
-/// `key: None` is therefore pure generation-tracking state — a tombstone — and is
-/// swept by the same TTL as a real entry so tombstones cannot accumulate.
+/// One slot per `(user_id, device_id)`. An invalidation drops `key` but bumps and
+/// keeps `generation` (a tombstone), so an in-flight read that captured the old
+/// generation still loses at insert time (#721). Tombstones expire with the TTL.
 struct Slot {
     /// The cached verifying key, or `None` for a bare generation tombstone.
     key: Option<Arc<VerifyingKey>>,
-    /// Per-key monotonic generation, bumped by every [`DeviceKeyCache::invalidate_device`]
-    /// of this key. Read-captured before the DB read; an insert is discarded
-    /// unless it is unchanged.
+    /// Bumped by every [`DeviceKeyCache::invalidate_device`] of this key.
     generation: u64,
     /// Server unix-seconds when this slot was last written — a key insert OR a
     /// generation bump. TTL is measured from here.
@@ -200,27 +121,18 @@ enum Lookup {
     Miss(GenStamp),
 }
 
-/// A test-only async barrier invoked on the cache-miss path AFTER the device row
-/// has been read and BEFORE the freshly-read key is inserted — the exact window
-/// of the read-then-evict race (#721). Production never installs one
-/// (`miss_barrier` stays `None`, a single `Option` check on the miss path); a
-/// test installs one to deterministically slot a concurrent revoke into that
-/// window. Boxed so it can capture the test's synchronisation state.
+/// Test-only async barrier on the miss path, after the row is read and before
+/// the insert: the read-then-evict race window (#721). `None` in production.
 type MissBarrier =
     Arc<dyn Fn(&str, &str) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
-/// The mutable state behind the cache's single `Mutex`.
 #[derive(Default)]
 struct Inner {
     map: HashMap<(String, String), Slot>,
-    /// Process-wide generation bumped by every [`DeviceKeyCache::invalidate_user`]
-    /// (and [`DeviceKeyCache::clear`]). A read captures it alongside the per-key
-    /// generation; a user-scoped invalidation between a read and its insert — rare
-    /// (account rotate/delete/reset, cert re-sign) — discards the insert. It is
-    /// deliberately coarse: user-scoped writes are infrequent, so the cost of
-    /// discarding an unrelated in-flight insert is at most one extra DB read, and
-    /// in exchange it closes the race for a device whose user is bulk-invalidated
-    /// even when that device was never individually cached.
+    /// Bumped by every [`DeviceKeyCache::invalidate_user`] and
+    /// [`DeviceKeyCache::clear`]; a miss captures it too. Deliberately coarse:
+    /// user-scoped writes are rare, and it closes the race even for a device that
+    /// was never individually cached.
     bulk_generation: u64,
     /// See [`MissBarrier`]. Always `None` outside tests.
     miss_barrier: Option<MissBarrier>,
@@ -228,64 +140,16 @@ struct Inner {
 
 /// In-process cache of `(user_id, device_id) -> mls_signature_pub_pq` (#658).
 ///
-/// **Single instance by construction.** The DS deploys with `max_instances: 1`
-/// (`pollis-delivery/wrangler.{dev,prod}.jsonc`) — one container, enforced for
-/// the sole-writer invariant — so there is exactly ONE process and ONE cache.
-/// That is what makes plain eviction sufficient: there is no second instance
-/// holding a copy we cannot reach. **If `max_instances` is ever raised, this
-/// cache becomes incoherent across instances**: instance A would evict on
-/// revoke while instance B kept serving the revoked device's key for up to
-/// [`DEVICE_KEY_CACHE_TTL_SECS`]. Raising `max_instances` therefore requires
-/// either dropping this cache or replacing eviction with a shared signal
-/// (pub/sub, or a cheap `revoked_at` watermark read).
+/// Correct only because the DS runs as one instance (`max_instances: 1` in
+/// `wrangler.{dev,prod}.jsonc`); raising that requires dropping this cache or a
+/// shared eviction signal. Negative results are never cached: a missing row is
+/// the normal state mid-enrollment, and caching it would let unauthenticated
+/// callers grow the map. Every DS write that changes what
+/// [`lookup_device_pubkey`] returns must call an `invalidate_*`; the list and the
+/// generation-counter race fix (#721) are in `.codesight/wiki/mls.md`.
 ///
-/// **Negative results are deliberately NOT cached.** A missing/NULL-pubkey
-/// `user_device` row is the *normal* state of a device mid-enrollment: the
-/// bootstrap sequence registers the row and then publishes the cert moments
-/// later, and a cached "no such device" would 401 a device that has since become
-/// valid — breaking device registration for up to a TTL. Caching negatives would
-/// also let an unauthenticated caller grow the map with arbitrary
-/// header-supplied `(user, device)` pairs. Since a miss already resolves to 401,
-/// not caching it costs one Turso read on a path that is failing anyway, and
-/// keeps the cache's entry set bounded by the real device fleet.
-///
-/// **Eviction points** — every DS write that can change what
-/// [`lookup_device_pubkey`] would return:
-///
-/// | Endpoint                        | `user_device` effect          | Call            |
-/// |---------------------------------|-------------------------------|-----------------|
-/// | `POST /v1/devices/revoke`       | `UPDATE … SET revoked_at`     | device          |
-/// | `POST /v1/auth/logout`          | `DELETE` own row              | device          |
-/// | `POST /v1/devices/resign`       | `UPDATE` cert columns         | user            |
-/// | `POST /v1/account/rotate-identity` | new account identity       | user            |
-/// | `POST /v1/account/delete`       | `DELETE users` → FK cascade   | user            |
-/// | `POST /v1/account/reset-recover`| `DELETE` other/all devices    | user            |
-/// | `POST /v1/auth/register-device` | `INSERT` / upsert row         | device          |
-/// | `POST /v1/auth/publish-device-cert` | `UPDATE … mls_signature_pub_pq` | device  |
-///
-/// The last two are the ones that can *change a live pubkey* rather than remove
-/// one, so they matter even though nothing is being revoked.
-///
-/// **The read-then-evict race is closed by a per-key generation counter (#721).**
-/// A request that read the row just before a revoke committed could formerly
-/// insert its now-stale entry just after that revoke's eviction, resurrecting a
-/// revoked key for up to [`DEVICE_KEY_CACHE_TTL_SECS`]. The fix: every miss
-/// captures the key's [`GenStamp`] BEFORE it reads the DB row; every invalidation
-/// bumps that generation; an insert whose stamp no longer matches is discarded
-/// rather than written. Because the capture strictly precedes the DB read, any
-/// invalidation that commits after the read is guaranteed to have bumped the
-/// generation past the captured value, so the racing insert always loses. The
-/// per-key generation covers [`invalidate_device`](Self::invalidate_device); a
-/// process-wide `bulk_generation` (see [`Inner`]) covers the coarser
-/// [`invalidate_user`](Self::invalidate_user). The TTL now backstops nothing but
-/// a genuinely missed eviction hook.
-///
-/// `Clone` is shallow (shared `Arc`), so it rides on the `Clone` `AppState`
-/// exactly like [`crate::session::SessionStore`].
-///
-/// It also carries the `last_seen` throttle ([`LastSeenThrottle`]): the cache
-/// already rides on every cached verification, which is exactly where a device
-/// proves it is alive, so the throttle needs no plumbing of its own.
+/// Also carries the `last_seen` throttle ([`LastSeenThrottle`]), since it already
+/// rides on every cached verification.
 #[derive(Clone, Default)]
 pub struct DeviceKeyCache {
     inner: Arc<Mutex<Inner>>,
@@ -293,23 +157,13 @@ pub struct DeviceKeyCache {
 }
 
 impl DeviceKeyCache {
-    /// The `last_seen` throttle that rides on this cache (see
-    /// [`crate::last_seen`]).
     pub fn last_seen(&self) -> &LastSeenThrottle {
         &self.last_seen
     }
 
-    /// Consult the cache for `(user_id, device_id)`.
-    ///
-    /// A live, in-TTL key is a [`Lookup::Hit`]. Anything else — no slot, a bare
-    /// generation tombstone, or an expired slot — is a [`Lookup::Miss`] carrying
-    /// the [`GenStamp`] the follow-up [`insert`](Self::insert) must present. The
-    /// stamp is captured HERE, under the lock, before the caller reads the DB row:
-    /// that ordering is what makes a later invalidation always observable at
-    /// insert time.
-    ///
-    /// An entry whose `cached_at` is in the FUTURE relative to `now` (the server
-    /// clock jumped backwards) is treated as stale, not as fresh — fail closed.
+    /// Consult the cache. Anything but a live in-TTL key is a [`Lookup::Miss`]
+    /// carrying the [`GenStamp`] captured here, under the lock, before the caller
+    /// reads the row. A `cached_at` in the future (clock went backwards) is stale.
     fn lookup(&self, user_id: &str, device_id: &str, now: i64) -> Lookup {
         let mut guard = self.inner.lock().expect("device key cache mutex poisoned");
         let bulk = guard.bulk_generation;
@@ -346,12 +200,8 @@ impl DeviceKeyCache {
             .clone()
     }
 
-    /// Record a freshly-read, LIVE (non-revoked, well-formed) pubkey — UNLESS the
-    /// `stamp` captured at the matching miss is now stale, i.e. an invalidation
-    /// (device- or user-scoped) committed between the read and here. In that case
-    /// the insert is discarded: the key we hold may be the one that was just
-    /// revoked, so it must not be resurrected. Only ever called on a positive DB
-    /// lookup — see the type docs on negatives.
+    /// Record a freshly-read live pubkey, unless an invalidation raced the read
+    /// (`stamp` is stale): the key may then be the one just revoked.
     fn insert(&self, user_id: &str, device_id: &str, key: Arc<VerifyingKey>, now: i64, stamp: GenStamp) {
         let mut guard = self.inner.lock().expect("device key cache mutex poisoned");
         // A user-scoped invalidation raced us.
@@ -403,12 +253,9 @@ impl DeviceKeyCache {
         slot.cached_at = now;
     }
 
-    /// Evict EVERY device of one user. Call after account-scoped writes whose
-    /// blast radius is the whole fleet (identity rotation, account delete,
-    /// reset-recover, cert re-sign) — cheaper to reason about than enumerating
-    /// the affected device ids, and never less safe. Bumps the process-wide
-    /// `bulk_generation` so an in-flight read for ANY of the user's devices — even
-    /// one that was never individually cached — loses its insert (#721).
+    /// Evict every device of one user, for account-scoped writes. Bumps
+    /// `bulk_generation`, so an in-flight read for any of the user's devices loses
+    /// its insert (#721).
     pub fn invalidate_user(&self, user_id: &str) {
         let mut guard = self.inner.lock().expect("device key cache mutex poisoned");
         guard.bulk_generation = guard.bulk_generation.wrapping_add(1);
@@ -443,9 +290,7 @@ impl DeviceKeyCache {
         self.len() == 0
     }
 
-    /// Install the test-only miss barrier (see [`MissBarrier`]). Test infra: never
-    /// called in production. Named distinctly from the private accessor so the
-    /// public surface reads as "set".
+    /// Install the test-only miss barrier (see [`MissBarrier`]).
     pub fn set_miss_barrier(&self, barrier: MissBarrier) {
         self.inner
             .lock()
@@ -522,16 +367,9 @@ fn parse_credentials(headers: &HeaderMap, now: i64) -> Result<Credentials, AuthR
 
 /// Look up the registered `mls_signature_pub_pq` for `(user_id, device_id)`.
 ///
-/// Returns [`DeviceLookup::Live`] for a live, enrolled device,
-/// [`DeviceLookup::Revoked`] for a revoked one with a key on record (#1338),
-/// and [`DeviceLookup::Refused`] if the row is absent, belongs to a suspended
-/// account (#1213), or has a NULL/wrong-length pubkey — all of which the
-/// caller treats as "unknown device" → 401. A NULL column specifically means a
-/// device that has not published a cert since #668; it must re-run
-/// `publish-device-cert` (which is session/cert gated, never device-signature
-/// gated, so it is always reachable) before it can authenticate a write. A DB
-/// error propagates as `Err` and the caller still rejects (never fails open),
-/// with a 503 rather than a 401 ([`read_device`], #1500).
+/// [`DeviceLookup::Refused`] covers an absent row, a suspended account (#1213)
+/// and a NULL or wrong-length key (the device must re-run `publish-device-cert`,
+/// which is never device-signature gated). A DB error is `Err`, never acceptance.
 async fn lookup_device_pubkey(
     conn: &Connection,
     user_id: &str,
@@ -572,11 +410,8 @@ async fn lookup_device_pubkey(
         });
     }
 
-    // A suspended account (#1213) authenticates nothing from any of its
-    // devices — the same refusal as an unknown device, enforced here because
-    // this lookup is the one every device-signed endpoint funnels through. The
-    // column is read as a required integer so a schema mistake fails closed
-    // (Err → reject), never open.
+    // A suspended account (#1213) authenticates nothing. Read as a required
+    // integer so a schema mistake fails closed.
     let suspended: i64 = row.get(2)?;
     if suspended != 0 {
         return Ok(DeviceLookup::Refused);
@@ -662,14 +497,9 @@ pub async fn verify_request_cached(
     )
 }
 
-/// [`verify_request`] returning BOTH halves of the authenticated identity —
-/// `(user_id, device_id)`. Handlers that record something keyed on the specific
-/// DEVICE (e.g. the retention high-water in `record_commit_since`, #681) need the
-/// authenticated `device_id`, not just the user, and must take it from the
-/// VERIFIED signature rather than from an unauthenticated request field. Both
-/// values are the exact ones the signature was checked against — the pubkey was
-/// looked up by `(user_id, device_id)` and a revoked/unknown device never gets
-/// past [`lookup_device_pubkey`].
+/// [`verify_request`] returning `(user_id, device_id)`, exactly the values the
+/// signature was checked against. Use it to key anything on the device (#681),
+/// never an unauthenticated body field.
 pub async fn verify_request_identity(
     conn: &Connection,
     headers: &HeaderMap,
@@ -732,10 +562,8 @@ async fn read_device(
     }
 }
 
-/// The one implementation of the verify path. `cache: None` is the uncached
-/// behaviour (every lookup hits the DB) — used by the in-process integration
-/// harnesses, which build their own routers and have no `AppState` to hang a
-/// cache off.
+/// The one implementation of the verify path. `cache: None` is the uncached path
+/// the in-process integration harnesses use.
 async fn verify_request_inner(
     cache: Option<&DeviceKeyCache>,
     source: KeySource<'_>,
@@ -750,14 +578,10 @@ async fn verify_request_inner(
     let creds = parse_credentials(headers, now)?;
 
     let verifying_key = match cache {
-        // Cached path (the shipping DS). A miss captures the key's generation
-        // stamp BEFORE the DB read, and the matching insert is discarded if an
-        // invalidation bumped it in between (#721).
         Some(c) => match c.lookup(&creds.user_id, &creds.device_id, now) {
             Lookup::Hit(vk) => vk,
             Lookup::Miss(stamp) => {
-                // Unknown / revoked device, or a DB error: never fail open, and
-                // never cache the negative (see `DeviceKeyCache` docs).
+                // Never fail open, and never cache the negative.
                 let vk = match read_device(source, &creds.user_id, &creds.device_id).await? {
                     DeviceLookup::Live(vk) => Arc::new(vk),
                     DeviceLookup::Revoked(vk) => {
@@ -765,9 +589,7 @@ async fn verify_request_inner(
                     }
                     DeviceLookup::Refused => return Err(AuthRejection::Unauthorized),
                 };
-                // Test seam (#721): with a barrier installed, park here — after
-                // the read, before the insert — so a test can commit a revoke into
-                // the exact race window. A no-op in production.
+                // Test seam (#721): park between the read and the insert.
                 if let Some(barrier) = c.miss_barrier() {
                     barrier(&creds.user_id, &creds.device_id).await;
                 }
@@ -775,9 +597,7 @@ async fn verify_request_inner(
                 vk
             }
         },
-        // Uncached path: the in-process integration harnesses build their own
-        // routers and have no `AppState` to hang a cache off — every lookup hits
-        // the DB.
+        // Uncached path (the test harnesses).
         None => match read_device(source, &creds.user_id, &creds.device_id).await? {
             DeviceLookup::Live(vk) => Arc::new(vk),
             DeviceLookup::Revoked(vk) => {
@@ -792,10 +612,8 @@ async fn verify_request_inner(
         .verify(&message, &creds.signature)
         .map_err(|_| AuthRejection::Unauthorized)?;
 
-    // The device just proved it is alive: bump its `last_seen`, throttled and
-    // off the critical path (spawned; a failure never fails this request). Only
-    // the cached path — the shipping DS — has a throttle to hang this on and a
-    // pool handle to spawn with; the uncached entry points are test harnesses.
+    // The device just proved it is alive: bump `last_seen`, throttled and spawned
+    // so a failure never fails this request. Only the shipping (cached) path.
     if let (Some(c), KeySource::Db(db)) = (cache, source) {
         c.last_seen().note(db, &creds.user_id, &creds.device_id, now);
     }
@@ -815,13 +633,9 @@ mod bench {
         Arc::new(VerifyingKey::decode(encoded))
     }
 
-    /// Lock-contention microbenchmark for the cache's `Mutex<HashMap>` (#721 DoD
-    /// item 3): hammer the hot read path from 1..=16 threads and report ns/op and
-    /// throughput, so the single mutex can be judged against a realistic request
-    /// rate before anyone reaches for sharding or an `RwLock`.
+    /// Lock-contention microbenchmark for the cache's `Mutex<HashMap>` (#721).
     ///
-    /// Ignored by default (it spins CPU for a second). Run it explicitly:
-    ///   cargo test -p pollis-delivery --lib bench::mutex_contention -- --ignored --nocapture
+    /// Run: `cargo test -p pollis-delivery --lib bench::mutex_contention -- --ignored --nocapture`
     #[test]
     #[ignore = "microbenchmark; run with --ignored --nocapture"]
     fn mutex_contention() {

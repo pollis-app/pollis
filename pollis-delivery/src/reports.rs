@@ -1,16 +1,9 @@
 //! Abuse reports (#1213).
 //!
-//! `POST /v1/reports` records that one account reported another, with a reason
-//! and optionally the conversation and message ids, and tells the operator by
-//! email. Messages are end-to-end encrypted, so no content ever arrives here:
-//! the wire type has no field for it and `user_report` has no column for it.
-//! The operator acts on accounts and on patterns (several unrelated reporters,
-//! a new account messaging many strangers), and the one action available is
-//! account suspension (`account_suspension`, enforced in `auth.rs`).
-//!
-//! Shape as in [`crate::profile`]: a pure `apply_*` on a bare connection holds
-//! the authorization and the write, so the flows harness and the axum handler
-//! run the same checks.
+//! `POST /v1/reports` records that one account reported another (reason plus
+//! optional conversation and message ids) and emails the operator. No content
+//! ever arrives: neither the wire type nor `user_report` has a field for it.
+//! The operator's one action is account suspension (enforced in `auth.rs`).
 
 use axum::{extract::State, response::IntoResponse, response::Response};
 use libsql::Connection;
@@ -20,15 +13,13 @@ use crate::error::{AppError, AuthRejection};
 use crate::writes::{gate_and_parse, ok_response, resolve_actor, RawRequest, WriteOutcome};
 use crate::AppState;
 
-/// Reports one account may file in a rolling 24 hours. Generous for a real
-/// person dealing with a harassment campaign; small enough that a script
-/// cannot flood the operator's inbox.
+/// Reports one account may file in a rolling 24 hours: enough for a harassment
+/// campaign, too few to flood the operator's inbox.
 pub const REPORTS_PER_DAY: i64 = 20;
 
 /// What [`apply_report_user`] decided.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ReportOutcome {
-    /// Stored. The fields are what the operator email needs.
     Stored {
         report_id: String,
         reporter_id: String,
@@ -37,13 +28,9 @@ pub enum ReportOutcome {
     /// Not allowed: reporting yourself, filing as someone else, or pointing at
     /// a conversation the reporter is not in.
     Forbidden,
-    /// The reported account does not exist.
     UnknownAccount,
-    /// The reporter is over [`REPORTS_PER_DAY`].
     RateLimited,
 }
-
-// ── POST /v1/reports ─────────────────────────────────────────────────────────
 
 pub async fn report_user(
     State(state): State<AppState>,
@@ -60,8 +47,7 @@ pub async fn report_user(
             reporter_id,
             prior_reports_against,
         } => {
-            // Telling the operator never holds up or fails the report: it is
-            // stored either way, and the inbox is a convenience over the table.
+            // The email never holds up or fails the report.
             if let Some(key) = state.otp_config.resend_api_key.clone() {
                 let notice = ReportNotice {
                     report_id,
@@ -105,8 +91,6 @@ pub async fn apply_report_user(
     if body.message_id.is_some() && body.conversation_id.is_none() {
         return Ok(ReportOutcome::Forbidden);
     }
-    // A conversation, when given, must be one the reporter is in: you can
-    // point at where it happened, not at somebody else's conversation.
     if let Some(conversation_id) = &body.conversation_id {
         if !crate::writes::is_member(conn, conversation_id, &reporter).await? {
             return Ok(ReportOutcome::Forbidden);

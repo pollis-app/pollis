@@ -1,29 +1,7 @@
-//! The DS's failed-request log (#1305).
-//!
-//! **Why:** a tester's first-device signup failed after `verify-otp` succeeded,
-//! and nothing could say which request failed or why: Workers Logs and Logpush
-//! are off (they record client IPs — `tests/no_client_ip_exposure.rs`), and
-//! container stdout, where `tracing` writes, is not retained. A 5xx body says
-//! only "internal error"; the cause went to a log nobody can read.
-//!
-//! **What:** every routed request that ends in a 4xx/5xx (except the limiter's
-//! own 429s) is recorded in `ds_error_log`: when, the method, the router's
-//! matched route pattern, the status, the response's `error` text, and any
-//! `warn!`/`error!` the request emitted while it ran — the cause behind an
-//! "internal error". Plus the client's random `X-Pollis-Request-Id`, which is
-//! how a line in a user's diagnostics log finds its row here.
-//!
-//! **Not who:** no user, device, email or IP. The table has no column for one
-//! (migration `000035_ds_error_log`), the route is the pattern rather than the
-//! raw path, and every text field passes [`pollis_api::redact::scrub`] first.
-//!
-//! **Tight by construction:** the table's own trigger keeps 72 hours and 500
-//! rows at most, on every insert. On top of that the DS writes at most
-//! [`MAX_WRITES_PER_MINUTE`] rows a minute, so a burst of junk requests costs a
-//! bounded number of database writes and is counted rather than stored.
-//!
-//! **Read it:** `GET /v1/ops/errors` with the operator bearer token
-//! (`POLLIS_DS_METRICS_TOKEN`); 404 when no token is configured.
+//! The DS's failed-request log (#1305): every routed 4xx/5xx except the
+//! limiter's own 429s, with the `warn!`/`error!` events behind it and the
+//! client's `X-Pollis-Request-Id`, but no user, device, email or IP. Bounds and
+//! access: `.codesight/wiki/database.md` → `ds_error_log`.
 
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};

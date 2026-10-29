@@ -55,9 +55,8 @@ const RING_ENTRY_LEN: usize = 48;
 /// AES-256-GCM tag.
 const TAG_LEN: usize = 16;
 
-/// Ceiling on the ring length. A ring grows by one key per removal batch; a
-/// conversation that has removed members a thousand times is not a real one,
-/// and the bound keeps a hostile member from parking a large blob here.
+/// Ceiling on the ring length (one key per removal batch), so a hostile member
+/// cannot park a large blob here.
 const MAX_KEY_VERSION: i64 = 1024;
 
 #[derive(Debug)]
@@ -116,8 +115,6 @@ pub async fn apply_upsert_keystate(
     let Ok(wrapped) = b64_decode(&body.wrapped_keyring) else {
         return Ok(FileKeystateOutcome::Invalid("wrapped_keyring is not valid base64"));
     };
-    // The wrap is exactly the ring plus a tag: a length that disagrees with
-    // `key_version` is a client bug or a lie, and either way not a ring.
     if wrapped.len() != body.key_version as usize * RING_ENTRY_LEN + TAG_LEN {
         return Ok(FileKeystateOutcome::Invalid(
             "wrapped_keyring length does not match key_version",
@@ -219,7 +216,7 @@ pub async fn read_keystate(
     }))
 }
 
-/// The stored row, byte-exact. Shared by the read handler and the tests.
+/// The stored row, byte-exact.
 pub async fn read_stored(
     conn: &Connection,
     conversation_id: &str,

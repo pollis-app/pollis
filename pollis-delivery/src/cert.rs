@@ -1,19 +1,10 @@
 //! Device-certificate verification — a thin `bool`-returning wrapper over the
 //! shared [`pollis_device_cert`] primitive.
 //!
-//! The first device-cert publish (`POST /v1/auth/publish-device-cert`) is the
-//! PIVOT write that establishes the very `mls_signature_pub` the device-signature
-//! gate ([`crate::auth`]) verifies against — so it cannot be device-signed. Its
-//! gate is instead **OTP-session + cert-validity**: the DS re-verifies the cert's
-//! ML-DSA-44 signature against the account's stored `account_id_pub` here,
-//! exactly as every other client does before accepting a device into an MLS
-//! group.
-//!
-//! This used to be a hand-copied port of the payload layout, kept in sync with
-//! pollis-core by comment alone. It is now a delegation: the cert format lives in
-//! exactly one crate, which both the client that mints certs and the two servers
-//! that verify them depend on, so the layout cannot drift. (No crate cycle —
-//! `pollis-device-cert` has no dependency on either side.)
+//! The first cert publish establishes the very `mls_signature_pub` the
+//! device-signature gate ([`crate::auth`]) checks, so it cannot be
+//! device-signed; its gate is the OTP session plus this check against the
+//! account's stored `account_id_pub`.
 
 /// Verify a device cert against a user's published `account_id_pub`. Returns
 /// `true` iff the ML-DSA-44 signature is valid over the canonical payload

@@ -1,16 +1,8 @@
-//! The Vault (#107) — personal encrypted storage, synced across a user's
-//! devices as ciphertext the server cannot read.
-//!
-//! Copies the read-cursor-sync shape ([`crate::profile::save_read_cursors`])
-//! per entry instead of per account: every row is an opaque AES-256-GCM blob
-//! under a key derived client-side from the ACCOUNT identity key, which the
-//! DS has never held. The DS's whole job here is byte-exact custody, owner
-//! binding, and bounds — it validates the ENVELOPE (base64 that decodes, the
-//! one nonce length AES-GCM has, a bounded blob) and nothing about content,
-//! because the entry body, the pinned flag, and any attachment references all
-//! live INSIDE the ciphertext. What the server learns is stated in migration
-//! `000020_vault_message.sql`: row count, approximate (padded) sizes, change
-//! times. Not content, never content.
+//! The Vault (#107): personal storage synced across a user's devices as
+//! per-entry AES-256-GCM blobs under a key derived from the account identity
+//! key, which the DS never holds. The DS only does custody, owner binding and
+//! envelope bounds; what it learns is stated in migration
+//! `000020_vault_message.sql`.
 
 use axum::{
     extract::State,
@@ -32,29 +24,19 @@ use crate::writes::{
 use crate::AppState;
 use crate::util::{b64, b64_decode};
 
-// The request bodies for this module's endpoints live in `pollis-api`, the
-// crate pollis-core builds its requests from — one declaration, both ends, so
-// a client field that does not exist here is a compile error rather than a
-// silently-absent JSON key. Re-exported so `pollis_delivery::vault::*Body`
-// keeps resolving for handlers, tests and the flows harness.
+// Request bodies are declared once in `pollis-api`, shared with pollis-core.
 pub use pollis_api::vault::*;
 
-/// AES-256-GCM nonce length — the one length the construction has.
 const VAULT_NONCE_LEN: usize = 12;
 
-/// Hard ceiling on one entry's blob. Matches the read-cursor bound: entries
-/// are padded JSON (text + attachment references — the attachment BYTES live
-/// in R2, never here), so a megabyte-scale blob is a bug or an abuse, not a
-/// note.
+/// Entries are padded JSON (attachment bytes live in R2), so a larger blob is a
+/// bug or abuse.
 const VAULT_BLOB_MAX_BYTES: usize = 256 * 1024;
 
-/// Hard ceiling on attachment references per entry. Mirrors the composer's
-/// per-message attachment cap with headroom; a save declaring hundreds of
-/// hashes is not a note, it is somebody using the ref table as a database.
+/// The composer's per-message attachment cap, with headroom.
 const VAULT_MAX_ATTACHMENT_REFS: usize = 32;
 
-/// The result of a vault write. Wider than [`WriteOutcome`] because a
-/// malformed envelope is the caller's mistake (400), not a permission problem.
+/// [`WriteOutcome`] plus `Invalid`: a malformed envelope is a 400, not a 403.
 #[derive(Debug)]
 pub enum VaultOutcome {
     Ok,
@@ -74,8 +56,6 @@ where
     })
 }
 
-// ── POST /v1/vault/save ──────────────────────────────────────────────────────
-
 pub async fn save_vault_message(
     State(state): State<AppState>,
     req: RawRequest,
@@ -90,20 +70,12 @@ pub async fn save_vault_message(
     )
 }
 
-/// UPSERT one vault entry, owner-bound on BOTH arms, and REPLACE its
-/// attachment reference set.
+/// UPSERT one vault entry and replace its attachment reference set.
 ///
-/// The insert stamps the authenticated user as owner; the update arm's
-/// `WHERE vault_message.user_id = ?2` is the row-level guard that makes
-/// "overwrite a stranger's entry by minting the same ULID" unrepresentable —
-/// the conflict target is the primary key alone, so without that predicate a
-/// colliding id would be a cross-user write. `created_at` is kept from the
-/// original row on an edit so the entry does not jump position in the list.
-///
-/// The reference replacement (delete-then-insert on `vault_attachment_ref`)
-/// runs only after the entry write is accepted, so a forged save can never
-/// touch another user's reference rows. Refs keep the shared R2 objects
-/// alive against attachment GC — see `crate::messages::LIVE_REF_EXISTS_SQL`.
+/// The conflict target is the primary key alone, so the update arm's
+/// `user_id` predicate is what stops a colliding id from overwriting another
+/// user's entry. The refs are replaced only after that write is accepted; they
+/// keep shared R2 objects alive against GC (`crate::messages::LIVE_REF_EXISTS_SQL`).
 pub async fn apply_save_vault_message(
     conn: &Connection,
     authed: Option<&str>,
@@ -134,8 +106,6 @@ pub async fn apply_save_vault_message(
     if body.attachment_hashes.len() > VAULT_MAX_ATTACHMENT_REFS {
         return Ok(VaultOutcome::Invalid("too many attachment references"));
     }
-    // A reference names a content-addressed object: exactly 64 lowercase hex.
-    // Anything else is not a SHA-256 and has no business in the ref table.
     for h in &body.attachment_hashes {
         if h.len() != 64 || !h.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Ok(VaultOutcome::Invalid("attachment hash is not sha-256 hex"));
@@ -144,13 +114,9 @@ pub async fn apply_save_vault_message(
 
     let affected = conn
         .execute(
-            // A fresh row's `updated_at` IS its `created_at`: clients show
-            // "(edited)" when the two differ, and the column default (server
-            // clock, SQLite format) made every entry look edited (#1316). Only
-            // the rewrite arm below stamps a new value — and only for a real
-            // change: a byte-identical save is a client resending after a
-            // connection failure (#1497, `DsRequest::IDEMPOTENT`), and must not
-            // mark the entry edited. A genuine edit is always a fresh nonce.
+            // Clients show "(edited)" when `updated_at` differs from
+            // `created_at` (#1316), so only a real change stamps it: a
+            // byte-identical save is an idempotent retry (#1497).
             "INSERT INTO vault_message (id, user_id, nonce, blob, created_at, updated_at) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?5) \
              ON CONFLICT(id) DO UPDATE SET \
@@ -171,16 +137,11 @@ pub async fn apply_save_vault_message(
             ],
         )
         .await?;
-    // Zero rows means the id exists and belongs to someone else — the exact
-    // state the WHERE guard exists to refuse. Answer as the permission problem
-    // it is rather than a silent success.
+    // Zero rows: the id belongs to someone else.
     if affected == 0 {
         return Ok(VaultOutcome::Forbidden);
     }
 
-    // Replace the entry's reference set. An edit that dropped a file releases
-    // it here; the object itself is collected later only if NOTHING else
-    // (message or vault, any user) still references it.
     conn.execute(
         "DELETE FROM vault_attachment_ref WHERE vault_message_id = ?1",
         libsql::params![body.id.clone()],
@@ -197,8 +158,6 @@ pub async fn apply_save_vault_message(
     Ok(VaultOutcome::Ok)
 }
 
-// ── POST /v1/vault/delete ────────────────────────────────────────────────────
-
 pub async fn delete_vault_message(
     State(state): State<AppState>,
     req: RawRequest,
@@ -213,13 +172,9 @@ pub async fn delete_vault_message(
     )
 }
 
-/// Hard-DELETE one entry, owner-bound in the statement itself, releasing its
-/// attachment references with it. Deleting an entry that is already gone is a
-/// no-op — the state the caller wanted.
-///
-/// The ref delete is guarded by the same owner predicate (it only fires when
-/// the entry row was actually the caller's), so a stranger cannot strip
-/// another user's references by replaying an id.
+/// Hard-DELETE one of the actor's entries and its attachment references. The
+/// ref delete runs only if the entry was the caller's, so replaying an id
+/// cannot strip another user's refs.
 pub async fn apply_delete_vault_message(
     conn: &Connection,
     authed: Option<&str>,
@@ -245,14 +200,8 @@ pub async fn apply_delete_vault_message(
     Ok(WriteOutcome::Ok)
 }
 
-// ── POST /v1/read/vault ──────────────────────────────────────────────────────
-
 /// POST `/v1/read/vault` — every entry this account holds, newest first.
-///
-/// Device-signed and bound to the authenticated user, like the read-cursor
-/// read: the rows are undecryptable without the account key, but serving them
-/// to a stranger would still hand out entry counts and change rates. An empty
-/// vault is an empty list, not an error.
+/// Owner-bound: even undecryptable, the rows reveal counts and change rates.
 pub async fn read_vault(
     State(state): State<AppState>,
     req: RawRequest,
