@@ -6,6 +6,13 @@ import type { GroupWithChannels } from "../../services/api";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
 import type { Group, Channel, GroupMember } from "../../types";
+import { deriveSlug } from "../../utils/urlRouting";
+import {
+  applyAcceptedInvite,
+  rollbackAcceptedInvite,
+  type AcceptSnapshot,
+  type InviteLike,
+} from "./inviteAcceptOptimistic";
 
 export const groupQueryKeys = {
   all: ["groups"] as const,
@@ -439,9 +446,20 @@ export function usePendingInvites() {
   });
 }
 
+/**
+ * Accept an invite (#1560). Optimistic: the invite leaves the pending list and
+ * the group joins the sidebar on the same frame as the click, so the UI never
+ * shows neither. A failure puts both back and the caller shows the error. The
+ * mutation stays pending until the refetches that replace the optimistic rows
+ * have landed.
+ */
 export function useAcceptInvite() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
+  const userId = currentUser?.id ?? null;
+  const invitesKey = groupQueryKeys.pendingInvites(userId);
+  const groupsKey = groupQueryKeys.userGroups(userId);
+  const withChannelsKey = groupQueryKeys.userGroupsWithChannels(userId);
 
   return useMutation({
     mutationFn: async (inviteId: string) => {
@@ -450,15 +468,61 @@ export function useAcceptInvite() {
       }
       await invoke('accept_group_invite', { inviteId, userId: currentUser.id });
       // Drain MLS Welcome messages the inviter pre-generated so we can decrypt
-      // channel messages immediately after navigating into the group.
+      // channel messages immediately after navigating into the group. Awaited:
+      // the accept is not done until the group can be opened.
       await invoke('poll_mls_welcomes', { userId: currentUser.id }).catch((err) => {
         console.warn('[mls] poll_mls_welcomes after accept:', err);
       });
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: groupQueryKeys.pendingInvites(currentUser?.id ?? null) });
-      queryClient.invalidateQueries({ queryKey: groupQueryKeys.userGroupsWithChannels(currentUser?.id ?? null) });
+    onMutate: async (inviteId: string): Promise<AcceptSnapshot> => {
+      // An in-flight refetch must not land on top of the optimistic rows.
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: invitesKey }),
+        queryClient.cancelQueries({ queryKey: groupsKey }),
+        queryClient.cancelQueries({ queryKey: withChannelsKey }),
+      ]);
+      const now = Date.now();
+      const group = (invite: InviteLike): Group => ({
+        id: invite.group_id,
+        slug: deriveSlug(invite.group_name),
+        name: invite.group_name,
+        description: '',
+        created_by: '',
+        created_at: now,
+        updated_at: now,
+      });
+      return applyAcceptedInvite(queryClient, {
+        invitesKey,
+        inviteId,
+        groupLists: [
+          { key: groupsKey, row: group },
+          // Channels fill in on the refetch below.
+          {
+            key: withChannelsKey,
+            row: (invite): GroupWithChannels => ({
+              ...group(invite),
+              channels: [],
+              current_user_role: 'member',
+            }),
+          },
+        ],
+      });
     },
+    onError: (_err, _inviteId, snapshot) => {
+      rollbackAcceptedInvite(queryClient, snapshot);
+    },
+    // Returned, so the mutation stays pending until the real rows are in. The
+    // group's own caches go too: a panel that opened on the optimistic row may
+    // have read its channels or roster before the accept landed.
+    onSettled: (_data, _err, _inviteId, snapshot) =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: invitesKey }),
+        queryClient.invalidateQueries({ queryKey: groupsKey }),
+        queryClient.invalidateQueries({ queryKey: withChannelsKey }),
+        snapshot?.groupId
+          ? queryClient.invalidateQueries({ queryKey: groupQueryKeys.group(snapshot.groupId) })
+          : undefined,
+      ]),
   });
 }
 

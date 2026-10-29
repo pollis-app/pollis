@@ -7,7 +7,14 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
-import { groupQueryKeys } from "./useUserGroups";
+import { groupQueryKeys, type GroupWithChannels } from "./useUserGroups";
+import type { Group } from "../../types";
+import {
+  applyAcceptedInvite,
+  rollbackAcceptedInvite,
+  type AcceptSnapshot,
+  type InviteLike,
+} from "./inviteAcceptOptimistic";
 
 export interface PendingInvite {
   id: string;
@@ -80,9 +87,20 @@ export function usePendingGroupInvites() {
   });
 }
 
+/**
+ * Accept an invite (#1560). Optimistic: the invite leaves the pending list and
+ * the group joins the group lists on the same frame as the tap, so the screen
+ * never sits showing neither. A failure puts both back and the caller shows
+ * the error. The mutation stays pending until the refetches that replace the
+ * optimistic rows have landed.
+ */
 export function useAcceptGroupInvite() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
+  const userId = currentUser?.id ?? null;
+  const invitesKey = groupInviteQueryKeys.pending(userId);
+  const groupsKey = groupQueryKeys.userGroups(userId);
+  const withChannelsKey = groupQueryKeys.userGroupsWithChannels(userId);
   return useMutation({
     // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "success" } },
@@ -91,27 +109,63 @@ export function useAcceptGroupInvite() {
         throw new Error("No current user");
       }
       await invoke("accept_group_invite", { inviteId, userId: currentUser.id });
-      // The MLS welcome may have already landed in Turso (the inviter
-      // queued it when sending the invite). Pull it now so the new group
-      // appears in the user's sidebar immediately instead of waiting for
-      // the next ingest-on-focus.
+      // The MLS welcome may have already landed (the inviter queued it when
+      // sending the invite). Pull it before the accept settles, so opening the
+      // new group straight away can decrypt its channels. Never fire-and-forget.
       try {
         await invoke("poll_mls_welcomes", { userId: currentUser.id });
       } catch (e) {
         console.warn("[mls] poll_mls_welcomes after accept failed:", e);
       }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: groupInviteQueryKeys.pending(currentUser?.id ?? null),
+    onMutate: async (inviteId: string): Promise<AcceptSnapshot> => {
+      // An in-flight refetch must not land on top of the optimistic rows.
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: invitesKey }),
+        queryClient.cancelQueries({ queryKey: groupsKey }),
+        queryClient.cancelQueries({ queryKey: withChannelsKey }),
+      ]);
+      const now = Date.now();
+      const group = (invite: InviteLike): Group => ({
+        id: invite.group_id,
+        slug: "",
+        name: invite.group_name,
+        created_by: "",
+        created_at: now,
+        updated_at: now,
       });
-      queryClient.invalidateQueries({
-        queryKey: groupQueryKeys.userGroups(currentUser?.id ?? null),
-      });
-      queryClient.invalidateQueries({
-        queryKey: groupQueryKeys.userGroupsWithChannels(currentUser?.id ?? null),
+      return applyAcceptedInvite(queryClient, {
+        invitesKey,
+        inviteId,
+        groupLists: [
+          { key: groupsKey, row: group },
+          // Channels fill in on the refetch below.
+          {
+            key: withChannelsKey,
+            row: (invite): GroupWithChannels => ({
+              ...group(invite),
+              channels: [],
+              current_user_role: "member",
+            }),
+          },
+        ],
       });
     },
+    onError: (_err, _inviteId, snapshot) => {
+      rollbackAcceptedInvite(queryClient, snapshot);
+    },
+    // Returned, so the mutation stays pending until the real rows are in. The
+    // group's own caches go too: a panel that opened on the optimistic row may
+    // have read its channels or roster before the accept landed.
+    onSettled: (_data, _err, _inviteId, snapshot) =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: invitesKey }),
+        queryClient.invalidateQueries({ queryKey: groupsKey }),
+        queryClient.invalidateQueries({ queryKey: withChannelsKey }),
+        snapshot?.groupId
+          ? queryClient.invalidateQueries({ queryKey: [...groupQueryKeys.all, snapshot.groupId] })
+          : undefined,
+      ]),
   });
 }
 
