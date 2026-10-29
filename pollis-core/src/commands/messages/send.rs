@@ -211,6 +211,14 @@ pub(super) async fn deliver_queued(
         crate::diag!("[messages] send_message: catch_up_mls_group for {mls_group_id}: {e}");
     }
 
+    // #1571: a device that belongs in this conversation and holds no leaf is
+    // re-added BEFORE this message is sealed, so it can read it — on any
+    // platform, without waiting for a sweep. Throttled per conversation, and
+    // best-effort: it never fails the send.
+    // Boxed: a reconcile is a large future, and inlining it into every send's
+    // state machine overflowed a default (2 MiB) test-thread stack.
+    Box::pin(crate::commands::mls::backstop_before_seal(state, &mls_group_id, &sender_id)).await;
+
     // Size padding (issue #331 v2, `docs/metadata-minimization-design.md`
     // §4.1). Pad TEXT plaintext to a size bucket before encryption so the
     // ciphertext length in `message_envelope` no longer reveals the message

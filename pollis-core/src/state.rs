@@ -191,6 +191,11 @@ pub struct AppState {
     /// `try_lock`: a drain that finds a top-up running leaves it to fill the
     /// whole shortfall instead of publishing a second batch beside it.
     pub key_package_refill: Arc<Mutex<()>>,
+    /// When this device last ran the missing-device check before sealing into
+    /// each conversation (#1571), so a burst of sends costs one check, not one
+    /// per message. Process-local: a fresh launch checks again on its first
+    /// send.
+    pub pre_seal_checked: Arc<Mutex<HashMap<String, std::time::Instant>>>,
     /// Held for the length of an outbox drain, carrying the last drain's
     /// report: `flush_outbox` is single-flight, and a call that finds it held
     /// waits and answers with that report rather than draining again (#1335).
@@ -285,6 +290,7 @@ impl AppState {
             mls_group_locks: Arc::new(Mutex::new(HashMap::new())),
             outbox_locks: Arc::new(Mutex::new(HashMap::new())),
             key_package_refill: Arc::new(Mutex::new(())),
+            pre_seal_checked: Arc::new(Mutex::new(HashMap::new())),
             outbox_drain: Arc::new(Mutex::new(None)),
             outbox_rerun: Arc::new(AtomicBool::new(false)),
             // Receiver dropped immediately; subscribers are created per

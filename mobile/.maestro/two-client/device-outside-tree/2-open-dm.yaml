@@ -1,0 +1,38 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# DEVICE OUTSIDE THE TREE (#1571), part 2 of 2. While this phone was closed,
+# the creator peer spent its regular KeyPackage pool, opened a DM with this
+# account, and exchanged three messages with the owner device. The phone's
+# last-resort package is what added it, so on first open it must show ALL
+# three — the incident showed none, and said nothing.
+
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-pin"
+    timeout: 20000
+- runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-direct"
+    timeout: 60000
+- tapOn:
+    id: "tab-direct"
+- extendedWaitUntil:
+    visible:
+      text: ".*${MAESTRO_PEER_HANDLE}.*"
+    timeout: 60000
+- tapOn:
+    text: ".*${MAESTRO_PEER_HANDLE}.*"
+- extendedWaitUntil:
+    visible:
+      text: "and one more before it wakes"
+    timeout: 60000
+- assertVisible:
+    text: "sent while your phone was off"
+- assertVisible:
+    text: "replied from my other device"
+- runFlow: ../../subflows/assert-no-loss.yaml
+- takeScreenshot: device-outside-tree-02-every-message

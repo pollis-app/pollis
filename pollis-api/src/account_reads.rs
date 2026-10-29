@@ -141,6 +141,16 @@ pub struct KeyPackagesResponse {
     /// suite. `None` when the caller did not ask.
     #[serde(default)]
     pub unclaimed: Option<i64>,
+    /// Does the authenticated device hold a last-resort package in the counted
+    /// suite (#1571)? Answered only alongside `unclaimed`. `None` from a
+    /// Delivery Service that predates last-resort packages — the client then
+    /// does not try to publish one, because that server would store it as a
+    /// regular package.
+    ///
+    /// `unclaimed` never counts the last-resort package: it is not part of the
+    /// pool a refill tops up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub has_last_resort: Option<bool>,
     /// `(user_id, device_id)` pairs with a claimable package.
     ///
     /// A short list here is indistinguishable from "these devices have no

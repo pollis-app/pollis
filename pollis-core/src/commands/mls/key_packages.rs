@@ -5,6 +5,24 @@
 //! login; `replenish_key_packages` tops it up whenever the Welcome drain reports
 //! the pool is low (#1412).
 //! Both route owner-scoped writes through the Delivery Service.
+//!
+//! ## The last-resort package (#1571)
+//!
+//! Beside the [`POOL_TARGET`] one-shot packages, a device publishes ONE
+//! last-resort package per suite (RFC 9420 §16.8, `mark_as_last_resort`). The
+//! Delivery Service hands it out only when the device's pool is empty, and never
+//! marks it claimed, so "a registered device of a roster member has nothing to
+//! be added with" — which left a phone silently outside a DM's tree — cannot
+//! happen to a device running this build. openmls keeps a last-resort package's
+//! private key in storage after a join (`keys_for_welcome` skips its delete),
+//! and nothing in `signal::mls_storage` deletes key packages on its own, so the
+//! same package admits the device to any number of groups. Reuse is the
+//! standard trade: the Welcomes sealed to it share an init key until the
+//! post-join self-update (#666) rotates the leaf.
+//!
+//! A login rotation replaces it with a fresh one in the same request. A top-up
+//! publishes one only when the Delivery Service says the device has none and
+//! knows what one is (`has_last_resort == Some(false)`).
 
 use openmls::prelude::*;
 use openmls_traits::crypto::OpenMlsCrypto;
@@ -46,8 +64,21 @@ fn kp_packages_json(
             ref_hash: ref_hex.clone(),
             key_package: base64::engine::general_purpose::STANDARD.encode(kp),
             ciphersuite: Some(code_point),
+            last_resort: false,
         })
         .collect()
+}
+
+/// The wire entry for this device's last-resort package (#1571).
+fn last_resort_json(
+    pair: &(String, Vec<u8>),
+    ciphersuite: Ciphersuite,
+) -> pollis_api::devices::KeyPackageEntry {
+    let mut entry = kp_packages_json(std::slice::from_ref(pair), ciphersuite)
+        .pop()
+        .expect("one pair in, one entry out");
+    entry.last_resort = true;
+    entry
 }
 
 /// Build one fresh `KeyPackage` in an explicit ciphersuite, returning
@@ -59,12 +90,30 @@ fn kp_packages_json(
 /// key. `suite` stays a parameter rather than reading `CS_PQ` directly so that a
 /// code-point change needs no edit here.
 ///
-/// Sync: the caller owns the local-DB guard.
+/// Sync: the caller owns the local-DB guard. A regular package; the unit tests'
+/// shorthand for [`build_key_package`].
+#[cfg(test)]
 pub(super) fn build_key_package_in_suite<C>(
     provider: &MlsProvider<'_, C>,
     user_id: &str,
     device_id: &str,
     suite: Ciphersuite,
+) -> Result<(String, Vec<u8>)>
+where
+    C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
+    build_key_package(provider, user_id, device_id, suite, false)
+}
+
+/// [`build_key_package_in_suite`], optionally as the device's LAST-RESORT
+/// package (#1571): the same package with openmls's `LastResort` extension,
+/// which is what makes openmls keep its private key after a Welcome uses it.
+pub(super) fn build_key_package<C>(
+    provider: &MlsProvider<'_, C>,
+    user_id: &str,
+    device_id: &str,
+    suite: Ciphersuite,
+    last_resort: bool,
 ) -> Result<(String, Vec<u8>)>
 where
     C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
@@ -81,7 +130,23 @@ where
         signature_key: sig_pub.into(),
     };
 
-    let bundle = KeyPackage::builder()
+    let mut builder = KeyPackage::builder();
+    if last_resort {
+        // RFC 9420 §7.2: every extension a KeyPackage carries must be listed in
+        // its leaf's capabilities, and `KeyPackageIn::validate` — which every
+        // committer runs on a claimed package, shipped builds included — refuses
+        // the package otherwise (`UnsupportedExtension`). Only the extension
+        // list moves off the defaults, so the leaf advertises exactly what a
+        // regular package's does plus `LastResort`.
+        builder = builder
+            .leaf_node_capabilities(
+                Capabilities::builder()
+                    .extensions(vec![ExtensionType::LastResort])
+                    .build(),
+            )
+            .mark_as_last_resort();
+    }
+    let bundle = builder
         .build(suite, provider, &sig_keys, cred_with_key)
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("kp build: {e}")))?;
 
@@ -151,19 +216,37 @@ async fn build_one_key_package_in_suite(
     device_id: &str,
     suite: Ciphersuite,
 ) -> Result<(String, Vec<u8>)> {
+    build_one(state, user_id, device_id, suite, false).await
+}
+
+/// [`build_one_key_package_in_suite`], optionally as the last-resort package.
+async fn build_one(
+    state: &Arc<AppState>,
+    user_id: &str,
+    device_id: &str,
+    suite: Ciphersuite,
+    last_resort: bool,
+) -> Result<(String, Vec<u8>)> {
     let guard = state.local_db.lock().await;
     let db = guard.as_ref().ok_or_else(|| {
         crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
     })?;
     let provider = PollisProvider::new(db.conn());
-    build_key_package_in_suite(&provider, user_id, device_id, suite)
+    build_key_package(&provider, user_id, device_id, suite, last_resort)
 }
 
 /// Rotate key packages: delete unclaimed packages for this device from the
-/// remote table and publish TARGET fresh ones backed by the current local DB.
+/// remote table and publish TARGET fresh ones backed by the current local DB,
+/// plus a fresh last-resort package (#1571).
 ///
 /// Called from `initialize_identity` on every login.  Only deletes packages
 /// for the current `device_id` — other devices' packages are left intact.
+///
+/// The last-resort package rides in the SAME replenish request, so the rotation
+/// that deletes the old one (its private key may be gone with a wiped local DB)
+/// is the one that publishes its replacement: there is no instant at which the
+/// device has neither. A Delivery Service that predates #1571 stores it as a
+/// sixth regular package, which costs nothing.
 pub async fn ensure_mls_key_package(
     state: &Arc<AppState>,
     user_id: &str,
@@ -177,7 +260,9 @@ pub async fn ensure_mls_key_package(
     for _ in 0..TARGET {
         pairs.push(build_one_key_package_in_suite(state, user_id, device_id, current_suite()).await?);
     }
-    let all_packages = kp_packages_json(&pairs, current_suite());
+    let mut all_packages = kp_packages_json(&pairs, current_suite());
+    let last_resort = build_one(state, user_id, device_id, current_suite(), true).await?;
+    all_packages.push(last_resort_json(&last_resort, current_suite()));
 
     // The replenish endpoint clears this device's stale unclaimed packages and
     // inserts the fresh pool in ONE transaction, owner-scoped to the signer.
@@ -211,7 +296,20 @@ pub async fn ensure_mls_key_package(
 /// `None` is a Delivery Service that predates the count: keep the old rule
 /// (refill after processing a Welcome) rather than pay a separate count read on
 /// every drain, which runs on every wake-up and every conversation opened.
-pub(super) fn drain_wants_refill(had_welcomes: bool, reported: Option<i64>) -> bool {
+///
+/// `has_last_resort` is the same drain's answer to "does this device hold a
+/// last-resort package" (#1571). `Some(false)` refills too, whatever the count:
+/// a device that upgraded from a build without one, or whose package was lost,
+/// gets one on its next wake-up rather than at its next sign-in. `None` (a server
+/// that predates it) changes nothing.
+pub(super) fn drain_wants_refill(
+    had_welcomes: bool,
+    reported: Option<i64>,
+    has_last_resort: Option<bool>,
+) -> bool {
+    if has_last_resort == Some(false) {
+        return true;
+    }
     match reported {
         Some(remaining) => remaining < POOL_TARGET,
         None => had_welcomes,
@@ -251,22 +349,35 @@ pub(super) async fn replenish_key_packages(
     // rather than to a body-named one — this number drives how many packages
     // this device publishes, and counting someone else's pool would make it
     // publish into the wrong one.
-    let remaining: i64 =
+    //
+    // The same read says whether the device holds a last-resort package
+    // (#1571): `Some(false)` publishes one alongside the top-up. `None` is a
+    // server that predates them, which would store one as a regular package —
+    // so nothing is sent.
+    let (remaining, has_last_resort) =
         crate::commands::ds_reads::unclaimed_key_packages(state, suite_code).await?;
 
-    let needed = TARGET - remaining;
-    if needed <= 0 {
+    let needed = (TARGET - remaining).max(0);
+    let wants_last_resort = has_last_resort == Some(false);
+    if needed == 0 && !wants_last_resort {
         return Ok(());
     }
 
-    crate::diag!("[mls] replenish: {remaining} unclaimed KPs, publishing {needed} more");
+    crate::diag!(
+        "[mls] replenish: {remaining} unclaimed KPs, publishing {needed} more{}",
+        if wants_last_resort { " and a last-resort package" } else { "" }
+    );
 
     // Build the top-up packages locally before any remote write.
     let mut pairs: Vec<(String, Vec<u8>)> = Vec::with_capacity(needed as usize);
     for _ in 0..needed {
         pairs.push(build_one_key_package_in_suite(state, user_id, device_id, current_suite()).await?);
     }
-    let all_packages = kp_packages_json(&pairs, current_suite());
+    let mut all_packages = kp_packages_json(&pairs, current_suite());
+    if wants_last_resort {
+        let last_resort = build_one(state, user_id, device_id, current_suite(), true).await?;
+        all_packages.push(last_resort_json(&last_resort, current_suite()));
+    }
 
     // A top-up is insert-only (no delete), so it routes through the owner-scoped
     // publish endpoint. As above, the direct-to-Turso fallback is gone (#910).
@@ -328,23 +439,33 @@ mod tests {
     /// on any drain, Welcome or not.
     #[test]
     fn a_reported_short_pool_is_refilled_without_a_welcome() {
-        assert!(drain_wants_refill(false, Some(0)));
-        assert!(drain_wants_refill(false, Some(POOL_TARGET - 1)));
+        assert!(drain_wants_refill(false, Some(0), Some(true)));
+        assert!(drain_wants_refill(false, Some(POOL_TARGET - 1), Some(true)));
+    }
+
+    /// #1571: a device with a full pool but no last-resort package (an upgrade
+    /// from a build without one) refills on its next drain. A server that does
+    /// not say (`None`) changes nothing.
+    #[test]
+    fn a_missing_last_resort_package_is_published_on_the_next_drain() {
+        assert!(drain_wants_refill(false, Some(POOL_TARGET), Some(false)));
+        assert!(!drain_wants_refill(false, Some(POOL_TARGET), None));
+        assert!(!drain_wants_refill(false, Some(POOL_TARGET), Some(true)));
     }
 
     /// A full pool is left alone even right after a Welcome: the count is the
     /// whole answer once the DS gives it.
     #[test]
     fn a_reported_full_pool_is_not_refilled() {
-        assert!(!drain_wants_refill(true, Some(POOL_TARGET)));
-        assert!(!drain_wants_refill(false, Some(POOL_TARGET + 3)));
+        assert!(!drain_wants_refill(true, Some(POOL_TARGET), Some(true)));
+        assert!(!drain_wants_refill(false, Some(POOL_TARGET + 3), Some(true)));
     }
 
     /// An older DS reports nothing: fall back to the pre-#1412 rule rather than
     /// paying a separate count read on every drain.
     #[test]
     fn without_a_count_only_a_processed_welcome_refills() {
-        assert!(drain_wants_refill(true, None));
-        assert!(!drain_wants_refill(false, None));
+        assert!(drain_wants_refill(true, None, None));
+        assert!(!drain_wants_refill(false, None, None));
     }
 }

@@ -204,6 +204,17 @@ draft with the keyboard up; the peer then sends into the open channel, twice.
 The composer must still be above the keyboard: the draft is sent by tapping
 Send where it is. Each arrival is screenshotted straight off the device.
 
+**Device outside the tree (automated, #1571):** `mobile/scripts/maestro-device-outside-tree.sh <device>`
+— one device plus two dev-DS peers (`pollis-tui`'s `outside_tree_peer`, roles
+`owner` and `creator`). The owner signs up as the account's first device; the
+device enrolls into it with the recovery key and closes the app
+(`two-client/device-outside-tree/1-enroll.yaml`). With the app closed, the
+creator spends the device's regular KeyPackage pool (five group invites to the
+account), opens a DM with the account, and exchanges three messages with the
+owner device. The device then opens the app for the first time since and must
+show all three in the DM with no placeholder (`2-open-dm.yaml`) — its
+last-resort KeyPackage is what added it. The DS must carry #1571.
+
 **Lost message (automated, #1312):** `mobile/scripts/maestro-lost-message.sh <device>`
 — one device plus a dev-DS peer client, not a second device: the script runs
 `pollis-tui`'s `lost_message_peer` example (a `test-harness` build that never

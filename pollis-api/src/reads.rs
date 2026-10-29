@@ -175,6 +175,24 @@ pub struct ConversationState {
     /// undetermined. Client fails CLOSED.
     #[serde(default)]
     pub device_registered: Option<bool>,
+    /// When the authenticated device was registered (`user_device.created_at`),
+    /// verbatim (#1571). `None` = not reported (a server that predates it, or a
+    /// failed read).
+    ///
+    /// With [`Self::member_since`] it answers one question the client cannot
+    /// answer alone: was this device already registered when its user became a
+    /// member here? If it was, the device was entitled to every message since,
+    /// and a late join at the head of the log is a visible loss (a
+    /// placeholder), not the silent "sent before you joined" pass a NEW device
+    /// gets. Metadata the authenticated device already knows about itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_registered_at: Option<String>,
+    /// When the authenticated USER became a member of this conversation, verbatim:
+    /// `dm_channel_member.added_at` for a DM, `group_member.joined_at` for a
+    /// group or one of its channels (#1571). `None` = not reported. Never earlier
+    /// than the conversation itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member_since: Option<String>,
     /// Cross-signing inputs for every distinct `added_user_id` named by
     /// `commits`, so replay verifies added devices without a round trip per
     /// add-carrying commit. Empty when the batch adds nobody.
@@ -273,6 +291,13 @@ pub struct FetchWelcomesResponse {
     /// to refilling only after it processes a Welcome.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unclaimed_key_packages: Option<i64>,
+    /// Whether the signing device holds a last-resort KeyPackage in the same
+    /// suite (#1571). Reported with `unclaimed_key_packages` and on the same
+    /// terms: `None` when not asked, not readable, or from a server that
+    /// predates last-resort packages. `Some(false)` is the drain's cue to
+    /// publish one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub has_last_resort_key_package: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

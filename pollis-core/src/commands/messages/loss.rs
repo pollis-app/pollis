@@ -11,7 +11,8 @@
 //! to read and never did, a placeholder row is written (`message.undecryptable`
 //! = the [`Reason`]) and the conversation shows it in place.
 //!
-//! "Entitled" excludes exactly two cases, and nothing else:
+//! "Entitled" excludes exactly two cases, and nothing else (and the first is
+//! narrowed by #1571, see [`sealed_while_entitled`]):
 //!
 //! * **Before this device was in the tree.** An envelope sealed below the epoch
 //!   this device was added at ([`crate::commands::mls::first_join`]) is the loss
@@ -89,6 +90,44 @@ pub(crate) fn classify(
         Some(Reason::Failed)
     } else {
         Some(Reason::Stranded)
+    }
+}
+
+/// Is an envelope that [`classify`] passed as "sealed before this device joined"
+/// in fact a loss this device was entitled to avoid (#1571)?
+///
+/// Only when all of these hold:
+/// * the device does hold the lineage (`floor` is `Some`) — an envelope of a
+///   lineage it never held is never its loss;
+/// * its FIRST hold recorded an entitlement (`entitled`): the device was
+///   registered BEFORE its user became a member, so it belonged in the tree
+///   all along (`mls::join_branch::record_entitlement`). A new device records
+///   none — loss #2 stays silent;
+/// * the envelope was sealed below that first hold (`below_epoch`). A gap
+///   after it — a removal and re-add — stays #1524's silent pass;
+/// * it was sent at or after that membership began. Anything earlier was sent
+///   before the user joined — loss #1 — and stays silent too.
+///
+/// `sent_at` is the sender's stamp, the only time an envelope carries; an
+/// unreadable one answers `false`, the silent pre-#1571 pass.
+pub(crate) fn sealed_while_entitled(
+    floor: Option<u64>,
+    entitled: Option<crate::commands::mls::Entitlement>,
+    sealed_epoch: u64,
+    sent_at: &str,
+) -> bool {
+    if floor.is_none() {
+        return false;
+    }
+    let Some(entitled) = entitled else {
+        return false;
+    };
+    if sealed_epoch >= entitled.below_epoch {
+        return false;
+    }
+    match crate::commands::mls::parse_ds_instant(sent_at) {
+        Some(sent) => sent >= entitled.since,
+        None => false,
     }
 }
 
@@ -210,6 +249,25 @@ mod tests {
         assert_eq!(classify((0, 4), 1, Some(0), false), Some(Reason::Lineage));
         // ...but not one it never held.
         assert_eq!(classify((0, 4), 1, None, false), None);
+    }
+
+    /// #1571: a pre-join envelope is shown only for a device entitled to it,
+    /// and only if it was sent once the user's membership began.
+    #[test]
+    fn a_pre_join_envelope_is_a_loss_only_for_an_entitled_device() {
+        let since = crate::commands::mls::parse_ds_instant("2026-10-20T01:49:21Z").unwrap();
+        let e = Some(crate::commands::mls::Entitlement { since, below_epoch: 3 });
+        assert!(sealed_while_entitled(Some(3), e, 1, "2026-10-20T01:55:00.000Z"));
+        assert!(sealed_while_entitled(Some(3), e, 2, "2026-10-20T01:49:21Z"));
+        // Sent before the user joined: loss #1, silent.
+        assert!(!sealed_while_entitled(Some(3), e, 1, "2026-10-20T01:40:00Z"));
+        // Sealed after the first hold (a removal gap): #1524, silent.
+        assert!(!sealed_while_entitled(Some(11), e, 8, "2026-10-20T01:55:00Z"));
+        // A new device records no entitlement: loss #2, silent.
+        assert!(!sealed_while_entitled(Some(3), None, 1, "2026-10-20T01:55:00Z"));
+        // A lineage this device never held.
+        assert!(!sealed_while_entitled(None, e, 1, "2026-10-20T01:55:00Z"));
+        assert!(!sealed_while_entitled(Some(3), e, 1, "garbage"));
     }
 
     #[test]

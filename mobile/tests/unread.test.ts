@@ -137,7 +137,7 @@ test("landing in the app catches up every listed conversation once", () => {
   const realtime = read("hooks/useInboxRealtime.ts");
   assert.match(
     realtime,
-    /landedRef\.current = true;\s*for \(const target of catchUpTargets\(groupsRef\.current, dmsRef\.current\)\)/,
+    /landedRef\.current = true;[\s\S]{0,400}?catchUpThenBackstop\(\s*catchUpTargets\(groupsRef\.current, dmsRef\.current\)/,
   );
   assert.match(realtime, /if \(!inApp\) \{\s*landedRef\.current = false;/);
 });

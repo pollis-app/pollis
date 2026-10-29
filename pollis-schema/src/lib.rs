@@ -322,6 +322,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "security_event_keyset",
         include_str!("../migrations/000041_security_event_keyset.sql"),
     ),
+    (
+        42,
+        "key_package_last_resort",
+        include_str!("../migrations/000042_key_package_last_resort.sql"),
+    ),
 ];
 
 /// Every script for the MAIN DB, in apply order (baseline first). One element
