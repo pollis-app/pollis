@@ -1173,7 +1173,9 @@ pub async fn reconcile_group_mls_impl(
     actor_user_id: &str,
 ) -> crate::error::Result<ReconcileOutcome> {
     for attempt in 1..=RECONCILE_ATTEMPTS {
-        match reconcile_pass(state, conversation_id, actor_user_id).await? {
+        // Boxed: one pass is a large future; the retry loop must not hold it
+        // inline in every caller's state machine.
+        match Box::pin(reconcile_pass(state, conversation_id, actor_user_id)).await? {
             PassEnd::Done(outcome) => return Ok(outcome),
             PassEnd::LostRace => {
                 crate::diag!(

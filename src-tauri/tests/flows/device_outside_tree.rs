@@ -551,3 +551,46 @@ async fn a_members_sweep_re_adds_its_own_users_other_device() {
 
     drop((alice_d1, alice_d2, bob));
 }
+
+/// The CI churn failure, made deterministic: a device whose FIRST hold was a
+/// late one (so it recorded an entitlement), then removed and re-added. What
+/// was sent while it was out is #1524's silent removal gap, not owed to it —
+/// the entitlement covers only the gap before its first hold. The seconds of
+/// sleep put every message clearly after the membership's second-granular
+/// stamp, which is what the CI run hit by timing.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_removal_gap_after_a_late_first_join_stays_silent() {
+    wipe().await;
+    let mut alice = TestClient::new().await;
+    alice.sign_up("alice@test.local").await;
+    let mut bob = TestClient::new().await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+
+    let group_id = alice.create_group("Gap").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+    join_group(&alice, &bob, &group_id, &bob_p.username).await;
+    alice.send_channel_message(&channel_id, "while bob is in").await;
+    bob.fetch_channel_messages(&channel_id).await;
+
+    alice.remove_member(&group_id, &bob_p.id).await;
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    alice.send_channel_message(&channel_id, "while bob is out").await;
+    bob.process_commits_for(&channel_id).await;
+
+    join_group(&alice, &bob, &group_id, &bob_p.username).await;
+    alice.send_channel_message(&channel_id, "bob is back").await;
+    let msgs = bob.fetch_channel_messages(&channel_id).await;
+    let bodies: Vec<&str> = msgs.iter().filter_map(|m| m["content"].as_str()).collect();
+    assert!(bodies.contains(&"bob is back"), "got {bodies:?}");
+    // The zero-loss check on drop fails on any placeholder or `[loss]` line.
+    drop((alice, bob));
+}
+
+async fn join_group(admin: &TestClient, joiner: &TestClient, group_id: &str, username: &str) {
+    admin.invite(group_id, username).await;
+    let invite = joiner.first_pending_invite().await.expect("invite");
+    joiner.accept_invite(invite["id"].as_str().expect("invite id")).await;
+    joiner.poll().await;
+}

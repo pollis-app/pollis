@@ -263,7 +263,10 @@ pub async fn catch_up_mls_group_interleaved(
         }
     };
     let held_before = held(state).await;
-    catch_up_once(state, mls_group_id, user_id).await?;
+    // Boxed: `catch_up_once` is the largest future on the receive path, and
+    // this wrapper awaits it twice; inline, both copies sat in every caller's
+    // state machine (#1571 overflowed a 2 MiB test-thread stack that way).
+    Box::pin(catch_up_once(state, mls_group_id, user_id)).await?;
     // A pass that started with no group can only JOIN (a Welcome, or an
     // external join at the head): with no group there was nothing to replay
     // or decrypt, so every envelope it fetched was left for a later pass. Run
@@ -271,7 +274,7 @@ pub async fn catch_up_mls_group_interleaved(
     // shows what it holds — including the placeholders for what this device
     // missed — instead of an empty view until the next wake-up.
     if !held_before && held(state).await {
-        catch_up_once(state, mls_group_id, user_id).await?;
+        Box::pin(catch_up_once(state, mls_group_id, user_id)).await?;
         // A device that has just joined is, at that moment, the member most
         // likely to be online and least likely to have looked at the tree: run
         // the re-add backstop once, now (#1571). In the incident the user's new
@@ -1007,7 +1010,7 @@ fn record_losses(
                 // registered all along and was left out of the tree (#1571).
                 None => {
                     let entitled = crate::commands::mls::entitled_since(conn, mls_group_id, sealed_at.0);
-                    if !super::loss::sealed_while_entitled(floor, entitled, sent_at) {
+                    if !super::loss::sealed_while_entitled(floor, entitled, sealed_at.1, sent_at) {
                         pre_join += 1;
                         continue;
                     }

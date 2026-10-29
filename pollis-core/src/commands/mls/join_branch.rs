@@ -348,13 +348,19 @@ pub(crate) fn record_entitlement(
     let Some(since) = entitlement(device_registered_at, member_since) else {
         return;
     };
+    // The floor this first hold just recorded. The entitlement covers only what
+    // was sealed BELOW it — the gap before the device ever held the lineage.
+    // A later removal and re-add moves the floor (`record_added`) but not this
+    // bound, so the "while you were out" gap stays #1524's silent pass rather
+    // than reading as owed to the device on the strength of a membership that
+    // has since ended.
+    let Some(below_epoch) = first_join(conn, conversation_id, generation) else {
+        return;
+    };
+    let value = format!("{} {below_epoch}", since.to_rfc3339());
     if let Err(e) = conn.execute(
         "INSERT OR REPLACE INTO mls_kv (scope, key, value) VALUES (?1, ?2, ?3)",
-        rusqlite::params![
-            ENTITLED_SINCE_SCOPE,
-            key(conversation_id, generation),
-            since.to_rfc3339().into_bytes()
-        ],
+        rusqlite::params![ENTITLED_SINCE_SCOPE, key(conversation_id, generation), value.into_bytes()],
     ) {
         crate::diag!(
             "[mls] could not record the entitlement of {conversation_id} generation {generation}: {e}"
@@ -362,13 +368,22 @@ pub(crate) fn record_entitlement(
     }
 }
 
-/// The instant from which this device was entitled to `(conversation_id,
-/// generation)` while outside its tree, if [`record_entitlement`] found it was.
+/// What [`record_entitlement`] stored: the device was entitled to envelopes of
+/// the lineage sent at or after `since` and sealed below `below_epoch` (its
+/// first hold).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Entitlement {
+    pub since: chrono::DateTime<chrono::Utc>,
+    pub below_epoch: u64,
+}
+
+/// The entitlement this device recorded for `(conversation_id, generation)`
+/// while it was outside the tree, if [`record_entitlement`] found one.
 pub(crate) fn entitled_since(
     conn: &rusqlite::Connection,
     conversation_id: &str,
     generation: i64,
-) -> Option<chrono::DateTime<chrono::Utc>> {
+) -> Option<Entitlement> {
     use rusqlite::OptionalExtension;
     let raw: Vec<u8> = conn
         .query_row(
@@ -379,7 +394,12 @@ pub(crate) fn entitled_since(
         .optional()
         .ok()
         .flatten()?;
-    parse_ds_instant(std::str::from_utf8(&raw).ok()?)
+    let raw = std::str::from_utf8(&raw).ok()?;
+    let (since, below) = raw.split_once(' ')?;
+    Some(Entitlement {
+        since: parse_ds_instant(since)?,
+        below_epoch: below.parse().ok()?,
+    })
 }
 
 #[cfg(test)]
@@ -420,6 +440,7 @@ mod tests {
     fn the_entitlement_marker_round_trips_per_lineage() {
         let conn = kv();
         assert_eq!(entitled_since(&conn, "c", 0), None);
+        record_first_join(&conn, "c", 0, 4);
         record_entitlement(&conn, "c", 0, true, Some("2026-10-20 01:50:00"), Some("2026-10-20T01:49:21Z"));
         assert_eq!(entitled_since(&conn, "c", 0), None, "a newer device records nothing");
         record_entitlement(&conn, "c", 0, false, Some("2026-10-20 01:38:40"), Some("2026-10-20T01:49:21.000Z"));
@@ -427,8 +448,15 @@ mod tests {
         record_entitlement(&conn, "c", 0, true, Some("2026-10-20 01:38:40"), Some("2026-10-20T01:49:21.000Z"));
         assert_eq!(
             entitled_since(&conn, "c", 0),
-            parse_ds_instant("2026-10-20T01:49:21.000Z")
+            Some(Entitlement {
+                since: parse_ds_instant("2026-10-20T01:49:21.000Z").unwrap(),
+                below_epoch: 4,
+            }),
+            "bounded by the first hold's floor"
         );
+        // A removal and re-add moves the floor; the bound stays.
+        record_added(&conn, "c", 0, 11);
+        assert_eq!(entitled_since(&conn, "c", 0).map(|e| e.below_epoch), Some(4));
         assert_eq!(entitled_since(&conn, "c", 1), None);
     }
 

@@ -293,14 +293,19 @@ pub async fn accept_dm_request(
     // missed — are put in the tree now, from whichever device accepted, rather
     // than when each one next opens the DM and joins at the head. Best-effort:
     // the accept itself has already landed.
-    if let Err(e) =
-        crate::commands::messages::catch_up_mls_group_interleaved(state, &dm_channel_id, &user_id)
-            .await
+    // Both boxed: large futures, kept off the caller's stack.
+    if let Err(e) = Box::pin(crate::commands::messages::catch_up_mls_group_interleaved(
+        state,
+        &dm_channel_id,
+        &user_id,
+    ))
+    .await
     {
         crate::diag!("[mls] accept_dm_request: catch-up for {dm_channel_id}: {e}");
     }
     if let Err(e) =
-        crate::commands::mls::reconcile_backstop_one(state, &dm_channel_id, &user_id).await
+        Box::pin(crate::commands::mls::reconcile_backstop_one(state, &dm_channel_id, &user_id))
+            .await
     {
         crate::diag!("[mls] accept_dm_request: re-add backstop for {dm_channel_id}: {e}");
     }

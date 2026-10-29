@@ -494,7 +494,7 @@ Welcome (`welcome_is_corroborated`) — `join_branch::record_entitlement` stores
 `member_since` under `mls_kv` scope `pollis_entitled_since` if the device was
 registered strictly before it. `record_losses` then writes a `stranded`
 placeholder (and a `[loss] … registered but outside the tree` line) for a
-below-floor `message` envelope sent at or after that instant
+below-floor `message` envelope sent at or after that instant and sealed below the epoch of that FIRST hold (the marker stores it, so a later removal and re-add, which moves the floor, keeps its gap silent per #1524)
 (`loss::sealed_while_entitled`). A device registered after the membership
 records nothing, and anything sent before the membership stays silent, so
 losses #1 and #2 are unchanged; a DS that predates the fields reports neither

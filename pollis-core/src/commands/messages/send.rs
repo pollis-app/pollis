@@ -215,7 +215,9 @@ pub(super) async fn deliver_queued(
     // re-added BEFORE this message is sealed, so it can read it — on any
     // platform, without waiting for a sweep. Throttled per conversation, and
     // best-effort: it never fails the send.
-    crate::commands::mls::backstop_before_seal(state, &mls_group_id, &sender_id).await;
+    // Boxed: a reconcile is a large future, and inlining it into every send's
+    // state machine overflowed a default (2 MiB) test-thread stack.
+    Box::pin(crate::commands::mls::backstop_before_seal(state, &mls_group_id, &sender_id)).await;
 
     // Size padding (issue #331 v2, `docs/metadata-minimization-design.md`
     // §4.1). Pad TEXT plaintext to a size bucket before encryption so the
