@@ -3,8 +3,14 @@
 // same way: images as a decrypted thumbnail, video as its blurhash under a
 // play glyph (expo-image cannot draw a video frame), audio and other files
 // as a named chip.
+//
+// A sensitive image or video (#1568) is covered — its blurhash under a
+// crossed-out eye — until a tap reveals it. That tap only reveals: it never
+// opens the viewer, so a video's reveal never starts it playing. A revealed
+// one carries an eye in its top-right corner that covers it again.
 
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
+import { observer } from "mobx-react-lite";
 import { Pressable, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { useTranslation } from "react-i18next";
@@ -15,6 +21,10 @@ import { mediaKind } from "../../lib/media/viewer";
 import { LONG_PRESS_MS } from "../../lib/pressFeedback";
 import { r, semantic, type as ty } from "../../theme/tokens";
 import type { MessageAttachment } from "../../types";
+import { useThemeRerender } from "../theme";
+import { useSensitiveReveal } from "../../hooks/useSensitiveReveal";
+import { tileTap } from "../../lib/sensitiveMedia";
+import { SensitiveCover, SensitiveHideButton } from "./SensitiveCover";
 
 // Image sizing: fixed max width, height follows the aspect ratio within
 // sane bounds; unknown dimensions get a square fallback.
@@ -30,7 +40,7 @@ function imageSize(att: MessageAttachment): { width: number; height: number } {
   return { width: 160, height: 160 };
 }
 
-export function AttachmentTile({
+export const AttachmentTile = observer(function AttachmentTile({
   attachment,
   onOpen,
   onLongPress,
@@ -42,8 +52,10 @@ export function AttachmentTile({
   // still reaches it.
   onLongPress?: () => void;
 }) {
+  useThemeRerender();
   const { t } = useTranslation("chat");
   const kind = mediaKind(attachment.content_type);
+  const sensitivity = useSensitiveReveal(attachment);
   // An upload still in flight with no local file has nothing to show yet.
   const openable =
     !!onOpen && (!!attachment.object_key || !!attachment.localPreviewUri);
@@ -63,8 +75,41 @@ export function AttachmentTile({
     accessibilityState: { disabled: !openable },
   };
 
-  if (kind === "image") {
+  const visual = kind === "image" || kind === "video";
+  if (visual && tileTap(attachment, sensitivity.revealed) === "reveal") {
+    const box = imageSize(attachment);
     return (
+      <Pressable
+        testID={testID}
+        onPress={sensitivity.reveal}
+        onLongPress={onLongPress}
+        delayLongPress={LONG_PRESS_MS}
+        accessibilityRole="button"
+        accessibilityLabel={t("attachment.sensitiveReveal", { filename: attachment.filename })}
+        style={{ ...box, borderRadius: r.md, overflow: "hidden" }}
+      >
+        <SensitiveCover blurhash={attachment.blurhash} testID={`sensitive-cover-${attachment.id}`} />
+      </Pressable>
+    );
+  }
+  // A revealed sensitive tile sits in a box with its hide button beside it —
+  // a sibling, so covering it again never also opens the viewer.
+  const withHide = (tile: ReactNode) =>
+    sensitivity.sensitive ? (
+      <View style={{ alignSelf: "flex-start" }}>
+        {tile}
+        <SensitiveHideButton
+          filename={attachment.filename}
+          onHide={sensitivity.hide}
+          testID={`btn-sensitive-hide-${attachment.id}`}
+        />
+      </View>
+    ) : (
+      tile
+    );
+
+  if (kind === "image") {
+    return withHide(
       <Pressable
         {...press}
         accessibilityLabel={t("attachment.viewLabel", { filename: attachment.filename })}
@@ -85,7 +130,7 @@ export function AttachmentTile({
 
   if (kind === "video") {
     const box = imageSize(attachment);
-    return (
+    return withHide(
       <Pressable
         {...press}
         accessibilityLabel={t("attachment.openLabel", { filename: attachment.filename })}
@@ -135,4 +180,4 @@ export function AttachmentTile({
       </Text>
     </Pressable>
   );
-}
+});

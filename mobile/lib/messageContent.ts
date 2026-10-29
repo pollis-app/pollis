@@ -27,6 +27,8 @@ export interface AttachmentWire {
   bh?: string;
   w?: number;
   h?: number;
+  // Sensitive media (#1568); omitted unless set.
+  sens?: boolean;
 }
 
 /** The key an attachment reference names, or null when it cannot be opened
@@ -78,6 +80,7 @@ export function parseContent(raw: string | undefined, origin: ContentOrigin): {
         blurhash: a.bh,
         width: a.w,
         height: a.h,
+        sensitive: a.sens === true,
       })),
     };
   } catch {
