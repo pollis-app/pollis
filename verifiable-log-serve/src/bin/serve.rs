@@ -108,7 +108,7 @@ enum Command {
         /// rebuild on every request (useful for tests).
         #[arg(long, default_value_t = 60)]
         ttl_secs: u64,
-        /// Env var holding the 32-byte hex Ed25519 signing key.
+        /// Env var holding the 32-byte hex ML-DSA-44 signing-key seed.
         #[arg(long, default_value = "VLOG_SIGNING_KEY")]
         signing_key_env: String,
         /// Optional file holding the 32-byte hex signing key (used if the env

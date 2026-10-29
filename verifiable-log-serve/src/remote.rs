@@ -794,23 +794,18 @@ fn verify_account_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
         }
     };
 
-    // The account tree's public key (the same key; published for a self-
-    // contained subtree). Anchor trust in it before any signature check.
-    let candidates = match fetch_json::<PublicKeyDoc>(agent, &format!("{prefix}/public_key.json"))
-    {
-        Ok(pk) => match Some(pk.verifying_candidates(now_ms())).filter(|c| !c.is_empty()) {
-            Some(vk) => vk,
-            None => {
-                report.check(
-                    false,
-                    "account-keys: public_key.json has no usable key (all expired or malformed)"
-                        .to_string(),
-                );
-                return;
-            }
-        },
+    // Same log key as the commit log, so the same pin applies (H-1): a served
+    // key that is not trusted must fail the audit, not anchor it.
+    let candidates = match trusted_candidates(
+        agent,
+        base,
+        &format!("{prefix}/public_key.json"),
+        account_key::STH_CONTEXT,
+        report,
+    ) {
+        Ok(vk) => vk,
         Err(e) => {
-            report.check(false, format!("account-keys: fetch public_key.json: {e}"));
+            report.check(false, format!("account-keys: {e}"));
             return;
         }
     };
@@ -988,23 +983,18 @@ fn verify_binaries_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
         }
     };
 
-    // The binaries tree's public key (the same key; published for a self-
-    // contained subtree). Anchor trust in it before any signature check.
-    let candidates = match fetch_json::<PublicKeyDoc>(agent, &format!("{prefix}/public_key.json"))
-    {
-        Ok(pk) => match Some(pk.verifying_candidates(now_ms())).filter(|c| !c.is_empty()) {
-            Some(vk) => vk,
-            None => {
-                report.check(
-                    false,
-                    "binaries: public_key.json has no usable key (all expired or malformed)"
-                        .to_string(),
-                );
-                return;
-            }
-        },
+    // Same log key as the commit log, so the same pin applies (H-1): a served
+    // key that is not trusted must fail the audit, not anchor it.
+    let candidates = match trusted_candidates(
+        agent,
+        base,
+        &format!("{prefix}/public_key.json"),
+        binaries::STH_CONTEXT,
+        report,
+    ) {
+        Ok(vk) => vk,
         Err(e) => {
-            report.check(false, format!("binaries: fetch public_key.json: {e}"));
+            report.check(false, format!("binaries: {e}"));
             return;
         }
     };

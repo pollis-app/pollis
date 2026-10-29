@@ -96,7 +96,7 @@ enum Command {
         #[arg(long)]
         account_timestamp: Option<u64>,
 
-        /// Env var holding the 32-byte hex Ed25519 signing key.
+        /// Env var holding the 32-byte hex ML-DSA-44 signing-key seed.
         #[arg(long, default_value = "VLOG_SIGNING_KEY")]
         signing_key_env: String,
 
@@ -173,7 +173,7 @@ enum Command {
         #[arg(long)]
         timestamp: u64,
 
-        /// Env var holding the 32-byte hex Ed25519 signing key.
+        /// Env var holding the 32-byte hex ML-DSA-44 signing-key seed.
         #[arg(long, default_value = "VLOG_SIGNING_KEY")]
         signing_key_env: String,
 
@@ -224,7 +224,7 @@ enum Command {
         #[arg(long)]
         signing_key_file: Option<PathBuf>,
     },
-    /// Mint a fresh Ed25519 keypair (hex) for dev/throwaway use.
+    /// Mint a fresh ML-DSA-44 keypair (hex) for dev/throwaway use.
     Keygen,
     /// Sign a key-set statement with the OFFLINE root key (#754).
     ///
