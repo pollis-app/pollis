@@ -57,6 +57,11 @@ pub enum Error {
     /// and why" is the difference between a five-minute fix and an incident.
     #[error("invalid key-set statement: {0}")]
     KeySet(String),
+
+    /// A reset statement (#1579) that is malformed, contradicts itself, or does
+    /// not verify.
+    #[error("invalid reset statement: {0}")]
+    Reset(String),
 }
 
 /// Convenience alias used throughout the crate.

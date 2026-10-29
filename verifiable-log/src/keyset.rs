@@ -232,15 +232,21 @@ impl KeySetStatement {
     /// cannot quietly keep a retired signer alive: a statement past its own
     /// `not_after_ms` yields nothing at all, which surfaces as "cannot verify"
     /// rather than as silent acceptance.
+    ///
+    /// A signer authorised for the commit-log tenant also counts for its successor
+    /// tree ([`crate::sth::key_set_authority_for`], #1579), so the reset needs no
+    /// root ceremony. Naming the successor context explicitly works too.
     pub fn active_signers_for(&self, context: &[u8], now_ms: u64) -> Vec<&SignerEntry> {
         if self.not_after_ms.is_some_and(|t| now_ms > t) {
             return Vec::new();
         }
         let want = String::from_utf8_lossy(context).to_string();
+        let authority =
+            String::from_utf8_lossy(crate::sth::key_set_authority_for(context)).to_string();
         self.signers
             .iter()
             .filter(|s| s.not_after_ms.is_none_or(|t| now_ms <= t))
-            .filter(|s| s.trees.contains(&want))
+            .filter(|s| s.trees.contains(&want) || s.trees.contains(&authority))
             .collect()
     }
 }
@@ -373,6 +379,18 @@ mod tests {
         let st = statement(&r, vec![signer(2, &[COMMIT], None)]);
         assert_eq!(st.active_signers_for(COMMIT.as_bytes(), NOW).len(), 1);
         assert_eq!(st.active_signers_for(BINARIES.as_bytes(), NOW).len(), 0);
+    }
+
+    #[test]
+    fn a_commit_log_signer_also_signs_its_successor_tree_and_nothing_else() {
+        let r = root(1);
+        let st = statement(&r, vec![signer(2, &[COMMIT], None)]);
+        let successor = crate::sth::STH_CONTEXT_COMMIT_LOG_2;
+        assert_eq!(st.active_signers_for(successor, NOW).len(), 1);
+        // The inheritance runs one way: a binaries-only signer gains nothing.
+        let st = statement(&r, vec![signer(2, &[BINARIES], None)]);
+        assert_eq!(st.active_signers_for(successor, NOW).len(), 0);
+        assert_eq!(st.active_signers_for(COMMIT.as_bytes(), NOW).len(), 0);
     }
 
     #[test]

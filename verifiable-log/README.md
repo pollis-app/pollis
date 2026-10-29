@@ -65,12 +65,22 @@ context  ||  tree_size (u64 BE)  ||  root_hash (32 bytes)  ||  timestamp (u64 BE
 
 | tree | context |
 |---|---|
-| `commit-log` | `pollis-verifiable-log:sth:v2` |
+| `commit-log` | `pollis-verifiable-log:sth:v2` (the retired first commit-log tree) |
+| `commit-log-2` | `pollis-verifiable-log:sth:v2:commit-log-2` (the live commit log, #1579) |
 | `account-keys` | `pollis-verifiable-log:sth:v2:account-keys` |
 | `binaries` | `pollis-verifiable-log:sth:v2:binaries` |
 
-One key signs all three trees, so the context is what stops a head for one tree
+One key signs every tree, so the context is what stops a head for one tree
 verifying as a head for another.
+
+A **reset statement** (`src/reset.rs`, #1579) is the log's signed record that one
+tree was retired in favour of another: the retired tree's last consistent head and
+leaf hashes, every other head of it that is still served (listed forks and
+superseded heads), the reason, and the successor's identity and genesis. It is
+signed under its own domain, `pollis-verifiable-log:reset:v1`, so it can never
+verify as a tree head or a key set. `ResetBody::classify` tells a verifier whether
+a served head of the retired tree is on its chain, a listed fork, a listed
+superseded head, or unlisted (always a failure).
 
 ## Wire format
 

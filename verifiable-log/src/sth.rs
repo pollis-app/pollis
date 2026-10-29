@@ -56,14 +56,47 @@ pub const STH_CONTEXT_ACCOUNT_KEYS: &[u8] = b"pollis-verifiable-log:sth:v2:accou
 /// See [`STH_CONTEXT_COMMIT_LOG`].
 pub const STH_CONTEXT_BINARIES: &[u8] = b"pollis-verifiable-log:sth:v2:binaries";
 
+/// Domain separation for the **second commit-log tree** (#1579).
+///
+/// The first commit-log tree ([`STH_CONTEXT_COMMIT_LOG`], served at `/v1/...`) was
+/// rebuilt from the Delivery Service's pruned `mls_commit_log` table, and after the
+/// DS started pruning it signed heads that are not consistent with its own earlier
+/// history. It is retired, frozen in place, and described by a signed reset
+/// statement ([`crate::reset`]). Its successor is a new tree built from the
+/// persisted leaves and signed under this context, so no head of the retired tree
+/// can ever verify as a head of the new one, or the other way round, even at the
+/// same size and root.
+pub const STH_CONTEXT_COMMIT_LOG_2: &[u8] = b"pollis-verifiable-log:sth:v2:commit-log-2";
+
 /// Every published tree, as `(cli-name, context)`. The single list a verifier
 /// walks when it has to turn a human-supplied tree name into a signing context,
-/// so adding a fourth tree cannot leave one entry point behind.
-pub const STH_CONTEXTS: [(&str, &[u8]); 3] = [
+/// so adding a tree cannot leave one entry point behind. `commit-log` is the
+/// retired first commit-log tree (still served, frozen); `commit-log-2` is the
+/// live one.
+pub const STH_CONTEXTS: [(&str, &[u8]); 4] = [
     ("commit-log", STH_CONTEXT_COMMIT_LOG),
+    ("commit-log-2", STH_CONTEXT_COMMIT_LOG_2),
     ("account-keys", STH_CONTEXT_ACCOUNT_KEYS),
     ("binaries", STH_CONTEXT_BINARIES),
 ];
+
+/// The key-set context that authorises signers for `context`.
+///
+/// A root-signed key set (#754) names, per signer, the STH contexts it may sign
+/// under. The key set in force when the commit log was reset names only the first
+/// commit-log context, and the root is offline by design, so the successor tree
+/// inherits the commit-log tenant's authority instead of needing a root ceremony:
+/// a signer the root authorised for the commit log may sign that tenant's
+/// successor tree, and nothing else. The binaries and account-key trees still need
+/// their own entry, so this widens no signer beyond the tenant it already had. A
+/// key set that names [`STH_CONTEXT_COMMIT_LOG_2`] explicitly is honoured as well.
+pub fn key_set_authority_for(context: &[u8]) -> &[u8] {
+    if context == STH_CONTEXT_COMMIT_LOG_2 {
+        STH_CONTEXT_COMMIT_LOG
+    } else {
+        context
+    }
+}
 
 /// The signing context for a tree name from [`STH_CONTEXTS`], or `None` for a
 /// name this build does not know — never a silent fallback to the commit log,
@@ -447,6 +480,22 @@ mod tests {
         assert!(account
             .verify_any_with_context(&candidates(), OTHER_CONTEXT)
             .is_some());
+    }
+
+    /// #1579: a head of the retired commit-log tree and a head of its successor
+    /// never verify as each other, even over the same size and root.
+    #[test]
+    fn the_second_commit_log_tree_is_separated_from_the_first() {
+        let vk = key().verifying_key();
+        let v1 = Sth::create(&key(), 7, [4u8; 32], TS);
+        let v2 = Sth::create_with_context(&key(), 7, [4u8; 32], TS, STH_CONTEXT_COMMIT_LOG_2);
+        assert!(v1.verify(&vk));
+        assert!(!v1.verify_with_context(&vk, STH_CONTEXT_COMMIT_LOG_2));
+        assert!(v2.verify_with_context(&vk, STH_CONTEXT_COMMIT_LOG_2));
+        assert!(!v2.verify(&vk));
+        assert_eq!(sth_context_for_tree("commit-log-2"), Some(STH_CONTEXT_COMMIT_LOG_2));
+        assert_eq!(key_set_authority_for(STH_CONTEXT_COMMIT_LOG_2), STH_CONTEXT_COMMIT_LOG);
+        assert_eq!(key_set_authority_for(STH_CONTEXT_BINARIES), STH_CONTEXT_BINARIES);
     }
 
     #[test]
