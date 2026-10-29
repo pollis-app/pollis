@@ -110,6 +110,26 @@ pub fn build_bundle_from_leaves(
     )
 }
 
+/// [`build_bundle_from_leaves`] for the **second** commit-log tree (#1579): the
+/// same leaves and replay, with every head signed under
+/// [`verifiable_log::STH_CONTEXT_COMMIT_LOG_2`], so none of them can verify as a
+/// head of the retired first tree, or the other way round.
+pub fn build_commit_log_2_bundle(
+    leaves: &[Entry],
+    signing_key: &SigningKey,
+    timestamp: u64,
+) -> Result<Bundle> {
+    let log = crate::commit_leaves::replay_public(leaves)?;
+    seal(
+        log,
+        leaves.to_vec(),
+        &[TENANT.to_string()],
+        signing_key,
+        timestamp,
+        Some(verifiable_log::STH_CONTEXT_COMMIT_LOG_2),
+    )
+}
+
 /// Build a signed bundle from account-key rows (assumed already in `seq` order).
 ///
 /// The account-key directory is a **separate** tenant with its **own** tree, so

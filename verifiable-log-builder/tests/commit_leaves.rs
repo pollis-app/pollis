@@ -397,3 +397,94 @@ fn a_regression_across_a_window_against_pruned_history_is_rejected_at_full_stren
     assert_eq!(ok.appended, 1);
     assert_eq!(ok.leaves.len(), 3);
 }
+
+// ---------------------------------------------------------------------------
+// #1579 reset: the successor tree, commit-log-2, seeds once and then appends.
+// ---------------------------------------------------------------------------
+
+fn build_cli_v2(db: &Path, leaves: &Path, out: &Path) -> Bundle {
+    let o = builder(&[
+        "build",
+        "--db",
+        db.to_str().unwrap(),
+        "--commit-leaves",
+        leaves.to_str().unwrap(),
+        "--commit-tree",
+        "commit-log-2",
+        "--out",
+        out.to_str().unwrap(),
+        "--timestamp",
+        &TS.to_string(),
+    ]);
+    assert!(o.status.success(), "build failed: {}", String::from_utf8_lossy(&o.stderr));
+    serde_json::from_str(&std::fs::read_to_string(out).unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn commit_log_2_seeds_from_the_live_table_once_then_appends_under_its_own_context() {
+    use verifiable_log::{STH_CONTEXT_COMMIT_LOG, STH_CONTEXT_COMMIT_LOG_2};
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("log.db");
+    let leaves = dir.path().join("commit-log-2-leaves.json");
+    create(&db).await;
+    // The live table at reset time is already a pruned window: seq 40 onwards.
+    insert(&db, &[(40, "a", 7), (41, "b", 3), (42, "a", 8)]).await;
+
+    // Seed: the successor's log of record starts from what is live, with no
+    // published head to reproduce (its namespace has never been served).
+    let o = append_cli(&db, &leaves, &["--seed-from-live"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let first = build_cli_v2(&db, &leaves, &dir.path().join("b1.json"));
+    let sth1 = first.sths.last().unwrap().clone();
+    assert_eq!(sth1.tree_size, 3);
+    let vk = ml_dsa::Keypair::verifying_key(&signing_key());
+    assert!(sth1.verify_with_context(&vk, STH_CONTEXT_COMMIT_LOG_2));
+    assert!(
+        !sth1.verify_with_context(&vk, STH_CONTEXT_COMMIT_LOG),
+        "a successor head must never verify as a head of the retired tree"
+    );
+
+    // A second seed is refused: seeding starts a log of record, never replaces one.
+    let o = append_cli(&db, &leaves, &["--seed-from-live"]);
+    assert!(!o.status.success());
+    assert!(stderr(&o).contains("already exists"), "{}", stderr(&o));
+
+    // Prune, then append: the successor stays consistent with its own head.
+    let sth1_path = dir.path().join("sth1.json");
+    std::fs::write(&sth1_path, serde_json::to_string(&sth1).unwrap()).unwrap();
+    prune_below(&db, 42).await;
+    insert(&db, &[(43, "b", 4), (44, "a", 9)]).await;
+    let o = append_cli(&db, &leaves, &["--published-sth", sth1_path.to_str().unwrap()]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let second = build_cli_v2(&db, &leaves, &dir.path().join("b2.json"));
+    assert_eq!(second.entries.len(), 5);
+    assert_eq!(&second.entries[..3], &first.entries[..]);
+    let sth2 = second.sths.last().unwrap();
+    assert!(sth2.verify_with_context(&vk, STH_CONTEXT_COMMIT_LOG_2));
+
+    let log = verifiable_log_builder::commit_leaves::replay_public(&read_leaves(&leaves)).unwrap();
+    let proof = log.consistency_proof(3, 5).unwrap();
+    assert!(verify_consistency_proof(&sth1, sth2, &proof));
+    // A build of the same leaves for the retired tree carries the retired
+    // context, so the two trees cannot stand in for each other.
+    let v1 = build_cli(&db, &leaves, &dir.path().join("b-v1.json"));
+    assert_eq!(v1.sths.last().unwrap().root_hash, sth2.root_hash);
+    assert_ne!(v1.sths.last().unwrap().signature, sth2.signature);
+}
+
+#[test]
+fn commit_log_2_without_persisted_leaves_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let o = builder(&[
+        "build",
+        "--db",
+        dir.path().join("x.db").to_str().unwrap(),
+        "--commit-tree",
+        "commit-log-2",
+        "--out",
+        dir.path().join("b.json").to_str().unwrap(),
+        "--timestamp",
+        "1",
+    ]);
+    assert!(!o.status.success(), "the successor is never built from the DS table");
+}

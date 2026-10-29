@@ -20,7 +20,8 @@ use clap::{Parser, Subcommand};
 use verifiable_log_builder::error::{BuilderError, Result};
 use verifiable_log_builder::{
     build_account_bundle, build_binaries_bundle, build_bundle, build_bundle_from_leaves,
-    commit_leaves, keys, source, BinaryRecord, RetiredKey,
+    build_commit_log_2_bundle, commit_leaves, commit_log_reset, keys, source, BinaryRecord,
+    RetiredKey,
 };
 
 #[derive(Parser)]
@@ -58,6 +59,19 @@ enum Command {
         /// from the DB, which is only right for a local or test database.
         #[arg(long)]
         commit_leaves: Option<PathBuf>,
+
+        /// Which commit-log tree to sign the commit-log bundle for. `commit-log`
+        /// is the retired first tree (its STH context, for local and test use);
+        /// `commit-log-2` is the live one (#1579), which CI publishes. The
+        /// successor is only ever built from persisted leaves, so it requires
+        /// `--commit-leaves`.
+        #[arg(
+            long,
+            default_value = "commit-log",
+            value_parser = ["commit-log", "commit-log-2"],
+            requires_if("commit-log-2", "commit_leaves")
+        )]
+        commit_tree: String,
 
         /// Output path for the commit-log JSON bundle.
         #[arg(long)]
@@ -120,7 +134,7 @@ enum Command {
         #[arg(long)]
         out: PathBuf,
 
-        /// The latest published commit-log STH (`/v1/sth/latest.json`). The
+        /// The latest published commit-log STH (`/v1/commit-log-2/sth/latest.json`). The
         /// persisted leaves must reproduce it. Omit only when no commit-log
         /// tree has ever been published.
         #[arg(long)]
@@ -175,6 +189,40 @@ enum Command {
         /// rotation being a flag day. Omit outside a rotation.
         #[arg(long = "retired-key", value_name = "HEX:NOT_AFTER_MS")]
         retired_key: Vec<String>,
+    },
+    /// Mint the signed reset statement that retires the first commit-log tree
+    /// and names its successor, `commit-log-2` (#1579). Refuses unless the
+    /// committed retirement facts match the served retired heads exactly, and
+    /// unless the successor has at least one persisted leaf (its genesis).
+    CommitLogReset {
+        /// The committed retirement facts (`commit-log-retirement.json`).
+        #[arg(long)]
+        retirement: PathBuf,
+
+        /// Directory holding the retired tree's served per-size heads as
+        /// `<tree_size>.json`, one for every size the facts list.
+        #[arg(long)]
+        retired_sths: PathBuf,
+
+        /// The successor's persisted leaves (`internal/commit-log-2-leaves.json`).
+        #[arg(long)]
+        leaves: PathBuf,
+
+        /// Issue time, milliseconds since epoch. Explicit, never the clock.
+        #[arg(long)]
+        issued_at: u64,
+
+        /// Where to write the signed statement.
+        #[arg(long)]
+        out: PathBuf,
+
+        /// Env var holding the 32-byte hex signing key.
+        #[arg(long, default_value = "VLOG_SIGNING_KEY")]
+        signing_key_env: String,
+
+        /// Optional file holding the 32-byte hex signing key.
+        #[arg(long)]
+        signing_key_file: Option<PathBuf>,
     },
     /// Mint a fresh Ed25519 keypair (hex) for dev/throwaway use.
     Keygen,
@@ -277,10 +325,28 @@ fn main() -> ExitCode {
             seed_from_live,
             seed_from.as_deref(),
         ),
+        Command::CommitLogReset {
+            retirement,
+            retired_sths,
+            leaves,
+            issued_at,
+            out,
+            signing_key_env,
+            signing_key_file,
+        } => run_commit_log_reset(
+            &retirement,
+            &retired_sths,
+            &leaves,
+            issued_at,
+            &out,
+            &signing_key_env,
+            signing_key_file.as_deref(),
+        ),
         Command::Build {
             db,
             log_db,
             commit_leaves,
+            commit_tree,
             out,
             account_out,
             timestamp,
@@ -292,6 +358,7 @@ fn main() -> ExitCode {
             db,
             log_db,
             commit_leaves,
+            commit_tree == "commit-log-2",
             out,
             account_out,
             timestamp,
@@ -384,6 +451,7 @@ async fn run_build(
     db: Option<String>,
     log_db: Option<String>,
     commit_leaves: Option<PathBuf>,
+    commit_log_2: bool,
     out: PathBuf,
     account_out: Option<PathBuf>,
     timestamp: u64,
@@ -468,6 +536,9 @@ async fn run_build(
     }
     let retired = parse_retired_keys(retired_key)?;
     let mut bundle = match &commit_source {
+        CommitSource::Leaves(leaves) if commit_log_2 => {
+            build_commit_log_2_bundle(leaves, &signing_key, timestamp)?
+        }
         CommitSource::Leaves(leaves) => build_bundle_from_leaves(leaves, &signing_key, timestamp)?,
         CommitSource::Rows(rows) => build_bundle(rows, &signing_key, timestamp)?,
     };
@@ -586,6 +657,60 @@ async fn run_append_commit_log(
         live.len(),
         outcome.appended,
         outcome.leaves.len(),
+        out.display()
+    );
+    Ok(())
+}
+
+/// Check the committed retirement facts against the served retired heads, then
+/// sign the reset statement (#1579).
+fn run_commit_log_reset(
+    retirement: &std::path::Path,
+    retired_sths: &std::path::Path,
+    leaves_path: &std::path::Path,
+    issued_at: u64,
+    out: &std::path::Path,
+    signing_key_env: &str,
+    signing_key_file: Option<&std::path::Path>,
+) -> Result<()> {
+    let signing_key = keys::load_signing_key(signing_key_env, signing_key_file)?;
+    let facts: commit_log_reset::RetirementFacts =
+        serde_json::from_str(&std::fs::read_to_string(retirement)?)?;
+
+    let r = &facts.retired;
+    let mut sizes: Vec<u64> = r.chain_sizes.clone();
+    sizes.extend(r.forks.iter().chain(&r.superseded).map(|h| h.tree_size));
+    sizes.push(r.last_consistent.tree_size);
+    sizes.sort_unstable();
+    sizes.dedup();
+    let mut served = std::collections::BTreeMap::new();
+    for size in sizes {
+        let path = retired_sths.join(format!("{size}.json"));
+        let raw = std::fs::read_to_string(&path).map_err(|e| {
+            BuilderError::Reset(format!("read the served retired head {}: {e}", path.display()))
+        })?;
+        served.insert(size, serde_json::from_str::<verifiable_log::Sth>(&raw)?);
+    }
+
+    // The retired heads were signed by this same key; it is the only key the
+    // statement can describe them under.
+    let vk = ml_dsa::Keypair::verifying_key(&signing_key);
+    let candidates = vec![(verifiable_log::key_id_for(&vk), vk)];
+    commit_log_reset::check_against_served(&facts, &served, &candidates)?;
+
+    let leaves = commit_leaves::load(leaves_path)?.ok_or_else(|| {
+        BuilderError::Reset(format!("{} does not exist", leaves_path.display()))
+    })?;
+    let body = commit_log_reset::build_body(&facts, &leaves, issued_at)?;
+    let statement = verifiable_log::ResetStatement::create(&signing_key, body)?;
+    statement.verify_any(&candidates)?;
+    std::fs::write(out, format!("{}\n", serde_json::to_string_pretty(&statement)?))?;
+    println!(
+        "wrote commit-log reset statement: retired chain to size {}, {} fork(s), {} superseded head(s), successor genesis {} -> {}",
+        r.last_consistent.tree_size,
+        r.forks.len(),
+        r.superseded.len(),
+        statement.statement.successor.genesis_root_hash,
         out.display()
     );
     Ok(())

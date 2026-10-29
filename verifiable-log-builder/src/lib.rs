@@ -27,6 +27,8 @@
 //! * [`commit_leaves`] — the commit log's persisted leaves, its log of record
 //!   (#1579): each publish appends the rows above the last persisted `seq`, so
 //!   a DS prune never changes a published leaf. Pure, no IO beyond a file read.
+//! * [`commit_log_reset`] — mints the signed statement that retires the first
+//!   commit-log tree and names its successor, `commit-log-2` (#1579).
 //! * [`builder`] — appends every row to a [`verifiable_log::VerifiableLog`],
 //!   signs Signed Tree Heads, and emits the [`builder::Bundle`] — one per tenant.
 //!
@@ -38,6 +40,7 @@ pub mod binaries;
 pub mod builder;
 pub mod commit_leaves;
 pub mod commit_log;
+pub mod commit_log_reset;
 pub mod error;
 pub mod keys;
 /// The log's row types, their hashing/emptiness guards, and — behind
@@ -52,8 +55,8 @@ pub mod source;
 pub use account_key::{AccountKeyInvariant, AccountKeyLeaf};
 pub use binaries::{BinaryInvariant, BinaryRecord, Layer, Toolchain};
 pub use builder::{
-    build_account_bundle, build_binaries_bundle, build_bundle, build_bundle_from_leaves, Bundle,
-    RetiredKey,
+    build_account_bundle, build_binaries_bundle, build_bundle, build_bundle_from_leaves,
+    build_commit_log_2_bundle, Bundle, RetiredKey,
 };
 pub use commit_log::{
     derive_conversation_pseudonym, derive_sender_pseudonym, window_for_seq, CommitLeaf,
