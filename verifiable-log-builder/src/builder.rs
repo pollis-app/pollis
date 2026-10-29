@@ -80,18 +80,34 @@ pub fn build_bundle(
     }
 
     // (2) Build the published, pseudonymous tree.
-    let mut log = VerifiableLog::new();
-    log.register_invariant(TENANT, Box::new(CommitLogInvariant));
-
     let mut entries = Vec::with_capacity(rows.len());
     for row in rows {
-        let entry = row.to_leaf().to_entry()?;
-        log.append(entry.clone())?;
-        entries.push(entry);
+        entries.push(row.to_leaf().to_entry()?);
     }
+    build_bundle_from_leaves(&entries, signing_key, timestamp)
+}
 
+/// Build a signed commit-log bundle from already-published leaves — the
+/// persisted log of record (#1579, [`crate::commit_leaves`]) — instead of from
+/// DS rows. The leaves are replayed through the public [`CommitLogInvariant`]
+/// first, exactly as an outside auditor replays them; the full-strength gate on
+/// real ids runs where the real ids are in hand, in
+/// [`crate::commit_leaves::append_rows`].
+pub fn build_bundle_from_leaves(
+    leaves: &[Entry],
+    signing_key: &SigningKey,
+    timestamp: u64,
+) -> Result<Bundle> {
+    let log = crate::commit_leaves::replay_public(leaves)?;
     // Default (commit-log) STH context.
-    seal(log, entries, &[TENANT.to_string()], signing_key, timestamp, None)
+    seal(
+        log,
+        leaves.to_vec(),
+        &[TENANT.to_string()],
+        signing_key,
+        timestamp,
+        None,
+    )
 }
 
 /// Build a signed bundle from account-key rows (assumed already in `seq` order).

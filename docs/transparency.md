@@ -82,7 +82,7 @@ Each crate has a README with the details.
 | Component | Crate / path | Role |
 |---|---|---|
 | **monitor** | [`verifiable-log`](../verifiable-log/README.md) | Merkle-log core, and an offline CLI that verifies a downloaded bundle with no network or database. |
-| **builder** | [`verifiable-log-builder`](../verifiable-log-builder/README.md) | Reads `mls_commit_log` (and the account-key and binaries sources) and writes signed bundles. Hashes each commit blob and discards the bytes. |
+| **builder** | [`verifiable-log-builder`](../verifiable-log-builder/README.md) | Appends new `mls_commit_log` rows to the commit log's persisted leaves (`append-commit-log`), reads the account-key and binaries sources, and writes signed bundles. Hashes each commit blob and discards the bytes. |
 | **serve** | [`verifiable-log-serve`](../verifiable-log-serve/README.md) | Turns signed bundles into the static `/v1/...` read API. Also a dev server and a `live` server, both with the dynamic `/verify/group/<id>` endpoint. |
 | **pollis-verify** | [`verifiable-log-serve`](../verifiable-log-serve/README.md) | The auditor CLI: `remote` (all three trees), `group`, `account`, `release`. |
 | **website explorer** | [`website/transparency.html`](../website/transparency.html) | Runs `pollis-verify group`'s checks in the browser (`website/transparency.js`, a JS port of `group.rs`) against the static `/v1/` files, trusting only the pinned key. A convenience, not a trust anchor. |
@@ -125,6 +125,51 @@ unchanged.
 
 A fork or regression in the source data aborts the build, and the verifiers check
 again on replay.
+
+### The commit log of record: persisted leaves, not the DS table (#1579)
+
+The published tree, not the Delivery Service's `mls_commit_log` table, is the
+commit log of record. The DS prunes that table below a retention floor (#539,
+`pollis-delivery/src/commit.rs`), so the table only ever holds a recent window of
+the log. Rebuilding the tree from it on each publish put different leaves at
+already-signed positions the first time a published row was pruned, and every
+earlier head stopped being reproducible.
+
+So the commit log works like the binaries tree, whose records live in
+`internal/binary-records.json`:
+
+- The leaves the publisher has published are kept in the transparency bucket at
+  `internal/commit-log-leaves.json`, a JSON array of entries in exactly the shape of
+  `/v1/entries.json`. Each publish also keeps a copy at
+  `internal/commit-log-leaves/<size>.json`, because R2 has no object versioning.
+- Each publish runs `builder append-commit-log`. It appends only the rows whose `seq`
+  is above the last persisted leaf, writes the file back to R2 before any head that
+  covers it is published, and then `builder build --commit-leaves` signs heads over
+  the whole file. A pruned row is simply not read again, and its leaf stays where it
+  was published.
+- It fails closed. The persisted leaves must reproduce the served `latest.json`
+  (its size and root). A missing, shrunk or rewritten file, a live row below the
+  head that was never logged or that has changed, or a served per-size head with a
+  different root stops the commit-log publish. The account-key and binaries trees
+  still publish, and the job fails.
+- Both invariant passes run on the whole appended stream: the public,
+  within-window check on the pseudonymous leaves, and the full-strength check on
+  real ids. For the full-strength check, a persisted leaf is matched back to its
+  real conversation whenever a live row's conversation derives that leaf's
+  pseudonym for its window, so a new commit is still checked against history whose
+  rows have been pruned.
+- Seeding is a one-shot, explicit act (`append-commit-log --seed-from-live` or
+  `--seed-from <entries.json>`, or the workflow's `seed_commit_log` input). It is
+  refused when the file already exists, and it still has to reproduce the served
+  head.
+
+The persisted file holds only the published, pseudonymous leaves, never a real
+`conversation_id` or `sender_id`, so keeping it longer than the DS keeps its rows
+discloses nothing the public log does not.
+
+Heads published before this change were rebuilt from the live table. After the DS
+started pruning, two of them were published that are not consistent with the
+earlier history; #1579 records which.
 
 ## Windowed pseudonyms in the commit log (#701)
 

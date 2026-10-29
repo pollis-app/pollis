@@ -1,7 +1,10 @@
 //! `builder` — reads `mls_commit_log` and emits a signed monitor bundle.
 //!
 //! Subcommands:
-//! * `build` — read the DB, append every commit, sign STHs, write the bundle.
+//! * `append-commit-log` — append the DS rows above the last persisted `seq` to
+//!   the commit log's persisted leaves, its log of record (#1579). Fails closed.
+//! * `build` — sign STHs over the persisted commit-log leaves (`--commit-leaves`)
+//!   or, without that flag, over every DS row; write the bundle.
 //! * `build-binaries` — read a JSON file of `BinaryRecord`s and write a signed
 //!   binaries-tree bundle (binary transparency, Phase 1). No DB.
 //! * `keygen` — mint a throwaway ML-DSA-44 keypair (hex) for dev.
@@ -16,8 +19,8 @@ use clap::{Parser, Subcommand};
 
 use verifiable_log_builder::error::{BuilderError, Result};
 use verifiable_log_builder::{
-    build_account_bundle, build_binaries_bundle, build_bundle, keys, source, BinaryRecord,
-    RetiredKey,
+    build_account_bundle, build_binaries_bundle, build_bundle, build_bundle_from_leaves,
+    commit_leaves, keys, source, BinaryRecord, RetiredKey,
 };
 
 #[derive(Parser)]
@@ -47,6 +50,14 @@ enum Command {
         /// the main `--db` (single-DB / pre-cutover behaviour).
         #[arg(long)]
         log_db: Option<String>,
+
+        /// Build the commit-log tree from this persisted leaves file (the
+        /// output of `append-commit-log`) instead of reading `mls_commit_log`.
+        /// This is how CI publishes (#1579): the DS prunes its table, so the
+        /// table is never the log of record. Without it the commit log is read
+        /// from the DB, which is only right for a local or test database.
+        #[arg(long)]
+        commit_leaves: Option<PathBuf>,
 
         /// Output path for the commit-log JSON bundle.
         #[arg(long)]
@@ -87,6 +98,45 @@ enum Command {
         /// rotation being a flag day. Omit outside a rotation.
         #[arg(long = "retired-key", value_name = "HEX:NOT_AFTER_MS")]
         retired_key: Vec<String>,
+    },
+    /// Append the DS rows above the last persisted `seq` to the commit log's
+    /// persisted leaves (#1579) and write the result. Refuses, never repairs, a
+    /// missing, shrunk or rewritten leaves file, a file that does not reproduce
+    /// `--published-sth`, and a live row below the head that was never logged
+    /// or has changed.
+    AppendCommitLog {
+        /// Log database: a libSQL/Turso URL (uses `LOG_DB_AUTH_TOKEN`, falling
+        /// back to `TURSO_AUTH_TOKEN`) or a local SQLite path. Falls back to
+        /// `LOG_DB_URL`, then `TURSO_DATABASE_URL`.
+        #[arg(long)]
+        log_db: Option<String>,
+
+        /// The persisted leaves file (a JSON array of entries, the shape of
+        /// `/v1/entries.json`). Must exist unless a `--seed-*` flag is given.
+        #[arg(long)]
+        leaves: PathBuf,
+
+        /// Where to write the appended leaves. May equal `--leaves`.
+        #[arg(long)]
+        out: PathBuf,
+
+        /// The latest published commit-log STH (`/v1/sth/latest.json`). The
+        /// persisted leaves must reproduce it. Omit only when no commit-log
+        /// tree has ever been published.
+        #[arg(long)]
+        published_sth: Option<PathBuf>,
+
+        /// One-shot: `--leaves` does not exist yet, so start the log of record
+        /// from the live table. Refused if `--leaves` exists.
+        #[arg(long, conflicts_with = "seed_from")]
+        seed_from_live: bool,
+
+        /// One-shot: `--leaves` does not exist yet, so start the log of record
+        /// from this entries file (for example leaves recovered from an earlier
+        /// publish), then append the live rows above it. Refused if `--leaves`
+        /// exists.
+        #[arg(long)]
+        seed_from: Option<PathBuf>,
     },
     /// Read a JSON file of `BinaryRecord`s and write a signed binaries-tree
     /// bundle. Unlike `build`, the binaries tenant's source of truth is a JSON
@@ -212,9 +262,25 @@ fn parse_signer(spec: &str) -> std::result::Result<verifiable_log::SignerEntry, 
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
+        Command::AppendCommitLog {
+            log_db,
+            leaves,
+            out,
+            published_sth,
+            seed_from_live,
+            seed_from,
+        } => run_append_commit_log(
+            log_db,
+            &leaves,
+            &out,
+            published_sth.as_deref(),
+            seed_from_live,
+            seed_from.as_deref(),
+        ),
         Command::Build {
             db,
             log_db,
+            commit_leaves,
             out,
             account_out,
             timestamp,
@@ -225,6 +291,7 @@ fn main() -> ExitCode {
         } => run_build(
             db,
             log_db,
+            commit_leaves,
             out,
             account_out,
             timestamp,
@@ -316,6 +383,7 @@ fn parse_retired_keys(specs: &[String]) -> Result<Vec<RetiredKey>> {
 async fn run_build(
     db: Option<String>,
     log_db: Option<String>,
+    commit_leaves: Option<PathBuf>,
     out: PathBuf,
     account_out: Option<PathBuf>,
     timestamp: u64,
@@ -347,10 +415,25 @@ async fn run_build(
     // empty commit log (e.g. right after Goal A's cutover) must NOT block the
     // account-key bundle, and vice versa. So we read both first, then decide.
 
-    // Commit-log tenant (frozen contract): read from the LOG DB with its token.
-    let log_conn = source::connect_with_token(&log_db, &log_token).await?;
-    let rows = source::read_commit_log(&log_conn).await?;
-    let commit_empty = rows.is_empty();
+    // Commit-log tenant (frozen contract). From the persisted log of record when
+    // given (#1579); otherwise from the LOG DB with its token.
+    let commit_source = match &commit_leaves {
+        Some(path) => CommitSource::Leaves(commit_leaves::load(path)?.ok_or_else(|| {
+            BuilderError::PersistedLeaves(format!(
+                "--commit-leaves {} does not exist",
+                path.display()
+            ))
+        })?),
+        None => {
+            let log_conn = source::connect_with_token(&log_db, &log_token).await?;
+            CommitSource::Rows(source::read_commit_log(&log_conn).await?)
+        }
+    };
+    let commit_count = match &commit_source {
+        CommitSource::Leaves(leaves) => leaves.len(),
+        CommitSource::Rows(rows) => rows.len(),
+    };
+    let commit_empty = commit_count == 0;
 
     // Account-key tenant (separate tree, domain-separated STH) — only when asked.
     // It stays in the MAIN DB (TURSO_AUTH_TOKEN), independent of the log DB.
@@ -369,7 +452,7 @@ async fn run_build(
     if commit_empty && account_empty {
         // The DB connected fine; the commit log is just empty. Surface that
         // distinct condition (EmptyCommitLog), not the missing-source NoDbSource.
-        source::ensure_non_empty(&rows)?;
+        return Err(BuilderError::EmptyCommitLog);
     }
 
     // Commit-log bundle. `build_bundle` over zero rows is well-defined — it emits
@@ -384,7 +467,10 @@ async fn run_build(
         );
     }
     let retired = parse_retired_keys(retired_key)?;
-    let mut bundle = build_bundle(&rows, &signing_key, timestamp)?;
+    let mut bundle = match &commit_source {
+        CommitSource::Leaves(leaves) => build_bundle_from_leaves(leaves, &signing_key, timestamp)?,
+        CommitSource::Rows(rows) => build_bundle(rows, &signing_key, timestamp)?,
+    };
     bundle.retired_keys.clone_from(&retired);
     let json = serde_json::to_string_pretty(&bundle)?;
     std::fs::write(&out, json)?;
@@ -392,7 +478,7 @@ async fn run_build(
     // Never print the raw commit_data or the auth token — only safe metadata.
     println!(
         "wrote commit-log bundle: {} commits, {} STH(s), {} inclusion proof(s) -> {}",
-        rows.len(),
+        commit_count,
         bundle.sths.len(),
         bundle.inclusion.len(),
         out.display()
@@ -424,6 +510,84 @@ async fn run_build(
     }
 
     println!("public_key: {}", bundle.public_key);
+    Ok(())
+}
+
+/// Where `build` takes the commit-log leaves from.
+enum CommitSource {
+    /// The persisted log of record (#1579), which is what CI publishes.
+    Leaves(Vec<verifiable_log::Entry>),
+    /// Every DS row. Right only for a local or test database.
+    Rows(Vec<source::CommitRow>),
+}
+
+/// Append the live rows above the persisted head and write the new leaves.
+#[tokio::main(flavor = "current_thread")]
+async fn run_append_commit_log(
+    log_db: Option<String>,
+    leaves_path: &std::path::Path,
+    out: &std::path::Path,
+    published_sth: Option<&std::path::Path>,
+    seed_from_live: bool,
+    seed_from: Option<&std::path::Path>,
+) -> Result<()> {
+    let seeding = seed_from_live || seed_from.is_some();
+    let persisted = match (commit_leaves::load(leaves_path)?, seeding) {
+        (Some(_), true) => {
+            return Err(BuilderError::PersistedLeaves(format!(
+                "{} already exists: a seed flag only starts a log of record, it never replaces one",
+                leaves_path.display()
+            )));
+        }
+        (Some(leaves), false) => leaves,
+        (None, false) => {
+            return Err(BuilderError::PersistedLeaves(format!(
+                "{} does not exist. It is the commit log's log of record, so its absence is never \
+                 read as empty; seed it once with --seed-from-live or --seed-from <entries.json>",
+                leaves_path.display()
+            )));
+        }
+        (None, true) => match seed_from {
+            Some(path) => commit_leaves::load(path)?.ok_or_else(|| {
+                BuilderError::PersistedLeaves(format!(
+                    "--seed-from {} does not exist",
+                    path.display()
+                ))
+            })?,
+            None => Vec::new(),
+        },
+    };
+
+    let published = match published_sth {
+        Some(path) => {
+            let raw = std::fs::read_to_string(path)?;
+            Some(serde_json::from_str::<verifiable_log::Sth>(&raw)?)
+        }
+        None => None,
+    };
+
+    let log_db = log_db
+        .or_else(|| std::env::var("LOG_DB_URL").ok())
+        .or_else(|| std::env::var("TURSO_DATABASE_URL").ok())
+        .ok_or(BuilderError::NoDbSource)?;
+    let log_token = std::env::var("LOG_DB_AUTH_TOKEN")
+        .or_else(|_| std::env::var("TURSO_AUTH_TOKEN"))
+        .unwrap_or_default();
+    let conn = source::connect_with_token(&log_db, &log_token).await?;
+    let live = source::read_commit_log(&conn).await?;
+
+    let outcome = commit_leaves::append_rows(&persisted, &live, published.as_ref())?;
+    std::fs::write(out, serde_json::to_string(&outcome.leaves)?)?;
+
+    // Counts only: never a row, an id or the token.
+    println!(
+        "commit-log leaves: {} persisted, {} live row(s), {} appended, {} total -> {}",
+        persisted.len(),
+        live.len(),
+        outcome.appended,
+        outcome.leaves.len(),
+        out.display()
+    );
     Ok(())
 }
 
