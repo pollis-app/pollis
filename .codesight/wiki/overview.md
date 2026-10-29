@@ -4,8 +4,8 @@
 
 **Tauri 2** desktop app: a React/TypeScript renderer running in the OS WebView (WebKitGTK on Linux, WKWebView on macOS, WebView2 on Windows), with the Rust backend compiled into the Tauri host process. The renderer reaches the backend through the shell-agnostic bridge `frontend/src/bridge`, which routes to Tauri's `invoke`.
 
-- **No backend server.** The Rust core (compiled into the Tauri host process) connects directly to Turso (1 network hop). All business logic runs in `pollis-core`; the renderer invokes commands via `invoke(cmd, args)` through the bridge.
-- **Media stays in Rust.** Voice and screenshare run inside `pollis-core` via the `livekit` + `libwebrtc` crates, not in the renderer. Two reasons: (a) cross-platform parity — the same Rust pipeline is consumed by mobile through uniffi bindings; (b) predictable allocation — multi-MB media buffers passed through a JS heap produce visible GC stutter, while Rust's manual allocation does not. This also sidesteps WebKitGTK's lack of WebRTC on Linux — the Rust path is the only one that works on every target.
+- **One backend: the Delivery Service.** The Rust core (compiled into the Tauri host process) reaches remote data only through typed `POST /v1/...` calls to `pollis-delivery`; since #987 it holds no database credential and does not depend on `libsql`. All client logic runs in `pollis-core`; the renderer invokes commands via `invoke(cmd, args)` through the bridge.
+- **Media stays in Rust.** Voice and screenshare run inside `pollis-core` via the `livekit` + `libwebrtc` crates, not in the renderer. Two reasons: (a) cross-platform parity — the same Rust pipeline is consumed by mobile through uniffi bindings; (b) predictable allocation — multi-MB media buffers passed through a JS heap produce visible GC stutter, while Rust's manual allocation does not. This also sidesteps WebKitGTK's lack of WebRTC on Linux — the Rust path is the only one that works on every target. (That wall is why an Electron shell was once tried, then reverted by #386/#389; CEF/`cef-rs`, a native video-hole overlay, a forked WebKitGTK and moving voice to `livekit-client` were all evaluated and rejected at the time.)
 
 ## Data Flow
 
@@ -15,7 +15,7 @@ React component
     → @tauri-apps/api/core invoke(...)          // bridge routes to Tauri
       → #[tauri::command] shim                   // src-tauri/src/commands/*.rs
         → pollis_core::commands::*              // pollis-core/src/commands/*.rs
-          → Turso (remote, metadata) or SQLite (local, secrets)
+          → Delivery Service (remote, via ds_client) or SQLCipher (local)
         ← Result<T>
       ← Result<T>
     ← Result<T>
@@ -48,7 +48,7 @@ Navigation uses `useNavigate()` from TanStack Router. Pages use `useParams()` fo
 ```
 pollis-core/src/
   commands/          # Real command implementations (auth, groups, messages, mls, voice, ...)
-  db/                # Turso + local SQLite connections + numbered migrations
+  db/                # Local SQLCipher DB (local_schema.sql); remote migrations live in pollis-schema/
   config.rs          # Env var config
   keystore.rs        # Device keystore: OS keychain, else encrypted file
   state.rs           # AppState shared across commands

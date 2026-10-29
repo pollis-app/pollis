@@ -3,7 +3,7 @@
 Pollis has four tiers of automated tests:
 
 1. **Unit tests** (in-crate `#[cfg(test)]` modules) — pure logic, in-memory rusqlite schemas, no I/O.
-2. **Integration harness** (`src-tauri/tests/flows.rs`) — drives the real `pollis-core` commands end-to-end against a disposable test Turso database. Most of this document covers the harness.
+2. **Integration harness** (`src-tauri/tests/flows.rs`) — drives the real `pollis-core` commands end-to-end through an in-process Delivery Service backed by process-local libsql files (no Turso, no configuration — see below). Most of this document covers the harness.
 3. **WebDriver E2E tests** (`e2e/*.js`) — drives the real shipped Tauri app (native WebKitGTK WebView, real Rust core) via `tauri-driver`. See [WebDriver E2E tests](#webdriver-e2e-tests-e2e) below.
 4. **Playwright UI specs** (`e2e/*.spec.js`) — front-end interaction only, against the browser build with `VITE_PLAYWRIGHT=true` (Tauri IPC mocked in `frontend/src/__mocks__/`). No backend, seconds to run. See [Playwright UI specs](#playwright-ui-specs-e2especjs) below.
 5. **Renderer unit tests** (`frontend/tests/*.test.ts`, `pnpm --filter frontend test`) — plain `node --test` over the renderer's pure functions, plus the source-scan guards. Milliseconds, no browser, no build step; Node's type stripping runs the TypeScript directly, so imports need the `.ts` extension.
@@ -44,7 +44,7 @@ Design constraints:
 
 - **Real command paths.** Tests go through `tauri::test::get_ipc_response` against a `MockRuntime` app, exactly as the React frontend does in production — no `_inner` shims, no mocked DB layer.
 - **Per-client isolation.** Each `TestClient` owns its own `App<MockRuntime>`, its own `InMemoryKeystore`, and its own `AppState`. Two clients in one test cannot share keys or local state.
-- **Shared remote.** All clients in a test round-trip through the same disposable Turso database, so read-after-write between clients exercises the same pipeline as two real users.
+- **Shared remote.** All clients in a test round-trip through the same in-process DS and its process-local libsql databases, so read-after-write between clients exercises the same pipeline as two real users.
 - **No timing, no websockets.** Tests drive the pipeline by explicit calls (`poll_mls_welcomes`, `process_pending_commits`) rather than waiting for LiveKit events.
 
 ## Running
@@ -54,7 +54,7 @@ cargo test --features test-harness --test flows
 ```
 
 The `test-harness` feature:
-- Exposes `Config::for_test()` (loads `.env.test`, stubs R2/LiveKit/Resend).
+- Exposes `Config::for_test()` (reads nothing from the environment; stubs R2/LiveKit/Resend).
 - Exposes `InMemoryKeystore` + the `test_harness` module.
 - Pulls in `tauri/test` so `MockRuntime` is available.
 

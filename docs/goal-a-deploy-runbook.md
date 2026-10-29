@@ -8,16 +8,25 @@
 > list of pending work. Two sections that described the world before the cutover
 > have been marked obsolete in place rather than deleted, because the reasoning in
 > them still explains why the current shape is what it is.
+>
+> **Since #987 no client holds any database token.** Every step below that mints,
+> stores, injects or rolls back the read-only client token `LOG_DB_TOKEN` is
+> obsolete: clients read the commit log through the DS (`POST /v1/read/…`) like
+> everything else, and no release workflow injects `LOG_DB_TOKEN` any more. Only
+> `LOG_DB_URL` + `LOG_DB_ADMIN_TOKEN` (the DS's read-write pair) remain.
 
 **Scope:** the infra + human steps that took #420 (Goal A — commit-log
-sole-writer) from "code merged" to "live in prod". Design and rationale live in
-[`goal-a-commit-log-sole-writer.md`](./goal-a-commit-log-sole-writer.md); this
-file is only the ordered operational checklist.
+sole-writer) from "code merged" to "live in prod". The resulting schema split is
+documented in [`.codesight/wiki/database.md`](../.codesight/wiki/database.md)
+(the commit-log DB section); this file is only the ordered operational checklist.
+The streams (S1–S7), writes (W1–W8) and decisions (OD-1, OD-2) it names were
+defined in the #420 coordination doc, since removed — see #420.
 
 The end state: three MLS control-plane tables (`mls_commit_log`,
 `mls_group_info`, `mls_welcome`) live in a **separate Turso DB**. The Delivery
-Service (DS) holds a **read-write** token and is the **only** writer; clients
-hold a **read-only** token and read direct / write only via the DS. Because
+Service (DS) holds a **read-write** token and is the **only** writer. At cutover
+clients held a **read-only** token and read direct; since #987 they hold no
+database token at all and read through the DS too. Because
 Turso tokens are database-level (not table-level), a client *physically cannot*
 write the commit log around the DS — epoch/commit slips become structurally
 impossible.
@@ -116,15 +125,15 @@ turso db show pollis-log-prod --url
 # READ-WRITE token → LOG_DB_ADMIN_TOKEN (DS + migrations only; NEVER in a client)
 turso db tokens create pollis-log-prod
 
-# READ-ONLY token → LOG_DB_TOKEN (embedded in client builds)
-turso db tokens create pollis-log-prod --read-only
 ```
+
+(At cutover a second, `--read-only` token was minted as `LOG_DB_TOKEN` for client
+builds. Since #987 no client holds a database token, so don't mint one.)
 
 Repeat with `pollis-log-dev` / `pollis-log-test`.
 
-> The read-only token is the load-bearing security control: it is what makes a
-> client *unable* to write the log DB. Mint it with `--read-only` and never
-> hand a client anything else.
+> Never hand a client either token. Since #987 the load-bearing control is
+> stronger than a read-only token: `pollis-core` has no database client at all.
 
 **Apply the schema to each new DB.** Prod is applied automatically by the
 release workflow's "commit-log DB" step (once the S2 dir move has landed). For
@@ -141,25 +150,24 @@ MIGRATIONS_DIR='pollis-schema/migrations-log' \
 
 ## 2. Doppler — store secrets, sync to GH Actions
 
-Per env config, store all three:
+Per env config, store both:
 
 | Doppler key | Value | Consumed by |
 |---|---|---|
-| `LOG_DB_URL` | log DB URL | client builds + DS + migrations |
-| `LOG_DB_TOKEN` | **read-only** token | client builds only |
+| `LOG_DB_URL` | log DB URL | DS + migrations |
 | `LOG_DB_ADMIN_TOKEN` | **read-write** token | DS + migrations only |
+
+(A third key, `LOG_DB_TOKEN`, held the read-only client token until #987; no
+client build consumes it any more.)
 
 - Put prod values in the `prd_prod` config (it syncs → **GitHub Actions
   secrets**). Put dev values in the dev config, test values in the test config.
-- The `prd_prod` → GH Actions sync gives the release workflow exactly the three
-  secrets it references:
-  - `secrets.LOG_DB_URL`
-  - `secrets.LOG_DB_TOKEN`        (read-only — injected into builds)
-  - `secrets.LOG_DB_ADMIN_TOKEN`  (read-write — migrations apply step only)
-- If you don't use the Doppler→GH sync, add those three as GH Actions repo
-  secrets manually. The workflow already references all three; missing secrets
-  serialize to empty strings, leaving the client/DS on the main-DB fallback
-  (inert, not broken).
+- The `prd_prod` → GH Actions sync gives the release workflow the two secrets it
+  references for the log DB: `secrets.LOG_DB_URL` and `secrets.LOG_DB_ADMIN_TOKEN`
+  (the migrations apply step).
+- If you don't use the Doppler→GH sync, add those as GH Actions repo secrets
+  manually. Missing secrets serialize to empty strings, leaving the DS on the
+  main-DB fallback (inert, not broken).
 
 ---
 
@@ -184,8 +192,8 @@ LOG_DB_URL / LOG_DB_ADMIN_TOKEN      # commit-log DB, READ-WRITE (sole writer)
 The DS uses the **admin (read-write)** token because it is the sole writer. When
 both `LOG_DB_URL` and `LOG_DB_ADMIN_TOKEN` are set it routes MLS control-plane
 writes to the log DB; when unset it falls back to the main DB (see
-`pollis-delivery/src/main.rs`). **Never** give the DS `LOG_DB_TOKEN` (the
-read-only token) — that one is for client builds.
+`pollis-delivery/src/main.rs`). Give the DS the read-write token, never a
+read-only one: it is the writer.
 
 To apply: set the values in Doppler, then run the **Deploy Delivery (prod)** or
 **Deploy Delivery (dev)** workflow. Each deploy also runs `db-apply.sh` against
@@ -198,15 +206,15 @@ succeeded is not proof the new container is serving.
 
 ## 4. Local dev / test env files
 
-- `.env.development` — add `LOG_DB_URL` + a token for the dev log DB. A single
-  read-write token is fine locally (the read-only split only matters in prod).
-- `.env.test` — add `LOG_DB_URL` + a token for the test log DB.
-- Both are optional: with `LOG_DB_*` unset, `pollis-core` falls back to the main
-  remote DB (`for_test()` → `None`), so existing tests keep passing unchanged.
+- `.env.development` — add `LOG_DB_URL` + `LOG_DB_ADMIN_TOKEN` for the dev log DB
+  if you run a local DS against it (they go in the DS's environment, never a
+  client's).
+- Optional: with `LOG_DB_*` unset, the DS keeps the three tables in the main DB,
+  so existing tests keep passing unchanged.
 
 ---
 
-## 5. ORDERING (critical — from §8 of the design doc)
+## 5. ORDERING (historical — the #420 cutover; steps 3–4 are obsolete since #987)
 
 The token flip is the last thing that happens. Do these strictly in order:
 
@@ -242,9 +250,9 @@ If the log DB misbehaves after cutover:
 1. **Remove `LOG_DB_URL` + `LOG_DB_ADMIN_TOKEN` from the DS's Doppler config** and
    redeploy (Deploy Delivery workflow). With `LOG_DB_*` unset the DS falls back to
    writing the **main** DB's copies of the three tables (the fallback path in
-   `pollis-delivery/src/main.rs`) — old shipped clients still read/write those,
-   so the system is back to pre-Goal-A behavior.
-2. **Revert the client release** — ship/point users at the previous build (or a
+   `pollis-delivery/src/main.rs`).
+2. *(Obsolete since #987 — clients no longer read the log DB, so step 1 alone
+   is the rollback.)* **Revert the client release** — ship/point users at the previous build (or a
    new tag) that does not carry `LOG_DB_TOKEN`, so clients read the main DB
    again. Clients with the RO token compiled in fall back to the main remote DB
    when the log DB is unreachable, but pulling the release removes the variable

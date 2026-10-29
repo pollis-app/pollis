@@ -14,14 +14,14 @@ makes me that the flow already works. Status: ✅ covered by an existing script,
 
 | # | Scenario | V | C | Status | Notes |
 |---|----------|---|---|--------|-------|
-| M-CH | Group + text-channel convergence: A creates group+channel, invites B, B accepts, A posts, B receives | 5 | 2 | 🟡 | Core Slack model; entirely untested cross-client. Invite path is MLS-synchronous (reliable). |
-| M-VC | Voice channel: A joins, B joins same channel, both see 2 participants, A leaves, B sees drop | 5 | 2 | 🟡 | Explicitly requested. Needs LiveKit + audio + group membership (MLS voice key). |
+| M-CH | Group + text-channel convergence: A creates group+channel, invites B, B accepts, A posts, B receives | 5 | 2 | ✅ | two-client-channel.js. Core Slack model. Invite path is MLS-synchronous (reliable). |
+| M-VC | Voice channel: A joins, B joins same channel, both see 2 participants, A leaves, B sees drop | 5 | 2 | ✅ | two-client-voice-channel.js. Explicitly requested. Needs LiveKit + audio + group membership (MLS voice key). |
 | M-OFF | Offline convergence: A sends while B's app closed, B relaunches → receives (bounded history) | 5 | 2 | ⬜ | "Messages must work" invariant. |
-| M-DM2 | DM bidirectional: B replies to A, A sees B's message | 4 | 3 | 🟡 | Reverse direction never asserted (existing test is A→B only). |
-| M-INV | Invite link (#847): A mints a link, copies it, B redeems and joins; A revokes, B's retry is refused. Run in BOTH skins | 5 | 2 | 🟡 | invite-links.js. Asserts the clipboard really holds the token (it can never be shown again) and that the failure message does not disclose WHY. |
+| M-DM2 | DM bidirectional: B replies to A, A sees B's message | 4 | 3 | ✅ | two-client-dm-reply.js — asserts the B→A leg two-client.js does not. |
+| M-INV | Invite link (#847): A mints a link, copies it, B redeems and joins; A revokes, B's retry is refused. Run in BOTH skins | 5 | 2 | ✅ | invite-links.js. Asserts the clipboard really holds the token (it can never be shown again) and that the failure message does not disclose WHY. |
 | M-JR | Join-request path: B searches group by slug, requests, A approves, B becomes member | 4 | 2 | ⬜ | Alt to invite; relies on async realtime membership_changed → welcome poll. |
 | M-EDIT | Edit convergence: A edits a message, B sees new text + (edited) | 3 | 2 | ⬜ | |
-| M-DEL | Delete convergence: A deletes, B sees `[deleted]` | 3 | 2 | ⬜ | Content tombstoned, row stays. |
+| M-DEL | Delete convergence: A deletes, B sees `[deleted]` | 3 | 2 | ✅ | two-client-delete.js (delete-for-everyone). Content tombstoned, row stays. |
 | M-ORD | Ordering: A sends 3 messages, B receives all 3 in order | 4 | 3 | ⬜ | |
 | M-PRES | Presence: A sees B come online / go offline | 3 | 2 | ⬜ | LiveKit realtime dependent. |
 | M-CALL | 1:1 call place + accept, both see each other | 5 | 3 | ✅ | two-client-call.js |
@@ -32,13 +32,13 @@ makes me that the flow already works. Status: ✅ covered by an existing script,
 | M-KICK | A kicks B from group, B loses access | 3 | 2 | ⬜ | |
 | M-LEAVE | B leaves group, A sees membership drop | 2 | 2 | ⬜ | |
 | M-CONV | DM request → accept → message (base) | 5 | 4 | ✅ | two-client.js |
-| M-RCPT | Receipts (#857): A sends, B decrypts while elsewhere → A sees **delivered**; B then opens the DM → A sees **read** | 4 | 2 | 🟡 | two-client-receipts.js. Asserts the intermediate `delivered` state *before* B ever looks, and fails fast if `read` appears early — that ordering is what proves the two signals are not conflated. Needs `ReceiptIndicator` wired into the message row (cross-cutting, owned by the #843 agent). |
+| M-RCPT | Receipts (#857): A sends, B decrypts while elsewhere → A sees **delivered**; B then opens the DM → A sees **read** | 4 | 2 | ✅ | two-client-receipts.js. Asserts the intermediate `delivered` state *before* B ever looks, and fails fast if `read` appears early — that ordering is what proves the two signals are not conflated. Needs `ReceiptIndicator` wired into the message row (cross-cutting, owned by the #843 agent). |
 
 ## Single-user scenarios
 
 | # | Scenario | V | C | Status | Notes |
 |---|----------|---|---|--------|-------|
-| S-RESTART | Restart persistence: sign up, kill app, relaunch same data dir → data/session survives | 5 | 2 | 🟡 | "Same device keeps data" invariant. Reveals real cold-start behaviour. |
+| S-RESTART | Restart persistence: sign up, kill app, relaunch same data dir → data/session survives | 5 | 2 | ✅ | restart-persistence.js. "Same device keeps data" invariant. Reveals real cold-start behaviour. |
 | S-RELOGIN | Logout (keep data) → re-login (email+OTP+PIN) → app-ready | 4 | 3 | ⬜ | Confirmed: always re-auth, never PIN-only. |
 | S-EDIT | Send → edit own message (Enter to save) → shows (edited) | 3 | 3 | ⬜ | No submit testid; save via Enter keydown. |
 | S-DEL | Send → delete own message → `[deleted]` | 3 | 3 | ⬜ | |
@@ -55,8 +55,7 @@ makes me that the flow already works. Status: ✅ covered by an existing script,
 
 ## Fixture bugs found while getting the suite green locally
 Two blockers stopped **every** two-client script from passing on a local dev box
-(they only ever passed in CI, where `.env.development` is absent). Both fixed on
-this branch:
+(they only ever passed in CI, where `.env.development` is absent). Both fixed:
 
 1. **Missing commit-log migrations.** `start-backend.sh` runs the DS in single-DB
    fallback (`LOG_DB_*` unset) so the MLS control-plane tables share the one
@@ -77,9 +76,9 @@ this branch:
    ...process.env}` so the fixture wins (CI unaffected — no `.env.development`
    there).
 
-## Not testable as-is
-- **Reactions** (add/remove, convergence): `MessageReactions` is commented out in
-  both skins of `MessageItem.tsx` — the `reaction-*` testids don't exist in the
-  running app. Would need the component re-enabled first.
+## Not yet automated
+- **Reactions convergence** (A reacts, B sees the pill): `MessageReactions` now
+  renders in both skins of `MessageItem.tsx` and single-client picking is covered
+  by S-EMOJI, but no two-client script asserts convergence yet.
 </content>
 </invoke>
