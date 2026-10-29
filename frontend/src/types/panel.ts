@@ -8,7 +8,7 @@
 // UI (scroll offset, drafts).
 
 /** The shape the panel is currently rendering. Derived, never parsed. */
-export type PanelKind = "members" | "thread" | "pins" | "none";
+export type PanelKind = "members" | "thread" | "pins" | "safety" | "none";
 
 export interface PanelSearch {
   /**
@@ -29,6 +29,13 @@ export interface PanelSearch {
    * intent.
    */
   pins?: "1";
+  /**
+   * User id of the peer whose safety number with you is showing: the DM's
+   * "You & <name>" view (#1563). A safety number belongs to a pair, so the
+   * param names the other person, never the conversation. Route-scoped like
+   * `pins`; a thread or pins in the same URL wins.
+   */
+  safety?: string;
   /**
    * ULID of a message to scroll to and flash on arrival (#850).
    *
@@ -72,6 +79,10 @@ export function validatePanelSearch(
   }
   if (search.pins === "1") {
     out.pins = "1";
+  }
+  const safety = search.safety;
+  if (typeof safety === "string" && safety.length > 0) {
+    out.safety = safety;
   }
   const message = search.message;
   if (typeof message === "string" && message.length > 0) {

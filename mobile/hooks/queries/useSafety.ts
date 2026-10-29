@@ -1,5 +1,6 @@
-// Safety-number hooks — used by the other-user profile screen to show
-// the 60-digit-ish fingerprint and a "Verified" toggle. Mirrors the
+// Safety-number hooks — used by the DM's "You & <name>" screen
+// (app/dm/safety.tsx, #1563) to show the 60-digit fingerprint of the pair and
+// a "Verified" toggle. Mirrors the
 // desktop verification pattern: we never display the *own* user's
 // safety number, only peer-vs-self pairs.
 //

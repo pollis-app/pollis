@@ -59,10 +59,17 @@
     "statusChanged": "Changed — re-verify",
     "statusUnverified": "Not verified",
     "keyChangedWarning": "This contact's identity key changed since you last verified it. Compare the number again out-of-band before trusting it.",
-    "compareHint": "Compare these digits with {{name}} over a trusted channel (in person, a call you recognise). If they match, mark this contact verified.",
     "removeVerification": "Remove verification",
     "markVerified": "Mark verified",
     "report": "Report"
+  },
+  "safety": {
+    "title": "You & {{name}}",
+    "verify": "Verify safety number",
+    "headingMany": "Safety numbers",
+    "shared": "You and {{name}} see the same number. Compare it in person or on a call to make sure no one is in between.",
+    "qrLabel": "QR code of the safety number you share with {{name}}",
+    "failed": "Couldn't load the safety number."
   },
   "notify": {
     "requestTitle": "New conversation",

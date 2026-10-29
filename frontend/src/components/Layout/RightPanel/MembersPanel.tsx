@@ -8,6 +8,8 @@ import { useGroupMembers } from "../../../hooks/queries/useGroups";
 import { useMessages, useDMConversations } from "../../../hooks/queries/useMessages";
 import { MemberRow } from "./MemberRow";
 import { MediaGrid } from "./MediaGrid";
+import { useRightPanel } from "./useRightPanel";
+import { ShieldCheck } from "lucide-react";
 import type { MessageAttachment } from "../../../types";
 
 /**
@@ -51,6 +53,8 @@ interface Person {
 export const MembersPanel: React.FC<MembersPanelProps> = observer(
   ({ groupId, channelId, conversationId }) => {
     const { t } = useTranslation("nav");
+    const { t: tDms } = useTranslation("dms");
+    const { setSafety } = useRightPanel();
     const { data: groupMembers = [] } = useGroupMembers(groupId);
     const { messages } = useMessages(channelId, conversationId);
     const isTerminal = useSkin() === "terminal";
@@ -107,16 +111,25 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
         if (!dm) {
           return [];
         }
-        const peer = dm.user2_id
-          ? [
-              {
-                userId: dm.user2_id,
-                label: dm.user2_identifier,
-                avatarKey: dm.user2_avatar_url ?? null,
-                isAdmin: false,
-              },
-            ]
-          : [];
+        // Every other member: a group DM has several (#1563), and
+        // `user2_*` only ever named the first of them.
+        const peer = (dm.peers ?? []).length > 0
+          ? (dm.peers ?? []).map((p) => ({
+              userId: p.user_id,
+              label: p.username || p.user_id,
+              avatarKey: p.avatar_url ?? null,
+              isAdmin: false,
+            }))
+          : dm.user2_id
+            ? [
+                {
+                  userId: dm.user2_id,
+                  label: dm.user2_identifier,
+                  avatarKey: dm.user2_avatar_url ?? null,
+                  isAdmin: false,
+                },
+              ]
+            : [];
         const self = currentUser
           ? [
               {
@@ -156,6 +169,11 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
       // mutated) by the store, so identity is a sound dependency.
       presenceStore.byUser,
     ]);
+
+    // A DM's other members, each with their own safety number (#1563).
+    const dmPeers = conversationId
+      ? people.filter((p) => p.userId !== currentUser?.id)
+      : [];
 
     const attachments = useMemo(() => {
       const seen = new Set<string>();
@@ -218,6 +236,43 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
             ))
           )}
         </section>
+
+        {dmPeers.length > 0 && (
+          <section
+            className={isTerminal ? "flex flex-col" : "flex flex-col gap-1"}
+            data-testid="right-panel-safety"
+          >
+            <SectionHeader
+              label={
+                dmPeers.length === 1
+                  ? tDms("profile.safetyNumber")
+                  : tDms("safety.headingMany")
+              }
+              isTerminal={isTerminal}
+              bordered
+            />
+            {dmPeers.map((p) => (
+              <button
+                key={p.userId}
+                type="button"
+                onClick={() => setSafety(p.userId)}
+                className={
+                  isTerminal
+                    ? "flex w-full items-center gap-1.5 px-2.5 py-0.5 text-start text-base text-fg hover:bg-hover"
+                    : "flex w-full items-center gap-2 rounded px-2 py-1 text-start text-sm text-fg hover:bg-hover"
+                }
+                data-testid={`right-panel-verify-safety-${p.userId}`}
+              >
+                <ShieldCheck size={14} aria-hidden="true" className="shrink-0 text-muted" />
+                <bdi className="min-w-0 flex-1 truncate">
+                  {dmPeers.length === 1
+                    ? tDms("safety.verify")
+                    : tDms("safety.title", { name: `@${p.label}` })}
+                </bdi>
+              </button>
+            ))}
+          </section>
+        )}
 
         {hasContext && (
           <section

@@ -77,13 +77,16 @@ export function useRightPanel() {
 
   const threadId = search.thread ?? null;
   const pinsOpen = search.pins === "1";
+  const safetyPeerId = search.safety ?? null;
   const kind: PanelKind = !isOpen
     ? "none"
     : threadId
       ? "thread"
       : pinsOpen
         ? "pins"
-        : "members";
+        : safetyPeerId
+          ? "safety"
+          : "members";
 
   const setThread = useCallback(
     (thread: string | undefined) => {
@@ -117,6 +120,7 @@ export function useRightPanel() {
           ...prev,
           pins,
           thread: undefined,
+          safety: undefined,
         }),
         replace: true,
       });
@@ -142,13 +146,43 @@ export function useRightPanel() {
     setPins(undefined);
   }, [search.pins, setPins]);
 
+  /** Show the "You & <name>" safety number for one peer (#1563), or `undefined`
+   * to drop back to the roster. Clears any thread or pins, which would
+   * otherwise win the kind derivation. */
+  const setSafety = useCallback(
+    (peerUserId: string | undefined) => {
+      if (peerUserId) {
+        rightPanelStore.setOpen(userId, true);
+      }
+      navigate({
+        to: pathname,
+        search: (prev: Record<string, unknown>) => ({
+          ...prev,
+          safety: peerUserId,
+          thread: undefined,
+          pins: undefined,
+        }),
+        replace: true,
+      });
+    },
+    [navigate, pathname, userId],
+  );
+
+  const clearSafety = useCallback(() => {
+    if (!search.safety) {
+      return;
+    }
+    setSafety(undefined);
+  }, [search.safety, setSafety]);
+
   const setPanel = useCallback(
-    (next: Exclude<PanelKind, "thread" | "pins">) => {
+    (next: Exclude<PanelKind, "thread" | "pins" | "safety">) => {
       rightPanelStore.setOpen(userId, next !== "none");
       clearThread();
       clearPins();
+      clearSafety();
     },
-    [userId, clearThread, clearPins],
+    [userId, clearThread, clearPins, clearSafety],
   );
 
   const openThread = useCallback(
@@ -176,5 +210,15 @@ export function useRightPanel() {
     setPanel(isOpen ? "none" : "members");
   }, [isOpen, setPanel]);
 
-  return { kind, isOpen, threadId, setPanel, openThread, togglePins, toggle };
+  return {
+    kind,
+    isOpen,
+    threadId,
+    safetyPeerId,
+    setPanel,
+    openThread,
+    togglePins,
+    setSafety,
+    toggle,
+  };
 }

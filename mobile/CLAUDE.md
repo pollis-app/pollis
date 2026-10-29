@@ -1003,7 +1003,7 @@ app/
   group/[id].tsx       one group's channel panel (phones: pushed, no tab bar; iPad: redirects to the Groups tab)
   group/*              new, invite, invite-links, members, settings, emoji, requests, discover
   chat/[id].tsx        conversation (Header + list + composer); chat/thread.tsx
-  dm/{new,info,requests}.tsx · conversation/{info,pins}.tsx · user/[id].tsx · report.tsx
+  dm/{new,info,safety,requests}.tsx · conversation/{info,pins}.tsx · user/[id].tsx · report.tsx
   media.tsx            full-screen attachment viewer (#1248, #1492): zoom, swipe pager, swipe-down dismiss, video, audio, save/share
   vault.tsx            the Vault (#1316): chat-with-yourself + media grid, opened from the top of Direct
   self/*               preferences, user-settings, security, link-device, blocked, saved, …
@@ -1047,7 +1047,7 @@ field navigates to `/(tabs)/self?search=1`, which focuses it.
 iPad (regular width, `hooks/useLayoutClass`): Groups and Direct are a
 two-pane (`components/MasterDetail.tsx`) — list left, conversation right, tab
 bar visible. Conversation pages (info, pins, members, group settings/invite/emoji/
-requests, thread, profile — `PANE_PATHS` in `components/pane/paneContext.ts`)
+requests, thread, profile, a DM's "You & <name>" safety number — `PANE_PATHS` in `components/pane/paneContext.ts`)
 push INSIDE the right pane: the tab owns a small entry stack and `DetailPane`
 renders the route's own component. Those screens read params with
 `useRouteParams` and navigate with `useNav` (both fall back to
@@ -1087,7 +1087,8 @@ Current state:
   restore via `get_session`); every tab/group/DM/chat/self screen consumes real
   React Query hooks (no hardcoded mock arrays); message send / receive / ingest /
   reactions / edit / delete; profile, devices, blocking, safety numbers,
-  preferences. Self → Security additionally carries: in-app **account deletion**
+  preferences. Safety numbers live in the DM, not on a profile (#1563): DM info
+  → `dm/safety` ("You & <name>", one per other member in a group DM). Self → Security additionally carries: in-app **account deletion**
   (typed-DELETE full-screen confirm → `delete_account` + best-effort
   `wipe_local_data` → sign-out; App Store 5.1.1(v)); **auto-lock** (#899,
   `lib/autolock.tsx` — RN-layer deadline against the plain `lock` arm, since

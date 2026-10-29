@@ -6,6 +6,8 @@ import { useShortcutLabel } from "../../../keyboard";
 import { useRightPanel } from "./useRightPanel";
 import { MembersPanel } from "./MembersPanel";
 import { PinnedPanel } from "./PinnedPanel";
+import { SafetyNumberPanel } from "./SafetyNumberPanel";
+import { useDMConversations } from "../../../hooks/queries/useMessages";
 import { ThreadPanel } from "./ThreadPanel";
 import { ResizeHandle } from "../ResizeHandle";
 import { usePanelWidth } from "../usePanelWidth";
@@ -27,7 +29,9 @@ import { usePanelWidth } from "../usePanelWidth";
  */
 export const RightPanel: React.FC = observer(() => {
   const { t } = useTranslation("nav");
-  const { kind, isOpen, threadId, setPanel } = useRightPanel();
+  const { kind, isOpen, threadId, safetyPeerId, setPanel, setSafety } =
+    useRightPanel();
+  const { data: dmConversations = [] } = useDMConversations();
   // Live label for the same command AppShell binds — rebinding the shortcut
   // in Preferences relabels this footer with no extra wiring.
   const toggleRightPanelLabel = useShortcutLabel("app.toggleRightPanel");
@@ -56,6 +60,14 @@ export const RightPanel: React.FC = observer(() => {
   const shownThreadId = kind === "thread" && hasContext ? threadId : null;
   const showPins =
     kind === "pins" && hasContext && Boolean(channelId || conversationId);
+  // "You & <name>" (#1563) only means something inside a DM with that person;
+  // a stale `?safety=` anywhere else falls back to the roster.
+  const safetyPeer =
+    kind === "safety" && conversationId && safetyPeerId
+      ? dmConversations
+          .find((c) => c.id === conversationId)
+          ?.peers?.find((p) => p.user_id === safetyPeerId) ?? null
+      : null;
 
   if (!isOpen) {
     return null;
@@ -95,6 +107,12 @@ export const RightPanel: React.FC = observer(() => {
           />
         ) : showPins ? (
           <PinnedPanel channelId={channelId} conversationId={conversationId} />
+        ) : safetyPeer ? (
+          <SafetyNumberPanel
+            peerUserId={safetyPeer.user_id}
+            peerLabel={`@${safetyPeer.username ?? safetyPeer.user_id}`}
+            onBack={() => setSafety(undefined)}
+          />
         ) : (
           <MembersPanel
             groupId={groupId}

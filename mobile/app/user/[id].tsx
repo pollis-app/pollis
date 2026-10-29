@@ -6,10 +6,8 @@ import {
   Screen,
   Header,
   Body,
-  SectionTitle,
   Avatar,
   Card,
-  Chip,
   Button,
   BottomAction,
   Group,
@@ -21,8 +19,6 @@ import { semantic, fonts, space } from "../../theme/tokens";
 import { useQuery } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
 import {
-  useSafetyNumber,
-  useSetContactVerified,
   useCreateDM,
   useBlockedUsers,
   useBlockUser,
@@ -63,8 +59,6 @@ function UserProfile() {
     staleTime: 1000 * 60,
   });
 
-  const safety = useSafetyNumber(isSelf ? null : peerId);
-  const setVerified = useSetContactVerified();
   const createDM = useCreateDM();
 
   const blockedUsers = useBlockedUsers();
@@ -93,16 +87,6 @@ function UserProfile() {
     );
   };
 
-  const onToggleVerified = () => {
-    if (!peerId || !safety.data) {
-      return;
-    }
-    setVerified.mutate({
-      peerUserId: peerId,
-      verified: safety.data.status !== "verified",
-    });
-  };
-
   const onToggleBlock = () => {
     if (!peerId) {
       return;
@@ -114,7 +98,6 @@ function UserProfile() {
     }
   };
 
-  const verification = safety.data?.status;
   const blockPending = block.isPending || unblock.isPending;
 
   return (
@@ -161,98 +144,6 @@ function UserProfile() {
           </Txt>
         ) : (
           <>
-            <View style={{ gap: space.sm }}>
-              <SectionTitle
-                style={{
-                  paddingHorizontal: 0,
-                  paddingTop: space.sm,
-                  paddingBottom: 0,
-                }}
-              >
-                {t("profile.safetyNumber")}
-              </SectionTitle>
-              {safety.isLoading ? (
-                <Txt variant="secondary">
-                  {t("mobile:user.computing")}
-                </Txt>
-              ) : safety.isError ? (
-                <Txt variant="secondary">
-                  {(safety.error as Error).message ||
-                    t("mobile:user.safetyNumberFailed")}
-                </Txt>
-              ) : safety.data ? (
-                <Card
-                  style={{ gap: space.lg }}
-                >
-                  <Text
-                    selectable
-                    testID="text-safety-number"
-                    style={{
-                      fontFamily: fonts.mono400,
-                      fontSize: 14,
-                      lineHeight: 22,
-                      color: semantic.text,
-                      letterSpacing: 0.4,
-                    }}
-                  >
-                    {safety.data.safety_number}
-                  </Text>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      flexWrap: "wrap",
-                      alignItems: "center",
-                      gap: space.sm,
-                    }}
-                  >
-                    <Chip
-                      testID="btn-verify"
-                      selected={verification === "verified"}
-                      variant="outline"
-                      onPress={onToggleVerified}
-                      disabled={setVerified.isPending}
-                      accessibilityLabel={
-                        verification === "verified"
-                          ? t("profile.removeVerification")
-                          : t("profile.markVerified")
-                      }
-                    >
-                      {setVerified.isPending
-                        ? t("mobile:common.working")
-                        : verification === "verified"
-                          ? t("mobile:user.verified")
-                          : t("profile.markVerified")}
-                    </Chip>
-                    {verification === "changed" ? (
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: space.xs,
-                          flex: 1,
-                          minWidth: 160,
-                        }}
-                      >
-                        <Icon.alert size={16} color={semantic.accent} />
-                        <Txt
-                          variant="secondary"
-                          style={{ flex: 1, color: semantic.text }}
-                        >
-                          {t("mobile:user.keyChanged")}
-                        </Txt>
-                      </View>
-                    ) : null}
-                  </View>
-                </Card>
-              ) : null}
-              <Txt
-                variant="meta"
-                style={{ lineHeight: 17 }}
-              >
-                {t("mobile:user.compareHint")}
-              </Txt>
-            </View>
-
             {/* Destructive actions: their own group at the end, told apart by
                 label and icon (danger is the accent — no third hue). */}
             <Group title={t("mobile:user.safetyActionsHeading")}>

@@ -14,6 +14,7 @@ import {
   Txt,
 } from "../../components/ui";
 import { ExportArchive } from "../../components/ExportArchive";
+import { SafetyNumberRows } from "../../components/direct/SafetyNumberRows";
 import { Icon } from "../../components/icons";
 import { semantic, space, layout } from "../../theme/tokens";
 import { useDMChannel, useLeaveDM } from "../../hooks/queries";
@@ -54,6 +55,9 @@ function DMInfo() {
   };
 
   const members = channel.data?.members ?? [];
+  // A safety number belongs to a pair (#1563): one per other member, never
+  // one for "the conversation".
+  const peers = members.filter((m) => m.user_id !== currentUser?.id);
 
   return (
     <Screen testID="screen-dm-info" aboveTabBar={router.inPane}>
@@ -111,6 +115,8 @@ function DMInfo() {
             </Group>
           ) : null}
         </View>
+
+        <SafetyNumberRows peers={peers} />
 
         {/* ExportArchive pads itself (shared with conversation info). */}
         <ExportArchive conversationId={channelId ?? null} />

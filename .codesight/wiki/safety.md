@@ -44,7 +44,8 @@ for `list_peer_verifications`). Both clients type it by hand — desktop in
 `mobile/hooks/queries/useSafety.ts` — so keep both in step with the Rust
 structs. Mobile once drifted (`combined` / `verification`): the profile showed
 a blank number and Mark verified never appeared to take (#1278). The Maestro
-`report` flow now asserts the 12 blocks and the verify toggle.
+`dm-safety` flow asserts the 12 blocks and the verify toggle (it was `report`
+until #1563 moved the number off the profile).
 
 ### TOFU pin store
 
@@ -103,9 +104,24 @@ cleared verified flag is what persists as evidence the swap happened.
 
 ## Verification UX
 
-- Profile page (`/user/$userId`) — safety number display + Verify button.
-  Reachable from DMs (avatar click), from group member lists (row click — wired
-  in `frontend/src/pages/Members.tsx`), and from channel author labels.
+- **In the DM, never on a profile (#1563).** The number belongs to a pair —
+  your key with theirs — so it lives where Signal and WhatsApp keep it: inside
+  the conversation, titled "You & <name>", with the digits, a QR of the digits
+  and the Verify toggle. A group DM offers one per other member, never one for
+  "the conversation". The profile shows none.
+  - Desktop: the DM's right panel lists "Verify safety number" (1:1) or one
+    "You & @name" row per peer (group DM) under the members
+    (`MembersPanel.tsx`); a row sets `?safety=<peerUserId>` and the panel
+    renders `SafetyNumberPanel.tsx` (panel kind `safety`, `useRightPanel`).
+    Test ids `safety-number`, `safety-number-digits`, `safety-status`,
+    `safety-verify-toggle`; Playwright `e2e/safety-number.spec.ts`.
+  - Mobile: the same rows (`components/direct/SafetyNumberRows.tsx`) on DM
+    info (`dm/info`) and on the members screen the chat header opens
+    (`conversation/info`), pushing `dm/safety` (a pane page on iPad,
+    `PANE_PATHS`). Test ids `text-safety-number`, `btn-verify`; Maestro
+    `flows/dm-safety.yaml`.
+  - The QR encodes the 60 digits, not `qr_payload`: two ML-DSA-44 keys in hex
+    are ~5 KB, past what a QR code can hold.
 - Shield-check (verified) / shield-alert (key changed) badges render in the
   same component shape across surfaces:
   - DM sidebar (`Sidebar.tsx`)
@@ -363,7 +379,7 @@ never block a send, the same policy as the key-change banner above.
 `components/Security/AccountKeyAuditLine.tsx` — a single advisory status line
 (no modal, no blocker), warning-toned only on `alarm` (amber, where it appends
 the report's reason). The **peer** audit shows on the user profile page
-(`pages/UserProfile.tsx`, `/user/$userId`) beside the safety number; the
+(`pages/UserProfile.tsx`, `/user/$userId`); the
 **self** audit shows in its own "Account key" section on the security page
 (`pages/SecurityPage.tsx`).
 

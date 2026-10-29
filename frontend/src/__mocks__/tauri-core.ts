@@ -1561,6 +1561,35 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'list_dm_channels':
       return store.dmChannels;
 
+    // Safety number of a pair (#1563): deterministic digits per peer, so a
+    // spec can tell two peers' numbers apart, and a local verified mark.
+    case 'get_safety_number': {
+      const { peerUserId } = args as { peerUserId: string };
+      let seed = 0;
+      for (const ch of peerUserId) {
+        seed = (seed * 31 + ch.charCodeAt(0)) % 100000;
+      }
+      const blocks = Array.from({ length: 12 }, (_, i) =>
+        String((seed * (i + 7) + i * 1013) % 100000).padStart(5, '0'),
+      );
+      return {
+        safety_number: blocks.join(' '),
+        status: verifiedPeers.has(peerUserId) ? 'verified' : 'unverified',
+        peer_identity_version: 1,
+        qr_payload: `pollis-key:v1:mock:${peerUserId}`,
+      };
+    }
+
+    case 'set_contact_verified': {
+      const { peerUserId, verified } = args as { peerUserId: string; verified: boolean };
+      if (verified) {
+        verifiedPeers.add(peerUserId);
+      } else {
+        verifiedPeers.delete(peerUserId);
+      }
+      return null;
+    }
+
     case 'get_preferences':
       return JSON.stringify(store.preferences);
 
@@ -2226,6 +2255,9 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
 }
 
 let stagedAttachmentCount = 0;
+
+/** Peers marked verified via `set_contact_verified`, for `get_safety_number`. */
+const verifiedPeers = new Set<string>();
 
 export function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   if (primaryInvoke) {

@@ -17,6 +17,7 @@ import {
   Group,
 } from "../../components/ui";
 import { ExportArchive } from "../../components/ExportArchive";
+import { SafetyNumberRows } from "../../components/direct/SafetyNumberRows";
 import { fonts, semantic, space, type as ty } from "../../theme/tokens";
 import {
   useDMChannel,
@@ -202,6 +203,14 @@ function ConversationInfo() {
             })}
           </Group>
         )}
+
+        {kind === "dm" ? (
+          <SafetyNumberRows
+            peers={(dmChannel.data?.members ?? []).filter(
+              (m) => m.user_id !== currentUser?.id,
+            )}
+          />
+        ) : null}
 
         <SectionTitle>{t("nav:media.heading")}</SectionTitle>
         {attachments.length === 0 ? (
