@@ -59,6 +59,7 @@ import * as Clipboard from "expo-clipboard";
 import * as ImagePicker from "expo-image-picker";
 import { formatMessagePermalink } from "../../lib/permalinks";
 import type { PickedAttachment } from "../../lib/attachments";
+import { pickedFromAssets } from "../../lib/composerAttachments";
 import { ensurePushRegistration } from "../../lib/push";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
@@ -284,21 +285,15 @@ function TextChat(props: ChatViewProps = {}) {
   // desktop — Rust encrypts + uploads on send).
   const onAttach = useCallback(async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: "images",
+      // Photos and videos, as desktop takes both (#1585).
+      mediaTypes: ["images", "videos"],
       allowsMultipleSelection: true,
       quality: 1,
     });
     if (result.canceled) {
       return;
     }
-    const picked: PickedAttachment[] = result.assets.map((asset, i) => ({
-      id: asset.assetId ?? `${Date.now()}-${i}`,
-      uri: asset.uri,
-      name: asset.fileName ?? `image-${Date.now()}-${i}.jpg`,
-      mimeType: asset.mimeType ?? "image/jpeg",
-      width: asset.width,
-      height: asset.height,
-    }));
+    const picked = pickedFromAssets(result.assets, Date.now());
     setPendingAttachments((prev) => [...prev, ...picked]);
   }, []);
 

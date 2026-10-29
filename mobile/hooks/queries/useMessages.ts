@@ -32,6 +32,7 @@ import {
   outgoingAttachments,
   type PickedAttachment,
 } from "../../lib/attachments";
+import { pickedToMessageAttachment } from "../../lib/composerAttachments";
 import {
   carryStubs,
   mapOutboxRows,
@@ -386,20 +387,9 @@ export function useSendMessage(
         sender_username: currentUser.username,
         content: vars.content,
         // Picked-but-uploading images render from their local URI.
-        attachments: (vars.attachments ?? []).map((att) => ({
-          id: att.id,
-          object_key: "",
-          content_hash: "",
-          sha256: "",
-          key_scope: null,
-          filename: att.name,
-          content_type: att.mimeType,
-          file_size: 0,
-          uploaded_at: Date.now(),
-          width: att.width,
-          height: att.height,
-          localPreviewUri: att.uri,
-        })),
+        attachments: (vars.attachments ?? []).map((att) =>
+          pickedToMessageAttachment(att, Date.now()),
+        ),
         reply_to_id: vars.replyToId ?? null,
         thread_id: vars.threadId ?? null,
         created_at: Date.now(),

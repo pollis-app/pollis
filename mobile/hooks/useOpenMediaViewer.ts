@@ -7,6 +7,8 @@ import { useCallback } from "react";
 import { useRouter } from "expo-router";
 import type { ConversationKind } from "./queries";
 import type { MessageAttachment } from "../types";
+import type { PickedAttachment } from "../lib/attachments";
+import { setDraftForViewer } from "../lib/composerAttachments";
 
 export function useOpenMediaViewer(
   conversationId: string | null,
@@ -30,5 +32,25 @@ export function useOpenMediaViewer(
       });
     },
     [router, conversationId, kind, threadId],
+  );
+}
+
+/**
+ * Opens the same viewer on the composer's pending attachments (#1585), to
+ * look at a picked image or video before sending it. The strip's files are
+ * handed over in memory (`setDraftForViewer`); the page walks them in strip
+ * order and draws each from its local file.
+ */
+export function useOpenDraftMediaViewer() {
+  const router = useRouter();
+  return useCallback(
+    (picked: readonly PickedAttachment[], attachmentId: string) => {
+      setDraftForViewer(picked);
+      router.push({
+        pathname: "/media",
+        params: { source: "draft", attachmentId },
+      });
+    },
+    [router],
   );
 }

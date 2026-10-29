@@ -46,6 +46,7 @@ import {
 } from "../lib/vault";
 import { outgoingText } from "../lib/messageText";
 import type { PickedAttachment } from "../lib/attachments";
+import { pickedFromAssets } from "../lib/composerAttachments";
 import { haptic } from "../lib/haptics";
 import { appStore } from "../stores/appStore";
 import { semantic, type as ty, space } from "../theme/tokens";
@@ -145,21 +146,15 @@ function VaultScreen() {
   // Images from the library — the same picker and upload flow as the chat.
   const onAttach = useCallback(async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: "images",
+      // Photos and videos, as desktop takes both (#1585).
+      mediaTypes: ["images", "videos"],
       allowsMultipleSelection: true,
       quality: 1,
     });
     if (result.canceled) {
       return;
     }
-    const picked: PickedAttachment[] = result.assets.map((asset, i) => ({
-      id: asset.assetId ?? `${Date.now()}-${i}`,
-      uri: asset.uri,
-      name: asset.fileName ?? `image-${Date.now()}-${i}.jpg`,
-      mimeType: asset.mimeType ?? "image/jpeg",
-      width: asset.width,
-      height: asset.height,
-    }));
+    const picked = pickedFromAssets(result.assets, Date.now());
     setPendingAttachments((prev) => [...prev, ...picked]);
   }, []);
 
