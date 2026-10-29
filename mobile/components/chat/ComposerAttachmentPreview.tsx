@@ -10,7 +10,7 @@ import { Pressable, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
-import { AttachmentToolbar } from "./AttachmentToolbar";
+import { AttachmentToolbar, TOOLBAR_GLYPH } from "./AttachmentToolbar";
 import { useVideoPoster } from "../../hooks/useVideoPoster";
 import {
   COMPOSER_PREVIEW_SIZE,
@@ -119,7 +119,7 @@ export function ComposerAttachmentPreview({
             key: "remove",
             testID: removeAttachmentTestID(index),
             accessibilityLabel: tc("composer.removeAttachment", { name: attachment.name }),
-            icon: (color) => <Icon.close size={16} color={color} />,
+            icon: (color) => <Icon.close size={TOOLBAR_GLYPH} color={color} />,
             onPress: () => onRemove(attachment.id),
           },
         ]}

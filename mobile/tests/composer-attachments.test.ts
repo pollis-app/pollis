@@ -160,8 +160,19 @@ test("the toolbar and card have no borders (mobile design rule)", () => {
   }
 });
 
+test("the toolbar is the theme's filled control: raised surface, text glyph, derived tokens only", () => {
+  const src = read("components/chat/AttachmentToolbar.tsx");
+  assert.match(src, /backgroundColor: semantic\.raised,/);
+  assert.match(src, /action\.icon\(on \? semantic\.onAccent : semantic\.text\)/);
+  // No near-black disc or ring, and no hand-picked colour.
+  assert.doesNotMatch(src, /semantic\.bg\b/);
+  assert.doesNotMatch(src, /["'`]#[0-9a-fA-F]{3,8}["'`]|rgba?\(/);
+});
+
 test("toolbar buttons reach 44pt and a toggle reports its state", () => {
   const src = read("components/chat/AttachmentToolbar.tsx");
+  assert.match(src, /const BUTTON = 26;/);
+  assert.match(src, /export const TOOLBAR_GLYPH = 14;/);
   assert.match(src, /const SLOP = \(44 - BUTTON\) \/ 2;/);
   assert.match(src, /hitSlop=\{SLOP\}/);
   assert.match(src, /accessibilityState=\{action\.selected === undefined \? undefined : \{ checked: on \}\}/);

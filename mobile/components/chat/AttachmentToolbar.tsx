@@ -3,11 +3,13 @@
 // buttons, so a new control (#1568's sensitive toggle) is one more entry in
 // `actions`, not a new layout.
 //
-// Each button is a 30pt disc inside the pill; the hit slop takes every
-// target to 44pt. No borders in any state: the pill (the background colour,
-// over the media) is the only surface; a button fills only while pressed, or
-// while `selected` (a toggle that is on: accent fill, background-coloured
-// glyph).
+// Each button is a 26pt disc and the hit slop takes every target to 44pt.
+// It is the theme's own filled control, the composer's attach button in
+// small: the raised surface with a text-coloured glyph, one surface up while
+// pressed, and the accent fill with the background-coloured glyph while
+// `selected` (a toggle that is on). Every colour is a derived token, so it
+// follows the accent and background the user picked. No borders and no ring
+// in any state: the pill hugs its buttons, so a lone button is just a disc.
 
 import type { ReactNode } from "react";
 import { Pressable, View } from "react-native";
@@ -24,9 +26,10 @@ export interface AttachmentToolbarAction {
   selected?: boolean;
 }
 
-const BUTTON = 30;
-const PAD = 3;
-// Brings a 30pt disc to the 44pt target.
+const BUTTON = 26;
+// The glyph size an action should draw at: 16 on a 30pt disc, scaled down.
+export const TOOLBAR_GLYPH = 14;
+// Brings a 26pt disc to the 44pt target.
 const SLOP = (44 - BUTTON) / 2;
 
 export function AttachmentToolbar({
@@ -44,10 +47,9 @@ export function AttachmentToolbar({
         top: 6,
         end: 6,
         flexDirection: "row",
-        gap: 4,
-        padding: PAD,
-        borderRadius: (BUTTON + PAD * 2) / 2,
-        backgroundColor: semantic.bg,
+        gap: 2,
+        borderRadius: BUTTON / 2,
+        backgroundColor: semantic.raised,
       }}
     >
       {actions.map((action) => {
