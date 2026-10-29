@@ -385,6 +385,7 @@ export default function MediaViewerScreen() {
               {feedback === "denied" ? (
                 <Button
                   testID="btn-media-open-settings"
+                  pressIn
                   variant="subtle"
                   onPress={() => {
                     void Linking.openSettings();
@@ -395,10 +396,13 @@ export default function MediaViewerScreen() {
               ) : null}
             </View>
           ) : null}
+          {/* Prev / next only move the pager, free to undo: touch-down
+              (#1529). Save and share stay on release. */}
           <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
             {multiple ? (
               <IconButton
                 testID="btn-media-prev"
+                pressIn
                 filled
                 accessibilityLabel={t("vault:media.previous")}
                 onPress={() => step(-1)}
@@ -442,6 +446,7 @@ export default function MediaViewerScreen() {
             {multiple ? (
               <IconButton
                 testID="btn-media-next"
+                pressIn
                 filled
                 accessibilityLabel={t("vault:media.next")}
                 onPress={() => step(1)}

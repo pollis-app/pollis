@@ -2,6 +2,7 @@ import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 
 import { useTranslation } from "react-i18next";
 import { Smile, type LucideIcon } from "lucide-react";
 import { type Placement, panelHeightPx, resolvePlacement } from "./pickerPlacement";
+import { PressButton } from "../ui/PressButton";
 
 // The picker carries the full standard emoji table (`emojiData.ts`), which is
 // the largest single application module in the bundle, plus the search index
@@ -158,7 +159,7 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
 
   return (
     <div ref={wrapperRef} className={`relative ${className}`}>
-      <button
+      <PressButton
         ref={triggerRef}
         type="button"
         data-testid={testId}
@@ -172,7 +173,7 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
         style={{ color: open ? "var(--c-accent)" : undefined }}
       >
         <Icon size={iconSize} className={iconClassName} />
-      </button>
+      </PressButton>
 
       {open && (
         <div

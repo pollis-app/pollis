@@ -12,6 +12,7 @@ import { warmVoiceChannel } from "../utils/voiceWarmup";
 import { parseMessagePermalink } from "../utils/urlRouting";
 import { useMessagePermalink } from "../hooks/useMessagePermalink";
 import { useGlobalShortcut, useShortcutLabel } from "../keyboard";
+import { usePressActivator } from "../hooks/usePressActivation";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -262,6 +263,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
   const { t } = useTranslation("search");
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const press = usePressActivator();
   // Pasting a message permalink (#854) takes over the panel: there is nothing
   // to fuzzy-match, the answer is either "jump there" or "you don't have it".
   const [permalinkStatus, setPermalinkStatus] = useState<
@@ -661,7 +663,10 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
                   style={{
                     borderInlineStart: `3px solid ${isSelected ? "var(--c-accent)" : "transparent"}`,
                   }}
-                  onClick={() => handleSelect(item)}
+                  // Opening a result is free to undo: pointer-down (#1529). A
+                  // voice channel can auto-join, which others see, so it
+                  // stays on click.
+                  {...press<HTMLDivElement>(() => handleSelect(item), item.type === "voice" ? "click" : "press")}
                   onMouseEnter={() => setSelectedIndex(index)}
                 >
                   {/* Icon */}

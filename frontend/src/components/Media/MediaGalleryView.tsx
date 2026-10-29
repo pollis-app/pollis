@@ -5,6 +5,7 @@ import { getMediaUrl } from "../../services/r2-upload";
 import { AttachmentDisplay } from "../Message/AttachmentDisplay";
 import { useSkin } from "../../hooks/queries/usePreferences";
 import type { MessageAttachment } from "../../types";
+import { PressButton } from "../ui/PressButton";
 
 interface MediaGalleryViewProps {
   /** Every attachment in the surface, newest first — the caller orders. */
@@ -180,7 +181,7 @@ const GalleryTile: React.FC<GalleryTileProps> = ({
   }, [isPending, url, failed, attachment.object_key, attachment.content_hash, attachment.content_type]);
 
   return (
-    <button
+    <PressButton
       type="button"
       onClick={onOpen}
       title={attachment.filename}
@@ -218,7 +219,7 @@ const GalleryTile: React.FC<GalleryTileProps> = ({
           </span>
         </span>
       )}
-    </button>
+    </PressButton>
   );
 };
 

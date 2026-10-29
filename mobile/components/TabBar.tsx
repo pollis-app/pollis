@@ -1,11 +1,11 @@
-import { View, Pressable, Text, Platform } from "react-native";
+import { View, Text, Platform } from "react-native";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { semantic, fonts, layout } from "../theme/tokens";
 import { useTheme } from "./theme";
 import { Icon } from "./icons";
-import { useBottomInset } from "./ui";
+import { useBottomInset, PressInPressable } from "./ui";
 import { appStore } from "../stores/appStore";
 import { useDMChannels, useUserGroupsWithChannels } from "../hooks/queries";
 
@@ -71,8 +71,10 @@ export const TabBar = observer(function TabBar({ state, navigation }: any) {
         const label = tab.label(t);
         const count = badgeByTab[tab.name] ?? 0;
         return (
-          <Pressable
+          // Switching tabs is free to undo, so it acts on touch-down (#1529).
+          <PressInPressable
             key={tab.name}
+            pressIn
             onPress={() => navigation.navigate(tab.name)}
             testID={`tab-${tab.name}`}
             accessibilityRole="tab"
@@ -147,7 +149,7 @@ export const TabBar = observer(function TabBar({ state, navigation }: any) {
             >
               {label}
             </Text>
-          </Pressable>
+          </PressInPressable>
         );
       })}
     </View>

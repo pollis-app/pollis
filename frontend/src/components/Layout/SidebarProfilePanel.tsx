@@ -11,6 +11,7 @@ import { voiceSession } from "../../voice";
 import { SidebarVoiceControls } from "../Voice/SidebarVoiceControls";
 import { toggleScreenShare } from "../../screenshare/screenShareActions";
 import { shareOf } from "../../types/voice-state";
+import { PressButton } from "../ui/PressButton";
 
 /**
  * Discord-style identity panel anchored to the sidebar bottom (refined skin).
@@ -100,7 +101,7 @@ export const SidebarProfilePanel: React.FC = observer(() => {
             <bdi className="truncate text-2xs text-muted">{handle}</bdi>
           )}
         </div>
-        <button
+        <PressButton
           type="button"
           data-testid="sidebar-profile-settings"
           onClick={() => router.navigate({ to: "/settings" })}
@@ -109,7 +110,7 @@ export const SidebarProfilePanel: React.FC = observer(() => {
           className="icon-btn-sm"
         >
           <SettingsIcon size={15} className="size-[0.933rem] shrink-0" />
-        </button>
+        </PressButton>
       </div>
 
       {/* Row 2 — persistent voice status (only while connected) */}
@@ -125,7 +126,7 @@ export const SidebarProfilePanel: React.FC = observer(() => {
           />
           {/* The status text doubles as the way back to the room, mirroring
               Discord's sidebar voice panel and terminal's VoiceBar pill. */}
-          <button
+          <PressButton
             type="button"
             data-testid="sidebar-voice-return"
             onClick={returnToVoice}
@@ -142,7 +143,7 @@ export const SidebarProfilePanel: React.FC = observer(() => {
             <span className="truncate text-2xs text-muted transition-colors group-hover:text-fg group-hover:underline">
               {voiceChannelName}
             </span>
-          </button>
+          </PressButton>
           {/* Mic (four-state) + deafen. Same information and affordances as
               terminal's VoiceBar, drawn in refined's idiom. */}
           <SidebarVoiceControls />

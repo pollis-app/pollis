@@ -1,6 +1,7 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { MessagesSquare } from "lucide-react";
+import { PressButton } from "../ui/PressButton";
 
 interface ThreadReplyCountProps {
   /** Replies this device holds for this message's thread. */
@@ -27,7 +28,7 @@ export const ThreadReplyCount: React.FC<ThreadReplyCountProps> = ({
   }
 
   return (
-    <button
+    <PressButton
       type="button"
       onClick={onOpen}
       data-testid="thread-reply-count"
@@ -35,6 +36,6 @@ export const ThreadReplyCount: React.FC<ThreadReplyCountProps> = ({
     >
       <MessagesSquare size={12} aria-hidden />
       {t("thread.replyCount", { count })}
-    </button>
+    </PressButton>
   );
 };

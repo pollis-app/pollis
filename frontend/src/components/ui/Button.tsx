@@ -1,5 +1,6 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
+import { usePressActivation, type ActivateOn } from "../../hooks/usePressActivation";
 
 const Spinner = () => (
   <span
@@ -36,6 +37,14 @@ interface ButtonProps {
    * through this component (#898).
    */
   "data-copy-state"?: string;
+  /**
+   * `"press"` acts on a plain mouse pointer-down instead of the click (#1529)
+   * — only for a button whose accidental press is free to undo (navigating,
+   * opening a panel, switching a view). Never send, save, confirm, destroy
+   * or toggle with it. The keyboard and assistive tech still activate it on
+   * click, and a mouse press runs it once. Default `"click"`.
+   */
+  activateOn?: ActivateOn;
 }
 
 export const Button: React.FC<ButtonProps> = ({
@@ -54,6 +63,7 @@ export const Button: React.FC<ButtonProps> = ({
   "aria-pressed": ariaPressed,
   "data-testid": testId,
   "data-copy-state": copyState,
+  activateOn,
 }) => {
   const { t } = useTranslation("common");
   // Resolved here rather than as a default parameter value so the fallback
@@ -62,6 +72,11 @@ export const Button: React.FC<ButtonProps> = ({
   const isPrimary = variant === "primary";
   const isDanger = variant === "danger";
   const isGhost = variant === "ghost";
+  const press = usePressActivation<HTMLButtonElement>(
+    isLoading ? undefined : (e) => { onClick?.(e); },
+    activateOn,
+    disabled || isLoading,
+  );
 
   const variantClass = isDanger
     ? "border-2 border-[hsl(0_70%_50%/0.4)] bg-transparent text-[hsl(0_70%_55%)] enabled:hover:bg-[hsl(0_70%_50%/0.1)]"
@@ -74,7 +89,7 @@ export const Button: React.FC<ButtonProps> = ({
   return (
     <button
       type={type}
-      onClick={isLoading ? undefined : (e) => { onClick?.(e); }}
+      {...press}
       disabled={disabled || isLoading}
       onKeyDown={onKeyDown}
       autoFocus={autoFocus}

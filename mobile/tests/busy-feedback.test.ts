@@ -57,6 +57,6 @@ test("the PIN screens show a busy line under the dots once the PIN is in", () =>
 test("a loading Button is disabled and announced busy", () => {
   const ui = read("components/ui.tsx");
   assert.match(ui, /const off = !!disabled \|\| !!loading;/);
-  assert.match(ui, /onPress=\{off \? undefined : onPress\}/);
+  assert.match(ui, /usePressIn\(off \? undefined : onPress, pressIn\)/);
   assert.match(ui, /busy: !!loading/);
 });

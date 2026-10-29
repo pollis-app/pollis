@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { ScrollView, Text, View } from "react-native";
 import { useNav } from "../pane/paneContext";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
-import { Divider, IconButton } from "../ui";
+import { Divider, IconButton, PressInPressable } from "../ui";
 import { Icon } from "../icons";
 import { semantic, type as ty, fonts, r, space, layout } from "../../theme/tokens";
 import {
@@ -134,7 +134,11 @@ function GroupPanelImpl({
           paddingEnd: space.sm,
         }}
       >
-        <Pressable
+        {/* The header above the channel list is fixed: its menu, invite and
+            search only open a sheet or page, so they act on touch-down
+            (#1529). The channel rows scroll and stay on release. */}
+        <PressInPressable
+          pressIn
           testID="btn-group-menu"
           onPress={() => setMenuOpen(true)}
           accessibilityRole="button"
@@ -158,9 +162,10 @@ function GroupPanelImpl({
           {memberCountLabel ? (
             <Text style={[ty.meta, { fontSize: 13 }]}>{memberCountLabel}</Text>
           ) : null}
-        </Pressable>
+        </PressInPressable>
         <IconButton
           testID="row-group-invite"
+          pressIn
           filled
           accessibilityLabel={t("group.panel.invite")}
           icon={<Icon.userPlus size={20} color={semantic.text} />}
@@ -170,7 +175,8 @@ function GroupPanelImpl({
 
       {/* Looks like a field; opens Search. */}
       <View style={{ paddingHorizontal: space.xxl, paddingBottom: space.lg }}>
-        <Pressable
+        <PressInPressable
+          pressIn
           testID="btn-search-group"
           accessibilityRole="button"
           accessibilityLabel={t("group.panel.search", { name: groupName })}
@@ -189,7 +195,7 @@ function GroupPanelImpl({
           <Text numberOfLines={1} style={{ flex: 1, fontFamily: fonts.regular, fontSize: 15, color: semantic.muted }}>
             {t("group.panel.search", { name: groupName })}
           </Text>
-        </Pressable>
+        </PressInPressable>
       </View>
       <Divider />
 

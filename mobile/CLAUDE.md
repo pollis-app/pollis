@@ -1536,6 +1536,37 @@ never the raw vibrator). Fire-and-forget, never throws into the interaction.
   the copy failed).
 - Never add one to plain navigation (opening a screen, back, tabs).
 
+**Press-in (#1529).** Where an accidental press is free to undo — back,
+closing a sheet, switching a tab or view, opening a menu, a sheet, a page or
+the picker — the control acts on **touch-down**: an opt-in `pressIn` prop on
+`IconButton`, `Chip`, `ListRow` and `Button`, `PressInPressable` for a bare
+Pressable, and `usePressIn` underneath (rules pure in `lib/pressIn.ts`,
+pinned by `tests/press-in.test.ts`). `onPress` stays wired as the
+screen-reader path (TalkBack's double tap is a click with no touch-down;
+VoiceOver's is a synthesised touch), and a guard swallows the release of a
+touch that already acted, so the action runs once either way. On by default
+in `Header` (back, and the title when it is a button), `TabBar` and
+`SheetOverlay` (Close and the backdrop); opted in on the chat header's pins /
+info / more, the composer's attach and emoji buttons (never send), the reply
+quote, `GroupPanel`'s header (menu, invite, search), Direct's new message,
+the Vault view chips, the media viewer's prev / next / open-settings, the
+menu rows of `ChannelMenuSheet` / `GroupMenuSheet` (not Leave) /
+`AddGroupSheet`, and `AudioPage`'s play / pause / skip (not the seek bar).
+**On Android nothing inside a `SheetOverlay` acts on touch-down** (Close,
+the backdrop and the sheet's rows fall back to release through
+`InSheetContext` / `pressInSupported`): dismissing the Modal while its
+touch is still down left that touch unfinished in JS, and the next tap on
+the screen underneath was swallowed (the tour's first Back after
+`btn-menu-info` did nothing). iOS ends the touch, so sheets keep touch-down
+there.
+Rules: **never on a row inside a `ScrollView` / `FlatList` / `Body`** —
+touch-down lands before the scroll takes the touch, so the row would open on
+every scroll that starts on it (those rows keep `onPress`; a
+`unstable_pressDelay` variant is a possible follow-up, untested); never with
+`onLongPress` (the `ListRow` types refuse the pair and it falls back to
+release at runtime); never on anything that sends, persists, notifies
+others, confirms or toggles; no haptic (it is navigation).
+
 UI rules: two base colours — use `semantic.*` / `type.*`, never a hex or
 rgba in `app/` or `components/` (QrCode's black/white is the one deliberate
 exception, for scannability); icons/text on an accent fill use

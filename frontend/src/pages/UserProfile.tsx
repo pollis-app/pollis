@@ -70,6 +70,7 @@ export const UserProfilePage: React.FC = observer(() => {
           action: () => navigate({ to: "/dms" }),
           type: "system",
           testId: "user-profile-back",
+          activateOn: "press",
         },
       ]
     : [
@@ -106,6 +107,7 @@ export const UserProfilePage: React.FC = observer(() => {
           action: () => navigate({ to: "/dms" }),
           type: "system",
           testId: "user-profile-back",
+          activateOn: "press",
         },
       ];
 

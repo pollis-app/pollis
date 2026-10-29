@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { horizontalArrowStep, isHorizontalArrow } from "../../utils/direction";
 import { EmptyState } from "./EmptyState";
+import { usePressActivator, type ActivateOn } from "../../hooks/usePressActivation";
 
 // Reusable keyboard-navigable list.
 //
@@ -46,6 +47,10 @@ export interface NavigableListProps<T> {
   // still triggers that control natively; this only fires when the
   // click lands on the row's main content.
   onClickRow?: (item: T) => void;
+  // `"press"`: `onClickRow` runs on a plain mouse pointer-down (#1529) — only
+  // when it navigates (free to undo). Enter and assistive tech still act on
+  // their own path; a mouse press runs it once.
+  activateRowOn?: ActivateOn;
 
   isLoading?: boolean;
   loadingLabel?: string;
@@ -78,6 +83,7 @@ export function NavigableList<T>({
   trailing,
   onEnterRow,
   onClickRow,
+  activateRowOn,
   isLoading = false,
   loadingLabel,
   emptyLabel,
@@ -92,6 +98,7 @@ export function NavigableList<T>({
   const resolvedLoadingLabel = loadingLabel ?? t("states.loading");
   const resolvedEmptyLabel = emptyLabel ?? t("list.empty");
   const [nav, setNav] = useState<NavState>({ rowIndex: 0, colIndex: 0 });
+  const press = usePressActivator();
   const containerRef = useRef<HTMLDivElement>(null);
   const [hasFocusWithin, setHasFocusWithin] = useState(false);
   const showCursor = !cursorOnlyWhenFocused || hasFocusWithin;
@@ -282,7 +289,7 @@ export function NavigableList<T>({
             <div
               className="flex-1 min-w-0 flex items-center gap-3"
               style={{ cursor: onClickRow ? "pointer" : undefined }}
-              onClick={onClickRow ? () => onClickRow(item) : undefined}
+              {...press<HTMLDivElement>(onClickRow ? () => onClickRow(item) : undefined, activateRowOn)}
             >
               {renderRow(item)}
             </div>

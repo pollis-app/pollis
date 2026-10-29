@@ -53,6 +53,7 @@ export const GroupPage: React.FC = observer(() => {
           { id: "__not-found__", label: t("group.notFound"), disabled: true },
           {
             id: "__back__",
+            activateOn: "press" as const,
             label: t("common:actions.goBack"),
             icon: <ArrowLeft size={14} className="rtl-mirror" />,
             action: () => navigate({ to: "/groups" }),
@@ -80,6 +81,9 @@ export const GroupPage: React.FC = observer(() => {
     },
     badge: unreadCounts[ch.id] ?? 0,
     testId: `channel-option-${ch.id}`,
+    // Opening a text channel is free to undo: pointer-down (#1529). Voice
+    // rows below can auto-join, which others see, so they stay on click.
+    activateOn: "press" as const,
     // A muted channel (#1431) is drawn in the dimmed tier, with a bell-off
     // mark so the state is not carried by colour alone.
     ...(mutedChannels?.has(ch.id)
@@ -133,6 +137,7 @@ export const GroupPage: React.FC = observer(() => {
       action: () => navigate({ to: "/groups/$groupId/members", params: { groupId } }),
       type: "system" as const,
       testId: "menu-item-members",
+      activateOn: "press" as const,
     },
     // Any MEMBER can add a custom emoji (#848) — the cost is bounded per
     // person rather than gatekept — so this sits outside the admin block.
@@ -143,6 +148,7 @@ export const GroupPage: React.FC = observer(() => {
       action: () => navigate({ to: "/groups/$groupId/emoji", params: { groupId } }),
       type: "system" as const,
       testId: "menu-item-group-emoji",
+      activateOn: "press" as const,
     },
     ...(isAdmin ? [
       {
@@ -152,6 +158,7 @@ export const GroupPage: React.FC = observer(() => {
         action: () => navigate({ to: "/groups/$groupId/rename", params: { groupId } }),
         type: "system" as const,
         testId: "menu-item-rename-group",
+        activateOn: "press" as const,
       },
       {
         id: "create-channel",
@@ -163,6 +170,7 @@ export const GroupPage: React.FC = observer(() => {
         },
         type: "system" as const,
         testId: "menu-item-create-channel",
+        activateOn: "press" as const,
       },
       {
         id: "invite-member",
@@ -171,6 +179,7 @@ export const GroupPage: React.FC = observer(() => {
         action: () => navigate({ to: "/groups/$groupId/invite", params: { groupId } }),
         type: "system" as const,
         testId: "menu-item-invite-member",
+        activateOn: "press" as const,
       },
       {
         id: "join-requests",
@@ -180,6 +189,7 @@ export const GroupPage: React.FC = observer(() => {
         badge: joinRequests.length > 0 ? joinRequests.length : undefined,
         type: "system" as const,
         testId: "menu-item-join-requests",
+        activateOn: "press" as const,
       },
     ] : []),
     {
@@ -192,6 +202,7 @@ export const GroupPage: React.FC = observer(() => {
     },
     {
       id: "__back__",
+      activateOn: "press" as const,
       label: t("common:actions.goBack"),
       icon: <ArrowLeft size={14} className="rtl-mirror" />,
       action: () => navigate({ to: "/groups" }),

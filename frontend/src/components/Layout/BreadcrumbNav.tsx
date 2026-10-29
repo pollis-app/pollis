@@ -10,6 +10,7 @@ import {
 import { observer } from "mobx-react-lite";
 import { useShortcutLabel } from "../../keyboard";
 import { Button } from "../ui/Button";
+import { usePressActivator } from "../../hooks/usePressActivation";
 import { appStore } from "../../stores/appStore";
 import { historyNavStore } from "../../stores/historyNavStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
@@ -174,6 +175,7 @@ const HistoryNav: React.FC<HistoryNavProps> = observer(({ iconSize }) => {
         variant="ghost"
         size="xs"
         data-testid="breadcrumb-back-button"
+        activateOn="press"
         onClick={historyNavStore.goBack}
         disabled={!historyNavStore.canGoBack}
         aria-label={t("common:actions.back")}
@@ -184,6 +186,7 @@ const HistoryNav: React.FC<HistoryNavProps> = observer(({ iconSize }) => {
         variant="ghost"
         size="xs"
         data-testid="breadcrumb-forward-button"
+        activateOn="press"
         onClick={historyNavStore.goForward}
         disabled={!historyNavStore.canGoForward}
         aria-label={t("common:actions.forward")}
@@ -212,6 +215,10 @@ export const BreadcrumbNav: React.FC = observer(() => {
   const openSearch = () => {
     window.dispatchEvent(new CustomEvent("pollis:open-search"));
   };
+  // Every control in the bar navigates or opens search, all free to undo, so
+  // a mouse press acts on pointer-down (#1529).
+  const press = usePressActivator();
+  const goSettings = () => router.navigate({ to: "/settings" });
 
   const isOnSettingsHub = pathname === "/settings";
 
@@ -239,7 +246,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
                   <bdi className="truncate font-semibold text-accent">{seg.label}</bdi>
                 ) : (
                   <button
-                    onClick={() => router.navigate({ to: seg.to })}
+                    {...press(() => router.navigate({ to: seg.to }), "press")}
                     className="truncate text-dim transition-colors hover:text-accent"
                   >
                     {seg.label}
@@ -252,7 +259,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
         <div className="flex items-center gap-3">
           <button
             data-testid="breadcrumb-search-button"
-            onClick={openSearch}
+            {...press(openSearch, "press")}
             aria-label={t("breadcrumb.searchButton", { shortcut: searchLabel })}
             title={t("breadcrumb.searchButton", { shortcut: searchLabel })}
             className="flex items-center gap-1.5 text-dim transition-colors hover:text-accent"
@@ -267,7 +274,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
           </button>
           <button
             data-testid="breadcrumb-settings-button"
-            onClick={() => router.navigate({ to: "/settings" })}
+            {...press(goSettings, "press")}
             aria-label={t("breadcrumb.settings")}
             className={`flex items-center justify-center rounded-control p-1 hover:bg-hover hover:text-accent ${isOnSettingsHub ? "text-accent" : "text-dim"}`}
           >
@@ -305,7 +312,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
               <bdi className="text-fg">{seg.label}</bdi>
             ) : (
               <button
-                onClick={() => router.navigate({ to: seg.to })}
+                {...press(() => router.navigate({ to: seg.to }), "press")}
                 className="font-mono transition-colors text-inherit hover:text-accent border-0"
                 style={{
                   background: "none",
@@ -322,7 +329,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
       </span>
       <button
         data-testid="breadcrumb-search-button"
-        onClick={openSearch}
+        {...press(openSearch, "press")}
         aria-label={t("breadcrumb.searchButton", { shortcut: searchLabel })}
         title={t("breadcrumb.searchButton", { shortcut: searchLabel })}
         className="flex items-center gap-1.5 transition-colors text-fg hover:text-accent border-0"
@@ -349,7 +356,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
       </button>
       <button
         data-testid="breadcrumb-settings-button"
-        onClick={() => router.navigate({ to: "/settings" })}
+        {...press(goSettings, "press")}
         aria-label={t("breadcrumb.settings")}
         className={`flex items-center justify-center bg-transparent hover:bg-hover hover:text-accent border-0 ${isOnSettingsHub ? "text-accent" : "text-fg"}`}
         style={{

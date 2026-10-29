@@ -717,10 +717,13 @@ function TextChat(props: ChatViewProps = {}) {
             <Icon.hash size={15} color={semantic.dim} />
           ) : undefined
         }
+        // Each action only opens a page or sheet, so it acts on touch-down
+        // (#1529).
         actions={
           <>
             <IconButton
               testID="btn-pins"
+              pressIn
               accessibilityLabel={
                 kind === "dm"
                   ? t("dms:conversation.pinsLabel")
@@ -739,6 +742,7 @@ function TextChat(props: ChatViewProps = {}) {
             />
             <IconButton
               testID="btn-members"
+              pressIn
               accessibilityLabel={t("nav:panel.ariaLabel")}
               icon={<Icon.users size={22} color={semantic.text} />}
               onPress={
@@ -758,6 +762,7 @@ function TextChat(props: ChatViewProps = {}) {
             />
             <IconButton
               testID="btn-chat-menu"
+              pressIn
               accessibilityLabel={t("common:actions.moreOptions")}
               icon={<Icon.more size={22} color={semantic.text} />}
               onPress={() => {

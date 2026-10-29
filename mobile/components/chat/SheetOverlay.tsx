@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Modal,
-  Pressable,
   Text,
   View,
   AccessibilityInfo,
@@ -22,7 +21,7 @@ import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { semantic, type as ty, r, space, layout } from "../../theme/tokens";
 import { useTheme } from "../theme";
 import { Icon } from "../icons";
-import { useBottomInset } from "../ui";
+import { useBottomInset, PressInPressable, InSheetContext } from "../ui";
 import { useIsRegular } from "../../hooks/useLayoutClass";
 
 // Entry timing (#1193): in line with the ~200 ms stack transitions — fast
@@ -189,95 +188,102 @@ export function SheetOverlay({
       onRequestClose={onClose}
       onShow={onShow}
     >
-      <View style={{ flex: 1 }}>
-        <Animated.View
-          style={[
-            {
-              position: "absolute",
-              top: 0,
-              bottom: 0,
-              start: 0,
-              end: 0,
-              backgroundColor: semantic.backdrop,
-            },
-            backdropStyle,
-            settled ? SETTLED_BACKDROP : null,
-          ]}
-        >
-          {/* The backdrop is a plain tap target, hidden from screen readers:
-              the Close button is the accessible way out. */}
-          <Pressable
-            onPress={onClose}
-            accessible={false}
-            importantForAccessibility="no"
-            style={{ flex: 1 }}
-          />
-        </Animated.View>
-        {/* A sheet with a field (emoji search) must ride above the keyboard,
-            on both platforms, the same way <Screen> does (#1246).
-            keyboard-controller follows the keyboard inside a Modal's own
-            window on Android too. Taps outside the card fall through to the
-            backdrop. */}
-        <KeyboardAvoidingView
-          pointerEvents="box-none"
-          behavior="padding"
-          automaticOffset
-          style={{ flex: 1, justifyContent: "flex-end" }}
-        >
+      {/* Android keeps every control in here on release: see
+          pressInSupported in lib/pressIn.ts. */}
+      <InSheetContext.Provider value={true}>
+        <View style={{ flex: 1 }}>
           <Animated.View
-            testID={testID}
-            accessibilityViewIsModal
             style={[
               {
-                // Opaque: the sheet floats over the header and composer, and a
-                // translucent card let them show through its buttons (#1193).
-                backgroundColor: semantic.sheetBg,
-                width: "100%",
-                maxWidth: regular ? layout.sheetMaxWidth : undefined,
-                alignSelf: "center",
-                borderTopStartRadius: r.sheet,
-                borderTopEndRadius: r.sheet,
-                borderTopWidth: 1,
-                borderTopColor: semantic.hair,
-                paddingHorizontal: space.xxl,
-                paddingTop: space.xl,
-                paddingBottom: bottomInset + space.lg,
-                gap: space.lg,
+                position: "absolute",
+                top: 0,
+                bottom: 0,
+                start: 0,
+                end: 0,
+                backgroundColor: semantic.backdrop,
               },
-              cardStyle,
-              settled ? SETTLED_CARD : null,
+              backdropStyle,
+              settled ? SETTLED_BACKDROP : null,
             ]}
           >
-            <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
-              <Text
-                accessibilityRole="header"
-                numberOfLines={2}
-                style={[ty.heading, { flex: 1, color: semantic.text }]}
-              >
-                {title ?? ""}
-              </Text>
-              <Pressable
-                onPress={onClose}
-                testID={closeTestID}
-                accessibilityRole="button"
-                accessibilityLabel={t("actions.close")}
-                hitSlop={4}
-                style={{
-                  width: 44,
-                  height: 44,
-                  borderRadius: 22,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  backgroundColor: semantic.high,
-                }}
-              >
-                <Icon.close size={20} color={semantic.text} />
-              </Pressable>
-            </View>
-            {children}
+            {/* The backdrop is a plain tap target, hidden from screen readers:
+                the Close button is the accessible way out. Closing is free to
+                undo, so both act on touch-down on iOS (#1529). */}
+            <PressInPressable
+              pressIn
+              onPress={onClose}
+              accessible={false}
+              importantForAccessibility="no"
+              style={{ flex: 1 }}
+            />
           </Animated.View>
-        </KeyboardAvoidingView>
-      </View>
+          {/* A sheet with a field (emoji search) must ride above the keyboard,
+              on both platforms, the same way <Screen> does (#1246).
+              keyboard-controller follows the keyboard inside a Modal's own
+              window on Android too. Taps outside the card fall through to the
+              backdrop. */}
+          <KeyboardAvoidingView
+            pointerEvents="box-none"
+            behavior="padding"
+            automaticOffset
+            style={{ flex: 1, justifyContent: "flex-end" }}
+          >
+            <Animated.View
+              testID={testID}
+              accessibilityViewIsModal
+              style={[
+                {
+                  // Opaque: the sheet floats over the header and composer, and a
+                  // translucent card let them show through its buttons (#1193).
+                  backgroundColor: semantic.sheetBg,
+                  width: "100%",
+                  maxWidth: regular ? layout.sheetMaxWidth : undefined,
+                  alignSelf: "center",
+                  borderTopStartRadius: r.sheet,
+                  borderTopEndRadius: r.sheet,
+                  borderTopWidth: 1,
+                  borderTopColor: semantic.hair,
+                  paddingHorizontal: space.xxl,
+                  paddingTop: space.xl,
+                  paddingBottom: bottomInset + space.lg,
+                  gap: space.lg,
+                },
+                cardStyle,
+                settled ? SETTLED_CARD : null,
+              ]}
+            >
+              <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+                <Text
+                  accessibilityRole="header"
+                  numberOfLines={2}
+                  style={[ty.heading, { flex: 1, color: semantic.text }]}
+                >
+                  {title ?? ""}
+                </Text>
+                <PressInPressable
+                  pressIn
+                  onPress={onClose}
+                  testID={closeTestID}
+                  accessibilityRole="button"
+                  accessibilityLabel={t("actions.close")}
+                  hitSlop={4}
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 22,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    backgroundColor: semantic.high,
+                  }}
+                >
+                  <Icon.close size={20} color={semantic.text} />
+                </PressInPressable>
+              </View>
+              {children}
+            </Animated.View>
+          </KeyboardAvoidingView>
+        </View>
+      </InSheetContext.Provider>
     </Modal>
   );
 }

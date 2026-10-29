@@ -17,6 +17,7 @@ import { UnsentMessageActions } from "./UnsentMessageActions";
 import { probeRender } from "../../utils/renderProbe";
 import type { MessageRenderContext } from "./messageRenderContext";
 import type { Message, MessageReceipts } from "../../types";
+import { PressButton } from "../ui/PressButton";
 
 interface MessageItemProps {
   message: Message;
@@ -231,7 +232,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           {/* Reply reference above the body */}
           {message.reply_to_message_id && (
             replyTo ? (
-              <button
+              <PressButton
                 data-testid={`reply-preview-${message.reply_to_message_id}`}
                 onClick={() => onScrollToReply?.(message.reply_to_message_id!)}
                 className="flex items-center gap-1 text-xs mb-0.5 opacity-70 hover:opacity-100 transition-opacity min-w-0 text-muted"
@@ -248,7 +249,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
                 <span className="truncate max-w-xs" dir="auto">
                   {replyTo.content_decrypted?.slice(0, 80) || t("message.encrypted")}
                 </span>
-              </button>
+              </PressButton>
             ) : (
               <div
                 data-testid={`reply-preview-${message.reply_to_message_id}`}
@@ -369,7 +370,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
       {/* Reply thread indicator */}
       {message.reply_to_message_id && (
         replyTo ? (
-          <button
+          <PressButton
             data-testid={`reply-preview-${message.reply_to_message_id}`}
             onClick={() => onScrollToReply?.(message.reply_to_message_id!)}
             className="flex items-center gap-1 text-xs font-mono mb-1.5 ps-14 opacity-60 hover:opacity-90 transition-opacity text-muted"
@@ -386,7 +387,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             <span className="truncate max-w-xs" dir="auto">
               {replyTo.content_decrypted?.slice(0, 80) || t("message.encrypted")}
             </span>
-          </button>
+          </PressButton>
         ) : (
           <div
             data-testid={`reply-preview-${message.reply_to_message_id}`}

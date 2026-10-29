@@ -9,6 +9,7 @@ import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useMarkConversationRead } from "../hooks/queries/useUnread";
 import { ExportArchiveButton } from "../components/Security/ExportArchiveButton";
+import { PressButton } from "../components/ui/PressButton";
 
 export const ChannelPage: React.FC = observer(() => {
   const { t } = useTranslation("channels");
@@ -84,7 +85,7 @@ export const ChannelPage: React.FC = observer(() => {
         >
           {isMuted ? <BellOff size={14} aria-hidden="true" /> : <Bell size={14} aria-hidden="true" />}
         </button>
-        <button
+        <PressButton
           data-testid="channel-pins-trigger"
           onClick={togglePins}
           aria-label={t("channel.pinsLabel")}
@@ -92,17 +93,17 @@ export const ChannelPage: React.FC = observer(() => {
           className="icon-btn-sm flex-shrink-0 padding-0 me-2"
         >
           <Pin size={14} aria-hidden="true" />
-        </button>
+        </PressButton>
         {isAdmin && channel && pendingDeleteChannelId !== channelId && (
           <div className="flex items-center gap-2">
-            <button
+            <PressButton
               data-testid="rename-channel-trigger"
               onClick={() => navigate({ to: "/groups/$groupId/channels/$channelId/rename", params: { groupId, channelId } })}
               aria-label={t("channel.renameLabel")}
               className="icon-btn-sm flex-shrink-0 padding-0"
             >
               <Pencil size={14} aria-hidden="true" />
-            </button>
+            </PressButton>
             <button
               data-testid="delete-channel-trigger"
               onClick={() => setPendingDeleteChannelId(channelId)}

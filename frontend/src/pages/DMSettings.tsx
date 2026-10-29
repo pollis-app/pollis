@@ -52,6 +52,7 @@ export const DMSettingsPage: React.FC = observer(() => {
         </Button>
         <Button
           data-testid="dm-settings-cancel-button"
+          activateOn="press"
           variant="secondary"
           onClick={() => navigate({ to: "/dms/$conversationId", params: { conversationId } })}
           className="w-full max-w-[280px]"
