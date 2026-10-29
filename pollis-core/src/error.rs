@@ -33,8 +33,8 @@ pub enum Error {
     ClientOutdated,
 
     /// The DS refused this device because it was revoked from another device
-    /// on the account (#1338). Hosts end the session on it; every later signed
-    /// call fails with it too, without reaching the network.
+    /// on the account (#1338); later signed calls fail with it without reaching
+    /// the network.
     #[error("device_revoked")]
     DeviceRevoked,
 
@@ -42,17 +42,12 @@ pub enum Error {
     Other(#[from] anyhow::Error),
 }
 
-// A failed device-cert build/verify is a crypto error in pollis-core's taxonomy.
-// This `From` is what lets `sign_device_cert` keep calling the shared
-// `device_cert_signed_payload` with a bare `?` after the primitive moved to the
-// `pollis-device-cert` crate.
 impl From<pollis_device_cert::DeviceCertError> for Error {
     fn from(e: pollis_device_cert::DeviceCertError) -> Self {
         Error::Crypto(e.to_string())
     }
 }
 
-// Tauri requires commands return serializable errors
 impl Serialize for Error {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where

@@ -10,29 +10,21 @@ use tokio::task::JoinHandle;
 use crate::sink::EventSink;
 
 /// Events pushed from the Rust backend to the frontend via an EventSink.
-/// New variants can be added here as the app grows (e.g. AudioLevel for visualizers).
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RealtimeEvent {
-    /// A new message wake-up (§5 signalling minimization): routing only, no
-    /// sender. The recipient re-derives the sender from the MLS credential in
-    /// the decrypted envelope it fetches on ingest.
+    /// A new-message wake-up: routing only, no sender; the recipient derives
+    /// the sender from the MLS credential of the envelope it fetches.
     NewMessage {
         channel_id: Option<String>,
         conversation_id: Option<String>,
     },
-    /// Sent to a user's personal inbox room when a DM channel is created
-    /// and they are a member, so they can fetch it without refreshing.
+    /// Sent to a user's inbox room when a DM channel they belong to is created.
     ///
-    /// `sender_username` is the creator's public username, carried so the
-    /// recipient's status-bar alert can name the requester (a DM request is a
-    /// pre-MLS-join event — there's no credential to re-derive the name from,
-    /// unlike `NewMessage`). Public directory metadata, already returned by the
-    /// DM-request query. Optional: null if the creator's user row is missing.
-    ///
-    /// `sender_id` is the verified actor (the DS stamps it). It is the
-    /// recipient's OWN id when one of their other devices created or accepted
-    /// the DM (#1410) — a refetch, never a request alert.
+    /// `sender_username` names the requester for the alert (a DM request is
+    /// pre-MLS-join, so there is no credential to derive it from). `sender_id`
+    /// is the DS-stamped actor; when it is the recipient's own id, another of
+    /// their devices made the DM (#1410) and it is a refetch, not an alert.
     DmCreated {
         conversation_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -40,23 +32,16 @@ pub enum RealtimeEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sender_username: Option<String>,
     },
-    /// Sent to a user's personal inbox room when they are added to a group
-    /// (via invite acceptance or join-request approval), or to a group room
-    /// when its membership changes for any other reason.
+    /// Sent to a user's inbox room when they are added to a group, or to a
+    /// group room when its membership changes.
     ///
-    /// `kind` discriminates the cause so the frontend can decide whether to
-    /// raise a user-facing notification:
-    /// - `Some("invite")`     — you've been invited to a group (ping/notify)
-    /// - `Some("approval")`   — your join request was approved (silent — you asked for this)
-    /// - `None` / other       — generic reconcile (silent — refetch only)
+    /// `kind`: `Some("invite")` notifies; `Some("approval")` and anything else
+    /// are silent refetches.
     MembershipChanged {
         conversation_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         kind: Option<String>,
-        /// Inviter's public username and the group's name, carried on the
-        /// `invite` kind so the invitee's status-bar alert can name who invited
-        /// them and to where. Public directory metadata, already returned by
-        /// `get_pending_invites`. Absent on non-invite membership changes.
+        /// Inviter's username and the group name, on the `invite` kind only.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         inviter_username: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -77,84 +62,57 @@ pub enum RealtimeEvent {
     MemberRoleChanged {
         group_id: String,
     },
-    /// Sent to a group room when a new join request is created, so connected
-    /// admins refetch the pending join-request list (badge + bottom bar)
-    /// without a manual refresh. Distinct from `MembershipChanged` because the
-    /// frontend should invalidate the join-requests query, not the member list.
+    /// Sent to a group room when a join request is created, so admins refetch
+    /// the join-request list (not the member list).
     JoinRequestsChanged {
         group_id: String,
     },
-    /// Sent to a group room (or DM room) when a message is edited, so recipients
-    /// can invalidate their message cache without polling.
+    /// Sent to a group or DM room when a message is edited.
     EditedMessage {
         channel_id: Option<String>,
         conversation_id: Option<String>,
         message_id: String,
     },
-    /// Sent to a group room when an admin deletes another member's message,
-    /// so connected clients soft-delete it from their cache immediately.
-    /// Durable propagation still flows through the `type='delete'` envelope —
-    /// this event is just an immediate nudge for online recipients.
+    /// Sent to a group room when an admin deletes another member's message.
+    /// An immediate nudge only; the `type='delete'` envelope is the durable path.
     DeletedMessage {
         channel_id: Option<String>,
         conversation_id: Option<String>,
         message_id: String,
     },
-    /// Sent to a user's personal inbox room when one of their OTHER devices
-    /// has just posted a `device_enrollment_request` row and is waiting for
-    /// approval. Interrupts the UI on every receiving device so the user can
-    /// confirm or reject.
+    /// Sent to a user's inbox room when another of their devices awaits
+    /// enrollment approval.
     ///
-    /// Carries **no verification code** (#1096). The DS's packet still has one —
-    /// shipped clients read it — but a receiver that took it would be back to
-    /// pre-filling the approval UI with a server-supplied value, which is the
-    /// whole defect: the approver must type what the NEW device shows, and
-    /// `approve_device_enrollment` checks that against the code it derives from
-    /// the ephemeral key it fetched itself.
-    ///
-    /// `link_id` is set when the request belongs to a QR device link (#1207 v1,
-    /// #1361 v2). Such a request is approved by the device holding that link —
-    /// on the link tag (v1) or the scanned key (v2), never a typed code — and
-    /// the new device shows no code to type, so the UI must not raise the
-    /// typed-code takeover for it. The flag can only WITHHOLD a prompt (which a
-    /// DS can always do by not sending the nudge); it approves nothing:
-    /// `approve_device_enrollment` still demands the typed code, and
-    /// `approve_device_link` wraps only after verifying the tag or key.
+    /// Carries no verification code (#1096): the approver must type what the
+    /// new device shows. `link_id` marks a QR device link (#1207, #1361), which
+    /// shows no code, so the UI must not raise the typed-code prompt; it can
+    /// only withhold a prompt, never approve anything.
     EnrollmentRequested {
         request_id: String,
         new_device_id: String,
         link_id: Option<String>,
     },
-    /// This account's channel mutes changed on one of its devices (#1431) —
-    /// re-read them. DS-originated only, carries nothing but the type: the
-    /// mutes themselves are read back over the signed channel.
+    /// This account's channel mutes changed on one of its devices (#1431);
+    /// re-read them over the signed channel.
     ChannelMutesChanged,
-    /// Sent after a room's event stream recovers from a drop. The frontend
-    /// uses this to resync state that may have changed during the outage
-    /// (voice presence, etc.) since the event stream itself doesn't replay
-    /// missed events.
+    /// Sent after a room's event stream recovers from a drop, so the frontend
+    /// resyncs state (voice presence etc.); missed events are not replayed.
     RealtimeReconnected {
         room_id: String,
     },
-    /// Sent to the callee's personal inbox room when someone is calling them.
-    /// `room_name` is the LiveKit room both sides will join on accept.
+    /// Sent to the callee's inbox room; `room_name` is the LiveKit room to join.
     CallInvite {
         call_id: String,
         room_name: String,
         caller_id: String,
         caller_username: String,
     },
-    /// Sent to the callee's personal inbox room when the caller hangs up
-    /// before pickup, or to either side when the other side declines.
-    /// Frontends use this to clear the incoming-call slot.
+    /// Caller hung up before pickup, or the other side declined.
     CallCanceled {
         call_id: String,
     },
-    /// Ephemeral signal that a user is composing a message in the named
-    /// channel/conversation. Senders re-emit `is_typing: true` every few
-    /// seconds while still typing (and `false` on send/blur); receivers
-    /// also age out stale entries on a TTL since this event is never
-    /// persisted and a user dropping offline must clear naturally.
+    /// Ephemeral typing signal. Senders re-emit `true` every few seconds;
+    /// receivers age entries out on a TTL, as the event is never persisted.
     Typing {
         channel_id: Option<String>,
         conversation_id: Option<String>,
@@ -163,36 +121,22 @@ pub enum RealtimeEvent {
         username: Option<String>,
         is_typing: bool,
     },
-    /// Inferred online/offline derived from LiveKit room participation:
-    /// emitted when a participant joins or leaves a room the local user is
-    /// already subscribed to (groups / DMs / inbox). The frontend tracks
-    /// per-user → set-of-rooms; the user is "online" while at least one
-    /// room shows them as present. No heartbeats or explicit publishes —
-    /// LiveKit's keep-alive does the work.
+    /// Presence inferred from LiveKit room participation; a user is online while
+    /// at least one subscribed room shows them. No heartbeats.
     PresenceChanged {
         user_id: String,
         room_id: String,
         present: bool,
     },
-    /// A peer's `account_id_pub` has changed since the last TOFU pin
-    /// (Signal-style "safety number changed"). Emitted by
-    /// `check_and_pin_account_key` whenever it observes a mismatch.
-    /// Advisory — sends are not blocked. The frontend uses this to
-    /// surface an inline, dismissable banner in any open conversation
-    /// with this peer so the user can re-verify out-of-band.
+    /// A peer's `account_id_pub` changed since the last TOFU pin. Advisory:
+    /// sends are not blocked; the frontend shows a re-verify banner.
     KeyChanged {
         peer_user_id: String,
         peer_identity_version: i64,
     },
-    /// Emitted after `reconcile_group_mls_impl` produces a non-empty
-    /// commit (members or devices added/removed, with a corresponding
-    /// epoch bump). A refetch hint only: the member list and the groups /
-    /// DM lists reload. It names no one — membership changes are never
-    /// announced in a timeline (#1506), so nothing consumes a diff.
-    ///
-    /// Locally: published by the reconciling client to its own sink.
-    /// Remotely: also broadcast to the conversation's LiveKit room via
-    /// `publish_to_room_server` so already-connected peers refetch.
+    /// A reconcile produced a non-empty commit. A refetch hint only: it names no
+    /// one, since membership changes are never announced in a timeline (#1506).
+    /// Also broadcast to the conversation's LiveKit room.
     RosterChanged {
         conversation_id: String,
         epoch_before: u64,
@@ -200,23 +144,18 @@ pub enum RealtimeEvent {
     },
 }
 
-/// Held in AppState behind an Arc<Mutex<_>>.
 /// Owns the frontend event sink and all active LiveKit room connections.
 pub struct LiveKitState {
-    /// The sink used to push events to the frontend.
-    /// Set once by `subscribe_realtime`; updated if the user logs out and back in.
+    /// Set by `subscribe_realtime`; replaced on re-login.
     pub channel: Option<Arc<dyn EventSink<RealtimeEvent>>>,
 
-    /// Active room connections keyed by room ID.
-    /// Room is wrapped in Arc so it can be cloned out of the MutexGuard for
-    /// publish operations without holding the lock across an await point.
-    /// Present only with the `media` feature (desktop) — mobile builds `media`
-    /// off and uses the native LiveKit SDK, not the Rust one.
+    /// Active rooms by ID. `Arc` so a room can be cloned out of the guard
+    /// without holding the lock across an await. Desktop only (`media`);
+    /// mobile uses the native LiveKit SDK.
     #[cfg(feature = "media")]
     pub rooms: HashMap<String, (Arc<livekit::Room>, JoinHandle<()>)>,
 
-    /// Room IDs currently being connected (between Room::connect call and map insertion).
-    /// Prevents duplicate connections when connect_rooms is called concurrently.
+    /// Rooms mid-connect, so concurrent `connect_rooms` calls don't duplicate.
     pub connecting: HashSet<String>,
 }
 

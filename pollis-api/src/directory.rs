@@ -1,79 +1,38 @@
 //! The directory and conversation READ surface (#987).
 //!
-//! Everything the app needs to draw a sidebar, open a conversation, or pull the
-//! envelopes it has not seen — asked of the Delivery Service instead of of a
-//! whole-database read token baked into the shipped binary.
-//!
-//! # Why these shapes
-//!
-//! **They collapse dependent chains, not just queries.** The reads these replace
-//! were sequential *and* dependent: each query's input was the previous one's
-//! output, so the client could not pipeline them. Opening a channel was 5–7
-//! round trips, a cold launch with eight groups and twelve DMs was sixty to
-//! eighty, serially. Co-locating the data would have shortened each hop; running
-//! the chain next to the database removes the hops. So [`CatchUpBody`] answers
-//! "which MLS group backs this conversation", "is it a DM", "which conversations
-//! does that group cover" and "what have I not fetched" in ONE request, because
-//! those four questions were four dependent trips.
-//!
-//! **They are authorization-shaped, not table-shaped.** Every response here is
-//! scoped to the authenticated caller by a predicate the DS already enforces on
-//! the WRITE half of the same table (`writes::is_member`, `groups::is_admin`), so
-//! no new authorization primitive exists to get wrong. Where a projection is
-//! narrower than the row, that is deliberate and load-bearing: [`UserWire`]
-//! carries no `phone`, and [`GroupPreview`] carries no `owner_id`.
-//!
-//! **They do not read `user_groups` / `user_dms`.** Those tables were the #532
-//! directory index; #540 reverted it and removed every writer, so they now hold a
-//! one-time backfill minus deletions. An endpoint reading them would serve a
-//! confidently wrong sidebar. Membership is derived from `group_member` /
-//! `dm_channel_member`, which is what the rest of the system agrees with.
+//! Each endpoint answers a whole dependent chain in one request (opening a
+//! channel was 5–7 sequential round trips). Every response is scoped to the
+//! caller by the same predicates the DS enforces on writes (`writes::is_member`,
+//! `groups::is_admin`), and narrow projections are deliberate: [`UserWire`] has
+//! no `phone`, [`GroupPreview`] no `owner_id`. Membership comes from
+//! `group_member` / `dm_channel_member`, never the stale `user_groups` /
+//! `user_dms` (#540).
 
 use serde::{Deserialize, Serialize};
 
-// ── POST /v1/conversations/catch-up ──────────────────────────────────────────
-
 /// Resolve a conversation to its MLS group, enumerate everything that group
-/// backs, and (optionally) hand back the envelopes this device has not fetched.
-///
-/// One request in place of the four dependent ones it replaces. `want_envelopes`
-/// is opt-in because several callers — send, edit, the voice join, the commit
-/// replay entry point — need only the resolution, and the envelope scan is the
-/// expensive half.
+/// backs, and optionally return the envelopes this device has not fetched
+/// (opt-in: several callers need only the resolution).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CatchUpBody {
-    /// A group id, a channel id, or a DM channel id. All three share one
-    /// namespace (`conversation` registry, #880), so the server decides which it
-    /// is rather than the caller asserting it.
+    /// A group, channel or DM channel id (one namespace, #880); the server
+    /// decides which.
     pub conversation_id: String,
-    /// Fetch envelopes past each bound conversation's own watermark for this
-    /// device.
+    /// Fetch envelopes past each bound conversation's watermark for this device.
     #[serde(default)]
     pub want_envelopes: bool,
-    /// Include the DM row and its members. Ignored for groups.
-    ///
-    /// One flag for two callers that want the same thing at different depths:
-    /// the ingest path re-pins every peer's identity key (TOFU), and the DM
-    /// screen renders the roster. Splitting them into "peers" and "the row"
-    /// would be two shapes for one query.
+    /// Include the DM row and its members (ingest re-pins peers' keys, the DM
+    /// screen renders them). Ignored for groups.
     #[serde(default)]
     pub want_dm: bool,
-    /// Include the conversation's DESIRED MLS ROSTER: the user ids that should
-    /// have a leaf in its tree.
+    /// Include the desired MLS roster: `group_member` plus pending invitees (so
+    /// they get a Welcome at invite time), or `dm_channel_member`.
     ///
-    /// `group_member` plus pending `group_invite` invitees for a group, or
-    /// `dm_channel_member` for a DM. Pending invitees are in it so their devices
-    /// get a Welcome at invite time — the acceptor can join without any other
-    /// member being online simultaneously.
-    ///
-    /// ONE definition, server-side: `reconcile` diffs the tree against it and
-    /// `migrate` moves exactly this set into a successor group. If the two ever
-    /// disagreed about who belongs, a migration would strand whoever the diff
-    /// would have added.
+    /// The one server-side definition both `reconcile` and `migrate` use; if
+    /// they disagreed, a migration would strand members.
     #[serde(default)]
     pub want_roster: bool,
-    /// No-auth (dev/test) path only; ignored when the DS enforces auth, though
-    /// still signature-bound.
+    /// No-auth (dev/test) path only; ignored when the DS enforces auth.
     #[serde(default)]
     pub user_id: Option<String>,
     #[serde(default)]
@@ -86,32 +45,27 @@ pub struct CatchUpBody {
 pub enum ConversationKind {
     /// A DM channel. Its MLS group is keyed by the DM id itself.
     Dm,
-    /// A channel inside a group. Every channel of a group shares ONE MLS group,
+    /// A channel inside a group; all of a group's channels share one MLS group,
     /// keyed by the group id.
     Channel,
-    /// A group id given directly (the sweep and the MLS paths address groups
-    /// this way).
+    /// A group id given directly.
     Group,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CatchUpResponse {
-    /// `false` → the caller is not a member. Every other field is empty. Not a
-    /// 403, because several callers treat "not a member" as an ordinary
-    /// short-circuit rather than an error, exactly as the direct read's
-    /// membership-joined query did by returning no row.
+    /// `false` → not a member, and every other field is empty. Not a 403: callers
+    /// treat "not a member" as an ordinary short-circuit.
     pub authorized: bool,
     /// The MLS group backing the conversation: the group id for a channel, the
     /// DM id for a DM.
     pub mls_group_id: String,
     pub kind: ConversationKind,
-    /// Every conversation the MLS group backs — the DM itself, or all of the
-    /// group's channels. This is the set whose envelopes must be decrypted at
-    /// each epoch before the shared group advances past it.
+    /// Every conversation the MLS group backs, whose envelopes must be decrypted
+    /// at each epoch before the shared group advances.
     pub conversation_ids: Vec<String>,
-    /// Ordered `(conversation_id, sent_at, id)`, each strictly past THAT
-    /// conversation's own watermark for this device — byte-for-byte the
-    /// ordering the interleaved ingest partitions on.
+    /// Ordered `(conversation_id, sent_at, id)`, each past that conversation's
+    /// own watermark for this device.
     #[serde(default)]
     pub envelopes: Vec<EnvelopeWire>,
     /// The DM and its members. `None` unless `want_dm` and `kind == Dm`.
@@ -120,16 +74,13 @@ pub struct CatchUpResponse {
     /// The desired MLS roster. Empty unless `want_roster`.
     #[serde(default)]
     pub roster: Vec<String>,
-    /// The commit log's head, read BEFORE `envelopes` was (#1041). `None` unless
-    /// `want_envelopes` (or from a DS that predates the field).
+    /// The commit log's head, read before `envelopes` (#1041); `None` unless
+    /// `want_envelopes` (or from an older DS).
     ///
-    /// This is the receiver's half of the epoch gate. An envelope may only be
-    /// stored while its epoch is the head, so every envelope that will ever exist
-    /// at an epoch below this head was already stored when the head was read,
-    /// and therefore is in `envelopes`. A replay that applies only the commits
-    /// accepted before this head — `(generation, epoch) < head` — can never
-    /// advance past an epoch whose envelopes it has not fetched. Commits accepted
-    /// later wait for the next pass, which fetches again first.
+    /// The receiver's half of the epoch gate: envelopes are stored only at the
+    /// head epoch, so every envelope below this head is already in `envelopes`,
+    /// and a replay of commits `(generation, epoch) < head` never advances past
+    /// unfetched envelopes.
     #[serde(default)]
     pub head: Option<LogHead>,
 }
@@ -142,10 +93,7 @@ pub struct LogHead {
     pub epoch: i64,
 }
 
-/// One `message_envelope` row as it crosses the wire.
-///
-/// `ciphertext` is already an opaque string on the wire and stays one: the DS
-/// cannot read it, and nothing here changes that.
+/// One `message_envelope` row as it crosses the wire; `ciphertext` stays opaque.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnvelopeWire {
     pub conversation_id: String,
@@ -156,72 +104,45 @@ pub struct EnvelopeWire {
     pub reply_to_id: Option<String>,
     #[serde(default)]
     pub target_message_id: Option<String>,
-    /// DISPLAY metadata only since #1087. It is the time the sender stamped on
-    /// the envelope, shown in the UI — it is not the delivery order, not the
-    /// cursor, and not what retention compares against. `seq` is all three.
+    /// Display metadata only (#1087): not the delivery order, the cursor, or what
+    /// retention compares; `seq` is all three.
     pub sent_at: String,
-    /// The envelope's `type` column — `message`, `edit`, `delete`, …. Named
-    /// `kind` here because `type` is a Rust keyword.
+    /// The envelope's `type` column (`message`, `edit`, `delete`, …).
     pub kind: String,
     /// The DS-assigned delivery position, strictly increasing per conversation
-    /// (#1087). This is the cursor: a device reports the highest `seq` it has
-    /// handled and the next fetch is `seq > last_seq`.
-    ///
-    /// `Option` for the wire only — every row the DS writes has one, and a row
-    /// that somehow does not is skipped rather than delivered out of order.
+    /// (#1087), and the cursor (`seq > last_seq`). `Option` for the wire only; a
+    /// row without one is skipped rather than delivered out of order.
     #[serde(default)]
     pub seq: Option<i64>,
-    /// The order the DS accepted this envelope in, comparable ACROSS the
-    /// conversations of one catch-up (the `message_envelope` rowid). `seq` orders
-    /// one conversation; this orders the whole MLS group, which is the order a
-    /// sender sealed in.
-    ///
-    /// Decryption needs that order, not the per-conversation one: every channel
-    /// of a group shares one MLS group, so a sender's generations run across all
-    /// of them, and openmls opens a generation more than 5 behind the newest one
-    /// it has opened for that sender as "too distant in the past" — gone. A
-    /// device catching up channel by channel after the sender interleaved
-    /// channels lost exactly those messages. Absent from an older DS; the
-    /// client then keeps the per-conversation order it always used.
+    /// Acceptance order across all conversations of one MLS group (the rowid).
+    /// Decryption needs it: a sender's generations run across every channel, and
+    /// openmls drops a generation more than 5 behind the newest it opened.
+    /// Absent from an older DS, which falls back to per-conversation order.
     #[serde(default)]
     pub arrival: Option<i64>,
 }
 
-// ── POST /v1/messages/lookup ─────────────────────────────────────────────────
-
-/// Which conversation an envelope belongs to.
-///
-/// Used by the delete path when this device holds no local copy of the target —
-/// an admin deleting a message they never fetched.
+/// Which conversation an envelope belongs to, for deleting a message this device
+/// never fetched.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageLookupBody {
     pub message_id: String,
     #[serde(default)]
     pub user_id: Option<String>,
-    /// Also return the reactions on these messages, in `conversation_id`.
-    ///
-    /// Batched, and folded into this endpoint rather than given its own,
-    /// because it is the same authorization question — "may this caller see
-    /// this conversation" — answered once. The mobile picker used to invoke a
-    /// per-message read for every row on screen; one request covers a page.
+    /// Also return reactions on these messages in `conversation_id`: the same
+    /// authorization question, answered once per page instead of per row.
     #[serde(default)]
     pub reactions_for: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageLookupResponse {
-    /// `None` when the envelope does not exist OR the caller is not a member of
-    /// its conversation.
-    ///
-    /// Deliberately not a 403 for the second case: a distinguishable refusal
-    /// would make this an existence oracle for message ids, and the caller's
-    /// behaviour is identical either way — it cannot name the conversation, so
-    /// it cannot delete.
+    /// `None` when the envelope does not exist or the caller is not a member;
+    /// not a 403, which would make this an existence oracle for message ids.
     #[serde(default)]
     pub conversation_id: Option<String>,
-    /// One entry per message in `reactions_for` that HAS reactions and whose
-    /// conversation the caller is a member of. A message with none is absent,
-    /// which is what the per-message read answered with an empty list.
+    /// One entry per message in `reactions_for` that has reactions and that the
+    /// caller may see.
     #[serde(default)]
     pub reactions: Vec<MessageReactions>,
 }
@@ -237,8 +158,6 @@ pub struct ReactionWire {
     pub emoji: String,
     pub user_ids: Vec<String>,
 }
-
-// ── POST /v1/directory/bootstrap ─────────────────────────────────────────────
 
 /// Everything the sidebar needs at launch, actor-scoped, in one request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -256,8 +175,7 @@ pub struct DirectoryBootstrapResponse {
     pub dm_requests: Vec<DmChannelWire>,
     pub pending_invites: Vec<PendingInviteWire>,
     pub blocks: Vec<BlockedUserWire>,
-    /// The caller's stored preferences JSON, or `None` when they have never
-    /// saved any.
+    /// The caller's stored preferences JSON, if any.
     #[serde(default)]
     pub preferences: Option<String>,
 }
@@ -333,56 +251,36 @@ pub struct BlockedUserWire {
     pub blocked_at: String,
 }
 
-// ── POST /v1/directory/group ─────────────────────────────────────────────────
-
 /// One group's detail page, gated per section: members and channels need
 /// membership, invite links and join requests need admin.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectoryGroupBody {
-    /// A group id, or a CHANNEL id — resolved server-side, the same way
-    /// `writes::is_member` accepts either. That tolerance is what lets the
-    /// message-moderation preflight ask "am I an admin of the group that owns
-    /// this channel" in one request instead of resolving first.
+    /// A group id or a channel id, resolved server-side like `writes::is_member`,
+    /// so a moderation preflight needs one request.
     pub group_id: String,
     #[serde(default)]
     pub user_id: Option<String>,
-    /// Answer only `exists` / `authorized` / `role` and skip every list. The
-    /// authorization preflights want a role and nothing else, and a roster is
-    /// not free.
+    /// Answer only `exists` / `authorized` / `role` and skip every list.
     #[serde(default)]
     pub role_only: bool,
-    /// Include the group's custom emoji set. Members-only, and a separate flag
-    /// because the picker asks for emoji across ALL the caller's groups through
-    /// a different endpoint.
+    /// Include the group's custom emoji (members only).
     #[serde(default)]
     pub want_emoji: bool,
-    /// Include the group's pending invites (#1506). Members-only, and opt-in
-    /// so the authorization preflights and the message list's roster read do
-    /// not pay for a list only the member page renders. An older DS ignores
-    /// the field and answers with no `invites`, which reads as "none pending".
+    /// Include pending invites (#1506; members only, opt-in). An older DS omits
+    /// them, which reads as "none pending".
     #[serde(default)]
     pub want_invites: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectoryGroupResponse {
-    /// The GROUP id the request resolved to.
-    ///
-    /// Echoed even in `role_only` mode, and even when `exists` is false (in
-    /// which case it is the id as asked). Callers that passed a CHANNEL id need
-    /// the group for their follow-up — a realtime nudge, a reconcile — and
-    /// resolving it a second time would be both a round trip and a chance to
-    /// resolve differently than the check did.
+    /// The group id the request resolved to, echoed even in `role_only` mode
+    /// and when `exists` is false, so channel-id callers need not resolve again.
     pub group_id: String,
-    /// The id resolved to a real GROUP.
-    ///
-    /// Reported separately from `authorized` because the two answer different
-    /// questions and the join flow needs both: "no such group" and "you are
-    /// already a member" are different refusals, and collapsing them would make
-    /// one of them wrong.
+    /// The id resolved to a real group. Separate from `authorized`: "no such
+    /// group" and "already a member" are different refusals.
     pub exists: bool,
-    /// `false` → not a member. Everything below is empty, which is the same
-    /// answer a stranger got from the membership-gated read this replaces.
+    /// `false` → not a member; everything below is empty.
     pub authorized: bool,
     /// The caller's role, `None` when not a member.
     #[serde(default)]
@@ -397,10 +295,8 @@ pub struct DirectoryGroupResponse {
     pub join_requests: Vec<JoinRequestWire>,
     #[serde(default)]
     pub emoji: Vec<CustomEmojiWire>,
-    /// Pending invites, when `want_invites` asked for them (#1506). Every
-    /// member sees them: a pending invitee already sits in the group's desired
-    /// MLS roster, so they are no secret from the people they will share it
-    /// with. Defaulted so a client reading an older DS gets an empty list.
+    /// Pending invites when `want_invites` asked (#1506). Every member sees
+    /// them: invitees are already in the desired MLS roster.
     #[serde(default)]
     pub invites: Vec<GroupInviteWire>,
 }
@@ -430,11 +326,8 @@ pub struct GroupMemberWire {
     pub joined_at: String,
 }
 
-/// An invite link, minus its token.
-///
-/// The secret half never existed server-side (only `sha256(secret)` is stored),
-/// and the selector is not returned either — this is the management list, not a
-/// way to recover a link that was not copied when it was made.
+/// An invite link, minus its token: only `sha256(secret)` is stored and the
+/// selector is not returned, so this cannot recover an uncopied link.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InviteLinkWire {
     pub id: String,
@@ -448,8 +341,8 @@ pub struct InviteLinkWire {
     pub uses: i64,
     #[serde(default)]
     pub revoked_at: Option<String>,
-    /// Computed with the same `datetime()` normalisation the redeem path uses,
-    /// so the badge cannot disagree with what redemption will actually do.
+    /// Uses the redeem path's `datetime()` normalisation, so the badge matches
+    /// what redemption will do.
     pub is_live: bool,
 }
 
@@ -476,13 +369,8 @@ pub struct CustomEmojiWire {
     pub created_by: String,
 }
 
-// ── POST /v1/directory/members ───────────────────────────────────────────────
-
-/// The Cmd+K fan-out: member lists for several groups at once.
-///
-/// The palette used to run a membership gate query AND a member query per group
-/// — `1 + 2N` round trips to open a menu. Each group is authorized
-/// independently, so one group the caller has left does not fail the batch.
+/// The Cmd+K fan-out: member lists for several groups at once, each authorized
+/// independently.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectoryMembersBody {
     pub group_ids: Vec<String>,
@@ -498,55 +386,39 @@ pub struct DirectoryMembersResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GroupMembersWire {
     pub group_id: String,
-    /// `false` → not a member of THIS group; `members` is empty.
+    /// `false` → not a member of this group; `members` is empty.
     pub authorized: bool,
     pub members: Vec<GroupMemberWire>,
 }
 
-// ── POST /v1/directory/users ─────────────────────────────────────────────────
-
-/// Profile hydration and username/email lookup.
-///
-/// One endpoint for both because they answer the same projection; the caller
-/// supplies ids, an identifier, or both.
+/// Profile hydration and username/email lookup (same projection).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectoryUsersBody {
     /// Hydrate these ids.
     #[serde(default)]
     pub user_ids: Vec<String>,
-    /// Resolve one username-or-email to a user. Matching is exact, as it was
-    /// against the database — this is a lookup, not a search index.
+    /// Resolve one username-or-email to a user; exact match, not search.
     #[serde(default)]
     pub identifier: Option<String>,
-    /// Which of these users are in a block relationship with the CALLER, in
-    /// EITHER direction.
-    ///
-    /// Direction-blind on purpose: every caller (send, invite, DM create) halts
-    /// delivery on either side's block and reports the same generic refusal, so
-    /// neither party can infer which of them blocked whom. Answering per
-    /// direction would hand that inference to the client, where a debug log or a
-    /// distinguishable error message would leak it back out.
+    /// Which of these users are in a block relationship with the caller, in
+    /// either direction. Direction-blind on purpose, so neither party can infer
+    /// who blocked whom.
     #[serde(default)]
     pub block_check: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectoryUsersResponse {
-    /// Everyone found, from ids and identifier together, deduplicated. A
-    /// requested id that does not resolve is simply absent.
+    /// Everyone found from ids and identifier, deduplicated; unresolved ids are
+    /// absent.
     pub users: Vec<UserWire>,
     /// The subset of `block_check` that is blocked in either direction.
     #[serde(default)]
     pub blocked: Vec<String>,
 }
 
-/// A user's public directory projection.
-///
-/// **No `phone`.** The column exists and the old `SELECT` returned it to every
-/// caller, including the ones that only wanted an avatar. Nothing in the app
-/// renders it, and a phone number is the single most re-identifying field on the
-/// row — so it does not cross this boundary at all, rather than crossing it and
-/// being ignored.
+/// A user's public directory projection. No `phone`: nothing renders it and it
+/// is the most re-identifying field on the row.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserWire {
     pub id: String,
@@ -557,16 +429,9 @@ pub struct UserWire {
     pub avatar_url: Option<String>,
 }
 
-// ── POST /v1/directory/group-by-slug ─────────────────────────────────────────
-
-/// Slug discovery — the join flow's first step.
-///
-/// Deliberately NOT membership-gated (#917): a `require_member` guard would mean
-/// you could only find groups you were already in, which is not a stricter
-/// version of the feature but the removal of it. Discord's vanity-invite lookup
-/// and Slack's workspace-URL lookup make the same trade. The protection is the
-/// PROJECTION plus a rate limit: the existence of a group at a guessed name is
-/// public, its owner and contents are not.
+/// Slug discovery, the join flow's first step. Deliberately not
+/// membership-gated (#917), as with Discord vanity invites; the projection and
+/// a rate limit protect it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GroupBySlugBody {
     pub slug: String,
@@ -578,8 +443,8 @@ pub struct GroupBySlugResponse {
     pub group: Option<GroupPreview>,
 }
 
-/// Exactly what a join prompt needs to name a group, and nothing else — no
-/// `owner_id` (a named user), no `created_at`.
+/// Exactly what a join prompt needs to name a group: no `owner_id`, no
+/// `created_at`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GroupPreview {
     pub id: String,
@@ -588,25 +453,12 @@ pub struct GroupPreview {
     pub description: Option<String>,
 }
 
-
 /// A group's URL slug, derived from its display name.
 ///
-/// # Why this lives in the shared crate (#987)
-///
-/// Slug matching moved server-side when `search_group_by_slug` became
-/// `POST /v1/directory/group-by-slug`: the DS now scans group names and compares
-/// derived slugs, where the client used to. The rule is not expressible in SQL
-/// (it strips, folds and collapses), so it is Rust on whichever side runs it —
-/// and if the two sides ever computed it differently, a link that worked in one
-/// build would silently resolve to nothing in the next. One implementation, both
-/// ends, exactly as `pollis_schema::authz`'s statements do for the role checks.
-///
-/// The rule, unchanged from the client implementation it replaces: lowercase,
-/// drop everything that is not ASCII alphanumeric / whitespace / `-`, turn runs
-/// of whitespace into single `-`, collapse repeated `-`, trim leading and
-/// trailing `-`. Non-ASCII letters are DROPPED rather than transliterated
-/// (`café` -> `caf`), which is the behaviour every shipped link was minted
-/// against.
+/// Shared so the DS's slug lookup and the client agree (#987). Lowercase, keep
+/// only ASCII alphanumerics / whitespace / `-`, whitespace runs become `-`,
+/// collapse and trim `-`. Non-ASCII letters are dropped (`café` -> `caf`), as
+/// every shipped link was minted.
 pub fn derive_slug(name: &str) -> String {
     let lower = name.to_lowercase();
     let cleaned: String = lower
@@ -630,23 +482,13 @@ pub fn derive_slug(name: &str) -> String {
     result.trim_matches('-').to_string()
 }
 
-// ── POST /v1/directory/conversations ─────────────────────────────────────────
-
 /// Id-only enumeration of everything the caller participates in.
-///
-/// The cold-launch sweep, account deletion's membership-change broadcast, and
-/// device-enrollment finalization all want the same list and none of them wants
-/// a row.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectoryConversationsBody {
     #[serde(default)]
     pub user_id: Option<String>,
-    /// Also resolve the 1:1 DM channel between the caller and this user.
-    ///
-    /// The voice path needs it for `call-*` rooms, which are ephemeral and have
-    /// no row of their own: their MLS group is the DM's. Scoped to the CALLER's
-    /// own DMs by construction, so it cannot be used to ask whether two other
-    /// people have a DM.
+    /// Also resolve the caller's own 1:1 DM with this user (`call-*` rooms use
+    /// the DM's MLS group); it cannot ask about two other people.
     #[serde(default)]
     pub dm_with_user_id: Option<String>,
 }
@@ -655,8 +497,7 @@ pub struct DirectoryConversationsBody {
 pub struct DirectoryConversationsResponse {
     pub group_ids: Vec<String>,
     pub dm_ids: Vec<String>,
-    /// The 1:1 DM channel with `dm_with_user_id`, if one exists. `None` when
-    /// the caller did not ask, or when the two share no two-person DM.
+    /// The 1:1 DM with `dm_with_user_id`, if asked for and one exists.
     #[serde(default)]
     pub dm_with: Option<String>,
 }

@@ -1,7 +1,6 @@
 //! Groups, channels, membership, invites, invite links and join requests.
 //!
-//! Wire types only — no handler logic, no DB access. See the matching module in
-//! `pollis-delivery` for what the server does with each one.
+//! Wire types only; see the matching `pollis-delivery` module for behaviour.
 
 use serde::{Deserialize, Serialize};
 
@@ -110,22 +109,13 @@ pub struct CreateInviteBody {
     /// The inviter; bound to the authenticated user when signed.
     #[serde(default)]
     pub inviter_id: Option<String>,
-    /// Who to invite, as the USER TYPED IT — a username or an email (#987).
-    ///
-    /// Was a resolved `invitee_id`, which made the client run five reads before
-    /// it could even build this body: resolve the identifier, check the block
-    /// pair, check existing membership, check for a pending invite, and its own
-    /// admin preflight. Every one of those is re-derived by this write anyway.
-    /// Taking the identifier moves the resolution to where the decision already
-    /// lives, and turns six round trips into one.
+    /// Who to invite, as the user typed it: a username or an email (#987). The
+    /// DS resolves it and re-derives every check, in one round trip.
     pub invitee_identifier: String,
 }
 
-/// `POST /v1/invites/create` — the outcome of inviting someone (#987).
-///
-/// Named outcomes rather than one 403, because the five reads this replaces
-/// existed to tell them apart for the user. Every message the client used to
-/// produce locally has a variant here.
+/// `POST /v1/invites/create`: named outcomes rather than one 403, so the client
+/// can tell the user which one happened (#987).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum InviteCreated {
@@ -133,8 +123,7 @@ pub enum InviteCreated {
         /// The resolved invitee, for the caller's follow-up inbox nudge.
         invitee_id: String,
         /// The inviter's username and the group's name, for the invitee's
-        /// status-bar alert (#396) — public directory metadata the DS has
-        /// already read to authorize the invite.
+        /// status-bar alert (#396).
         #[serde(default)]
         inviter_username: Option<String>,
         #[serde(default)]
@@ -144,8 +133,8 @@ pub enum InviteCreated {
     NoSuchUser,
     /// The inviter named themselves.
     SelfInvite,
-    /// A block exists in either direction. One generic outcome for both
-    /// directions, so neither side can infer who blocked whom.
+    /// A block exists in either direction; one outcome for both, so neither side
+    /// can infer who blocked whom.
     Blocked,
     /// The invitee is already in the group.
     AlreadyMember,
@@ -169,9 +158,8 @@ pub struct DeclineInviteBody {
     pub user_id: Option<String>,
 }
 
-/// Withdraw a pending invite (#1506). Allowed to the member who sent it and to
-/// any admin of the invite's group, both re-derived server-side from the invite
-/// row — never from the request.
+/// Withdraw a pending invite (#1506): allowed to its sender and any admin of the
+/// group, re-derived from the invite row, never the request.
 #[derive(Serialize, Deserialize)]
 pub struct RevokeInviteBody {
     pub invite_id: String,
@@ -216,8 +204,8 @@ pub struct CreateInviteLinkBody {
     pub created_by: Option<String>,
     /// Public lookup handle. Generated client-side.
     pub selector: String,
-    /// `sha256(secret)`, hex. The DS never receives the secret at create time —
-    /// the client mints the token and hashes it locally.
+    /// `sha256(secret)`, hex; the client mints and hashes the token, so the DS
+    /// never sees the secret.
     pub secret_hash: String,
     /// RFC3339. `None` = never expires.
     #[serde(default)]
@@ -245,45 +233,29 @@ pub struct RedeemInviteLinkBody {
     pub user_id: Option<String>,
     /// Client-generated id for the audit row.
     pub attempt_id: String,
-    /// **IGNORED by the server, and kept only for wire compatibility.**
-    ///
-    /// This used to be the clock the Delivery Service compared `expires_at`
-    /// against — a plain wire field, so `{"now":"2020-01-01T00:00:00Z"}`
-    /// redeemed any expired link, and a `now` far in the future emptied the
-    /// failed-attempt rate-limit window. Expiry, the rate-limit window and the
-    /// audit stamp are all `datetime('now')` on the server now. A shipped
-    /// client still sends the field; nothing reads it.
+    /// Ignored by the server; kept for wire compatibility. Expiry, the rate-limit
+    /// window and the audit stamp all use the server's `datetime('now')`, never a
+    /// client-supplied clock.
     pub now: String,
 }
 
-/// `POST /v1/invite-links/redeem` — the group the token admitted the caller to.
-///
-/// Every way a token can fail to be live answers with ONE indistinguishable
-/// rejection status, deliberately (#847), so this type describes the success
-/// case only.
+/// `POST /v1/invite-links/redeem`: the group the token admitted the caller to.
+/// Every non-live token gets one indistinguishable rejection (#847), so this is
+/// the success case only.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
 pub enum RedeemInviteLinkResponse {
     Ok {
         group_id: String,
-        /// The group's display name, for the caller's confirmation UI (#987).
-        ///
-        /// Returned with the join rather than fetched after it: the DS has just
-        /// read the row to authorize the redemption, and the client asking again
-        /// was a second round trip for a string the server already had in hand.
-        /// `None` only if the row vanished between the join and this read.
+        /// The group's display name, for the confirmation UI (#987); `None` only
+        /// if the row vanished between the join and this read.
         #[serde(default)]
         group_name: Option<String>,
     },
 }
 
-/// `POST /v1/groups/update` — the row as it now stands (#987).
-///
-/// Returned rather than re-read, for the reason the whole read migration
-/// exists: the client used to `SELECT` the group straight back after the write,
-/// which was a second round trip for a row the server had just written and,
-/// worse, a read that could observe a LATER concurrent update and report it as
-/// the result of THIS one.
+/// `POST /v1/groups/update`: the row as it now stands (#987), returned rather
+/// than re-read, which could observe a later concurrent update.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
 pub enum UpdatedGroup {
@@ -297,8 +269,7 @@ pub enum UpdatedGroup {
     },
 }
 
-/// `POST /v1/channels/update` — the row as it now stands (#987). Same reasoning
-/// as [`UpdatedGroup`].
+/// `POST /v1/channels/update`: the row as it now stands; see [`UpdatedGroup`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
 pub enum UpdatedChannel {
@@ -312,48 +283,32 @@ pub enum UpdatedChannel {
     },
 }
 
-/// `POST /v1/invites/accept` — which group the invite admitted the caller to
-/// (#987).
-///
-/// The client used to read `group_invite` to learn this BEFORE posting the
-/// accept, which is both a round trip and a TOCTOU: the invite it read could be
-/// revoked before the write landed, leaving the client announcing membership of
-/// a group it never joined. Naming the group in the RESPONSE makes the answer a
-/// property of the write that succeeded.
+/// `POST /v1/invites/accept`: the group the invite admitted the caller to
+/// (#987), named in the response so it describes the write that succeeded
+/// rather than a pre-read invite that may since have been revoked.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
 pub enum AcceptedInvite {
     Ok { group_id: String },
 }
 
-/// `POST /v1/join-requests/{approve,reject}` — who the reviewed request was
-/// for (#987).
-///
-/// The client used to read the request row before posting, both to learn the
-/// group (for the reconcile and the realtime nudge that follow) and to run its
-/// admin preflight against it. The write already resolves the same row under the
-/// same admin gate, so returning what it resolved deletes the read AND the race
-/// where the row changed in between.
+/// `POST /v1/join-requests/{approve,reject}`: who the reviewed request was for
+/// (#987), as resolved by the write under its admin gate, so no pre-read races
+/// it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
 pub enum ReviewedJoinRequest {
     Ok {
         group_id: String,
-        /// The user the request was from. Absent on the reject path, which has
-        /// no follow-up that needs it.
+        /// The user the request was from; absent on the reject path.
         #[serde(default)]
         requester_id: Option<String>,
     },
 }
 
-/// `POST /v1/join-requests/create` — the outcome of asking to join (#987).
-///
-/// The client used to run three reads before posting: does the group exist, am
-/// I already a member, and do I already have a PENDING request. All three are
-/// re-derived by the write anyway, so what the reads bought was a specific
-/// error message. Naming the outcomes here keeps every message and adds none of
-/// the reads back — and closes the TOCTOU the third one had, where a request
-/// created between the check and the write was silently reset to pending.
+/// `POST /v1/join-requests/create`: the outcome of asking to join (#987). Named
+/// outcomes replace the client's pre-reads, including the TOCTOU where a request
+/// created in between was silently reset to pending.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum JoinRequestCreated {
@@ -363,8 +318,6 @@ pub enum JoinRequestCreated {
     NoSuchGroup,
     /// The requester is already a member — there is nothing to request.
     AlreadyMember,
-    /// A pending request already exists. Distinct from `Ok` because re-asking
-    /// is not an error the user should see as success, and distinct from
-    /// `AlreadyMember` because it is a different thing to tell them.
+    /// A pending request already exists (not success, and not `AlreadyMember`).
     AlreadyPending,
 }

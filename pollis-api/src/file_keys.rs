@@ -1,20 +1,15 @@
 //! The per-conversation attachment key ring (#1382).
 //!
-//! Every MLS conversation (a group, whose channels share one MLS group, or a
-//! DM) holds a ring of random 32-byte file keys. Attachments are sealed under
-//! a key derived from the ring's newest entry and a random per-file id; the
-//! ring itself crosses this boundary only WRAPPED under a KEK the members
-//! export from the current MLS epoch, exactly like the pin key
-//! (`crate::pins`). The DS stores the wrap and the ring's length, and can open
-//! neither the ring nor any file. See
-//! `pollis_core::commands::file_keys` for the client half.
+//! Each MLS conversation holds a ring of random 32-byte file keys; attachments
+//! are sealed under a key derived from the newest entry and a random file id.
+//! The ring is wrapped under an epoch-exporter KEK like the pin key
+//! (`crate::pins`); the DS sees only the wrap and the ring's length
+//! (`pollis_core::commands::file_keys`).
 
 use serde::{Deserialize, Serialize};
 
-// ── POST /v1/file-keys/keystate ──────────────────────────────────────────────
-
-/// What a keystate write is doing to the ring. The DS enforces each one's
-/// `key_version` rule, which is what makes a key fork unrepresentable.
+/// What a keystate write does to the ring; the DS enforces each op's
+/// `key_version` rule, so a key fork is unrepresentable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FileKeystateOp {
@@ -33,13 +28,12 @@ pub enum FileKeystateOp {
 /// Write a conversation's wrapped file key ring.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UpsertFileKeystateBody {
-    /// The MLS conversation — a group id or DM channel id.
+    /// The MLS conversation (group id or DM channel id).
     pub conversation_id: String,
-    /// base64 — AES-256-GCM ciphertext of the ring (`key_version` entries of a
-    /// 32-byte key plus the big-endian `(generation, epoch)` it was added at)
-    /// under the epoch's exporter-derived KEK.
+    /// base64 AES-256-GCM ciphertext of the ring (each entry a 32-byte key plus
+    /// the big-endian `(generation, epoch)` it was added at) under the KEK.
     pub wrapped_keyring: String,
-    /// base64 — the 12-byte AES-256-GCM nonce of the wrap.
+    /// base64 12-byte nonce of the wrap.
     pub nonce: String,
     /// The ring's length after this write.
     pub key_version: i64,
@@ -54,23 +48,19 @@ pub struct UpsertFileKeystateBody {
     pub op: FileKeystateOp,
 }
 
-/// Whether the write landed. `updated: false` is the race answer: another
-/// device's mint, re-wrap or rotation is already stored, and the caller
-/// refetches and adopts it.
+/// Whether the write landed. `updated: false` means another device's write is
+/// already stored; the caller refetches and adopts it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
 pub enum FileKeystateUpserted {
     Ok { updated: bool },
 }
 
-// ── POST /v1/read/file-keystate ──────────────────────────────────────────────
-
 /// Fetch a conversation's current wrapped ring. Membership-gated.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FileKeystateBody {
     pub conversation_id: String,
-    /// No-auth fallback for the reading user; when signed it must equal the
-    /// authenticated user.
+    /// No-auth fallback; when signed it must equal the authenticated user.
     #[serde(default)]
     pub user_id: Option<String>,
 }
@@ -85,9 +75,9 @@ pub struct FileKeystateResponse {
 /// The stored wrap, exactly as the DS holds it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StoredFileKeystate {
-    /// base64 — AES-256-GCM ciphertext of the ring.
+    /// base64 AES-256-GCM ciphertext of the ring.
     pub wrapped_keyring: String,
-    /// base64 — the 12-byte nonce.
+    /// base64 12-byte nonce.
     pub nonce: String,
     pub key_version: i64,
     pub generation: i64,

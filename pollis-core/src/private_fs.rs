@@ -1,65 +1,36 @@
 //! Owner-only filesystem creation, in one place.
 //!
-//! Every file this app writes holds something that belongs to exactly one
-//! person: `accounts.json` carries their real email address, `keystore.pks`
-//! their wrapped identity keys, `pollis_<user>.db` their message history,
-//! `overlay-guards.json` where they connect from, the media cache their
-//! pictures. Created at the process umask — 0644 on a stock Linux or macOS
-//! account — every one of those is readable by every other local user.
+//! Every file this app writes belongs to one person, and the process umask
+//! would leave it readable by other local users. The mode is not a parameter,
+//! so a caller cannot forget it or ask for a world-readable file.
 //!
-//! The rule is one helper, not a `set_permissions` call sprinkled next to each
-//! `File::create`: a write path that forgets is indistinguishable from one that
-//! never had a mode, and there is no way to notice the omission later. So the
-//! creation itself lives here and the mode is not a parameter — a caller cannot
-//! ask for a world-readable file, because this module offers no way to say it.
-//!
-//! ## Platforms
-//!
-//! * **Unix** — files are created 0600 and directories 0700. The mode is passed
-//!   to `open(2)`/`mkdir(2)` so the file is never briefly world-readable, and
-//!   re-applied through the open handle (`fchmod`) so an *existing* file that
-//!   predates this module — or one someone else pre-created — is tightened too,
-//!   without a path-based `chmod` a symlink swap could redirect.
-//! * **Windows** — deliberately nothing, and deliberately not silent. Files
-//!   under `%APPDATA%` inherit the user profile directory's ACL, which grants
-//!   the owning user, SYSTEM and Administrators and nobody else; that is
-//!   already the property [`FILE_MODE`] buys on Unix. Writing our own ACLs
-//!   would mean hand-rolling `SetNamedSecurityInfo` and a DACL, i.e. new code
-//!   that can only be wrong in ways the inherited one cannot. The functions
-//!   below compile to the plain `std::fs` operation there, and
-//!   [`owner_only_is_enforced_by_mode`] states which of the two worlds you are
-//!   in so a test can assert the difference rather than assume it.
+//! * **Unix**: files 0600, directories 0700, passed to `open(2)`/`mkdir(2)` and
+//!   re-applied through the handle (`fchmod`) so pre-existing files are
+//!   tightened without a symlink-swappable path `chmod`.
+//! * **Windows**: plain `std::fs`; files under `%APPDATA%` inherit the profile
+//!   ACL (owner, SYSTEM, Administrators), which already gives owner-only.
 
 use std::io;
 use std::path::Path;
 
-/// Mode for every file this app creates: owner read/write, nothing for group
-/// or other.
+/// Mode for every file this app creates.
 #[cfg(unix)]
 pub const FILE_MODE: u32 = 0o600;
 
-/// Mode for every directory this app creates: owner only, including the
-/// execute bit it needs to be traversable.
+/// Mode for every directory this app creates.
 #[cfg(unix)]
 pub const DIR_MODE: u32 = 0o700;
 
-/// Whether this platform enforces owner-only access through an explicit mode
-/// set by this module (Unix), or inherits it from the containing profile
-/// directory's ACL (Windows).
-///
-/// Exists so the platform difference is a value tests can branch on instead of
-/// a claim in a comment.
+/// Whether owner-only access comes from an explicit mode (Unix) or the
+/// inherited profile ACL (Windows), so tests can branch on it.
 pub const fn owner_only_is_enforced_by_mode() -> bool {
     cfg!(unix)
 }
 
 /// Create `dir` and any missing parents, owner-only.
 ///
-/// The mode is applied to the leaf directory even when it already exists, so a
-/// data directory created by an older build (or by hand) is tightened on the
-/// next run. Parents are left as `mkdir` made them: `dirs_path()` resolves
-/// under `~/.local/share`, and this must not restyle the user's XDG tree on the
-/// way down.
+/// The mode is re-applied to an existing leaf; parents are left as `mkdir`
+/// made them, so the user's XDG tree is not restyled.
 pub fn create_dir_all(dir: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
@@ -70,8 +41,7 @@ pub fn create_dir_all(dir: &Path) -> io::Result<()> {
             .recursive(true)
             .mode(DIR_MODE)
             .create(dir)?;
-        // `mkdir` is a no-op on a directory that already exists, so the mode
-        // above only covers the ones this call just made.
+        // `mkdir` is a no-op on an existing directory.
         std::fs::set_permissions(dir, std::fs::Permissions::from_mode(DIR_MODE))
     }
     #[cfg(not(unix))]
@@ -80,8 +50,7 @@ pub fn create_dir_all(dir: &Path) -> io::Result<()> {
     }
 }
 
-/// Create (or truncate) `path` for writing, owner-only, and hand back the open
-/// handle.
+/// Create (or truncate) `path` for writing, owner-only.
 pub fn create_file(path: &Path) -> io::Result<std::fs::File> {
     let mut opts = std::fs::OpenOptions::new();
     opts.write(true).create(true).truncate(true);
@@ -102,10 +71,7 @@ pub fn write(path: &Path, contents: impl AsRef<[u8]>) -> io::Result<()> {
     file.write_all(contents.as_ref())
 }
 
-/// [`write`], off the async runtime's worker thread.
-///
-/// The cache writes that use it run up to `MEDIA_CACHE_MAX_FILE_BYTES`
-/// (100 MB), which is not something to do inline on a Tokio worker.
+/// [`write`] on a blocking thread; cache writes run up to 100 MB.
 pub async fn write_async(path: &Path, contents: Vec<u8>) -> io::Result<()> {
     let path = path.to_path_buf();
     tokio::task::spawn_blocking(move || write(&path, &contents))
@@ -113,11 +79,8 @@ pub async fn write_async(path: &Path, contents: Vec<u8>) -> io::Result<()> {
         .map_err(|e| io::Error::other(format!("private write task: {e}")))?
 }
 
-/// Tighten a file something else created — the SQLite database and its `-wal`
-/// / `-shm` sidecars, which the SQLite VFS opens and this module does not.
-///
-/// A missing file is not an error: the sidecars exist only while a connection
-/// is open in WAL mode, and the caller should not have to know which.
+/// Tighten a file something else created (SQLite's DB and `-wal`/`-shm`
+/// sidecars). A missing file is not an error.
 pub fn restrict_existing(path: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
@@ -135,13 +98,8 @@ pub fn restrict_existing(path: &Path) -> io::Result<()> {
     }
 }
 
-/// Apply [`FILE_MODE`] through an already-open handle (`fchmod`), which no
-/// path-based race can redirect.
-///
-/// Public because a few files cannot be created by this module — `pollis-tui`
-/// opens its log in append mode so it can `dup2` fd 2 onto it — and the mode
-/// passed to `open(2)` applies only when the open created the file. Tightening
-/// through the handle covers the one left by an older build.
+/// Apply [`FILE_MODE`] through an already-open handle (`fchmod`), for files
+/// this module cannot create itself (e.g. `pollis-tui`'s append-mode log).
 pub fn restrict_open_handle(file: &std::fs::File) -> io::Result<()> {
     #[cfg(unix)]
     {
@@ -175,9 +133,8 @@ mod tests {
 
     #[test]
     fn created_files_are_owner_only() {
-        // The platform predicate and the platform's actual behaviour, asserted
-        // against each other: a `#[cfg(not(unix))]` branch that swallowed the
-        // mode everywhere would still pass every assertion below on its own.
+        // Asserted against the platform predicate, so a non-unix branch that
+        // swallowed the mode everywhere cannot pass on its own.
         assert!(
             owner_only_is_enforced_by_mode(),
             "this is the unix build, so the mode is what enforces owner-only here"
@@ -199,8 +156,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// The umask cannot loosen us, and neither can a file that was already
-    /// there: the mode is re-applied through the open handle on every write.
+    /// A pre-existing loose file is tightened on rewrite.
     #[test]
     fn an_existing_world_readable_file_is_tightened_on_rewrite() {
         let dir = scratch("rewrite");
@@ -215,8 +171,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// An existing loose directory is tightened too — a data dir created by a
-    /// build that predates this module does not stay 0755 forever.
+    /// A pre-existing loose directory is tightened too.
     #[test]
     fn an_existing_world_readable_directory_is_tightened() {
         let dir = scratch("loose-dir");

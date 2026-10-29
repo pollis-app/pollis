@@ -1,27 +1,17 @@
-//! Scrubbing for diagnostic text (#1305), shared by both ends: the client's
-//! on-device log (`pollis_core::diag`) and the DS's failed-request log
-//! (`pollis_delivery::error_log`). One rule, so the two logs can never disagree
-//! about what counts as identifying.
+//! Scrubbing for diagnostic text (#1305), shared by the client's on-device log
+//! and the DS's failed-request log so both agree on what is identifying.
 //!
-//! [`scrub`] removes:
-//!   - email local parts — `alice@example.com` → `***@example.com`;
-//!   - IP addresses — `[redacted]`, by [`redact_ip_literals`] (the DS's rule
-//!     for device names and security-log metadata since migration 000034);
-//!   - long secret-shaped runs — [`REDACT_RUN_LEN`]+ characters of base64/hex
-//!     that mix letters and digits become `[redacted:N]` (session tokens, keys,
-//!     signatures). A ULID (26) stays readable.
-//!
-//! It is a backstop. The callers' rule is still "do not log content, names,
-//! keys or tokens" — this only catches what slips past it.
+//! [`scrub`] masks email local parts, replaces IP addresses ([`redact_ip_literals`])
+//! and long mixed letter/digit runs ([`REDACT_RUN_LEN`]+, e.g. tokens, keys).
+//! A backstop only: callers must not log content, names, keys or tokens.
 
-/// Header carrying a fresh random id on every DS request. It names one request
-/// and nothing else — never reused, never derived from the user or device — so
-/// a line in a user's diagnostics log can be matched to the DS's failed-request
-/// log without either side recording who sent it.
+/// Header carrying a fresh random id on every DS request, never derived from the
+/// user or device, so a diagnostics line can be matched to the DS's log without
+/// either side recording who sent it.
 pub const REQUEST_ID_HEADER: &str = "X-Pollis-Request-Id";
 
-/// Longest request id the DS will record; anything longer (or not plain
-/// alphanumeric) is dropped rather than stored. The client sends 16 hex chars.
+/// Longest request id the DS will record; anything longer or non-alphanumeric is
+/// dropped. The client sends 16 hex chars.
 pub const REQUEST_ID_MAX_LEN: usize = 32;
 
 /// Whether `id` is shaped like a request id the DS may store.
@@ -29,9 +19,8 @@ pub fn is_valid_request_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= REQUEST_ID_MAX_LEN && id.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
-/// Runs of token-shaped characters at least this long are redacted. A ULID
-/// (26) and a UUID's hex groups stay readable; a 32-byte value in base64 (44)
-/// or hex (64) does not.
+/// Token-shaped runs at least this long are redacted: a ULID (26) survives, a
+/// 32-byte value in base64 (44) or hex (64) does not.
 pub const REDACT_RUN_LEN: usize = 40;
 
 /// Apply every rule in this module to `text`.
@@ -86,26 +75,12 @@ fn scrub_emails(text: &str) -> String {
     out
 }
 
-/// Current wall-clock time, whole seconds since the Unix epoch.
-///
-/// A clock behind the epoch reads as `0` rather than panicking: every caller
-/// uses this for TTLs, lockouts and rate-limit stamps, where "a very old
-/// timestamp" degrades gracefully and a panic takes the DS down.
-///
-/// Returns `u64` because a Unix second is not negative. [`crate::auth`] casts at
-/// its boundary — request-signature skew is compared against a *client*-supplied
-/// timestamp, so that arithmetic has to be signed or a client ahead of the
-/// server wraps into "valid".
 /// Replace every IP-address-looking token in client-supplied free text (a
 /// device name, a security-event note) with `[redacted]`.
 ///
-/// No client IP may be readable anywhere the DS stores, admins included, and
-/// these fields are text the client chooses. Shipped desktop builds send a
-/// device name of `"{hostname} ({os})"`, and a cloud, corporate or ISP hostname
-/// routinely embeds the machine's address (`ip-10-0-0-12`,
-/// `c-73-162-1-2.hsd1.ca.comcast.net`). Current clients send an OS label
-/// instead, but old builds stay in the field, so the DS REDACTS rather than
-/// rejects: their writes must keep succeeding.
+/// No client IP may be readable anywhere the DS stores, and old builds still
+/// send `"{hostname} ({os})"` device names that often embed one
+/// (`ip-10-0-0-12`), so the DS redacts rather than rejects.
 ///
 /// Tokens are split on whitespace and `= , ; ( ) < > { } " '`, so `name=…`
 /// keeps its key. A token is redacted when it parses as an IPv4/IPv6 address

@@ -1,26 +1,21 @@
 //! The MLS control plane: commit submission and the Welcomes it carries.
 //!
-//! Wire types only — no handler logic, no DB access. See the matching module in
-//! `pollis-delivery` for what the server does with each one.
+//! Wire types only; see the matching `pollis-delivery` module for behaviour.
 
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SubmitBody {
     pub conversation_id: String,
-    /// The suite generation this commit belongs to. Absent (pre-hybrid client) →
-    /// `0`, which is exactly the lineage such a client is in.
+    /// The suite generation this commit belongs to; absent (pre-hybrid) → `0`.
     #[serde(default)]
     pub generation: i64,
-    /// The epoch this commit was built from = the head the client believes it's at.
+    /// The epoch this commit was built from: the head the client believes it is at.
     pub based_on_epoch: i64,
-    /// Migration only (`generation = N + 1`, `based_on_epoch = 0`): the head the
-    /// submitter observed on generation `N`, which this migration CLOSES. Making
-    /// the migrator name it turns "open the next lineage" into a compare-and-swap
-    /// on the old one, so a commit that lands in generation `N` after the
-    /// migrator read the roster invalidates the migration instead of being
-    /// silently orphaned by it. Ignored (and must be absent) for a same-generation
-    /// commit.
+    /// Migration only (`generation = N + 1`, `based_on_epoch = 0`): the head of
+    /// generation `N` this migration closes, making it a compare-and-swap, so a
+    /// commit landing in `N` after the roster read invalidates the migration
+    /// instead of being orphaned. Must be absent otherwise.
     #[serde(default)]
     pub closes_epoch: Option<i64>,
     pub sender_id: String,
@@ -31,11 +26,11 @@ pub struct SubmitBody {
     /// CSV of device ids added by this commit, if any.
     #[serde(default)]
     pub added_device_ids: Option<String>,
-    /// New published GroupInfo at the *resulting* epoch (`based_on_epoch + 1`),
-    /// base64. Lets a future joiner external-join. Optional.
+    /// New published GroupInfo at the resulting epoch, base64, for external
+    /// joins.
     #[serde(default)]
     pub group_info: Option<String>,
-    /// Welcomes for devices added by this commit. Optional.
+    /// Welcomes for devices added by this commit.
     #[serde(default)]
     pub welcomes: Vec<WelcomeBody>,
 }
@@ -48,63 +43,37 @@ pub struct WelcomeBody {
     pub welcome: String,
 }
 
-/// `POST /v1/commits/since` — the device's catch-up high-water for one
-/// conversation, the signal the server-side retention floor is the MIN of across
-/// current members (#539, I4 Tier 1).
-///
-/// A WRITE, and device-signed: it raises the retention floor, so it must be
-/// authenticated as the device it claims to be. It used to be an unauthenticated
-/// GET with the values in the query string, which let anyone raise the floor for
-/// any device and, chained with the unclamped prune floor, wipe a conversation's
-/// whole commit log (#681). Living in the signed BODY is what binds the reported
-/// values to the signature's `sha256(body)`.
+/// `POST /v1/commits/since`: the device's catch-up high-water for one
+/// conversation; the retention floor is its MIN across members (#539).
+/// Device-signed with values in the body, since it raises the floor (the
+/// unauthenticated GET it replaced could wipe a commit log, #681).
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CommitSinceReport {
     pub conversation_id: String,
-    /// The suite lineage this position belongs to (#454 P4); absent → `0`. The
-    /// DS keeps `(generation, since)` monotone lexicographically, which is what
-    /// stops a migrated device's report — epoch 0 of generation `N + 1`,
-    /// numerically below the retired lineage's last epoch — reading as a
+    /// The suite lineage of this position (#454); absent → `0`. Kept monotone
+    /// lexicographically with `since`, so a migrated device's epoch 0 is not a
     /// regression.
     #[serde(default)]
     pub generation: i64,
     pub since: i64,
-    /// No-auth (dev/test) path only. When the DS enforces auth both halves come
-    /// from the verified signature and these are ignored — though still
-    /// signature-bound, since the signature covers the whole body.
+    /// No-auth (dev/test) path only; ignored when the DS enforces auth.
     #[serde(default)]
     pub user_id: Option<String>,
     #[serde(default)]
     pub device_id: Option<String>,
 }
 
-// ── Responses (#922) ─────────────────────────────────────────────────────────
-//
-// Moved here from `pollis-delivery::commit` so the submit response has ONE
-// declaration, like every request body already did. `pollis_delivery::commit`
-// re-exports this module wholesale, so `pollis_delivery::commit::SubmitResponse`
-// keeps resolving for its handlers, its tests and the `flows` harness.
-
-/// `POST /v1/commits` — accepted, or rejected with the head to re-base onto.
-///
-/// Both outcomes are this ONE type because they are one decision with two
-/// answers; the HTTP status (200 / 409) mirrors the variant so a client that
-/// only branches on the status is still correct.
+/// `POST /v1/commits`: accepted, or rejected with the head to re-base onto. The
+/// HTTP status (200 / 409) mirrors the variant.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
 pub enum SubmitResponse {
     /// The commit won its epoch. The lineage head is now `epoch + 1`.
     Accepted { generation: i64, epoch: i64 },
-    /// The client wasn't at the head. Here's the current head and the commits
-    /// it's missing so it can re-base and resubmit — no fork possible.
-    ///
-    /// `head` and `missing` are scoped to the SUBMITTER's generation, so a
-    /// pre-hybrid client sees byte-for-byte the response it sees today (its
-    /// generation is 0 and `head_generation` is a field it ignores).
-    /// `head_generation` is the extra bit a hybrid-aware client needs: if it
-    /// exceeds the submitter's generation, the conversation has migrated and the
-    /// client must drain its lineage and pick up the Welcome rather than keep
-    /// re-basing.
+    /// Not at the head: the current head and the missing commits, to re-base
+    /// and resubmit. Scoped to the submitter's generation; a `head_generation`
+    /// above it means the conversation migrated and the client should take the
+    /// Welcome instead of re-basing.
     Rejected {
         head: i64,
         head_generation: i64,
@@ -125,9 +94,3 @@ pub struct CommitWire {
     pub added_device_ids: Option<String>,
     pub created_at: String,
 }
-
-// `CommitsResponse` — the body of the old unauthenticated
-// `GET /v1/commits/:conversation_id` — is gone with the route. The same three
-// answers (`head`, `head_generation`, the commit batch) are served by
-// `reads::ConversationState`, from one transaction, to a signed and
-// membership-gated caller.

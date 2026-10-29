@@ -1,21 +1,18 @@
 //! Account lifecycle: identity rotation, deletion, recovery, security events,
 //! enrollment approval/rejection, device revocation and logout.
 //!
-//! Wire types only — no handler logic, no DB access. See the matching module in
-//! `pollis-delivery` for what the server does with each one.
+//! Wire types only; see the matching `pollis-delivery` module for behaviour.
 
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct RotateIdentityBody {
-    /// The `identity_version` the client read BEFORE rotating — i.e. the head of
-    /// `account_key_log` it believes it is appending onto. The new version is
-    /// `based_on_version + 1`. This is the CAS expectation, the exact analogue of
-    /// a commit's `based_on_epoch`.
+    /// The `identity_version` read before rotating: the CAS expectation (like a
+    /// commit's `based_on_epoch`); the new version is `based_on_version + 1`.
     pub based_on_version: i64,
-    /// New account identity public key, base64 (STANDARD).
+    /// New account identity public key, base64.
     pub account_id_pub: String,
-    /// New `account_recovery` blob, all base64 (STANDARD).
+    /// New `account_recovery` blob, all base64.
     pub salt: String,
     pub nonce: String,
     pub wrapped_key: String,
@@ -39,7 +36,7 @@ pub struct SecurityEventBody {
 #[derive(Serialize, Deserialize)]
 pub struct ApproveEnrollmentBody {
     pub request_id: String,
-    /// base64 (STANDARD) of `approver_pub || nonce || ciphertext`.
+    /// base64 of `approver_pub || nonce || ciphertext`.
     pub wrapped_account_key: String,
     pub approved_by_device_id: String,
     /// Self-scope: when signed it must equal the authenticated user.
@@ -57,24 +54,16 @@ pub struct RejectEnrollmentBody {
 
 #[derive(Serialize, Deserialize)]
 pub struct RevokeDeviceBody {
-    /// The device being revoked (one of the actor's OWN devices, not the caller).
+    /// The device being revoked (one of the actor's own, not the caller).
     pub device_id: String,
     #[serde(default)]
     pub user_id: Option<String>,
 }
 
-/// `POST /v1/devices/revoke` — the tombstone, plus the name the device had at
-/// the moment it was revoked (#987).
-///
-/// The client writes a `device_revoked` security event straight after this, and
-/// a log line that says only "device 01HQ7Z..." is not the answer to "was it the
-/// laptop or the phone?". It used to `SELECT device_name` itself before the
-/// write; the name is on the row the DS is already touching.
-///
-/// `NotFound` keeps the pre-check the client did: the write is bound
-/// `WHERE user_id = actor`, so revoking a device that is not yours is already a
-/// silent no-op, and reporting it as success would tell a user their stolen
-/// laptop had been cut off when nothing happened.
+/// `POST /v1/devices/revoke`: the tombstone plus the device's name at
+/// revocation (#987), for the security event that follows. `NotFound` because
+/// a revoke is bound to the actor's devices, and reporting a no-op as success
+/// would tell a user their stolen laptop was cut off.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum DeviceRevoked {
@@ -88,8 +77,7 @@ pub enum DeviceRevoked {
 
 #[derive(Serialize, Deserialize)]
 pub struct LogoutDeviceBody {
-    /// The device logging out — in practice the signing device itself. Bound
-    /// `WHERE user_id = actor`, so a caller can only remove a device on THEIR OWN
+    /// The device logging out (in practice the signer), bound to the actor's own
     /// account.
     pub device_id: String,
     /// Self-scope: when signed it must equal the authenticated user.
@@ -99,9 +87,8 @@ pub struct LogoutDeviceBody {
 
 #[derive(Serialize, Deserialize)]
 pub struct ResetRecoverBody {
-    /// The device performing the reset — its `user_device` row is KEPT (it stays
-    /// enrolled under the new identity); every OTHER device of the actor is
-    /// dropped. `None` → drop ALL of the actor's devices.
+    /// The device performing the reset, kept enrolled under the new identity;
+    /// every other device is dropped. `None` → drop all.
     #[serde(default)]
     pub current_device_id: Option<String>,
     #[serde(default)]
@@ -114,12 +101,8 @@ pub struct DeleteAccountBody {
     pub user_id: Option<String>,
 }
 
-/// `POST /v1/account/rotate-identity` — the `identity_version` the rotation
-/// landed on.
-///
-/// A lost CAS race answers 409 (with the current head) rather than this type:
-/// the client must re-read and retry, and conflating "applied" with "rejected"
-/// in one body is how a caller ends up treating a refusal as a success.
+/// `POST /v1/account/rotate-identity`: the `identity_version` it landed on. A
+/// lost CAS race is a 409 with the current head, never this type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
 pub enum RotateIdentityResponse {

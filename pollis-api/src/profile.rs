@@ -1,14 +1,12 @@
 //! Profile, preferences, blocks and DM conversations.
 //!
-//! Wire types only — no handler logic, no DB access. See the matching module in
-//! `pollis-delivery` for what the server does with each one.
+//! Wire types only; see the matching `pollis-delivery` module for behaviour.
 
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct UpdateProfileBody {
-    /// The profile being edited; when signed it must equal the authenticated
-    /// user (you can only edit your OWN profile).
+    /// The profile being edited; when signed it must equal the authenticated user.
     pub user_id: String,
     #[serde(default)]
     pub username: Option<String>,
@@ -22,28 +20,20 @@ pub struct UpdateProfileBody {
 
 #[derive(Serialize, Deserialize)]
 pub struct SavePreferencesBody {
-    /// The owner of the preferences; when signed it must equal the authenticated
-    /// user (you can only edit your OWN preferences).
+    /// The owner; when signed it must equal the authenticated user.
     pub user_id: String,
     pub preferences: String,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct BlockBody {
-    /// The user doing the blocking; when signed it must equal the authenticated
-    /// user (you manage only your OWN block list).
+    /// The blocker; when signed it must equal the authenticated user.
     pub blocker_id: String,
     pub blocked_id: String,
 }
 
-/// `POST /v1/dm/create` — the DM, whether it was created now or already existed
-/// (#987).
-///
-/// The client used to do the 2-person dedupe itself — scan `dm_channel_member`,
-/// find an existing pair, then re-read the channel — three reads and a race:
-/// two devices creating the same DM simultaneously each saw no existing pair and
-/// each created one. Deduping inside the write makes "one DM per pair" a
-/// property of the transaction rather than of the client's timing.
+/// `POST /v1/dm/create`: the DM, new or already existing (#987). The 2-person
+/// dedupe happens inside the write, so concurrent creates cannot make two.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
 pub enum CreatedDm {
@@ -52,13 +42,12 @@ pub enum CreatedDm {
         created_by: String,
         created_at: String,
         members: Vec<DmMember>,
-        /// `true` when an existing 2-person DM was returned instead of a new one
-        /// being created. The caller skips MLS group creation in that case — the
-        /// group already exists.
+        /// `true` when an existing 2-person DM was returned; the caller then
+        /// skips MLS group creation.
         existing: bool,
     },
-    /// A proposed pairing is blocked in either direction. One generic refusal for
-    /// every direction, so neither side can infer why their DM failed.
+    /// A proposed pairing is blocked in either direction; one generic refusal,
+    /// so neither side can infer why.
     Blocked,
 }
 
@@ -79,8 +68,7 @@ pub struct CreateDmBody {
     pub id: String,
     /// The creator; when signed it must equal the authenticated user.
     pub creator_id: String,
-    /// Every participant (may or may not include the creator — the creator is
-    /// always inserted as auto-accepted regardless).
+    /// Every participant; the creator is always inserted as auto-accepted.
     pub member_ids: Vec<String>,
     pub created_at: String,
 }
@@ -88,8 +76,7 @@ pub struct CreateDmBody {
 #[derive(Serialize, Deserialize)]
 pub struct AcceptDmBody {
     pub dm_channel_id: String,
-    /// The accepting member; when signed it must equal the authenticated user
-    /// (you accept your OWN pending request, never someone else's).
+    /// The accepting member; when signed it must equal the authenticated user.
     pub user_id: String,
     pub accepted_at: String,
 }
@@ -99,8 +86,8 @@ pub struct AddDmMemberBody {
     pub dm_channel_id: String,
     /// The user being added.
     pub user_id: String,
-    /// The actor performing the add; when signed it must equal the authenticated
-    /// user, and that user must already be a member of the DM.
+    /// The actor; when signed it must equal the authenticated user, who must
+    /// already be a member.
     pub added_by: String,
     pub added_at: String,
 }
@@ -110,81 +97,59 @@ pub struct RemoveDmMemberBody {
     pub dm_channel_id: String,
     /// The user being removed.
     pub user_id: String,
-    /// The actor performing the removal; when signed it must equal the
-    /// authenticated user. Authz: the actor may remove only themselves OR (as the
-    /// channel creator) another member.
+    /// The actor; when signed it must equal the authenticated user. They may
+    /// remove only themselves or, as channel creator, another member.
     pub requester_id: String,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct LeaveDmBody {
     pub dm_channel_id: String,
-    /// The leaving member; when signed it must equal the authenticated user
-    /// (you may only remove your OWN membership).
+    /// The leaving member; when signed it must equal the authenticated user.
     pub user_id: String,
 }
 
-/// `POST /v1/blocks/add` — add a user to the caller's own block list.
-///
-/// A `#[serde(transparent)]` newtype over [`BlockBody`] for the same reason as
-/// [`crate::messages::AddReaction`]: add and remove share one field list, but the
-/// path is a property of the type, so each endpoint needs its own.
+/// `POST /v1/blocks/add`. A transparent newtype over [`BlockBody`], as
+/// [`crate::messages::AddReaction`].
 #[derive(Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct AddBlock(pub BlockBody);
 
-/// `POST /v1/blocks/remove` — remove a user from the caller's own block list.
-/// See [`AddBlock`].
+/// `POST /v1/blocks/remove`; see [`AddBlock`].
 #[derive(Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct RemoveBlock(pub BlockBody);
 
-// ── POST /v1/read-cursors/save ───────────────────────────────────────────────
-
-/// The caller's read cursors, encrypted, for the other devices on the account
-/// (#844).
+/// The caller's read cursors for the account's other devices (#844).
 ///
-/// **This is deliberately NOT shaped like [`SavePreferencesBody`].** Preferences
-/// cross this boundary as plaintext JSON and land in `user_preferences` in the
-/// clear, which is a defensible trade for a theme name. A read cursor is not: it
-/// is a timestamped record of which conversations a human reads and when, so it
-/// crosses as an opaque AEAD blob and the DS stores exactly the bytes it is
-/// handed. The server has no key for it and never will — see
-/// `pollis_core::commands::messages::read_state`.
+/// Unlike [`SavePreferencesBody`] (plaintext, fine for a theme name), this is an
+/// opaque AEAD blob: cursors record which conversations a person reads and when.
+/// The server has no key (`pollis_core::commands::messages::read_state`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SaveReadCursorsBody {
-    /// The owner; when signed it must equal the authenticated user (you sync
-    /// only your OWN cursors).
+    /// The owner; when signed it must equal the authenticated user.
     pub user_id: String,
-    /// base64 — the 12-byte AES-256-GCM nonce.
+    /// base64 12-byte AES-256-GCM nonce.
     pub nonce: String,
-    /// base64 — AES-256-GCM ciphertext + tag over the padded cursor list.
+    /// base64 AES-256-GCM ciphertext + tag over the padded cursor list.
     pub blob: String,
 }
 
-// ── Per-channel mute (#1431) ─────────────────────────────────────────────────
-
-/// `POST /v1/channel-mutes/set` — mute or unmute one group channel for the
-/// caller's whole account.
-///
-/// The mute is stored on the DS, in the clear, because the DS is what acts on
-/// it: the push fan-out (`pollis_delivery::push::notify_new_message`) skips a
-/// recipient who muted the channel unless the message names them directly by
-/// `@username`. Every device of the account reads the same row, which is what
-/// syncs it.
+/// `POST /v1/channel-mutes/set`: mute or unmute one group channel for the whole
+/// account (#1431). Stored in the clear because the DS acts on it: the push
+/// fan-out skips muted recipients unless directly `@`-mentioned.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SetChannelMuteBody {
-    /// The owner; when signed it must equal the authenticated user (you mute
-    /// only for yourself).
+    /// The owner; when signed it must equal the authenticated user.
     pub user_id: String,
-    /// A group CHANNEL id the caller is a member of. A DM or a group id is
-    /// refused: a DM is personal by construction and always notifies.
+    /// A group channel id the caller belongs to. DMs and group ids are refused:
+    /// a DM always notifies.
     pub channel_id: String,
     /// `true` mutes, `false` unmutes. Both are idempotent.
     pub muted: bool,
 }
 
-/// `POST /v1/read/channel-mutes` — the caller's muted channel ids.
+/// `POST /v1/read/channel-mutes`: the caller's muted channel ids.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelMutesBody {
     /// Must equal the authenticated user; a mismatch is a 403.

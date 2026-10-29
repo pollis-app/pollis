@@ -1,17 +1,9 @@
 //! iOS-only placement of the core's data directory (#1306).
 //!
-//! Everything the core keeps — the local SQLCipher DB, `keystore.pks`,
-//! `accounts.json`, the media cache, `logs/` — lives under `dirs_path()`. On
-//! iOS that used to fall back to `std::env::temp_dir()`, i.e. the sandbox's
-//! `tmp/`, which the system may purge while the app is not running. A purge
-//! would leave a Keychain KEK with nothing to unwrap: a silently re-enrolled
-//! device, which is not one of the acceptable losses.
-//!
-//! The directory is `Library/Application Support/pollis` inside the app
-//! container: persistent, never purged, and not user-visible. It is excluded
-//! from iCloud/iTunes backup so a restore onto another phone cannot carry the
-//! state without the Keychain item (which is `ThisDeviceOnly` and does not
-//! travel) — the same "a new device starts empty" rule as everywhere else.
+//! The data directory is `Library/Application Support/pollis`: unlike the
+//! sandbox `tmp/`, iOS never purges it, which would otherwise strand the
+//! Keychain KEK and silently re-enrol the device. It is excluded from backup so
+//! a restore onto another phone starts empty, like every new device.
 
 #![cfg(target_os = "ios")]
 
@@ -21,8 +13,7 @@ use core_foundation::base::TCFType;
 use core_foundation::boolean::CFBoolean;
 use core_foundation::url::CFURL;
 
-/// `$HOME/Library/Application Support/pollis`. On iOS `$HOME` is the app's
-/// sandbox container, so this never leaves it.
+/// `$HOME/Library/Application Support/pollis` (`$HOME` is the sandbox container).
 pub fn data_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_default();
     PathBuf::from(home).join("Library/Application Support/pollis")
@@ -35,8 +26,7 @@ pub fn prepare(dir: &Path) -> std::io::Result<()> {
     exclude_from_backup(dir)
 }
 
-/// Sets `NSURLIsExcludedFromBackupKey` on `dir`. The flag lives on the
-/// directory and covers everything beneath it, including files written later.
+/// Sets `NSURLIsExcludedFromBackupKey` on `dir`; it covers everything beneath it.
 fn exclude_from_backup(dir: &Path) -> std::io::Result<()> {
     let url = CFURL::from_path(dir, true).ok_or_else(|| {
         std::io::Error::other(format!("not a valid file URL: {}", dir.display()))

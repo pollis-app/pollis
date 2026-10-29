@@ -14,8 +14,6 @@ pub mod error;
 pub mod keystore;
 pub mod media_server;
 pub mod net;
-// Marking files that leave the app for the user's own filesystem: macOS
-// quarantine, Windows mark-of-the-web.
 pub mod downloads;
 pub mod private_fs;
 pub mod realtime;
@@ -24,9 +22,7 @@ pub mod sink;
 pub mod state;
 pub mod util;
 
-// Re-export so downstream crates (pollis-node, src-tauri shims) can name
-// types like `Selection`/`SourceList` that appear in screenshare command
-// signatures without adding pollis-capture-proto as a direct dep.
+// Re-exported so downstream crates can name screenshare types without a direct dep.
 pub use pollis_capture_proto;
 
 #[uniffi::export]

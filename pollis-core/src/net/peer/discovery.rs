@@ -1,64 +1,33 @@
 //! Where peer-hosted relays come from, and where they are allowed to sit in a
 //! circuit.
 //!
-//! # Trust model: the signed directory, or nothing
+//! Candidates come only from the Ed25519-signed relay directory
+//! ([`crate::net::directory`]), verified against the pinned key: an unsigned
+//! channel could feed a target hand-picked relays. That also gives peers the
+//! directory's revocation (by `cert_sha256_b64`) for free.
 //!
-//! A client learns of candidate peer relays through **exactly one channel**: the
-//! Ed25519-signed relay directory it already consumes ([`crate::net::directory`],
-//! #616 §3), verified against the client-pinned `POLLIS_OVERLAY_DIRECTORY_KEY`
-//! before a single byte of it is believed. Peers are an additive optional field
-//! in that artifact, the same shape phase C used for the revocation anchor — no
-//! version bump, no second trust root, no gossip, no DHT, no
-//! "peer told me about another peer". A discovery channel that is not signed by
-//! the key clients already pin would be a way to feed a target a hand-picked set
-//! of relays, which is the one attack the whole directory design exists to stop.
+//! [`peer_position_admissible`] decides where a peer may sit:
 //!
-//! Practically that also means peer entries inherit phase C's revocation for
-//! free: revocation selectors include `cert_sha256_b64` precisely so a single
-//! peer identity can be pulled without touching the rest of the pool.
+//! - never terminal: the exit talks to Turso/DS/R2 and must be first-party (the
+//!   peer engine also refuses all destinations, a second barrier);
+//! - never the guard: every hop learns the account from the device cert, and the
+//!   guard also sees the client's IP, so a peer guard would hand a volunteer the
+//!   account↔IP link.
 //!
-//! [`PeerCatalog::from_verified_directory`] is the only constructor, and its
-//! name is the contract: the caller must have verified the artifact. Nothing in
-//! this module fetches anything.
-//!
-//! # Position policy: never terminal, never the guard
-//!
-//! [`peer_position_admissible`] is the single place that decides. Both
-//! exclusions are load-bearing and neither is about trust in the volunteer:
-//!
-//! - **Terminal** is excluded because the exit hop talks to Turso/DS/R2 and must
-//!   be first-party (§1.2 — no third-party liability). The peer engine also
-//!   refuses destinations outright ([`super::engine`]), so this rule is the
-//!   second of two independent barriers, not the only one.
-//! - **Guard** (hop 1) is excluded because every hop authenticates the client's
-//!   device cert and therefore learns which **account** built the circuit (Phase
-//!   A's decision log). A guard additionally sees the client's IP, so a peer
-//!   guard would hand a volunteer the exact account↔IP link this feature exists
-//!   to keep away from everyone. A first-party guard already holds it and is
-//!   accountable for it.
-//!
-//! What is left is the middle, which is also the position where a peer learns
-//! the least: not the client's address, not the destination — only that some
-//! account is building a circuit through it.
+//! The middle is also where a peer learns the least.
 
 use pollis_relay::CertificateDer;
 
 /// One peer-hosted relay a client may use as a middle hop.
 #[derive(Debug, Clone)]
 pub struct PeerCandidate {
-    /// Stable opaque id from the directory. Not a user id and not derived from
-    /// one — a relay identity must not be linkable to an account.
+    /// Stable opaque id from the directory, never linkable to an account.
     pub id: String,
-    /// The leaf cert the client pins for this peer. Its identity *is* this cert
-    /// (§7): whatever carries the link cannot substitute itself for it, because
-    /// the layer to this hop is authenticated end to end against exactly this
-    /// cert.
+    /// The leaf cert the client pins for this peer; the layer to this hop is
+    /// authenticated against exactly this cert.
     pub cert_der: CertificateDer<'static>,
-    /// The first-party relay this peer has parked an outbound link with. There
-    /// is deliberately no "dial the peer directly" alternative to represent: a
-    /// peer never listens for inbound connections ([`super::engine`] binds
-    /// loopback), so a directly-dialable peer is not a state this design can be
-    /// in.
+    /// The first-party relay this peer has parked an outbound link with (a peer
+    /// never listens for inbound connections).
     pub via_relay: String,
 }
 
@@ -69,13 +38,8 @@ pub struct PeerCatalog {
 }
 
 impl PeerCatalog {
-    /// Build from entries taken out of an **already-verified** signed directory.
-    ///
-    /// The verification (signature against the pinned key, version, expiry) is
-    /// [`crate::net::directory`]'s job and has already happened by the time
-    /// entries reach here. There is deliberately no constructor that takes bytes
-    /// or a URL: that would make it possible to build a catalog from something
-    /// nobody checked.
+    /// Build from entries of an already-verified signed directory. There is
+    /// deliberately no constructor taking bytes or a URL.
     pub fn from_verified_directory<I>(entries: I) -> PeerCatalog
     where
         I: IntoIterator<Item = PeerCandidate>,
@@ -93,12 +57,8 @@ impl PeerCatalog {
         self.candidates.is_empty()
     }
 
-    /// The candidates usable at `position` of a `path_len`-hop path, or an empty
-    /// slice when a peer may not sit there at all.
-    ///
-    /// Returning a slice rather than a choice keeps selection (guard pinning,
-    /// diversity, latency) in `net::overlay` where the rest of path selection
-    /// lives; this module owns only the admissibility rule.
+    /// The candidates usable at `position` of a `path_len`-hop path, or empty
+    /// where a peer may not sit. Selection itself stays in `net::path`.
     pub fn candidates_for(&self, position: usize, path_len: usize) -> &[PeerCandidate] {
         if !peer_position_admissible(position, path_len) {
             return &[];
@@ -109,8 +69,7 @@ impl PeerCatalog {
 
 /// May a peer-hosted relay occupy `position` (0-based) of a `path_len`-hop path?
 ///
-/// True only for a strictly interior hop, which needs `path_len >= 3`. See the
-/// module docs for why the guard is excluded as well as the exit.
+/// True only for a strictly interior hop (`path_len >= 3`); see the module docs.
 pub fn peer_position_admissible(position: usize, path_len: usize) -> bool {
     if path_len < 3 {
         return false;
@@ -118,7 +77,6 @@ pub fn peer_position_admissible(position: usize, path_len: usize) -> bool {
     if position >= path_len {
         return false;
     }
-    // Not the guard, not the exit.
     position > 0 && position + 1 < path_len
 }
 
@@ -138,7 +96,6 @@ mod tests {
         PeerCatalog::from_verified_directory([candidate("p1"), candidate("p2")])
     }
 
-    /// The rule the exit constraint rests on, from the policy side.
     #[test]
     fn a_peer_is_never_admissible_as_the_exit() {
         for path_len in 1..=4 {
@@ -167,12 +124,10 @@ mod tests {
         assert!(peer_position_admissible(1, 3));
         assert_eq!(catalog().candidates_for(1, 3).len(), 2);
 
-        // A 4-hop path has two interior positions.
         assert!(peer_position_admissible(1, 4));
         assert!(peer_position_admissible(2, 4));
     }
 
-    /// A two-hop path has no interior position, so it can never carry a peer.
     #[test]
     fn short_paths_have_no_room_for_a_peer() {
         assert!(!peer_position_admissible(0, 2));

@@ -1,39 +1,15 @@
 //! `pollis_search_text` — the one transform between a stored message body and
 //! the tokens the full-text index holds (#850).
 //!
-//! Registered as a deterministic SQLite scalar function on every local
-//! connection, because the FTS5 triggers in `local_schema.sql` call it. That is
-//! deliberate: putting the transform in SQL-reachable code is what lets the
-//! index be maintained by triggers instead of by ten Rust write sites that each
-//! have to remember (CLAUDE.md ranks code discipline last).
-//!
-//! It does three things, and each one is load-bearing:
-//!
-//! 1. **Unwraps the attachment envelope.** A message body is either raw text or
-//!    `{"_att":[{"key":…,"url":…,"name":…,"hash":…}],"_txt":…}`. Only `_txt`
-//!    and each attachment's `name` are indexed; `key`, `url`, `ct`, `hash`,
-//!    `bh` and `size` are dropped. Without this, searching for `media` or a hex
-//!    fragment matches every message that carries an attachment, because the R2
-//!    object key and the content hash are sitting in the body.
-//! 2. **Segments CJK into overlapping bigrams.** `unicode61` tokenises
-//!    `今天天气很好` as ONE token, so `今天` finds nothing; `trigram` needs three
-//!    characters, and most Chinese words are two. Emitting bigrams at index
-//!    time and applying the identical transform to the query is what makes
-//!    Mandarin searchable at all.
-//! 3. **Emits sentinel tokens** for `has:attachment` and `has:link`, so those
-//!    filters are ordinary MATCH terms rather than an extra column, an extra
-//!    index, or a schema change.
-//!
-//! **Determinism is a correctness requirement, not a nicety.** A contentless
-//! FTS5 table is told what to delete by being handed the body it indexed, so
-//! the delete trigger re-runs this function over `old.content`. If the output
-//! for a given input ever changes, previously indexed rows can no longer be
-//! deleted and the index drifts — which is what `rebuild_search_index` exists
-//! to repair.
+//! A deterministic SQLite scalar function, called by the FTS5 triggers in
+//! `local_schema.sql`. It unwraps the attachment envelope (only `_txt` and
+//! filenames are indexed), segments CJK into bigrams, and emits `has:` sentinel
+//! tokens. Its output for a given input must never change: the contentless
+//! index's delete trigger re-runs it over `old.content`. See
+//! `.codesight/wiki/search.md`.
 
-/// Sentinel token meaning "this message carries an attachment". Namespaced so
-/// it cannot collide with a real word; stripped from user input by the query
-/// parser so nobody can inject it by typing it.
+/// Sentinel token meaning "this message carries an attachment"; stripped from
+/// user input so it cannot be typed.
 pub const ATTACHMENT_SENTINEL: &str = "zzpollisatt";
 
 /// Sentinel token meaning "this message contains a link".
@@ -42,11 +18,8 @@ pub const LINK_SENTINEL: &str = "zzpollislnk";
 /// Every sentinel, for the query parser to strip out of free text.
 pub const SENTINELS: [&str; 2] = [ATTACHMENT_SENTINEL, LINK_SENTINEL];
 
-/// Is `c` in a script whose words are not space-separated, i.e. one that
-/// `unicode61` will run together into a single token?
-///
-/// Kana is included even though Japanese has its own segmentation rules: an
-/// unsegmented kana run has exactly the same failure mode as a Han one.
+/// Is `c` in a script whose words are not space-separated (so `unicode61` runs
+/// them into one token)? Kana included: same failure mode as Han.
 pub fn is_cjk(c: char) -> bool {
     matches!(c as u32,
         0x3040..=0x30FF     // Hiragana + Katakana
@@ -63,15 +36,9 @@ pub fn has_cjk(s: &str) -> bool {
     s.chars().any(is_cjk)
 }
 
-/// Rewrite `text` so every CJK run becomes space-separated overlapping
-/// bigrams, leaving everything else untouched.
-///
-/// `今天天气很好` becomes `今天 天天 天气 气很 很好`. A one-character run is
-/// emitted as itself, so a lone `好` is still findable.
-///
-/// The same function runs over query terms, which is what makes the two sides
-/// agree: `今天` is one bigram token, `会议明天` is the ordered bigram sequence
-/// `会议 议明 明天` and is issued as a phrase.
+/// Rewrite every CJK run as space-separated overlapping bigrams (`今天天气很好`
+/// → `今天 天天 天气 气很 很好`); a one-character run stays as is. Queries go
+/// through the same function, so both sides agree.
 pub fn segment_cjk(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut run: Vec<char> = Vec::new();
@@ -85,10 +52,8 @@ pub fn segment_cjk(text: &str) -> String {
         out.push(c);
     }
     flush_cjk_run(&mut run, &mut out);
-    // Flushing a run always emits a trailing separator, so a run followed by
-    // real whitespace leaves a double space. Tokenisation would not care, but
-    // the query side compares segmented strings for equality — normalising here
-    // is what keeps the two sides byte-identical.
+    // A run before real whitespace leaves a double space; the query side
+    // compares segmented strings, so normalise.
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
@@ -107,17 +72,12 @@ fn flush_cjk_run(run: &mut Vec<char>, out: &mut String) {
             out.push(pair[1]);
         }
     }
-    // Bigrams are their own tokens; without a boundary the run would fuse into
-    // whatever follows it.
     out.push(' ');
     run.clear();
 }
 
-/// The human-readable text of a message body: the caption plus any attachment
-/// filenames, with the transport metadata dropped.
-///
-/// This is also what the snippet is cut from, so the two cannot disagree about
-/// what the message "says".
+/// The human-readable text of a message body: the caption plus attachment
+/// filenames. Snippets are cut from this too.
 pub fn plain_text(content: &str) -> String {
     match parse_envelope(content) {
         Some(parsed) => {
@@ -141,9 +101,7 @@ pub fn has_attachment(content: &str) -> bool {
 
 /// Whether a body's human-readable text contains a link.
 ///
-/// Deliberately naive, and deliberately NOT run over the attachment envelope's
-/// `url` field — every attachment message would otherwise answer yes and
-/// `has:link` would stop meaning anything.
+/// Not run over the envelope's `url`, or every attachment would answer yes.
 pub fn has_link(content: &str) -> bool {
     let text = plain_text(content).to_lowercase();
     text.contains("http://") || text.contains("https://") || text.contains("www.")
@@ -157,9 +115,7 @@ struct Envelope {
 
 /// Parse the `{"_att":[…],"_txt":…}` envelope, or `None` for a plain body.
 ///
-/// Cheap-rejects anything that does not start with `{` before handing bytes to
-/// serde: the overwhelming majority of messages are plain text and this runs on
-/// every insert.
+/// Cheap-rejects anything not starting with `{`: this runs on every insert.
 fn parse_envelope(content: &str) -> Option<Envelope> {
     let trimmed = content.trim_start();
     if !trimmed.starts_with('{') {
@@ -222,11 +178,9 @@ pub fn strip_sentinels(text: &str) -> String {
         if !lower.contains(sentinel) {
             continue;
         }
-        // Case-insensitive removal, without pulling in a regex engine. Safe to
-        // slice `out` at offsets found in `lower` only because `to_lowercase`
-        // is length-preserving for ASCII, and the sentinels are ASCII: a
-        // non-ASCII character's lowercase form can change byte length, so the
-        // match position is recomputed from the rebuilt prefix instead.
+        // Case-insensitive removal without a regex. Offsets from `lower` are
+        // valid in `out` only while lowercasing preserves byte length, hence the
+        // char-boundary check.
         let mut rebuilt = String::with_capacity(out.len());
         let mut cursor = 0usize;
         while let Some(at) = lower[cursor..].find(sentinel) {
@@ -245,8 +199,7 @@ pub fn strip_sentinels(text: &str) -> String {
 
 /// Register `pollis_search_text` on a connection.
 ///
-/// Must run before ANY write to `message`, because the triggers call it and an
-/// unregistered function fails the whole statement with `no such function`.
+/// Must run before any write to `message`: the triggers call it.
 pub fn register(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
     use rusqlite::functions::FunctionFlags;
     conn.create_scalar_function(
@@ -290,9 +243,7 @@ mod tests {
     #[test]
     fn cjk_runs_become_overlapping_bigrams() {
         assert_eq!(segment_cjk("今天天气很好").trim(), "今天 天天 天气 气很 很好");
-        // A query for a two-character word is exactly one of those bigrams.
         assert_eq!(segment_cjk("今天").trim(), "今天");
-        // Mixed scripts keep their Latin half verbatim.
         assert_eq!(segment_cjk("meet 明天 ok").trim(), "meet 明天 ok");
     }
 
@@ -316,9 +267,7 @@ mod tests {
         assert!(!indexed.contains(ATTACHMENT_SENTINEL), "{indexed}");
     }
 
-    /// The delete trigger hands the index `pollis_search_text(old.content)` and
-    /// expects the exact bytes the insert put there. Same input, same output —
-    /// forever, or the index drifts.
+    /// The delete trigger needs the exact bytes the insert indexed.
     #[test]
     fn the_transform_is_deterministic() {
         for body in [
