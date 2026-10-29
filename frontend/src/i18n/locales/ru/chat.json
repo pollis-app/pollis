@@ -6,6 +6,7 @@
     "encrypted": "[зашифровано]",
     "redacted": "[скрыто]",
     "edited": "(изменено)",
+    "editUnsent": "(изменение не отправлено)",
     "newMember": "новый",
     "newMemberTitle": "В группе меньше 7 дней"
   },

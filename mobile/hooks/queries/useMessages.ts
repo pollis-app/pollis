@@ -62,12 +62,17 @@ export interface RawChannelMessage {
   /** Our own message the durable outbox has not delivered yet (#1335).
    *  Absent once delivered, and on everything received. */
   send_state?: SendState;
+  /** Our edit of it the DS has not confirmed yet (#1555); `content` is the
+   *  edited text. */
+  edit_state?: SendState;
 }
 
 /** Mirror of `pollis_core::commands::messages::OutboxReport`. */
 interface OutboxReport {
   delivered: string[];
   failed: string[];
+  edits_delivered: string[];
+  edits_failed: string[];
 }
 
 /** Mirror of `pollis_core::commands::messages::ThreadSummary`. */
@@ -102,6 +107,9 @@ export interface Message {
   /** A placeholder for a message this device could not decrypt (#1312):
    *  no content, no author, nothing to act on. */
   undecryptable?: boolean;
+  /** Our edit of it is stored but its delivery failed (#1555); the outbox
+   *  drain retries it. A pending edit is drawn as an ordinary one. */
+  edit_unsent?: boolean;
   /** How many consecutive placeholders this row stands for — set by
    *  `collapseUndecryptable` when the timeline is built. */
   undecryptableCount?: number;
@@ -142,6 +150,8 @@ function transform(raw: RawChannelMessage): Message {
     edited_at: raw.edited_at ? new Date(raw.edited_at).getTime() : undefined,
     deleted_at: raw.deleted_at ? new Date(raw.deleted_at).getTime() : undefined,
     undecryptable: raw.undecryptable === true ? true : undefined,
+    edit_unsent:
+      raw.edit_state === "failed" || raw.edit_state === "rejected" ? true : undefined,
     ...unsentFlags(raw.id, raw.send_state),
   };
 }
@@ -613,7 +623,12 @@ export async function flushOutbox(
 ): Promise<void> {
   try {
     const report = await invoke<OutboxReport>("flush_outbox");
-    if ((report?.delivered?.length ?? 0) + (report?.failed?.length ?? 0) > 0) {
+    const touched =
+      (report?.delivered?.length ?? 0) +
+      (report?.failed?.length ?? 0) +
+      (report?.edits_delivered?.length ?? 0) +
+      (report?.edits_failed?.length ?? 0);
+    if (touched > 0) {
       await queryClient.invalidateQueries({ queryKey: messageQueryKeys.all });
       await queryClient.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
     }
@@ -722,6 +737,11 @@ export function useEditMessage(
     onError: (_e, _vars, ctx) => {
       if (ctx?.previous) {
         queryClient.setQueryData(ctx.key, ctx.previous);
+      }
+      // The core kept the edit in its outbox (#1555): read it back, now
+      // labelled as not sent, and the drain delivers it later.
+      if (ctx?.key) {
+        queryClient.invalidateQueries({ queryKey: ctx.key });
       }
     },
   });

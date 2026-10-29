@@ -66,6 +66,7 @@ export function MessageRow({
   onRetry,
   onDiscard,
   edited,
+  editUnsent,
   reactions,
   currentUserId,
   onToggleReaction,
@@ -101,6 +102,8 @@ export function MessageRow({
   onRetry?: () => void;
   onDiscard?: () => void;
   edited?: boolean;
+  /** Our edit of this message is stored but its delivery failed (#1555). */
+  editUnsent?: boolean;
   reactions?: Reaction[];
   currentUserId?: string;
   onToggleReaction?: (emoji: string, reacted: boolean) => void;
@@ -367,7 +370,9 @@ export function MessageRow({
                   selfName={selfName}
                 />
                 {edited ? (
-                  <Text style={ty.meta}>{`  ${t("message.edited")}`}</Text>
+                  <Text style={ty.meta} testID={editUnsent ? "text-edit-unsent" : undefined}>
+                    {`  ${editUnsent ? t("message.editUnsent") : t("message.edited")}`}
+                  </Text>
                 ) : null}
               </Text>
             ) : null}

@@ -294,8 +294,11 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           >
             <MessageBody text={content} ctx={ctx} />
             {message.edited_at && !isDeleted && (
-              <span className="ms-1 text-xs text-muted">
-                {t("message.edited")}
+              <span
+                className="ms-1 text-xs text-muted"
+                data-testid={message.edit_unsent ? "message-edit-unsent" : undefined}
+              >
+                {message.edit_unsent ? t("message.editUnsent") : t("message.edited")}
               </span>
             )}
             {/* Only a FAILED send is labelled. An optimistic row already looks sent
@@ -443,8 +446,11 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           >
             <MessageBody text={content} ctx={ctx} />
             {message.edited_at && !isDeleted && (
-              <span className="ms-1 text-xs text-muted">
-                {t("message.edited")}
+              <span
+                className="ms-1 text-xs text-muted"
+                data-testid={message.edit_unsent ? "message-edit-unsent" : undefined}
+              >
+                {message.edit_unsent ? t("message.editUnsent") : t("message.edited")}
               </span>
             )}
             {/* Only a FAILED send is labelled. An optimistic row already looks sent

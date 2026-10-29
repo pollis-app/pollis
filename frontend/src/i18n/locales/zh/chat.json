@@ -6,6 +6,7 @@
     "encrypted": "[已加密]",
     "redacted": "[已隐去]",
     "edited": "（已编辑）",
+    "editUnsent": "（编辑未发送）",
     "newMember": "新",
     "newMemberTitle": "加入不到 7 天"
   },

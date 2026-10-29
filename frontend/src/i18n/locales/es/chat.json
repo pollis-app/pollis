@@ -6,6 +6,7 @@
     "encrypted": "[cifrado]",
     "redacted": "[retirado]",
     "edited": "(editado)",
+    "editUnsent": "(edición no enviada)",
     "newMember": "nuevo",
     "newMemberTitle": "Se unió en los últimos 7 días"
   },

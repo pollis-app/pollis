@@ -10,7 +10,9 @@
  *   - a message a killed process left unsent is delivered by the launch drain;
  *   - one that still cannot go is shown failed, with Retry and Discard;
  *   - a send that fails now is kept, labelled, and Retry delivers it once;
- *   - Discard removes an unsent message.
+ *   - Discard removes an unsent message;
+ *   - an edit that cannot go is kept, labelled, and the drain delivers it
+ *     (the edit outbox, #1555).
  *
  *   pnpm --filter @pollis/e2e exec playwright test -c playwright.config.js outbox
  */
@@ -216,3 +218,51 @@ test("Discard removes an unsent message", async ({ page }) => {
   );
   expect(left).toEqual([MSG_BOB]);
 });
+
+// ── The edit outbox (#1555) ─────────────────────────────────────────────────
+
+const MSG_MINE = "01HQ7Z3K9M2P5R8T1V4W6Y0MNE";
+
+const editState = (page: Page, id: string) =>
+  page.evaluate(
+    ([channel, msg]) =>
+      (window as any).__tauriMock.messages[channel].find((m: { id: string }) => m.id === msg)
+        ?.edit_state ?? null,
+    [CHANNEL_ID, id],
+  );
+
+for (const skin of SKINS) {
+  test(`an edit that cannot go is kept, labelled, and the drain delivers it (${skin})`, async ({ page }) => {
+    const preload = preloadState(skin, "pending", true);
+    preload.messages[CHANNEL_ID].push({
+      id: MSG_MINE,
+      conversation_id: CHANNEL_ID,
+      sender_id: USER.id,
+      sender_username: USER.username,
+      content: "first draft",
+      sent_at: "2026-10-14T15:03:00.000Z",
+    });
+    await boot(page, preload);
+    await openChannel(page);
+
+    const row = page.getByTestId(`message-${MSG_MINE}`);
+    await row.hover();
+    await row.getByTestId("edit-button").click();
+    const input = page.getByTestId("edit-message-bar-input");
+    await input.fill("second draft");
+    await input.press("Enter");
+
+    // The core kept the edit: the author sees it, marked as not sent.
+    await expect(row).toContainText("second draft");
+    await expect(row.getByTestId("message-edit-unsent")).toBeVisible();
+    expect(await editState(page, MSG_MINE)).toBe("failed");
+    await page.screenshot({ path: test.info().outputPath(`outbox-edit-failed-${skin}.png`) });
+
+    // Back online: the drain delivers it, with no user action.
+    await page.evaluate(() => (window as any).__tauriFailSends(false));
+    await page.evaluate(() => window.dispatchEvent(new Event("online")));
+    await expect.poll(() => editState(page, MSG_MINE)).toBeNull();
+    await expect(row.getByTestId("message-edit-unsent")).toHaveCount(0);
+    await expect(row).toContainText("second draft");
+  });
+}
