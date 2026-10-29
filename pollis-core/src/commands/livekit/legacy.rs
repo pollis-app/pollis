@@ -4,18 +4,12 @@ use crate::commands::mls::ds_livekit_token;
 use crate::error::Result;
 use crate::state::AppState;
 
-// ── LiveKit token commands ─────────────────────────────────────────────────
-//
-// Minting moved server-side to the DS (#393): identity + display name are
-// derived from the verified signer there, so the client-supplied `identity` /
-// `display_name` args are ignored (kept for Tauri command-signature stability).
-
+// Minted by the DS (#393) from the verified signer, so the `identity` /
+// `display_name` args are ignored (kept for command-signature stability).
 /// A minted LiveKit credential: the JWT and the server it is valid at.
 ///
-/// These are returned together on purpose. A LiveKit JWT is only accepted by the
-/// server that issued it, so handing back a bare token forces the caller to guess
-/// the address — which is how the SFU address ended up compiled into every shipped
-/// binary in the first place.
+/// Returned together: a LiveKit JWT is only accepted by the server that issued
+/// it.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LivekitCredential {
     pub token: String,
@@ -32,8 +26,8 @@ pub async fn get_livekit_token(
     Ok(LivekitCredential { token, url })
 }
 
-/// Mint a subscribe-only, hidden JWT for the renderer-side livekit-client
-/// view connection (screenshare receive) — the DS `view` kind.
+/// A subscribe-only, hidden token for the renderer's screenshare-receive
+/// connection (the DS `view` kind).
 pub async fn get_livekit_view_token(
     room_name: String,
     _identity: String,
@@ -46,10 +40,8 @@ pub async fn get_livekit_view_token(
 
 /// The compiled-in DEFAULT LiveKit address.
 ///
-/// Deliberately not authoritative: it is only the fallback used when a
-/// self-hosted DS leaves `LIVEKIT_URL` unset. Anything that dials a room should
-/// use the `url` returned beside that room's token (`LivekitCredential`), because
-/// only the issuing server will accept the JWT.
+/// Only the fallback for a self-hosted DS without `LIVEKIT_URL`; dial the `url`
+/// returned beside a room's token instead.
 pub async fn get_livekit_url(state: &Arc<AppState>) -> Result<String> {
     Ok(state.config.livekit_url.clone())
 }

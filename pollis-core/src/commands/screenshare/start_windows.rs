@@ -1,37 +1,12 @@
-//! Windows capture lifecycle. In-process via the `windows-capture` crate
-//! (Windows.Graphics.Capture). Like macOS, no subprocess is needed — WGC
-//! is a clean in-proc linkage and doesn't fight libwebrtc/cpal/Tauri the
-//! way Linux's libpipewire does.
+//! Windows capture lifecycle, in-process via `windows-capture` (WGC), which
+//! links cleanly beside libwebrtc and cpal.
 //!
-//! Source selection (mirrors macOS, since spike/tauri-revival):
-//!   `enumerate_screen_sources` runs `Monitor::enumerate()` +
-//!   `Window::enumerate()`, captures a 320×200 GDI thumbnail per source
-//!   (BitBlt for monitors, PrintWindow for windows), and returns a
-//!   `SourceList` the frontend's in-app picker renders directly. The raw
-//!   `Monitor` / `Window` handles are cached in `ScreenShareState::windows_picker`,
-//!   keyed by 0-based index. `start_screen_share(Some(Selection))` looks the
-//!   handle up and feeds it straight into `Settings`. `Selection::None` is a
-//!   safety-net path that falls back to the native `GraphicsCapturePicker`,
-//!   preserved so a frontend regression can't strand the user.
-//!
-//! Capture flow:
-//!   1. Resolve the capture source — cached Monitor/Window for the
-//!      in-app picker path, or `GraphicsCapturePicker::pick_item()` for
-//!      the native fallback.
-//!   2. Create the LiveKit NativeVideoSource + LocalVideoTrack, publish
-//!      to the current voice room as Screenshare/VP8.
-//!   3. Run the blocking `WindowsCaptureHandler::start(settings)` on a
-//!      dedicated owned thread. The frame callback converts every BGRA8
-//!      WGC frame to I420 inline (off the tokio runtime — WGC pumps on
-//!      its own worker thread).
-//!   4. Stash the JoinHandle + per-session fence in state so stop is
-//!      synchronous + ordered with the track unpublish.
-//!
-//! We use one dedicated thread (not `start_free_threaded`) because the
-//! native-picker fallback's `PickedGraphicsCaptureItem` is `!Send`. With
-//! the in-app picker path `Monitor`/`Window` ARE `Send`, but keeping the
-//! same thread structure across both paths means one set of teardown
-//! semantics in `stop_screen_share`.
+//! `enumerate_screen_sources` lists monitors and windows with 320×200 GDI
+//! thumbnails for the in-app picker and caches the handles by index;
+//! `start_screen_share(Some(Selection))` looks the pick up. `None` falls back
+//! to the native `GraphicsCapturePicker`, so a frontend regression cannot
+//! strand the user. Capture runs on one owned thread for both paths (the
+//! native picker's item is `!Send`), so `stop_screen_share` has one teardown.
 
 use std::sync::Arc;
 
@@ -54,33 +29,22 @@ use super::{
     fail_capture, RawSink, ScreenShareEvent, LOCAL_PREVIEW_KEY, PREVIEW_MIN_INTERVAL,
 };
 
-// ── Thumbnail size for the in-app picker ──────────────────────────────────
-//
-// Matches the size the Electron path requests from `desktopCapturer.getSources`
-// — 320×200, 16:10 — so the same `ScreenSharePicker` grid renders consistently
-// across runtimes. The bytes go out as a base64-encoded PNG data URL.
+// Thumbnail size for the in-app picker (16:10), sent as a base64 PNG data URL.
 const THUMB_W: u32 = 320;
 const THUMB_H: u32 = 200;
 
-// ── Picker cache ──────────────────────────────────────────────────────────
-
-/// Cached enumeration result the frontend's in-app picker is rendering.
-/// `Monitor`/`Window` are `Send` and hold a bare `HMONITOR`/`HWND`, so
-/// stashing them is cheap and they cross threads safely when handed to
-/// the capture thread. Indices match the `DisplaySource::id` /
-/// `WindowSource::id` values returned in the proto.
+/// The enumeration the in-app picker is rendering, indexed like the proto's
+/// `DisplaySource::id` / `WindowSource::id`. The handles are bare
+/// `HMONITOR`/`HWND`s and `Send`.
 pub struct WindowsPickerCache {
     pub displays: Vec<Monitor>,
     pub windows: Vec<Window>,
 }
 
-// ── Commands ──────────────────────────────────────────────────────────────
-
 pub async fn enumerate_screen_sources(
     state: &Arc<AppState>,
 ) -> Result<pollis_capture_proto::SourceList> {
-    // EnumDisplayMonitors / EnumChildWindows + the GDI thumbnail capture
-    // are blocking GDI work — keep them off the tokio worker.
+    // Blocking GDI work: off the tokio worker.
     let enumerated = tokio::task::spawn_blocking(enumerate_blocking)
         .await
         .map_err(|e| anyhow::anyhow!("enumerate join: {e}"))??;
@@ -102,9 +66,8 @@ pub async fn cancel_screen_share_picker(state: &Arc<AppState>) -> Result<()> {
     Ok(())
 }
 
-/// `with_audio` also captures the machine's audio output — everything
-/// except our own process tree, so the call is never re-published. See
-/// `super::windows_audio`.
+/// `with_audio` also captures the machine's audio output minus our own process
+/// tree, so the call is never re-published (`super::windows_audio`).
 pub async fn start_screen_share(
     state: &Arc<AppState>,
     selection: Option<pollis_capture_proto::Selection>,
@@ -121,7 +84,7 @@ pub async fn start_screen_share(
         crate::error::Error::Other(anyhow::anyhow!("not in a voice channel — join voice first"))
     })?;
 
-    // Re-share must start from a clean slate (same rationale as macOS).
+    // Start from a clean slate.
     {
         let has_prev = {
             let ss = state.screenshare.lock().await;
@@ -132,8 +95,7 @@ pub async fn start_screen_share(
         }
     }
 
-    // Resolve the capture source. `Selection::None` -> native WGC picker
-    // (rare safety-net path); `Some` -> cached handle from the in-app picker.
+    // `None`: the native WGC picker (safety net); `Some`: the cached handle.
     let capture_source = match selection {
         None => CaptureSource::NativePicker,
         Some(sel) => {
@@ -143,7 +105,6 @@ pub async fn start_screen_share(
                     "screen-share picker cache is empty — re-open the picker"
                 ))
             })?;
-            // Drop the lock before doing anything else.
             drop(ss);
             match sel {
                 pollis_capture_proto::Selection::Display { id, .. } => {
@@ -174,9 +135,8 @@ pub async fn start_screen_share(
         }
     };
 
-    // 1. LiveKit source + track. Provisional resolution; the first WGC
-    //    frame carries the true selection size and LiveKit's
-    //    NativeVideoSource tolerates per-frame size changes.
+    // Provisional resolution: the first frame carries the real size, which
+    // NativeVideoSource tolerates.
     let source = NativeVideoSource::new(
         VideoResolution {
             width: 1920,
@@ -188,8 +148,7 @@ pub async fn start_screen_share(
         "screenshare",
         RtcVideoSource::Native(source.clone()),
     );
-    // See start_unix.rs: honour the user's Screen Share framerate preference
-    // (default 30) so the ceiling tracks the source.
+    // Honour the user's framerate preference, as in start_unix.rs.
     let (max_framerate, max_bitrate) = resolve_screenshare_encoding(max_framerate);
     if let Err(e) = room
         .local_participant()
@@ -216,7 +175,6 @@ pub async fn start_screen_share(
     }
     crate::diag!("[screenshare] track published");
 
-    // 2. Fresh per-session fence + the frames sink for the self-preview.
     let active_flag = std::sync::Arc::new(AtomicBool::new(true));
     let (frames_sink, events_sink) = {
         let ss = state.screenshare.lock().await;
@@ -230,9 +188,8 @@ pub async fn start_screen_share(
         frames: frames_sink,
         frame_tx: preview_tx,
     };
-    // The thread reports the picked size (or a picker cancel/error) back
-    // over a oneshot, then blocks in start() until the frame callback sees
-    // the fence flipped.
+    // The thread reports the picked size (or cancel/error), then blocks in
+    // start() until the frame callback sees the fence.
     let (size_tx, size_rx) = tokio::sync::oneshot::channel::<WgcStart>();
     let events_for_thread = events_sink.clone();
     let capture_thread = std::thread::Builder::new()
@@ -243,8 +200,7 @@ pub async fn start_screen_share(
     let (width, height) = match size_rx.await {
         Ok(WgcStart::Size(w, h)) => (w, h),
         Ok(WgcStart::Cancelled) => {
-            // Normal user cancel — roll back the publish, return without
-            // emitting LocalError (not a failure the UI must react to).
+            // A normal cancel: roll back the publish without a LocalError.
             let sid = track.sid();
             let _ = room.local_participant().unpublish_track(&sid).await;
             return Err(crate::error::Error::Other(anyhow::anyhow!(
@@ -267,14 +223,12 @@ pub async fn start_screen_share(
         }
     };
 
-    // 3. Stash for stop_screen_share + announce.
     {
         let mut ss = state.screenshare.lock().await;
         ss.local_source = Some(source);
         ss.local_track = Some(track);
         ss.windows_thread = Some(capture_thread);
         ss.windows_active = Some(std::sync::Arc::clone(&active_flag));
-        // Successful start consumes the picker cache.
         ss.windows_picker = None;
         if let Some(ev) = &ss.events {
             let _ = ev.send(ScreenShareEvent::LocalStarted { width, height });
@@ -282,22 +236,17 @@ pub async fn start_screen_share(
     }
     let _ = events_sink;
 
-    // 4. Shared audio, if asked for. Started only after video is
-    //    confirmed running AND the session is stashed + announced: audio
-    //    startup must never delay LocalStarted, and a stop arriving while
-    //    audio is still activating must find a session to tear down.
+    // Audio starts only once video is running and the session is stashed:
+    // it must never delay LocalStarted, and an early stop must find a session.
     if with_audio {
         start_windows_audio(state, &room, std::sync::Arc::clone(&active_flag)).await;
     }
     Ok(())
 }
 
-/// Stand up WASAPI process-loopback capture and the task that publishes
-/// what it produces.
-///
-/// Never fails the share: every problem here downgrades to video-only via
-/// `LocalAudioUnavailable`. The commonest one is a Windows 10 build older
-/// than 20H1, where the process-loopback pseudo-device does not exist.
+/// Start WASAPI process-loopback capture and the task that publishes it. Never
+/// fails the share: problems (commonly a pre-20H1 Windows 10) downgrade to
+/// video-only via `LocalAudioUnavailable`.
 async fn start_windows_audio(
     state: &Arc<AppState>,
     room: &std::sync::Arc<livekit::Room>,
@@ -307,23 +256,18 @@ async fn start_windows_audio(
         SHARED_AUDIO_FRAME_SAMPLES, SHARED_AUDIO_RATE_HZ};
     use super::windows_audio::{run_loopback_capture, AudioBlock};
 
-    // 32 blocks ~= 300 ms of slack at WASAPI's default period. Deep
-    // enough that a scheduling hiccup on the publish side doesn't make
-    // the capture thread block, shallow enough that it can't hide a
-    // stalled consumer behind seconds of latency.
+    // 32 blocks ≈ 300 ms of slack: enough to absorb a publish-side hiccup, too
+    // little to hide a stalled consumer.
     let (tx, mut rx) = tokio::sync::mpsc::channel::<AudioBlock>(32);
-    // Explicitly std's Result: this module imports `crate::error::Result`,
-    // which is a one-generic alias and not what this channel carries.
+    // std's Result: `crate::error::Result` is a one-generic alias.
     let (start_tx, start_rx) =
         tokio::sync::oneshot::channel::<std::result::Result<(), String>>();
     let active_for_thread = std::sync::Arc::clone(&active);
     let capture_thread = std::thread::Builder::new()
         .name("wasapi-screenshare-audio".into())
         .spawn(move || {
-            // The activation and the capture client are both COM, and the
-            // callbacks arrive on system threads — MTA is the apartment
-            // for that. Failing to initialise is itself just an
-            // audio-only failure.
+            // COM with callbacks on system threads: MTA. Failing to
+            // initialise is an audio-only failure.
             let com = unsafe {
                 windows::Win32::System::Com::CoInitializeEx(
                     None,
@@ -334,8 +278,8 @@ async fn start_windows_audio(
                 let _ = start_tx.send(Err("could not initialise audio COM".into()));
                 return;
             }
-            // Signals `start_tx` itself, the moment the stream is up —
-            // then blocks in the capture loop until the share ends.
+            // Signals `start_tx` once the stream is up, then blocks until the
+            // share ends.
             run_loopback_capture(tx, active_for_thread, start_tx);
             unsafe { windows::Win32::System::Com::CoUninitialize() };
         });
@@ -350,10 +294,8 @@ async fn start_windows_audio(
         return;
     }
 
-    // The thread reports on the oneshot as soon as the stream is running
-    // (or has failed to start) — milliseconds on the happy path. The outer
-    // timeout only guards a wedged audio service; the activation inside
-    // the thread already gives up after 2 s, so 5 s is a generous ceiling.
+    // Milliseconds on the happy path; the activation itself gives up after
+    // 2 s, so 5 s only guards a wedged audio service.
     match tokio::time::timeout(std::time::Duration::from_millis(5_000), start_rx).await {
         Ok(Ok(Ok(()))) => {}
         Ok(Ok(Err(reason))) => {
@@ -366,9 +308,7 @@ async fn start_windows_audio(
             .await;
             return;
         }
-        // Sender dropped without reporting (thread panicked or ended
-        // before the stream came up), or the outer timeout fired: either
-        // way there is no audio to publish.
+        // Sender dropped before reporting, or the timeout fired.
         Ok(Err(_)) | Err(_) => {
             emit(
                 state,
@@ -394,8 +334,7 @@ async fn start_windows_audio(
                 resampler.set_src_rate(block.sample_rate);
             }
             for frame in resampler.push(&block.pcm, block.channels) {
-                // No echo canceller on this path, and none needed: the OS
-                // already excluded our process tree from the mix.
+                // No echo canceller needed: the OS excluded our process tree.
                 let frame = libwebrtc::prelude::AudioFrame {
                     data: frame.into(),
                     sample_rate: SHARED_AUDIO_RATE_HZ,
@@ -408,11 +347,9 @@ async fn start_windows_audio(
             }
         }
         crate::diag!("[screenshare/audio] windows publish loop ended");
-        // The capture thread hung up while the share is still running:
-        // a mid-share audio failure (device removed, WASAPI error), not a
-        // stop. Retire the track rather than leave it published with
-        // nothing behind it (#1040); on a real stop `active` is already
-        // false and `stop_screen_share` owns the teardown.
+        // The capture thread hung up while the share still runs: a mid-share
+        // audio failure, so retire the track (#1040). On a real stop `active`
+        // is false and `stop_screen_share` owns the teardown.
         if active.load(std::sync::atomic::Ordering::Acquire) {
             super::audio::unpublish_shared_audio(&state_for_task, &room_for_task).await;
             drop(source);
@@ -427,20 +364,15 @@ async fn start_windows_audio(
     });
 }
 
-// ── Capture-thread driver ─────────────────────────────────────────────────
-
-/// What the thread is going to capture: cached in-app picker selection,
-/// or the legacy native WGC picker (frontend `selection: None` fallback).
+/// What the thread captures: the cached in-app pick, or the native picker.
 enum CaptureSource {
     NativePicker,
     Monitor(Monitor),
     Window(Window),
 }
 
-/// Outcome the dedicated WGC thread reports before it blocks in
-/// `start()`: the negotiated size, a clean user cancel (not surfaced as
-/// an error the UI must react to), or a genuine capture failure
-/// (surfaced via LocalError).
+/// What the WGC thread reports before blocking in `start()`: the size, a user
+/// cancel (not an error), or a real failure (surfaced via LocalError).
 enum WgcStart {
     Size(u32, u32),
     Cancelled,
@@ -459,9 +391,7 @@ fn run_capture_thread(
         MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings,
     };
 
-    // Common settings constructor — keeps every arm's call site one line.
-    // Bgra8 so the bytes are B,G,R,A in memory — identical to the
-    // macOS/Linux paths feeding libwebrtc argb_to_i420, no swizzle.
+    // Bgra8: B,G,R,A in memory, as the other platforms feed argb_to_i420.
     macro_rules! settings_for {
         ($item:expr) => {
             Settings::new(
@@ -580,8 +510,6 @@ fn run_capture_thread(
     }
 }
 
-// ── Enumeration (blocking GDI work) ───────────────────────────────────────
-
 struct EnumeratedSources {
     display_sources: Vec<pollis_capture_proto::DisplaySource>,
     display_handles: Vec<Monitor>,
@@ -597,9 +525,7 @@ fn enumerate_blocking() -> Result<EnumeratedSources> {
     for (idx, monitor) in monitors.into_iter().enumerate() {
         let width = monitor.width().unwrap_or(0);
         let height = monitor.height().unwrap_or(0);
-        // Prefer the friendly EDID name; fall back to the device path
-        // (`\\.\DISPLAY1`) and then a generic placeholder so the tile is
-        // never label-less.
+        // EDID name, else the device path (`\\.\DISPLAY1`), else a placeholder.
         let name = monitor
             .name()
             .or_else(|_| monitor.device_name())
@@ -621,22 +547,18 @@ fn enumerate_blocking() -> Result<EnumeratedSources> {
     let mut window_handles = Vec::with_capacity(windows.len());
     for window in windows.into_iter() {
         let title = window.title().unwrap_or_default();
-        // process_name needs PROCESS_VM_READ — fails for elevated processes
-        // and tightly-locked-down system processes. Don't fail enumeration
-        // over it; empty string is fine.
+        // Needs PROCESS_VM_READ, which elevated processes deny; empty is fine.
         let app_name = window.process_name().unwrap_or_default();
-        // Skip headless/cloaked/microscopic windows — UWP frame hosts
-        // (ApplicationFrameHost), suspended store apps, audio-console-style
-        // persistent invisible top-level windows, etc. Same gate
-        // Slack/Discord apply.
+        // Skip cloaked, tiny and unlabelled windows (UWP frame hosts, tray
+        // apps), as Slack and Discord do.
         if !is_window_user_facing(&window, &title, &app_name) {
             continue;
         }
         let width = window.width().ok().map(|w| w.max(0) as u32).unwrap_or(0);
         let height = window.height().ok().map(|h| h.max(0) as u32).unwrap_or(0);
         let thumbnail = capture_window_thumbnail(&window);
-        // Index is assigned AFTER the filter so it matches `window_handles`
-        // exactly — that's the index `Selection::Window` passes back.
+        // Assigned after the filter so it matches `window_handles`, the index
+        // `Selection::Window` passes back.
         let idx = window_handles.len() as u32;
         window_sources.push(pollis_capture_proto::WindowSource {
             id: idx,
@@ -644,7 +566,6 @@ fn enumerate_blocking() -> Result<EnumeratedSources> {
             height,
             title,
             app_name,
-            // bundle_id is macOS-only; Windows has no analog.
             bundle_id: String::new(),
             thumbnail_data_url: thumbnail,
         });
@@ -659,38 +580,18 @@ fn enumerate_blocking() -> Result<EnumeratedSources> {
     })
 }
 
-// ── User-facing window filter ─────────────────────────────────────────────
-//
-// `Window::enumerate()` only filters out the obvious junk: invisible windows,
-// tool windows, child windows, and our own process. That still leaves three
-// big classes of pickerable-but-useless surfaces:
-//
-//   * **UWP frame hosts** (`ApplicationFrameHost.exe`) for store apps that
-//     are running but cloaked — minimized to the start screen, suspended in
-//     the background. They report `IsWindowVisible() == TRUE` even when the
-//     user has no on-screen surface for them. The DWM cloak attribute is
-//     the canonical check; Slack/Discord/Teams all key off it.
-//   * **Tray-resident utility apps** like Realtek Audio Console — Win32 apps
-//     that keep a "visible" top-level window of effectively zero size to
-//     receive shell messages, even when the user only ever sees the system
-//     tray icon.
-//   * **Pure helper windows** with no title and no resolvable process name
-//     (system shell overlays that survived the IsWindowVisible cull).
-//
-// 64×64 is the same floor the macOS helper uses. Real picker targets are
-// always at least a few hundred pixels in either dimension.
+// `Window::enumerate()` still leaves cloaked UWP frame hosts (visible per
+// `IsWindowVisible`, invisible to the user), tray apps' near-zero-size
+// message windows, and untitled helper windows. 64×64 matches the macOS
+// helper's floor.
 const MIN_WINDOW_DIM: i32 = 64;
 
 fn is_window_user_facing(window: &Window, title: &str, app_name: &str) -> bool {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
 
-    // 1. Filter cloaked UWP / shell-cloaked windows. Treat any non-zero
-    //    cloak value as "don't show" (DWM_CLOAKED_APP / DWM_CLOAKED_SHELL /
-    //    DWM_CLOAKED_INHERITED are all reasons the user can't see it).
-    //    If the API call fails (older Windows / restricted process), we
-    //    fall through to the size + label checks — better to show a tile
-    //    than wrongly hide a real window.
+    // Any non-zero DWM cloak value hides it. If the call fails, fall through:
+    // better to show a tile than hide a real window.
     let hwnd = HWND(window.as_raw_hwnd());
     let mut cloaked: u32 = 0;
     let cloak_ok = unsafe {
@@ -705,8 +606,6 @@ fn is_window_user_facing(window: &Window, title: &str, app_name: &str) -> bool {
         return false;
     }
 
-    // 2. Filter sub-64px windows. Anything smaller is almost always a
-    //    helper / message-loop sink.
     let (w, h) = match (window.width(), window.height()) {
         (Ok(w), Ok(h)) => (w, h),
         _ => return false,
@@ -715,15 +614,12 @@ fn is_window_user_facing(window: &Window, title: &str, app_name: &str) -> bool {
         return false;
     }
 
-    // 3. Need *something* to label the tile with.
     if title.is_empty() && app_name.is_empty() {
         return false;
     }
 
     true
 }
-
-// ── Thumbnail capture ─────────────────────────────────────────────────────
 
 fn capture_monitor_thumbnail(monitor: &Monitor) -> Option<String> {
     use windows::Win32::Foundation::RECT;
@@ -753,9 +649,7 @@ fn capture_monitor_thumbnail(monitor: &Monitor) -> Option<String> {
             return None;
         }
 
-        // GetDC(None) yields the desktop (root window) DC; ReleaseDC accepts
-        // None symmetrically. windows-rs encodes the nullable HWND param as
-        // Option<HWND> in 0.62+.
+        // GetDC(None) is the desktop DC.
         let screen_dc = GetDC(None);
         if screen_dc.is_invalid() {
             return None;
@@ -831,7 +725,7 @@ fn capture_window_thumbnail(window: &Window) -> Option<String> {
         }
         let screen_scope = ScopedScreenDc(screen_dc);
 
-        // 1. Render the window full-resolution into a memory DC via PrintWindow.
+        // Render the window at full size via PrintWindow.
         let src_mem_dc = CreateCompatibleDC(Some(screen_scope.0));
         if src_mem_dc.is_invalid() {
             return None;
@@ -844,11 +738,10 @@ fn capture_window_thumbnail(window: &Window) -> Option<String> {
         let _src_bm_scope = ScopedBitmap(src_bitmap);
         let src_old = SelectObject(src_scope.0, src_bitmap.into());
 
-        // PW_RENDERFULLCONTENT (0x00000002) — required for Chromium-based
-        // and DirectComposition-based windows. Win10 1903+.
+        // PW_RENDERFULLCONTENT (0x2): needed for Chromium and
+        // DirectComposition windows (Win10 1903+).
         let ok = PrintWindow(hwnd, src_scope.0, PRINT_WINDOW_FLAGS(0x00000002));
         if !ok.as_bool() {
-            // Fallback without the flag — better than no thumbnail.
             let retry = PrintWindow(hwnd, src_scope.0, PRINT_WINDOW_FLAGS(0));
             if !retry.as_bool() {
                 SelectObject(src_scope.0, src_old);
@@ -856,7 +749,6 @@ fn capture_window_thumbnail(window: &Window) -> Option<String> {
             }
         }
 
-        // 2. StretchBlt the native-size render down to THUMB_W × THUMB_H.
         let dst_mem_dc = CreateCompatibleDC(Some(screen_scope.0));
         if dst_mem_dc.is_invalid() {
             SelectObject(src_scope.0, src_old);
@@ -901,8 +793,7 @@ fn capture_window_thumbnail(window: &Window) -> Option<String> {
     }
 }
 
-/// Read the THUMB_W × THUMB_H bitmap selected into `dc` as a flat BGRA8
-/// vector (top-down).
+/// Read the THUMB_W × THUMB_H bitmap selected into `dc` as top-down BGRA8.
 unsafe fn read_dib_bgra(
     dc: windows::Win32::Graphics::Gdi::HDC,
     bitmap: windows::Win32::Graphics::Gdi::HBITMAP,
@@ -914,11 +805,10 @@ unsafe fn read_dib_bgra(
     let header = BITMAPINFOHEADER {
         biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
         biWidth: THUMB_W as i32,
-        // Negative for top-down DIB so we don't have to flip rows later.
+        // Negative: a top-down DIB.
         biHeight: -(THUMB_H as i32),
         biPlanes: 1,
         biBitCount: 32,
-        // BI_RGB is a typed wrapper around 0u32; biCompression is a raw u32.
         biCompression: BI_RGB.0,
         biSizeImage: 0,
         biXPelsPerMeter: 0,
@@ -954,7 +844,6 @@ fn encode_thumbnail_data_url(bgra: &[u8]) -> Option<String> {
     if bgra.len() != expected {
         return None;
     }
-    // BGRA -> RGB (drop alpha; thumbnails don't need transparency).
     let mut rgb = Vec::with_capacity((THUMB_W * THUMB_H * 3) as usize);
     for chunk in bgra.chunks_exact(4) {
         rgb.push(chunk[2]);
@@ -972,10 +861,7 @@ fn encode_thumbnail_data_url(bgra: &[u8]) -> Option<String> {
     Some(format!("data:image/png;base64,{encoded}"))
 }
 
-// ── GDI scope guards ──────────────────────────────────────────────────────
-//
-// GDI handles leak if not released on every path (including error paths).
-// These tiny RAII wrappers keep `?` and early returns safe.
+// RAII guards: GDI handles leak unless released on every path.
 
 struct ScopedScreenDc(windows::Win32::Graphics::Gdi::HDC);
 impl Drop for ScopedScreenDc {
@@ -1004,8 +890,6 @@ impl Drop for ScopedBitmap {
     }
 }
 
-// ── Capture handler + frame push ──────────────────────────────────────────
-
 struct WindowsCaptureFlags {
     source: NativeVideoSource,
     active: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -1018,8 +902,7 @@ struct WindowsCaptureHandler {
     active: std::sync::Arc<std::sync::atomic::AtomicBool>,
     frames: Option<Arc<dyn RawSink>>,
     frame_tx: tokio::sync::broadcast::Sender<std::sync::Arc<Vec<u8>>>,
-    // on_frame_arrived takes &mut self (WGC serializes the callback), so a
-    // plain field suffices — no Mutex unlike the macOS &self handler.
+    // WGC serializes the callback (&mut self), so no Mutex.
     last_preview: Option<std::time::Instant>,
 }
 
@@ -1044,7 +927,6 @@ impl windows_capture::capture::GraphicsCaptureApiHandler for WindowsCaptureHandl
         frame: &mut windows_capture::frame::Frame<'_>,
         capture_control: windows_capture::graphics_capture_api::InternalCaptureControl,
     ) -> std::result::Result<(), Self::Error> {
-        // Stop fence: a teardown flips this; end the pump from inside.
         if !self.active.load(std::sync::atomic::Ordering::Acquire) {
             capture_control.stop();
             return Ok(());
@@ -1052,19 +934,15 @@ impl windows_capture::capture::GraphicsCaptureApiHandler for WindowsCaptureHandl
         let mut buffer = frame.buffer().map_err(|e| -> Self::Error { Box::new(e) })?;
         let width = buffer.width();
         let height = buffer.height();
-        // row_pitch is the GPU-aligned stride (>= width*4); argb_to_i420
-        // consumes it directly, same as the macOS bytes_per_row path.
+        // The GPU-aligned stride (>= width*4), which argb_to_i420 takes as is.
         let stride = buffer.row_pitch();
         let bgra = buffer.as_raw_buffer();
         let timestamp_us = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_micros() as i64)
             .unwrap_or(0);
-        // WS preview rides every frame: the PoC showed the WS+WebGL path is
-        // cheap, so there's no reason to throttle the sharer's own tile. The
-        // legacy RawSink (unused by the Tauri WS frontend) keeps its
-        // PREVIEW_MIN_INTERVAL gate to bound IPC cost if anything still
-        // listens on it. Mirrors start_unix.rs.
+        // The WS preview gets every frame; only the legacy RawSink keeps the
+        // PREVIEW_MIN_INTERVAL gate (as in start_unix.rs).
         let preview = match &self.frames {
             Some(sink)
                 if self
@@ -1104,19 +982,17 @@ fn push_frame_windows(
     preview: Option<&dyn RawSink>,
     preview_ws: Option<&tokio::sync::broadcast::Sender<std::sync::Arc<Vec<u8>>>>,
 ) {
-    // VP8 + I420 require even dimensions.
+    // VP8 and I420 require even dimensions.
     let w = (width & !1) as i32;
     let h = (height & !1) as i32;
     if w <= 0 || h <= 0 {
         return;
     }
-    // Convert (WGC Bgra8 == little-endian ARGB) to I420 at native res.
     let buffer = convert_to_i420(w, h, stride, bgra);
     let (out_w, out_h) = (buffer.width(), buffer.height());
     let frame = VideoFrame {
         rotation: VideoRotation::VideoRotation0,
         timestamp_us,
-        // No packet-trailer features are negotiated, so there is no metadata to attach.
         frame_metadata: None,
         buffer,
     };

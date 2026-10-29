@@ -1,7 +1,5 @@
-//! No-op stubs compiled on platforms that have no capture implementation
-//! (anything that isn't Linux, macOS, or Windows). The frontend should
-//! never reach these in production; returning empty/Err keeps the public
-//! surface signature consistent across the cfg matrix.
+//! Stubs for platforms with no capture implementation, keeping the public
+//! surface identical across the cfg matrix.
 
 use std::sync::Arc;
 

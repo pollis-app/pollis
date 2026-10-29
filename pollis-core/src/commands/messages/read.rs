@@ -76,11 +76,8 @@ pub async fn list_messages(
     Ok(messages)
 }
 
-/// Fetch a page of messages for a channel the user is a member of.
-///
-/// First call: omit `cursor` to get the most recent `limit` messages.
-/// Subsequent calls: pass the `next_cursor` from the previous response to
-/// walk backwards through history. Results are ordered newest-first.
+/// Ingest, then fetch a page of a channel's messages, newest-first. Pass the
+/// previous `next_cursor` to walk back through history.
 pub async fn get_channel_messages(
     user_id: String,
     channel_id: String,
@@ -107,12 +104,10 @@ pub async fn get_channel_messages(
     Ok(MessagePage { messages, next_cursor })
 }
 
-/// Map a `message` row to a [`ChannelMessage`].
-///
-/// Shared by the channel/DM page reads and the thread read (#825), so every
-/// caller must SELECT the same column order:
-/// `id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at,
-///  edited_at, deleted_at, thread_id, undecryptable, send_state`.
+/// Map a `message` row to a [`ChannelMessage`]. Every caller must SELECT this
+/// column order: `id, conversation_id, sender_id, ciphertext, content,
+/// reply_to_id, sent_at, edited_at, deleted_at, thread_id, undecryptable,
+/// send_state`.
 fn row_to_channel_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChannelMessage> {
     let ct: Vec<u8> = row.get(3)?;
     let content: Option<String> = row.get(4)?;
@@ -123,7 +118,6 @@ fn row_to_channel_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChannelMe
         sender_id: row.get(2)?,
         sender_username: None,
         ciphertext: format!("mls:{}", hex::encode(&ct)),
-        // Soft-deleted messages mask content to None regardless of cache.
         content: if deleted_at.is_some() { None } else { content },
         reply_to_id: row.get(5)?,
         thread_id: row.get(9)?,
@@ -135,9 +129,7 @@ fn row_to_channel_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChannelMe
     })
 }
 
-/// Read a page of messages for a conversation from the local `message` table,
-/// newest-first. Used by both channel and DM read paths after ingest has
-/// persisted any new envelopes.
+/// Read a page of a conversation from the local `message` table, newest-first.
 async fn read_local_channel_page(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -181,10 +173,8 @@ async fn read_local_channel_page(
     Ok(rows)
 }
 
-/// Attach sender usernames from the local `user_cache` table; for any
-/// sender_ids missing from the cache, do one batched remote fetch and
-/// write the results back. After the first read of a channel/DM, the
-/// cache is warm and subsequent reads are zero-remote.
+/// Attach sender usernames from `user_cache`, with one batched remote fetch
+/// (written back) for any misses.
 async fn attach_sender_usernames_local(
     state: &Arc<AppState>,
     messages: &mut [ChannelMessage],
@@ -203,8 +193,7 @@ async fn attach_sender_usernames_local(
     let missing: Vec<String> = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
-        // Chunked (#916): one sender per message in the page, so this list is
-        // bounded by the page size — but by nothing that says so.
+        // Chunked (#916): bounded by the page size, but by nothing that says so.
         for chunk in crate::db::chunk::bind_chunks(&ids_vec, 0) {
             let sql = format!(
                 "SELECT id, username FROM user_cache WHERE id IN ({})",
@@ -222,7 +211,6 @@ async fn attach_sender_usernames_local(
     };
 
     if !missing.is_empty() {
-        // One request for the whole missing set — the DS chunks its own binds.
         match crate::commands::ds_reads::users(state, missing.clone(), None).await {
             Ok(users) => {
                 let fetched: Vec<(String, String)> = users
@@ -246,8 +234,7 @@ async fn attach_sender_usernames_local(
                 }
             }
             Err(e) => {
-                // Offline or transient — leave the missing names as None.
-                // Next ingest / read while online will fill them in.
+                // Offline or transient: names stay None until a later read.
                 crate::diag!("[messages] attach_sender_usernames_local: remote fallback failed: {e}");
             }
         }
@@ -259,10 +246,8 @@ async fn attach_sender_usernames_local(
     Ok(())
 }
 
-/// Local-only read of a channel page. Does NOT trigger ingest — callers
-/// fire `ingest_channel_envelopes` separately, off the critical render
-/// path. Usernames come from the local `user_cache` (with a one-shot
-/// remote fallback for cache misses, see `attach_sender_usernames_local`).
+/// Local-only read of a channel page; callers fire `ingest_channel_envelopes`
+/// separately, off the render path.
 pub async fn read_channel_messages(
     channel_id: String,
     limit: Option<i64>,
@@ -308,21 +293,13 @@ pub async fn read_dm_messages(
     Ok(MessagePage { messages, next_cursor })
 }
 
-/// Bound-parameter chunk size for [`read_last_messages`]. SQLite's default
-/// `SQLITE_MAX_VARIABLE_NUMBER` is 999 on older builds; staying well under it
-/// means a sidebar of any size is a fixed number of statements rather than a
-/// runtime error nobody can reproduce with three channels.
+/// Bound-parameter chunk size for [`read_last_messages`], well under older
+/// SQLite builds' 999-variable limit.
 const LAST_MESSAGE_ID_CHUNK: usize = 400;
 
-/// The batched newest-per-conversation SELECT, for `n` bound conversation ids.
-///
-/// Lifted out of [`read_last_messages`] so the ordering claim below is testable
-/// without an `AppState`: the whole correctness of a preview row is "is this
-/// really the newest message", and that lives entirely in this string.
-///
-/// The window's ordering key (`sent_at DESC, id DESC`) is deliberately the same
-/// one `read_local_channel_page` uses. A preview and the top of the opened
-/// conversation showing different messages is the failure this pins shut.
+/// The batched newest-per-conversation SELECT, for `n` bound ids. Its ordering
+/// (`sent_at DESC, id DESC`) must match `read_local_channel_page`, or a preview
+/// and the top of the opened conversation could show different messages.
 pub(crate) fn last_messages_sql(n: usize) -> String {
     let placeholders = (1..=n).map(|i| format!("?{i}")).collect::<Vec<_>>().join(",");
     format!(
@@ -337,19 +314,8 @@ pub(crate) fn last_messages_sql(n: usize) -> String {
     )
 }
 
-/// The newest message in each of `conversation_ids`, in ONE round trip (#874).
-///
-/// The sidebar draws one preview row per channel and per DM, and each row used
-/// to ask for its own page of one message — so a 20-row sidebar cost 20 IPC
-/// calls on mount, 20 more on every window focus, and 20 more on every delete
-/// event. The work is identical whether it is asked for once or twenty times:
-/// one indexed scan of the local `message` table plus one username hydration.
-/// This asks for it once.
-///
-/// Conversations with no local messages are simply ABSENT from the result. The
-/// caller keys the response by `conversation_id`, so "no row" and "no messages"
-/// are the same answer and a null placeholder would only add a second spelling
-/// of it.
+/// The newest message in each of `conversation_ids`, in one round trip (#874),
+/// for the sidebar previews. Conversations with no local messages are absent.
 pub async fn read_last_messages(
     conversation_ids: Vec<String>,
     state: &Arc<AppState>,
@@ -358,17 +324,14 @@ pub async fn read_last_messages(
         return Ok(Vec::new());
     }
 
-    // De-duplicate. Two rows pointing at the same conversation must not make
-    // the query do the work twice, and the caller keys by id regardless.
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let ids: Vec<String> = conversation_ids
         .into_iter()
         .filter(|id| seen.insert(id.clone()))
         .collect();
 
-    // rusqlite statements are not `Send`, so the whole DB read is scoped in a
-    // block — the same reason `read_thread_messages` does it. An explicit
-    // `drop()` is not enough; the generated future would still capture them.
+    // rusqlite statements are not `Send`: scope the DB read in a block (an
+    // explicit `drop()` is not enough for the generated future).
     let mut messages: Vec<ChannelMessage> = {
         let guard = state.local_db.lock().await;
         let db = guard
@@ -392,19 +355,7 @@ pub async fn read_last_messages(
     Ok(messages)
 }
 
-// #987: `list_messages_by_sender` and `list_channel_previews` were deleted here.
-//
-// Both were caller-less — no renderer, no mobile hook, no test drove either —
-// AND both were semantically dead: they filter or project
-// `message_envelope.sender_id`, which since #607's sealed sender is always the
-// literal string `"sealed"`. `list_messages_by_sender` could therefore never
-// match a real user, and `list_channel_previews` could only ever report the
-// sentinel as every channel's last sender. Porting them behind the DS would
-// have meant building an endpoint for two queries that cannot answer their own
-// question.
-
-/// Fetch a page of messages for a DM channel the user is a member of.
-/// Results are ordered newest-first.
+/// Ingest, then fetch a page of a DM's messages, newest-first.
 pub async fn get_dm_messages(
     user_id: String,
     dm_channel_id: String,
@@ -433,20 +384,10 @@ pub async fn get_dm_messages(
 
 /// A page of a conversation centred on one message (#850).
 ///
-/// The jump-to-message flow — a search hit, a permalink — points at something
-/// that is usually far outside the loaded window, and the renderer's windowing
-/// can only reveal a row the query already holds. Paging backwards until the
-/// target appears would be N round trips for a message from last year; this is
-/// one.
-///
-/// Anchored on `(sent_at, id)` rather than on rowid, because that is the order
-/// the log renders in and the only one the client can reason about. Returns the
-/// `limit` newest messages at or before the anchor plus the `limit` oldest
-/// after it, newest-first like every other page, so the caller can hand it
-/// straight to the same renderer.
-///
-/// A message this device does not hold yields an empty page — the same honest
-/// answer `resolve_message_permalink` gives, and for the same reason.
+/// The jump-to-message flow (a search hit, a permalink) in one round trip:
+/// the `limit` newest messages at or before the `(sent_at, id)` anchor plus the
+/// `limit` oldest after it, newest-first. A message this device does not hold
+/// yields an empty page.
 pub async fn read_messages_around(
     conversation_id: String,
     message_id: String,
@@ -506,7 +447,6 @@ pub async fn read_messages_around(
             .flatten()
             .collect();
 
-        // `newer` came back oldest-first; the page as a whole is newest-first.
         let mut page: Vec<ChannelMessage> = newer.into_iter().rev().collect();
         page.append(&mut out);
         page
@@ -514,8 +454,7 @@ pub async fn read_messages_around(
 
     attach_sender_usernames_local(state, &mut messages).await?;
 
-    // The cursor points at the OLDEST row returned, so scrolling further back
-    // from a jump continues from here exactly as it would from any other page.
+    // The cursor points at the oldest row, so scrolling back continues normally.
     let next_cursor = messages.last().map(|m| MessageCursor {
         sent_at: m.sent_at.clone(),
         id: m.id.clone(),
@@ -527,9 +466,8 @@ pub async fn read_messages_around(
 /// The `limit` OLDEST messages strictly newer than `cursor`, newest-first, as
 /// a `(rows, next_cursor)` pair (#1039). See [`read_messages_after`].
 ///
-/// Split out from the command so the paging contract is testable against a
-/// bare connection: the whole point of the forward read is that repeatedly
-/// feeding `next_cursor` back in visits every row exactly once and then stops.
+/// Split out so the paging contract (feeding `next_cursor` back visits every
+/// row once, then stops) is testable against a bare connection.
 pub(crate) fn read_after_on(
     conn: &rusqlite::Connection,
     conversation_id: &str,
@@ -552,10 +490,8 @@ pub(crate) fn read_after_on(
         .flatten()
         .collect();
 
-    // A full page may have more behind it; a short one is the tail of what
-    // this device holds. The cursor points at the NEWEST row returned, because
-    // that is the edge the next forward page continues from — the mirror image
-    // of every backward read, where it points at the oldest.
+    // A short page is the tail of what this device holds. The cursor points at
+    // the newest row returned: the edge the next forward page continues from.
     let next_cursor = if oldest_first.len() == limit as usize {
         oldest_first.last().map(|m| MessageCursor {
             sent_at: m.sent_at.clone(),
@@ -565,26 +501,16 @@ pub(crate) fn read_after_on(
         None
     };
 
-    // Newest-first, like every other page, so one renderer path handles it.
     let messages: Vec<ChannelMessage> = oldest_first.into_iter().rev().collect();
     Ok((messages, next_cursor))
 }
 
 /// A page of a conversation NEWER than a cursor — the forward read (#1039).
 ///
-/// Every other page read walks backwards from the newest message, which is
-/// the only direction a log opened at its tail ever needs. A jump to an old
-/// message (#850) is different: the window is re-centred far back in history
-/// and the reader then scrolls FORWARD, toward the present. Without this read
-/// the renderer had nothing to fill the gap between the anchor's page and the
-/// live newest page, so it rendered the two as if they were adjacent and the
-/// history in between silently vanished from the scroll — the #1039 bug.
-///
-/// `cursor` is exclusive: the page starts at the first message after it in
-/// `(sent_at, id)` order, the order the log renders in. `next_cursor` is `None`
-/// once the page comes back short — i.e. the device has nothing newer on
-/// disk, which is the client's cue that the anchored window has caught up
-/// with the live tail and can hand back to it.
+/// After a jump to an old message the reader scrolls forward; without this the
+/// gap between the anchored page and the live tail silently vanished (#1039).
+/// `cursor` is exclusive in `(sent_at, id)` order. `next_cursor` is `None` once
+/// a page comes back short: the anchored window has caught up with the tail.
 pub async fn read_messages_after(
     conversation_id: String,
     cursor: MessageCursor,
@@ -608,22 +534,14 @@ pub async fn read_messages_after(
 
 /// One thread's replies, oldest-first (#825).
 ///
-/// Purely local: `thread_id` lives inside the MLS ciphertext and is recovered
-/// at ingest, so the DS cannot be asked for a thread and there is nothing to
-/// paginate server-side. What this device has decrypted is the thread. A device
-/// that joined later, or a fresh install, sees only what it holds — the same
-/// bounded-history behaviour that already applies to channels.
-///
-/// The root message itself is NOT included; it is already rendered in the
-/// channel, and the caller has it.
+/// Purely local: `thread_id` lives inside the ciphertext, so what this device
+/// has decrypted is the thread. The root message is not included.
 pub async fn read_thread_messages(
     thread_id: String,
     state: &Arc<AppState>,
 ) -> Result<Vec<ChannelMessage>> {
-    // The rusqlite connection and its statements are not `Send`, so every one
-    // of them has to be dropped before the `.await` below — an explicit
-    // `drop()` is not enough, since the generated future still captures them.
-    // Scoping the whole DB read in a block is what keeps this command `Send`.
+    // rusqlite statements are not `Send`: scope the DB read in a block (an
+    // explicit `drop()` is not enough for the generated future).
     let mut messages: Vec<ChannelMessage> = {
         let guard = state.local_db.lock().await;
         let db = guard
@@ -646,9 +564,8 @@ pub async fn read_thread_messages(
 
 /// Reply count and last-reply time for every thread in a conversation (#825).
 ///
-/// Drives the "N replies" affordance under a root message without loading each
-/// thread. Soft-deleted replies are excluded from the count so a thread whose
-/// replies were all deleted stops advertising itself.
+/// Soft-deleted replies are excluded, so a thread whose replies were all
+/// deleted stops advertising itself.
 pub async fn list_thread_summaries(
     conversation_id: String,
     state: &Arc<AppState>,

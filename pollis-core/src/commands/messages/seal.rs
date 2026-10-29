@@ -1,14 +1,11 @@
 //! Sealing an envelope at the current epoch and posting it under the DS's
 //! epoch gate (#1041).
 //!
-//! An envelope is decryptable only by members still AT the epoch it was sealed
-//! at (`max_past_epochs = 0`). The DS refuses to keep one whose asserted
-//! `(generation, epoch)` is no longer the commit log's head — a commit landed
-//! between this device's catch-up and its post — and answers 409
-//! [`pollis_api::messages::EpochBehind`]. The only correct response is the one
-//! a lost commit race gets: catch up, re-seal at the new epoch, post again.
-//! Every envelope this crate posts — a send, a redaction, an edit — goes
-//! through [`post_resealing`], so no post site can forget the retry.
+//! With `max_past_epochs = 0` an envelope is readable only at the epoch it was
+//! sealed at, so the DS refuses one whose `(generation, epoch)` is no longer the
+//! log head (409 [`pollis_api::messages::EpochBehind`]). The fix is to catch up,
+//! re-seal and post again; every envelope goes through [`post_resealing`], so no
+//! post site can forget it.
 
 use std::sync::Arc;
 
@@ -19,21 +16,13 @@ use crate::state::AppState;
 
 /// One application message sealed at a definite `(generation, epoch)`.
 pub(super) struct Sealed {
-    /// The TLS-serialised `MlsMessageOut`, exactly what the local `message`
-    /// row's `ciphertext` column holds.
+    /// The TLS-serialised `MlsMessageOut`, as the local row stores it.
     pub bytes: Vec<u8>,
-    /// The lineage read off the ciphertext's own MLS header — asserted to the
-    /// DS, never taken from anywhere the server could influence.
+    /// Read off the ciphertext's own MLS header, never from the server.
     pub generation: i64,
     pub epoch: i64,
-    /// Stamped at seal time, and DISPLAY metadata since #1087. A re-seal still
-    /// takes a fresh stamp so the bubble shows when the message actually landed,
-    /// but nothing depends on it any more: a re-posted envelope takes the next
-    /// DS-assigned delivery sequence, so it is above every recipient's cursor
-    /// whatever its timestamp says. Before that, refreshing the stamp was
-    /// load-bearing — recipients fetched `sent_at > watermark`, so an envelope
-    /// re-landing under an old stamp could sit below a cursor that had already
-    /// moved past it.
+    /// Display metadata only (#1087): a re-posted envelope takes the next DS
+    /// sequence, so its stamp affects nothing but the bubble.
     pub sent_at: String,
 }
 
@@ -44,12 +33,8 @@ impl Sealed {
     }
 }
 
-/// Encrypt `plaintext` for `mls_group_id` at the epoch the local group sits at
-/// right now.
-///
-/// `Ok(None)` when this device holds no local group for it, or when the group
-/// holds a staged, unconfirmed commit — see [`try_seal_unlocked`] and
-/// [`seal_under_lock`] for which of those a given caller can actually see.
+/// Encrypt `plaintext` at the epoch the local group sits at now. `Ok(None)`
+/// when there is no local group, or a staged commit is pending.
 fn try_seal_inner(
     conn: &rusqlite::Connection,
     mls_group_id: &str,
@@ -72,20 +57,14 @@ fn try_seal_inner(
     }))
 }
 
-/// Seal for a caller that holds the per-conversation MLS lock — the shape every
+/// Seal for a caller that holds the per-conversation MLS lock, the shape every
 /// user-initiated post wants.
 ///
-/// The [`MlsLockHeld`] witness is the point (#1079): a post must serialize behind
-/// any committer on this device, because a committer holds a staged commit across
-/// its DS round-trip and the epoch is undecided for that whole window. Holding
-/// the lock means this seal cannot observe that state at all, so `Ok(None)` from
-/// the inner sealer can only mean "no local group", which is the error this
-/// returns. Requiring proof rather than trusting each site to remember the lock
-/// is what keeps a future post site from silently reintroducing the race.
-///
-/// Take the lock BEFORE `state.local_db` — the order `reconcile` and
-/// `self_update` use — and drop it before any `await` that might itself take it
-/// (the catch-up does).
+/// The [`MlsLockHeld`] witness (#1079): a committer holds a staged commit
+/// across its DS round trip, so a post must serialize behind it. Under the
+/// lock, `Ok(None)` can only mean "no local group". Take the lock before
+/// `state.local_db` (as `reconcile` and `self_update` do) and drop it before
+/// any `await` that might take it (the catch-up does).
 pub(super) fn seal_under_lock(
     conn: &rusqlite::Connection,
     mls_group_id: &str,
@@ -100,14 +79,10 @@ pub(super) fn seal_under_lock(
     })
 }
 
-/// Seal for a caller that deliberately holds NO MLS lock, where not sealing is
-/// an acceptable outcome.
-///
-/// `Ok(None)` means "not sealable right now" and covers both "no local group"
-/// and "a commit is staged" — the caller cannot distinguish them and must not
-/// need to. `receipts::emit_receipt` is the only such caller: taking the lock
-/// there would deadlock the catch-up paths that hold it while emitting delivered
-/// receipts, and a skipped receipt is already its documented failure mode.
+/// Seal for a caller that deliberately holds no MLS lock. `Ok(None)` covers
+/// both "no local group" and "a commit is staged". Only `receipts::emit_receipt`
+/// uses it: taking the lock there would deadlock the catch-up paths that emit
+/// delivered receipts, and a skipped receipt is acceptable.
 pub(super) fn try_seal_unlocked(
     conn: &rusqlite::Connection,
     mls_group_id: &str,
@@ -117,9 +92,8 @@ pub(super) fn try_seal_unlocked(
     try_seal_inner(conn, mls_group_id, conversation_id, plaintext)
 }
 
-/// How many times a post re-seals before giving up. Each round is one commit
-/// that landed between catch-up and post; a link busy enough to lose four in a
-/// row is one on which the user's send should fail visibly rather than spin.
+/// How many times a post re-seals before giving up. Losing four commit races
+/// in a row should fail the send visibly rather than spin.
 const MAX_RESEALS: usize = 4;
 
 /// What a re-seal needs to know about the envelope being posted.
@@ -129,22 +103,16 @@ pub(super) struct Target<'a> {
     /// The acting user — whose catch-up runs when a re-seal is needed.
     pub user_id: &'a str,
     pub plaintext: &'a [u8],
-    /// The envelope's id, recorded as this device's own before the first post
-    /// (#1312) — it will come back through the fetch, undecryptable to us.
+    /// Recorded as this device's own before the first post (#1312): it comes
+    /// back through the fetch, undecryptable to us.
     pub envelope_id: &'a str,
 }
 
-/// Post an envelope, re-sealing and re-posting while the DS reports its epoch
-/// behind (#1041).
+/// Post an envelope, re-sealing while the DS reports its epoch behind (#1041).
 ///
-/// `build` turns the current [`Sealed`] into the request body (the caller owns
-/// the body type and the other fields). `on_reseal` runs under the local-DB
-/// lock after every re-seal, with the connection and the fresh envelope, so a
-/// local row written for the first seal can be brought in line (a send's own
-/// `message` row, whose `ciphertext` and `sent_at` must match what lands).
-///
-/// Returns the envelope that landed — its `sent_at` is the stamp the caller
-/// must report, not the one it started with.
+/// `build` turns the current [`Sealed`] into the request body. `on_reseal` runs
+/// under the local-DB lock after every re-seal, so a local row written for the
+/// first seal can match what lands. Returns the envelope that landed.
 pub(super) async fn post_resealing<B: ClientRequest>(
     state: &Arc<AppState>,
     target: Target<'_>,
@@ -165,8 +133,7 @@ pub(super) async fn post_resealing<B: ClientRequest>(
             super::loss::record_own_envelope(db.conn(), envelope_id);
         }
     }
-    // Test-harness only: a test can park a sender here and land a commit
-    // while its envelope is sealed-but-unposted (#1041).
+    // Test harness: park a sender between seal and post (#1041).
     #[cfg(feature = "test-harness")]
     crate::commands::mls::rendezvous::park(
         crate::commands::mls::rendezvous::Point::EnvelopeBeforePost,
@@ -190,9 +157,7 @@ pub(super) async fn post_resealing<B: ClientRequest>(
                 if attempt == MAX_RESEALS {
                     break;
                 }
-                // The interleaved catch-up applies the commit(s) we are behind
-                // by, decrypting what was sealed at each epoch on the way. It
-                // takes the group lock itself; no post site holds it.
+                // The catch-up takes the group lock itself; no post site holds it.
                 if let Err(e) =
                     super::catch_up_mls_group_interleaved(state, mls_group_id, user_id).await
                 {
@@ -200,9 +165,8 @@ pub(super) async fn post_resealing<B: ClientRequest>(
                         "[messages] re-seal catch-up for {mls_group_id} failed: {e}"
                     );
                 }
-                // The re-seal needs the MLS lock for the same reason the first
-                // seal did (#1079) — and only now that the catch-up has
-                // released it. Scoped so it is gone before the next post.
+                // Re-seal under the MLS lock (#1079), now that the catch-up has
+                // released it; scoped so it is gone before the next post.
                 let mls_guard = state.mls_group_lock(mls_group_id).await;
                 let held = crate::state::MlsLockHeld::from_guard(&mls_guard);
                 let guard = state.local_db.lock().await;

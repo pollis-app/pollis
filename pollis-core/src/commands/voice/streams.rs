@@ -24,10 +24,8 @@ pub(crate) fn start_mic_stream(
         .map_err(|e| anyhow::anyhow!("input config: {e}"))?;
     let channels = config.channels() as usize;
     let sample_format = config.sample_format();
-    // Prefer 48 kHz (WebRTC APM only supports 8/16/32/48 kHz), but fall
-    // back to whatever the device actually supports — Bluetooth devices
-    // on macOS (e.g. AirPods in SCO) often only advertise 16/24 kHz, and
-    // forcing 48 kHz makes build_input_stream fail.
+    // Prefer 48 kHz (APM supports only 8/16/32/48 kHz), else the device's
+    // default: Bluetooth SCO devices on macOS often offer only 16/24 kHz.
     let preferred_rate: u32 = 48_000;
     let supports_48k = device
         .supported_input_configs()
@@ -50,8 +48,7 @@ pub(crate) fn start_mic_stream(
         buffer_size: cpal::BufferSize::Default,
     };
 
-    // Build the stream for whatever native format the device reports.
-    // Each arm clones the shared state so it can move into the closure.
+    // One arm per native sample format.
     macro_rules! build_input {
         ($T:ty, $to_f32:expr) => {{
             let frame_tx = frame_tx.clone();
@@ -101,13 +98,9 @@ pub(crate) fn start_mic_stream(
 /// count, and the shared ring the AEC render reference is read from.
 type SpeakerStream = (SendableStream, u32, u32, Arc<Mutex<VecDeque<f32>>>);
 
-/// Build a cpal output stream driven by a shared ring buffer.
-/// Returns the stream (kept alive by the caller) and the buffer to push into.
-///
-/// `preferred_rate` is the rate we'd like to run at; we'll honour it when
-/// the device supports it and fall back to its default rate otherwise. The
-/// caller can compare the returned rate against `preferred_rate` to decide
-/// whether the AEC render reference can be tapped without resampling.
+/// Build a cpal output stream fed from a shared ring buffer. `preferred_rate`
+/// is used when supported, else the default; the caller compares the returned
+/// rate to decide whether the AEC reference needs resampling.
 pub(crate) fn start_speaker_stream(
     device: &cpal::Device,
     preferred_rate: u32,

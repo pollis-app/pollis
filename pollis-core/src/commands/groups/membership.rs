@@ -8,21 +8,13 @@ use super::authz;
 
 /// Every member of a group, with the profile fields the member list renders.
 ///
-/// #917: members-only. This took no caller at all, so any signed-in user who
-/// named a group id got its full roster — usernames and avatars included — and
-/// ids are enumerable because every client holds a whole-DB read-only Turso
-/// token. A roster is precisely the social-graph metadata this product exists
-/// to protect, so the answer for an outsider is the error, not an empty list:
-/// #875 established that a silence a caller cannot distinguish from "there is
-/// nothing here" is not an authorization outcome.
+/// Members only (#917): a roster is exactly the social-graph metadata this
+/// product protects. An outsider gets the error, not an empty list (#875).
 pub async fn get_group_members(
     group_id: String,
     requester_id: String,
     state: &Arc<AppState>,
 ) -> Result<Vec<GroupMember>> {
-    // Membership and the roster in ONE request. Non-membership comes back as
-    // `authorized: false`, which this turns into the shared refusal — the point
-    // of #875's chokepoint, now enforced by the server rather than asked of it.
     let resp = crate::commands::ds_reads::group(state, &group_id, &requester_id, false).await?;
     if !resp.authorized {
         return Err(Error::Other(anyhow::anyhow!(authz::NOT_A_MEMBER)));
@@ -56,8 +48,7 @@ pub async fn remove_member_from_group(
         )));
     }
 
-    // Route the member-row delete through the Delivery Service (which re-derives
-    // the admin/self rule server-side).
+    // The DS re-derives the admin/self rule.
     let body = pollis_api::groups::RemoveMemberBody {
         group_id: group_id.clone(),
         user_id,
@@ -65,31 +56,22 @@ pub async fn remove_member_from_group(
     };
     crate::commands::mls::ds_post_ok(state, &body).await?;
 
-    // Ingest-before-advance (issue #440, committer strand): catch this device up
-    // to head with the INTERLEAVED ingesting catch-up — decrypting every bound
-    // conversation's messages at each epoch — BEFORE reconcile stages + merges
-    // our remove commit and advances our epoch. Reconcile advances the shared MLS
-    // group; with `max_past_epochs = 0`, any current-epoch inbound message we
-    // haven't fetched yet would have its keys discarded the instant we advance
-    // past it. Hoisted ABOVE reconcile deliberately: `reconcile_group_mls_impl`
-    // holds the per-conversation MLS lock (`mls_group_lock`) for its whole body,
-    // and the interleaved catch-up re-acquires that SAME lock internally — running
-    // it here, before reconcile takes the lock, ingests the current epoch without
-    // deadlocking.
+    // Ingest-before-advance (#440): the interleaved catch-up must run before
+    // reconcile commits the removal, or an unfetched current-epoch message is
+    // stranded. It runs here, not inside reconcile, because reconcile holds the
+    // per-conversation MLS lock the catch-up takes.
     if let Err(e) = crate::commands::messages::catch_up_mls_group_interleaved(
         state, &group_id, &requester_id,
     ).await {
         crate::diag!("[mls] remove_member_from_group: catch_up_mls_group for {group_id}: {e}");
     }
 
-    // Reconcile removes the member's leaves from the MLS tree.
     if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
         state, &group_id, &requester_id,
     ).await {
         crate::diag!("[mls] remove_member_from_group: reconcile for group {group_id}: {e}");
     }
 
-    // Notify group members so they refetch the member list.
     if let Err(e) = crate::commands::livekit::publish_membership_changed_to_room(
         state,
         &group_id,
@@ -105,36 +87,25 @@ pub async fn leave_group(
     user_id: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    // Membership is the only bar: any member may leave, admins included. There
-    // is no ownership to transfer — migration 000008 renamed the 'owner' role to
-    // 'admin' and `groups.owner_id` is a display field, not an authz input.
+    // Any member may leave, admins included; there is no ownership to transfer.
     authz::require_member(state, &group_id, &user_id).await?;
 
-    // Route the leaver's member-row delete (and, when the group empties, the group
-    // delete) through the Delivery Service — one server-authorized write scoped to
-    // the signer's own row.
+    // Scoped to the signer's own row; the DS deletes the group if it empties.
     let body = pollis_api::groups::LeaveGroupBody {
         group_id: group_id.clone(),
         user_id: Some(user_id),
     };
     crate::commands::mls::ds_post_ok(state, &body).await?;
 
-    // A user cannot commit their own removal in MLS ("remove_members with self
-    // as target" is rejected by the spec).  Instead, wipe the local group state
-    // so the leaver can no longer read or send messages.  The remaining members
-    // still see this user in their epoch until an admin issues a remove commit,
-    // but forward secrecy ensures the leaver cannot decrypt future traffic after
-    // the next epoch advance.
+    // MLS rejects committing your own removal, so wipe the local group state
+    // instead. Remaining members drop the leaf on their next reconcile.
     match crate::commands::mls::forget_local_mls_group(state, &group_id).await {
         Ok(()) => {}
         Err(e) => crate::diag!("[mls] leave_group: forget local group {group_id}: {e}"),
     }
 
-    // Signal remaining members to reconcile (removes the leaver's stale leaf).
-    // `kind: "leave"` is what makes them actually do it — every other membership
-    // change was already committed by the device that made it, and a leaver
-    // cannot commit its own removal (#1081). Use publish_to_room_server since the
-    // leaver may not be connected to the room.
+    // `kind: "leave"` makes remaining members reconcile the stale leaf (#1081).
+    // Server-side publish: the leaver may not be connected to the room.
     if let Err(e) = crate::commands::livekit::publish_to_room_server(
         state,
         &group_id,
@@ -143,14 +114,10 @@ pub async fn leave_group(
         crate::diag!("[realtime] leave_group: notify group {group_id}: {e}");
     }
 
-    // If no members remain, the group is deleted (cascades to channels, invites,
-    // etc.); the DS handles that server-side inside the leave write above.
-
     Ok(())
 }
 
-/// Promote or demote a group member. Requester must be an admin.
-/// Valid roles: 'admin', 'member'.
+/// Promote or demote a group member to 'admin' or 'member'. Admins only.
 pub async fn set_member_role(
     group_id: String,
     user_id: String,
@@ -165,8 +132,7 @@ pub async fn set_member_role(
     authz::require_admin(state, &group_id, &requester_id, "change member roles").await?;
     authz::require_target_member(state, &group_id, &requester_id, &user_id).await?;
 
-    // Route the role update through the Delivery Service (admin re-derived
-    // server-side, target-membership re-checked).
+    // The DS re-derives admin and re-checks target membership.
     let body = pollis_api::groups::SetMemberRoleBody {
         group_id: group_id.clone(),
         user_id,
@@ -175,9 +141,7 @@ pub async fn set_member_role(
     };
     crate::commands::mls::ds_post_ok(state, &body).await?;
 
-    // Notify other online group members so their members list refreshes.
-    // Best-effort realtime push; routed through the livekit boundary so this
-    // call site stays platform-agnostic (no-op on mobile, see issue #185).
+    // Best effort; a no-op on mobile (#185).
     if let Err(e) = crate::commands::livekit::publish_member_role_changed_to_room(
         state,
         &group_id,

@@ -1,45 +1,31 @@
 //! Local transmit / listen gate for a voice session (#849).
 //!
-//! Everything that decides "is my mic hot right now" and "can I hear the
-//! room right now" lives here, as one pure state machine with no audio,
-//! no LiveKit, and no I/O. `lifecycle.rs` drives it from the Tauri
-//! commands and mirrors the two derived booleans onto atomics that the
-//! cpal capture callback and the playback mixer read on their hot paths.
+//! One pure state machine (no audio, LiveKit or I/O) for "is my mic hot" and
+//! "can I hear the room". `lifecycle.rs` mirrors its derived booleans onto
+//! atomics for the audio hot paths.
 //!
-//! Keeping it pure is what makes the interesting cases testable without a
-//! sound card: undeafen restoring the *prior* mute state, and a
-//! push-to-talk key that was still held when the window lost focus.
-//!
-//! ## Invariant
-//!
-//! `deafened ⇒ self_muted`. Deafen implies self-mute (the Discord model:
-//! you cannot be broadcasting into a room you have muted yourself out of),
-//! and the fields are private so no caller can construct the contradiction.
-//! `muted_before_deafen` is the *restore* slot that makes undeafen
-//! non-destructive.
+//! Invariant: `deafened ⇒ self_muted` (the Discord model), enforced by private
+//! fields. `muted_before_deafen` is what makes undeafen non-destructive.
 
 use serde::{Deserialize, Serialize};
 
 /// How the microphone is gated while unmuted.
 ///
-/// Mirrored in TypeScript as `VoiceInputMode` in
-/// `frontend/src/types/voice-state.ts` — keep the wire strings in sync.
+/// Mirrored as `VoiceInputMode` in `frontend/src/types/voice-state.ts`; keep
+/// the wire strings in sync.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VoiceInputMode {
-    /// Today's behaviour: the mic is open whenever you are not muted.
+    /// The mic is open whenever you are not muted.
     #[default]
     VoiceActivity,
     /// The mic is open only while the push-to-talk key is held.
     PushToTalk,
 }
 
-/// Flat snapshot handed back to the renderer by every gate-mutating
-/// command, so the UI never has to re-derive the outcome of a transition
-/// (notably: unmuting while deafened also clears deafen).
-///
-/// Mirrored in TypeScript as `VoiceGateState` in
-/// `frontend/src/types/voice-state.ts`.
+/// Snapshot returned by every gate-mutating command, so the UI never
+/// re-derives a transition (e.g. unmuting while deafened also undeafens).
+/// Mirrored as `VoiceGateState` in `frontend/src/types/voice-state.ts`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VoiceGateState {
     pub mode: VoiceInputMode,
@@ -47,8 +33,7 @@ pub struct VoiceGateState {
     pub self_muted: bool,
     /// Incoming audio is silenced (and, by the invariant, so is the mic).
     pub deafened: bool,
-    /// The push-to-talk key is currently down. Only meaningful in
-    /// `PushToTalk` mode.
+    /// The push-to-talk key is down (meaningful only in `PushToTalk`).
     pub ptt_held: bool,
     /// Derived: captured mic frames are being published right now.
     pub transmitting: bool,
@@ -56,16 +41,15 @@ pub struct VoiceGateState {
 
 /// The push-to-talk / mute / deafen state machine.
 ///
-/// All fields private; every transition is a method. See the module docs
-/// for the invariant this buys.
+/// Fields are private and every transition is a method, which is what
+/// enforces the invariant.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TransmitGate {
     mode: VoiceInputMode,
     self_muted: bool,
     deafened: bool,
     ptt_held: bool,
-    /// Mute state to put back when `deafened` clears. Meaningless (and
-    /// always `false`) while not deafened.
+    /// Mute state to restore when `deafened` clears; `false` otherwise.
     muted_before_deafen: bool,
 }
 
@@ -86,8 +70,6 @@ impl TransmitGate {
         }
     }
 
-    // ── Queries ──────────────────────────────────────────────────────────
-
     pub fn mode(&self) -> VoiceInputMode {
         self.mode
     }
@@ -104,11 +86,8 @@ impl TransmitGate {
         self.ptt_held
     }
 
-    /// The one derived question the capture path cares about: should the
-    /// mic frames we just captured be published?
-    ///
-    /// Deafen does not need its own arm here — the invariant guarantees it
-    /// has already forced `self_muted`.
+    /// Should the mic frames just captured be published? Deafen needs no arm:
+    /// the invariant already forced `self_muted`.
     pub fn transmitting(&self) -> bool {
         if self.self_muted {
             return false;
@@ -119,9 +98,8 @@ impl TransmitGate {
         }
     }
 
-    /// True when the user is not transmitting but has not muted themselves
-    /// either — i.e. push-to-talk is armed and idle. The UI shows this
-    /// distinctly from a real mute (#849, "state must be visible").
+    /// Push-to-talk armed and idle: not transmitting, but not muted either.
+    /// The UI shows it distinctly from a mute (#849).
     pub fn ptt_idle(&self) -> bool {
         self.mode == VoiceInputMode::PushToTalk && !self.self_muted && !self.ptt_held
     }
@@ -136,30 +114,23 @@ impl TransmitGate {
         }
     }
 
-    // ── Transitions ──────────────────────────────────────────────────────
-
-    /// Switch input mode. Always drops any held push-to-talk latch: on the
-    /// way *in* so push-to-talk starts idle rather than instantly hot, and
-    /// on the way *out* so a stale latch can't linger.
+    /// Switch input mode, always dropping the push-to-talk latch so PTT starts
+    /// idle and no stale latch lingers.
     pub fn set_mode(&mut self, mode: VoiceInputMode) {
         self.mode = mode;
         self.ptt_held = false;
     }
 
-    /// Set the explicit mute.
-    ///
-    /// Unmuting while deafened also undeafens — the invariant forbids
-    /// `deafened && !self_muted`, and of the two ways to resolve that, the
-    /// one that honours the user's click is to let go of deafen. This is
-    /// what Discord does with the same pair of buttons.
+    /// Set the explicit mute. Unmuting while deafened also undeafens: the
+    /// invariant forbids the alternative, and honouring the click means letting
+    /// go of deafen (as Discord does).
     pub fn set_self_muted(&mut self, muted: bool) {
         if !muted && self.deafened {
             self.deafened = false;
             self.muted_before_deafen = false;
         }
         self.self_muted = muted;
-        // Muting while deafened re-arms the restore slot, so a later
-        // undeafen leaves you muted rather than surprising the room.
+        // Muting while deafened re-arms the restore slot.
         if self.deafened {
             self.muted_before_deafen = muted;
         }
@@ -169,11 +140,8 @@ impl TransmitGate {
         self.set_self_muted(!self.self_muted);
     }
 
-    /// Set self-deafen.
-    ///
-    /// Deafening remembers the mute state it displaced and forces mute on.
-    /// Undeafening restores exactly that remembered state — it never
-    /// blindly unmutes.
+    /// Set self-deafen: remember the displaced mute state and force mute on;
+    /// undeafen restores exactly that, never blindly unmuting.
     pub fn set_deafened(&mut self, deafened: bool) {
         if deafened == self.deafened {
             return;
@@ -182,8 +150,7 @@ impl TransmitGate {
             self.muted_before_deafen = self.self_muted;
             self.deafened = true;
             self.self_muted = true;
-            // Nothing is going out while deafened, so release the latch
-            // rather than let it decide the state we come back to.
+            // Release the latch rather than let it decide the restored state.
             self.ptt_held = false;
         } else {
             self.deafened = false;
@@ -201,21 +168,15 @@ impl TransmitGate {
         self.ptt_held = held;
     }
 
-    /// The window lost keyboard focus (or the renderer is tearing down).
-    ///
-    /// This is the failure everybody remembers: alt-tab away with the
-    /// push-to-talk key still down, the OS delivers the keydown but never
-    /// the keyup, and the mic stays hot in the background. Focus loss
-    /// unconditionally drops the latch, so the worst case is a clipped
-    /// word rather than a live mic nobody knows about.
+    /// The window lost focus (or the renderer is tearing down). Alt-tab with
+    /// the key down delivers no keyup, so focus loss always drops the latch:
+    /// at worst a clipped word, never a hidden live mic.
     pub fn on_focus_lost(&mut self) {
         self.ptt_held = false;
     }
 
-    /// Reset the per-session bits at join time: nobody joins a room
-    /// pre-muted or pre-deafened, and no latch survives from a previous
-    /// call. `mode` deliberately persists — it is a user preference pushed
-    /// down from the settings page, not session state.
+    /// Reset per-session state at join. `mode` persists: it is a preference,
+    /// not session state.
     pub fn reset_for_join(&mut self) {
         self.self_muted = false;
         self.deafened = false;
@@ -227,8 +188,6 @@ impl TransmitGate {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── Voice-activity mode (today's behaviour, unchanged) ───────────────
 
     #[test]
     fn voice_activity_transmits_until_muted() {
@@ -250,11 +209,8 @@ mod tests {
         g.set_ptt_held(true);
         assert!(g.transmitting());
         g.set_ptt_held(false);
-        // Still transmitting: the latch has no authority in this mode.
         assert!(g.transmitting());
     }
-
-    // ── Push-to-talk ─────────────────────────────────────────────────────
 
     #[test]
     fn push_to_talk_starts_idle_and_transmits_only_while_held() {
@@ -293,7 +249,6 @@ mod tests {
 
         g.set_mode(VoiceInputMode::VoiceActivity);
         assert!(!g.ptt_held(), "the latch must not survive a mode change");
-        // Voice-activity + unmuted is hot, which is correct and visible.
         assert!(g.transmitting());
     }
 
@@ -306,8 +261,6 @@ mod tests {
         g.set_mode(VoiceInputMode::PushToTalk);
         assert!(!g.transmitting());
     }
-
-    // ── Focus loss: the mic must never be left hot ────────────────────────
 
     #[test]
     fn focus_loss_while_ptt_held_stops_transmitting() {
@@ -350,8 +303,7 @@ mod tests {
 
     #[test]
     fn a_keyup_that_never_arrives_cannot_strand_the_mic() {
-        // Simulates the real bug: keydown, window blur, then the stray
-        // keyup lands later against a gate that already released.
+        // Keydown, blur, then the stray keyup arrives later.
         let mut g = TransmitGate::new();
         g.set_mode(VoiceInputMode::PushToTalk);
         g.set_ptt_held(true);
@@ -359,8 +311,6 @@ mod tests {
         g.set_ptt_held(false);
         assert!(!g.transmitting());
     }
-
-    // ── Deafen ───────────────────────────────────────────────────────────
 
     #[test]
     fn deafen_implies_self_mute() {
@@ -377,7 +327,6 @@ mod tests {
     #[test]
     fn undeafen_restores_the_unmuted_state_it_displaced() {
         let mut g = TransmitGate::new();
-        // Unmuted before deafening…
         g.set_deafened(true);
         assert!(g.self_muted());
 
@@ -391,7 +340,6 @@ mod tests {
     #[test]
     fn undeafen_restores_the_muted_state_it_displaced() {
         let mut g = TransmitGate::new();
-        // …and muted before deafening.
         g.set_self_muted(true);
         g.set_deafened(true);
         assert!(g.self_muted());
@@ -437,9 +385,7 @@ mod tests {
         let mut g = TransmitGate::new();
         g.set_self_muted(true);
         g.set_deafened(true);
-        // A repeat deafen must not overwrite the restore slot with the
-        // forced-mute value — that is how "undeafen leaves you muted
-        // forever" bugs happen.
+        // A repeat deafen must not overwrite the restore slot.
         g.set_deafened(true);
         g.set_deafened(false);
         assert!(g.self_muted(), "restore slot survived a redundant deafen");
@@ -482,13 +428,10 @@ mod tests {
         let mut g = TransmitGate::new();
         g.set_mode(VoiceInputMode::PushToTalk);
         g.set_deafened(true);
-        // Keys pressed while deafened must not open the mic.
         g.set_ptt_held(true);
         assert!(!g.transmitting());
         assert!(g.deafened());
     }
-
-    // ── Session reset ────────────────────────────────────────────────────
 
     #[test]
     fn reset_for_join_clears_session_state_but_keeps_the_mode() {
@@ -507,16 +450,12 @@ mod tests {
         assert!(!g.self_muted());
         assert!(!g.deafened());
         assert!(!g.ptt_held());
-        // Fresh PTT session: armed and idle, not hot.
         assert!(!g.transmitting());
 
-        // And the restore slot is genuinely cleared, not just the flags.
         g.set_deafened(true);
         g.set_deafened(false);
         assert!(!g.self_muted());
     }
-
-    // ── Snapshot ─────────────────────────────────────────────────────────
 
     #[test]
     fn snapshot_reports_the_derived_transmit_state() {
@@ -545,10 +484,8 @@ mod tests {
         assert!(json.contains("\"push_to_talk\""), "got {json}");
     }
 
-    /// The invariant, swept over every reachable transition sequence of
-    /// length 4. Cheap exhaustive proof that no ordering of the public API
-    /// can produce `deafened && !self_muted`, or `transmitting` while
-    /// deafened.
+    /// The invariant, swept exhaustively over every transition sequence of
+    /// length 4.
     #[test]
     // The three assertions below are each written as "never (A and B)" because
     // that is the invariant; De Morgan'ing one of them would break the set's

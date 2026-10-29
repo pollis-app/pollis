@@ -1,23 +1,10 @@
 use rusqlite::Connection;
 
-// #987 removed the first half of this file. It exercised the SQL behind
-// `list_messages_by_sender` and `list_channel_previews`, two commands #987
-// deleted: both keyed on `message_envelope.sender_id`, which sealed sender
-// (#607) has written as the literal string "sealed" for every send since, so
-// neither could match a real user any more. The queries went with the commands
-// and the fixtures went with the queries.
-
-// ── #874: batched last-message previews ──────────────────────────────────────
-//
-// The sidebar's preview rows used to issue one `read_channel_messages` /
-// `read_dm_messages` IPC call EACH. `read_last_messages` collapses them into a
-// single call whose entire correctness lives in one SQL string, so that string
-// is what these exercise — against the LOCAL schema, which is where the
-// `message` table actually lives.
+// #874: `read_last_messages` lives in one SQL string, exercised here against
+// the local schema.
 
 use super::read::last_messages_sql;
 
-/// The local (device) SQLite schema, as `LocalDb::open` applies it.
 fn local_db() -> Connection {
     let conn = Connection::open_in_memory().unwrap();
     crate::db::local::apply_local_schema(&conn).unwrap();
@@ -67,8 +54,7 @@ fn last_messages_omits_conversations_with_no_messages() {
 
     let rows = last_messages(&conn, &["conv-a", "conv-empty"]);
 
-    // Absence IS the answer for an empty conversation — the caller keys by
-    // conversation_id, so a null placeholder would be a second spelling of it.
+    // Absence is the answer for an empty conversation.
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].0, "conv-a");
 }
@@ -77,8 +63,7 @@ fn last_messages_omits_conversations_with_no_messages() {
 fn last_messages_breaks_sent_at_ties_the_same_way_the_page_read_does() {
     let conn = local_db();
     // Identical timestamps: the page read orders `sent_at DESC, id DESC`, so
-    // the higher id wins. A preview disagreeing with the top of the opened
-    // conversation is the bug this pins shut.
+    // the higher id wins, and the preview must agree.
     insert_local_message(&conn, "m-aaa", "conv-a", "lower id",  "2024-01-01T10:00:00Z");
     insert_local_message(&conn, "m-zzz", "conv-a", "higher id", "2024-01-01T10:00:00Z");
 
@@ -106,17 +91,11 @@ fn last_messages_covers_every_requested_conversation_in_one_statement() {
     let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
     let rows = last_messages(&conn, &refs);
 
-    // 25 conversations, ONE prepared statement. This is the whole point of the
-    // command: the previous shape was 25 separate IPC round trips.
     assert_eq!(rows.len(), 25);
 }
 
-// ── #1039: the forward page read ─────────────────────────────────────────────
-//
-// `read_messages_after` is what fills the hole a jump-to-message leaves
-// between the anchor's page and the live newest page. Its contract is a paging
-// one — feed `next_cursor` back in and you visit every row once, then stop —
-// so that is what is pinned, not any single page.
+// #1039: feeding `next_cursor` back into the forward read visits every row
+// once, then stops.
 
 use super::read::read_after_on;
 use super::types::MessageCursor;
@@ -125,8 +104,7 @@ fn cursor(sent_at: &str, id: &str) -> MessageCursor {
     MessageCursor { sent_at: sent_at.to_string(), id: id.to_string() }
 }
 
-/// Walk forward from `start` in pages of `limit`, the way the renderer does,
-/// returning every id in the order it was handed back (each page newest-first).
+/// Walk forward from `start` in pages of `limit`, as the renderer does.
 fn walk_forward(conn: &Connection, start: MessageCursor, limit: i64) -> (Vec<String>, usize) {
     let mut cursor = start;
     let mut ids = Vec::new();
@@ -160,16 +138,13 @@ fn read_after_pages_forward_to_the_tail_without_skipping_or_repeating() {
 
     let (ids, pages) = walk_forward(&conn, cursor("2024-01-01T10:04:00Z", "m04"), 5);
 
-    // Exclusive of the cursor row, every later row exactly once, in log order
-    // once each page's newest-first is unwound.
     let mut expected: Vec<String> = (5..23).map(|i| format!("m{i:02}")).collect();
     let mut got = ids.clone();
     got.sort();
     expected.sort();
     assert_eq!(got, expected);
     assert_eq!(ids.len(), 18, "no row visited twice");
-    // 18 rows at 5 a page: three full pages, one of three, and — because the
-    // fourth was short — no fifth call.
+    // Three full pages and one short one; the short one ends the walk.
     assert_eq!(pages, 4);
 }
 
@@ -196,13 +171,12 @@ fn read_after_exactly_full_last_page_ends_on_the_next_empty_call() {
         insert_local_message(&conn, &format!("m{i}"), "conv-a", "hi", &format!("2024-01-01T10:0{i}:00Z"));
     }
 
-    // Two rows remain after m1 and the page size is two: the page is full, so
-    // the read cannot yet know it is the tail.
+    // Two rows remain after m1 and the page holds two: full, so not yet known
+    // to be the tail.
     let (page, next) = read_after_on(&conn, "conv-a", &cursor("2024-01-01T10:01:00Z", "m1"), 2).unwrap();
     assert_eq!(page.len(), 2);
     let next = next.expect("a full page always continues");
 
-    // The next call is the one that says so: empty, and no cursor.
     let (tail, none) = read_after_on(&conn, "conv-a", &next, 2).unwrap();
     assert!(tail.is_empty());
     assert!(none.is_none(), "an empty page never carries a continuation");
@@ -211,9 +185,8 @@ fn read_after_exactly_full_last_page_ends_on_the_next_empty_call() {
 #[test]
 fn read_after_breaks_sent_at_ties_on_id_like_the_backward_read() {
     let conn = local_db();
-    // Three rows at ONE instant. The backward read orders `sent_at DESC, id
-    // DESC`, so its cursor at `m-b` means "everything before m-b in that
-    // order" — and forward from `m-b` must be exactly the complement.
+    // Forward from `m-b` must be the exact complement of the backward read's
+    // `sent_at DESC, id DESC` at the same instant.
     for id in ["m-a", "m-b", "m-c"] {
         insert_local_message(&conn, id, "conv-a", "hi", "2024-01-01T10:00:00Z");
     }

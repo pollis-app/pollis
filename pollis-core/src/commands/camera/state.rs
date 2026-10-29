@@ -1,8 +1,5 @@
-//! Per-process webcam-capture state. Owns the live LiveKit camera track +
-//! source and (on the helper-subprocess platforms, macOS + Linux) the
-//! capture-helper handles. Independent of `ScreenShareState`: a user can
-//! screen-share and webcam simultaneously, so the two never share a track,
-//! source, or helper slot.
+//! Per-process webcam-capture state, independent of `ScreenShareState` so a
+//! user can screen-share and webcam at once.
 
 use std::sync::Arc;
 
@@ -19,9 +16,8 @@ pub struct CameraState {
     pub local_track: Option<LocalVideoTrack>,
     pub local_source: Option<NativeVideoSource>,
 
-    /// Enumeration phase: helper spawned in `--mode camera` and has sent
-    /// its `Cameras` list; we're waiting for `start_camera` to send the
-    /// pick. `start_camera` consumes this; `stop_camera` discards it.
+    /// Helper spawned in `--mode camera` that has sent its `Cameras` list,
+    /// waiting for `start_camera` to send the pick.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub picker_session: Option<crate::commands::screenshare::HelperSession>,
     /// Handle to the capture helper subprocess. Killing it terminates
@@ -37,25 +33,18 @@ pub struct CameraState {
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub local_reader_task: Option<tokio::task::JoinHandle<()>>,
 
-    /// Windows: the dedicated thread running the blocking Media Foundation
-    /// `IMFSourceReader::ReadSample` capture loop (no helper subprocess — MF
-    /// is clean in-process COM, mirroring WGC screen capture). `stop_camera`
-    /// flips `windows_active`; the loop observes it, tears down its own MF +
-    /// COM state, and exits. The handle is detached, not force-joined — the
-    /// fence guarantees no post-stop source access.
+    /// Windows: the thread running the blocking Media Foundation capture loop.
+    /// `stop_camera` flips `windows_active` and the loop tears itself down;
+    /// detached, not joined.
     #[cfg(target_os = "windows")]
     pub windows_thread: Option<std::thread::JoinHandle<()>>,
-    /// Windows: per-session fence, same role as the reader task on the helper
-    /// platforms. The MF loop checks it before touching the LiveKit source; a
-    /// fresh Arc per session so a stale stop can't fence a newer one.
+    /// Windows: per-session fence checked before touching the LiveKit source;
+    /// a fresh Arc per session so a stale stop can't fence a newer one.
     #[cfg(target_os = "windows")]
     pub windows_active: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 
-    // ── Settings self-preview (issue #434) ──────────────────────────────────
-    // A capture that mirrors to the local preview WITHOUT a voice room or a
-    // published track — for the camera picker in Voice & Video settings.
-    // Kept in its OWN slots so it never disturbs a live in-call camera: a user
-    // can open settings mid-call and the two captures coexist.
+    // Settings self-preview (#434): no voice room or published track, in its
+    // own slots so it coexists with a live in-call camera.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub preview_helper: Option<tokio::process::Child>,
     #[cfg(any(target_os = "macos", target_os = "linux"))]

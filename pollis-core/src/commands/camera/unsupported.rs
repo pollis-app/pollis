@@ -1,7 +1,5 @@
-//! Camera capture is macOS-only for now. On Linux and Windows the
-//! commands return a clean, structured error instead of spawning a helper
-//! that can't honour `--mode camera`. Linux (V4L2 / PipeWire camera
-//! portal) and Windows (Media Foundation) land in follow-up commits.
+//! Platforms without camera capture (mobile and others): the commands return
+//! a structured "not yet supported" error.
 
 use std::sync::Arc;
 
@@ -23,14 +21,13 @@ pub async fn start_camera(_state: &Arc<AppState>, _device_id: String) -> Result<
     Err(unsupported())
 }
 
-/// Settings self-preview (issue #434) — same "unsupported here" story as capture.
+/// Settings self-preview (#434).
 pub async fn start_camera_preview(_state: &Arc<AppState>, _device_id: String) -> Result<()> {
     Err(unsupported())
 }
 
-/// Idempotent no-op: there is never a live camera capture to tear down on
-/// an unsupported platform, and callers (e.g. leave-voice cleanup) must be
-/// able to call this unconditionally.
+/// Idempotent no-op, so callers (e.g. leave-voice cleanup) can call it
+/// unconditionally.
 pub async fn stop_camera(_state: &Arc<AppState>) -> Result<()> {
     Ok(())
 }

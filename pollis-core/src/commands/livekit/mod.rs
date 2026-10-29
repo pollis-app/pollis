@@ -1,42 +1,15 @@
-//! LiveKit integration: JWT minting, RoomService admin calls, realtime data
-//! channel fanout (presence, message pings, typing, voice presence, calls),
-//! and the connect/reconnect loop that keeps each group/inbox room
-//! subscribed.
-//!
-//! LiveKit tokens + RoomService admin calls are minted **server-side** by the
-//! Delivery Service now (#393) — this module holds no LiveKit API secret. Token
-//! requests go through `commands::mls::ds_livekit_token`; SendData / roster go
-//! through `ds_livekit_send_data` / `ds_livekit_participants`.
-//!
-//! Submodules:
-//!   - `identity`      — parse a LiveKit identity into a Pollis user_id +
-//!     avatar lookups against the remote DB.
-//!   - `participants`  — `list_voice_participants` / `list_voice_room_counts`.
-//!   - `publish`       — every outbound data-packet helper
-//!     (`publish_to_user_inbox`, `publish_to_room_server`,
-//!     per-event publishers, typing, voice presence,
-//!     ping, 1:1 call invite/cancel).
-//!   - `realtime`      — `subscribe_realtime` + `connect_rooms` connect /
-//!     reconnect loop and presence emission.
-//!   - `legacy`        — thin `get_livekit_token` / `get_livekit_view_token`
-//!     / `get_livekit_url` shims kept for the frontend.
-//!
-//! `dispatch_data` (defined here in `mod.rs`) parses an inbound DataReceived
-//! payload and forwards it as a typed `RealtimeEvent` on the frontend
-//! channel — it's the shared "wire format → RealtimeEvent" decoder used
-//! by `realtime::connect_rooms`.
+//! LiveKit integration: realtime data-channel fanout (presence, message pings,
+//! typing, voice presence, calls) and the connect/reconnect loop for each
+//! group/inbox room. Tokens and RoomService calls are minted by the DS (#393);
+//! this module holds no LiveKit secret.
 
 use crate::realtime::RealtimeEvent;
-
-// ── Submodules ───────────────────────────────────────────────────────────
 
 mod identity;
 mod legacy;
 mod participants;
 mod publish;
 mod realtime;
-
-// ── Public surface ───────────────────────────────────────────────────────
 
 pub(crate) use identity::{
     is_view_identity, lookup_avatar_url_for_identity, lookup_avatar_urls_for_identities,
@@ -57,21 +30,10 @@ pub use publish::{
 };
 pub use realtime::{connect_rooms, subscribe_realtime};
 
-// ── Internal helpers ───────────────────────────────────────────────────────
-
-/// Parses a raw DataReceived payload and forwards it to the frontend channel.
-/// Returns a conversation_id when a `membership_changed` event indicates
-/// MLS reconcile should be triggered by the caller.
-/// The publisher of a data packet, already resolved from its opaque LiveKit
-/// identity (#836). `None` when the packet came from a server-side emitter (the
-/// DS's own `SendData`) or from a participant we could not resolve.
-///
-/// This is what shared-room broadcasts are attributed from now. Previously the
-/// actor rode inside the payload as a raw `user_id`, which both violated the §5
-/// routing-only rule for shared rooms and — after #836 — pointed straight back
-/// at the account behind the pseudonym that published it. Taking it from the
-/// sender is also the stronger claim: a self-declared id in the body is
-/// unauthenticated, this one is at least what the SFU saw connect.
+/// The publisher of a data packet, resolved from its opaque LiveKit identity
+/// (#836). `None` for a server-side emitter (the DS's `SendData`) or an
+/// unresolvable participant. Shared-room broadcasts are attributed from this,
+/// never from a self-declared id in the payload.
 pub(super) struct PacketSender {
     pub user_id: String,
     pub username: Option<String>,
@@ -80,15 +42,12 @@ pub(super) struct PacketSender {
 /// Who a packet is FROM, for the private-inbox events that name their actor
 /// (DM request, group invite, incoming call).
 ///
-/// Two trustworthy sources, and only two: a packet published by a participant
-/// is attributed to that participant (the SFU saw it connect under a pseudonym
-/// the DS resolved); a packet with no participant came from the DS's own
-/// `SendData`, and the DS stamps the VERIFIED signer into it as `sender_id` /
-/// `sender_username` after stripping every identity key the client sent
-/// (`pollis-delivery/src/broker.rs`, `livekit_send_data`). So `caller_id`,
-/// `caller_username`, `inviter_username` and friends are never read here: a
-/// self-declared identity in the body is exactly what let any account ring a
-/// device "from" anyone.
+/// Two trustworthy sources only: a participant-published packet is attributed
+/// to that participant; a packet with no participant came from the DS, which
+/// stamps the verified signer as `sender_id` / `sender_username` after
+/// stripping client-sent identity keys (`pollis-delivery/src/broker.rs`). Body
+/// fields like `caller_id` are never read: that let any account ring a device
+/// "from" anyone.
 fn attributed(sender: Option<&PacketSender>, data: &serde_json::Value) -> Option<PacketSender> {
     if let Some(who) = sender {
         return Some(PacketSender {
@@ -111,12 +70,14 @@ fn attributed(sender: Option<&PacketSender>, data: &serde_json::Value) -> Option
 pub(super) struct MembershipWake {
     /// The `mls_group_id` — `group_id` for channels, `dm_channel_id` for DMs.
     pub(super) conversation_id: String,
-    /// `true` when the change was a member LEAVING (or deleting their account).
-    /// A leaver cannot commit its own removal, so unlike every other membership
-    /// change there is no committer yet and the receiver has to be one (#1081).
+    /// A member leaving (or deleting their account). A leaver cannot commit its
+    /// own removal, so the receiver has to (#1081).
     pub(super) is_leave: bool,
 }
 
+/// Parse a raw DataReceived payload and forward it to the frontend channel.
+/// Returns a [`MembershipWake`] when the caller should act on a membership
+/// change.
 pub(super) fn dispatch_data(
     payload: &[u8],
     sender: Option<&PacketSender>,
@@ -133,10 +94,9 @@ pub(super) fn dispatch_data(
 
     match data.get("type").and_then(|v| v.as_str()) {
         Some("new_message") => {
-            // §5: the wake-up carries no sender — the recipient attributes the
-            // message from the MLS credential in the envelope it ingests. Tolerate
-            // an old client still sending `sender_id`/`sender_username` by simply
-            // ignoring those fields.
+            // §5: the wake-up carries no sender; the recipient attributes the
+            // message from the MLS credential. An old client's `sender_id` is
+            // ignored.
             let event = RealtimeEvent::NewMessage {
                 channel_id: data
                     .get("channel_id")
@@ -147,7 +107,6 @@ pub(super) fn dispatch_data(
                     .and_then(|v| v.as_str())
                     .map(str::to_owned),
             };
-            // Errors here mean the frontend channel was dropped (e.g. logout). Ignore.
             let _ = channel.send(event);
         }
         Some("dm_created") => {
@@ -164,7 +123,6 @@ pub(super) fn dispatch_data(
             }
         }
         Some("membership_changed") => {
-            // Extract conversation_id from payload (group_id or conversation_id).
             let conv_id = data
                 .get("group_id")
                 .or_else(|| data.get("conversation_id"))
@@ -173,8 +131,7 @@ pub(super) fn dispatch_data(
             let kind = data.get("kind").and_then(|v| v.as_str()).map(str::to_owned);
             let is_leave =
                 kind.as_deref() == Some(crate::commands::livekit_signalling::LEAVE_KIND);
-            // The inviter is the attributed actor (see `attributed`); the DS
-            // resolves `group_name` from the group row the invite names.
+            // The inviter is the attributed actor; the DS resolves `group_name`.
             let _ = channel.send(RealtimeEvent::MembershipChanged {
                 conversation_id: conv_id.clone(),
                 kind,
@@ -197,9 +154,7 @@ pub(super) fn dispatch_data(
             }
         }
         Some("voice_joined") => {
-            // §5/#836: the actor is the sender, not a field in the packet. An old
-            // client's `user_id`/`display_name` are simply ignored — the same
-            // tolerance `new_message` applies to `sender_id`.
+            // §5/#836: the actor is the sender, not a field in the packet.
             if let (Some(channel_id), Some(who)) = (
                 data.get("channel_id").and_then(|v| v.as_str()),
                 sender,
@@ -226,8 +181,7 @@ pub(super) fn dispatch_data(
             }
         }
         Some("edited_message") => {
-            // §5: no `sender_id` — the editor is re-derived from the durable edit
-            // envelope on ingest. An old client's `sender_id` is ignored.
+            // §5: the editor is re-derived from the edit envelope on ingest.
             if let Some(message_id) = data.get("message_id").and_then(|v| v.as_str()) {
                 let _ = channel.send(RealtimeEvent::EditedMessage {
                     channel_id: data.get("channel_id").and_then(|v| v.as_str()).map(str::to_owned),
@@ -236,12 +190,8 @@ pub(super) fn dispatch_data(
                 });
             }
         }
-        // Both were published by every client and handled by the renderer, but
-        // never forwarded from here, so a delete or a role change reached other
-        // desktops only on their next refetch.
         Some("deleted_message") => {
-            // §5: no `deleted_by` — the actor is re-derived from the tombstone
-            // envelope on ingest.
+            // §5: the actor is re-derived from the tombstone on ingest.
             if let Some(message_id) = data.get("message_id").and_then(|v| v.as_str()) {
                 let _ = channel.send(RealtimeEvent::DeletedMessage {
                     channel_id: data.get("channel_id").and_then(|v| v.as_str()).map(str::to_owned),
@@ -258,26 +208,19 @@ pub(super) fn dispatch_data(
             }
         }
         Some("enrollment_requested") => {
-            // DS-originated only (`bootstrap::enrollment_request`): the DS refuses
-            // this type from clients, and a participant-published copy — which
-            // in an inbox room can only be one of this user's own devices — is
-            // dropped rather than allowed to raise the approval takeover.
+            // DS-originated only: a participant-published copy (in an inbox
+            // room, one of this user's own devices) is dropped.
             if sender.is_some() {
                 return None;
             }
-            // `verification_code` is deliberately NOT read out of the packet
-            // (#1096), even though the DS still sends it for shipped clients.
-            // Forwarding it would let the approval UI pre-fill the comparison
-            // with a server-supplied value.
+            // `verification_code` is deliberately not read (#1096): the approval
+            // UI must not pre-fill the comparison with a server-supplied value.
             if let (Some(request_id), Some(new_device_id)) = (
                 data.get("request_id").and_then(|v| v.as_str()),
                 data.get("new_device_id").and_then(|v| v.as_str()),
             ) {
                 // `link_id` (#1207/#1361) marks a QR-link request, which the UI
-                // must not answer with the typed-code takeover: the new device
-                // shows no code. Dropping it here (as this dispatch did) made
-                // desktop's skip dead code, so a phone signing in from a
-                // desktop's QR raised an approval card nobody could complete.
+                // must not answer with the typed-code takeover.
                 let link_id = data
                     .get("link_id")
                     .and_then(|v| v.as_str())
@@ -291,18 +234,14 @@ pub(super) fn dispatch_data(
             }
         }
         Some("channel_mutes_changed") => {
-            // DS-originated only (`profile::set_channel_mute`), like
-            // `enrollment_requested`: a participant-published copy is dropped.
-            // Harmless either way — it only triggers a re-read — but there is
-            // no reason to let a client fake a server nudge.
+            // DS-originated only, like `enrollment_requested`.
             if sender.is_some() {
                 return None;
             }
             let _ = channel.send(RealtimeEvent::ChannelMutesChanged);
         }
         Some("call_invite") => {
-            // The caller is the attributed actor — a ring with no attributable
-            // caller is dropped, never shown as "from" whoever the body names.
+            // A ring with no attributable caller is dropped.
             if let (Some(call_id), Some(room_name), Some(caller)) = (
                 data.get("call_id").and_then(|v| v.as_str()),
                 data.get("room_name").and_then(|v| v.as_str()),
@@ -325,8 +264,7 @@ pub(super) fn dispatch_data(
             }
         }
         Some("roster_changed") => {
-            // Mirror of the RosterChanged variant in realtime.rs: a bare
-            // refetch hint (§5.3) — the conversation and its epochs, no ids.
+            // A bare refetch hint (§5.3): the conversation and its epochs.
             let conversation_id = data
                 .get("conversation_id")
                 .and_then(|v| v.as_str())
@@ -344,9 +282,8 @@ pub(super) fn dispatch_data(
             }
         }
         Some("typing") => {
-            // §5/#836: the typist is the sender. A packet we cannot attribute is
-            // dropped rather than shown as "someone is typing" — an indicator
-            // with no name is not worth an unattributed event.
+            // §5/#836: the typist is the sender; an unattributable packet is
+            // dropped.
             if let Some(who) = sender {
                 let _ = channel.send(RealtimeEvent::Typing {
                     channel_id: data.get("channel_id").and_then(|v| v.as_str()).map(str::to_owned),
@@ -387,9 +324,8 @@ mod tests {
         dispatch_data(payload.to_string().as_bytes(), None, &sink)
     }
 
-    /// Every wake-up a client publishes reaches the renderer. A type that
-    /// falls through to `_ => {}` is published to nobody: the sender believes
-    /// it told the room, and every receiver stays stale until a refetch.
+    /// Every wake-up a client publishes reaches the renderer, rather than
+    /// falling through to `_ => {}`.
     #[test]
     fn every_published_wake_up_reaches_the_renderer() {
         use crate::commands::livekit_signalling as sig;
@@ -410,9 +346,7 @@ mod tests {
         }
     }
 
-    /// #1081: a leave is the one membership change with no committer, so the
-    /// handler has to be able to tell it apart. Classification lives here; what
-    /// the flag makes the device do lives in `mls::apply_membership_wake`.
+    /// #1081: only a leave asks the receiver to commit.
     #[test]
     fn only_a_leave_wake_asks_the_receiver_to_commit() {
         let leave = wake(crate::commands::livekit_signalling::member_left_group_payload("g1"))
@@ -427,7 +361,6 @@ mod tests {
         assert_eq!(dm_leave.conversation_id, "dm1");
         assert!(dm_leave.is_leave);
 
-        // Everything else was committed by the device that made it.
         let plain = wake(crate::commands::livekit_signalling::membership_changed_payload("g1"))
             .expect("a plain membership change still names its conversation");
         assert!(!plain.is_leave, "a plain membership change needs no remove commit here");
@@ -440,8 +373,7 @@ mod tests {
         .expect("an invite names its conversation");
         assert!(!invite.is_leave);
 
-        // An unknown kind is not a leave — a future kind must not accidentally
-        // trigger a remove commit on every receiver.
+        // A future kind must not trigger a remove commit on every receiver.
         let unknown = wake(serde_json::json!({
             "type": "membership_changed",
             "group_id": "g1",
@@ -461,15 +393,13 @@ mod tests {
         })
     }
 
-    /// The spoof: a server-relayed packet naming a caller in its body, with no
-    /// DS stamp. It must not ring at all — not as "The CEO", not as anyone.
+    /// A server-relayed packet naming a caller only in its body must not ring.
     #[test]
     fn call_invite_with_only_body_identity_is_dropped() {
         assert!(run(forged_call_invite(), None).is_empty());
     }
 
-    /// A DS-relayed packet is attributed from the stamp the DS added, and the
-    /// body's own `caller_*` claims are ignored even when present.
+    /// Attributed from the DS stamp; body `caller_*` claims are ignored.
     #[test]
     fn call_invite_is_attributed_from_the_ds_stamp() {
         let mut payload = forged_call_invite();
@@ -488,8 +418,8 @@ mod tests {
         }
     }
 
-    /// A participant-published packet is attributed to the participant, and the
-    /// body — `caller_*` and even a fake `sender_id` — is ignored.
+    /// Attributed to the participant; the body, even a fake `sender_id`, is
+    /// ignored.
     #[test]
     fn call_invite_from_a_participant_is_attributed_to_that_participant() {
         let mut payload = forged_call_invite();
@@ -508,8 +438,7 @@ mod tests {
         }
     }
 
-    /// `dm_created` / invite pings name their actor the same way: the stamp, or
-    /// the participant — never `inviter_username` / `sender_username` alone.
+    /// Inbox pings name their actor from the stamp or the participant only.
     #[test]
     fn inbox_pings_take_their_name_from_the_attribution() {
         let events = run(
@@ -549,8 +478,7 @@ mod tests {
         }
     }
 
-    /// The enrollment-approval takeover is honoured only from the DS's own
-    /// emitter (no participant); a participant-published copy is dropped.
+    /// The approval takeover is honoured only from the DS.
     #[test]
     fn enrollment_requested_is_honoured_only_from_the_ds() {
         let payload = serde_json::json!({
@@ -567,8 +495,7 @@ mod tests {
         assert!(run(payload, Some(&someone)).is_empty());
     }
 
-    /// #1431: the mute re-read nudge is forwarded from the DS and dropped from a
-    /// participant.
+    /// #1431: the mute nudge is honoured only from the DS.
     #[test]
     fn channel_mutes_changed_is_honoured_only_from_the_ds() {
         let payload = serde_json::json!({ "type": "channel_mutes_changed" });
@@ -581,11 +508,8 @@ mod tests {
         assert!(run(payload, Some(&someone)).is_empty());
     }
 
-    /// #1096: the approval takeover must not carry the server's copy of the
-    /// verification code. The DS still puts one in the packet for shipped
-    /// clients, so the check is that this dispatch DROPS it — otherwise the
-    /// approval UI can pre-fill the comparison with a server-supplied value and
-    /// a DS that swaps the ephemeral key and its stored code together passes.
+    /// #1096: the server's copy of the verification code is dropped, or a DS
+    /// swapping the ephemeral key and its stored code together would pass.
     #[test]
     fn an_enrollment_takeover_carries_no_server_supplied_code() {
         let events = run(
@@ -603,10 +527,7 @@ mod tests {
         assert_eq!(request_id, "r1");
         assert_eq!(new_device_id, "d2");
         assert_eq!(link_id, &None, "a typed-code request carries no link id");
-        // The variant has no code field at all; this is the compile-time half of
-        // the assertion. The runtime half is that a packet WITH a code still
-        // dispatches, rather than being rejected as malformed — shipped DS
-        // packets must keep working.
+        // A packet with a code still dispatches: shipped DS packets send one.
         let serialized = serde_json::to_string(&events[0]).expect("serialize");
         assert!(
             !serialized.contains("ABCD2345"),
@@ -614,8 +535,7 @@ mod tests {
         );
     }
 
-    /// And a packet with NO code must still raise the takeover — a future DS
-    /// that stops sending it cannot be allowed to silence enrollment prompts.
+    /// A packet with no code still raises the takeover.
     #[test]
     fn an_enrollment_takeover_needs_no_code_in_the_packet() {
         let events = run(
@@ -629,10 +549,8 @@ mod tests {
         assert_eq!(events.len(), 1, "a packet with no code must still raise the takeover");
     }
 
-    /// A QR-link request's nudge (the DS sets `link_id` on it) must reach the UI
-    /// WITH that id, or the UI cannot tell it from a typed-code request and
-    /// raises an approval card asking for a code the new device never shows —
-    /// the phone-scans-desktop's-QR sign-in then dead-ends on the desktop.
+    /// A QR-link nudge keeps its `link_id`, or the UI asks for a code the new
+    /// device never shows.
     #[test]
     fn a_qr_link_enrollment_nudge_keeps_its_link_id() {
         let events = run(
@@ -649,11 +567,9 @@ mod tests {
             panic!("expected exactly one EnrollmentRequested, got {} event(s)", events.len());
         };
         assert_eq!(link_id.as_deref(), Some("link-1"));
-        // The renderer reads it off the serialized event.
         let serialized = serde_json::to_value(&events[0]).expect("serialize");
         assert_eq!(serialized["link_id"], "link-1");
 
-        // A null or empty id is a typed-code request — the takeover's default.
         for absent in [serde_json::Value::Null, serde_json::json!("")] {
             let events = run(
                 serde_json::json!({

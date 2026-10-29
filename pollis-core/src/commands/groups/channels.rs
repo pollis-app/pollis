@@ -9,21 +9,12 @@ use super::authz;
 
 /// Every channel in a group.
 ///
-/// #917: members-only. Channel names are content-adjacent metadata — `#general`
-/// says nothing, `#q3-layoffs` says a great deal — and this took no caller, so
-/// any group's channel list was readable by anyone who named the group id. The
-/// sibling read `list_user_groups_with_channels` has always joined through
-/// `group_member`; this is the same rule, applied to the same data, reached by
-/// a different door.
+/// Members only (#917): channel names are content-adjacent metadata.
 pub async fn list_group_channels(
     group_id: String,
     requester_id: String,
     state: &Arc<AppState>,
 ) -> Result<Vec<Channel>> {
-    // Membership and the channel list in ONE request: the DS answers
-    // `authorized: false` with an empty list, which is the same refusal
-    // `require_member` produced — expressed once, server-side, by the same
-    // predicate that gates the writes.
     let resp = crate::commands::ds_reads::group(state, &group_id, &requester_id, false).await?;
     if !resp.authorized {
         return Err(Error::Other(anyhow::anyhow!(authz::NOT_A_MEMBER)));
@@ -39,8 +30,7 @@ pub async fn create_channel(
     group_id: String,
     name: String,
     description: Option<String>,
-    // 'text' (default) or 'voice' — stored in the channel_type column.
-    // Requires Turso migration: ALTER TABLE channels ADD COLUMN channel_type TEXT NOT NULL DEFAULT 'text';
+    // 'text' (default) or 'voice'.
     channel_type: Option<String>,
     _creator_id: String,
     state: &Arc<AppState>,
@@ -48,8 +38,7 @@ pub async fn create_channel(
     let id = Ulid::new().to_string();
     let channel_type = channel_type.unwrap_or_else(|| "text".to_string());
 
-    // DS seam: route the channel insert through the Delivery Service (which
-    // re-derives group membership server-side).
+    // The DS re-derives group membership.
     let body = pollis_api::groups::CreateChannelBody {
         id: id.clone(),
         group_id: group_id.clone(),
@@ -60,10 +49,7 @@ pub async fn create_channel(
     };
     crate::commands::mls::ds_post_ok(state, &body).await?;
 
-    // Tell the group's other members a channel appeared (#874). `delete_channel`
-    // already did this; creation did not, so a new channel was invisible to
-    // everyone else until they happened to refocus the window — which is what
-    // the sidebar's blanket `refetchOnWindowFocus` was silently paying for.
+    // Tell the other members a channel appeared (#874).
     if let Err(e) = crate::commands::livekit::publish_membership_changed_to_room(
         state,
         &group_id,
@@ -81,8 +67,7 @@ pub async fn update_channel(
     description: Option<String>,
     state: &Arc<AppState>,
 ) -> Result<Channel> {
-    // The channel id resolves to its owning group server-side, so the preflight
-    // is one request rather than two (resolve, then role).
+    // The channel id resolves to its owning group server-side: one request.
     let role = crate::commands::ds_reads::group_role(state, &channel_id, &requester_id).await?;
     if !role.exists {
         return Err(Error::Other(anyhow::anyhow!("channel not found")));
@@ -94,8 +79,7 @@ pub async fn update_channel(
         )));
     }
 
-    // DS seam: route the column updates through the Delivery Service (admin
-    // re-derived server-side) and take the UPDATED ROW from its response (#987).
+    // The DS re-derives admin and returns the updated row (#987).
     let body = pollis_api::groups::UpdateChannelBody {
         channel_id: channel_id.clone(),
         requester_id: Some(requester_id),
@@ -115,8 +99,6 @@ pub async fn update_channel(
         group_id
     };
 
-    // Same reasoning as `create_channel` (#874): a rename other members can't
-    // see until they refocus is a stale sidebar, not a saved round trip.
     if let Err(e) = crate::commands::livekit::publish_membership_changed_to_room(
         state,
         &group_id,
@@ -149,8 +131,7 @@ pub async fn delete_channel(
     }
     let group_id = role.group_id.clone();
 
-    // DS seam: route the envelope/watermark/channel deletes through the Delivery
-    // Service (one transactional, admin-gated write).
+    // One transactional, admin-gated write.
     let body = pollis_api::groups::DeleteChannelBody {
         channel_id,
         requester_id: Some(requester_id),
@@ -169,11 +150,9 @@ pub async fn delete_channel(
 
 /// Mute or unmute a group channel for this account (#1431).
 ///
-/// Stored on the DS, which is what reads it: the push fan-out skips a member
-/// who muted the channel unless the message names them by `@username`. The
-/// row is per account, so every device sees it; the DS nudges the account's
-/// other devices (`channel_mutes_changed`) to re-read. Each client also keeps
-/// its own in-app alerts quiet for a muted channel.
+/// Stored on the DS, whose push fan-out skips a member who muted the channel
+/// unless the message names them by `@username`. Per account; the DS nudges
+/// the account's other devices (`channel_mutes_changed`) to re-read.
 pub async fn set_channel_muted(
     user_id: String,
     channel_id: String,

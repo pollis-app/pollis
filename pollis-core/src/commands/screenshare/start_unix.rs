@@ -1,14 +1,7 @@
-//! Linux + macOS capture lifecycle: enumerate sources (macOS in-app
-//! picker), cancel an in-flight picker session, start a capture (parks
-//! the helper handle in state and spawns the reader-drain task), and the
-//! `push_frame` callback that converts each helper BGRx frame into an
-//! I420 LiveKit frame.
-//!
-//! Linux uses xdg-desktop-portal (handled inside `pollis-capture-linux`),
-//! so `enumerate_screen_sources` returns empty and the frontend skips its
-//! in-app picker — the portal dialog IS the picker. macOS calls
-//! `enumerate_screen_sources` first, the frontend renders the in-app
-//! picker, then sends the selection back via `start_screen_share(Some(sel))`.
+//! Linux + macOS capture lifecycle: enumerate (macOS in-app picker), cancel a
+//! picker session, start a capture, and convert helper BGRx frames to I420.
+//! On Linux the xdg-desktop-portal dialog is the picker, so enumeration is
+//! empty and the frontend skips its own.
 
 use std::sync::Arc;
 
@@ -38,24 +31,19 @@ use super::{
     RawSink, ScreenShareEvent, LOCAL_PREVIEW_KEY, PREVIEW_MIN_INTERVAL,
 };
 
-/// macOS: spawn the helper, let it enumerate via `SCShareableContent`,
-/// and return the list of capturable displays + windows. The helper
-/// stays parked in `state.screenshare.picker_session` waiting for the
-/// upcoming `start_screen_share(Some(selection))`. On Linux/Windows this
-/// returns `Err`; the frontend should never call it on those platforms
-/// (the portal/WGC picker handles selection).
+/// macOS: spawn the helper, enumerate via `SCShareableContent`, and return the
+/// capturable displays and windows. The helper stays parked in
+/// `picker_session` for the upcoming `start_screen_share(Some(selection))`.
 #[cfg(target_os = "macos")]
 pub async fn enumerate_screen_sources(
     state: &Arc<AppState>,
 ) -> Result<pollis_capture_proto::SourceList> {
     use pollis_capture_proto::{read_msg, CaptureMsg};
 
-    // Discard any previous picker session that never got chosen.
     cancel_screen_share_picker(state).await.ok();
 
-    // Video-only at spawn: on macOS the audio decision reaches the helper
-    // in the upcoming `Select`, because the user has not yet seen the
-    // picker (and its audio toggle) at this point in the flow.
+    // Video-only at spawn: the audio decision arrives in `Select`, since the
+    // user has not seen the audio toggle yet.
     let mut session = spawn_and_accept_helper(state, false).await?;
     let msg = tokio::time::timeout(
         std::time::Duration::from_secs(30),
@@ -70,11 +58,7 @@ pub async fn enumerate_screen_sources(
     let list = match msg {
         Ok(Some(CaptureMsg::Sources(list))) => list,
         Ok(Some(CaptureMsg::Error { message })) => {
-            // Pass the helper's message through verbatim — the
-            // frontend's `friendlyScreenShareError` collapses it into
-            // a short, user-facing sentence (TCC denial, no displays,
-            // etc). Wrapping here would just lengthen the string the
-            // status bar has to render.
+            // Verbatim: the frontend's `friendlyScreenShareError` shortens it.
             return Err(crate::error::Error::Other(anyhow::anyhow!(message)));
         }
         Ok(Some(other)) => {
@@ -99,17 +83,14 @@ pub async fn enumerate_screen_sources(
 pub async fn enumerate_screen_sources(
     _state: &Arc<AppState>,
 ) -> Result<pollis_capture_proto::SourceList> {
-    // The system portal (Linux) handles source selection. The frontend
-    // should not call this on Linux — but returning an empty list is a
-    // safer no-op than an error if it ever does.
+    // The portal picks the source; an empty list is a safe no-op.
     Ok(pollis_capture_proto::SourceList {
         displays: Vec::new(),
         windows: Vec::new(),
     })
 }
 
-/// Discard a parked picker session — used when the user backs out of
-/// the in-app picker without selecting a source.
+/// Discard a parked picker session (the user backed out without picking).
 pub async fn cancel_screen_share_picker(state: &Arc<AppState>) -> Result<()> {
     let session = {
         let mut ss = state.screenshare.lock().await;
@@ -121,11 +102,9 @@ pub async fn cancel_screen_share_picker(state: &Arc<AppState>) -> Result<()> {
     Ok(())
 }
 
-/// `with_audio` is the one source of truth for whether this share carries
-/// the source's sound. It reaches the two helpers by different routes —
-/// stamped onto the outgoing `Selection` on macOS, passed as a spawn flag
-/// on Linux — so it is deliberately taken as its own argument rather than
-/// read back off whatever the renderer happened to put in the selection.
+/// `with_audio` is the single source of truth for sharing sound. It reaches
+/// the helpers by different routes (stamped on the macOS `Selection`, a Linux
+/// spawn flag), so it is its own argument.
 pub async fn start_screen_share(
     state: &Arc<AppState>,
     selection: Option<pollis_capture_proto::Selection>,
@@ -143,8 +122,7 @@ pub async fn start_screen_share(
         crate::error::Error::Other(anyhow::anyhow!("not in a voice channel — join voice first"))
     })?;
 
-    // Re-share from a clean slate: kill any lingering helper/reader from a
-    // previous session before spawning a new one.
+    // Start from a clean slate.
     {
         let has_prev = {
             let ss = state.screenshare.lock().await;
@@ -157,8 +135,7 @@ pub async fn start_screen_share(
         }
     }
 
-    // Acquire the helper: reuse a parked picker session (macOS, after
-    // enumerate→user-pick) or spawn a fresh one (Linux portal path).
+    // Reuse a parked picker session (macOS) or spawn fresh (Linux).
     let parked = {
         let mut ss = state.screenshare.lock().await;
         ss.picker_session.take()
@@ -168,9 +145,8 @@ pub async fn start_screen_share(
         None => spawn_and_accept_helper(state, with_audio).await?,
     };
 
-    // Stamp the caller's audio decision onto the selection so the macOS
-    // helper — spawned back at enumeration time, before the toggle
-    // existed — learns it from the one message it is still waiting on.
+    // The macOS helper was spawned before the toggle existed; it learns the
+    // audio decision from the Select it is waiting on.
     let selection = selection.map(|sel| match sel {
         pollis_capture_proto::Selection::Display { id, .. } => {
             pollis_capture_proto::Selection::Display { id, with_audio }
@@ -180,9 +156,7 @@ pub async fn start_screen_share(
         }
     });
 
-    // macOS picker reply. The helper is parked between Sources and
-    // Format; Select unblocks it. Linux helpers ignore this (no such
-    // protocol message is sent without a Selection).
+    // macOS picker reply: the helper is parked between Sources and Format.
     if let Some(sel) = &selection {
         if let Err(e) = session.writer.write_all(&encode_select(sel)).await {
             crate::diag!("[screenshare] send Select: {e}");
@@ -195,51 +169,29 @@ pub async fn start_screen_share(
         let _ = session.writer.flush().await;
     }
 
-    // Park the helper handle + writer in state so a concurrent
-    // `stop_screen_share` (e.g. user clicked stop while waiting for
-    // the picker, or the publish below errors and they cancel) can
-    // kill it via the standard cleanup path. The writer stays open
-    // for the capture's lifetime so the helper's read side doesn't
-    // see EOF and exit early.
+    // Park the helper and writer so a concurrent `stop_screen_share` can kill
+    // them. The writer stays open so the helper's read side never sees EOF.
     {
         let mut ss = state.screenshare.lock().await;
         ss.local_helper = Some(session.child);
         ss.local_writer = Some(session.writer);
     }
 
-    // Read protocol messages until we get one that announces the source
-    // dimensions (a `Format`, or a leading `Frame` — both self-describe
-    // their size), an `Error` to surface, or we run out of patience.
-    //
-    // This is a tolerant LOOP, not a single rigid read, on purpose. On the
-    // Wayland/Portal path the helper's `param_changed` callback only emits
-    // `Format` once pipewire has negotiated a non-zero size; an early
-    // `param_changed` carrying a not-yet-negotiated zero size sends nothing
-    // (`pollis-capture-linux/src/linux.rs` ~L445), so the FIRST message the
-    // parent sees can legitimately be a `Frame` rather than a `Format`. The
-    // old code special-cased exactly one leading `Frame` and treated every
-    // other non-`Format` message as a fatal "protocol error" — so any other
-    // benign, out-of-expected-order message before `Format` (e.g. a stray
-    // `Sources`/`Select`, only meaningful in the macOS picker handshake, or
-    // any future status message) hard-failed the share with a misleading
-    // generic error. We now skip non-dimension, non-`Error` messages and
-    // keep reading. Bounds keep a misbehaving helper from hanging us: the
-    // 5-min wall-clock deadline (covers the user staring at the portal
-    // picker) plus a hard cap on skipped messages.
+    // Read until a message announces the size (`Format`, or a leading
+    // self-describing `Frame`), an `Error`, or a bound is hit. A tolerant loop:
+    // on the portal path pipewire sends no `Format` for a not-yet-negotiated
+    // zero size (`pollis-capture-linux/src/linux.rs`), so a `Frame` can come
+    // first, and stray handshake messages are skipped rather than fatal. A
+    // 5-minute deadline (the user at the portal picker) and a skip cap bound it.
     let mut reader = session.reader;
     crate::diag!("[screenshare] awaiting video format from helper");
     use pollis_capture_proto::CaptureMsg;
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(300);
-    // A misbehaving helper streaming junk shouldn't keep us looping forever;
-    // a healthy handshake needs at most one skip (a lone Sources/Select or a
-    // zero-size artifact) before Format/Frame arrives.
+    // A healthy handshake skips at most one message.
     const MAX_SKIPPED_BEFORE_FORMAT: usize = 64;
     let mut skipped = 0usize;
-    // Audio can negotiate before video does — on Linux the portal's video
-    // stream waits on the user's pick while the audio node is already
-    // live. Remember an early announcement instead of discarding it;
-    // dropping it here would leave a share that requested sound silently
-    // without it, with no second announcement ever coming.
+    // Audio can negotiate before video (the portal's video waits on the
+    // user's pick), so remember an early announcement; none would come again.
     let mut early_audio_format: Option<(u32, u32)> = None;
     let (width, height) = loop {
         let read_result =
@@ -247,9 +199,7 @@ pub async fn start_screen_share(
         let msg = match read_result {
             Ok(r) => r,
             Err(_) => {
-                // 300s elapsed with no format. The user staring at the OS
-                // picker is the expected long case; hitting this means the
-                // portal never produced a stream.
+                // The portal never produced a stream.
                 stop_screen_share(state).await.ok();
                 return Err(fail_capture(
                     state,
@@ -263,14 +213,8 @@ pub async fn start_screen_share(
                 crate::diag!("[screenshare] helper announced {}x{}", width, height);
                 break (width & !1, height & !1);
             }
-            // The Linux pipewire helper can deliver a Frame ahead of (or
-            // instead of) the Format message: `param_changed` may fire first
-            // with a not-yet-negotiated zero size — skipping the Format send —
-            // while `process` then streams frames carrying real dimensions.
-            // Frames are self-describing, so treat a leading Frame as the
-            // format announcement and drop its single payload; the next frame
-            // (~1 refresh later) feeds the publish loop normally. (spike/
-            // tauri-revival — this path went unexercised through the Electron era.)
+            // A leading Frame stands in for Format (see above); its payload is
+            // dropped and the next frame feeds the publish loop.
             Ok(Some(CaptureMsg::Frame { width, height, .. })) => {
                 crate::diag!(
                     "[screenshare] helper sent frame before format; deriving {}x{}",
@@ -278,19 +222,8 @@ pub async fn start_screen_share(
                 );
                 break (width & !1, height & !1);
             }
-            // Not a dimension-bearing message and not an error. These should
-            // never reach the parent on the Linux/portal path (the picker is
-            // the OS dialog, not an in-app Sources→Select round-trip), but
-            // tolerate them rather than fail the share: skip and keep waiting
-            // for the real Format/Frame.
-            // Camera-handshake messages (Cameras/SelectCamera) join Sources/
-            // Select here: none of them belong on the Linux screenshare path
-            // (the picker is the OS portal dialog, not an in-app round-trip),
-            // but tolerate any of them rather than fail the share.
-            // Audio negotiated first. Hold the format for the reader task
-            // and drop any frames that arrive before video is up — a few
-            // tens of milliseconds of the source's sound, from before
-            // anyone could see it.
+            // Audio negotiated first: hold the format; drop frames until video
+            // is up.
             Ok(Some(CaptureMsg::AudioFormat {
                 sample_rate,
                 channels,
@@ -338,10 +271,7 @@ pub async fn start_screen_share(
                 continue;
             }
             Ok(Some(CaptureMsg::Error { message })) => {
-                // Audio-only failure: the machine has no capturable
-                // output, or this platform's exclusion API is missing.
-                // The video share is untouched, so downgrade rather than
-                // tear down — the share the user asked for still works.
+                // Audio-only failure: downgrade, the video share still works.
                 if let Some(reason) = audio_error_message(&message) {
                     crate::diag!("[screenshare/audio] unavailable: {reason}");
                     early_audio_format = None;
@@ -354,17 +284,9 @@ pub async fn start_screen_share(
                     .await;
                     continue;
                 }
-                // The helper relays the failure cause as a prefixed string.
-                // Split the three distinct shapes the old code collapsed
-                // into one "permission" message:
-                //   - `unsupported:` — the desktop environment has no
-                //     ScreenCast backend at all (Linux Cinnamon/MATE/XFCE
-                //     on Wayland). NOT something the user can grant; emit
-                //     LocalUnsupported so the UI shows a different message.
-                //   - `cancel` / `dismiss` — normal user cancellation, not
-                //     an error to surface as LocalError.
-                //   - everything else (portal errors, denied permission,
-                //     SCK failures) — a genuine capture failure.
+                // `unsupported:` means no ScreenCast backend (e.g. Cinnamon on
+                // Wayland), which the user cannot grant; `cancel` / `dismiss`
+                // is a normal cancellation; anything else is a real failure.
                 crate::diag!("[screenshare] helper error: {message}");
                 stop_screen_share(state).await.ok();
                 let lower = message.to_lowercase();
@@ -385,12 +307,8 @@ pub async fn start_screen_share(
                     }
                     return Err(crate::error::Error::Other(anyhow::anyhow!(human)));
                 }
-                // User-cancelled the source picker. The helper prefixes these
-                // with `cancel:`. Treat as a no-op: clean up (already done
-                // above), exit silently with Ok so the frontend's
-                // start().catch() never fires and no toast appears. No
-                // LocalStarted event was emitted, so the store stays at
-                // screenShareLocalActive=false.
+                // User cancelled the picker (`cancel:`): already cleaned up;
+                // return Ok so no toast appears and no LocalStarted was sent.
                 if lower.starts_with("cancel:")
                     || lower.starts_with("cancelled")
                     || lower.contains("dismiss")
@@ -434,7 +352,6 @@ pub async fn start_screen_share(
         .await);
     }
 
-    // 5. Create the LiveKit track + publish.
     let source = NativeVideoSource::new(
         VideoResolution { width, height },
         true, /* is_screencast */
@@ -444,13 +361,9 @@ pub async fn start_screen_share(
         RtcVideoSource::Native(source.clone()),
     );
     crate::diag!("[screenshare] publishing track {}x{}", width, height);
-    // Pin the encoding explicitly. With `video_encoding: None` the SDK
-    // auto-selects from its quality-optimized screenshare preset table, which
-    // caps any surface ≤1280px wide at 15fps (`H1080_FPS15`) — "optimized for
-    // quality, prefers to reduce FPS". That silently pinned every sub-1080p
-    // share to 15fps regardless of source rate. We instead honour the user's
-    // Screen Share framerate preference (defaulting to 30); the encoder treats
-    // max_framerate as a ceiling, so static content still costs nothing.
+    // Pin the encoding: with `None` the SDK's screenshare presets cap any
+    // surface ≤1280px wide at 15fps. Honour the user's framerate preference
+    // instead; it is a ceiling, so static content costs nothing.
     let (max_framerate, max_bitrate) = resolve_screenshare_encoding(max_framerate);
     if let Err(e) = room
         .local_participant()
@@ -478,14 +391,10 @@ pub async fn start_screen_share(
     }
     crate::diag!("[screenshare] track published");
 
-    // 6. Spawn the supervising reader task. It owns the socket + the
-    //    LiveKit source from here on; on EOF / error it just exits and
-    //    relies on stop_screen_share for the rest of cleanup.
+    // The reader task owns the socket and source; on EOF or error it exits and
+    // leaves the rest to stop_screen_share.
     let source_for_task = source.clone();
-    // Local self-preview now rides the same WebSocket broadcast the remote
-    // tiles use (spike/tauri-revival); without this the sharer's own preview
-    // tile stays black, since the frontend stopped listening to the IPC frame
-    // Channel when it switched to the WS transport.
+    // The self-preview rides the same WebSocket broadcast as remote tiles.
     let preview_tx = state.screenshare_frame_tx.clone();
     let (events_for_task, frames_for_task) = {
         let ss = state.screenshare.lock().await;
@@ -495,28 +404,13 @@ pub async fn start_screen_share(
     let room_for_task = room.clone();
     let reader_task = tokio::spawn(async move {
         let mut last_preview: Option<std::time::Instant> = None;
-        // Shared-audio pump state, all `None`/inert until the helper
-        // announces an audio format. A share that never carries audio
-        // pays nothing for any of it.
+        // Shared-audio pump, inert until the helper announces an audio format.
         let mut audio_source: Option<libwebrtc::audio_source::native::NativeAudioSource> = None;
         let mut resampler: Option<SharedAudioResampler> = None;
         let mut echo: Option<SelfEchoCanceller> = None;
-        // No FPS cap: pipewire delivers at the source's native refresh
-        // (144Hz+ on high-refresh displays) and we publish at the same
-        // rate. The SW encoder absorbs that fine on modern hardware; if
-        // a future thermal complaint surfaces, the right answer is a
-        // user-facing toggle (issue #300), not a hardcoded limit.
-        //
-        // No keep-alive / no synthetic frame replay: when the captured
-        // surface is idle, pipewire goes silent and we just stop
-        // pushing. The viewer's canvas retains the last painted frame
-        // (the GL context isn't torn down), so the share looks
-        // identical to one where the content happens to be unchanging.
-        // We trade nothing on the user-visible side and save the
-        // bandwidth + CPU of re-encoding identical pixels.
-        // Audio that negotiated ahead of video: publish it now, before
-        // the first frame, so the very first thing the share carries has
-        // sound.
+        // No FPS cap and no keep-alive: frames go out at the source's native
+        // rate, and an idle surface simply stops them (#300). Audio that
+        // negotiated before video is published before the first frame.
         if let Some((sample_rate, channels)) = early_audio_format {
             start_shared_audio(
                 &state_for_task,
@@ -539,12 +433,8 @@ pub async fn start_screen_share(
                     timestamp_us,
                     bgrx,
                 })) => {
-                    // Self-preview rides the WS broadcast at full capture rate
-                    // — the PoC showed the WS+WebGL path is cheap, so there's no
-                    // reason to throttle the sharer's own tile to 5fps. The
-                    // legacy RawSink (unused by the Tauri WS frontend) keeps its
-                    // PREVIEW_MIN_INTERVAL gate to bound IPC cost if anything
-                    // still listens on it.
+                    // The WS preview runs at full rate; only the legacy RawSink
+                    // keeps the PREVIEW_MIN_INTERVAL gate.
                     let show_preview = last_preview
                         .is_none_or(|t| t.elapsed() >= PREVIEW_MIN_INTERVAL);
                     if show_preview {
@@ -568,10 +458,8 @@ pub async fn start_screen_share(
                     );
                 }
                 Ok(Some(CaptureMsg::Format { .. })) => {
-                    // Renegotiation mid-stream — currently unsupported,
-                    // but harmless to ignore. The next frame will use
-                    // the new dimensions; LiveKit's NativeVideoSource
-                    // tolerates per-frame size changes.
+                    // Mid-stream renegotiation: the next frame carries the new
+                    // size, which NativeVideoSource tolerates.
                 }
                 Ok(Some(CaptureMsg::AudioFormat {
                     sample_rate,
@@ -594,10 +482,7 @@ pub async fn start_screen_share(
                     pcm,
                     ..
                 })) => {
-                    // A backend can renegotiate its rate mid-stream when
-                    // the default output device changes under a live
-                    // share. Follow it rather than resampling from a rate
-                    // that is no longer true.
+                    // The rate can change mid-stream (output device switch).
                     if let Some(r) = resampler.as_mut() {
                         if r.src_rate() != sample_rate {
                             crate::diag!(
@@ -620,20 +505,13 @@ pub async fn start_screen_share(
                 | Ok(Some(CaptureMsg::Select(_)))
                 | Ok(Some(CaptureMsg::Cameras(_)))
                 | Ok(Some(CaptureMsg::SelectCamera(_))) => {
-                    // Only valid during the picker handshake — should
-                    // never appear once frames are flowing. Ignore.
+                    // Handshake-only messages.
                 }
                 Ok(Some(CaptureMsg::Error { message })) => {
-                    // Losing audio mid-share must not end the share: the
-                    // user is still presenting, and the video half is
-                    // unaffected. Drop the pump, then unpublish the track
-                    // and disarm the self-echo tap (#1040) — a published
-                    // track with no samples behind it keeps every viewer's
-                    // speaker indicator lit until the share ends, and an
-                    // armed tap keeps the mixer feeding a dead canceller.
-                    // The local source clone goes last, after unpublish,
-                    // matching `stop`'s ordering. A later `AudioFormat`
-                    // (device came back) republishes from scratch.
+                    // Losing audio must not end the share. Unpublish the track
+                    // and disarm the self-echo tap (#1040), then drop the
+                    // source, as `stop` orders it. A later `AudioFormat`
+                    // republishes.
                     if let Some(reason) = audio_error_message(&message) {
                         crate::diag!("[screenshare/audio] stopped mid-share: {reason}");
                         resampler = None;
@@ -667,7 +545,6 @@ pub async fn start_screen_share(
         }
     });
 
-    // 7. Save state and announce. Helper handle was parked earlier.
     {
         let mut ss = state.screenshare.lock().await;
         ss.local_source = Some(source);
@@ -680,10 +557,9 @@ pub async fn start_screen_share(
     Ok(())
 }
 
-/// Publish the shared-audio track and stand up the pump behind it.
-/// Idempotent by construction: a second `AudioFormat` for a source that is
-/// already publishing only retunes the resampler, because republishing
-/// would hand every viewer a new track id for the same sound.
+/// Publish the shared-audio track and start its pump. A second `AudioFormat`
+/// only retunes the resampler: republishing would give viewers a new track id
+/// for the same sound.
 async fn start_shared_audio(
     state: &Arc<AppState>,
     room: &Arc<Room>,
@@ -704,10 +580,8 @@ async fn start_shared_audio(
         return;
     };
     *resampler = Some(SharedAudioResampler::new(sample_rate));
-    // Linux only. macOS excludes our own process at the ScreenCaptureKit
-    // layer, so its capture never contains the call in the first place and
-    // running an echo canceller over it would only risk chewing into the
-    // material the user actually meant to share.
+    // Linux only: macOS excludes our process at the ScreenCaptureKit layer,
+    // and an echo canceller would only chew into the shared material.
     #[cfg(target_os = "linux")]
     {
         let slot = {
@@ -723,13 +597,9 @@ async fn start_shared_audio(
     *audio_source = Some(source);
 }
 
-/// Normalise one captured block and hand every whole 10 ms frame it
-/// completed to LiveKit.
-///
-/// The helper's `timestamp_us` is deliberately not carried through:
-/// LiveKit's `AudioFrame` has no timestamp field — an audio track's
-/// timing is its sample count — so there is nowhere to put it. It stays
-/// on the wire for diagnostics.
+/// Normalise one captured block and hand each whole 10 ms frame to LiveKit.
+/// The helper's `timestamp_us` is dropped: an audio frame's timing is its
+/// sample count.
 async fn push_shared_audio(
     audio_source: Option<&libwebrtc::audio_source::native::NativeAudioSource>,
     resampler: Option<&mut SharedAudioResampler>,
@@ -741,8 +611,7 @@ async fn push_shared_audio(
         return;
     };
     for mut frame in resampler.push(pcm, channels) {
-        // Subtract the call before publishing, never after: once the
-        // frame is in LiveKit's hands there is nothing left to fix.
+        // Subtract the call before publishing.
         if let Some(echo) = echo {
             echo.process(&mut frame);
         }
@@ -771,21 +640,17 @@ fn push_frame(
     preview: Option<&dyn RawSink>,
     preview_ws: Option<&tokio::sync::broadcast::Sender<std::sync::Arc<Vec<u8>>>>,
 ) {
-    // libwebrtc + VP8 require even dimensions; libyuv I420 chroma
-    // alignment does too. Crop down rather than ever publishing odd
-    // dims.
+    // libwebrtc, VP8 and libyuv I420 require even dimensions: crop down.
     let w = (width & !1) as i32;
     let h = (height & !1) as i32;
     if w <= 0 || h <= 0 {
         return;
     }
-    // Convert (BGRx == little-endian ARGB) to I420 at native res.
     let buffer = convert_to_i420(w, h, stride, bgrx);
     let (out_w, out_h) = (buffer.width(), buffer.height());
     let frame = VideoFrame {
         rotation: VideoRotation::VideoRotation0,
         timestamp_us,
-        // No packet-trailer features are negotiated, so there is no metadata to attach.
         frame_metadata: None,
         buffer,
     };

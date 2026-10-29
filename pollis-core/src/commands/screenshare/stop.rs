@@ -1,7 +1,5 @@
-//! Shared stop path for every capture backend. Drains state, fences the
-//! per-platform pump, unpublishes the LiveKit track, then drops the source.
-//! Safe to call when nothing is live (the defensive pre-share teardown
-//! exercises that path).
+//! The stop path for every capture backend: drain state, fence the platform
+//! pump, unpublish, then drop the sources. Safe to call when nothing is live.
 
 use std::sync::Arc;
 
@@ -29,14 +27,9 @@ pub async fn stop_screen_share(state: &Arc<AppState>) -> Result<()> {
     {
         let mut ss = state.screenshare.lock().await;
         track = ss.local_track.take();
-        // Keep the source alive locally until after the SCK stream is fully
-        // torn down + the track is unpublished. Releasing it from state now
-        // would otherwise let the next reference drop free its backing
-        // while in-flight handler calls are still firing.
+        // Sources stay alive locally until their tracks are unpublished, so an
+        // in-flight capture_frame cannot outlive its backing.
         source_to_drop = ss.local_source.take();
-        // Same ordering rule as the video pair below: hold the source
-        // alive locally until after the track is unpublished, so an
-        // in-flight capture_frame can't outlive its backing.
         audio_track = ss.local_audio_track.take();
         audio_source_to_drop = ss.local_audio_source.take();
         #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -44,9 +37,8 @@ pub async fn stop_screen_share(state: &Arc<AppState>) -> Result<()> {
             helper = ss.local_helper.take();
             reader = ss.local_reader_task.take();
             picker = ss.picker_session.take();
-            // Dropping the writer closes our half of the socket so the
-            // helper sees EOF and exits cleanly even if its parent-death
-            // poll is mid-sleep.
+            // Closing our writer half makes the helper see EOF and exit even if
+            // its parent-death poll is mid-sleep.
             ss.local_writer = None;
         }
         #[cfg(target_os = "windows")]
@@ -59,10 +51,8 @@ pub async fn stop_screen_share(state: &Arc<AppState>) -> Result<()> {
         room = voice.room.clone();
     }
 
-    // Nothing was live (e.g. the defensive pre-share teardown, or an
-    // on_room_disconnected with no active share). Return without firing a
-    // spurious LocalStopped — that would flip the UI's share state off
-    // right as a fresh share is starting.
+    // Nothing was live: return without a spurious LocalStopped, which would
+    // flip the UI off just as a fresh share starts.
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     let had_session = track.is_some()
         || source_to_drop.is_some()
@@ -78,22 +68,15 @@ pub async fn stop_screen_share(state: &Arc<AppState>) -> Result<()> {
         return Ok(());
     }
 
-    // Stop the voice mixer feeding a render reference to a canceller
-    // nothing is reading any more. Unconditional and idempotent: the slot
-    // is only ever armed by a share, so clearing it here is the one place
-    // every stop path already converges on.
+    // Stop the voice mixer feeding a render reference nobody reads; every stop
+    // path converges here.
     {
         let voice = state.voice.lock().await;
         super::self_echo::disarm(&voice.shared_audio_render);
     }
 
-    // Linux + macOS: identical teardown. Abort the reader task, then
-    // kill the helper subprocess. On macOS this also tears down SCK —
-    // it lives entirely in the helper now, so killing the helper IS the
-    // SCStream stop + picker deactivate. The helper's own Drop /
-    // signal-on-exit handling releases SCK; we no longer have to drive
-    // remove_output_handler / SCContentSharingPicker::set_active from
-    // this process (that code moved into `pollis-capture-macos`).
+    // Kill the helper; on macOS that is also the SCStream stop, since SCK lives
+    // entirely in the helper.
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         if let Some(t) = reader {
@@ -102,35 +85,24 @@ pub async fn stop_screen_share(state: &Arc<AppState>) -> Result<()> {
         if let Some(h) = helper.as_mut() {
             let _ = h.kill().await;
         }
-        // A picker-phase helper that was orphaned (e.g. capture failed
-        // before consuming the picker session) needs the same kill.
+        // A picker-phase helper orphaned by a failed capture.
         if let Some(p) = picker.as_mut() {
             let _ = p.child.kill().await;
         }
     }
     #[cfg(target_os = "windows")]
     {
-        // 1. Fence the WGC callback from touching the source (pairs with
-        //    the Acquire load in on_frame_arrived). Only this session's
-        //    flag — taken from state — is flipped. This is also what ends
-        //    the capture: the next frame callback observes it and calls
-        //    InternalCaptureControl::stop(), which unblocks the dedicated
-        //    thread's start() and lets it return.
+        // Fence the WGC callback (pairs with the Acquire in on_frame_arrived);
+        // the next frame callback then calls InternalCaptureControl::stop().
         if let Some(active) = &windows_active {
             active.store(false, std::sync::atomic::Ordering::Release);
         }
-        // 2. Detach the capture thread rather than force-joining it. The
-        //    fence above guarantees it can no longer touch the LiveKit
-        //    source, so it's safe to unpublish/drop the source below
-        //    without waiting; the thread tears down its own WGC + COM
-        //    state and exits on the next frame. Joining here would risk
-        //    blocking stop indefinitely if the captured surface produced
-        //    no further frames.
+        // Detach rather than join: a surface producing no frames would block
+        // stop forever, and the fence keeps the thread off the source.
         drop(windows_thread);
     }
-    // 3. Unpublish the track before dropping the source. LiveKit's track
-    //    teardown can free the source's webrtc backing; doing it in this
-    //    order avoids the "unpublish frees backing, handler crashes" race.
+    // Unpublish before dropping the sources: track teardown can free their
+    // webrtc backing.
     if let Some(room) = room {
         if let Some(track) = track {
             let sid = track.sid();
@@ -145,7 +117,6 @@ pub async fn stop_screen_share(state: &Arc<AppState>) -> Result<()> {
             }
         }
     }
-    // 4. Now the sources can be dropped safely.
     drop(source_to_drop);
     drop(audio_source_to_drop);
     if let Some(ev) = ev_opt {

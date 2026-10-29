@@ -22,30 +22,22 @@ use crate::commands::{
     voice_denoiser,
 };
 
-/// Warm-cached LiveKit credentials for a single channel. Issued by
-/// `prepare_voice_connection` on user "intent" (hover, route entry) and
-/// consumed by `join_voice_channel` to skip the synchronous JWT mint.
-///
-/// The DNS/TLS warmth is the bigger win — we kick off a one-shot HTTPS
-/// request to the LiveKit host so its address and TLS session are in the
-/// process-wide cache by the time `Room::connect` opens the WebSocket.
+/// Warm-cached LiveKit credentials for one channel, issued by
+/// `prepare_voice_connection` on user intent (hover, route entry) so
+/// `join_voice_channel` skips the JWT mint. The bigger win is the DNS/TLS
+/// warmth from a one-shot HTTPS request to the LiveKit host.
 pub struct VoiceWarmup {
     pub channel_id: String,
     pub token: String,
-    /// The LiveKit ws URL the DS minted `token` FOR. Cached alongside the token
-    /// because the two are a pair — a JWT is only valid at the server that
-    /// issued it, so reusing a warm token against a different address would fail
-    /// authentication. Carrying it here is what lets the SFU move between the
-    /// warmup and the join without stranding the cached credential.
+    /// The server `token` is valid at: a JWT works only where it was issued,
+    /// so the two are cached as a pair.
     pub url: String,
     /// When the prepared token was created. Used to discard stale entries.
     pub created_at: Instant,
-    /// When the underlying user identity was captured. Mismatches against
-    /// the join-time identity invalidate the cached token.
+    /// A mismatch against the join-time identity invalidates the token.
     pub user_id: String,
     pub display_name: String,
-    /// Background warmup task (DNS/TLS). Aborted if a new prep supersedes
-    /// this one so spamming hover doesn't pile up requests.
+    /// Background DNS/TLS warmup, aborted when a new prep supersedes this one.
     pub task: Option<tokio::task::JoinHandle<()>>,
 }
 
@@ -57,29 +49,25 @@ impl Drop for VoiceWarmup {
     }
 }
 
-/// Warm tokens are cheap to mint but not free; cap freshness to 5 min so a
-/// long-stale prep can't deliver an expired credential to `join_voice_channel`.
+/// Cap warm-token freshness so a stale prep cannot hand `join_voice_channel`
+/// an expired credential.
 pub(crate) const VOICE_WARMUP_TTL: Duration = Duration::from_secs(300);
 
-// ── cpal::Stream is Send on Linux and macOS. On Windows WASAPI it is not,
-// so we wrap it with an explicit unsafe impl to allow storage in AppState.
+// cpal::Stream is not Send on Windows WASAPI (it is on Linux and macOS);
+// wrapped so it can live in AppState.
 pub struct SendableStream(pub cpal::Stream);
 unsafe impl Send for SendableStream {}
 unsafe impl Sync for SendableStream {}
 
 impl Drop for SendableStream {
     fn drop(&mut self) {
-        // cpal::Stream::Drop alone doesn't reliably stop the backend audio
-        // thread — on ALSA the I/O thread can be parked in snd_pcm_readi and
-        // miss the drop signal, leaving the OS mic-in-use indicator on until
-        // the process exits. Explicit pause() wakes the backend and releases
-        // the device promptly.
+        // Drop alone doesn't reliably stop the backend thread: on ALSA it can
+        // be parked in snd_pcm_readi, leaving the OS mic indicator on until
+        // exit. pause() wakes it and releases the device.
         use cpal::traits::StreamTrait;
         let _ = self.0.pause();
     }
 }
-
-// ── Events pushed to the frontend ─────────────────────────────────────────
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -94,34 +82,25 @@ pub enum VoiceEvent {
     ParticipantLeft { identity: String },
     Muted { identity: String },
     Unmuted { identity: String },
-    /// Whether the local session has a working capture device. Emitted once at
-    /// join: `available: false` means the mic failed to open (no device, ALSA
-    /// error, busy) and we joined *listen-only* — connected and receiving, but
-    /// not publishing audio. Lets the renderer swap the mute toggle for a
-    /// "listening only" indicator. Only ever carries the local identity.
+    /// Emitted once at join: `available: false` means the mic failed to open
+    /// and we joined listen-only (connected, receiving, not publishing).
+    /// Always the local identity.
     MicAvailability { identity: String, available: bool },
     SpeakingStarted { identity: String },
     SpeakingStopped { identity: String },
-    /// Per-source multi-band audio levels (one 0..1 value per band),
-    /// emitted ~20 Hz while in a call to drive the participant tile's live
-    /// meter. Best-effort and purely cosmetic — drop freely. Band count is
-    /// fixed (`levels::BAND_COUNT`); keep the renderer in sync.
+    /// Per-source band levels (0..1 each), ~20 Hz, for the tile meter.
+    /// Cosmetic; drop freely. Band count is `levels::BAND_COUNT`.
     AudioBands { identity: String, bands: Vec<f32> },
-    /// LiveKit's per-participant categorical connection quality. The Rust
-    /// SDK doesn't expose RTT in ms here — this is the only signal it
-    /// surfaces — so the UI shows a lagging-dot rather than a number.
-    /// `quality` is one of "excellent" | "good" | "poor" | "lost".
+    /// LiveKit's categorical connection quality ("excellent" | "good" |
+    /// "poor" | "lost"); the Rust SDK exposes no RTT.
     ConnectionQualityChanged {
         identity: String,
         quality: String,
     },
-    /// Voice MLS epoch advanced and a fresh E2EE key was derived. The Rust
-    /// voice path's `KeyProvider` is already updated; this event lets the
-    /// renderer's screen-share view client (which holds its own
-    /// `ExternalE2EEKeyProvider`) rotate to the new key. Without it the
-    /// view client keeps encrypting/decrypting with the key from its
-    /// connect-time epoch and drifts out of sync with the audio path on
-    /// any commit.
+    /// A fresh voice E2EE key after an MLS epoch advance. The Rust path's
+    /// `KeyProvider` is already updated; the renderer's screen-share view
+    /// client holds its own key provider and must rotate too, or it drifts out
+    /// of sync on any commit.
     VoiceE2eeKeyRotated {
         key: Vec<u8>,
         key_index: i32,
@@ -131,8 +110,6 @@ pub enum VoiceEvent {
     Disconnected,
 }
 
-// ── Audio device descriptor returned to the frontend ─────────────────────
-
 #[derive(Serialize)]
 pub struct AudioDevice {
     pub id: String,
@@ -140,14 +117,8 @@ pub struct AudioDevice {
     pub kind: String, // "input" | "output"
 }
 
-// ── Playback pipeline ─────────────────────────────────────────────────────
-//
-// All remote audio funnels through a single mixer → one cpal output stream.
-// That gives us one stable point at which to tap the "what's about to hit
-// the speaker" signal as APM's render (AEC) reference. The previous
-// per-track stream model worked for output but had no single mix point.
-//
-// Layout:
+// All remote audio goes through one mixer and one output stream, the single
+// point to tap the speaker signal as APM's render (AEC) reference:
 //
 //   [NativeAudioStream per remote track] ─ drain task ─→ track_buffers[k]
 //                                                            │
@@ -157,16 +128,13 @@ pub struct AudioDevice {
 //                                                            │
 //                                               cpal output stream callback
 
-/// Per-track f32 mono ring buffers, keyed by `"{identity}-{sid}"`. Drain
-/// tasks push into them; the mixer drains them every 10 ms. Held in an
-/// `Arc<Mutex<…>>` because both the drain tasks and the mixer task reach
-/// into it from different tokio workers; the lock window is always a
-/// single insert/drain so it never overlaps an `await`.
+/// Per-track f32 mono ring buffers, keyed by `"{identity}-{sid}"`: drain tasks
+/// push, the mixer drains every 10 ms. Each lock is a single insert or drain,
+/// never held across an `await`.
 pub type TrackBuffers = Arc<Mutex<HashMap<String, VecDeque<f32>>>>;
 
-/// Capacity per per-track buffer. 200 ms at 48 kHz mono = 9_600 samples;
-/// anything older than that is dropped to keep latency low. Same number
-/// the previous per-track ring used.
+/// Per-track buffer cap: 200 ms at 48 kHz mono. Older samples are dropped to
+/// keep latency low.
 pub(crate) const TRACK_BUFFER_CAP_SAMPLES: usize = 9_600;
 
 pub struct PlaybackState {
@@ -174,24 +142,20 @@ pub struct PlaybackState {
     pub track_buffers: TrackBuffers,
     /// The single shared cpal output stream. `None` until `start_playback`.
     pub output_stream: Option<SendableStream>,
-    /// The interleaved-f32 ring the cpal output callback drains. Same Arc
-    /// shared with the mixer task so both speak to one buffer.
+    /// The interleaved-f32 ring the output callback drains, shared with the
+    /// mixer.
     pub output_ring: Option<Arc<Mutex<VecDeque<f32>>>>,
     pub output_channels: u32,
     pub output_sample_rate: u32,
     pub output_device_name: Option<String>,
     /// Per-track NativeAudioStream drain tasks.
     pub drain_tasks: HashMap<String, tokio::task::JoinHandle<()>>,
-    /// Raw RtcAudioTrack refs, kept so `set_voice_output_device` can rebuild
-    /// the speaker stream while preserving subscriptions.
+    /// Kept so `set_voice_output_device` can rebuild the speaker stream
+    /// without losing subscriptions.
     pub rtc_tracks: HashMap<String, libwebrtc::audio_track::RtcAudioTrack>,
-    /// Identity per `track_key`, used by `set_voice_output_device` to
-    /// re-emit speaking events on the new pipeline if needed.
     pub identities: HashMap<String, String>,
-    /// Per-remote-user output gain multiplier, keyed by `user_id` (NOT the
-    /// LiveKit identity — see `user_id_from_voice_identity` for the
-    /// conversion). Read on the mixer hot path; absence means unity (1.0).
-    /// Shared with the mixer task via `Arc::clone`.
+    /// Per-remote-user output gain, keyed by `user_id` (not the LiveKit
+    /// identity; see `user_id_from_voice_identity`). Absent means 1.0.
     pub user_volumes: Arc<Mutex<HashMap<String, f32>>>,
     /// Single mixer task running at 10 ms cadence.
     pub mixer_task: Option<tokio::task::JoinHandle<()>>,
@@ -214,9 +178,8 @@ impl PlaybackState {
         }
     }
 
-    /// Stop and drop everything: per-track drain tasks, the mixer, the
-    /// cpal output stream. Track refs are kept so a follow-up
-    /// `start_playback` (e.g. on output-device switch) can reattach.
+    /// Stop the drain tasks, the mixer and the output stream. Track refs are
+    /// kept so `start_playback` can reattach (e.g. on an output-device switch).
     pub(crate) fn stop_all(&mut self) {
         for (_, t) in self.drain_tasks.drain() {
             t.abort();
@@ -234,35 +197,27 @@ impl PlaybackState {
     }
 }
 
-// ── Join-path timing instrumentation ──────────────────────────────────────
-//
-// Each phase below measures wall time around a discrete chunk of the join
-// flow. All values are milliseconds. `total_join_ms` is wall time from
-// `join_voice_channel` entry until first publish_track resolves. Stored on
-// `VoiceState.last_join_timings` and exposed via the `get_last_join_timings`
-// Tauri command so the frontend can dump them to the dev console.
+// Join-path phase timings in milliseconds, exposed via `get_last_join_timings`
+// for the dev console. `total_join_ms` runs from entry to the first
+// publish_track.
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct JoinTimings {
     pub channel_id: String,
     pub jwt_mint_ms: u64,
-    /// MLS group resolution + catch-up + exporter-secret derivation. Runs
-    /// BEFORE the LiveKit connect (the key has to be in `RoomOptions`), so it is
-    /// pure added latency and the phase most worth watching.
+    /// MLS resolution, catch-up and exporter derivation. Runs before the
+    /// connect (the key goes in `RoomOptions`): pure added latency.
     pub e2ee_ms: u64,
     pub room_connect_ms: u64,
     pub mic_init_ms: u64,
     pub first_publish_ms: u64,
-    /// Seeding the participant list: pseudonym resolution + the batched avatar
-    /// lookup for everyone already in the room.
+    /// Pseudonym resolution plus the batched avatar lookup for the roster.
     pub roster_ms: u64,
     pub total_join_ms: u64,
-    /// UNIX epoch ms when `join_voice_channel` started — useful for
-    /// correlating with frontend click timestamps later.
+    /// UNIX epoch ms at `join_voice_channel` entry, to correlate with frontend
+    /// click timestamps.
     pub join_started_at_ms: u64,
 }
-
-// ── Top-level voice state held in AppState ────────────────────────────────
 
 pub struct VoiceState {
     pub channel: Option<std::sync::Arc<dyn crate::sink::EventSink<VoiceEvent>>>,
@@ -273,70 +228,48 @@ pub struct VoiceState {
     pub frame_task: Option<tokio::task::JoinHandle<()>>,
     pub room_task: Option<tokio::task::JoinHandle<()>>,
     pub playback: Arc<Mutex<PlaybackState>>,
-    /// Push-to-talk / mute / deafen state machine (#849). The authority for
-    /// every local gating decision; `transmit_muted` and `deafened` below
-    /// are just its derived booleans, republished as atomics so the audio
-    /// hot paths never take a lock.
+    /// Push-to-talk / mute / deafen state machine (#849), the authority for
+    /// every local gating decision. The atomics below are its derived booleans,
+    /// so the audio hot paths never take a lock.
     pub gate: Arc<Mutex<super::gate::TransmitGate>>,
-    /// Derived from `gate`: `true` means the cpal capture callback drops
-    /// the frames it just read. Covers an explicit mute, a deafen, and an
-    /// un-held push-to-talk key alike — the callback asks one question.
+    /// Derived: the capture callback drops its frames (mute, deafen, or an
+    /// un-held push-to-talk key).
     pub transmit_muted: Arc<AtomicBool>,
-    /// Derived from `gate`: `true` means the playback mixer zeroes its
-    /// mixed frame, so nothing reaches the speaker. Remote tracks keep
-    /// draining, so undeafening resumes at the live position instead of
-    /// flushing a backlog.
+    /// Derived: the mixer zeroes its output. Remote tracks keep draining, so
+    /// undeafening resumes live rather than flushing a backlog.
     pub deafened: Arc<AtomicBool>,
-    /// Derived from `gate`: the user's *explicit* mute, with no
-    /// push-to-talk or deafen folded in.
-    ///
-    /// Exists solely for the mic-test harness (`voice_test.rs`), which
-    /// borrows a gate for its own capture stream. It must not read
-    /// `transmit_muted`: in push-to-talk mode that atomic sits `true`
-    /// whenever the key isn't held — including outside a call — which
-    /// would make "test my microphone" silently record nothing. Explicit
-    /// mute is the only part of the gate a mic test should honour.
+    /// Derived: the user's explicit mute only. For the mic-test harness
+    /// (`voice_test.rs`): `transmit_muted` is `true` outside a call in
+    /// push-to-talk mode, which would make a mic test record nothing.
     pub self_muted: Arc<AtomicBool>,
-    /// Set while a `join_voice_channel` call is in flight. Blocks a second
-    /// concurrent invocation from racing the first and tripping LiveKit's
-    /// DuplicateIdentity eviction (which would disconnect both attempts).
+    /// Set while a join is in flight, so a concurrent one cannot trip
+    /// LiveKit's DuplicateIdentity eviction (which disconnects both).
     pub joining: Arc<AtomicBool>,
     pub current_input_device: Option<String>,
-    /// APM stage for the current voice session. Owns the WebRTC AudioProcessing
-    /// `Processor` and its config. `None` outside a call.
+    /// APM stage for the current session; `None` outside a call.
     pub apm: Option<voice_apm::ApmStage>,
-    /// Optional RNNoise denoiser running upstream of APM. Held behind an
-    /// `Arc<Mutex<…>>` because the frame_task needs `&mut` access (RNNoise
-    /// is stateful) and `set_voice_audio_processing` mutates the slot when
-    /// the user toggles Click Suppression mid-call. `None` outside a call,
-    /// or when the mic isn't running at 48 kHz (RNNoise is rate-locked).
+    /// Optional RNNoise denoiser upstream of APM, behind a mutex because the
+    /// frame task needs `&mut` and the click-suppression toggle can swap it
+    /// mid-call. `None` outside a call or when the mic isn't at 48 kHz.
     pub denoiser: Arc<Mutex<Option<voice_denoiser::DenoiserStage>>>,
-    /// Optional precomputed token + DNS/TLS warmer for the next channel
-    /// the user is likely to join. See [`VoiceWarmup`].
+    /// Precomputed token and DNS/TLS warmer for the next likely channel.
     pub warmup: Option<VoiceWarmup>,
-    /// Most recent `join_voice_channel` timing record. Populated at the end
-    /// of every successful join; read by `get_last_join_timings`.
+    /// The latest successful join's timings.
     pub last_join_timings: Arc<Mutex<Option<JoinTimings>>>,
-    /// Live `KeyProvider` from `livekit::e2ee`, retained so MLS epoch
-    /// changes can rotate the shared key without rebuilding the room.
+    /// Retained so MLS epoch changes rotate the key without rebuilding the
+    /// room.
     pub e2ee_key_provider: Option<KeyProvider>,
-    /// MLS group id whose exporter backs `e2ee_key_provider`. Used to match
-    /// epoch-change events for the currently-joined room.
+    /// MLS group id whose exporter backs `e2ee_key_provider`.
     pub e2ee_mls_group_id: Option<String>,
-    /// MLS epoch the current voice key was derived at. Suppresses duplicate
-    /// rotations and lets the rotation hook skip when nothing has changed.
+    /// MLS epoch the current key was derived at; suppresses duplicate
+    /// rotations.
     pub e2ee_epoch: u64,
-    /// Key-ring slot (`voice_key_ring::voice_key_index(e2ee_epoch)`) every
-    /// local sender `FrameCryptor` must encrypt with. Re-applied to each newly
-    /// published local track, because libwebrtc creates every cryptor on slot
-    /// 0 and never moves it on its own.
+    /// Key-ring slot every local sender `FrameCryptor` must use, re-applied
+    /// to each newly published track: libwebrtc creates every cryptor on slot
+    /// 0 and never moves it.
     pub e2ee_key_index: i32,
-    /// Where a screen share capturing system audio parks its echo
-    /// canceller so the mixer can feed it the signal about to hit the
-    /// speaker. See `commands::screenshare::self_echo` for why the shared
-    /// audio has to have the call subtracted out of it. `None` whenever no
-    /// share is capturing audio, which is the overwhelming majority of the
-    /// time — the mixer's cost is then one uncontended lock per 10 ms tick.
+    /// Where a screen share capturing system audio parks its echo canceller,
+    /// so the mixer can feed it the speaker signal (`screenshare::self_echo`).
     pub shared_audio_render: crate::commands::screenshare::self_echo::SelfEchoSlot,
 }
 
@@ -376,8 +309,6 @@ impl VoiceState {
     }
 }
 
-// The identity grammar itself lives in `commands::livekit_identity` (#836) —
-// outside the media gate so it is unit-tested on every target, and in one place
-// because there are now two identity spaces (opaque wire pseudonym vs. internal
-// key) and splitting the parsing across modules is how they drift.
+// The identity grammar lives in `commands::livekit_identity` (#836), in one
+// place so the wire and internal identity spaces cannot drift.
 pub use crate::commands::livekit_identity::user_id_from_voice_identity;

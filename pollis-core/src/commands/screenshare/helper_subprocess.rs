@@ -1,24 +1,5 @@
-//! Shared helper-subprocess capture path (Linux + macOS).
-//!
-//! One implementation drives both per-platform helpers. The only
-//! per-OS difference is which helper binary is spawned
-//! (`capture_helper_name()`); everything after — socket accept, the
-//! `pollis-capture-proto` Format/Frame/Error decode, LiveKit publish,
-//! libyuv ARGB->I420 — is identical (there is no FPS cap; see the
-//! module-wide constants note in `screenshare/mod.rs`). This is exactly the
-//! de-risking #283 Phase 2 buys: every SCK call now runs in a process
-//! whose death the parent already tolerates.
-//!
-//! ── Helper subprocess wire protocol ──────────────────────────────────────
-//!
-//! The Format/Frame/Error framing now lives in the single shared
-//! `pollis-capture-proto` crate (decode: `pollis_capture_proto::read_msg`,
-//! used by the start path + reader task in `start_unix`). Both the
-//! `pollis-capture-linux` and `pollis-capture-macos` helpers encode with
-//! the same crate, so the wire bytes have exactly one definition. The
-//! hand-rolled `SocketReader` / `HelperMsg` / `MSG_*` that used to live
-//! here were removed in the issue #281/#283 helper-split refactor — no
-//! behavior change, the byte layout is identical.
+//! The helper-subprocess capture path (Linux + macOS). Only the helper binary
+//! differs per OS; the wire format is `pollis-capture-proto`.
 
 use std::sync::Arc;
 
@@ -26,20 +7,13 @@ use crate::{error::Result, state::AppState};
 
 use super::{fail_capture, state::HelperSession};
 
-/// Spawn the per-platform capture helper and wait for it to connect back
-/// over a fresh Unix socket. Returns the established session split into
-/// read/write halves so the parent can both send `Select` (macOS picker
-/// reply) and read `Format`/`Frame` messages. Used by both
-/// `enumerate_screen_sources` (macOS picker phase) and
-/// `start_screen_share` (Linux/Windows direct path).
+/// Spawn the platform capture helper and wait for it to connect back over a
+/// fresh Unix socket.
 ///
-/// `with_audio` asks the helper to capture the shared source's audio
-/// alongside its video. It is a spawn-time flag rather than a protocol
-/// message because the Linux helper has no Select round trip at all — the
-/// portal dialog is its picker, so spawn is the only moment the parent can
-/// tell it anything. macOS ignores the flag and reads the same decision off
-/// `Selection::with_audio`, since its helper is spawned during enumeration,
-/// before the user has seen the audio toggle.
+/// `with_audio` is a spawn-time flag because the Linux helper has no Select
+/// round trip (the portal is its picker). macOS ignores it and reads
+/// `Selection::with_audio`, since its helper is spawned before the user sees
+/// the audio toggle.
 pub(super) async fn spawn_and_accept_helper(
     state: &Arc<AppState>,
     with_audio: bool,
@@ -140,9 +114,7 @@ pub(super) async fn spawn_and_accept_helper(
     })
 }
 
-/// Resolve the per-platform capture helper binary. Linux ->
-/// `pollis-capture-linux`, macOS -> `pollis-capture-macos`. Both ship as
-/// Tauri `externalBin` sidecars next to the main binary in production.
+/// The helper binary name, shipped as a Tauri `externalBin` sidecar.
 fn capture_helper_name() -> &'static str {
     #[cfg(target_os = "linux")]
     {
@@ -159,8 +131,7 @@ pub(crate) fn locate_capture_helper() -> Result<std::path::PathBuf> {
 
     let helper = capture_helper_name();
 
-    // 1. Explicit override — useful for dev setups with a non-standard
-    //    layout.
+    // 1. Explicit override, for non-standard dev layouts.
     if let Ok(p) = std::env::var("POLLIS_CAPTURE_BIN") {
         let p = PathBuf::from(p);
         if p.exists() {
@@ -168,8 +139,7 @@ pub(crate) fn locate_capture_helper() -> Result<std::path::PathBuf> {
         }
     }
 
-    // 2. Sidecar next to the current executable (this is how we ship in
-    //    production — Tauri bundles the helper as an external bin).
+    // 2. Sidecar next to the executable (production).
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             let candidate = dir.join(helper);
@@ -179,9 +149,7 @@ pub(crate) fn locate_capture_helper() -> Result<std::path::PathBuf> {
         }
     }
 
-    // 3. Dev: workspace target dir. We can't be sure of profile, so try
-    //    the running binary's profile first (debug if the parent is
-    //    debug, otherwise release), then fall back to the other.
+    // 3. Dev: the workspace target dir, the running profile first.
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").ok();
     let workspace_root = manifest_dir
         .as_ref()
@@ -200,8 +168,7 @@ pub(crate) fn locate_capture_helper() -> Result<std::path::PathBuf> {
             }
         }
     }
-    // Also try a `target/<profile>` relative to CWD — covers
-    // `pnpm dev` running from the repo root.
+    // Also `target/<profile>` relative to CWD (`pnpm dev` from the repo root).
     if let Ok(cwd) = std::env::current_dir() {
         for profile in profiles {
             let candidate = cwd.join("target").join(profile).join(helper);
