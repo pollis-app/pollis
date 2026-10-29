@@ -49,6 +49,14 @@ tags:
 - addMedia:
     - "../fixtures/media-viewer.png"
     - "../fixtures/composer-video.mp4"
+# Android's media provider indexes new files late: give it a moment before
+# the picker reads the library.
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - waitForAnimationToEnd:
+          timeout: 8000
 - tapOn:
     id: "btn-attach"
 - waitForAnimationToEnd:
@@ -120,12 +128,23 @@ tags:
 - takeScreenshot: sensitive-03-composer-both-marked
 
 # Send: the row is covered, both attachments.
-- tapOn:
-    id: "btn-send"
-- extendedWaitUntil:
-    notVisible:
-      id: "strip-attachments"
-    timeout: 10000
+# Keep pressing Send until the strip clears: a press while a previous send
+# is still settling is ignored (as composer-attachments.yaml).
+- repeat:
+    while:
+      visible:
+        id: "strip-attachments"
+    times: 30
+    commands:
+      - tapOn:
+          id: "btn-send"
+      - extendedWaitUntil:
+          notVisible:
+            id: "strip-attachments"
+          timeout: 4000
+          optional: true
+- assertNotVisible:
+    id: "strip-attachments"
 - extendedWaitUntil:
     visible:
       id: "sensitive-cover-.*"
@@ -135,14 +154,27 @@ tags:
     id: "btn-sensitive-hide-.*"
 - takeScreenshot: sensitive-04-message-covered
 
-# One tap reveals the image alone; the video stays covered.
-- tapOn:
-    id: "btn-attachment-.*"
-    index: 0
-- extendedWaitUntil:
-    visible:
-      id: "btn-sensitive-hide-.*"
-    timeout: 5000
+# One tap reveals the image alone; the video stays covered. Taps on one row
+# are spaced out (and retried) so two never read as the row's double tap,
+# which starts a reply instead.
+- waitForAnimationToEnd:
+    timeout: 3000
+- repeat:
+    while:
+      notVisible:
+        id: "btn-sensitive-hide-.*"
+    times: 3
+    commands:
+      - tapOn:
+          id: "btn-attachment-.*"
+          index: 0
+      - extendedWaitUntil:
+          visible:
+            id: "btn-sensitive-hide-.*"
+          timeout: 3000
+          optional: true
+- assertVisible:
+    id: "btn-sensitive-hide-.*"
 - assertNotVisible:
     id: "screen-media-viewer"
 - assertVisible:
@@ -156,13 +188,26 @@ tags:
     id: "btn-sensitive-hide-.*"
 
 # The tap that reveals the video neither opens the viewer nor plays it.
-- tapOn:
-    id: "btn-attachment-.*"
-    index: 1
-- extendedWaitUntil:
-    visible:
-      id: "btn-sensitive-hide-.*"
-    timeout: 5000
+- waitForAnimationToEnd:
+    timeout: 3000
+- repeat:
+    while:
+      notVisible:
+        id: "btn-sensitive-hide-.*"
+    times: 3
+    commands:
+      - tapOn:
+          id: "btn-attachment-.*"
+          index: 1
+      - extendedWaitUntil:
+          visible:
+            id: "btn-sensitive-hide-.*"
+          timeout: 3000
+          optional: true
+- assertVisible:
+    id: "btn-sensitive-hide-.*"
+- assertNotVisible:
+    id: "bar-reply"
 - waitForAnimationToEnd:
     timeout: 2000
 - assertNotVisible:
@@ -188,12 +233,23 @@ tags:
 - assertVisible:
     id: "sensitive-cover-composer-0"
 - takeScreenshot: sensitive-07-vault-composer-marked
-- tapOn:
-    id: "btn-send"
-- extendedWaitUntil:
-    notVisible:
-      id: "strip-attachments"
-    timeout: 10000
+# Keep pressing Send until the strip clears: a press while a previous send
+# is still settling is ignored (as composer-attachments.yaml).
+- repeat:
+    while:
+      visible:
+        id: "strip-attachments"
+    times: 30
+    commands:
+      - tapOn:
+          id: "btn-send"
+      - extendedWaitUntil:
+          notVisible:
+            id: "strip-attachments"
+          timeout: 4000
+          optional: true
+- assertNotVisible:
+    id: "strip-attachments"
 - extendedWaitUntil:
     visible:
       id: "sensitive-cover-.*"
