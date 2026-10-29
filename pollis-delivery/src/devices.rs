@@ -114,28 +114,63 @@ pub async fn apply_publish_key_packages(
         Ok(a) => a,
         Err(o) => return Ok(o),
     };
+    if let Some(why) = last_resort_shape_error(&body.packages) {
+        return Ok(WriteOutcome::Invalid(why));
+    }
+    // Decode every package before touching the DB, so a bad blob writes nothing.
+    // A malformed package is the whole write's problem; surface as 500 (the
+    // handler maps decode-at-parse to 400, but here it is a bad row).
+    let mut decoded: Vec<(&KeyPackageEntry, Vec<u8>)> = Vec::with_capacity(body.packages.len());
     for pkg in &body.packages {
-        let kp = match b64_decode(&pkg.key_package) {
-            Ok(b) => b,
-            // A malformed package is the whole write's problem; surface as 500
-            // (the handler maps decode-at-parse to 400, but here it is a bad row).
-            Err(e) => return Err(e),
-        };
-        conn.execute(
+        decoded.push((pkg, b64_decode(&pkg.key_package)?));
+    }
+    let tx = conn.transaction().await?;
+    for (pkg, kp) in decoded {
+        if pkg.last_resort {
+            // A device has ONE last-resort package per suite (the partial
+            // unique index enforces it). Publishing a new one replaces the old.
+            tx.execute(
+                "DELETE FROM mls_key_package \
+                 WHERE user_id = ?1 AND device_id = ?2 AND ciphersuite = ?3 AND last_resort = 1",
+                libsql::params![actor.clone(), body.device_id.clone(), pkg.suite()],
+            )
+            .await?;
+        }
+        tx.execute(
             "INSERT OR IGNORE INTO mls_key_package \
-             (ref_hash, user_id, key_package, device_id, ciphersuite) \
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+             (ref_hash, user_id, key_package, device_id, ciphersuite, last_resort) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             libsql::params![
                 pkg.ref_hash.clone(),
                 actor.clone(),
                 kp,
                 body.device_id.clone(),
                 pkg.suite(),
+                i64::from(pkg.last_resort),
             ],
         )
         .await?;
     }
+    tx.commit().await?;
     Ok(WriteOutcome::Ok)
+}
+
+/// A request may carry at most ONE last-resort package per suite (#1571): the
+/// partial unique index `idx_mls_kp_last_resort` would refuse the second
+/// mid-write, and refusing it up front is a clean 400 instead of a 500.
+fn last_resort_shape_error(packages: &[KeyPackageEntry]) -> Option<&'static str> {
+    let mut suites: Vec<i64> = packages
+        .iter()
+        .filter(|p| p.last_resort)
+        .map(KeyPackageEntry::suite)
+        .collect();
+    let n = suites.len();
+    suites.sort_unstable();
+    suites.dedup();
+    if suites.len() != n {
+        return Some("more than one last-resort key package per ciphersuite");
+    }
+    None
 }
 
 // ── POST /v1/key-packages/replenish ──────────────────────────────────────────
@@ -168,10 +203,18 @@ pub async fn apply_replenish_key_packages(
         Ok(a) => a,
         Err(o) => return Ok(o),
     };
+    if let Some(why) = last_resort_shape_error(&body.packages) {
+        return Ok(WriteOutcome::Invalid(why));
+    }
     // Decode every package up front so a bad blob aborts before we touch the DB.
-    let mut decoded: Vec<(String, Vec<u8>, i64)> = Vec::with_capacity(body.packages.len());
+    let mut decoded: Vec<(String, Vec<u8>, i64, bool)> = Vec::with_capacity(body.packages.len());
     for pkg in &body.packages {
-        decoded.push((pkg.ref_hash.clone(), b64_decode(&pkg.key_package)?, pkg.suite()));
+        decoded.push((
+            pkg.ref_hash.clone(),
+            b64_decode(&pkg.key_package)?,
+            pkg.suite(),
+            pkg.last_resort,
+        ));
     }
     // A rotation replaces the pool for the SUITES it is publishing, and only
     // those. Today that is one suite (classic) and every stored row is classic,
@@ -179,7 +222,7 @@ pub async fn apply_replenish_key_packages(
     // when a device keeps a classic and a hybrid pool side by side: an unscoped
     // delete would make the second rotation silently destroy the first pool.
     // An empty request keeps the historical whole-device semantics.
-    let mut suites: Vec<i64> = decoded.iter().map(|(_, _, s)| *s).collect();
+    let mut suites: Vec<i64> = decoded.iter().map(|(_, _, s, _)| *s).collect();
     suites.sort_unstable();
     suites.dedup();
 
@@ -187,6 +230,14 @@ pub async fn apply_replenish_key_packages(
     // Remove unclaimed packages for THIS device only — their private keys may no
     // longer exist in the device's current local DB (e.g. after a wipe). Also
     // clear legacy packages with NULL device_id for this user.
+    //
+    // That includes the device's LAST-RESORT package in a rotated suite (#1571),
+    // deliberately: it is unclaimed by construction, and the reason a rotation
+    // deletes the pool (its private keys may be gone) is just as true of it. A
+    // rotating client that knows about last-resort packages sends a fresh one in
+    // this same request, so the device is never without one; a client that
+    // predates them sends none and is left exactly where it always was, with a
+    // regular pool only.
     if suites.is_empty() {
         tx.execute(
             "DELETE FROM mls_key_package WHERE user_id = ?1 AND claimed = 0 \
@@ -203,17 +254,18 @@ pub async fn apply_replenish_key_packages(
         )
         .await?;
     }
-    for (ref_hash, kp, suite) in &decoded {
+    for (ref_hash, kp, suite, last_resort) in &decoded {
         tx.execute(
             "INSERT OR IGNORE INTO mls_key_package \
-             (ref_hash, user_id, key_package, device_id, ciphersuite) \
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+             (ref_hash, user_id, key_package, device_id, ciphersuite, last_resort) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             libsql::params![
                 ref_hash.clone(),
                 actor.clone(),
                 kp.clone(),
                 body.device_id.clone(),
                 *suite,
+                i64::from(*last_resort),
             ],
         )
         .await?;
@@ -369,7 +421,8 @@ where
 /// low enough to matter would refuse real adds. The structural answer is a
 /// LAST-RESORT KeyPackage (the RFC 9420 / X3DH device: one package handed out
 /// repeatedly rather than consumed, so a pool can be depleted but never
-/// emptied), which is a client and protocol change rather than a DS one.
+/// emptied). #1571 implements it: the claim falls back to the device's
+/// last-resort package when its pool is empty (`last_resort_package`).
 async fn may_claim_from(
     conn: &Connection,
     claimer: &str,
@@ -517,42 +570,21 @@ pub async fn apply_claim_key_package(
     }
 
     let suite = body.ciphersuite.unwrap_or(CIPHERSUITE_PQ);
-    let mut rows = match &body.target_device_id {
-        Some(device_id) => {
-            conn.query(
-                "UPDATE mls_key_package \
-                 SET claimed = 1 \
-                 WHERE ref_hash = ( \
-                     SELECT ref_hash FROM mls_key_package \
-                     WHERE user_id = ?1 AND device_id = ?2 AND claimed = 0 \
-                       AND ciphersuite = ?3 \
-                     ORDER BY created_at ASC LIMIT 1 \
-                 ) \
-                 RETURNING ref_hash, key_package",
-                libsql::params![body.target_user_id.clone(), device_id.clone(), suite],
-            )
-            .await?
-        }
-        None => {
-            conn.query(
-                "UPDATE mls_key_package \
-                 SET claimed = 1 \
-                 WHERE ref_hash = ( \
-                     SELECT ref_hash FROM mls_key_package \
-                     WHERE user_id = ?1 AND claimed = 0 AND ciphersuite = ?2 \
-                     ORDER BY created_at ASC LIMIT 1 \
-                 ) \
-                 RETURNING ref_hash, key_package",
-                libsql::params![body.target_user_id.clone(), suite],
-            )
-            .await?
-        }
+    let claimed = match claim_regular(conn, body, suite).await? {
+        Some(hit) => Some(hit),
+        // The pool is empty: fall back to the device's last-resort package
+        // (#1571). It is read, never flipped, so it stays available for every
+        // later add. Only a DEVICE-scoped claim falls back: the user-scoped path
+        // (`target_device_id: None`) adds "some device of this user", and handing
+        // out one device's last-resort package there would pick a device
+        // arbitrarily. Every live add path names the device.
+        None => match &body.target_device_id {
+            Some(device_id) => {
+                last_resort_package(conn, &body.target_user_id, device_id, suite).await?
+            }
+            None => None,
+        },
     };
-    let claimed = match rows.next().await? {
-        Some(row) => Some((row.get::<String>(0)?, row.get::<Vec<u8>>(1)?)),
-        None => None,
-    };
-    drop(rows);
 
     let Some((ref_hash, key_package)) = claimed else {
         return Ok(ClaimOutcome::NoKeyPackage);
@@ -576,6 +608,77 @@ pub async fn apply_claim_key_package(
     Ok(ClaimOutcome::Claimed {
         ref_hash,
         key_package,
+    })
+}
+
+/// Atomically claim the OLDEST unclaimed REGULAR package for the target: the
+/// pre-#1571 claim, narrowed to `last_resort = 0` so the pool is spent before the
+/// package that never may be.
+async fn claim_regular(
+    conn: &Connection,
+    body: &ClaimKeyPackageBody,
+    suite: i64,
+) -> anyhow::Result<Option<(String, Vec<u8>)>> {
+    let mut rows = match &body.target_device_id {
+        Some(device_id) => {
+            conn.query(
+                "UPDATE mls_key_package \
+                 SET claimed = 1 \
+                 WHERE ref_hash = ( \
+                     SELECT ref_hash FROM mls_key_package \
+                     WHERE user_id = ?1 AND device_id = ?2 AND claimed = 0 \
+                       AND ciphersuite = ?3 AND last_resort = 0 \
+                     ORDER BY created_at ASC LIMIT 1 \
+                 ) \
+                 RETURNING ref_hash, key_package",
+                libsql::params![body.target_user_id.clone(), device_id.clone(), suite],
+            )
+            .await?
+        }
+        None => {
+            conn.query(
+                "UPDATE mls_key_package \
+                 SET claimed = 1 \
+                 WHERE ref_hash = ( \
+                     SELECT ref_hash FROM mls_key_package \
+                     WHERE user_id = ?1 AND claimed = 0 AND ciphersuite = ?2 \
+                       AND last_resort = 0 \
+                     ORDER BY created_at ASC LIMIT 1 \
+                 ) \
+                 RETURNING ref_hash, key_package",
+                libsql::params![body.target_user_id.clone(), suite],
+            )
+            .await?
+        }
+    };
+    Ok(match rows.next().await? {
+        Some(row) => Some((row.get::<String>(0)?, row.get::<Vec<u8>>(1)?)),
+        None => None,
+    })
+}
+
+/// The device's last-resort package in `suite`, if it published one (#1571).
+/// A plain SELECT: serving it changes nothing, so any number of committers may
+/// be handed the same package, which is the point. The audit row and both claim
+/// budgets still apply to it, in [`apply_claim_key_package`].
+async fn last_resort_package(
+    conn: &Connection,
+    user_id: &str,
+    device_id: &str,
+    suite: i64,
+) -> anyhow::Result<Option<(String, Vec<u8>)>> {
+    let mut rows = conn
+        .query(
+            "SELECT ref_hash, key_package FROM mls_key_package \
+             WHERE user_id = ?1 AND device_id = ?2 AND ciphersuite = ?3 \
+               AND last_resort = 1 \
+             LIMIT 1",
+            libsql::params![user_id.to_string(), device_id.to_string(), suite],
+        )
+        .await?;
+    Ok(match rows.next().await? {
+        Some(row) => Some((row.get::<String>(0)?, row.get::<Vec<u8>>(1)?)),
+        None => None,
     })
 }
 

@@ -346,20 +346,25 @@ pub(crate) async fn account_status(
     Ok(ds_post_json(state, &body).await?.account)
 }
 
-/// This device's remaining unclaimed key packages in one suite.
+/// This device's remaining unclaimed (regular) key packages in one suite, and
+/// whether it holds a last-resort package there (#1571; `None` from a Delivery
+/// Service that predates them).
 pub(crate) async fn unclaimed_key_packages(
     state: &Arc<AppState>,
     ciphersuite: i64,
-) -> Result<i64> {
+) -> Result<(i64, Option<bool>)> {
     let body = ar::KeyPackagesBody {
         count_for_ciphersuite: Some(ciphersuite),
         pairs_for_user_ids: Vec::new(),
         pairs_ciphersuite: None,
     };
-    Ok(ds_post_json(state, &body).await?.unclaimed.unwrap_or(0))
+    let resp = ds_post_json(state, &body).await?;
+    Ok((resp.unclaimed.unwrap_or(0), resp.has_last_resort))
 }
 
-/// `(user_id, device_id)` pairs among `user_ids` with a claimable package.
+/// `(user_id, device_id)` pairs among `user_ids` with a claimable package —
+/// an unclaimed regular one, or (#1571) a last-resort one, which is never
+/// claimed and so keeps a device with an empty pool on this list.
 ///
 /// A short list here is indistinguishable from "no package", which is how a
 /// device silently stays out of a group — so this propagates the error rather

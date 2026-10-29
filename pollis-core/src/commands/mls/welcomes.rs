@@ -160,6 +160,7 @@ where
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("into group: {e}")))?;
     // Added to the tree here: nothing sealed before this epoch was sent to
     // this device (#1312).
+    super::join_branch::mark_fresh_if_first(provider.raw_conn(), &conversation_id, generation);
     super::join_branch::record_added(
         provider.raw_conn(),
         &conversation_id,
@@ -185,13 +186,19 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
     let super::ds_reads::FetchedWelcomes {
         items,
         unclaimed_key_packages,
+        has_last_resort_key_package,
     } = super::ds_reads::fetch_welcomes(state, user_id, device_id).await?;
 
     let had_welcomes = !items.is_empty();
     // IDs to mark delivered. We ack even apply failures — the private key for a
-    // failed Welcome was likely orphaned by a DB wipe and will never succeed;
-    // the repair mechanism generates a fresh Welcome. (Same semantics as before.)
+    // failed Welcome was likely orphaned by a DB wipe and will never succeed, so
+    // retrying it would loop forever. But an ack alone is not a recovery (#1571):
+    // nothing else re-adds this device, and the next ingest would find no group,
+    // join at the head, and pass every earlier envelope in silence. So each
+    // failure also names its conversation in `failed`, and after the ack this
+    // pass re-joins it at once ([`rejoin_after_failed_welcomes`]).
     let mut processed_ids: Vec<String> = Vec::new();
+    let mut failed: Vec<String> = Vec::new();
     // Conversations this pass actually joined, with the LINEAGE each Welcome
     // admitted us to — the post-join self-update targets (issue #666) and the
     // generation-adoption input (#454 P4). Deduplicated on the conversation
@@ -199,12 +206,15 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
     // rotating twice buys nothing; the highest generation wins, since a Welcome
     // into a newer lineage supersedes one into an older.
     let mut joined: Vec<(String, i64)> = Vec::new();
-    for (id, bytes) in items {
-        // `None`: the drain (`POST /v1/welcomes/fetch`) does not report the
-        // `conversation_id` the row was filed under, so there is nothing yet to
-        // hold the blob's own GroupId against. The DS half of #1161 C1 adds it;
-        // `join_from_welcome` already enforces it the moment it arrives. Until
-        // then the corroboration below is what stands in for it.
+    for super::ds_reads::FetchedWelcome {
+        id,
+        bytes,
+        conversation_id: filed_under,
+    } in items
+    {
+        // `None`: the blob's own GroupId is not held against the row it was
+        // filed under here; the corroboration below is what stands in for that
+        // check. `filed_under` is used only to recover from a failed apply.
         match apply_welcome(state, &bytes, None).await {
             Ok((conversation_id, generation)) => {
                 crate::diag!("[mls] poll_mls_welcomes: applied welcome {id}");
@@ -216,7 +226,16 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
                 }
             }
             Err(e) => {
-                crate::diag!("[mls] poll_mls_welcomes: failed to apply welcome {id}: {e}");
+                crate::diag!(
+                    "[mls] poll_mls_welcomes: failed to apply welcome {id} (filed under \
+                     {filed_under:?}): {e} — acknowledging it and re-joining that \
+                     conversation now (#1571)"
+                );
+                if let Some(conversation_id) = filed_under {
+                    if !failed.contains(&conversation_id) {
+                        failed.push(conversation_id);
+                    }
+                }
             }
         }
         processed_ids.push(id);
@@ -251,7 +270,11 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
     // carries the pool size, so this is the refill trigger on all of them at no
     // extra round trip. See `drain_wants_refill` for why "processed a Welcome"
     // alone was not enough.
-    if super::key_packages::drain_wants_refill(had_welcomes, unclaimed_key_packages) {
+    if super::key_packages::drain_wants_refill(
+        had_welcomes,
+        unclaimed_key_packages,
+        has_last_resort_key_package,
+    ) {
         if let Err(e) = replenish_key_packages(state, user_id, device_id).await {
             crate::diag!("[mls] KP replenishment failed (non-fatal): {e}");
         }
@@ -273,7 +296,65 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
 
     self_update_joined_groups(state, user_id, &joined).await;
 
+    rejoin_after_failed_welcomes(state, user_id, &failed, &joined).await;
+
     Ok(())
+}
+
+/// Re-join each conversation whose Welcome this pass could not apply (#1571).
+///
+/// The Welcome was acknowledged above, so it is no longer pending, and the I6
+/// gate (`invariants::join_recovery`, Kani-proved: external join only when no
+/// Welcome is pending) now admits an external join — the device's own re-add,
+/// which replaces its unusable leaf in the tree. Running it here rather than
+/// leaving it to the next ingest is the difference between losing what arrives
+/// before that ingest and not: every envelope sealed after this join is
+/// readable, and what was sealed between the failed add and now is shown as a
+/// loss (the entitlement marker the join records), not passed in silence.
+///
+/// No loop: a Welcome is acknowledged once and comes back only if the ack
+/// itself failed, and the catch-up is one attempt per failed Welcome. Skipped
+/// when this pass also applied a Welcome for the same conversation, or when a
+/// group is already held — a refused REPLAY of an old Welcome fails exactly like
+/// this and needs nothing.
+async fn rejoin_after_failed_welcomes(
+    state: &Arc<AppState>,
+    user_id: &str,
+    failed: &[String],
+    joined: &[(String, i64)],
+) {
+    for conversation_id in failed {
+        if joined.iter().any(|(c, _)| c == conversation_id) {
+            continue;
+        }
+        let held = {
+            let guard = state.local_db.lock().await;
+            guard
+                .as_ref()
+                .is_some_and(|db| super::group_state::has_local_group(db.conn(), conversation_id))
+        };
+        if held {
+            continue;
+        }
+        crate::diag!(
+            "[mls] poll_mls_welcomes: {conversation_id}: Welcome unusable and no group held — \
+             re-joining now"
+        );
+        // Boxed: the catch-up can poll Welcomes again (its no-GroupInfo branch),
+        // which makes this future recursive.
+        if let Err(e) = Box::pin(crate::commands::messages::catch_up_mls_group_interleaved(
+            state,
+            conversation_id,
+            user_id,
+        ))
+        .await
+        {
+            crate::diag!(
+                "[mls] poll_mls_welcomes: re-join of {conversation_id} after a failed Welcome \
+                 failed: {e}"
+            );
+        }
+    }
 }
 
 /// Does the conversation a just-applied Welcome claims actually list us as a
@@ -306,6 +387,14 @@ async fn welcome_is_corroborated(
     conversation_id: &str,
     generation: i64,
 ) -> bool {
+    // Consumed up front, whatever the verdict, so a marker can never outlive
+    // the join that wrote it (#1571).
+    let fresh = {
+        let guard = state.local_db.lock().await;
+        guard
+            .as_ref()
+            .is_some_and(|db| super::join_branch::take_fresh(db.conn(), conversation_id, generation))
+    };
     let snap = match super::ds_reads::conversation_snapshot(
         state,
         super::ds_reads::state_query(conversation_id, Some(generation)),
@@ -334,6 +423,20 @@ async fn welcome_is_corroborated(
         None => true,
     };
     if snap.authorized && snap.is_member != Some(false) && epoch_is_in_the_log {
+        // #1571: a Welcome can also arrive LATE — the device was registered
+        // before its user joined, and was re-added only after messages had
+        // been exchanged. Same marker as an external join records.
+        let guard = state.local_db.lock().await;
+        if let Some(db) = guard.as_ref() {
+            super::join_branch::record_entitlement(
+                db.conn(),
+                conversation_id,
+                generation,
+                fresh,
+                snap.device_registered_at.as_deref(),
+                snap.member_since.as_deref(),
+            );
+        }
         return true;
     }
     crate::diag!(

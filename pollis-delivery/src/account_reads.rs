@@ -211,10 +211,14 @@ pub async fn unclaimed_key_package_count(
     device_id: &str,
     suite: i64,
 ) -> anyhow::Result<i64> {
+    // `last_resort = 0`: the last-resort package (#1571) is not part of the
+    // pool a refill tops up. Counting it would leave a device one package short
+    // forever, and an old client never has one, so for it this is unchanged.
     let mut rows = conn
         .query(
             "SELECT COUNT(*) FROM mls_key_package \
-             WHERE user_id = ?1 AND device_id = ?2 AND claimed = 0 AND ciphersuite = ?3",
+             WHERE user_id = ?1 AND device_id = ?2 AND claimed = 0 AND ciphersuite = ?3 \
+               AND last_resort = 0",
             libsql::params![user_id.to_string(), device_id.to_string(), suite],
         )
         .await?;
@@ -222,6 +226,26 @@ pub async fn unclaimed_key_package_count(
         Some(row) => Ok(row.get::<i64>(0)?),
         None => Ok(0),
     }
+}
+
+/// Does `(user_id, device_id)` hold a last-resort KeyPackage in `suite` (#1571)?
+/// Like [`unclaimed_key_package_count`], callers pass the AUTHENTICATED identity:
+/// the answer decides whether that device publishes one.
+pub async fn has_last_resort_key_package(
+    conn: &Connection,
+    user_id: &str,
+    device_id: &str,
+    suite: i64,
+) -> anyhow::Result<bool> {
+    let mut rows = conn
+        .query(
+            "SELECT 1 FROM mls_key_package \
+             WHERE user_id = ?1 AND device_id = ?2 AND ciphersuite = ?3 AND last_resort = 1 \
+             LIMIT 1",
+            libsql::params![user_id.to_string(), device_id.to_string(), suite],
+        )
+        .await?;
+    Ok(rows.next().await?.is_some())
 }
 
 /// POST `/v1/read/key-packages` — the replenish shortfall and the roster's
@@ -246,14 +270,15 @@ pub async fn key_packages(
 
     let conn = state.db.conn().await?;
 
-    let unclaimed = match parsed.count_for_ciphersuite {
+    let (unclaimed, has_last_resort) = match parsed.count_for_ciphersuite {
         // Scoped to the AUTHENTICATED device, never a body-named one: this
         // number drives how many packages that device publishes, and answering
         // for someone else's pool would make it publish into the wrong one.
-        Some(suite) => {
-            Some(unclaimed_key_package_count(&conn, &who.user_id, &who.device_id, suite).await?)
-        }
-        None => None,
+        Some(suite) => (
+            Some(unclaimed_key_package_count(&conn, &who.user_id, &who.device_id, suite).await?),
+            Some(has_last_resort_key_package(&conn, &who.user_id, &who.device_id, suite).await?),
+        ),
+        None => (None, None),
     };
 
     let mut pairs = Vec::new();
@@ -287,6 +312,7 @@ pub async fn key_packages(
 
     Ok(ok_response::<KeyPackagesBody>(KeyPackagesResponse {
         unclaimed,
+        has_last_resort,
         pairs,
     }))
 }

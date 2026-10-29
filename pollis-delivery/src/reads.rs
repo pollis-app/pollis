@@ -214,6 +214,8 @@ pub async fn conversation_state(
                 // behind a stream of plausible "you were removed" verdicts.
                 is_member: member.as_ref().ok().copied(),
                 device_registered: None,
+                device_registered_at: None,
+                member_since: None,
                 added_identities: Vec::new(),
             });
             continue;
@@ -222,6 +224,17 @@ pub async fn conversation_state(
             .await
             .ok();
         let mut st = snapshot(&log, q, &who, registered).await?;
+        // #1571, main DB, best-effort: `None` only keeps the client on its
+        // pre-#1571 behaviour (a late join stays silent), so a failed read must
+        // never fail the snapshot the replay depends on.
+        st.device_registered_at = device_registered_at(&main, &who.user_id, &who.device_id)
+            .await
+            .ok()
+            .flatten();
+        st.member_since = member_since(&main, &q.conversation_id, &who.user_id)
+            .await
+            .ok()
+            .flatten();
         // Cross-signing inputs for the adds this batch carries, fetched ONCE per
         // batch instead of once per add-carrying commit. Deliberately after the
         // log-DB transaction closed: these rows live on the MAIN DB, so they were
@@ -334,7 +347,10 @@ pub async fn snapshot(
         commit_at_epoch,
         is_member: Some(true),
         device_registered,
-        // Filled by the caller, from the MAIN DB, after this transaction closes.
+        // These three are filled by the caller, from the MAIN DB, after this
+        // transaction closes.
+        device_registered_at: None,
+        member_since: None,
         added_identities: Vec::new(),
     })
 }
@@ -643,6 +659,53 @@ pub async fn device_registered(
     Ok(rows.next().await?.is_some())
 }
 
+/// When the device was registered, `user_device.created_at` verbatim (#1571).
+/// Revoked rows included: the question is when it was enrolled, and a revoked
+/// device is stopped by `device_registered` long before this matters.
+pub async fn device_registered_at(
+    main: &Connection,
+    user_id: &str,
+    device_id: &str,
+) -> anyhow::Result<Option<String>> {
+    let mut rows = main
+        .query(
+            "SELECT created_at FROM user_device WHERE user_id = ?1 AND device_id = ?2 LIMIT 1",
+            libsql::params![user_id.to_string(), device_id.to_string()],
+        )
+        .await?;
+    Ok(match rows.next().await? {
+        Some(row) => row.get::<Option<String>>(0)?,
+        None => None,
+    })
+}
+
+/// When `user_id` became a member of `conversation_id` (#1571): the DM row's
+/// `added_at`, or the `group_member.joined_at` of the group the id names or owns
+/// (the same three id shapes [`is_member`] accepts). `None` when not a member.
+pub async fn member_since(
+    main: &Connection,
+    conversation_id: &str,
+    user_id: &str,
+) -> anyhow::Result<Option<String>> {
+    let mut rows = main
+        .query(
+            "SELECT added_at FROM dm_channel_member WHERE dm_channel_id = ?1 AND user_id = ?2 \
+             UNION ALL \
+             SELECT joined_at FROM group_member WHERE group_id = ?1 AND user_id = ?2 \
+             UNION ALL \
+             SELECT gm.joined_at FROM channels c \
+                 JOIN group_member gm ON gm.group_id = c.group_id \
+                 WHERE c.id = ?1 AND gm.user_id = ?2 \
+             LIMIT 1",
+            libsql::params![conversation_id.to_string(), user_id.to_string()],
+        )
+        .await?;
+    Ok(match rows.next().await? {
+        Some(row) => row.get::<Option<String>>(0)?,
+        None => None,
+    })
+}
+
 // ── POST /v1/welcomes/fetch ──────────────────────────────────────────────────
 
 /// POST `/v1/welcomes/fetch` — drain this device's undelivered Welcomes.
@@ -680,33 +743,46 @@ pub async fn fetch_welcomes(
     // design: the drain is the payload and must never fail on this, and `None`
     // only sends the client back to its pre-#1412 refill rule. Scoped to the
     // VERIFIED device, like the drain itself.
-    let unclaimed_key_packages = match parsed.count_key_packages_in_suite {
-        Some(suite) => {
-            let counted = async {
-                let main = state.db.conn().await?;
-                crate::account_reads::unclaimed_key_package_count(
-                    &main,
-                    &who.user_id,
-                    &who.device_id,
-                    suite,
-                )
-                .await
-            }
-            .await;
-            match counted {
-                Ok(n) => Some(n),
-                Err(e) => {
-                    tracing::warn!("fetch_welcomes: key-package count failed: {e}");
-                    None
+    //
+    // #1571: and whether it holds a last-resort package in that suite, read in
+    // the same breath and on the same best-effort terms.
+    let (unclaimed_key_packages, has_last_resort_key_package) =
+        match parsed.count_key_packages_in_suite {
+            Some(suite) => {
+                let counted = async {
+                    let main = state.db.conn().await?;
+                    let n = crate::account_reads::unclaimed_key_package_count(
+                        &main,
+                        &who.user_id,
+                        &who.device_id,
+                        suite,
+                    )
+                    .await?;
+                    let lr = crate::account_reads::has_last_resort_key_package(
+                        &main,
+                        &who.user_id,
+                        &who.device_id,
+                        suite,
+                    )
+                    .await?;
+                    anyhow::Ok((n, lr))
+                }
+                .await;
+                match counted {
+                    Ok((n, lr)) => (Some(n), Some(lr)),
+                    Err(e) => {
+                        tracing::warn!("fetch_welcomes: key-package count failed: {e}");
+                        (None, None)
+                    }
                 }
             }
-        }
-        None => None,
-    };
+            None => (None, None),
+        };
 
     Ok(ok_response::<FetchWelcomesBody>(FetchWelcomesResponse {
         welcomes,
         unclaimed_key_packages,
+        has_last_resort_key_package,
     }))
 }
 

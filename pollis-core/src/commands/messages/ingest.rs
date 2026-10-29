@@ -252,6 +252,35 @@ pub async fn catch_up_mls_group_interleaved(
     mls_group_id: &str,
     user_id: &str,
 ) -> Result<()> {
+    let held = |state: &Arc<AppState>| {
+        let state = state.clone();
+        let id = mls_group_id.to_string();
+        async move {
+            let guard = state.local_db.lock().await;
+            guard
+                .as_ref()
+                .is_some_and(|db| crate::commands::mls::has_local_group(db.conn(), &id))
+        }
+    };
+    let held_before = held(state).await;
+    catch_up_once(state, mls_group_id, user_id).await?;
+    // A pass that started with no group can only JOIN (a Welcome, or an
+    // external join at the head): with no group there was nothing to replay
+    // or decrypt, so every envelope it fetched was left for a later pass. Run
+    // that pass now (#1571), once, so the conversation the user just opened
+    // shows what it holds — including the placeholders for what this device
+    // missed — instead of an empty view until the next wake-up.
+    if !held_before && held(state).await {
+        catch_up_once(state, mls_group_id, user_id).await?;
+    }
+    Ok(())
+}
+
+async fn catch_up_once(
+    state: &Arc<AppState>,
+    mls_group_id: &str,
+    user_id: &str,
+) -> Result<()> {
     // ONE request for a chain that used to be four dependent ones: enumerate the
     // conversations bound to this MLS group (a DM is its own single
     // conversation; a group is every one of its channels), and pull each one's
@@ -951,9 +980,37 @@ fn record_losses(
                 continue;
             }
             let floor = crate::commands::mls::first_join(conn, mls_group_id, sealed_at.0);
-            let Some(reason) = super::loss::classify(sealed_at, lineage, floor, attempted) else {
-                pre_join += 1;
-                continue;
+            let reason = match super::loss::classify(sealed_at, lineage, floor, attempted) {
+                Some(reason) => reason,
+                // Below the floor: sent before this device held the group. That
+                // is the accepted loss for a new device or for anything sent
+                // before its user joined — but NOT for a device that was
+                // registered all along and was left out of the tree (#1571).
+                None => {
+                    let entitled = crate::commands::mls::entitled_since(conn, mls_group_id, sealed_at.0);
+                    if !super::loss::sealed_while_entitled(floor, entitled, sent_at) {
+                        pre_join += 1;
+                        continue;
+                    }
+                    crate::diag!(
+                        "[loss] {cid}: {env_type} {id} sealed at ({}, {}) while this device was \
+                         registered but outside the tree (joined at {floor:?}, entitled since \
+                         {entitled:?}) — shown, not passed (#1571)",
+                        sealed_at.0,
+                        sealed_at.1,
+                    );
+                    if env_type == "message" {
+                        super::loss::write_placeholder(
+                            conn,
+                            cid,
+                            id,
+                            sender_id,
+                            sent_at,
+                            super::loss::Reason::Stranded,
+                        );
+                    }
+                    continue;
+                }
             };
             // `failed: secret reuse (...)` — the openmls step that refused it (#1520).
             let label = match why {

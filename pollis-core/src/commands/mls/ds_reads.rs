@@ -147,19 +147,36 @@ pub(crate) async fn fetch_welcomes(
         .into_iter()
         .map(|w| {
             let bytes = decode_b64("welcome", &w.welcome)?;
-            Ok((w.id, bytes))
+            Ok(FetchedWelcome {
+                id: w.id,
+                bytes,
+                conversation_id: w.conversation_id,
+            })
         })
         .collect::<Result<Vec<_>>>()?;
     Ok(FetchedWelcomes {
         items,
         unclaimed_key_packages: resp.unclaimed_key_packages,
+        has_last_resort_key_package: resp.has_last_resort_key_package,
     })
 }
 
-/// One Welcome drain: the `(welcome_id, blob)` rows, plus this device's
-/// remaining KeyPackage count when the Delivery Service reports it (#1412).
+/// One undelivered Welcome row.
+pub(crate) struct FetchedWelcome {
+    pub id: String,
+    pub bytes: Vec<u8>,
+    /// The conversation the row was filed under. `None` from a Delivery Service
+    /// that predates the field. Used to re-join a conversation whose Welcome
+    /// failed to apply (#1571).
+    pub conversation_id: Option<String>,
+}
+
+/// One Welcome drain: the rows, plus this device's remaining KeyPackage count
+/// (#1412) and last-resort state (#1571) when the Delivery Service reports them.
 pub(crate) struct FetchedWelcomes {
-    pub items: Vec<(String, Vec<u8>)>,
+    pub items: Vec<FetchedWelcome>,
     /// `None` from a Delivery Service that predates the field.
     pub unclaimed_key_packages: Option<i64>,
+    /// `None` from a Delivery Service that predates the field.
+    pub has_last_resort_key_package: Option<bool>,
 }

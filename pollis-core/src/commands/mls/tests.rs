@@ -4026,3 +4026,71 @@ fn a_created_group_starts_with_the_wide_window() {
         super::provider::OUT_OF_ORDER_TOLERANCE
     );
 }
+
+// ── #1571: the last-resort KeyPackage survives the joins it admits ───────────
+
+/// Add bob to `conversation_id` (a fresh group of alice's) with `kp_bytes`, and
+/// return the Welcome as bob receives it.
+fn add_with_key_package<C>(
+    alice: &MlsProvider<'_, C>,
+    conversation_id: &str,
+    kp_bytes: &[u8],
+) -> Welcome
+where
+    C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
+    create_mls_group_in_suite(alice, conversation_id, 0, "alice", "alice_dev", CS_PQ).unwrap();
+    let (mut group, sig) = load_group_with_signer(alice, conversation_id, 0).unwrap();
+    let mut reader: &[u8] = kp_bytes;
+    let kp = KeyPackageIn::tls_deserialize(&mut reader)
+        .unwrap()
+        .validate(alice.crypto(), ProtocolVersion::Mls10)
+        .unwrap();
+    let (_commit, welcome, _) = group.add_members(alice, &sig, &[kp]).unwrap();
+    group.merge_pending_commit(alice).unwrap();
+    let bytes = welcome.tls_serialize_detached().unwrap();
+    let mut reader: &[u8] = &bytes;
+    match MlsMessageIn::tls_deserialize(&mut reader).unwrap().extract() {
+        MlsMessageBodyIn::Welcome(w) => w,
+        _ => panic!("expected a Welcome"),
+    }
+}
+
+/// The DS hands the same last-resort package to every committer that finds the
+/// device's pool empty, so the device must be able to join through it again and
+/// again. That holds only if its private key outlives the first join: openmls
+/// skips the delete for a package carrying the LastResort extension, and our
+/// storage (`signal::mls_storage`) must not drop it either. A regular package is
+/// the control: its key is spent by the first join, so a second Welcome to it
+/// cannot be opened.
+#[test]
+fn a_last_resort_key_package_admits_the_device_to_more_than_one_group() {
+    let alice_db = make_db();
+    let bob_db = make_db();
+    let alice = PollisProvider::new(&alice_db);
+    let bob = PollisProvider::new(&bob_db);
+
+    let (_, last_resort) =
+        super::key_packages::build_key_package(&bob, "bob", "bob_dev", CS_PQ, true).unwrap();
+    for conversation_id in [
+        "01JLASTRESORTGROUPA0000000",
+        "01JLASTRESORTGROUPB0000000",
+        "01JLASTRESORTGROUPC0000000",
+    ] {
+        let welcome = add_with_key_package(&alice, conversation_id, &last_resort);
+        let joined = super::welcomes::join_from_welcome(&bob, welcome, Some(conversation_id))
+            .unwrap_or_else(|e| {
+                panic!("bob must join {conversation_id} with the last-resort package: {e}")
+            });
+        assert_eq!(joined, conversation_id);
+    }
+
+    let (_, regular) = build_key_package_in_suite(&bob, "bob", "bob_dev", CS_PQ).unwrap();
+    let first = add_with_key_package(&alice, "01JREGULARGROUPA0000000000", &regular);
+    super::welcomes::join_from_welcome(&bob, first, None).expect("first use of a regular package");
+    let second = add_with_key_package(&alice, "01JREGULARGROUPB0000000000", &regular);
+    assert!(
+        super::welcomes::join_from_welcome(&bob, second, None).is_err(),
+        "a regular package is one-shot: its private key is gone after the first join"
+    );
+}

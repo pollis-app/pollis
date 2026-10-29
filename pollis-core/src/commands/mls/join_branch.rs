@@ -217,9 +217,231 @@ pub(crate) fn first_join(
     Some(u64::from_le_bytes(bytes))
 }
 
+/// `mls_kv` scope for the "entitled since" marker (#1571). Key: as
+/// [`UNCONFIRMED_JOIN_SCOPE`]. Value: an RFC 3339 UTC instant, UTF-8.
+///
+/// [`FIRST_JOIN_SCOPE`]'s floor says what this device never HELD; it cannot say
+/// whether that was an accepted loss. For a NEW device it is (loss #2), and for
+/// anything sent before the USER joined it is (loss #1). But a device that was
+/// already registered when its user became a member here was supposed to be in
+/// the tree all along: if it first holds the group later — a peer's add skipped
+/// it, its Welcome failed to apply, nothing re-added it, and it external-joined
+/// at the head of the log — what was sent in between is a real loss and must be
+/// shown, not passed silently. This marker records that the device was in that
+/// position, and from when (the user's membership), so the ingest's loss check
+/// can tell the two apart (`messages::ingest::record_losses`).
+const ENTITLED_SINCE_SCOPE: &str = "pollis_entitled_since";
+
+/// Parse the two timestamp shapes the Delivery Service stores: RFC 3339
+/// (client-stamped columns such as `dm_channel_member.added_at` and an
+/// envelope's `sent_at`) and SQLite's `datetime('now')`, `YYYY-MM-DD HH:MM:SS`
+/// in UTC (server-defaulted columns such as `user_device.created_at` and
+/// `group_member.joined_at`). Answers the START of the window the stamp names;
+/// see [`ds_instant_window`].
+pub(crate) fn parse_ds_instant(raw: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    ds_instant_window(raw).map(|(start, _)| start)
+}
+
+/// The window a stored stamp names: an instant for a stamp with sub-second
+/// digits, the whole second for one without. `datetime('now')` truncates, so
+/// "01:49:21" means "some time during that second", and comparing it as the
+/// instant 01:49:21.000 would read an event later in the same second as
+/// earlier than it. Every comparison below takes the side of the window that
+/// keeps an undecidable case silent (the pre-#1571 behaviour).
+pub(crate) fn ds_instant_window(
+    raw: &str,
+) -> Option<(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)> {
+    let second = chrono::Duration::seconds(1);
+    if let Ok(t) = chrono::DateTime::parse_from_rfc3339(raw) {
+        let t = t.with_timezone(&chrono::Utc);
+        let fractional = raw.contains('.') || raw.contains(',');
+        return Some(if fractional { (t, t) } else { (t, t + second) });
+    }
+    if let Ok(n) = chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S") {
+        let t = n.and_utc();
+        return Some((t, t + second));
+    }
+    chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S%.f")
+        .ok()
+        .map(|n| {
+            let t = n.and_utc();
+            (t, t)
+        })
+}
+
+/// The instant from which this device was entitled to the conversation's
+/// messages despite not holding its group, or `None` when it was not: the pure
+/// rule behind [`record_entitlement`]. Entitled only when the device was
+/// registered strictly BEFORE its user became a member (the whole window of the
+/// registration stamp ends by the start of the membership's); a device
+/// registered after is a new device (loss #2) and gets nothing earlier than its
+/// own join. The answer is the END of the membership stamp's window, so nothing
+/// sent in the second the membership began is claimed for it. Either input
+/// missing or unreadable answers `None`: the pre-#1571 behaviour, a silent
+/// pass.
+pub(crate) fn entitlement(
+    device_registered_at: Option<&str>,
+    member_since: Option<&str>,
+) -> Option<chrono::DateTime<chrono::Utc>> {
+    let (_, registered_end) = ds_instant_window(device_registered_at?)?;
+    let (since_start, since_end) = ds_instant_window(member_since?)?;
+    if registered_end <= since_start {
+        Some(since_end)
+    } else {
+        None
+    }
+}
+
+/// `mls_kv` scope marking a join as this device's FIRST hold of a lineage
+/// (#1571), written just before the join records its floor and consumed by
+/// [`record_entitlement`]. Value: empty.
+///
+/// The entitlement is only for a device that never held the lineage — the
+/// incident's shape. A device that held it, was evicted while its user stayed a
+/// member, and was re-added keeps #1524's rule that the gap "while you were
+/// out" was never sent to it; a recovery rebuild keeps its original floor.
+const FRESH_JOIN_SCOPE: &str = "pollis_fresh_join";
+
+/// Mark the join about to record its floor as this device's first hold of
+/// `(conversation_id, generation)`, if no floor exists yet. Call BEFORE
+/// [`record_first_join`] / [`record_added`].
+pub(crate) fn mark_fresh_if_first(conn: &rusqlite::Connection, conversation_id: &str, generation: i64) {
+    if first_join(conn, conversation_id, generation).is_some() {
+        return;
+    }
+    if let Err(e) = conn.execute(
+        "INSERT OR REPLACE INTO mls_kv (scope, key, value) VALUES (?1, ?2, X'')",
+        rusqlite::params![FRESH_JOIN_SCOPE, key(conversation_id, generation)],
+    ) {
+        crate::diag!("[mls] could not mark the first join of {conversation_id}: {e}");
+    }
+}
+
+/// Consume the [`mark_fresh_if_first`] marker: was the join just recorded this
+/// device's first hold of the lineage?
+pub(crate) fn take_fresh(conn: &rusqlite::Connection, conversation_id: &str, generation: i64) -> bool {
+    conn.execute(
+        "DELETE FROM mls_kv WHERE scope = ?1 AND key = ?2",
+        rusqlite::params![FRESH_JOIN_SCOPE, key(conversation_id, generation)],
+    )
+    .map(|n| n > 0)
+    .unwrap_or(false)
+}
+
+/// Record, for the lineage this device just joined, whether (and since when) it
+/// was entitled to what was sent before that join — see [`ENTITLED_SINCE_SCOPE`].
+/// Called with the snapshot that admitted the join (an external join, or the
+/// corroboration read behind a Welcome). Only a FIRST hold of the lineage
+/// qualifies (`fresh`, from [`take_fresh`]). Best-effort: a missing marker only
+/// keeps a late join's gap silent, as it was before #1571.
+pub(crate) fn record_entitlement(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+    generation: i64,
+    fresh: bool,
+    device_registered_at: Option<&str>,
+    member_since: Option<&str>,
+) {
+    if !fresh {
+        return;
+    }
+    let Some(since) = entitlement(device_registered_at, member_since) else {
+        return;
+    };
+    if let Err(e) = conn.execute(
+        "INSERT OR REPLACE INTO mls_kv (scope, key, value) VALUES (?1, ?2, ?3)",
+        rusqlite::params![
+            ENTITLED_SINCE_SCOPE,
+            key(conversation_id, generation),
+            since.to_rfc3339().into_bytes()
+        ],
+    ) {
+        crate::diag!(
+            "[mls] could not record the entitlement of {conversation_id} generation {generation}: {e}"
+        );
+    }
+}
+
+/// The instant from which this device was entitled to `(conversation_id,
+/// generation)` while outside its tree, if [`record_entitlement`] found it was.
+pub(crate) fn entitled_since(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+    generation: i64,
+) -> Option<chrono::DateTime<chrono::Utc>> {
+    use rusqlite::OptionalExtension;
+    let raw: Vec<u8> = conn
+        .query_row(
+            "SELECT value FROM mls_kv WHERE scope = ?1 AND key = ?2",
+            rusqlite::params![ENTITLED_SINCE_SCOPE, key(conversation_id, generation)],
+            |row| row.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten()?;
+    parse_ds_instant(std::str::from_utf8(&raw).ok()?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #1571: only a device registered BEFORE its user's membership is entitled
+    /// to a late join's gap; a newer device (loss #2) and an unreported input
+    /// stay silent. Both stored timestamp shapes are read.
+    #[test]
+    fn only_a_device_registered_before_the_membership_is_entitled() {
+        let since = "2026-10-20T01:49:21.000+00:00";
+        assert!(entitlement(Some("2026-10-20 01:38:40"), Some(since)).is_some());
+        assert_eq!(entitlement(Some("2026-10-20 01:50:00"), Some(since)), None);
+        assert_eq!(entitlement(None, Some(since)), None);
+        assert_eq!(entitlement(Some("2026-10-20 01:38:40"), None), None);
+        assert_eq!(entitlement(Some("not a time"), Some(since)), None);
+    }
+
+    /// `datetime('now')` stamps are whole seconds: a registration or a
+    /// membership in the same second as the other decides nothing, and the
+    /// entitlement starts after the membership's second.
+    #[test]
+    fn second_granular_stamps_are_windows_not_instants() {
+        assert_eq!(entitlement(Some("2026-10-20 01:49:21"), Some("2026-10-20 01:49:21")), None);
+        assert_eq!(entitlement(Some("2026-10-20 01:49:20"), Some("2026-10-20T01:49:20.500Z")), None);
+        assert_eq!(
+            entitlement(Some("2026-10-20 01:49:20"), Some("2026-10-20 01:49:21")),
+            parse_ds_instant("2026-10-20T01:49:22Z"),
+        );
+        assert_eq!(
+            entitlement(Some("2026-10-20 01:49:20"), Some("2026-10-20T01:49:21.250Z")),
+            parse_ds_instant("2026-10-20T01:49:21.250Z"),
+        );
+    }
+
+    #[test]
+    fn the_entitlement_marker_round_trips_per_lineage() {
+        let conn = kv();
+        assert_eq!(entitled_since(&conn, "c", 0), None);
+        record_entitlement(&conn, "c", 0, true, Some("2026-10-20 01:50:00"), Some("2026-10-20T01:49:21Z"));
+        assert_eq!(entitled_since(&conn, "c", 0), None, "a newer device records nothing");
+        record_entitlement(&conn, "c", 0, false, Some("2026-10-20 01:38:40"), Some("2026-10-20T01:49:21.000Z"));
+        assert_eq!(entitled_since(&conn, "c", 0), None, "a re-join of a held lineage records nothing");
+        record_entitlement(&conn, "c", 0, true, Some("2026-10-20 01:38:40"), Some("2026-10-20T01:49:21.000Z"));
+        assert_eq!(
+            entitled_since(&conn, "c", 0),
+            parse_ds_instant("2026-10-20T01:49:21.000Z")
+        );
+        assert_eq!(entitled_since(&conn, "c", 1), None);
+    }
+
+    #[test]
+    fn only_a_first_hold_is_fresh() {
+        let conn = kv();
+        mark_fresh_if_first(&conn, "c", 0);
+        assert!(take_fresh(&conn, "c", 0));
+        assert!(!take_fresh(&conn, "c", 0), "consumed");
+        record_first_join(&conn, "c", 0, 2);
+        mark_fresh_if_first(&conn, "c", 0);
+        assert!(!take_fresh(&conn, "c", 0), "a lineage held before is not fresh");
+    }
 
     /// A rebuild (external join) keeps the first floor — what the device missed
     /// in between is a real loss — but being ADDED again (a Welcome after a

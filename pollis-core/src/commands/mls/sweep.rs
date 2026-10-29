@@ -46,6 +46,27 @@
 //! live device that has a claimable KeyPackage again and reconciles to add it.
 //! The device recovers on its own too: catching up a conversation it holds no
 //! group for external-joins it, and every Welcome drain refills its pool.
+//!
+//! ## On mobile, and before every seal (#1571)
+//!
+//! The sweep above is desktop's (cold launch, unlock, reconnect). Mobile never
+//! ran it, so in a conversation whose every participant was on a phone nothing
+//! retried a dropped add, and a device left out of the tree stayed out until it
+//! opened the conversation itself — joining at the head and missing everything
+//! before. Two more callers now reach the same backstop:
+//!
+//! * [`reconcile_backstop_all`] — the backstop alone, for every conversation,
+//!   bridged to mobile and run when the app lands and on every return to the
+//!   foreground, after the ingest pass it already makes (so the trees it reads
+//!   are caught up);
+//! * [`backstop_before_seal`] — the same check for ONE conversation, run by a
+//!   sender before it seals, at most once per conversation per
+//!   [`PRE_SEAL_CHECK_INTERVAL`], so the next message into a conversation with
+//!   a missing device re-adds it first.
+//!
+//! With last-resort KeyPackages (#1571) a missing device of a current build
+//! always has something to claim, so `has_addable_device` wakes for it even
+//! when its pool is empty — the claimable set the DS answers includes it.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -98,6 +119,84 @@ pub async fn catch_up_all_mls_groups(state: &Arc<AppState>, user_id: &str) -> Re
     }
 
     Ok(())
+}
+
+/// What [`reconcile_backstop_all`] did.
+#[derive(Debug, Default, serde::Serialize)]
+pub struct BackstopReport {
+    /// Conversations looked at.
+    pub checked: usize,
+    /// Conversations whose tree had drifted and were reconciled.
+    pub reconciled: usize,
+}
+
+/// The reconcile backstop for every conversation the user is in, without the
+/// catch-up, migration and self-update the full sweep adds (#1571).
+///
+/// Mobile's entry to the backstop: it runs right after the app's own ingest
+/// pass (landing in the app, and every return to the foreground), which has
+/// already caught each conversation up, so repeating the catch-up here would
+/// only double the work. Cheap in steady state — see [`local_tree_drift`].
+/// Best-effort per conversation, like the sweep.
+pub async fn reconcile_backstop_all(
+    state: &Arc<AppState>,
+    user_id: &str,
+) -> Result<BackstopReport> {
+    let dirs = crate::commands::ds_reads::conversations(state, user_id).await?;
+    let mut report = BackstopReport::default();
+    for conversation_id in dirs.group_ids.iter().chain(dirs.dm_ids.iter()) {
+        report.checked += 1;
+        match reconcile_if_tree_drifted(state, conversation_id, user_id).await {
+            Ok(true) => report.reconciled += 1,
+            Ok(false) => {}
+            Err(e) => {
+                crate::diag!("[mls-backstop] {conversation_id}: {e}");
+            }
+        }
+    }
+    crate::diag!(
+        "[mls-backstop] {user_id}: {} conversation(s) checked, {} reconciled",
+        report.checked,
+        report.reconciled
+    );
+    Ok(report)
+}
+
+/// The reconcile backstop for ONE conversation: reconcile it only if its local
+/// tree has drifted from what reconcile wants. Answers whether it reconciled.
+pub async fn reconcile_backstop_one(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    user_id: &str,
+) -> Result<bool> {
+    reconcile_if_tree_drifted(state, conversation_id, user_id).await
+}
+
+/// How long a sender trusts its last pre-seal check of a conversation.
+pub(crate) const PRE_SEAL_CHECK_INTERVAL: std::time::Duration =
+    std::time::Duration::from_secs(10 * 60);
+
+/// Before sealing into `conversation_id`, re-add any device that belongs in its
+/// tree and is missing — or evict a stale leaf — so the message is sealed to the
+/// tree reconcile wants (#1571). At most once per conversation per
+/// [`PRE_SEAL_CHECK_INTERVAL`] on this device; best-effort, never fails a send.
+///
+/// The caller has just caught the conversation up and holds no MLS lock, which
+/// is what reconcile needs.
+pub async fn backstop_before_seal(state: &Arc<AppState>, conversation_id: &str, user_id: &str) {
+    {
+        let mut checked = state.pre_seal_checked.lock().await;
+        let now = std::time::Instant::now();
+        if let Some(at) = checked.get(conversation_id) {
+            if now.duration_since(*at) < PRE_SEAL_CHECK_INTERVAL {
+                return;
+            }
+        }
+        checked.insert(conversation_id.to_string(), now);
+    }
+    if let Err(e) = reconcile_if_tree_drifted(state, conversation_id, user_id).await {
+        crate::diag!("[mls-backstop] pre-seal check for {conversation_id}: {e}");
+    }
 }
 
 /// One conversation's full sweep pass. Ordering is load-bearing:
@@ -345,21 +444,23 @@ async fn reconcile_if_tree_has_stale_leaf(
 /// wake at once, and each racer burns a claim from the very pool that just ran
 /// dry. The staggered sweeps (cold launch, unlock, reconnect) are enough, and
 /// the device recovers on its own whenever it next catches the conversation up.
-async fn reconcile_if_tree_drifted(
+///
+/// Answers whether it reconciled.
+pub(crate) async fn reconcile_if_tree_drifted(
     state: &Arc<AppState>,
     conversation_id: &str,
     user_id: &str,
-) -> Result<()> {
+) -> Result<bool> {
     let drift = local_tree_drift(state, conversation_id, true).await?;
     if drift == TreeDrift::Settled {
-        return Ok(());
+        return Ok(false);
     }
 
     crate::diag!(
         "[mls-sweep] {conversation_id}: {drift:?} — staging a reconcile"
     );
     crate::commands::mls::reconcile_group_mls_impl(state, conversation_id, user_id).await?;
-    Ok(())
+    Ok(true)
 }
 
 /// What the cheap pre-check found, in the order it looks.
@@ -381,7 +482,10 @@ enum TreeDrift {
 /// different add set than the reconcile it gates. `claimable` is the KeyPackage
 /// half of that rule — devices with an unclaimed package in the GROUP's suite,
 /// which is exactly what reconcile claims from — so a device with an empty pool
-/// does not wake a reconcile that could only skip it again.
+/// does not wake a reconcile that could only skip it again. Since #1571 a
+/// device's last-resort package counts as claimable (it is never claimed), so a
+/// current build with an empty pool DOES wake it, and is added; only a device
+/// with nothing published at all — an old build's empty pool — still does not.
 fn has_addable_device(
     tree_members: &[(String, String)],
     roster: &HashSet<String>,

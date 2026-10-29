@@ -287,6 +287,24 @@ pub async fn accept_dm_request(
     // they are not in its room, and every message in it stays invisible there.
     notify_own_devices_of_dm(state, &user_id, &dm_channel_id, "accept_dm_request").await;
 
+    // #1571: accepting is the moment this user's device first acts in the DM.
+    // Catch it up (joining it if it holds no group yet) and run the re-add
+    // backstop, so the accepter's OTHER devices — which a creator's add may have
+    // missed — are put in the tree now, from whichever device accepted, rather
+    // than when each one next opens the DM and joins at the head. Best-effort:
+    // the accept itself has already landed.
+    if let Err(e) =
+        crate::commands::messages::catch_up_mls_group_interleaved(state, &dm_channel_id, &user_id)
+            .await
+    {
+        crate::diag!("[mls] accept_dm_request: catch-up for {dm_channel_id}: {e}");
+    }
+    if let Err(e) =
+        crate::commands::mls::reconcile_backstop_one(state, &dm_channel_id, &user_id).await
+    {
+        crate::diag!("[mls] accept_dm_request: re-add backstop for {dm_channel_id}: {e}");
+    }
+
     Ok(())
 }
 

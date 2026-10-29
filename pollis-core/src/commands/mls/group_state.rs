@@ -754,6 +754,7 @@ async fn external_join_attempt(
             // The log accepted the commit: the branch is now the canonical
             // group (#1220).
             super::join_branch::clear(db.conn(), conversation_id, stored_generation);
+            super::join_branch::mark_fresh_if_first(db.conn(), conversation_id, stored_generation);
             // Recorded only now that the log has accepted the join: a branch
             // that loses never held the lineage (#1312).
             super::join_branch::record_first_join(
@@ -761,6 +762,21 @@ async fn external_join_attempt(
                 conversation_id,
                 stored_generation,
                 stored_epoch as u64 + 1,
+            );
+            // #1571: a device that was already registered when its user joined
+            // this conversation, and is only now joining at the head, missed
+            // what was sent in between through no accepted loss. Recorded from
+            // the same snapshot that admitted the join, so the ingest shows that
+            // gap instead of passing it as "sent before you joined".
+            let fresh =
+                super::join_branch::take_fresh(db.conn(), conversation_id, stored_generation);
+            super::join_branch::record_entitlement(
+                db.conn(),
+                conversation_id,
+                stored_generation,
+                fresh,
+                snap.device_registered_at.as_deref(),
+                snap.member_since.as_deref(),
             );
             set_local_generation(db.conn(), conversation_id, stored_generation);
             // Our leaf in this lineage is brand new and, being an external

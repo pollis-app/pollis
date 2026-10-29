@@ -387,6 +387,10 @@ pub struct ReconcileOutcome {
     /// since #669 — one not republished since the group's suite stopped being
     /// the current one. Downgrading the group to admit them is never an option.
     ///
+    /// Since #1571 it also names every registered roster device with no leaf
+    /// that had no package to claim at all (it used to be dropped before the
+    /// diff ever saw it), and any device whose claim request failed.
+    ///
     /// Not recorded anywhere, on purpose: the sweep re-derives "a live roster
     /// device with no leaf and a claimable KeyPackage" on every pass and
     /// reconciles it in (`sweep::reconcile_if_tree_drifted`), and the device
@@ -1140,13 +1144,58 @@ pub async fn local_tree_members(
     }
 }
 
+/// How many passes [`reconcile_group_mls_impl`] makes when its commit keeps
+/// losing the epoch race: the first, and two retries on the converged epoch.
+const RECONCILE_ATTEMPTS: usize = 3;
+
+/// One reconcile pass's end: done (with what it did), or its commit lost the
+/// epoch race and the device has converged on the winner.
+enum PassEnd {
+    Done(ReconcileOutcome),
+    LostRace,
+}
+
 /// Async entry point: reads desired state from Turso, loads local MLS group,
 /// calls `reconcile_group_mls_core`, posts commit + welcome rows.
+///
+/// A pass whose commit loses the epoch race is RETRIED on the epoch it converged
+/// to (#1571), at most [`RECONCILE_ATTEMPTS`] passes in all. Reconcile is
+/// declarative, so a retry re-derives the add set from the tree it now holds:
+/// whatever the winning commit already did drops out, and what it did not is
+/// committed. Before, a lost race simply returned, leaving the rest to "a later
+/// reconcile" — and on a mobile-only roster none ever ran. That is how a DM's
+/// creator, whose create-time reconcile lost epoch 0 to the recipient's own
+/// external join, added nobody else: every other device then had to find the
+/// DM and join itself, and one that was not running was left out entirely.
 pub async fn reconcile_group_mls_impl(
     state: &Arc<AppState>,
     conversation_id: &str,
     actor_user_id: &str,
 ) -> crate::error::Result<ReconcileOutcome> {
+    for attempt in 1..=RECONCILE_ATTEMPTS {
+        match reconcile_pass(state, conversation_id, actor_user_id).await? {
+            PassEnd::Done(outcome) => return Ok(outcome),
+            PassEnd::LostRace => {
+                crate::diag!(
+                    "[mls] reconcile: {conversation_id}: pass {attempt}/{RECONCILE_ATTEMPTS} lost \
+                     the epoch race{}",
+                    if attempt < RECONCILE_ATTEMPTS {
+                        " — retrying on the converged epoch"
+                    } else {
+                        " — giving up this time; the next reconcile or backstop retries"
+                    }
+                );
+            }
+        }
+    }
+    Ok(ReconcileOutcome::default())
+}
+
+async fn reconcile_pass(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    actor_user_id: &str,
+) -> crate::error::Result<PassEnd> {
     let conversation_id = conversation_id.to_owned();
     let actor_user_id = actor_user_id.to_owned();
 
@@ -1257,7 +1306,7 @@ pub async fn reconcile_group_mls_impl(
             valid_devices.len(),
             roster_user_ids.len()
         );
-        return Ok(ReconcileOutcome::default());
+        return Ok(PassEnd::Done(ReconcileOutcome::default()));
     }
 
     // 3. Peek at the current tree to learn which devices are already members.
@@ -1281,7 +1330,7 @@ pub async fn reconcile_group_mls_impl(
         let db = match guard.as_ref() {
             Some(db) => db,
             None => {
-                return Ok(ReconcileOutcome::default());
+                return Ok(PassEnd::Done(ReconcileOutcome::default()));
             }
         };
         let generation = super::generation::local_generation(db.conn(), &conversation_id);
@@ -1299,10 +1348,27 @@ pub async fn reconcile_group_mls_impl(
                 (members, suite, generation)
             }
             None => {
-                return Ok(ReconcileOutcome::default());
+                return Ok(PassEnd::Done(ReconcileOutcome::default()));
             }
         }
     };
+
+    // #1571: diff EVERY registered device of the roster against the tree, not
+    // only the claimable ones. A device that has no package to claim — an
+    // empty pool on a build without a last-resort package, or nothing published
+    // yet — used to be missing from `device_pairs`, so it never reached the
+    // claim loop below and was left out of the tree with no trace anywhere.
+    // It is now named here, logged, and returned in `skipped_no_suite_kp`.
+    let claimable: std::collections::HashSet<&(String, String)> = device_pairs.iter().collect();
+    let mut skipped_no_suite_kp: Vec<(String, String)> =
+        unaddable_devices(&valid_devices, &already_in_tree, &claimable, &roster_user_ids);
+    for (uid, did) in &skipped_no_suite_kp {
+        crate::diag!(
+            "[mls] reconcile: {conversation_id}: roster device {uid}:{did} has no leaf and no \
+             KeyPackage to add it with — left out of this commit (#1571); it is added once it \
+             publishes one, or joins itself on its next catch-up"
+        );
+    }
 
     // Only claim KPs for devices not already in the tree.
     let devices_to_claim: Vec<(String, String)> = device_pairs
@@ -1323,12 +1389,28 @@ pub async fn reconcile_group_mls_impl(
     // suite has nothing to claim, so it is skipped rather than downgraded in.
     // #669 left exactly one suite in production, but a group awaiting migration
     // is still on its predecessor's, so the claim stays group-scoped.
+    //
+    // A claim that FAILS (rather than finding nothing) skips that one device
+    // too, loudly, instead of aborting the pass (#1571). Aborting threw away
+    // every package already claimed for the devices before it — each claim is a
+    // one-way flip — and left every device after it unclaimed, so one bad
+    // response kept the whole rest of the roster out of the tree.
     let mut kp_tuples: Vec<(String, String, Vec<u8>)> = Vec::new();
-    let mut skipped_no_suite_kp: Vec<(String, String)> = Vec::new();
     for (uid, did) in &devices_to_claim {
         let claimed: Option<Vec<u8>> =
-            crate::commands::mls::ds_claim_key_package(state, uid, Some(did), group_suite)
-                .await?;
+            match crate::commands::mls::ds_claim_key_package(state, uid, Some(did), group_suite)
+                .await
+            {
+                Ok(claimed) => claimed,
+                Err(e) => {
+                    crate::diag!(
+                        "[mls] reconcile: {conversation_id}: claiming a KeyPackage for \
+                         {uid}:{did} failed ({e}) — skipping that device, not the pass (#1571)"
+                    );
+                    skipped_no_suite_kp.push((uid.clone(), did.clone()));
+                    continue;
+                }
+            };
         match claimed {
             Some(kp) => kp_tuples.push((uid.clone(), did.clone(), kp)),
             None => {
@@ -1350,7 +1432,7 @@ pub async fn reconcile_group_mls_impl(
         let db = match guard.as_ref() {
             Some(db) => db,
             None => {
-                return Ok(ReconcileOutcome::default());
+                return Ok(PassEnd::Done(ReconcileOutcome::default()));
             }
         };
         let provider = PollisProvider::new(db.conn());
@@ -1368,8 +1450,12 @@ pub async fn reconcile_group_mls_impl(
     };
     let (mut outcome, commit_data_opt) = match staged {
         Some(v) => v,
+        // Nothing to commit — but a device it could not add is still reported.
         None => {
-            return Ok(ReconcileOutcome::default());
+            return Ok(PassEnd::Done(ReconcileOutcome {
+                skipped_no_suite_kp,
+                ..ReconcileOutcome::default()
+            }));
         }
     };
     outcome.skipped_no_suite_kp = skipped_no_suite_kp;
@@ -1487,7 +1573,7 @@ pub async fn reconcile_group_mls_impl(
                         "[mls] reconcile: converge-after-lost-race failed for {conversation_id}: {e}"
                     );
                 }
-                return Ok(ReconcileOutcome::default());
+                return Ok(PassEnd::LostRace);
             }
             // The commit genuinely did not land; the staged pending commit was
             // already cleared so a later reconcile doesn't merge a commit the
@@ -1559,7 +1645,25 @@ pub async fn reconcile_group_mls_impl(
         }
     }
 
-    Ok(outcome)
+    Ok(PassEnd::Done(outcome))
+}
+
+/// Registered devices of roster members that hold no leaf and have no package
+/// to claim (#1571) — the devices a reconcile cannot add this pass. Sorted, so
+/// the log and the outcome read the same on every run.
+fn unaddable_devices(
+    valid_devices: &std::collections::HashSet<(String, String)>,
+    tree: &std::collections::HashSet<(String, String)>,
+    claimable: &std::collections::HashSet<&(String, String)>,
+    roster: &std::collections::HashSet<String>,
+) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = valid_devices
+        .iter()
+        .filter(|d| roster.contains(&d.0) && !tree.contains(*d) && !claimable.contains(d))
+        .cloned()
+        .collect();
+    out.sort();
+    out
 }
 
 #[cfg(test)]
@@ -1670,6 +1774,19 @@ mod tests {
             got.contains(&key("bob", "b1")),
             "a live roster device with a KP must be desired (the add path); got {got:?}"
         );
+    }
+
+    /// #1571: a registered roster device with no leaf and nothing to claim is
+    /// named, not dropped; a device in the tree, a claimable one and one whose
+    /// user is off the roster are not.
+    #[test]
+    fn a_registered_device_with_nothing_to_claim_is_reported() {
+        let valid = valid(&[("alice", "a1"), ("bob", "b1"), ("bob", "b2"), ("carol", "c1"), ("zed", "z1")]);
+        let tree: HashSet<(String, String)> = [key("alice", "a1"), key("bob", "b1")].into_iter().collect();
+        let c1 = key("carol", "c1");
+        let claimable: HashSet<&(String, String)> = [&c1].into_iter().collect();
+        let got = unaddable_devices(&valid, &tree, &claimable, &roster(&["alice", "bob", "carol"]));
+        assert_eq!(got, vec![key("bob", "b2")]);
     }
 
     // ── #1082: the self-presence gate on the eviction snapshot ──────────────

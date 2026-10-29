@@ -305,6 +305,13 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             crate::commands::mls::poll_mls_welcomes(&state()?, user_id).await?;
             ok(())
         }
+        // #1571: mobile's half of desktop's sweep backstop — re-add a device
+        // missing from a conversation's tree (or evict a stale leaf). Run after
+        // the app's landing / resume ingest pass.
+        "reconcile_backstop_all" => {
+            let user_id: String = arg(&args, "userId")?;
+            ok(crate::commands::mls::reconcile_backstop_all(&state()?, &user_id).await?)
+        }
         "logout" => {
             let delete: bool = arg_opt(&args, "deleteData")?.unwrap_or(false);
             auth::logout(&state()?, delete).await?;
