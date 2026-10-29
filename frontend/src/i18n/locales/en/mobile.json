@@ -445,8 +445,6 @@
       "pairHeading": "Pair new device",
       "pairHint": "Confirm this code matches what's shown on the other device, then approve.",
       "pairIntro": "A new device wants to pair with your account.",
-      "recoveryDescription": "To add a new device, sign in on it with your email, or link it from Devices above.",
-      "recoveryHeading": "Recovery",
       "reject": "Reject",
       "rejectA11y": "Reject enrollment",
       "safetyHeading": "Safety",

@@ -434,8 +434,6 @@
       "pairHeading": "Associer un nouvel appareil",
       "pairHint": "Vérifiez que ce code correspond à celui affiché sur l'autre appareil, puis approuvez.",
       "pairIntro": "Un nouvel appareil souhaite s'associer à votre compte.",
-      "recoveryDescription": "Pour ajouter un appareil, connectez-vous dessus avec votre e-mail, ou associez-le depuis Appareils, plus haut.",
-      "recoveryHeading": "Récupération",
       "reject": "Refuser",
       "rejectA11y": "Refuser l'enrôlement",
       "safetyHeading": "Sécurité",

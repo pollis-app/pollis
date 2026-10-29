@@ -491,15 +491,9 @@ export default function Security() {
           </Group>
         </View>
 
-        <View style={sectionGap} onLayout={sectionLayout("data")}>
-          <Group title={t("mobile:self.security.recoveryHeading")}>
-            <View style={{ padding: space.xxl }}>
-              <Text style={ty.secondary}>{t("mobile:self.security.recoveryDescription")}</Text>
-            </View>
-          </Group>
+        <View onLayout={sectionLayout("data")}>
+          <ExportArchive padded={false} />
         </View>
-
-        <ExportArchive padded={false} />
 
         <View onLayout={sectionLayout("account")}>
           <Group title={t("mobile:self.hub.accountSection")}>
