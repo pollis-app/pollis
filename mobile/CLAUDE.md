@@ -1134,9 +1134,20 @@ Current state:
   photos and videos, and a pending one shows in the composer as desktop's
   preview card — `components/chat/ComposerAttachmentPreview.tsx`, 120pt (desktop's
   80px + #1568's half), a video's first frame via `hooks/useVideoPoster.ts`, the
-  shared top-end `AttachmentToolbar` (remove; #1568's sensitive toggle goes
-  there), tap → the viewer on the picked file (`source=draft`), rules in
-  `lib/composerAttachments.ts`, #1585); quote replies
+  shared top-end `AttachmentToolbar` — ONE capsule on the raised surface
+  holding every glyph, never side-by-side discs; a toggle that is on shows it
+  by an accent glyph alone — tap → the viewer on the picked file
+  (`source=draft`), rules in `lib/composerAttachments.ts`, #1585); sensitive
+  media (#1568): the toolbar's eye (before remove, images and videos only)
+  marks a card, which then shows its blurhash under a crossed-out eye
+  (`SensitiveCover`, blurhash from `Image.generateBlurhashAsync`) and opens
+  nothing; it is sent as `sensitive` → the envelope's `sens: true`. Every
+  surface (row tile, viewer page, Vault grid) covers a sensitive one until a
+  tap reveals it — that tap only reveals, so a video never opens or plays on
+  it — and a revealed one carries the one-action toolbar capsule to hide it
+  again. Reveal state is `stores/sensitiveRevealStore.ts` (in memory, per
+  attachment id); rules in `lib/sensitiveMedia.ts`; Maestro
+  `flows/sensitive-media.yaml`; quote replies
   (#1270, desktop's Reply: `send_message` with `replyToId`, a `ReplyBar` over the
   composer, a quote line on the replying row via `lib/replyPreview.ts`, tap jumps
   to the original). A reply starts from a Discord-style **swipe toward the start

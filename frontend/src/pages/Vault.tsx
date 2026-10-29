@@ -166,6 +166,7 @@ export const VaultPage: React.FC = observer(() => {
               bh: a.blurhash,
               w: a.width,
               h: a.height,
+              ...(a.sensitive ? { sens: true } : {}),
             })),
             ...(editDraft.trim() ? { _txt: editDraft.trim() } : {}),
           })

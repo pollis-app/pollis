@@ -698,6 +698,13 @@ const ADDITIVE_COLUMNS: &[(&str, &str, &str)] = &[
             OR (send_state IN ('pending', 'failed', 'rejected') AND undecryptable IS NULL AND content IS NOT NULL)
         )",
     ),
+    // Sensitive media (#1568): an outbox row stored by an older build is not
+    // sensitive. Must stay identical to the column in `local_schema.sql`.
+    (
+        "outbox_attachment",
+        "sensitive",
+        "ALTER TABLE outbox_attachment ADD COLUMN sensitive INTEGER NOT NULL DEFAULT 0 CHECK (sensitive IN (0, 1))",
+    ),
 ];
 
 /// Apply [`ADDITIVE_COLUMNS`] to a database that predates them.
@@ -1416,6 +1423,58 @@ mod tests {
             .collect::<std::result::Result<_, _>>()
             .unwrap();
         assert_eq!(left, vec!["old-unsent".to_string()]);
+    }
+
+    /// #1568: an outbox attachment stored by a build from before sensitive
+    /// media survives the upgrade and reads as not sensitive; the column
+    /// admits only 0 and 1.
+    #[test]
+    fn outbox_attachment_gains_sensitive_without_losing_queued_bytes() {
+        let conn = Connection::open_in_memory().expect("open");
+        // `outbox_attachment` exactly as #1335 shipped it.
+        conn.execute_batch(
+            "CREATE TABLE outbox_attachment (
+                 message_id   TEXT NOT NULL,
+                 position     INTEGER NOT NULL CHECK (position >= 0),
+                 filename     TEXT NOT NULL,
+                 content_type TEXT NOT NULL,
+                 data         BLOB NOT NULL,
+                 blurhash     TEXT,
+                 width        INTEGER,
+                 height       INTEGER,
+                 PRIMARY KEY (message_id, position)
+             );",
+        )
+        .expect("legacy schema");
+        conn.execute(
+            "INSERT INTO outbox_attachment (message_id, position, filename, content_type, data)
+             VALUES ('m1', 0, 'a.png', 'image/png', X'01')",
+            [],
+        )
+        .expect("seed a queued attachment");
+
+        add_missing_columns(&conn).expect("additive columns");
+        apply_local_schema(&conn).expect("schema batch");
+        add_missing_columns(&conn).expect("second run must be idempotent");
+
+        let (data, sensitive): (Vec<u8>, bool) = conn
+            .query_row(
+                "SELECT data, sensitive FROM outbox_attachment WHERE message_id = 'm1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("queued bytes still present");
+        assert_eq!(data, vec![0x01]);
+        assert!(!sensitive, "an attachment queued before #1568 is not sensitive");
+        let insert = |pos: i64, sensitive: i64| {
+            conn.execute(
+                "INSERT INTO outbox_attachment (message_id, position, filename, content_type, data, sensitive)
+                 VALUES ('m1', ?1, 'b.png', 'image/png', X'02', ?2)",
+                rusqlite::params![pos, sensitive],
+            )
+        };
+        insert(1, 1).expect("sensitive is writable on an upgraded DB");
+        assert!(insert(2, 2).is_err(), "sensitive is a boolean");
     }
 
     /// A fresh database has no `message` table when additive columns run, and

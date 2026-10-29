@@ -938,6 +938,16 @@ which a delete-data sign-out or a wipe removes whole. The outbox is per user:
 before another account can unlock, so user B's session never sees, let alone
 sends, user A's queue. A kill during the upload loses nothing.
 
+**Sensitive media (#1568).** An attachment marked sensitive in the composer
+carries `sens: true` in its `_att` entry — inside the MLS-encrypted message, next
+to `bh`, so the DS and R2 never learn which media are marked. The key is omitted
+when false, so an unmarked attachment is byte-identical to one from before the
+flag; a client that predates it ignores the key and shows the media unblurred.
+Receivers (and the sender's own copy) draw it as its blurhash with a centred eye
+until revealed; the reveal is in-memory UI state keyed by attachment id
+(`frontend/src/stores/sensitiveRevealStore.ts`), shared by the message, the media
+grid and the gallery, and gone on restart.
+
 **Discard withdraws what may have left.** A row the seal never touched (empty
 ciphertext) never left this device and is simply deleted. One that WAS sealed may
 have landed — a crash after the post, then an attempt that failed for another

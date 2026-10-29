@@ -334,6 +334,58 @@ async fn an_attachment_send_killed_before_its_upload_is_delivered_after_unlock()
     drop((alice, bob));
 }
 
+/// Sensitive media (#1568): an attachment the composer marked reaches the
+/// receiver with `sens: true` inside the encrypted envelope, and its unmarked
+/// neighbour carries no `sens` at all — byte-compatible with every client that
+/// predates the flag. Nothing about the mark reaches the DS in the clear: it
+/// is only ever inside the MLS ciphertext.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_sensitive_attachment_reaches_the_receiver_marked() {
+    let (alice, bob, channel_id) = pair().await;
+    let _stub = StubbedUploads::on();
+
+    let stage = |b: &[u8]| {
+        pollis_core::commands::staging::stage_attachment(b.to_vec())
+            .expect("stage")
+            .id
+    };
+    let (marked, plain) = (stage(b"spoiler bytes"), stage(b"plain bytes"));
+    let id: String = alice.invoke_json("new_message_id", json!({})).await
+        .as_str().expect("id").to_string();
+    alice
+        .invoke_try(
+            "send_message",
+            json!({
+                "conversationId": channel_id,
+                "senderId": alice.user_id(),
+                "content": "the finale",
+                "replyToId": null,
+                "senderUsername": null,
+                "messageId": id,
+                "attachments": [
+                    { "stagedId": marked, "filename": "a.png", "contentType": "image/png", "sensitive": true },
+                    { "stagedId": plain, "filename": "b.png", "contentType": "image/png" },
+                ],
+            }),
+        )
+        .await
+        .expect("sent");
+
+    let got: Vec<_> = bob
+        .fetch_channel_messages(&channel_id)
+        .await
+        .into_iter()
+        .filter(|m| m["id"] == id.as_str())
+        .collect();
+    assert_eq!(got.len(), 1);
+    let envelope: serde_json::Value =
+        serde_json::from_str(got[0]["content"].as_str().expect("content")).expect("an _att envelope");
+    assert_eq!(envelope["_att"][0]["sens"], true);
+    assert!(envelope["_att"][1].get("sens").is_none(), "{envelope}");
+    drop((alice, bob));
+}
+
 /// Discarding an unsent message that DID reach the DS (killed after the post,
 /// then an attempt that failed for another reason) must withdraw it from
 /// everyone — not just drop the sender's copy and leave them no way to delete

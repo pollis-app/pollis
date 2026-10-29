@@ -65,6 +65,8 @@ import {
   Play,
   Pause,
   Film,
+  Eye,
+  EyeOff,
   File,
   ImageDown,
   RotateCcw,
@@ -195,6 +197,9 @@ export const Icon = {
   play: wrap(Play),
   pause: wrap(Pause),
   video: wrap(Film),
+  // Sensitive media (#1568): open while it shows, crossed out while covered.
+  eye: wrap(Eye, 16),
+  eyeOff: wrap(EyeOff, 16),
   file: wrap(File),
   saveImage: wrap(ImageDown),
   // Seek back / forward: the arrows encode time, not reading direction, so

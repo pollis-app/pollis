@@ -83,6 +83,8 @@ export function editedVaultContent(original: string, draft: string): string | nu
     bh: a.blurhash,
     w: a.width,
     h: a.height,
+    // Kept across a caption edit (#1568), as desktop's Vault keeps it.
+    ...(a.sensitive ? { sens: true } : {}),
   }));
   return JSON.stringify({ _att: att, ...(text ? { _txt: text } : {}) });
 }

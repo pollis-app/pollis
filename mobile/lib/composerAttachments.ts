@@ -36,6 +36,26 @@ export function composerAttachmentTestID(index: number): string {
 export function removeAttachmentTestID(index: number): string {
   return `btn-remove-attachment-${index}`;
 }
+export function sensitiveToggleTestID(index: number): string {
+  return `btn-sensitive-attachment-${index}`;
+}
+
+/**
+ * Whether a card offers the sensitive toggle (#1568): pictures and videos
+ * only, as on desktop — a file card has nothing on screen to cover.
+ */
+export function canMarkSensitive(mimeType: string): boolean {
+  return canOpenPreview(mimeType);
+}
+
+/**
+ * Whether tapping the card opens the viewer. A marked card stays covered in
+ * the composer too: opening it would put the media on screen, which is what
+ * marking it was for.
+ */
+export function cardOpens(att: Pick<PickedAttachment, "mimeType" | "sensitive">): boolean {
+  return canOpenPreview(att.mimeType) && att.sensitive !== true;
+}
 
 /**
  * A picked attachment as the viewer and the optimistic row read it: no
@@ -58,6 +78,8 @@ export function pickedToMessageAttachment(
     uploaded_at: uploadedAt,
     width: att.width,
     height: att.height,
+    blurhash: att.blurhash,
+    sensitive: att.sensitive,
     localPreviewUri: att.uri,
   };
 }

@@ -55,7 +55,9 @@
     "placeholder": "输入消息…",
     "previewAlt": "预览",
     "removeAttachment": "移除 {{name}}",
-    "send": "发送消息"
+    "send": "发送消息",
+    "markSensitive": "将 {{name}} 标记为敏感内容",
+    "unmarkSensitive": "取消将 {{name}} 标记为敏感内容"
   },
   "mentions": {
     "listLabel": "提及建议",

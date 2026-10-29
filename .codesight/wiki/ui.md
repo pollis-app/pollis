@@ -673,7 +673,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**170 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**173 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -749,9 +749,12 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **ThreadMessageRow** — props: message, isRoot — `frontend/src/components/Layout/RightPanel/ThreadMessageRow.tsx`
 - **ThreadPanel** — props: threadId, channelId, conversationId — `frontend/src/components/Layout/RightPanel/ThreadPanel.tsx`
 
-### `components/Media` (1)
+### `components/Media` (4)
 
+- **BlurhashCanvas** — `frontend/src/components/Media/BlurhashCanvas.tsx`
 - **MediaGalleryView** — props: attachments, emptyLabel — `frontend/src/components/Media/MediaGalleryView.tsx`
+- **SensitiveCover** — `frontend/src/components/Media/SensitiveCover.tsx`
+- **SensitiveHideButton** — `frontend/src/components/Media/SensitiveHideButton.tsx`
 
 ### `components/Message` (17)
 

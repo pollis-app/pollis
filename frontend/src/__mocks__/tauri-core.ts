@@ -1639,6 +1639,10 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       const attachments = (args.attachments ?? []) as Array<{
         filename: string;
         contentType: string;
+        blurhash?: string;
+        width?: number;
+        height?: number;
+        sensitive?: boolean;
       }>;
       const body =
         attachments.length === 0
@@ -1655,6 +1659,10 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
                 // reference carries; without them the renderer refuses to fetch.
                 kv: 1,
                 sha: `sha-${id}-${i}`,
+                ...(a.blurhash ? { bh: a.blurhash } : {}),
+                ...(a.width ? { w: a.width, h: a.height } : {}),
+                // #1568: written only when set, as the core's outbox does.
+                ...(a.sensitive ? { sens: true } : {}),
               })),
               ...(content ? { _txt: content } : {}),
             });
@@ -2305,6 +2313,15 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     // In-memory attachment staging (src-tauri/src/commands/staging.rs). There
     // is no backend here to hold bytes, so a stage answers with a handle and a
     // discard answers true — enough for the composer's bookkeeping to run.
+    // The loopback media URL for an attachment. There is no media server
+    // here; a preload's `mediaUrls` (object key -> URL a test serves) stands
+    // in for one. Anything else answers null, as the real command does for a
+    // file it cannot serve, and the renderer falls back to its blurhash.
+    case 'get_media_url': {
+      const urls = (preload.mediaUrls ?? {}) as Record<string, string>;
+      return urls[args.r2Key as string] ?? null;
+    }
+
     case 'stage_attachment':
       stagedAttachmentCount += 1;
       return { id: `mock-staged-${stagedAttachmentCount}`, size_bytes: 0 };

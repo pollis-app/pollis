@@ -1,0 +1,257 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+---
+# SENSITIVE MEDIA (#1568) — desktop's spoiler media on the phone.
+#   attach an image and a video → the eye in each card's toolbar marks it →
+#   a marked card is its blurhash under a crossed-out eye, and a tap on it
+#   opens nothing → unmark and mark again → send → the sent row is covered
+#   (the sender's own copy too, as on desktop) → one tap reveals the image
+#   alone → the top-right eye covers it again → the tap that reveals the
+#   video does not open the viewer or play it → the Vault composer marks and
+#   covers the same way.
+# Self-contained: a fresh disposable account, no peer. What a receiver draws
+# is the same tile as the sender's copy, from the same `sens` in the envelope;
+# the core's flows test `a_sensitive_attachment_reaches_the_receiver_marked`
+# proves the flag crosses the wire.
+#
+# The pick goes through the SYSTEM picker by accessibility label, as
+# composer-attachments.yaml does.
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-groups"
+- assertVisible:
+    id: "screen-groups"
+- tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Sensitive Media"
+- tapOn:
+    id: "btn-submit-group"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "E2E Sensitive Media, .*"
+    timeout: 15000
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"
+
+- addMedia:
+    - "../fixtures/media-viewer.png"
+    - "../fixtures/composer-video.mp4"
+# Android's media provider indexes new files late: give it a moment before
+# the picker reads the library.
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - waitForAnimationToEnd:
+          timeout: 8000
+- tapOn:
+    id: "btn-attach"
+- waitForAnimationToEnd:
+    timeout: 5000
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - tapOn: "Sort and Filter"
+      - tapOn: "Added"
+      - waitForAnimationToEnd:
+          timeout: 3000
+- tapOn:
+    text: "Photo(,| taken on) .*"
+    index: 0
+- tapOn:
+    text: "Video(,| taken on) .*"
+    index: 0
+- tapOn:
+    text: "(?i)(add|done).*"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: "strip-attachments"
+    timeout: 10000
+
+# Unmarked: each card's toolbar is one capsule, the eye before remove.
+- assertVisible:
+    id: "btn-sensitive-attachment-0"
+- assertVisible:
+    id: "btn-remove-attachment-0"
+- assertVisible:
+    id: "btn-sensitive-attachment-1"
+- assertNotVisible:
+    id: "sensitive-cover-composer-0"
+- takeScreenshot: sensitive-01-composer-unmarked
+
+# Mark the image: its card is covered, and tapping it opens nothing.
+- tapOn:
+    id: "btn-sensitive-attachment-0"
+- extendedWaitUntil:
+    visible:
+      id: "sensitive-cover-composer-0"
+    timeout: 5000
+- takeScreenshot: sensitive-02-composer-marked
+- tapOn:
+    id: "composer-attachment-0"
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertNotVisible:
+    id: "screen-media-viewer"
+- assertVisible:
+    id: "screen-chat"
+
+# Unmark and mark again, as often as the user likes.
+- tapOn:
+    id: "btn-sensitive-attachment-0"
+- assertNotVisible:
+    id: "sensitive-cover-composer-0"
+- tapOn:
+    id: "btn-sensitive-attachment-0"
+- assertVisible:
+    id: "sensitive-cover-composer-0"
+# The video too.
+- tapOn:
+    id: "btn-sensitive-attachment-1"
+- assertVisible:
+    id: "sensitive-cover-composer-1"
+- takeScreenshot: sensitive-03-composer-both-marked
+
+# Send: the row is covered, both attachments.
+# Keep pressing Send until the strip clears: a press while a previous send
+# is still settling is ignored (as composer-attachments.yaml).
+- repeat:
+    while:
+      visible:
+        id: "strip-attachments"
+    times: 30
+    commands:
+      - tapOn:
+          id: "btn-send"
+      - extendedWaitUntil:
+          notVisible:
+            id: "strip-attachments"
+          timeout: 4000
+          optional: true
+- assertNotVisible:
+    id: "strip-attachments"
+- extendedWaitUntil:
+    visible:
+      id: "sensitive-cover-.*"
+      index: 1
+    timeout: 60000
+- assertNotVisible:
+    id: "btn-sensitive-hide-.*"
+- takeScreenshot: sensitive-04-message-covered
+
+# One tap reveals the image alone; the video stays covered. Taps on one row
+# are spaced out (and retried) so two never read as the row's double tap,
+# which starts a reply instead.
+- waitForAnimationToEnd:
+    timeout: 3000
+- repeat:
+    while:
+      notVisible:
+        id: "btn-sensitive-hide-.*"
+    times: 3
+    commands:
+      - tapOn:
+          id: "btn-attachment-.*"
+          index: 0
+      - extendedWaitUntil:
+          visible:
+            id: "btn-sensitive-hide-.*"
+          timeout: 3000
+          optional: true
+- assertVisible:
+    id: "btn-sensitive-hide-.*"
+- assertNotVisible:
+    id: "screen-media-viewer"
+- assertVisible:
+    id: "sensitive-cover-.*"
+- takeScreenshot: sensitive-05-message-revealed
+
+# The top-right eye covers it again.
+- tapOn:
+    id: "btn-sensitive-hide-.*"
+- assertNotVisible:
+    id: "btn-sensitive-hide-.*"
+
+# The tap that reveals the video neither opens the viewer nor plays it.
+- waitForAnimationToEnd:
+    timeout: 3000
+- repeat:
+    while:
+      notVisible:
+        id: "btn-sensitive-hide-.*"
+    times: 3
+    commands:
+      - tapOn:
+          id: "btn-attachment-.*"
+          index: 1
+      - extendedWaitUntil:
+          visible:
+            id: "btn-sensitive-hide-.*"
+          timeout: 3000
+          optional: true
+- assertVisible:
+    id: "btn-sensitive-hide-.*"
+- assertNotVisible:
+    id: "bar-reply"
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertNotVisible:
+    id: "screen-media-viewer"
+- takeScreenshot: sensitive-06-video-revealed-not-playing
+
+# The Vault composer marks and covers the same way.
+- tapOn:
+    id: "btn-back"
+    optional: true
+- tapOn:
+    id: "btn-back"
+    optional: true
+- tapOn:
+    id: "tab-direct"
+- tapOn:
+    id: "row-vault"
+- assertVisible:
+    id: "screen-vault"
+- runFlow: ../subflows/pick-newest-photo.yaml
+- tapOn:
+    id: "btn-sensitive-attachment-0"
+- assertVisible:
+    id: "sensitive-cover-composer-0"
+- takeScreenshot: sensitive-07-vault-composer-marked
+# Keep pressing Send until the strip clears: a press while a previous send
+# is still settling is ignored (as composer-attachments.yaml).
+- repeat:
+    while:
+      visible:
+        id: "strip-attachments"
+    times: 30
+    commands:
+      - tapOn:
+          id: "btn-send"
+      - extendedWaitUntil:
+          notVisible:
+            id: "strip-attachments"
+          timeout: 4000
+          optional: true
+- assertNotVisible:
+    id: "strip-attachments"
+- extendedWaitUntil:
+    visible:
+      id: "sensitive-cover-.*"
+    timeout: 60000
+- takeScreenshot: sensitive-08-vault-covered

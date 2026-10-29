@@ -70,7 +70,9 @@
     "placeholder": "Type a message…",
     "previewAlt": "Preview",
     "removeAttachment": "Remove {{name}}",
-    "send": "Send message"
+    "send": "Send message",
+    "markSensitive": "Mark {{name}} as sensitive",
+    "unmarkSensitive": "Unmark {{name}} as sensitive"
   },
   "mentions": {
     "listLabel": "Mention suggestions",

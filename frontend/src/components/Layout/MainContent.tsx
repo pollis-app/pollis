@@ -798,6 +798,8 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
       file_size: att.size,
       uploaded_at: Date.now(),
       localPreviewUrl: att.preview,
+      blurhash: att.blurhash,
+      sensitive: att.sensitive,
     }));
 
     const optimisticId = `pending-${Date.now()}-${Math.random()}`;

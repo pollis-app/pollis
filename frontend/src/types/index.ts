@@ -235,6 +235,9 @@ export interface MessageAttachment {
   blurhash?: string;
   width?: number;
   height?: number;
+  // Marked sensitive by the sender (#1568): drawn blurred until revealed.
+  // The `_att` field `sens`, inside the encrypted envelope only.
+  sensitive?: boolean;
   localPreviewUrl?: string; // Blob URL for optimistic display — never persisted or sent to server
 }
 

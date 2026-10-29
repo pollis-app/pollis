@@ -55,7 +55,9 @@
     "placeholder": "Écrivez un message…",
     "previewAlt": "Aperçu",
     "removeAttachment": "Retirer {{name}}",
-    "send": "Envoyer le message"
+    "send": "Envoyer le message",
+    "markSensitive": "Marquer {{name}} comme sensible",
+    "unmarkSensitive": "Ne plus marquer {{name}} comme sensible"
   },
   "mentions": {
     "listLabel": "Suggestions de mention",

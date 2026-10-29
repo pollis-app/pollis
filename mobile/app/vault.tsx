@@ -389,6 +389,9 @@ function VaultScreen() {
               onRemoveAttachment={(id) =>
                 setPendingAttachments((prev) => prev.filter((a) => a.id !== id))
               }
+              onChangeAttachment={(id, patch) =>
+                setPendingAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)))
+              }
               canSendEmptyText={pendingAttachments.length > 0}
             />
           )}

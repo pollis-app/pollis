@@ -82,6 +82,9 @@ export interface MessageAttachment {
   blurhash?: string;
   width?: number;
   height?: number;
+  // Marked sensitive by the sender (#1568): drawn covered until revealed.
+  // The `_att` field `sens`, inside the encrypted envelope only.
+  sensitive?: boolean;
   // Local `file://` preview for optimistic display before upload — never
   // persisted or sent to the server.
   localPreviewUri?: string;

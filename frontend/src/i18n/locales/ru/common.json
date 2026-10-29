@@ -55,7 +55,9 @@
     "placeholder": "Введите сообщение…",
     "previewAlt": "Предпросмотр",
     "removeAttachment": "Убрать {{name}}",
-    "send": "Отправить сообщение"
+    "send": "Отправить сообщение",
+    "markSensitive": "Отметить {{name}} как деликатное",
+    "unmarkSensitive": "Снять отметку «деликатное» с {{name}}"
   },
   "mentions": {
     "listLabel": "Подсказки упоминаний",

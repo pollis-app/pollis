@@ -1,7 +1,7 @@
 import { errorMessage } from "../../utils/errorMessage";
 import React, { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { decode } from "blurhash";
+import { observer } from "mobx-react-lite";
 import { dialogSave, invoke } from "../../bridge";
 import { Download, Film, Check } from "lucide-react";
 import { getFileIcon } from "../../utils/fileIcon";
@@ -13,46 +13,10 @@ import { InlineAudioPlayer } from "../ui/InlineAudioPlayer";
 import { AudioPlayer } from "../ui/AudioPlayer";
 import type { MessageAttachment } from "../../types";
 import { PressButton } from "../ui/PressButton";
-
-// Co-located: only used by AttachmentDisplay. Fills whatever box it is put
-// in — every caller is a square thumb that crops the real image with
-// `object-fit: cover`, so the placeholder crops the same way.
-const BlurhashCanvas: React.FC<{ hash: string }> = ({ hash }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) { return; }
-    try {
-      const pixels = decode(hash, 32, 32);
-      const ctx = canvas.getContext("2d");
-      if (!ctx) { return; }
-      const imageData = ctx.createImageData(32, 32);
-      imageData.data.set(pixels);
-      ctx.putImageData(imageData, 0, 0);
-    } catch {
-      // Invalid or unsupported blurhash — canvas stays blank, no crash.
-    }
-  }, [hash]);
-
-  return (
-    <div style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden" }}>
-      <canvas
-        ref={canvasRef}
-        width={32}
-        height={32}
-        style={{
-          position: "absolute",
-          inset: 0,
-          width: "100%",
-          height: "100%",
-          filter: "blur(6px)",
-          transform: "scale(1.08)",
-        }}
-      />
-    </div>
-  );
-};
+import { BlurhashCanvas } from "../Media/BlurhashCanvas";
+import { SensitiveCover } from "../Media/SensitiveCover";
+import { SensitiveHideButton } from "../Media/SensitiveHideButton";
+import { useSensitiveReveal } from "../../hooks/useSensitiveReveal";
 
 // Shared styles for lightbox action buttons (download / esc).
 const lightboxBtnStyle: React.CSSProperties = {
@@ -75,12 +39,15 @@ interface AttachmentDisplayProps {
   testId?: string;
 }
 
-export const AttachmentDisplay: React.FC<AttachmentDisplayProps> = ({
+export const AttachmentDisplay = observer(({
   attachment,
   tile = false,
   testId,
-}) => {
+}: AttachmentDisplayProps) => {
   const { t } = useTranslation("chat");
+  // Sensitive media (#1568): blurred until the user reveals it, and the
+  // reveal is shared with every other surface showing this attachment.
+  const sensitivity = useSensitiveReveal(attachment);
   const isImage = attachment.content_type.startsWith("image/");
   const isVideo = attachment.content_type.startsWith("video/");
   const isAudio = attachment.content_type.startsWith("audio/");
@@ -92,6 +59,52 @@ export const AttachmentDisplay: React.FC<AttachmentDisplayProps> = ({
     : { width: 96, height: 96 };
   // object_key is empty while the upload is still in progress (optimistic stub).
   const isPending = !attachment.object_key;
+
+  // A sensitive thumb sits in a box of its own so the hide button can be its
+  // sibling — the thumb is a button, and a button cannot hold another.
+  const withSensitiveChrome = (thumb: React.ReactNode) =>
+    sensitivity.sensitive ? (
+      <div className="relative flex-shrink-0" style={thumbBox}>
+        {thumb}
+        {!sensitivity.hidden && (
+          <SensitiveHideButton filename={attachment.filename} onHide={sensitivity.hide} />
+        )}
+      </div>
+    ) : (
+      thumb
+    );
+  // The hidden thumb: the cover, and one click (never a press, it is not
+  // free to undo) reveals it — and does nothing else, so a video's reveal
+  // never starts it playing.
+  const hiddenThumb = () => (
+    <PressButton
+      data-testid={cardTestId}
+      data-sensitive="hidden"
+      activateOn="click"
+      onClick={sensitivity.reveal}
+      aria-label={t("attachment.sensitiveReveal", { filename: attachment.filename })}
+      title={attachment.filename}
+      className="border-0"
+      style={{
+        width: "100%",
+        height: "100%",
+        padding: 0,
+        background: "transparent",
+        borderRadius: "0.5rem",
+        overflow: "hidden",
+        position: "relative",
+        cursor: "pointer",
+        display: "block",
+      }}
+    >
+      <SensitiveCover blurhash={attachment.blurhash} />
+    </PressButton>
+  );
+  // While sensitive and revealed, the thumb fills the box above instead of
+  // carrying its own size.
+  const cardBox: React.CSSProperties = sensitivity.sensitive
+    ? { width: "100%", height: "100%" }
+    : thumbBox;
 
   // Seed state with the local preview URL if available (images sent by this device).
   const [downloadUrl, setDownloadUrl] = useState<string | null>(
@@ -380,15 +393,17 @@ export const AttachmentDisplay: React.FC<AttachmentDisplayProps> = ({
   if (isImage) {
     return (
       <>
+        {withSensitiveChrome(sensitivity.hidden ? hiddenThumb() : (
         <PressButton
           data-testid={cardTestId}
+          data-sensitive={sensitivity.sensitive ? "revealed" : undefined}
           onClick={() => { if (downloadUrl) { setViewerOpen(true); } }}
           disabled={!downloadUrl}
           aria-label={t("attachment.viewLabel", { filename: attachment.filename })}
           title={attachment.filename}
           className="border-0"
           style={{
-            ...thumbBox,
+            ...cardBox,
             padding: 0,
             background: "transparent",
             borderRadius: "0.5rem",
@@ -425,9 +440,10 @@ export const AttachmentDisplay: React.FC<AttachmentDisplayProps> = ({
             </span>
           )}
         </PressButton>
+        ))}
 
         {/* Full-screen lightbox */}
-        {viewerOpen && downloadUrl && (
+        {viewerOpen && downloadUrl && !sensitivity.hidden && (
           <div
             style={{
               position: "fixed",
@@ -537,8 +553,10 @@ export const AttachmentDisplay: React.FC<AttachmentDisplayProps> = ({
   if (isVideo) {
     return (
       <>
+        {withSensitiveChrome(sensitivity.hidden ? hiddenThumb() : (
         <PressButton
           data-testid={cardTestId}
+          data-sensitive={sensitivity.sensitive ? "revealed" : undefined}
           onClick={!isPending && !isLoading ? handleVideoOpen : undefined}
           disabled={isPending || isLoading}
           aria-label={t("attachment.openLabel", { filename: attachment.filename })}
@@ -548,7 +566,7 @@ export const AttachmentDisplay: React.FC<AttachmentDisplayProps> = ({
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            ...thumbBox,
+            ...cardBox,
             padding: 0,
             background: "transparent",
             cursor: isPending || isLoading ? "default" : "pointer",
@@ -609,9 +627,10 @@ export const AttachmentDisplay: React.FC<AttachmentDisplayProps> = ({
             </span>
           )}
         </PressButton>
+        ))}
 
         {/* Video lightbox */}
-        {viewerOpen && downloadUrl && (
+        {viewerOpen && downloadUrl && !sensitivity.hidden && (
           <div
             style={{
               position: "fixed",
@@ -707,4 +726,4 @@ export const AttachmentDisplay: React.FC<AttachmentDisplayProps> = ({
       )}
     </div>
   );
-};
+});

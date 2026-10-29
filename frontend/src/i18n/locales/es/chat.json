@@ -86,7 +86,9 @@
     "lightboxFetch": "cargar",
     "lightboxDone": "[ hecho ]",
     "lightboxDownload": "[descargar]",
-    "lightboxClose": "[esc]"
+    "lightboxClose": "[esc]",
+    "sensitiveReveal": "Mostrar contenido sensible: {{filename}}",
+    "sensitiveHide": "Ocultar {{filename}}"
   },
   "unfurl": {
     "loadImage": "Cargar imagen",

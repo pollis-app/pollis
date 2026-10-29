@@ -1,4 +1,8 @@
 import { useMemo, useState } from "react";
+import { observer } from "mobx-react-lite";
+import { useSensitiveReveal } from "../../hooks/useSensitiveReveal";
+import { SensitiveCover, SensitiveHideButton } from "../chat/SensitiveCover";
+import { useThemeRerender } from "../theme";
 import { FlatList, Pressable, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { useTranslation } from "react-i18next";
@@ -84,7 +88,9 @@ export function VaultMediaGrid({
   );
 }
 
-function VaultMediaTile({
+// A sensitive tile (#1568) is covered until a tap reveals it (the tap does
+// nothing else), sharing the reveal with the message row and the viewer.
+const VaultMediaTile = observer(function VaultMediaTile({
   attachment,
   size,
   onOpen,
@@ -93,8 +99,23 @@ function VaultMediaTile({
   size: number;
   onOpen: (attachment: MessageAttachment) => void;
 }) {
+  useThemeRerender();
   const { t } = useTranslation("vault");
-  return (
+  const sensitivity = useSensitiveReveal(attachment);
+  if (sensitivity.covered) {
+    return (
+      <Pressable
+        testID={`tile-vault-media-${attachment.id}`}
+        accessibilityRole="button"
+        accessibilityLabel={t("chat:attachment.sensitiveReveal", { filename: attachment.filename })}
+        onPress={sensitivity.reveal}
+        style={{ width: size, height: size, overflow: "hidden" }}
+      >
+        <SensitiveCover blurhash={attachment.blurhash} />
+      </Pressable>
+    );
+  }
+  const tile = (
     <Pressable
       testID={`tile-vault-media-${attachment.id}`}
       accessibilityRole="button"
@@ -127,4 +148,13 @@ function VaultMediaTile({
       )}
     </Pressable>
   );
-}
+  if (!sensitivity.sensitive) {
+    return tile;
+  }
+  return (
+    <View>
+      {tile}
+      <SensitiveHideButton filename={attachment.filename} onHide={sensitivity.hide} />
+    </View>
+  );
+});

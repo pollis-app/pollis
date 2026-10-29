@@ -33,6 +33,8 @@ export type OutgoingAttachment = {
   blurhash?: string;
   width?: number;
   height?: number;
+  /** Marked sensitive in the composer (#1568). */
+  sensitive?: boolean;
 };
 
 /**
@@ -60,9 +62,12 @@ export async function outgoingAttachments(
       ...(att.source.kind === "staged" ? { stagedId: att.source.id } : { path: att.source.path }),
       filename: att.name,
       contentType: att.mimeType,
-      blurhash: meta?.hash,
+      // An image's own blurhash comes from the upload; the one the composer
+      // drew a sensitive cover with (#1568) stands in until then.
+      blurhash: meta?.hash ?? att.blurhash,
       width: meta?.width,
       height: meta?.height,
+      ...(att.sensitive ? { sensitive: true } : {}),
     });
   }
   return out;
@@ -198,6 +203,8 @@ export async function buildMessageContent(
         bh: r.blurhash ?? vMeta?.bh,
         w: r.width ?? vMeta?.w,
         h: r.height ?? vMeta?.h,
+        // Only when set, as the core's outbox writes it (#1568).
+        ...(attachments[i]?.sensitive ? { sens: true } : {}),
       };
     }),
   };
