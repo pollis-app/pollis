@@ -18,9 +18,38 @@ on:
       - 'verifiable-log/**'
       - 'verifiable-log-builder/**'
       - 'verifiable-log-serve/**'
+      # Path dependencies: verifiable-log-builder/-serve depend on the libsql
+      # connector, and -serve's dev-dependencies (compiled by `cargo test`) on
+      # pollis-relay and pollis-device-cert.
+      - 'pollis-libsql-connector/**'
+      - 'pollis-relay/**'
+      - 'pollis-device-cert/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'patches/**'
+      - '.cargo/**'
+      - 'rust-toolchain.toml'
       - '.github/workflows/verifiable-log-tests.yml'
+  # `main` on the same list: a push outside it cannot change these crates'
+  # build or tests.
   push:
     branches: [main]
+    paths:
+      - 'verifiable-log/**'
+      - 'verifiable-log-builder/**'
+      - 'verifiable-log-serve/**'
+      # Path dependencies: verifiable-log-builder/-serve depend on the libsql
+      # connector, and -serve's dev-dependencies (compiled by `cargo test`) on
+      # pollis-relay and pollis-device-cert.
+      - 'pollis-libsql-connector/**'
+      - 'pollis-relay/**'
+      - 'pollis-device-cert/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'patches/**'
+      - '.cargo/**'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/verifiable-log-tests.yml'
   workflow_dispatch:
 
 permissions:

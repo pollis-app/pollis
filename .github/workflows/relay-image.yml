@@ -33,6 +33,16 @@ on:
     paths:
       - 'pollis-relay/**'
       - 'pollis-device-cert/**'
+      # pollis-relay's other path dependency, and what decides every crate's
+      # build: a PR here can break the relay's tests or image build without
+      # touching either directory above. PR-only on purpose: `main`'s push
+      # PUBLISHES an image, and a lockfile-only merge should not ship one.
+      - 'verifiable-log/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'patches/**'
+      - '.cargo/**'
+      - 'rust-toolchain.toml'
       - '.github/workflows/relay-image.yml'
   push:
     branches: [main]

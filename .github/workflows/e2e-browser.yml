@@ -17,13 +17,28 @@ name: Browser UI specs
 # the renderer, the specs and the JS dependency graph can change its outcome —
 # a Rust, mobile, website, docs or workflow-only PR cannot. Before this, every
 # such PR (about half of them) paid four runners for ~4 min each, and up to
-# ~15 when the Chromium apt step stalled. `main` always runs the whole suite.
+# ~15 when the Chromium apt step stalled.
+#
+# `main` runs the whole suite on every push that touches the same allow-list
+# (a workflow-level `paths:` here is safe: nothing requires a check on a push).
+# A merge outside it leaves the suite's inputs byte-identical to the previous
+# `main` run, so re-running it re-proves nothing; before this every Rust,
+# mobile or docs merge paid four more runners.
 
 on:
   pull_request:
     branches: [main]
   push:
     branches: [main]
+    # Same list as the `ui` filter below; keep the two in step.
+    paths:
+      - 'frontend/**'
+      - 'e2e/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/e2e-browser.yml'
+      - 'scripts/ci-apt-retries.sh'
 
 permissions:
   contents: read

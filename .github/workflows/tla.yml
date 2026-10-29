@@ -13,13 +13,22 @@ name: TLA+ specs
 
 on:
   pull_request:
-    # Only the spec surface + its runner matter here.
+    # Only the spec surface + its runner (and the summary script the job runs
+    # after it) matter here.
     paths:
       - 'specs/tla/**'
       - 'scripts/tlc-check.sh'
+      - 'scripts/tlc-summary.sh'
       - '.github/workflows/tla.yml'
+  # `main` on the same list: TLC reads nothing else, so a push outside it
+  # re-checks byte-identical specs.
   push:
     branches: [main]
+    paths:
+      - 'specs/tla/**'
+      - 'scripts/tlc-check.sh'
+      - 'scripts/tlc-summary.sh'
+      - '.github/workflows/tla.yml'
   workflow_dispatch:
 
 permissions:

@@ -53,6 +53,12 @@ on:
       - 'rust-toolchain.toml'
       - 'pollis-schema/migrations/**'
       - 'pollis-sqlcipher/**'
+      # The non-Rust files the PR-side `changes` job also runs on.
+      - 'docs/ds-operator-endpoints.md'
+      - 'scripts/emoji-shortcodes.json'
+      - 'scripts/ci-free-disk.sh'
+      - 'scripts/ci-apt-retries.sh'
+      - 'scripts/install-clang.sh'
       - '.github/workflows/mls-tests.yml'
   workflow_dispatch:
     inputs:
@@ -141,6 +147,16 @@ jobs:
               - 'docs/ds-operator-endpoints.md'
             shortcodes:
               - 'scripts/emoji-shortcodes.json'
+            # The CI helpers the heavy jobs run (disk, apt, clang). They sit under
+            # the exempt scripts/**, so without this a PR that broke one would go
+            # green here and turn `main` red on the next Rust merge. One pattern
+            # per filter, as above.
+            freedisk:
+              - 'scripts/ci-free-disk.sh'
+            aptretries:
+              - 'scripts/ci-apt-retries.sh'
+            clang:
+              - 'scripts/install-clang.sh'
       - name: Decide whether the heavy Rust gate must run
         id: decide
         env:
@@ -149,16 +165,20 @@ jobs:
           HARNESS: ${{ steps.filter.outputs.harness }}
           RUNBOOK: ${{ steps.filter.outputs.runbook }}
           SHORTCODES: ${{ steps.filter.outputs.shortcodes }}
+          FREEDISK: ${{ steps.filter.outputs.freedisk }}
+          APTRETRIES: ${{ steps.filter.outputs.aptretries }}
+          CLANG: ${{ steps.filter.outputs.clang }}
         run: |
           if [ "$EVENT" = "pull_request" ]; then
             # A real Rust change, an edit to this workflow itself, or a file
             # Rust compiles in from an otherwise-exempt directory.
-            if [ "$FILTERED" = "true" ] || [ "$HARNESS" = "true" ] || [ "$RUNBOOK" = "true" ] || [ "$SHORTCODES" = "true" ]; then
+            if [ "$FILTERED" = "true" ] || [ "$HARNESS" = "true" ] || [ "$RUNBOOK" = "true" ] || [ "$SHORTCODES" = "true" ] \
+              || [ "$FREEDISK" = "true" ] || [ "$APTRETRIES" = "true" ] || [ "$CLANG" = "true" ]; then
               echo "run_tests=true" >> "$GITHUB_OUTPUT"
             else
               echo "run_tests=false" >> "$GITHUB_OUTPUT"
             fi
-            echo "rust=$FILTERED harness=$HARNESS runbook=$RUNBOOK shortcodes=$SHORTCODES"
+            echo "rust=$FILTERED harness=$HARNESS runbook=$RUNBOOK shortcodes=$SHORTCODES ci-scripts=$FREEDISK/$APTRETRIES/$CLANG"
           else
             # workflow_dispatch / schedule / any non-PR trigger: always run the
             # full gate (the marathon step keys off event_name inside the job).
