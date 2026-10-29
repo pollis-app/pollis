@@ -10,14 +10,11 @@ use super::key_packages::build_key_package_in_suite;
 use super::provider::{signature_scheme, MlsProvider, PollisProvider, CS_PQ};
 use super::self_update::stage_self_update;
 
-/// A suite that is deliberately **not** [`CS_PQ`], used only by the tests: the
-/// code still handles a stored group on a non-current suite (`CS_PQ`'s code
-/// point is provisional), and that is untestable without a second suite.
-/// `0x0001` is what Pollis shipped before #454 and differs from `CS_PQ` in every
-/// dimension.
+/// A suite that is deliberately not [`CS_PQ`]: the code still handles a stored
+/// group on a non-current suite (`CS_PQ`'s code point is provisional), which is
+/// untestable without a second suite. It differs from `CS_PQ` in every dimension.
 const CS_LEGACY: Ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
 
-/// Create an in-memory SQLite DB with the `mls_kv` table.
 fn make_db() -> rusqlite::Connection {
     let conn = rusqlite::Connection::open_in_memory().unwrap();
     conn.execute_batch(
@@ -31,7 +28,6 @@ fn make_db() -> rusqlite::Connection {
     conn
 }
 
-/// Synthetic device ID: each test "user" has a single device.
 fn test_device_id(user_id: &str) -> String {
     format!("{user_id}_dev")
 }
@@ -92,7 +88,6 @@ fn gen_key_package(conn: &rusqlite::Connection, user_id: &str) -> Vec<u8> {
     bundle.key_package().tls_serialize_detached().unwrap()
 }
 
-/// Alice creates a group, adds Bob, then Alice encrypts and Bob decrypts.
 #[test]
 fn encrypt_decrypt_roundtrip() {
     let conv_id = "01JTEST00000000000000000AB";
@@ -223,7 +218,6 @@ fn padded_text_roundtrip_through_mls() {
     assert_eq!(framing::strip(&legacy_pt), legacy_plain);
 }
 
-/// The creator of a solo group can still encrypt.
 #[test]
 fn solo_group_encrypt_returns_some() {
     let conv_id = "01JTEST00000000000000000CD";
@@ -234,7 +228,6 @@ fn solo_group_encrypt_returns_some() {
     assert!(ct.is_some(), "creator should be able to encrypt in a solo group");
 }
 
-/// A missing group returns None without panicking.
 #[test]
 fn missing_group_returns_none() {
     let db = make_db();
@@ -268,7 +261,6 @@ fn add_member_to_group(
     )
 }
 
-/// Join a group by applying a serialised Welcome message.
 fn join_via_welcome(joiner_db: &rusqlite::Connection, welcome_bytes: &[u8]) {
     let provider = PollisProvider::new(joiner_db);
     let mut reader: &[u8] = welcome_bytes;
@@ -286,7 +278,6 @@ fn join_via_welcome(joiner_db: &rusqlite::Connection, welcome_bytes: &[u8]) {
         .unwrap();
 }
 
-/// Apply a serialised commit to advance a member's epoch.
 fn apply_commit(member_db: &rusqlite::Connection, conv_id: &str, commit_bytes: &[u8]) {
     let provider = PollisProvider::new(member_db);
     let group_id = GroupId::from_slice(conv_id.as_bytes());
@@ -332,8 +323,6 @@ fn remove_member(
     commit_msg.tls_serialize_detached().unwrap()
 }
 
-/// Alice, Bob, and Carol are all in the same group. Each can encrypt a
-/// message that the other two can decrypt.
 #[test]
 fn three_way_group_messaging() {
     let conv_id = "01JTEST00000000000000000EF";
@@ -348,7 +337,7 @@ fn three_way_group_messaging() {
     let (add_bob_commit, bob_welcome) = add_member_to_group(&alice_db, conv_id, &bob_kp);
     join_via_welcome(&bob_db, &bob_welcome);
 
-    // Alice adds Carol. Bob must also apply this commit.
+    // Bob must also apply this commit.
     let carol_kp = gen_key_package(&carol_db, "carol");
     let (add_carol_commit, carol_welcome) = add_member_to_group(&alice_db, conv_id, &carol_kp);
     join_via_welcome(&carol_db, &carol_welcome);
@@ -369,8 +358,6 @@ fn three_way_group_messaging() {
     assert_eq!(try_mls_decrypt(&bob_db, conv_id, &carol_ct).unwrap().0, b"hello from carol");
 }
 
-/// After Bob is removed, messages Alice sends are encrypted at the new epoch.
-/// Bob's local state is stuck at the old epoch, so he cannot decrypt them.
 #[test]
 fn removed_member_cannot_decrypt_new_messages() {
     let conv_id = "01JTEST00000000000000000GH";
@@ -390,7 +377,6 @@ fn removed_member_cannot_decrypt_new_messages() {
         b"pre-removal"
     );
 
-    // Alice removes Bob. Alice's epoch advances; Bob's does not.
     let _remove_commit = remove_member(&alice_db, conv_id, "bob");
 
     let post_remove_ct = try_mls_encrypt(&alice_db, conv_id, b"secret").unwrap();
@@ -401,7 +387,6 @@ fn removed_member_cannot_decrypt_new_messages() {
     );
 }
 
-/// A newly added member cannot decrypt messages that were sent before they joined.
 #[test]
 fn new_member_cannot_read_history() {
     let conv_id = "01JTEST00000000000000000IJ";
@@ -445,12 +430,11 @@ fn epoch_sync_via_commit_processing() {
     let (add_bob_commit, bob_welcome) = add_member_to_group(&alice_db, conv_id, &bob_kp);
     join_via_welcome(&bob_db, &bob_welcome);
 
-    // Bob adds Carol (epoch 1→2). Alice hasn't applied this commit yet.
+    // Epoch 1→2; Alice hasn't applied this commit yet.
     let carol_kp = gen_key_package(&carol_db, "carol");
     let (add_carol_commit, carol_welcome) = add_member_to_group(&bob_db, conv_id, &carol_kp);
     join_via_welcome(&carol_db, &carol_welcome);
 
-    // Alice applies Bob's add-Carol commit to advance to epoch 2.
     apply_commit(&alice_db, conv_id, &add_carol_commit);
 
     let _ = add_bob_commit;
@@ -466,9 +450,6 @@ fn epoch_sync_via_commit_processing() {
     );
 }
 
-/// When a member leaves (is removed), the remaining members can still
-/// communicate, the removed member cannot decrypt, and a newly added
-/// member can participate in the group.
 #[test]
 fn leave_group_remaining_members_communicate_then_new_member_joins() {
     let conv_id = "01JTEST0000000000000LEAVE1";
@@ -593,7 +574,6 @@ fn account_deletion_rotates_keys_for_remaining_members() {
     let pre_g2 = try_mls_encrypt(&alice_db, group2, b"pre-delete g2").unwrap();
     assert_eq!(try_mls_decrypt(&bob_db, group2, &pre_g2).unwrap().0, b"pre-delete g2");
 
-    // Simulate account deletion: remove Bob from each group.
     let remove_g1 = remove_member(&alice_db, group1, "bob");
     apply_commit(&carol_db, group1, &remove_g1);
 
@@ -623,7 +603,6 @@ fn account_deletion_rotates_keys_for_remaining_members() {
     );
 }
 
-/// Create an MLS group with an explicit device_id in the credential.
 fn create_group_with_device(
     conn: &rusqlite::Connection,
     conversation_id: &str,
@@ -656,7 +635,6 @@ fn create_group_with_device(
     sig_keys
 }
 
-/// Generate a key package with an explicit device_id in the credential.
 fn gen_key_package_with_device(
     conn: &rusqlite::Connection,
     user_id: &str,
@@ -735,7 +713,6 @@ fn add_members_batch(
     )
 }
 
-/// Credential encodes user_id:device_id; parsing extracts user_id.
 #[test]
 fn credential_roundtrip_with_device() {
     let cred = make_credential("alice", "dev_01ABCDEF");
@@ -746,15 +723,12 @@ fn credential_roundtrip_with_device() {
     );
 }
 
-/// Legacy credentials (no colon) still parse correctly.
 #[test]
 fn credential_legacy_no_device_id() {
     let cred: Credential = BasicCredential::new("alice".as_bytes().to_vec()).into();
     assert_eq!(parse_credential_user_id(&cred), "alice");
 }
 
-/// Alice has two devices in the group. Bob sends a message. Both Alice
-/// devices decrypt it.
 #[test]
 fn multi_device_both_devices_decrypt() {
     let conv_id = "01JTEST00000000000MULTIDEV1";
@@ -831,8 +805,6 @@ fn multi_device_batch_add_single_commit() {
     );
 }
 
-/// Removing a user removes ALL their device leaf nodes. Neither device
-/// can decrypt messages from the new epoch.
 #[test]
 fn remove_multi_device_user_removes_all_leaves() {
     let conv_id = "01JTEST00000000000MULTIDEV3";
@@ -868,8 +840,6 @@ fn remove_multi_device_user_removes_all_leaves() {
     );
 }
 
-/// A second device joins later. It cannot read pre-join history but can
-/// decrypt new messages.
 #[test]
 fn second_device_joins_later_cannot_read_history() {
     let conv_id = "01JTEST00000000000MULTIDEV4";
@@ -911,10 +881,9 @@ fn second_device_joins_later_cannot_read_history() {
     );
 }
 
-/// Regression: a re-invited user could not send. Bob leaves locally (no remove
-/// commit, as `leave_group` does) and is re-invited with his STABLE signing key,
-/// so a plain `add_members` fails `validate_key_uniqueness`; reconcile's
-/// combined remove+add commit is the fix.
+/// Bob leaves locally (no remove commit, as `leave_group` does) and is
+/// re-invited with his stable signing key, so a plain `add_members` fails
+/// `validate_key_uniqueness`; only a combined remove+add commit works.
 #[test]
 fn reinvite_with_stable_signing_key_handles_stale_leaf() {
     let conv_id = "01JTEST000000000REINVITE01";
@@ -977,7 +946,6 @@ fn reinvite_with_stable_signing_key_handles_stale_leaf() {
         );
     }
 
-    // The fix: combined remove+add commit via commit_builder.
     let welcome2_bytes: Vec<u8> = {
         let provider = PollisProvider::new(&alice_db);
         let (mut group, signer) = load_group_with_signer(&provider, conv_id, 0).unwrap();
@@ -1071,7 +1039,6 @@ fn reconcile(
     .unwrap()
 }
 
-/// Clean state: tree matches roster, no available KPs → no-op.
 #[test]
 fn reconcile_no_drift() {
     let conv_id = "01JTEST00000000000RECONCILE1";
@@ -1099,7 +1066,6 @@ fn reconcile_no_drift() {
     assert!(commit_data.is_none());
 }
 
-/// Stale leaf: user removed from roster but leaf remains → remove.
 #[test]
 fn reconcile_remove_stale_leaf() {
     let conv_id = "01JTEST00000000000RECONCILE2";
@@ -1130,7 +1096,6 @@ fn reconcile_remove_stale_leaf() {
     assert!(commit_data.is_some());
 }
 
-/// Missing device: user in roster with available KP but not in tree → add.
 #[test]
 fn reconcile_add_missing_device() {
     let conv_id = "01JTEST00000000000RECONCILE3";
@@ -1164,7 +1129,6 @@ fn reconcile_add_missing_device() {
     );
 }
 
-/// Combined add + remove in a single commit.
 #[test]
 fn reconcile_combined_add_and_remove() {
     let conv_id = "01JTEST00000000000RECONCILE4";
@@ -1229,7 +1193,6 @@ fn reconcile_committer_skip_self_removal() {
     assert!(commit_data.is_none());
 }
 
-/// Idempotence: reconcile twice with same desired state → second is no-op.
 #[test]
 fn reconcile_idempotent() {
     let conv_id = "01JTEST00000000000RECONCILE6";
@@ -1286,7 +1249,6 @@ fn reconcile_no_kp_user_not_added() {
     assert!(commit_data.is_none());
 }
 
-/// Add a second device for a user already in the tree.
 #[test]
 fn reconcile_add_second_device() {
     let conv_id = "01JTEST00000000000RECONCILE8";
@@ -1315,7 +1277,6 @@ fn reconcile_add_second_device() {
     assert!(commit_data.is_some());
 }
 
-/// Remove all leaves for a multi-device user removed from roster.
 #[test]
 fn reconcile_remove_multi_device_user() {
     let conv_id = "01JTEST00000000000RECONCILE9";
@@ -2097,16 +2058,12 @@ fn self_update_jitter_is_stable_and_bounded() {
     }
 }
 
-/// #454 P3 item 4: absolute byte ceilings for the post-quantum suite, so a KEM
-/// swap, a code-point change or unmerged leaves fail here rather than in a group
-/// at forty members. The growth shape is pinned by
-/// [`self_update_turns_linear_commit_growth_into_logarithmic`].
-///
-/// Measured after #668: KeyPackage 8,670 B (classical 307 B), Welcome 15,241 B,
-/// merged 8-member commit 14,839 B; ceilings sit ~1.4× above each.
+/// Absolute byte ceilings for the post-quantum suite (#454), so a KEM swap, a
+/// code-point change or unmerged leaves fail here rather than in a group at
+/// forty members. Ceilings sit ~1.4× above the measured sizes; the growth shape
+/// is pinned by [`self_update_turns_linear_commit_growth_into_logarithmic`].
 #[test]
 fn pq_payloads_stay_under_their_ceilings() {
-    // A KeyPackage is published per device and claimed on every add.
     let kp_db = make_db();
     let (_, hybrid_kp) =
         build_key_package_in_suite(&PollisProvider::new(&kp_db), "alice", "alice_dev", CS_PQ)
@@ -3504,8 +3461,6 @@ fn a_created_group_starts_with_the_wide_window() {
     );
 }
 
-// ── #1571: the last-resort KeyPackage survives the joins it admits ───────────
-
 /// Add bob to `conversation_id` (a fresh group of alice's) with `kp_bytes`, and
 /// return the Welcome as bob receives it.
 fn add_with_key_package<C>(
@@ -3534,12 +3489,8 @@ where
 }
 
 /// The DS hands the same last-resort package to every committer that finds the
-/// device's pool empty, so the device must be able to join through it again and
-/// again. That holds only if its private key outlives the first join: openmls
-/// skips the delete for a package carrying the LastResort extension, and our
-/// storage (`signal::mls_storage`) must not drop it either. A regular package is
-/// the control: its key is spent by the first join, so a second Welcome to it
-/// cannot be opened.
+/// pool empty (#1571), so its private key must outlive the first join, in
+/// openmls and in `signal::mls_storage`. A regular package is the control.
 #[test]
 fn a_last_resort_key_package_admits_the_device_to_more_than_one_group() {
     let alice_db = make_db();

@@ -23,11 +23,9 @@ use super::provider::{
 
 /// Test-harness rendezvous points inside the join and commit paths.
 ///
-/// A test arms one, drives a client into the path (which then parks at the
-/// point and hands the test a release handle), interleaves whatever it wants
-/// against the parked client, and releases it. Deterministic interleavings of
-/// the join paths are otherwise unreachable from a test — they depend on which
-/// of two clients' HTTP round trips lands first.
+/// A test arms a point, a client parks there and hands back a release handle,
+/// and the test interleaves against it — otherwise these orderings depend on
+/// which of two clients' HTTP round trips lands first.
 #[cfg(feature = "test-harness")]
 pub mod rendezvous {
     use std::sync::Mutex;
@@ -37,7 +35,6 @@ pub mod rendezvous {
     /// releases the client.
     pub type Release = oneshot::Sender<()>;
 
-    /// The points a test can park a client at.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum Point {
         /// External commit built and stored locally, CAS not yet submitted —
@@ -66,17 +63,14 @@ pub mod rendezvous {
     static ARMED: Mutex<[Option<mpsc::UnboundedSender<Release>>; POINTS]> =
         Mutex::new([None, None, None, None, None]);
 
-    /// Arm `point`. Every client reaching it in this process then parks there
-    /// and sends a [`Release`] on the returned receiver. Disarm with
-    /// [`disarm`] (dropping the receiver also stops clients from parking: a
-    /// send on a closed channel falls through).
+    /// Every client reaching `point` in this process parks and sends a
+    /// [`Release`] on the returned receiver. Dropping the receiver also disarms.
     pub fn arm(point: Point) -> mpsc::UnboundedReceiver<Release> {
         let (tx, rx) = mpsc::unbounded_channel();
         ARMED.lock().expect("rendezvous poisoned")[point as usize] = Some(tx);
         rx
     }
 
-    /// Disarm `point` so later arrivals run straight through.
     pub fn disarm(point: Point) {
         ARMED.lock().expect("rendezvous poisoned")[point as usize] = None;
     }
@@ -92,31 +86,14 @@ pub mod rendezvous {
     }
 }
 
-// ── GroupInfo publishing ─────────────────────────────────────────────────────
-
-/// Export a fresh `GroupInfo` for the given conversation and upsert it
-/// into the remote `mls_group_info` table. Called by every device that
-/// merges a commit (the originator right after `merge_pending_commit`,
-/// receivers right after `merge_staged_commit`).
-///
-/// The row is conversation-scoped and only overwritten with a STRICTLY
-/// greater epoch, so concurrent writers at the same epoch are idempotent
-/// and receivers don't waste work once the committer has already
-/// published.
-///
-/// No-op if:
-///   - the device has no local MLS group for this conversation
-///   - the device has no `account_id_key` (pre-enrollment)
-///
-/// This function is the prerequisite for the Secret Key recovery path:
-/// a brand-new device uses the stored `GroupInfo` to construct an MLS
-/// external commit joining the group, without needing a Welcome.
+/// Export a fresh `GroupInfo` and upsert it via the DS; every device that
+/// merges a commit calls this. The DS only overwrites with a strictly greater
+/// head, so concurrent same-epoch writers are idempotent. No-op without a
+/// device id or a local group. External-join recovery bootstraps from this row.
 pub async fn publish_group_info(
     state: &Arc<AppState>,
     conversation_id: &str,
 ) -> crate::error::Result<()> {
-    // Sync scope: load the local group, recover the signer, export a
-    // GroupInfo, and TLS-serialize it. Nothing !Send crosses await.
     let device_id_opt = state.device_id.lock().await.clone();
     let Some(device_id) = device_id_opt else {
         return Ok(());
@@ -137,8 +114,6 @@ pub async fn publish_group_info(
         return Ok(());
     };
 
-    // W4 seam: route the GroupInfo republish through the Delivery Service (the
-    // sole writer of the log DB). Mirrors `submit_commit`.
     use base64::Engine as _;
     let body = pollis_api::writes::GroupInfoBody {
         conversation_id: conversation_id.to_string(),
@@ -161,9 +136,8 @@ pub async fn publish_group_info(
 
 /// Export the current `GroupInfo` for `conversation_id` as `(epoch, tls_bytes)`.
 ///
-/// `Ok(None)` — not an error — when there is no usable local group or the export
-/// itself fails: `publish_group_info` is a best-effort durability backstop, and
-/// a device with nothing to publish has nothing to report.
+/// `Ok(None)`, not an error, when there is no usable local group or the export
+/// fails: publishing is a best-effort durability backstop.
 pub(super) fn export_group_info_blob<C>(
     provider: &MlsProvider<'_, C>,
     conversation_id: &str,
@@ -175,10 +149,8 @@ where
     let Ok((group, signer)) = load_group_with_signer(provider, conversation_id, generation) else {
         return Ok(None);
     };
-    // A staged commit means the epoch is still being decided, and GroupInfo is
-    // what an external join bootstraps from — publishing one for an epoch the
-    // log may never hold is the same defect as sealing at it (#1079). This is a
-    // best-effort backstop, so it simply waits for the next call.
+    // A staged commit means the epoch is undecided; publishing GroupInfo for an
+    // epoch the log may never hold is the same defect as sealing at it (#1079).
     if group.pending_commit().is_some() {
         return Ok(None);
     }
@@ -198,37 +170,16 @@ where
 
 /// Parse a stored `mls_group_info` payload, accepting BOTH wire forms.
 ///
-/// Current writers publish the `MlsMessage`-wrapped form (`export_group_info`
-/// and the commit bundle both hand back an `MlsMessageOut`). Rows written by
-/// earlier builds are a **bare `GroupInfo`**, and the two are not
-/// distinguishable by length or by a magic byte — but they are trivially
-/// distinguishable by parse, because the envelope's second field is a
-/// `WireFormat` while a bare `GroupInfo` has a `Ciphersuite` in that position.
-///
-/// That is exactly how this failed in the field, and the error is worth writing
-/// down because it looks like anything but what it is:
+/// Current writers publish the `MlsMessage`-wrapped form; older rows are a bare
+/// `GroupInfo`, which read as an envelope fails like this:
 ///
 /// ```text
 /// stored group_info envelope failed to deserialize: UnknownValue(82)
 /// ```
 ///
-/// `MlsMessageIn` reads `protocol_version` (u16) then `wire_format` (u16). A
-/// bare `GroupInfo` starts `GroupInfoTBS { group_context: GroupContext { .. } }`,
-/// and `GroupContext` starts `protocol_version` (u16) then `ciphersuite` (u16).
-/// So the version matches (`0x0001`, mls10), the reader advances, and reads the
-/// ciphersuite where the wire format should be. `82 == 0x0052 == CS_PQ`. The
-/// number in that error is not corruption and not a version skew: it is this
-/// build's own ciphersuite, being read at the wrong offset.
-///
-/// The consequence was total for an affected device: a device with no local
-/// group recovers by external-joining onto the published GroupInfo, so an
-/// unreadable GroupInfo means the group cannot be rejoined and nothing can be
-/// sent to it — with no error surfaced beyond "failed".
-///
-/// Falling back is safe rather than lenient. Both parses are strict, and the
-/// bare form is tried ONLY after the envelope form fails, so a well-formed
-/// envelope can never be reinterpreted. A payload that is neither still errors,
-/// and now says so with both reasons.
+/// Its ciphersuite (`CS_PQ` = 0x0052) sits where the wire format should be.
+/// Both parses are strict and the bare form is tried only after the envelope
+/// fails, so a well-formed envelope is never reinterpreted.
 fn parse_stored_group_info(group_info_bytes: &[u8]) -> Result<VerifiableGroupInfo> {
     let mut env_reader: &[u8] = group_info_bytes;
     let envelope_err = match MlsMessageIn::tls_deserialize(&mut env_reader) {
@@ -244,7 +195,6 @@ fn parse_stored_group_info(group_info_bytes: &[u8]) -> Result<VerifiableGroupInf
         Err(e) => e,
     };
 
-    // Legacy row: a bare GroupInfo with no MlsMessage envelope.
     let mut bare_reader: &[u8] = group_info_bytes;
     match VerifiableGroupInfo::tls_deserialize(&mut bare_reader) {
         Ok(gi) => {
@@ -261,24 +211,9 @@ fn parse_stored_group_info(group_info_bytes: &[u8]) -> Result<VerifiableGroupInf
     }
 }
 
-/// Whether the durably-published GroupInfo is stale relative to our local epoch
-/// and must be republished.
-///
-/// `published` is the `(generation, epoch)` head of the GroupInfo currently
-/// stored in the log DB (`None` = no row at all — it was never published, or a
-/// create-time publish was dropped). `local` is this device's own head.
-///
-/// Republish iff the log DB has no GroupInfo, or its GroupInfo is behind us. An
-/// equal head is already durable, and a *higher* one means another member
-/// advanced and published past us — neither needs our help. The DS `/v1/group-info`
-/// upsert is monotone on the same key, so republishing an equal/stale head would
-/// be a harmless no-op anyway; this check just avoids the needless round-trip.
-///
-/// The comparison is lexicographic on `(generation, epoch)` and NOT on epoch
-/// alone (#454 P4): a successor lineage restarts at epoch 0, numerically below
-/// the retired lineage's last epoch, so an epoch-only test would read the
-/// migrated group's GroupInfo as "stale" forever and have every member fight to
-/// overwrite it with the retired suite's.
+/// Republish iff no GroupInfo is published or its `(generation, epoch)` head is
+/// behind ours. Lexicographic, not epoch-only (#454): a successor lineage
+/// restarts at epoch 0, below the retired lineage's last epoch.
 fn group_info_is_stale(published: Option<(i64, u64)>, local: (i64, u64)) -> bool {
     match published {
         None => true,
@@ -286,12 +221,9 @@ fn group_info_is_stale(published: Option<(i64, u64)>, local: (i64, u64)) -> bool
     }
 }
 
-/// Highest epoch of the GroupInfo durably stored in the log DB for this group,
-/// or `None` if there's no row — or the read fails, which we deliberately treat
-/// as "absent" so the caller errs toward republishing rather than assuming
-/// durability. (Mirrors `voice_e2ee::published_group_epoch`'s read idiom, but
-/// with the opposite failure bias: this is a write-durability backstop, so a
-/// redundant publish on a transient blip is safer than a missed heal.)
+/// The published GroupInfo head, or `None` if there is none. A failed read is
+/// also `None` on purpose: the caller errs toward a redundant republish rather
+/// than a missed heal.
 pub(super) async fn published_group_info_head(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -305,15 +237,8 @@ pub(super) async fn published_group_info_head(
     group_info_head_of(&snap)
 }
 
-/// The `(generation, epoch)` head out of a conversation snapshot, or `None` when
-/// no GroupInfo is published — or the caller was not authorized to see one.
-///
-/// Split out so the several call sites that already hold a snapshot read the
-/// head from it rather than spending a second round trip on
-/// [`published_group_info_head`]. Non-membership collapses to `None` on purpose:
-/// "no GroupInfo I may see" and "no GroupInfo" lead to the same decision
-/// everywhere this feeds, and the alternative — a distinct third state — would
-/// need a bias of its own at every one of those sites.
+/// The `(generation, epoch)` head out of a snapshot, or `None` when no GroupInfo
+/// is published or the caller may not see it; every caller treats those alike.
 pub(super) fn group_info_head_of(
     snap: &pollis_api::reads::ConversationState,
 ) -> Option<(i64, u64)> {
@@ -321,27 +246,14 @@ pub(super) fn group_info_head_of(
     Some((gi.generation, gi.epoch as u64))
 }
 
-/// Durability backstop for MLS bootstrap: ensure the log DB holds a current-epoch
-/// GroupInfo for this group, republishing if a past publish was dropped.
-///
-/// `publish_group_info` is best-effort at create time (`init_mls_group`) and on
-/// epoch advance. If that DS post fails — e.g. a transient outage right as a group
-/// is created — the group is otherwise stranded forever: with no GroupInfo in the
-/// log DB, no member can external-join, and (if the add-member Welcome was dropped
-/// in the same outage) no member can join at all. Nothing else heals it, because
-/// the `any_applied` republish in `process_pending_commits_locked_impl` never fires
-/// for a sole-member creator who applies no commits.
-///
-/// Called on every "group touched" pass (sweep / send / realtime ingest /
-/// reconcile). Cheap for healthy groups — one indexed read, and a DS post only
-/// when the stored GroupInfo is missing or behind. Idempotent (the upsert is
-/// epoch-monotone), and it also rescues already-bricked groups on the next pass.
-/// No-op when we have no local group (nothing to export).
+/// Durability backstop: republish GroupInfo when the published head is missing
+/// or behind ours. Without it a group whose create-time publish was dropped is
+/// unjoinable forever — nothing else republishes for a sole member who applies
+/// no commits. Runs on every "group touched" pass; one read when healthy.
 async fn ensure_group_info_published(state: &Arc<AppState>, conversation_id: &str) {
     let local_head = {
         let guard = state.local_db.lock().await;
         let Some(db) = guard.as_ref() else { return };
-        // Reading an epoch is storage-only — no crypto backend, so no dispatch.
         let generation = local_generation(db.conn(), conversation_id);
         match load_stored_group_at(db.conn(), conversation_id, generation) {
             Some(g) => (generation, g.epoch().as_u64()),
@@ -349,23 +261,15 @@ async fn ensure_group_info_published(state: &Arc<AppState>, conversation_id: &st
         }
     };
 
-    // One snapshot, and it answers two questions: whether the published head is
-    // behind, and whether we are still a member. A removed member's local group
-    // lingers until the next sweep drops it, and republishing for a group we
-    // have been removed from is a guaranteed 403 on every pass — so read the
-    // authorization out of the same answer rather than discovering it as an
-    // error.
+    // The same snapshot says whether we are still a member: a removed member's
+    // lingering local group would otherwise 403 on every pass.
     let Ok(snap) = super::ds_reads::conversation_snapshot(
         state,
         super::ds_reads::state_query(conversation_id, None),
     )
     .await
     else {
-        // Unreadable → treat the GroupInfo as ABSENT, which is this backstop's
-        // deliberate bias: a redundant publish on a transient blip is safer than
-        // a missed heal, because a group whose GroupInfo never landed is
-        // unjoinable forever. Falling through to `group_info_is_stale(None, …)`
-        // preserves that exactly.
+        // Unreadable counts as absent: a redundant publish beats a missed heal.
         if let Err(e) = publish_group_info(state, conversation_id).await {
             crate::diag!(
                 "[mls] ensure_group_info_published: republish for {conversation_id} failed: {e}"
@@ -389,25 +293,13 @@ async fn ensure_group_info_published(state: &Arc<AppState>, conversation_id: &st
     }
 }
 
-// ── External-commit joining ──────────────────────────────────────────────────
-
-/// Join an existing MLS group via external commit, using the latest
-/// `GroupInfo` blob stored server-side in `mls_group_info`. The new
-/// device becomes a full member of the group at the epoch *after* the
-/// one carried in the GroupInfo.
+/// Join an existing group by external commit onto its published GroupInfo,
+/// becoming a member at the next epoch. Used when no Welcome can arrive (e.g.
+/// Secret Key recovery with no sibling device online).
 ///
-/// Used by the Secret Key recovery path: when a new device recovers
-/// `account_id_key` without any sibling device online to issue a
-/// Welcome, it fetches each of the user's groups' GroupInfo and
-/// externally commits into them. The commit is posted to
-/// `mls_commit_log` so existing members will merge it on their next
-/// `process_pending_commits` pass.
-///
-/// Safety note: this path does NOT currently pass through the outbound
-/// cross-signing cert check. Existing members that implement the
-/// step-3b inbound cert verification will reject external-join commits
-/// from devices whose cert doesn't chain to the user's
-/// `account_id_pub` — which is exactly the desired behavior.
+/// Security: there is no outbound cert check here; existing members' inbound
+/// leaf verification rejects a joiner whose cert doesn't chain to the user's
+/// `account_id_pub`.
 pub async fn external_join_group(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -417,36 +309,24 @@ pub async fn external_join_group(
     external_join_group_inner(state, conversation_id, user_id).await
 }
 
-/// Result of a single external-join attempt — see [`external_join_attempt`].
 enum ExternalJoinResult {
-    /// Our external commit won its epoch and was persisted.
     Joined,
-    /// Another member already committed at the target epoch; our freshly
-    /// built local branch is doomed and must be discarded before retrying.
-    /// Carries the generation the branch was built in, because that is the
-    /// lineage whose local group must be deleted — after a migration this
-    /// device may hold two.
+    /// Another member committed at the target epoch; the local branch must be
+    /// discarded before retrying. Carries the branch's generation, since after a
+    /// migration the device may hold two lineages.
     LostRace { generation: i64 },
-    /// A Welcome for this device became available for this conversation — the
-    /// canonical join path. We stood down without building/submitting anything so
-    /// we don't race our own inbound Welcome (both do "delete stale group →
-    /// rejoin"). See the DM-accept convergence note in [`external_join_attempt`].
+    /// A Welcome for this device is pending; stood down so the device doesn't
+    /// race its own Welcome (see [`external_join_attempt`]).
     DeferredToWelcome,
-    /// This device already holds a CONFIRMED group for the lineage — typically
-    /// its Welcome landed while an earlier attempt was losing its race (#1220).
-    /// It is a member; building another branch would discard that group and
-    /// every envelope sealed at its epoch, so the join stands down.
+    /// A confirmed group already exists for the lineage, typically because the
+    /// Welcome landed during a lost race (#1220). Another branch would discard
+    /// it and every envelope sealed at its epoch.
     AlreadyMember,
 }
 
-/// Body of [`external_join_group`]. Assumes the caller already holds the
-/// per-conversation MLS lock (`state.mls_group_lock`).
-///
-/// Submits the external commit as a compare-and-swap on the target epoch (see
-/// [`external_join_attempt`]). On a lost race we discard the doomed local
-/// branch, let the winner republish GroupInfo at the advanced epoch, and retry
-/// — bounded — from the new epoch. This is what stops two concurrent joins
-/// from forking the group.
+/// Body of [`external_join_group`]; the caller holds `state.mls_group_lock`.
+/// Each attempt is a compare-and-swap on the target epoch, so two concurrent
+/// joins cannot fork the group; a loser discards its branch and retries.
 pub(crate) async fn external_join_group_inner(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -456,11 +336,8 @@ pub(crate) async fn external_join_group_inner(
     for attempt in 0..MAX_JOIN_ATTEMPTS {
         match external_join_attempt(state, conversation_id, user_id).await? {
             ExternalJoinResult::Joined => return Ok(()),
-            // A Welcome became available mid-recovery — defer to it (the join will
-            // happen via `apply_welcome`). Success, not an error: the group WILL be
-            // joined, just via the canonical Welcome path.
+            // Success: `apply_welcome` will do the join.
             ExternalJoinResult::DeferredToWelcome => return Ok(()),
-            // Already in, by another path (#1220). Success: nothing to join.
             ExternalJoinResult::AlreadyMember => {
                 crate::diag!(
                     "[mls] external_join_group: {conversation_id} already has a confirmed local \
@@ -477,18 +354,12 @@ pub(crate) async fn external_join_group_inner(
                      (attempt {}/{MAX_JOIN_ATTEMPTS}) — discarding local branch and retrying",
                     attempt + 1
                 );
-                // Drop the doomed branch we just built so the next attempt
-                // re-joins cleanly from the advanced GroupInfo — the BRANCH
-                // only: if a Welcome replaced it while the compare-and-swap
-                // was in flight, the group stored now is confirmed and stays
-                // (#1220).
+                // The branch only: a Welcome that replaced it mid-CAS left a
+                // confirmed group that must stay (#1220).
                 forget_unconfirmed_branch(state, conversation_id, join_generation).await;
-                // Test-harness only: park between the lost race and the retry,
-                // the window in which the device's own Welcome can land.
                 #[cfg(feature = "test-harness")]
                 rendezvous::park(rendezvous::Point::ExternalJoinAfterLostRace).await;
-                // Brief backoff so the winner can publish GroupInfo at the new
-                // epoch before we re-read it.
+                // Give the winner time to publish GroupInfo at the new epoch.
                 tokio::time::sleep(std::time::Duration::from_millis(
                     100 * (attempt as u64 + 1),
                 ))
@@ -502,8 +373,7 @@ pub(crate) async fn external_join_group_inner(
 }
 
 /// One external-join attempt: read the current GroupInfo, build an external
-/// commit against it, and try to claim its epoch in `mls_commit_log` via
-/// `ON CONFLICT(conversation_id, epoch) DO NOTHING`. Returns [`ExternalJoinResult`].
+/// commit against it, and try to claim its epoch in the commit log.
 async fn external_join_attempt(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -516,14 +386,9 @@ async fn external_join_attempt(
         .clone()
         .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("device_id not set")))?;
 
-    // 1. Fetch the stored GroupInfo for this conversation, and with it the suite
-    //    GENERATION it belongs to. The published GroupInfo is always the newest
-    //    lineage (the upsert is monotone on `(generation, epoch)`), so a device
-    //    recovering into a migrated conversation joins the successor directly —
-    //    which is the only lineage still accepting commits.
-    //
-    //    The Welcome check eight lines below reads the SAME snapshot, and that
-    //    is load-bearing rather than an optimisation — see the comment there.
+    // The published GroupInfo is always the newest lineage, so a recovering
+    // device joins a migrated conversation's successor directly. The Welcome
+    // check below must read this same snapshot.
     let snap = super::ds_reads::conversation_snapshot(
         state,
         pollis_api::reads::ConversationStateQuery {
@@ -554,28 +419,10 @@ async fn external_join_attempt(
         }
     };
 
-    // GroupInfo is present — so, because the DS writes the commit, its GroupInfo,
-    // AND the add's Welcomes in ONE transaction (`pollis_delivery::commit::
-    // submit_commit`, an IMMEDIATE tx), any Welcome reconcile produced for THIS
-    // device is durably present too. Prefer that Welcome and stand down: external-
-    // joining now would race our own inbound Welcome — both do "delete stale local
-    // group → (re)join" — and can clobber the freshly-joined group, stranding us
-    // (`no GroupInfo stored — cannot external-join`, the DM-accept convergence race).
-    //
-    // This is the load-bearing close of that race. The `create_dm` sequence makes a
-    // recipient's membership row (and thus this recovery path) visible BEFORE
-    // reconcile produces the Welcome+GroupInfo, so the caller's pre-check can run
-    // in that gap and miss the Welcome; but external-join can only ever SUCCEED
-    // once GroupInfo exists, and by the atomic write that is exactly when the
-    // Welcome exists — so re-checking HERE catches it deterministically. A genuine
-    // Secret-Key recovery / dropped-Welcome case has no such row and proceeds.
-    //
-    // Since #987 both facts come from ONE snapshot — the same server-side read
-    // transaction — which is what keeps the argument above true across an HTTP
-    // boundary. Re-reading the Welcome in a second request would restore exactly
-    // the race this paragraph rules out, and would do so silently: the Kani
-    // property is proved over the pure gate, so feeding it two snapshots does
-    // not fail the proof, it makes it vacuous.
+    // The DS writes a commit, its GroupInfo and its Welcomes in one transaction,
+    // so a visible GroupInfo means any Welcome for this device is visible in the
+    // same snapshot; defer to it rather than race it. Must stay one snapshot —
+    // see "Welcome-first arbitration" in .codesight/wiki/mls.md.
     if snap.welcome_pending {
         crate::diag!(
             "[mls] external_join: a Welcome for {conversation_id} is available — deferring to it \
@@ -584,23 +431,15 @@ async fn external_join_attempt(
         return Ok(ExternalJoinResult::DeferredToWelcome);
     }
 
-    // 2. Run the external commit inside the local_db sync scope. Capture both
-    //    the commit and its resulting-epoch GroupInfo so they land atomically
-    //    through the delivery seam (Slice 1). Welcomes are empty — an external
-    //    join only adds self.
-    // Deserialising the stored GroupInfo touches no crypto, so it happens before
-    // (and outside) provider selection — and it is what tells us which suite the
-    // group runs, since a recovering device has no local group left to ask.
+    // A recovering device has no local group, so the GroupInfo is what names
+    // the suite.
     let verifiable_group_info: VerifiableGroupInfo =
         parse_stored_group_info(&group_info_bytes)?;
     let suite = verifiable_group_info.ciphersuite();
 
-    // 2a. Who is allowed to have built this lineage (#1161 M6 residual). Both
-    //     reads happen OUTSIDE the local-DB guard and both fail to the weak
-    //     answer: a roster we could not read is `None` (unknown, not "empty"),
-    //     and identities we could not load leave an unpinned directory that
-    //     certifies nothing and therefore verdicts everything `Unverifiable`.
-    //     Neither failure refuses a join — see `invariants::lineage_adoption`.
+    // Who may have built this lineage (#1161). Both reads fail to the weak
+    // answer (unknown roster, unpinned directory), which never refuses a join —
+    // see `invariants::lineage_adoption`.
     let roster: Option<std::collections::HashSet<String>> =
         match crate::commands::ds_reads::catch_up_full(state, conversation_id, false, false, true)
             .await
@@ -640,11 +479,8 @@ async fn external_join_attempt(
         let db = guard.as_ref().ok_or_else(|| {
             crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
         })?;
-        // Already a member of this lineage by another path (#1220) — most often
-        // the device's own Welcome, applied (unlocked) while a previous attempt
-        // was losing its race. Checked under the same guard as the build, so a
-        // Welcome cannot slip in between: `build_external_commit` would refuse
-        // anyway, and this turns that refusal into the success it is.
+        // Already a member by another path, usually our own Welcome (#1220).
+        // Checked under the same guard as the build so nothing slips between.
         let stored = load_stored_group_at(db.conn(), conversation_id, stored_generation).is_some();
         let unconfirmed =
             super::join_branch::is_unconfirmed(db.conn(), conversation_id, stored_generation);
@@ -664,38 +500,24 @@ async fn external_join_attempt(
         )?
     };
 
-    // Test-harness only: let a test park this attempt with the doomed-or-not
-    // branch already stored locally and the CAS not yet submitted — the exact
-    // window in which another member's commit turns it into a lost race.
     #[cfg(feature = "test-harness")]
     rendezvous::park(rendezvous::Point::ExternalJoinBeforeSubmit).await;
 
-    // 3. Claim this epoch in mls_commit_log via compare-and-swap. If another
-    //    member already committed `stored_epoch`, the conflict makes this a
-    //    no-op (0 rows) and we report a lost race — the branch we just built
-    //    locally is doomed and the caller will discard it and retry.
-    // Submit through the delivery seam (Direct today, the Delivery Service once
-    // POLLIS_DELIVERY_URL is set). LostRace → another member committed this
-    // epoch first; discard our doomed local branch and retry.
-    // Resolve the outcome against the canonical log (issue #411). A network
-    // error may mean our external commit LANDED and only the response was lost,
-    // and a stale `LostRace` can be a retry of our own accepted commit — in both
-    // cases our exact commit bytes at `stored_epoch` prove we won and must keep
-    // the locally-finalized join, not discard it and wedge.
+    // Compare-and-swap on `stored_epoch`. A network error or a `LostRace` may
+    // still mean our commit landed (lost response, retried submit), so resolve
+    // against the canonical log before discarding the branch (#411).
     match super::delivery::submit_commit(
         state,
         conversation_id,
         stored_generation,
         stored_epoch,
-        // An external join always CONTINUES the lineage it read the GroupInfo
-        // from; it never opens a new one, so it closes nothing.
+        // An external join continues the lineage it read; it closes nothing.
         None,
         user_id,
         &commit_bytes,
         Some(user_id),
         Some(&device_id),
         new_group_info_bytes.as_deref(),
-        // External join adds only self — no Welcomes to deliver.
         &[],
     )
     .await
@@ -734,40 +556,33 @@ async fn external_join_attempt(
                     "[mls] external_join: submit errored but our commit is canonical at epoch {stored_epoch} for {conversation_id} — adopting (lost response): {e}"
                 );
             } else {
-                // Genuine failure — discard the locally-finalized (orphaned)
-                // join branch for symmetry with the LostRace path (the caller
-                // only forgets on LostRace), then surface the error. Branch
-                // only, as there (#1220).
+                // The caller only forgets on LostRace, so drop the orphaned
+                // branch here (branch only, #1220).
                 forget_unconfirmed_branch(state, conversation_id, stored_generation).await;
                 return Err(e);
             }
         }
     }
 
-    // 3b. We are now a member of `stored_generation`. Record it BEFORE anything
-    //     reads the group back, so every subsequent load resolves to the lineage
-    //     we actually joined. Monotone, so a device that external-joined a stale
-    //     generation while a newer one exists cannot walk itself backwards.
+    // Record the generation before anything reads the group back, so every load
+    // resolves to the lineage we joined. Monotone: a stale join cannot walk the
+    // device backwards.
     {
         let guard = state.local_db.lock().await;
         if let Some(db) = guard.as_ref() {
-            // The log accepted the commit: the branch is now the canonical
-            // group (#1220).
             super::join_branch::clear(db.conn(), conversation_id, stored_generation);
             super::join_branch::mark_fresh_if_first(db.conn(), conversation_id, stored_generation);
-            // Recorded only now that the log has accepted the join: a branch
-            // that loses never held the lineage (#1312).
+            // Only once the log accepted the join: a losing branch never held
+            // the lineage (#1312).
             super::join_branch::record_first_join(
                 db.conn(),
                 conversation_id,
                 stored_generation,
                 stored_epoch as u64 + 1,
             );
-            // #1571: a device that was already registered when its user joined
-            // this conversation, and is only now joining at the head, missed
-            // what was sent in between through no accepted loss. Recorded from
-            // the same snapshot that admitted the join, so the ingest shows that
-            // gap instead of passing it as "sent before you joined".
+            // A device registered before its user joined, joining only now,
+            // missed the gap through no accepted loss; record it so the ingest
+            // shows it rather than "sent before you joined" (#1571).
             let fresh =
                 super::join_branch::take_fresh(db.conn(), conversation_id, stored_generation);
             super::join_branch::record_entitlement(
@@ -779,9 +594,7 @@ async fn external_join_attempt(
                 snap.member_since.as_deref(),
             );
             set_local_generation(db.conn(), conversation_id, stored_generation);
-            // Our leaf in this lineage is brand new and, being an external
-            // commit, already merged — but the rotation clock belongs to the
-            // lineage, not the conversation.
+            // The rotation clock belongs to the lineage, not the conversation.
             super::self_update::record_self_update(
                 db.conn(),
                 conversation_id,
@@ -790,20 +603,14 @@ async fn external_join_attempt(
         }
     }
 
-    // 4. Refresh the stored GroupInfo at the new epoch so any NEXT
-    //    new device joining via this same path sees the up-to-date
-    //    tree.
     if let Err(e) = publish_group_info(state, conversation_id).await {
         crate::diag!(
             "[mls] external_join_group: publish_group_info failed (non-fatal): {e}"
         );
     }
 
-    // Best-effort pin-key adopt (#99). Usually a no-op — our own external
-    // commit just advanced the epoch past the stored wrap, so the real adopt
-    // happens lazily once a key-holding member processes our join and
-    // re-wraps — but when the wrap somehow already matches (a re-join into a
-    // quiet group), this picks it up now.
+    // Usually a no-op (our commit advanced past the stored wrap; a key holder
+    // re-wraps later), but catches a wrap that already matches (#99).
     crate::commands::pinned_messages::try_adopt_pin_key(state, conversation_id).await;
     crate::commands::file_keys::try_adopt_file_keys(state, conversation_id).await;
 
@@ -814,54 +621,29 @@ async fn external_join_attempt(
     Ok(ExternalJoinResult::Joined)
 }
 
-// ── Phase 3: Group / DM creation ─────────────────────────────────────────────
-
-/// The material an external join needs in order to decide WHO built the group
-/// it is about to adopt (#1161 M6 residual).
-///
-/// A parameter rather than something [`build_external_commit`] fetches, because
-/// the fetch is async and the build is not — but a mandatory one, so that the
-/// provenance check cannot be skipped by adding a call site. The two failure
-/// biases it carries are opposite and both deliberate:
-///
-/// * `identities` unpinned or empty → every verdict is `Unverifiable`, which
-///   ADOPTS. A directory this device could not load must not brick a migration.
-/// * `roster` is `None` only when the roster could not be READ, never when the
-///   signer is merely absent from it. `Some(set)` is an assertion about who the
-///   conversation's members are, and a signer outside it is refused.
+/// What an external join needs to decide who built the group it adopts
+/// (#1161). A mandatory parameter of [`build_external_commit`], so no call
+/// site can skip the provenance check.
 pub(super) struct LineageProvenance<'a> {
-    /// The roster's cross-signing material, already through the local
-    /// substitutions (`reconcile::pin_identities`). An unpinned directory
-    /// certifies nothing, which is the safe direction here.
+    /// Already through `reconcile::pin_identities`. Unpinned or empty means
+    /// every verdict is `Unverifiable`, which adopts.
     pub identities: &'a IdentityDirectory,
-    /// The conversation's current member user ids, or `None` when the read that
-    /// would have answered failed.
+    /// `None` only when the roster read failed; `Some` asserts who the members
+    /// are, and a signer outside it is refused.
     pub roster: Option<&'a std::collections::HashSet<String>>,
 }
 
 impl LineageProvenance<'_> {
-    /// Is `user_id` a current member? `None` when the roster is unknown — the
-    /// distinction [`super::invariants::lineage_adoption`] turns on.
+    /// `None` when the roster is unknown.
     fn signer_on_roster(&self, user_id: &str) -> Option<bool> {
         self.roster.map(|r| r.contains(user_id))
     }
 }
 
-/// The leaf of `tree` that actually signed `vgi`, with the identity it claims.
-///
-/// `VerifiableGroupInfo::signer()` is `pub(crate)` at the pinned openmls rev
-/// (`34222ef6`), so the signer's leaf INDEX is not readable from outside the
-/// crate. It does not need to be: the signer is recovered by trial verification
-/// instead — the GroupInfo signature is checked against every leaf's signature
-/// key, and the leaf it verifies under IS the signer. That is strictly stronger
-/// than reading the index would have been, since an index is only a claim until
-/// the signature under that leaf's key is checked, which is the same check.
-///
-/// `tree` comes from the ratchet-tree extension via `RatchetTreeIn::into_verified`,
-/// which has already verified every leaf's own self-signature against its
-/// signature key AND against this `GroupId` and leaf position — so a credential
-/// here is bound to the key beside it by the holder of that key, not merely
-/// adjacent to it in a blob the DS wrote.
+/// The leaf of `tree` that actually signed `vgi`, found by trial verification
+/// because `VerifiableGroupInfo::signer()` is `pub(crate)` in openmls. `tree`
+/// must come from `RatchetTreeIn::into_verified`, which binds each credential
+/// to its signature key.
 fn group_info_signer<'t, C>(
     provider: &MlsProvider<'_, C>,
     scheme: SignatureScheme,
@@ -876,41 +658,16 @@ where
         let Ok(pk) = OpenMlsSignaturePublicKey::new(key.into(), scheme) else {
             return false;
         };
-        // `verify_no_out` rather than `verify`: the latter consumes the
-        // GroupInfo, which would mean cloning the whole ratchet-tree extension
-        // once per candidate leaf.
+        // `verify` consumes the GroupInfo, forcing a tree clone per leaf.
         vgi.verify_no_out(provider.crypto(), &pk).is_ok()
     })
 }
 
 /// Refuse a GroupInfo whose signer is not a certified device of a current
-/// roster member (#1161 M6 residual).
-///
-/// `build_external_commit` pins the lineage's NAME — the GroupId has to be
-/// `mls_group_id(conversation_id, generation)`. A GroupId is not a capability
-/// though: anyone can create an MLS group with an arbitrary one, so a hostile or
-/// compromised Delivery Service could stand up its own group under the
-/// successor's name, publish its GroupInfo as the conversation's newest lineage
-/// and answer `head_generation = N+1`. `maybe_advance_generation` reads a head
-/// above ours as proof a successor exists, external-joins it, and
-/// `adopt_generation_locked` then deletes the predecessor's key material —
-/// losing every un-ingested envelope below the rejoin epoch and leaving this
-/// device sealing for a group of the server's choosing. The same shape applies
-/// to a plain external-join recovery inside one generation.
-///
-/// None of the existing gates closes it: `may_rejoin_via_external_join` is
-/// answered by the same DS, the `pruned_below`/`hole` gate constrains DELETION
-/// on a gap rather than ADOPTION of a successor, and the cross-signing verdicts
-/// run on leaves a COMMIT grafts — a lineage entered by Welcome or external
-/// commit is never replayed through that path at its founding.
-///
-/// What closes it is that the GroupInfo is signed by a member of the group it
-/// describes and carries the ratchet tree, so the signer's leaf credential and
-/// signature key are both readable BEFORE adoption. A Delivery Service holds no
-/// account identity key, so it cannot mint a leaf the roster's cross-signing
-/// material certifies.
-///
-/// Runs before the stale-group delete below, so a refusal costs nothing.
+/// roster member (#1161 M6). A GroupId is not a capability, so a hostile DS
+/// could otherwise publish its own group under the successor's name; it holds
+/// no account identity key, so it cannot mint a certified signer. See
+/// "Adopting a lineage is gated twice" in .codesight/wiki/mls.md.
 fn check_lineage_provenance<C>(
     provider: &MlsProvider<'_, C>,
     conversation_id: &str,
@@ -930,12 +687,8 @@ where
         ))
     };
 
-    // Every group this client builds sets `use_ratchet_tree_extension(true)`,
-    // and an external commit cannot be built without the tree anyway, so a
-    // GroupInfo without one is not a lineage of ours. Refusing here only makes
-    // an error that would have happened in `build_group` happen before the
-    // delete, and keeps "we could not see who signed it" from being a way past
-    // this gate.
+    // Every group we build carries the tree, and an external commit needs it
+    // anyway; refusing here keeps "signer not visible" from bypassing the gate.
     let Some(tree_ext) = vgi.extensions().ratchet_tree() else {
         return Err(refuse(
             "the published GroupInfo carries no ratchet-tree extension, so there is no way to \
@@ -944,9 +697,7 @@ where
         ));
     };
 
-    // Binds every leaf's credential to the signature key beside it, and both to
-    // this GroupId and leaf position. A tree that fails here is one openmls
-    // would have rejected on the next line.
+    // Binds every leaf's credential to its signature key, GroupId and position.
     let tree = tree_ext
         .ratchet_tree()
         .clone()
@@ -983,11 +734,8 @@ where
         ))),
         super::invariants::LineageAdoption::Adopt => {
             if !matches!(standing, super::invariants::SignerStanding::Certified) {
-                // Adopted on the weak verdict, and said so. This is the
-                // deliberate bias — cert rows that have not replicated yet must
-                // not strand a legitimate migration — but it is the one case
-                // where the gate let something through it could not prove, so
-                // it is never silent.
+                // Deliberate bias (unreplicated cert rows must not strand a
+                // migration), but never silent.
                 crate::diag!(
                     "[mls] external join for {conversation_id} generation {generation}: adopting a \
                      GroupInfo signed by {signer_user}:{signer_device} whose cross-signing could \
@@ -999,18 +747,10 @@ where
     }
 }
 
-/// Build (and locally stage) an external commit joining the group described by
-/// `verifiable_group_info`, returning the serialised commit and the GroupInfo at
-/// the resulting epoch.
-///
-/// `suite` is the group's, read off the GroupInfo by the caller. It decides the
-/// scheme the joining leaf signs under, so passing the wrong one produces a
-/// commit the group rejects rather than a silently weaker signature.
-///
-/// `provenance` answers the question the GroupId pin cannot — see
-/// [`check_lineage_provenance`].
-///
-/// Sync: the caller owns the local-DB guard.
+/// Build and locally stage an external commit onto `verifiable_group_info`,
+/// returning the serialised commit and the GroupInfo at the resulting epoch.
+/// `suite` must be the group's own (read off the GroupInfo). The caller owns
+/// the local-DB guard.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_external_commit<C>(
     provider: &MlsProvider<'_, C>,
@@ -1025,7 +765,6 @@ pub(super) fn build_external_commit<C>(
 where
     C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
 {
-    // Load (or create) this device's stable MLS signing keypair for the suite.
     let scheme = signature_scheme(suite);
     let (sig_keys, sig_pub_bytes) =
         load_or_create_device_signer(provider, user_id, device_id, scheme)?;
@@ -1038,14 +777,8 @@ where
         signature_key: sig_pub.into(),
     };
 
-    // The GroupInfo must describe the lineage we MEANT to join (#1161 M6).
-    // Everything downstream — which local group is deleted, which lineage the
-    // join is recorded under, which conversation's messages this device then
-    // seals — is keyed on `(conversation_id, generation)`, while the blob itself
-    // arrives from the DS. Unchecked, a substituted GroupInfo made this device
-    // destroy one group's state and join a group of the server's choosing under
-    // that group's name. Checked FIRST, before the delete below, so a rejected
-    // blob costs nothing.
+    // The DS-supplied blob must name the lineage we meant to join (#1161 M6);
+    // checked before the delete below, so a rejected blob costs nothing.
     let group_id = mls_group_id(conversation_id, generation);
     if verifiable_group_info.group_id() != &group_id {
         return Err(crate::error::Error::Other(anyhow::anyhow!(
@@ -1055,9 +788,7 @@ where
         )));
     }
 
-    // …and it must have been built by a member of this conversation, not merely
-    // named after it (#1161 M6 residual). Also before the delete, for the same
-    // reason.
+    // …and have been built by a member, not merely named after the lineage.
     check_lineage_provenance(
         provider,
         conversation_id,
@@ -1068,16 +799,9 @@ where
         provenance,
     )?;
 
-    // Drop this device's own leftover branch for the lineage so the external
-    // commit builder doesn't collide — but NEVER a confirmed group (#1220). A
-    // confirmed group is on the canonical log and holds the only keys this
-    // device will ever have for its epoch; replacing it with a fresh branch at
-    // the next epoch made every envelope sealed at the old one undecryptable
-    // (the epoch-0 race: a retry clobbered the Welcome group the device had
-    // just joined). A caller that really means to rebuild a broken group
-    // deletes it first. Scoped to THIS lineage: a predecessor group under a
-    // different id is still needed to drain messages sealed before the
-    // migration.
+    // Drop our own leftover branch for this lineage, never a confirmed group: it
+    // holds the only keys for its epoch (#1220). A caller rebuilding a broken
+    // group deletes it first. Predecessor lineages are untouched.
     if let Ok(Some(mut old)) = MlsGroup::load(provider.storage(), &group_id) {
         let unconfirmed =
             super::join_branch::is_unconfirmed(provider.raw_conn(), conversation_id, generation);
@@ -1114,10 +838,8 @@ where
             "external commit finalize: {e}"
         )))?;
 
-    // The stored group is now a branch the log has not accepted (#1220). Marked
-    // in the same local-DB critical section that stored it, so nothing can see
-    // the branch without the marker. Cleared when the compare-and-swap wins, or
-    // with the branch when it loses.
+    // Marked in the same critical section that stored the branch, so nothing
+    // sees it unmarked (#1220).
     super::join_branch::mark_unconfirmed(
         provider.raw_conn(),
         conversation_id,
@@ -1140,18 +862,9 @@ where
     Ok((commit_bytes, group_info_bytes))
 }
 
-/// Create a fresh MLS group for `conversation_id` in an explicit ciphersuite,
-/// with `creator_user_id`:`device_id` as the sole initial member.
-///
-/// This is the one place a group's suite is decided; every later operation on
-/// the group inherits it from the stored group state, so nothing downstream
-/// needs a suite argument.
-///
-/// The suite is a parameter rather than a constant so it is visible at the call
-/// site, and so `super::migrate` can build a successor group on a suite that is
-/// not the one `init_mls_group` births on.
-///
-/// Sync: the caller owns the local-DB guard.
+/// Create a fresh group with `creator_user_id`:`device_id` as sole member. The
+/// one place a group's suite is decided; everything later inherits it from the
+/// stored state. The caller owns the local-DB guard.
 pub(super) fn create_mls_group_in_suite<C>(
     provider: &MlsProvider<'_, C>,
     conversation_id: &str,
@@ -1177,11 +890,8 @@ where
 
     let group_id = mls_group_id(conversation_id, generation);
 
-    // Delete any stale group with the same ID so the create below never
-    // collides.  This is a no-op on first creation and essential during
-    // repair (where the old group still exists but is broken/outdated).
-    // Lineage-scoped: standing up a successor (#454 P4) must not touch the
-    // predecessor, which is still serving reads until the migration lands.
+    // A repair recreates over a broken group with this id. Lineage-scoped: the
+    // predecessor keeps serving reads until a migration lands (#454).
     if let Ok(Some(mut old)) = MlsGroup::load(provider.storage(), &group_id) {
         let _ = old.delete(provider.storage());
     }
@@ -1201,13 +911,8 @@ where
     Ok(())
 }
 
-/// Internal: create a fresh MLS group for `conversation_id` with
-/// `creator_user_id` as the sole initial member.  Group state is persisted in
-/// the local `mls_kv` table via `MlsStore`.
-///
-/// `use_ratchet_tree_extension(true)` is set so that Welcome messages sent in
-/// Phase 4 embed the full ratchet tree — recipients can join without a separate
-/// out-of-band tree download.
+/// Create a new conversation's group at generation 0 with `creator_user_id` as
+/// sole member, then publish its GroupInfo and mint its pin and file keys.
 pub async fn init_mls_group(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -1216,8 +921,7 @@ pub async fn init_mls_group(
     let device_id = state.device_id.lock().await.clone()
         .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("device_id not set")))?;
 
-    // Scope the local_db guard so it is dropped before the async
-    // publish_group_info call below (which re-acquires it).
+    // Dropped before `publish_group_info`, which re-acquires it.
     {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| {
@@ -1227,62 +931,31 @@ pub async fn init_mls_group(
         create_mls_group_in_suite(
             &provider,
             conversation_id,
-            // A brand-new conversation starts on generation 0: there is no
-            // history to migrate.
             0,
             creator_user_id,
             &device_id,
-            // Every new group is born on the one suite this build ships (#669).
-            // #454 chose per group, behind a fleet-capability gate, because a
-            // classic-only device invited afterwards could never join a hybrid
-            // group — reconcile refuses to downgrade and MLS offers no other
-            // way in. With the classic suite retired there is no such device to
-            // lock out, so the gate and its two capability reads are gone
-            // rather than pinned open.
+            // The one suite this build ships (#669).
             current_suite(),
         )?;
     }
 
-    // Publish the epoch-0 GroupInfo so a future device enrolling via the
-    // Secret Key path can join this group via external commit.
     if let Err(e) = publish_group_info(state, conversation_id).await {
         crate::diag!("[mls] init_mls_group: publish_group_info failed (non-fatal): {e}");
     }
 
-    // Mint the conversation's pin master key while the creator is the sole
-    // member at epoch 0 (#99). Best-effort: on failure the first pin mints.
+    // Best-effort while the creator is sole member (#99): on failure the first
+    // pin mints.
     crate::commands::pinned_messages::mint_pin_key_for_new_group(state, conversation_id).await;
     crate::commands::file_keys::mint_file_keys_for_new_group(state, conversation_id).await;
 
     Ok(())
 }
 
-// ── Phase 4: Member changes ───────────────────────────────────────────────────
-
-/// Reload an existing MLS group from storage and recover the signer.
+/// Reload a stored group and its signer, looked up under the group's own
+/// suite's scheme.
 ///
-/// Returns `(MlsGroup, SignatureKeyPair)` ready for use with the provider whose
-/// connection was passed to `PollisProvider::new`.
-///
-/// Takes no ciphersuite: a group's suite is part of the stored group state, and
-/// since #668 the signature scheme follows from it — so the signer is looked up
-/// under `group.ciphersuite()`'s scheme, not a constant. A leaf key of the
-/// wrong scheme is simply absent from storage, which surfaces as "signer not
-/// found" rather than as a signature nobody can verify.
-///
-/// **Does NOT merge a pending commit (#1079).** It used to, unconditionally, and
-/// that put an epoch advance behind a function whose job is only "give me this
-/// group". A staged commit is a decision the commit log has not made yet, so
-/// merging it is only correct where the log's answer is known — at
-/// `reconcile::publish_staged_commit` or in `apply_one_commit` — or under the
-/// per-conversation MLS lock, after a catch-up, by a caller that is about to
-/// stage its own commit. Merging here let `try_mls_encrypt` (reached from
-/// `receipts::emit_receipt`, which by design takes no MLS lock) advance the
-/// group past a committer's un-decided epoch: on a lost race the device sat at a
-/// phantom epoch on a branch the log never held, and on a won one the
-/// pre-merge sweep skipped every envelope sealed at the closing epoch. Callers
-/// that need the merge do it themselves, in one line, where the decision belongs
-/// — see `no_new_site_merges_a_pending_commit` for the enforced list.
+/// Never merges a pending commit: only the commit log decides an epoch (#1079);
+/// the allowed merge sites are enforced by `no_new_site_merges_a_pending_commit`.
 pub(super) fn load_group_with_signer<C>(
     provider: &MlsProvider<'_, C>,
     conversation_id: &str,
@@ -1300,8 +973,6 @@ where
         )))?;
     super::provider::upgrade_sender_ratchet(&mut group, provider.storage());
 
-    // Retrieve the signature public key stored in the group's leaf node, then
-    // read back the full keypair from mls_kv.
     let sig_pub_bytes = group
         .own_leaf_node()
         .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("no own leaf node")))?
@@ -1319,14 +990,9 @@ where
     Ok((group, signer))
 }
 
-/// Wipe all local MLS state for a group without publishing a commit.
-///
-/// Used when the local user leaves a group.  MLS does not allow a member to
-/// commit their own removal (`remove_members` with self as target errors), so
-/// instead we just delete the local group epoch.  The remaining members still
-/// have this user in their group state until the next admin-issued commit, but
-/// forward secrecy ensures the leaver cannot decrypt messages after the next
-/// epoch advance.
+/// Wipe all local MLS state for a group without publishing a commit. Used on
+/// leave: MLS forbids committing your own removal, so the others drop this
+/// leaf on their next commit.
 pub async fn forget_local_mls_group(
     state: &Arc<AppState>,
     group_id: &str,
@@ -1341,14 +1007,8 @@ pub async fn forget_local_mls_group(
     forget_local_mls_group_at(state, group_id, generation).await
 }
 
-/// [`forget_local_mls_group`] scoped to one suite generation (#454 P4).
-///
-/// The lineage matters whenever a device holds two groups for one conversation:
-/// a migrator that lost its compare-and-swap must delete the *successor* it
-/// speculatively built and keep the predecessor it is still reading from, and
-/// a device adopting a successor deletes the *predecessor* once it is drained.
-/// Deleting "the group" without saying which would, in both cases, destroy the
-/// one that is still needed.
+/// [`forget_local_mls_group`] scoped to one generation (#454): a device may
+/// hold two lineages for one conversation and must delete only the one meant.
 pub(super) async fn forget_local_mls_group_at(
     state: &Arc<AppState>,
     group_id: &str,
@@ -1358,29 +1018,20 @@ pub(super) async fn forget_local_mls_group_at(
     let db = guard.as_ref().ok_or_else(|| {
         crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
     })?;
-    // Deleting is storage-only — no crypto backend, so no suite dispatch.
     if let Some(mut group) = load_stored_group_at(db.conn(), group_id, generation) {
-        // Leaving a lineage (a generation hop, a rebuild) leaves its epoch too:
-        // keep the file KEK, as every merge does, so a ring still wrapped there
-        // stays openable.
+        // Leaving a lineage leaves its epoch: keep the file KEK, as every merge
+        // does, so a ring still wrapped there stays openable.
         crate::commands::file_keys::keep_epoch_kek(&PollisProvider::new(db.conn()), &group);
         group.delete(&store_only(db.conn()))
             .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("mls delete group: {e}")))?;
     }
-    // Whatever was stored is gone, branch or not (#1220).
     super::join_branch::clear(db.conn(), group_id, generation);
-    // If the group wasn't found locally, nothing to clean up.
     Ok(())
 }
 
 /// Delete this device's unconfirmed external-join branch for the lineage, and
-/// nothing else (#1220).
-///
-/// A lost compare-and-swap means the branch is doomed — but by the time the
-/// loss is known the device's own Welcome may already have REPLACED the branch
-/// (`welcome_may_replace`), and that group is confirmed. Deleting it there was
-/// half of the epoch-0 message loss; the check and the delete share one
-/// local-DB critical section so the Welcome cannot land between them.
+/// nothing else (#1220): by now our own Welcome may have replaced it with a
+/// confirmed group. Check and delete share one critical section.
 pub(super) async fn forget_unconfirmed_branch(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -1408,30 +1059,12 @@ pub(super) async fn forget_unconfirmed_branch(
     super::join_branch::clear(db.conn(), conversation_id, generation);
 }
 
-/// Apply any commits from `mls_commit_log` that this member has not yet seen.
+/// Bring the local group for `mls_group_id` (already resolved) to the log's
+/// head, applying pending commits; a missing, evicted or gapped group recovers
+/// by external join, losing only the jumped-over epochs.
 ///
-/// Reads rows where `epoch >= current_local_epoch` in ascending order, applies
-/// each commit, and advances the local epoch.  An epoch gap (a missing interior
-/// commit while a higher epoch is present) does NOT wedge and needs no manual
-/// intervention: the member drops its stale local group and auto-recovers onto
-/// the current published epoch via external-join (the recovery block below /
-/// `may_rejoin_via_external_join`). Messages sealed at the jumped-over epochs are
-/// the only accepted loss.
-///
-/// `mls_group_id` must already be resolved (group_id for channels,
-/// conversation_id for DMs).
-/// Ensure this device has a local MLS group at the latest epoch for
-/// `mls_group_id`. Processes any pending commits from the commit log.
-/// If the local group is missing, evicted, or unrecoverably behind,
-/// falls back to external-join using the published GroupInfo.
-///
-/// `user_id` is needed for the external-join fallback.
-///
-/// Acquires the per-conversation MLS lock for the duration so concurrent
-/// callers on this device (send, channel/DM ingest, the realtime inbox
-/// handler) can't race into a commit fork. The actual work is in
-/// [`process_pending_commits_locked`]; callers that already hold the lock
-/// (e.g. reconcile's lost-race recovery) must call that directly.
+/// Takes the per-conversation MLS lock; callers already holding it use
+/// [`process_pending_commits_locked`].
 pub async fn process_pending_commits_inner(
     state: &Arc<AppState>,
     mls_group_id: &str,
@@ -1441,110 +1074,42 @@ pub async fn process_pending_commits_inner(
     process_pending_commits_locked(state, mls_group_id, user_id).await
 }
 
-/// Whether this device's `user_device` row still exists remotely. Gates the
-/// external-join *recovery* paths so a revoked device (row deleted by
-/// `revoke_device`) can't auto-rejoin a group it was removed from — which would
-/// squat an epoch and wedge the group under the UNIQUE(conversation_id, epoch)
-/// constraint.
-///
-/// Fails CLOSED (returns false) whenever the answer is not a confirmed `true`: a
-/// transient inability to confirm the device is still registered must NOT permit
-/// a rejoin. The DS `/v1/commits` endpoint does not itself gate submissions on
-/// device-revocation, so an errored check here is the only thing standing
-/// between a just-revoked device and a climb-back — treating "couldn't check" as
-/// "registered" is the same fail-OPEN hole `local_user_is_member` closes for
-/// membership. This is never a permanent lockout: a legitimate device recovers
-/// on the next catch-up pass once the read succeeds.
-///
-/// #987 note: this used to fail OPEN for a missing local `device_id`, on the
-/// grounds that no device context is not a failed check. That branch is gone
-/// because it is now unreachable — the snapshot is a device-SIGNED request, so a
-/// device with no id cannot obtain one at all, and the surrounding replay path
-/// already requires an unlocked session. It also used to plead that an error was
-/// "vanishingly unlikely" because the same `remote_db` had just been read for
-/// the commit log. That sentence is retired: both are HTTP now, so the safety
-/// rests on the bias rather than on the improbability.
+/// Whether this device is still registered, so a revoked device cannot
+/// external-join back in. Fails closed: the DS does not gate commits on
+/// revocation, so "couldn't check" must not permit a rejoin; a legitimate
+/// device recovers on the next pass.
 fn local_device_registered(snap: Option<&pollis_api::reads::ConversationState>) -> bool {
-    // `None` = the snapshot request failed; `Some(state)` with
-    // `device_registered: None` = the DS could not read `user_device`. Both are
-    // "couldn't check", and both are false here. The two are kept distinct on
-    // the wire so a sick main DB is visible rather than disguised as a fleet of
-    // plausible revocations, but the CLIENT's rule is the same for both.
+    // A failed request and a DS that couldn't read `user_device` are distinct
+    // on the wire, but both are "couldn't check" here.
     snap.and_then(|s| s.device_registered).unwrap_or(false)
 }
 
-/// Whether `user_id` is a CURRENT member of the conversation backed by
-/// `mls_group_id`. Gates the external-join *recovery* paths on group membership
-/// so a member who was REMOVED from the group (their `group_member` /
-/// `dm_channel_member` row deleted) can't rebuild/rejoin itself — even though the
-/// device is still registered (not revoked). `local_device_registered` alone does
-/// NOT catch this: a removed-but-not-revoked device passes that gate, and the DS
-/// `/v1/commits` endpoint does not gate submissions on membership, so a removed
-/// member's external-join would otherwise WIN its epoch on the CAS and climb the
-/// removed member back into the tree — a membership leak (fuzzer finding #2).
-///
-/// Answered by `pollis_delivery::writes::is_member` — the very predicate the DS
-/// enforces on the write half of these tables, so the two can no longer drift.
-///
-/// Fails CLOSED (returns false) whenever the answer is not a confirmed `true`:
-/// unlike the revoked-device check, this guards a membership *leak*, so when we
-/// cannot confirm membership we must NOT rebuild. This is never a permanent
-/// lockout — a legitimate current member simply recovers on the next catch-up
-/// pass once the read succeeds.
-///
-/// #987 note: this gate used to justify itself with "the same `remote_db` was
-/// already read successfully for the commit-log fetch, so a failure here is
-/// vanishingly unlikely". That sentence is retired. The commit fetch is now an
-/// HTTP call and so is this, so a failure is an ORDINARY event rather than a
-/// vanishing one — which is why the bias, not its improbability, is what the
-/// safety argument now rests on. The two are in fact the SAME call since #987,
-/// so they cannot disagree.
+/// Whether `user_id` is a current member, so a removed-but-not-revoked device
+/// cannot external-join back in (fuzzer finding #2). Fails closed: this guards a
+/// membership leak. Answered by the DS's own `is_member` predicate.
 fn local_user_is_member(snap: Option<&pollis_api::reads::ConversationState>) -> bool {
     snap.and_then(|s| s.is_member).unwrap_or(false)
 }
 
-/// Whether an undelivered MLS `Welcome` for THIS device targets `mls_group_id`.
+/// Whether an undelivered Welcome for this device targets the group; if so,
+/// external-join recovery stands down rather than race it. A failed apply
+/// still marks the row delivered, so an orphaned Welcome hands off to
+/// external join on a later pass.
 ///
-/// When true, the Welcome is the canonical join path and the external-join
-/// *recovery* must stand down: firing external-join in parallel makes this device
-/// race its own inbound Welcome — both do "delete stale local group → (re)join" —
-/// which can clobber the freshly-joined group and strand the member
-/// (`no GroupInfo stored — cannot external-join`, the DM-accept convergence race).
-///
-/// Self-healing: `apply_welcome` (via `poll_mls_welcomes_inner`) marks the row
-/// `delivered = 1` even when apply FAILS, so this gate lifts on a later pass once
-/// the Welcome is genuinely consumed — a truly orphaned Welcome then hands off to
-/// external-join rather than deadlocking recovery forever.
-///
-/// Fails OPEN (returns `false` ⇒ "no Welcome, don't suppress") whenever the
-/// answer is not a confirmed `true`: a transient inability to see the Welcome
-/// must never permanently block recovery — external-join, which needs the
-/// GroupInfo from the same snapshot, is the pre-existing fallback and simply
-/// no-ops itself if that isn't visible either.
-///
-/// **This is the OPPOSITE bias to [`local_user_is_member`], seven lines away,
-/// and they must not be collapsed into one error path.** They read the same
-/// snapshot; they do not share a default.
+/// Fails open, the opposite bias to [`local_user_is_member`] on the same
+/// snapshot; don't merge their error paths.
 fn has_pending_welcome(snap: Option<&pollis_api::reads::ConversationState>) -> bool {
     snap.map(|s| s.welcome_pending).unwrap_or(false)
 }
 
-/// Both cooperative gates on the external-join *recovery* paths: this device is
-/// still registered (not revoked) AND its user is still a current member of the
-/// group. A `false` from either means "do not rebuild/rejoin". Logs the specific
-/// reason so a skipped recovery is never a silent no-op.
+/// Registered AND a current member, via the Kani-proved
+/// `invariants::may_rejoin`. Logs which gate refused, so a skipped recovery is
+/// never silent.
 fn may_rejoin_via_external_join(
     snap: Option<&pollis_api::reads::ConversationState>,
     mls_group_id: &str,
     user_id: &str,
 ) -> bool {
-    // The two gates as booleans, then the (proved) pure conjunction. Each `false`
-    // still logs its specific reason so a skipped recovery is never a silent
-    // no-op, and the membership query is short-circuited when the device is
-    // already revoked (unchanged from the original). The AND itself is
-    // `invariants::may_rejoin`, proved by Kani to admit a rejoin ONLY for
-    // (registered && member) — a revoked or removed device can never climb back
-    // in (fuzzer finding #2).
     let registered = local_device_registered(snap);
     if !registered {
         crate::diag!(
@@ -1563,8 +1128,8 @@ fn may_rejoin_via_external_join(
     super::invariants::may_rejoin(registered, is_member)
 }
 
-/// Body of [`process_pending_commits_inner`]. Assumes the caller already holds
-/// the per-conversation MLS lock (`state.mls_group_lock`).
+/// Body of [`process_pending_commits_inner`]; the caller holds
+/// `state.mls_group_lock`.
 pub(crate) async fn process_pending_commits_locked(
     state: &Arc<AppState>,
     mls_group_id: &str,
@@ -1573,37 +1138,13 @@ pub(crate) async fn process_pending_commits_locked(
     process_pending_commits_locked_impl(state, mls_group_id, user_id, None, None).await
 }
 
-/// Like [`process_pending_commits_inner`], but after the local group reaches
-/// each epoch during the replay it invokes `on_epoch(conn, epoch)` so the caller
-/// can decrypt the application-message envelopes sealed at that epoch BEFORE the
-/// next commit advances past it.
+/// Like [`process_pending_commits_inner`], but calls `on_epoch(conn,
+/// generation, epoch)` at the starting epoch and after each applied commit, so
+/// the caller decrypts each epoch's envelopes before `max_past_epochs = 0`
+/// destroys its keys (#418). It does not fire for epochs a recovery jump skips.
 ///
-/// This is the interleave that makes offline catch-up correct under
-/// `max_past_epochs = 0` (issue #418). With the default `max_past_epochs = 0`,
-/// the ratchet keys for an epoch are discarded the instant the group advances
-/// past it. The old ingest path applied *every* pending commit first — jumping
-/// straight to head — and only then tried to decrypt the backlog, so any message
-/// sent at an intermediate epoch was sealed under keys that no longer existed and
-/// decrypted as `WrongEpoch`, permanently lost. By decrypting each epoch's
-/// messages while the group is still AT that epoch, every message a current
-/// member was eligible to read survives a heavy offline-churn catch-up.
-///
-/// `on_epoch` fires once for the member's starting epoch (before any commit) and
-/// once after each commit that successfully advances the group. It does NOT fire
-/// for epochs skipped by a recovery jump (epoch-gap / fork / eviction →
-/// external-join); messages at those epochs are caught on the NEXT ingest, when
-/// the rejoined epoch becomes the starting epoch.
-///
-/// It receives the `(generation, epoch)` pair, not the epoch alone (#454 P4).
-/// After a suite migration a conversation has two lineages and the successor
-/// restarts at epoch 0, so "epoch 1" is ambiguous across a migration; only the
-/// pair is monotone, and it is the pair the ingest watermark advances on.
-///
-/// `bound` is the commit-log head the caller read BEFORE it fetched the
-/// envelopes it will decrypt from `on_epoch` (#1041). The replay applies only
-/// commits strictly below it — see [`ReplayBound`] — so the group never advances
-/// past an epoch whose envelopes this pass could not have fetched. `None` (an
-/// older DS, or a caller with no envelopes in hand) replays to head as before.
+/// `bound` is the log head read before the envelope fetch; see [`ReplayBound`].
+/// `None` replays to head.
 pub async fn process_pending_commits_inner_with_hook(
     state: &Arc<AppState>,
     mls_group_id: &str,
@@ -1617,60 +1158,35 @@ pub async fn process_pending_commits_inner_with_hook(
 
 /// How far one ingesting replay may advance the local group (#1041).
 ///
-/// An ingest pass reads the commit-log head, then fetches envelopes, then
-/// fetches commits — three requests, and the log keeps moving between them.
-/// With `max_past_epochs = 0` a commit, once merged, destroys the keys of the
-/// epoch it leaves; so a commit the pass applies that was accepted AFTER its
-/// envelope fetch can destroy the keys for an envelope that fetch did not carry
-/// — sealed at the epoch the commit closed, posted after the fetch — and that
-/// envelope is lost to this device forever, even though it was a member at the
-/// epoch it was sealed. Bounding the replay at the head the pass read FIRST
-/// closes the window: every commit it applies was in the log before the
-/// envelope fetch, so every envelope sealed at an epoch this pass leaves was
-/// either in the fetch or refused by the DS's epoch gate (#1041) and re-sealed
-/// by its sender at a later epoch. Whatever the bound holds back is applied on
-/// the next pass, whose fetch carries the envelopes that arrived meanwhile.
-///
-/// Lexicographic on `(generation, epoch)`: a successor lineage restarts at
-/// epoch 0, and a bound in a later generation releases every commit of the
-/// current one.
+/// The pass reads the log head before fetching envelopes; applying a commit
+/// accepted after that fetch could destroy the keys for an envelope the fetch
+/// missed. Held-back commits apply next pass. Lexicographic on
+/// `(generation, epoch)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ReplayBound {
     pub generation: i64,
-    /// The head epoch in `generation` — the epoch the next accepted commit
-    /// will be based on. A commit row at this epoch or beyond is not applied.
+    /// The head epoch in `generation`; a commit row at or beyond it is not
+    /// applied.
     pub epoch: u64,
 }
 
 impl ReplayBound {
-    /// Whether a commit row at `(generation, epoch)` lies below the bound and
-    /// may be applied on this pass.
     pub fn admits(self, generation: i64, epoch: u64) -> bool {
         (generation, epoch) < (self.generation, self.epoch)
     }
 
-    /// Whether the bound lies in a generation beyond `generation`, i.e. the log
-    /// had already opened a successor lineage when the bound was read, so
-    /// adopting one on this pass cannot skip envelopes the pass did not fetch.
+    /// The log had already opened a successor lineage when the bound was read,
+    /// so adopting one this pass cannot skip unfetched envelopes.
     pub fn allows_generation_beyond(self, generation: i64) -> bool {
         self.generation > generation
     }
 }
 
-/// Most suite generations a single pass will hop across (#454 P4).
-///
-/// Crossing a boundary re-enters the replay so the successor's commits are
-/// applied with the interleave hook still live, rather than waiting for the next
-/// sweep — a conversation that migrated while this device was offline would
-/// otherwise ingest nothing from the new lineage on the pass that discovers it.
-/// Bounded because "adopt a newer generation" is driven by server-reported state:
-/// an unbounded loop would let a misbehaving DS spin this pass forever. Four is
-/// far beyond any real fleet — a conversation migrates once per suite era.
+/// Most generations one pass will hop across, so the successor's commits are
+/// replayed with the hook still live (#454). Bounded because the hop is driven
+/// by server-reported state; a migration happens once per suite era.
 const MAX_GENERATION_HOPS: usize = 4;
 
-/// The per-epoch hook a replay pass may carry: called with the open connection,
-/// the generation and the epoch each time a commit is applied. Named because the
-/// bare `dyn FnMut(..) + Send + 'h` was spelled out at every level of the replay.
 type EpochHook<'h> = dyn FnMut(&rusqlite::Connection, i64, u64) + Send + 'h;
 
 async fn process_pending_commits_locked_impl(
@@ -1691,13 +1207,10 @@ async fn process_pending_commits_locked_impl(
     Ok(())
 }
 
-/// One replay pass over a single suite lineage. Returns whether it ended by
-/// adopting a NEWER generation, in which case the caller replays again — the
-/// successor's commits have not been applied yet.
-// `'h` is named rather than elided so the hook's own lifetime is decoupled from
-// the reborrow that reaches it: the caller loops, handing this fn a fresh short
-// `&mut` to the same `Option` on every hop, which only typechecks if the trait
-// object may outlive that borrow.
+/// One replay pass over a single lineage. Returns whether it adopted a newer
+/// generation, whose commits the caller must then replay.
+// `'h` is named so the trait object may outlive the fresh `&mut` reborrow the
+// caller hands in on every hop.
 async fn process_one_generation<'h>(
     state: &Arc<AppState>,
     mls_group_id: &str,
@@ -1705,7 +1218,6 @@ async fn process_one_generation<'h>(
     mut on_epoch: Option<&mut EpochHook<'h>>,
     bound: Option<ReplayBound>,
 ) -> crate::error::Result<bool> {
-    // 1. Get the current lineage + epoch from the local group.
     let (generation, has_group) = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| {
@@ -1720,35 +1232,10 @@ async fn process_one_generation<'h>(
     let initial_epoch = match has_group {
         Some(epoch) => epoch,
         None => {
-            // No local group. Two ways in — the inbound Welcome (apply_welcome)
-            // and external-join *recovery* — and they must not both run: both do
-            // "delete stale local group → (re)join", so in parallel the device
-            // races its own Welcome and can clobber the freshly-joined group,
-            // stranding it (`no GroupInfo stored — cannot external-join`, the
-            // DM-accept convergence race). Arbitrate through the pure I6 gate
-            // (`invariants::join_recovery`, Kani-proved to admit ExternalJoin ONLY
-            // when no Welcome is pending):
-            //   * a queued Welcome wins — defer to it (it self-heals into
-            //     external-join on a later pass if it never applies);
-            //   * otherwise external-join, UNLESS this device was revoked (its
-            //     `user_device` row is gone) OR its user was removed from the group
-            //     — either must not climb back in (a revoked/removed member's
-            //     external-join squats an epoch and, under
-            //     UNIQUE(conversation_id, epoch), wedges the group; absent a DS
-            //     membership gate on `/v1/commits` a removed member would also
-            //     rejoin the tree and decrypt post-removal traffic — membership
-            //     leak, fuzzer finding #2).
-            //
-            // All three inputs come from ONE snapshot, and the pairing is
-            // load-bearing rather than a saving: split across requests, a device
-            // can see a GroupInfo without the Welcome `submit_commit` wrote in
-            // the same transaction, pick ExternalJoin, and strand itself. The
-            // gate is Kani-proved over a pure function, so two snapshots would
-            // not fail the proof — they would make it vacuous.
-            //
-            // Each gate keeps its OWN bias on a failed request, which is why the
-            // three lines below read the same `Option` three different ways and
-            // must not be folded together.
+            // No local group: Welcome vs external-join recovery, arbitrated by
+            // the Kani-proved `invariants::join_recovery` (I6). All three inputs
+            // must come from ONE snapshot, and each keeps its own failure bias —
+            // see "Welcome-first arbitration" in .codesight/wiki/mls.md.
             let snap = super::ds_reads::conversation_snapshot(
                 state,
                 super::ds_reads::state_query(mls_group_id, Some(generation)),
@@ -1762,16 +1249,9 @@ async fn process_one_generation<'h>(
             })
             .ok();
             let snap = snap.as_ref().filter(|s| s.authorized);
-            // Fails OPEN — a Welcome we cannot see must never permanently block
-            // recovery.
             let welcome_pending = has_pending_welcome(snap);
-            // Fails CLOSED — a membership we cannot confirm must never license a
-            // rebuild.
             let may_rejoin = may_rejoin_via_external_join(snap, mls_group_id, user_id);
-            // #832: external-join builds a commit ON the published GroupInfo, so
-            // with no `mls_group_info` row there is nothing to join onto. Feeding
-            // that to the gate is what stops it selecting an impossible join and
-            // retrying it once per pass through the pre-establishment window.
+            // Without GroupInfo there is nothing to join onto (#832).
             let group_info_available = snap.and_then(group_info_head_of).is_some();
             match super::invariants::join_recovery(
                 welcome_pending,
@@ -1786,18 +1266,15 @@ async fn process_one_generation<'h>(
                              (not external-joining) to avoid racing our own Welcome"
                         );
                     } else {
-                        // No GroupInfo yet: the group is not established from our
-                        // view, so a Welcome is the only way in. Poll for it NOW
-                        // rather than waiting for the next sweep — idempotent, and
-                        // it is the step that actually converges this state (#832).
+                        // A Welcome is the only way in: poll for it now rather
+                        // than wait for the next sweep (#832).
                         crate::diag!(
                             "[mls] process_pending_commits: no local group for {mls_group_id} and no \
                              published GroupInfo — awaiting a Welcome (external-join would have \
                              nothing to join onto); polling welcomes now"
                         );
-                        // `Box::pin`: poll_mls_welcomes can re-enter this path
-                        // (welcome → apply → process commits), so the future is
-                        // recursive and needs indirection to have a finite size.
+                        // `Box::pin`: the welcome poll re-enters this path, so the
+                        // future is recursive.
                         if let Err(e) =
                             Box::pin(super::poll_mls_welcomes(state, user_id.to_string())).await
                         {
@@ -1808,23 +1285,19 @@ async fn process_one_generation<'h>(
                     }
                 }
                 super::invariants::JoinRecovery::ExternalJoin => {
-                    // Lock already held by the wrapper, so call the unlocked inner variant.
                     if let Err(e) = external_join_group_inner(state, mls_group_id, user_id).await {
                         crate::diag!("[mls] process_pending_commits: no local group for {mls_group_id}, external-join failed: {e}");
                     }
                 }
                 super::invariants::JoinRecovery::StayOut => {
-                    // `may_rejoin_via_external_join` already logged the specific
-                    // revoked/removed reason.
+                    // `may_rejoin_via_external_join` already logged why.
                 }
             }
             return Ok(false);
         }
     };
 
-    // #418 interleave: decrypt the envelopes sealed at the member's CURRENT
-    // epoch before any commit advances the group past it. (No-op for callers
-    // that pass no hook — e.g. send / reconcile catch-up.)
+    // Decrypt the current epoch's envelopes before any commit leaves it (#418).
     if let Some(hook) = on_epoch.as_deref_mut() {
         let guard = state.local_db.lock().await;
         if let Some(db) = guard.as_ref() {
@@ -1832,22 +1305,10 @@ async fn process_one_generation<'h>(
         }
     }
 
-    // 2. Fetch pending commits, and with them the cross-signing rows for every
-    //    user the batch's add-metadata HINTS at (#987), so verifying the leaves a
-    //    commit adds costs no round trip per add-carrying commit. The leaves
-    //    themselves are diffed out of the merged tree (`grafted_leaves`) —
-    //    never off the hint columns, which the committer wrote.
-    //
-    //    Scoped to ONE lineage: commits of a different generation are encrypted
-    //    under a different suite's key schedule and are not replayable here.
-    //
-    //    The DS reads `head`, `head_generation` and the batch inside ONE
-    //    transaction and REFUSES to answer with a non-contiguous batch, which is
-    //    what makes the gap classification below safe to act on: a hole reaching
-    //    this loop triggers `forget_local_mls_group_at`, i.e. deletion of this
-    //    device's MLS crypto state, so "the log is append-only and reads are
-    //    consistent" had to stop being an assumption about the transport and
-    //    become a checked property of the response.
+    // Pending commits of this lineage only, plus cross-signing rows for every
+    // user the batch's add hints name (#987). The DS reads head and batch in one
+    // transaction and checks contiguity, which is what makes the gap handling
+    // below safe to act on.
     let snapshot = super::ds_reads::conversation_snapshot(
         state,
         pollis_api::reads::ConversationStateQuery {
@@ -1860,11 +1321,7 @@ async fn process_one_generation<'h>(
     )
     .await?;
     if !snapshot.authorized {
-        // Removed from the conversation. Not an error and not a recovery
-        // trigger: `may_rejoin_via_external_join` is the gate that decides
-        // whether to climb back, and it answers `false` for exactly this case.
-        // Replaying commits we are no longer entitled to read is not an option
-        // the DS leaves open, so this pass simply ends.
+        // Removed: neither an error nor a recovery trigger.
         crate::diag!(
             "[mls] process_pending_commits: {user_id} is not a member of {mls_group_id} — nothing to replay"
         );
@@ -1878,18 +1335,9 @@ async fn process_one_generation<'h>(
         commit_data: Vec<u8>,
     }
 
-    // Three different reasons the batch can look short, all recovered the same
-    // way (drop the local group, external-join onto the head) and all worth
-    // telling apart in a log, because only one of them is a bug:
-    //
-    //   * a retention prune (#539) — the floor moved, `pruned_below > since`;
-    //   * genuine damage — a row missing BETWEEN two present epochs, which the
-    //     DS reports as `hole` after checking contiguity inside the same read
-    //     transaction as the batch and the head;
-    //   * a torn read — which is what the single transaction eliminated, and is
-    //     the reason `hole` can now be trusted at all. Before #987 the batch and
-    //     the head came off separate statements, so this path could destroy a
-    //     live group recovering from a gap the log never had.
+    // A short batch is a retention prune (#539) or, rarer, real damage
+    // (`hole`); both recover the same way, but only damage is a bug, so log them
+    // apart.
     if let Some(floor) = snapshot.pruned_below {
         if floor > initial_epoch as i64 {
             crate::diag!(
@@ -1909,9 +1357,7 @@ async fn process_one_generation<'h>(
         );
     }
 
-    // The server's own account of why the batch might be short, captured before
-    // the snapshot is consumed — the gap gate below is allowed to destroy crypto
-    // state only when one of these covers the epoch we are missing (#1161 M6).
+    // Captured before the snapshot is consumed; the gap gate needs them.
     let hole_expected = snapshot.hole.and_then(|h| u64::try_from(h.expected).ok());
     let pruned_floor = snapshot.pruned_below.and_then(|f| u64::try_from(f).ok());
 
@@ -1924,21 +1370,9 @@ async fn process_one_generation<'h>(
         });
     }
 
-    // Cross-signing rows for every user the batch's hints name, fetched with the
-    // batch rather than once per commit (#987 §5). INPUTS only: the verdict is a
-    // signature check over a chain rooted in the added user's own identity key,
-    // and the DS is outside the trust boundary. A user the hint omitted is simply
-    // absent, which verdicts `Unverifiable` — a committer can make its own
-    // honest add look suspicious by lying here, never make a rogue one pass.
-    //
-    // …and then PINNED, through the same helper the committing side uses
-    // (#1161 M3). Without it the receive side judged leaves against a directory
-    // the DS supplied end to end — including, for a leaf claiming OUR OWN user
-    // id, a DS-supplied copy of our own account key instead of the one in the
-    // device keystore. Both substitutions only ever weaken a verdict, so the
-    // failure case is a flag the eviction reconcile self-corrects, never a
-    // stalled replay: an unpinnable directory degrades to an EMPTY one, which
-    // verdicts every leaf `Unverifiable`, rather than to a DS-authored one.
+    // DS-supplied rows are inputs only; pin them as the committing side does
+    // (#1161 M3). An unpinnable directory degrades to an empty one (every leaf
+    // `Unverifiable`), never to a DS-authored one.
     let directory = match super::reconcile::pin_identities(
         state,
         IdentityDirectory::new(snapshot.added_identities),
@@ -1956,27 +1390,16 @@ async fn process_one_generation<'h>(
         }
     };
 
-    // 3. Apply each commit in epoch order. Every leaf a commit GRAFTS — diffed
-    //    out of the tree after the merge, whichever proposal type introduced it
-    //    (#1161 H4) — is checked against the added user's account key; a leaf
-    //    that is not certified is flagged and evicted afterwards (see
-    //    `report_uncertified_leaves`). The commit is still
-    //    merged: it won the epoch CAS and is canonical, so refusing it would
-    //    strand this device behind the group with no honest way back (the
-    //    ELECTRON-epoch-11 incident). Eviction is the append-only answer.
+    // Uncertified grafted leaves are flagged and evicted afterwards, but the
+    // commit is still merged: it is canonical, and refusing it would strand this
+    // device (#1161 H4).
     let mut flagged: Vec<(AddedLeaf, i64, String, FlagKind)> = Vec::new();
     let mut current_epoch = initial_epoch;
     let mut any_applied = false;
-    // Set when a commit could not be applied and the lineage must be rebuilt
-    // (#680). Carried out of the loop so recovery is driven by an EXPLICIT reason,
-    // never inferred from a group's mere absence — a group that exists locally yet
-    // cannot advance must still recover, not wedge.
+    // Recovery is driven by an explicit reason, never inferred from a group's
+    // absence: a group that exists yet cannot advance must recover too (#680).
     let mut recover: Option<RecoverReason> = None;
     for commit in pending {
-        // #1041: a commit at or beyond the head this pass read before fetching
-        // its envelopes was accepted after that fetch, and merging it would
-        // discard the keys for envelopes the fetch could not have carried. Leave
-        // it — and everything after it — to the next pass. See `ReplayBound`.
         if let Some(b) = bound {
             if !b.admits(generation, commit.epoch as u64) {
                 crate::diag!(
@@ -1989,31 +1412,13 @@ async fn process_one_generation<'h>(
             }
         }
 
-        // Gap classification (I1), proved by Kani (`invariants::classify`) never
-        // to `Apply` across a gap: `Apply` iff this row's epoch is exactly
-        // `current_epoch`, else `GapRecover`. Abstracted by the `Apply` /
-        // `ExternalJoin` actions in `specs/tla/CommitLog.tla` (Spec A): TLC
-        // checks this replay+recovery loop never adopts a foreign commit
-        // (NoForeignAdopt, I2) over the log the DS `submit_commit` maintains.
+        // I1, Kani-proved never to `Apply` across a gap; modelled by
+        // `specs/tla/CommitLog.tla` (NoForeignAdopt, I2).
         if super::invariants::classify(current_epoch, Some(commit.epoch as u64))
             != super::invariants::ReplayStep::Apply
         {
-            // The commit that would bridge `current_epoch` -> next is missing
-            // from the log while a HIGHER epoch is present. Recovery means
-            // dropping the local group so the block at the end external-joins us
-            // onto the current published epoch — which deletes the only keys
-            // that can still open envelopes sealed on this lineage, and
-            // classifies every un-ingested one below the rejoin epoch as
-            // handled. (It drops MLS crypto state only, never decrypted message
-            // history — that lives in the local `message` table.)
-            //
-            // So the gap alone does not license it (#1161 M6). The DS has to
-            // have DECLARED, in the same read transaction that served this
-            // batch, an explanation that covers the epoch we are missing: a
-            // retention floor above us, or its own contiguity check naming this
-            // exact epoch. Anything else holds position — nothing deleted,
-            // nothing advanced, retried next pass — so one malformed or hostile
-            // response cannot spend this device's crypto state.
+            // Rebuilding deletes this lineage's keys, so only a declared prune or
+            // hole covering our epoch licenses it (#1161 M6).
             match super::invariants::gap_recovery(current_epoch, hole_expected, pruned_floor) {
                 super::invariants::GapRecovery::Rebuild => {
                     crate::diag!(
@@ -2039,8 +1444,6 @@ async fn process_one_generation<'h>(
 
         let commit_data = commit.commit_data;
 
-        // All MLS work is synchronous and scoped so nothing !Send crosses
-        // the lock().await boundary.
         let applied: Option<u64> = {
             let guard = state.local_db.lock().await;
             let db = match guard.as_ref() {
@@ -2052,19 +1455,11 @@ async fn process_one_generation<'h>(
                 apply_one_commit(&provider, mls_group_id, generation, commit.epoch, &commit_data);
             match outcome {
                 CommitApply::Applied { adds, epoch_after } => {
-                    // A canonical commit applied on top of the stored group
-                    // proves it is on the log; if it was an external-join
-                    // branch whose acceptance was never recorded (a crash
-                    // between the compare-and-swap and the record), it is
-                    // confirmed now (#1220).
+                    // A canonical commit on top of the stored group confirms a
+                    // branch whose acceptance a crash left unrecorded (#1220).
                     super::join_branch::clear(db.conn(), mls_group_id, generation);
-                    // Verify AFTER the merge and OFF THE TREE: a StagedCommit
-                    // cannot be dropped and re-processed later (its ratchet
-                    // generation is consumed), so there is no "defer" — only
-                    // verify-and-flag, with eviction as the remedy. `adds` is
-                    // the post-merge tree diff (#1161 H4), so a leaf grafted by
-                    // an external join's UpdatePath is verdicted exactly like
-                    // one an Add proposal introduced.
+                    // A StagedCommit cannot be re-processed later, so there is
+                    // no defer: verify after the merge, flag, evict.
                     for leaf in adds {
                         let verdict = directory.leaf_verdict(
                             &leaf.user_id,
@@ -2075,9 +1470,6 @@ async fn process_one_generation<'h>(
                         let Some((reason, kind)) = flag_for(verdict) else {
                             continue;
                         };
-                        // #1127: say which of the two this is. "Could not tell"
-                        // and "is not that account's key" read very differently
-                        // to whoever finds this in a log.
                         let verdict_phrase = match kind {
                             FlagKind::Uncertified => "is NOT cross-signed by that account",
                             FlagKind::Unverifiable => "could not be verified against that account (yet)",
@@ -2090,13 +1482,10 @@ async fn process_one_generation<'h>(
                         );
                         flagged.push((leaf, commit.epoch, reason, kind));
                     }
-                    // #1161 C2: the replay counter and the group's real epoch
-                    // must stay equal — every envelope this pass buckets, and
-                    // therefore every watermark it advances past, is keyed on
-                    // `current_epoch`. So read the epoch back off the merged
-                    // group and CHECK it rather than assuming `+= 1`: a single
-                    // silent divergence here mis-buckets every later envelope,
-                    // and `watermark.rs` then marks each one permanently handled.
+                    // Envelopes and watermarks are bucketed on `current_epoch`,
+                    // so check it against the merged group rather than assume
+                    // `+= 1`: one divergence mis-buckets every later envelope
+                    // (#1161 C2).
                     if epoch_after != commit.epoch as u64 + 1 {
                         crate::diag!(
                             "[mls] process_pending_commits: {mls_group_id} applied the commit at \
@@ -2122,9 +1511,7 @@ async fn process_one_generation<'h>(
             }
         };
 
-        // The desync guard above sets `recover` and yields `None` — stop the
-        // replay rather than run the epoch hook against a counter we have just
-        // proved wrong.
+        // Never run the hook against a counter just proved wrong.
         if recover.is_some() {
             break;
         }
@@ -2132,10 +1519,7 @@ async fn process_one_generation<'h>(
         if let Some(epoch_after) = applied {
             current_epoch = epoch_after;
             any_applied = true;
-            // #418 interleave: the commit we just merged advanced the group to
-            // `current_epoch`. Decrypt the envelopes sealed at this epoch NOW,
-            // while the group still holds its ratchet keys — the next iteration's
-            // commit will advance past it and (max_past_epochs = 0) discard them.
+            // #418: decrypt this epoch now; the next commit discards its keys.
             if let Some(hook) = on_epoch.as_deref_mut() {
                 let guard = state.local_db.lock().await;
                 if let Some(db) = guard.as_ref() {
@@ -2149,19 +1533,12 @@ async fn process_one_generation<'h>(
         report_uncertified_leaves(state, mls_group_id, user_id, flagged).await;
     }
 
-    // Resolve any commit left DANGLING by an interrupted submit (a crash, or a
-    // `clear_pending_commit` that itself failed). If our commit had actually
-    // landed, the replay loop above would have adopted it (OwnCommit → merge),
-    // so a commit still pending here never made it into the canonical log.
-    // Clear it — otherwise a later blind `merge_pending_commit`
-    // (`load_group_with_signer` / reconcile) would advance us to a phantom epoch
-    // no other member can see, and our messages would become undecryptable to
-    // the group (issue #411 item 2). Safe even if it *had* landed: a future
-    // pass re-adopts it from the log.
+    // A commit still pending after the replay never landed (the loop would have
+    // adopted it), so clear it before anything merges it into a phantom epoch
+    // (#411). Safe even if wrong: a later pass re-adopts it from the log.
     {
         let guard = state.local_db.lock().await;
         if let Some(db) = guard.as_ref() {
-            // Clearing a pending commit is storage-only — no suite dispatch.
             if let Some(mut group) = load_stored_group_at(db.conn(), mls_group_id, generation) {
                 if group.pending_commit().is_some() {
                     crate::diag!(
@@ -2173,26 +1550,10 @@ async fn process_one_generation<'h>(
         }
     }
 
-    // Suite-generation backstop (#454 P4). The lineage we just replayed may have
-    // been RETIRED by a migration, in which case no future commit or message will
-    // ever appear on it again and staying put is a permanent stall. Runs here —
-    // after the replay, so the predecessor is drained to its final epoch, and
-    // after the dangling-pending clear, so we never carry a doomed commit across
-    // a boundary.
-    //
-    // Only on an INGESTING pass (`on_epoch.is_some()`). Adoption deletes the
-    // predecessor's key material, and under `max_past_epochs = 0` that is the
-    // only thing that can still decrypt envelopes sealed on the old lineage. A
-    // pass with no hook has fetched no envelopes, so adopting there would discard
-    // messages this device was eligible to read. Every production path into this
-    // function runs through `catch_up_mls_group_interleaved`, which always passes
-    // a hook, so this costs no liveness — it only refuses to advance on a pass
-    // that could not have drained first.
-    //
-    // And only when the bound (#1041) does not forbid it: adopting a successor
-    // also discards the predecessor's keys, so a successor the log opened AFTER
-    // this pass fetched its envelopes waits for the next pass, exactly like a
-    // commit beyond the bound.
+    // A retired lineage never moves again, so hop to its successor (#454) —
+    // after the replay has drained it. Adoption deletes the predecessor's keys,
+    // so only on an ingesting pass (one with a hook, which has fetched the
+    // envelopes) and only within the bound (#1041).
     let bound_allows_hop = bound.is_none_or(|b| b.allows_generation_beyond(generation));
     if on_epoch.is_some() && bound_allows_hop {
         if let Some(new_generation) =
@@ -2202,52 +1563,29 @@ async fn process_one_generation<'h>(
                 "[mls] process_pending_commits: {mls_group_id} advanced generation \
                  {generation} -> {new_generation} — replaying the new lineage"
             );
-            // The exporter secret is per-group, and we are now on a different
-            // group entirely, so any live voice room must re-derive immediately.
+            // A new group means a new exporter: voice, pin and file keys re-derive.
             crate::commands::voice_e2ee::on_mls_epoch_changed(state, mls_group_id).await;
-            // Same trigger for the pin key: the successor lineage has a fresh
-            // exporter, so a cached Kpin must be re-wrapped under it (#99).
             crate::commands::pinned_messages::maybe_rewrap_pin_key(state, mls_group_id).await;
             crate::commands::file_keys::maybe_rewrap_file_keys(state, mls_group_id).await;
             return Ok(true);
         }
     }
 
-    // GroupInfo durability backstop. The `any_applied` path advanced our epoch,
-    // so its freshly-exported GroupInfo must be republished — but we also heal the
-    // case where a *past* publish (e.g. the create-time one in `init_mls_group`)
-    // was dropped by a transient DS failure and never retried. `any_applied` is
-    // false for a stranded sole-member creator, so the old gated republish never
-    // ran and the group stayed unjoinable forever (no GroupInfo → no external-join).
-    // `ensure_group_info_published` republishes only when the log DB's GroupInfo is
-    // missing or behind us, so it subsumes the old `any_applied` republish too.
+    // Also heals a dropped past publish, not just this pass's advance.
     ensure_group_info_published(state, mls_group_id).await;
 
-    // Pin-key durability backstop (#99), the sibling of the GroupInfo one
-    // above: if this device holds the conversation's Kpin and the epoch has
-    // moved past its last published wrap — its own advance here, or a
-    // committer that crashed before re-wrapping — publish a fresh wrap so a
-    // keyless device (an external joiner, a new enrollee) can unwrap at the
-    // current epoch. One local SELECT in the steady state.
+    // Pin/file-key durability backstop (#99): re-wrap if the epoch moved past
+    // the last published wrap, so a keyless device can unwrap.
     crate::commands::pinned_messages::maybe_rewrap_pin_key(state, mls_group_id).await;
     crate::commands::file_keys::maybe_rewrap_file_keys(state, mls_group_id).await;
 
     if any_applied {
-        // Voice E2EE: when the epoch advances for the MLS group currently
-        // backing the active voice room, re-derive the per-room key and
-        // rotate it on the live KeyProvider. No-op when voice is idle.
         crate::commands::voice_e2ee::on_mls_epoch_changed(state, mls_group_id).await;
     }
 
-    // If the group was deleted during processing (e.g. eviction), OR a commit
-    // could not be applied and asked us to recover (#680 — the four former `Stop`
-    // wedge sites), external-join to rebuild. The explicit `recover` reason is the
-    // load-bearing addition: previously recovery was gated ONLY on `!group_exists`,
-    // so a group that still existed but could never advance (corrupt commit bytes,
-    // a merge failure, a diverged tree) wedged permanently. `apply_one_commit`
-    // deletes the group before returning `Recover`, so in practice `group_exists`
-    // is already false here — but we key off the reason so a wedge can never again
-    // be silently mistaken for "caught up".
+    // Rebuild if the group is gone (e.g. eviction) or a commit asked to
+    // recover; keyed on the reason so a wedge is never mistaken for caught up
+    // (#680).
     let group_exists = {
         let guard = state.local_db.lock().await;
         guard.as_ref().is_some_and(|db| {
@@ -2255,18 +1593,8 @@ async fn process_one_generation<'h>(
         })
     };
     if !group_exists || recover.is_some() {
-        // Recover by external-join — UNLESS this device was revoked (its
-        // `user_device` row is gone) OR its user was removed from the group
-        // (`group_member` row gone). Either must stay out rather than squatting
-        // an epoch to climb back in: a removed member that self-evicted here
-        // (applied its own removal above) would otherwise rebuild and rejoin the
-        // tree, decrypting post-removal traffic (membership leak, fuzzer finding
-        // #2). A legitimately-forked or freshly-wiped CURRENT member keeps both
-        // rows and recovers normally.
-        // Re-read the gates rather than reusing the snapshot taken before the
-        // replay: applying a commit may have removed THIS member, and the whole
-        // point of the gate is to notice that before rebuilding. Fails CLOSED on
-        // a failed request, as it must.
+        // Fresh snapshot: the replay may just have applied our own removal,
+        // which the gate must see before rebuilding.
         let gates = super::ds_reads::conversation_snapshot(
             state,
             super::ds_reads::state_query(mls_group_id, Some(generation)),
@@ -2275,59 +1603,34 @@ async fn process_one_generation<'h>(
         .ok();
         let gates = gates.as_ref().filter(|s| s.authorized);
         if may_rejoin_via_external_join(gates, mls_group_id, user_id) {
-            // An explicit rebuild: the group that could not advance is dropped
-            // HERE, by name, because an external join never replaces a stored
-            // confirmed group on its own (#1220). `apply_one_commit` already
-            // deleted it for every `Recover` reason; the epoch-desync guard
-            // above is the one that leaves it in place.
+            // External join never replaces a confirmed group (#1220), so drop
+            // it explicitly; only the epoch-desync path leaves one in place.
             if group_exists {
                 let _ = forget_local_mls_group_at(state, mls_group_id, generation).await;
             }
             crate::diag!("[mls] process_pending_commits: group {mls_group_id} was deleted during processing — external-joining to recover");
-            // Lock already held by the wrapper, so call the unlocked inner variant.
             if let Err(e) = external_join_group_inner(state, mls_group_id, user_id).await {
                 crate::diag!("[mls] process_pending_commits: recovery external-join failed for {mls_group_id}: {e}");
             }
         }
     }
 
-    // Retention signal (#539, I4): report this device's now-current applied MLS
-    // epoch so the DS can compute the commit-log prune floor from the SLOWEST
-    // current member (Tier 1, zero loss — Spec B `NoLossForCurrentMember`).
-    // Best-effort + event-driven (fires on catch-up, never polls); a failed or
-    // skipped report only leaves the floor conservative (Tier 2's cap still bounds
-    // storage). Read the final epoch from the local group so it reflects both a
-    // normal replay and an external-join recovery above.
+    // Retention signal (#539, I4); best-effort, a missed report only keeps the
+    // prune floor conservative.
     report_applied_epoch(state, mls_group_id, user_id).await;
 
     Ok(false)
 }
 
-/// Adopt a newer suite generation for `mls_group_id` if one exists, returning the
-/// generation adopted.
-///
-/// Two ways a device learns it has been migrated, tried in order:
-///
-/// 1. **The successor is already here.** Its Welcome landed and
-///    [`super::welcomes::apply_welcome`] stored it under the successor's own
-///    `GroupId`, deliberately inert until now. This is the ordinary path, and it
-///    needs no network: flip the lineage row and delete the predecessor.
-/// 2. **The successor exists but we have no Welcome for it** — dropped, or this
-///    device was added to the new lineage without one. The published GroupInfo is
-///    always the newest lineage (its upsert is monotone on `(generation, epoch)`),
-///    so a head generation above ours is proof. Recover by external-joining it,
-///    behind the same revoked/removed gates as every other rebuild: a device that
-///    was legitimately removed must not climb into the successor either.
-///
-/// `None` means "still on the newest lineage we can see" — the overwhelmingly
-/// common case, and one indexed local read plus one indexed remote read.
+/// Adopt a newer generation if one exists, returning it: a successor already
+/// stored from its Welcome, else an external join onto a published head above
+/// ours (behind the usual rejoin gates).
 async fn maybe_advance_generation(
     state: &Arc<AppState>,
     mls_group_id: &str,
     user_id: &str,
     generation: i64,
 ) -> Option<i64> {
-    // 1. A stored-but-unadopted successor, applied from a Welcome.
     let stored_successor = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref()?;
@@ -2336,15 +1639,9 @@ async fn maybe_advance_generation(
             .find(|g| load_stored_group_at(db.conn(), mls_group_id, *g).is_some())
     };
     if let Some(successor) = stored_successor {
-        // The log is the authority on which lineages exist; a stored group proves
-        // only that THIS device built or received one. A migration that lost its
-        // compare-and-swap leaves behind exactly that — a group on a generation
-        // the conversation never opened — and adopting it would walk us off a
-        // healthy lineage onto a dead one. The DS writes the opening commit, its
-        // GroupInfo and its Welcomes in one transaction, so a Welcome we could
-        // have applied implies a GroupInfo we can see: this confirmation has no
-        // false negatives, and it costs a read only in the rare case that a
-        // successor is sitting here at all.
+        // A migration that lost its CAS leaves a group the log never opened, so
+        // confirm against the published head. No false negatives: the DS writes
+        // the opening commit, GroupInfo and Welcomes in one transaction.
         match published_group_info_head(state, mls_group_id).await {
             Some((head_generation, _)) if head_generation >= successor => {
                 adopt_generation_locked(state, mls_group_id, generation, successor).await;
@@ -2360,10 +1657,8 @@ async fn maybe_advance_generation(
         }
     }
 
-    // 2. No successor locally. Ask the log whether one exists at all — and, in
-    //    the SAME answer, whether we are still entitled to join it. One request,
-    //    so the "a successor exists" observation and the "we may rejoin" decision
-    //    cannot straddle a removal that lands between them.
+    // One snapshot answers both "does a successor exist" and "may we join it",
+    // so a removal cannot land between them.
     let snap = super::ds_reads::conversation_snapshot(
         state,
         super::ds_reads::state_query(mls_group_id, None),
@@ -2382,8 +1677,7 @@ async fn maybe_advance_generation(
         "[mls] process_pending_commits: {mls_group_id} was migrated to generation \
          {head_generation} but no Welcome reached this device — external-joining the successor"
     );
-    // The caller holds the MLS lock, so use the unlocked inner variant. On
-    // success it records the new lineage itself; re-read rather than assume.
+    // On success it records the new lineage itself; re-read rather than assume.
     if let Err(e) = external_join_group_inner(state, mls_group_id, user_id).await {
         crate::diag!(
             "[mls] process_pending_commits: successor external-join failed for {mls_group_id}: {e}"
@@ -2397,8 +1691,6 @@ async fn maybe_advance_generation(
             .map_or(generation, |db| local_generation(db.conn(), mls_group_id))
     };
     if adopted > generation {
-        // The predecessor is drained and superseded; its key material is now pure
-        // liability (it can still decrypt pre-migration traffic).
         let _ = forget_local_mls_group_at(state, mls_group_id, generation).await;
         Some(adopted)
     } else {
@@ -2406,11 +1698,9 @@ async fn maybe_advance_generation(
     }
 }
 
-/// Move this device onto `successor` for `mls_group_id`: record the lineage,
-/// drop the drained predecessor, and re-arm the post-join self-update.
-///
-/// Assumes the caller holds the per-conversation MLS lock and that the
-/// predecessor has been drained — see [`maybe_advance_generation`].
+/// Move onto `successor`: record the lineage, re-arm the post-join self-update
+/// and drop the predecessor. The caller holds the MLS lock and has drained the
+/// predecessor.
 pub(super) async fn adopt_generation_locked(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -2421,124 +1711,73 @@ pub(super) async fn adopt_generation_locked(
         let guard = state.local_db.lock().await;
         let Some(db) = guard.as_ref() else { return };
         set_local_generation(db.conn(), conversation_id, successor);
-        // We entered the successor by Welcome, so our leaf there is UNMERGED —
-        // regardless of how recently we rotated in the predecessor. Every commit
-        // in the new lineage pays for it until we commit once (#666), so the
-        // rotation clock restarts with the lineage.
+        // Our leaf entered by Welcome is unmerged until we commit once (#666),
+        // so the rotation clock restarts with the lineage.
         super::self_update::clear_self_update(db.conn(), conversation_id);
     }
-    // Only now is the predecessor safe to destroy: the lineage row already points
-    // past it, so a crash between these two steps leaves a harmless orphan rather
-    // than a device with no group at all.
+    // After the lineage row moves: a crash in between leaves a harmless orphan,
+    // not a device with no group.
     let _ = forget_local_mls_group_at(state, conversation_id, predecessor).await;
 }
 
-/// Why the local group could not advance from a commit — see [`apply_one_commit`]
-/// and [`classify_process_message_error`].
-///
-/// Every variant is RECOVERABLE by delete-and-rejoin (external join). The reason
-/// is carried so (a) the caller acts on the specific failure, and (b) a wedge is
-/// a *distinct* return value from `Applied`/"caught up" and can never be silently
-/// mistaken for "done" — that conflation is the #680 bug, where four `Stop` sites
-/// left a group that exists locally yet can never advance.
+/// Why the local group could not advance from a commit. Every variant recovers
+/// by delete-and-rejoin; carrying it keeps a wedge distinct from "caught up"
+/// (#680).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum RecoverReason {
-    /// The stored group is gone (never built, or already deleted).
     GroupMissing,
-    /// The stored group failed to load from storage.
     GroupLoadFailed,
-    /// The commit bytes did not TLS-deserialize (corrupt / truncated row).
     MalformedCommit,
-    /// The deserialized message was not a protocol message.
     NotAProtocolMessage,
-    /// The row is a protocol message but NOT a Commit — an application message
-    /// or a bare proposal sitting in a commit-log slot (#1161 C2). Nothing can
-    /// advance the group's epoch from it, so it is damage, never a free advance.
+    /// An application message or bare proposal in a commit-log slot (#1161 C2):
+    /// damage, never a free advance.
     NotACommit,
-    /// The row is a protocol message for a DIFFERENT group id than the lineage
-    /// we are replaying (#1161 C2).
     WrongGroup,
-    /// The commit merged but left the group at an epoch other than
-    /// `commit.epoch + 1` (#1161 C2). The whole watermark-safety argument rests
-    /// on that equality, so it is checked rather than assumed.
+    /// The merge left the group at an epoch other than `commit.epoch + 1`
+    /// (#1161 C2).
     EpochDesync,
-    /// Merging the staged commit failed (storage error / diverged tree).
     MergeFailed,
-    /// Our keys cannot open the commit — we were evicted from the group.
     Evicted,
-    /// The commit is at our epoch yet won't stage/validate: our local tree has
-    /// diverged from the canonical branch (fork; #411, prod incident 01KQYX89…).
+    /// The commit is at our epoch yet won't stage: our tree diverged (#411).
     ForkedTree,
-    /// Our own commit was echoed back but merging the pending commit failed.
     OwnCommitMergeFailed,
-    /// An openmls error this code does not specifically classify. Recover
-    /// conservatively — NEVER wedge. A future openmls bump that reshapes the
-    /// error surface lands HERE (loudly, and caught by the classification unit
-    /// tests) instead of silently wedging on a stale string match (#680).
+    /// An openmls error not specifically classified; still recovers, never
+    /// wedges (#680).
     Unclassified,
 }
 
-/// Outcome of applying one commit from the log — see [`apply_one_commit`].
 #[derive(Debug)]
 pub(super) enum CommitApply {
-    /// Merged; the local epoch advanced. `adds` are the leaves the commit
-    /// GRAFTED — every leaf present in the tree after the merge that was not
-    /// present (at the same index, with the same credential and signature key)
-    /// before it, whichever proposal type introduced it. The caller verifies
-    /// them. `epoch_after` is the epoch the group ACTUALLY reached, read back
-    /// off the merged group rather than inferred.
+    /// `adds` are the leaves the commit grafted (see [`grafted_leaves`]), for
+    /// the caller to verify; `epoch_after` is read back off the merged group.
     Applied {
         adds: Vec<AddedLeaf>,
         epoch_after: u64,
     },
-    /// The local group cannot advance on this lineage and must be rebuilt. The
-    /// reason is carried so the caller recovers (external-join) rather than
-    /// treating the stop as "caught up". `apply_one_commit` has already deleted
-    /// the local group where one was loaded, so the caller's rejoin path has a
-    /// clean slate.
+    /// Must be rebuilt; any loaded local group has already been deleted.
     Recover(RecoverReason),
 }
 
-/// Map an openmls `process_message` error to the recovery it warrants.
-///
-/// Matching the real error ENUMS — not their `Display` strings (`format!("{e}")`)
-/// — is the load-bearing change of #680: a string match silently reclassifies the
-/// moment openmls rewords a message or moves a case (as the pinned rev already did
-/// for the own-commit path), and the group wedges with no signal. An enum match is
-/// a compile-checked, test-pinned contract; anything unrecognised falls to
-/// [`RecoverReason::Unclassified`], which still recovers rather than wedging.
+/// Map an openmls `process_message` error to its recovery. Matches error enums,
+/// never `Display` strings, which silently reclassify when openmls rewords one
+/// (#680).
 pub(super) fn classify_process_message_error<S>(
     e: &ProcessMessageError<S>,
 ) -> RecoverReason {
     use ProcessMessageError as E;
     match e {
-        // We tried to use a group we've been evicted from: our leaf is gone and
-        // our keys can't open this or any later commit. Re-join only if still a
-        // roster member — the `may_rejoin` gate downstream enforces that.
+        // Rejoin only if still a member; `may_rejoin` enforces that downstream.
         E::GroupStateError(MlsGroupStateError::UseAfterEviction) => RecoverReason::Evicted,
-        // Our OWN commit came back but does NOT match our pending commit — our
-        // pending state diverged from what actually landed. This was the old
-        // "created by this client" string; now a typed StageCommitError. Merging
-        // our stale pending here would diverge us further, so rebuild instead.
+        // Merging our stale pending commit would diverge us further.
         E::InvalidCommit(StageCommitError::OwnCommitMismatch) => RecoverReason::ForkedTree,
-        // The commit passed the log's epoch-gap check yet still fails to stage or
-        // validate: our local tree has diverged from the canonical branch. Every
-        // remaining StageCommit / Validation failure is this same fork shape.
         E::InvalidCommit(_) | E::ValidationError(_) => RecoverReason::ForkedTree,
-        // Anything else (LibraryError, StorageError, wire-format policy, and any
-        // future variant) — recover conservatively rather than wedge.
         _ => RecoverReason::Unclassified,
     }
 }
 
-/// Apply a single commit from the log to the local group.
-///
-/// `provider` must serve the group's suite (the caller dispatches on the stored
-/// group's ciphersuite). Errors are handled in-place rather than returned
-/// because each has its own recovery, and none of them should abort the caller's
-/// replay loop with an `Err` — see [`CommitApply`].
-///
-/// Sync: the caller owns the local-DB guard.
+/// Apply one commit from the log to the local group. `provider` must serve the
+/// group's suite; failures come back as [`CommitApply::Recover`], never `Err`,
+/// so the replay loop is never aborted. The caller owns the local-DB guard.
 pub(super) fn apply_one_commit<C>(
     provider: &MlsProvider<'_, C>,
     mls_group_id: &str,
@@ -2552,8 +1791,6 @@ where
     let group_id = super::generation::mls_group_id(mls_group_id, generation);
     let mut group = match MlsGroup::load(provider.storage(), &group_id) {
         Ok(Some(g)) => g,
-        // The group is simply absent (never built, or already deleted by an
-        // earlier recovery). Nothing to delete; the caller's rejoin path rebuilds.
         Ok(None) => {
             crate::diag!("[mls] process_pending_commits: no local group for {mls_group_id} gen {generation} at epoch {commit_epoch} — recovering via external-join");
             return CommitApply::Recover(RecoverReason::GroupMissing);
@@ -2582,27 +1819,10 @@ where
         }
     };
 
-    // #1161 C2/H5: a commit-log slot may carry a COMMIT for THIS group and
-    // nothing else, and that is checked HERE — before openmls sees the message —
-    // rather than inferred from what `process_message` hands back.
-    //
-    // Both fields are authenticated rather than advisory: for the PrivateMessage
-    // framing Pollis uses for handshakes they are the AEAD's AAD, and for the
-    // PublicMessage framing an external commit arrives in they are inside the
-    // signed `FramedContentTBS` — so a member cannot relabel someone else's
-    // message and a non-member cannot produce one at all. What they
-    // are NOT is trustworthy by position: the DS does not parse commit bytes, so
-    // ANY member can POST an application message to `/v1/commits`, and every
-    // shape below used to reach a branch that advanced the replay counter (the
-    // catch-all `_` arm) or merged a staged commit (`OwnPrivateMessage`, which
-    // openmls returns for any PrivateMessage from OUR leaf index, commit or
-    // not — the early return fires before the content is decrypted).
-    //
-    // A non-commit here is damage in the log, never a no-op: the replay counter
-    // and `group.epoch()` must stay equal or every later envelope is bucketed at
-    // the wrong epoch, fails to decrypt under `max_past_epochs = 0`, and is then
-    // marked permanently handled by `watermark.rs` — a fourth message-loss mode,
-    // where CLAUDE.md sanctions exactly three.
+    // A slot may hold a Commit for this group and nothing else, checked before
+    // openmls sees it (#1161 C2/H5). Both fields are authenticated (AAD or
+    // signed TBS), but the DS doesn't parse commit bytes, so any member can post
+    // an application message here.
     if protocol_msg.group_id() != &group_id {
         crate::diag!(
             "[mls] process_pending_commits: commit-log row at epoch {commit_epoch} for \
@@ -2623,8 +1843,6 @@ where
         return CommitApply::Recover(RecoverReason::NotACommit);
     }
 
-    // The tree as it stands BEFORE the merge, so every leaf the commit grafts can
-    // be diffed out of it afterwards — see [`grafted_leaves`].
     let scheme = signature_scheme(group.ciphersuite());
     let before = leaf_fingerprints(&group);
 
@@ -2638,39 +1856,14 @@ where
                     return CommitApply::Recover(RecoverReason::MergeFailed);
                 }
             }
-            // Our OWN commit, fanned back to us at this epoch — e.g. we submitted
-            // it but a lost response made us converge instead of merging (issue
-            // #411). At the pinned openmls rev this is surfaced as CONTENT (an
-            // `Ok`), NOT an error: `OwnPendingCommit` when the commit is framed as
-            // a PublicMessage, or `OwnPrivateMessage` when framed as a
-            // PrivateMessage. Pollis frames handshake messages as PrivateMessage,
-            // so `OwnPrivateMessage` is the path we ACTUALLY hit — its ciphertext
-            // cannot be decrypted by its own author, so openmls can't stage it and
-            // hands it back for us to adopt.
-            //
-            // The pre-#680 code matched only the OLD "created by this client"
-            // error STRING in the `Err` arm, which at this rev catches NEITHER
-            // shape. So the own-commit replay fell through unmerged: it was
-            // miscounted as `Applied`, the pending commit was left dangling, and
-            // the dangling-clear backstop then DISCARDED our landed commit —
-            // stranding us at a phantom epoch no other member shares. Adopt it by
-            // merging our pending commit so we land at the same epoch as everyone
-            // else.
+            // Our own commit echoed back (#411): openmls returns it as content,
+            // not an error, and can't stage it (an author can't decrypt its own
+            // PrivateMessage), so adopt it by merging our pending commit. Only
+            // safe because the content-type gate above proved it is a Commit:
+            // `OwnPrivateMessage` fires for any PrivateMessage from our leaf
+            // (#1161 H5).
             ProcessedMessageContent::OwnPendingCommit
             | ProcessedMessageContent::OwnPrivateMessage => {
-                // The content-type gate above has already established that this
-                // row IS a Commit, which is what makes "our own message" mean
-                // "our own commit" here (#1161 H5). Without it, openmls's
-                // `OwnPrivateMessage` early return — which fires for ANY
-                // PrivateMessage whose sender leaf index is ours, before the
-                // content is decrypted — let a replay of one of our own
-                // application envelopes merge a staged commit onto a branch the
-                // log never accepted (a live #1079 phantom epoch) or force a
-                // rebuild.
-                //
-                // If we hold no pending commit to adopt (e.g. a crash cleared
-                // it) we cannot advance from it locally — rebuild from the
-                // published GroupInfo rather than wedge.
                 if group.pending_commit().is_none() {
                     crate::diag!(
                         "[mls] process_pending_commits: own commit at epoch {commit_epoch} for {mls_group_id} but no pending commit to adopt — recovering via external-join"
@@ -2689,14 +1882,9 @@ where
                 crate::diag!(
                     "[mls] process_pending_commits: adopted our own commit at epoch {commit_epoch} for {mls_group_id}"
                 );
-                // Fall through so this counts as applied and the epoch advances.
             }
-            // Unreachable now that the content type is checked up front — a
-            // proposal or application message never reaches `process_message`.
-            // It is still a `Recover`, never a free advance: "impossible in
-            // practice" is exactly what the old comment here claimed, and the
-            // arm below it advanced the replay counter without advancing the
-            // group (#1161 C2).
+            // Unreachable given the content-type gate, but still a `Recover`,
+            // never a free advance (#1161 C2).
             _ => {
                 crate::diag!(
                     "[mls] process_pending_commits: unexpected non-commit content at epoch {commit_epoch} for {mls_group_id} — recovering via external-join"
@@ -2706,13 +1894,7 @@ where
             }
         },
         Err(e) => {
-            // Classify by the real error enum, then recover by dropping the local
-            // group so the caller's external-rejoin rebuilds it from the latest
-            // published GroupInfo. Deleting drops only this device's MLS crypto
-            // state, not its decrypted message history (that lives in the local
-            // `message` table). The rejoin lands at the latest epoch, so the next
-            // pass filters `epoch >= new_epoch` and can't re-fail on the same
-            // commit — no recovery loop.
+            // The rejoin lands past this commit, so it can't re-fail on it.
             let reason = classify_process_message_error(&e);
             crate::diag!(
                 "[mls] process_pending_commits: commit at epoch {commit_epoch} for {mls_group_id} failed to apply ({e}) — classified {reason:?}, deleting local group to re-join"
@@ -2728,15 +1910,10 @@ where
     }
 }
 
-/// One leaf of a ratchet tree, as the grafted-leaf diff identifies it:
-/// `(position, user, device, signature key)`.
-///
-/// All four together, because each one alone misses a real case. Position alone
-/// misses a leaf swapped into an index that was already occupied; identity alone
-/// misses a second leaf claiming a `(user, device)` the tree already holds.
+/// `(position, user, device, signature key)`. All four: position alone misses a
+/// leaf swapped into an occupied index, identity alone a duplicate claim.
 type LeafFingerprint = (LeafNodeIndex, String, String, Vec<u8>);
 
-/// Fingerprint every leaf currently in `group`'s tree.
 fn leaf_fingerprints(group: &MlsGroup) -> std::collections::HashSet<LeafFingerprint> {
     group
         .members()
@@ -2751,24 +1928,10 @@ fn leaf_fingerprints(group: &MlsGroup) -> std::collections::HashSet<LeafFingerpr
         .collect()
 }
 
-/// Every leaf a just-merged commit GRAFTED: present in the tree now, absent
-/// from `before`.
-///
-/// #1161 H4: the inbound cross-signing check used to read the staged commit's
-/// **Add proposals**, which made it blind to the one proposal type that grafts a
-/// leaf without one. An external-join commit carries no Add — the joiner's leaf
-/// arrives in the UpdatePath — so a leaf planted by external join was never
-/// verdicted, never flagged, and never triggered the eviction reconcile, even
-/// though `external_join_group`'s own doc names inbound verification by existing
-/// members as the defence that makes an unverified external join safe. Diffing
-/// the tree instead of reading proposals is what makes the check total: it sees
-/// a leaf however it arrived.
-///
-/// A commit's ordinary UpdatePath does NOT read as grafted. Every commit rotates
-/// the committer's own leaf, but rotation changes the ENCRYPTION key; the
-/// credential, the signature key and the index all stay put, and none of those
-/// is something a leaf may change about itself and still be the device its
-/// account certified.
+/// Every leaf a just-merged commit grafted: in the tree now, absent from
+/// `before`. A tree diff rather than Add proposals, so an external join's
+/// UpdatePath leaf is verified too (#1161 H4). An ordinary rotation changes
+/// only the encryption key, so it doesn't read as grafted.
 fn grafted_leaves(
     before: &std::collections::HashSet<LeafFingerprint>,
     group: &MlsGroup,
@@ -2786,25 +1949,16 @@ fn grafted_leaves(
         .collect()
 }
 
-/// Why a replayed add was flagged — and therefore whether the USER is told
-/// (#1127).
+/// Why a replayed add was flagged, and so whether the user is told (#1127).
 ///
-/// [`LeafVerdict`] has two non-`Certified` answers and they mean opposite
-/// things. `Uncertified` is evidence: the inputs were all present and the leaf
-/// is not the key that account certified. `Unverifiable` is the absence of
-/// evidence: a cert row that has not reached the snapshot yet, or a commit whose
-/// `added_user_id` hint did not name this user (#1080, where a multi-user add
-/// names only one). Both are worth an eviction reconcile — it re-reads the whole
-/// roster and keeps a leaf that turns out to be certified, so it is
-/// self-correcting — but only the first is worth a security alarm.
-///
-/// Telling a user their conversation's membership is compromised every time a
-/// teammate enrolls a device is how a real `Uncertified` event gets ignored.
+/// Both kinds get an eviction reconcile (self-correcting), but only
+/// `Uncertified` is evidence worth an alarm. `Unverifiable` is usually a cert
+/// row not yet replicated or an incomplete add hint; alarming on it would make
+/// every teammate's enrollment look like a compromise and let a committer
+/// manufacture alarms by omitting the hint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FlagKind {
-    /// Positively not the claimed account's device.
     Uncertified,
-    /// Could not be decided here.
     Unverifiable,
 }
 
@@ -2815,9 +1969,7 @@ impl FlagKind {
     }
 }
 
-/// Classify a leaf verdict for the replay loop: `None` when the leaf is fine,
-/// otherwise the reason string and whether it is evidence. Pure, so the rule in
-/// #1127 is a thing tests can state rather than a branch buried in a loop.
+/// `None` when the leaf is fine, else the reason and its [`FlagKind`].
 fn flag_for(verdict: LeafVerdict) -> Option<(String, FlagKind)> {
     match verdict {
         LeafVerdict::Certified => None,
@@ -2826,28 +1978,13 @@ fn flag_for(verdict: LeafVerdict) -> Option<(String, FlagKind)> {
     }
 }
 
-/// What a member does about leaves a replayed commit added that are NOT
-/// cross-signed by the account they claim (`LeafVerdict` ≠ `Certified`).
+/// Handle flagged leaves of an already-merged commit: log a
+/// `uncertified_mls_leaf` security event per alarming leaf, then kick a
+/// detached reconcile that evicts any positively uncertified leaf with a
+/// normal remove commit.
 ///
-/// The commit has already been merged — it is canonical, and refusing it would
-/// only strand this device (see the replay loop). So: (1) write one
-/// `security_event` (`kind = "uncertified_mls_leaf"`) per leaf that is
-/// POSITIVELY uncertified — an `Unverifiable` one is skipped (#1127), since
-/// "the cert row has not reached me yet" is not evidence and the reconcile below
-/// self-corrects it — to this user's
-/// own audit log, which the Security settings page lists — the same surface a
-/// revoked or newly-enrolled device is reported on; (2) kick a detached
-/// reconcile, whose leaf gate (`reconcile_group_mls_core_staged`) removes any
-/// leaf that is POSITIVELY uncertified, append-only, with a normal remove
-/// commit. The reconcile re-reads the whole roster's cert material, so a leaf
-/// that was merely unverifiable here (a hint the committer left incomplete)
-/// and is in fact certified is kept — the eviction is self-correcting, and
-/// every honest member races to make the same removal, so at most one lands.
-///
-/// Residual: the rogue leaf holds the group's key schedule from the epoch it
-/// was added until the eviction commit lands — bounded by one honest member's
-/// reconcile, not by anything the attacker controls. Nothing evicts it sooner
-/// without breaking the append-only log every member replays.
+/// Residual: a rogue leaf holds the key schedule until one honest member's
+/// eviction lands; nothing sooner fits an append-only log.
 async fn report_uncertified_leaves(
     state: &Arc<AppState>,
     mls_group_id: &str,
@@ -2855,12 +1992,6 @@ async fn report_uncertified_leaves(
     flagged: Vec<(AddedLeaf, i64, String, FlagKind)>,
 ) {
     for (leaf, epoch, reason, kind) in &flagged {
-        // #1127: an `Unverifiable` leaf is not evidence of anything — the
-        // eviction reconcile below re-reads the roster and keeps it if it is in
-        // fact certified. Raising a user-facing alarm for it would mean a
-        // teammate enrolling a device reads as a compromise, and it would let a
-        // malicious committer manufacture alarms in other people's audit logs by
-        // simply omitting the hint.
         if !kind.alarms() {
             continue;
         }
@@ -2871,9 +2002,7 @@ async fn report_uncertified_leaves(
                 "conversation={mls_group_id} user={} epoch={epoch} reason={reason}",
                 leaf.user_id
             )),
-            // The DS's no-auth fallback for the acting user
-            // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
-            // user and this must EQUAL it; auth off → this IS the actor.
+            // The DS's no-auth fallback; with auth on it must equal the signer.
             user_id: Some(user_id.to_string()),
         };
         if let Err(e) = super::ds_client::ds_post_ok(state, &ev).await {
@@ -2883,8 +2012,7 @@ async fn report_uncertified_leaves(
         }
     }
 
-    // Detached: this runs under the per-conversation MLS lock, which reconcile
-    // re-acquires, so it cannot run inline. The spawned task waits its turn.
+    // Detached: reconcile re-acquires the MLS lock we hold.
     tokio::spawn(eviction_reconcile(
         Arc::clone(state),
         mls_group_id.to_string(),
@@ -2892,12 +2020,8 @@ async fn report_uncertified_leaves(
     ));
 }
 
-/// The detached eviction reconcile [`report_uncertified_leaves`] spawns.
-///
-/// Boxed and type-erased on purpose: reconcile runs the interleaved catch-up,
-/// which runs this replay, which spawns this — a cycle the compiler cannot
-/// prove `Send` through by inference. Erasing the future here is what breaks
-/// it; the body is otherwise a plain call.
+/// Boxed and type-erased on purpose: reconcile → catch-up → replay → this is a
+/// cycle the compiler cannot prove `Send` through by inference.
 fn eviction_reconcile(
     state: Arc<AppState>,
     conversation_id: String,
@@ -2914,19 +2038,9 @@ fn eviction_reconcile(
     })
 }
 
-/// Read this device's current local MLS epoch for `mls_group_id` and report it to
-/// the DS as the retention high-water (`ds_client::ds_report_commit_since`). No-op
-/// when there is no local group (nothing applied to report). See #539.
-///
-/// The report is DETACHED (`tokio::spawn`): it must never hold the per-conversation
-/// MLS lock across a network round-trip, so a slow/unreachable DS can't stall
-/// catch-up. Fully best-effort — the spawned task swallows every error.
+/// Report this device's local `(generation, epoch)` as its retention high-water
+/// (#539). Detached so a slow DS never holds the MLS lock; best-effort.
 async fn report_applied_epoch(state: &Arc<AppState>, mls_group_id: &str, user_id: &str) {
-    // The high-water is the PAIR `(generation, epoch)`, compared
-    // lexicographically by the DS (#454 P4): epoch 3 of a successor lineage is
-    // ahead of epoch 12 of the retired one, not behind it. Reporting the epoch
-    // alone would make every migrated device look like it had regressed, and the
-    // retention floor is computed from the slowest member.
     let head = {
         let guard = state.local_db.lock().await;
         guard.as_ref().and_then(|db| {
@@ -2952,20 +2066,9 @@ async fn report_applied_epoch(state: &Arc<AppState>, mls_group_id: &str, user_id
     }
 }
 
-/// Tauri command wrapper — resolves conversation_id to MLS group ID, then runs
-/// the group-level interleaved catch-up.
-///
-/// This is a user-facing CATCH-UP entry point (the app's manual "sync" shortcut,
-/// and the test harness's `process_commits_for`), so it must NOT be a bare
-/// commit-only replay: advancing the shared group to head without decrypting
-/// en route would strand any message sealed at an epoch it skips past
-/// (`max_past_epochs = 0`). Route through `catch_up_mls_group_interleaved`, which
-/// decrypts every bound conversation's messages at each epoch before advancing
-/// past it, and still reaches head. (The send / edit / invite / remove commit-
-/// INITIATION paths do NOT go through this command, but they run the SAME
-/// interleaved catch-up before advancing their own epoch — see issue #440, the
-/// committer strand — so a current-epoch inbound message is never stranded by a
-/// self-initiated commit either.)
+/// Command entry point: resolve the MLS group, then run the interleaved
+/// catch-up. Never a bare commit replay, which would strand messages at skipped
+/// epochs (`max_past_epochs = 0`).
 pub async fn process_pending_commits(
     state: &Arc<AppState>,
     conversation_id: String,
@@ -2975,39 +2078,17 @@ pub async fn process_pending_commits(
     crate::commands::messages::catch_up_mls_group_interleaved(state, &mls_group_id, &user_id).await
 }
 
-// ── Phase 5 helpers: encrypt / decrypt ───────────────────────────────────────
-
-/// Check whether an MLS group exists in the local database.
-///
-/// This — not `try_mls_encrypt(..).is_none()` — is how to ask "does this device
-/// have the group?". The edit and redaction paths used to ask it the other way,
-/// which was only ever right while a failed encrypt could mean nothing else;
-/// since #1079 it also means "a commit is staged", and a `false` there sends the
-/// caller through `external_join_group`, so a transient answer must not reach it.
-///
-/// Storage-only, so it needs no crypto backend and decides nothing about the
-/// epoch.
+/// Whether this device holds the group. Use this, not
+/// `try_mls_encrypt(..).is_none()`, which also means "a commit is staged"
+/// (#1079).
 pub fn has_local_group(conn: &rusqlite::Connection, conversation_id: &str) -> bool {
     load_stored_group(conn, conversation_id).is_some()
 }
 
-/// Try to encrypt `plaintext` with the MLS group for `conversation_id`.
-///
-/// Returns `None` — without logging — if the group does not exist locally
-/// (e.g. the channel was created before MLS was rolled out), or if the group
-/// holds a **staged, unconfirmed commit**. The caller treats `None` as "not
-/// sealable right now".
-///
-/// The pending-commit refusal is #1079. Sealing while a commit is staged means
-/// choosing an epoch the commit log has not decided: seal at the old epoch and
-/// the envelope may be behind the head by the time it posts (the DS epoch gate
-/// catches that, and `seal::post_resealing` retries); merge first to seal at the
-/// new one and this device has advanced onto a branch the log may never hold.
-/// Neither is a choice an encryptor gets to make, so it declines. Every
-/// user-initiated post holds the per-conversation MLS lock across its seal, so
-/// it cannot observe a pending commit at all; the callers that can are the
-/// deliberately lock-free ones — `receipts::emit_receipt` and the `edit_delete`
-/// probes — for which skipping is already the documented failure mode.
+/// Encrypt with the conversation's group. `None`, unlogged, when there is no
+/// local group or a commit is staged: sealing then would pick an epoch the log
+/// hasn't decided (#1079). Only the lock-free callers (receipts, edit/delete
+/// probes) can see a staged commit, and they skip.
 pub fn try_mls_encrypt(
     conn: &rusqlite::Connection,
     conversation_id: &str,
@@ -3024,28 +2105,10 @@ pub fn try_mls_encrypt(
     msg_out.tls_serialize_detached().ok()
 }
 
-/// Parse the MLS epoch a `message` / `edit` envelope was sealed at, WITHOUT
-/// decrypting it (no group state touched).
-///
-/// Returns `None` when the bytes are not a valid MLS `ProtocolMessage` — e.g. a
-/// `delete` tombstone, whose ciphertext is empty — so the caller treats such
-/// envelopes as epoch-independent.
-///
-/// This is the load-bearing primitive for the epoch-stepped ingest interleave
-/// (issue #418): because `max_past_epochs` is 0, a message must be decrypted
-/// while the local group is still AT its epoch, so the ingest pass routes each
-/// envelope to the moment in the commit replay when the group reaches the
-/// matching epoch. The epoch is read by PARSING the envelope rather than inferred
-/// from `sent_at` — clock skew and same-epoch reordering make `sent_at` an
-/// unreliable proxy for the cryptographic epoch.
-///
-/// Returns the `(generation, epoch)` PAIR, not the epoch alone (#454 P4). The
-/// generation is read off the envelope's MLS `GroupId`, which our own
-/// [`super::generation::mls_group_id`] suffixed at group-creation time — so it is
-/// authenticated by the sender's own group state, not asserted by the server.
-/// Without it, an un-ingested envelope from a retired lineage sealed at epoch 7
-/// would read as "ahead of" the successor's epoch 1 and stall the ingest
-/// watermark permanently.
+/// The `(generation, epoch)` an envelope was sealed at, parsed without
+/// decrypting; `None` for non-MLS bytes (e.g. an empty `delete` tombstone).
+/// The ingest interleave routes envelopes by this (#418); the generation comes
+/// from the authenticated `GroupId`, not the server (#454).
 pub fn envelope_lineage(ciphertext: &[u8]) -> Option<(i64, u64)> {
     let mut reader: &[u8] = ciphertext;
     let msg_in = MlsMessageIn::tls_deserialize(&mut reader).ok()?;
@@ -3055,23 +2118,11 @@ pub fn envelope_lineage(ciphertext: &[u8]) -> Option<(i64, u64)> {
     Some((generation, protocol_msg.epoch().as_u64()))
 }
 
-/// Try to decrypt MLS ciphertext bytes for `conversation_id`.
+/// Decrypt an envelope, returning `(plaintext, sender_user_id)`.
 ///
-/// The bytes must be TLS-serialised `MlsMessageOut` (i.e. what we stored in
-/// `message_envelope.ciphertext` after `send_message` used MLS). Returns
-/// `Some((plaintext, credential_user_id))` on success, or `None` if the bytes
-/// are not a valid MLS `ApplicationMessage` or if decryption fails for any
-/// reason.
-///
-/// The second tuple element is the **MLS-authenticated** sender — the `user_id`
-/// parsed from the sender's `BasicCredential` inside the ciphertext
-/// (`{user_id}:{device_id}`). This is the load-bearing primitive of sealed
-/// sender (`docs/metadata-minimization-design.md` §2): attribution comes from
-/// this crypto-authenticated credential, NOT from the server-writable
-/// `message_envelope.sender_id` column. Returning both together makes it
-/// impossible to obtain plaintext without also obtaining the authenticated
-/// sender, so no caller can accidentally fall back to trusting the envelope
-/// column.
+/// The sender is the MLS-authenticated credential, never the server-writable
+/// `sender_id` column; returning both together keeps callers from trusting the
+/// column (sealed sender, `docs/metadata-minimization-design.md` §2).
 pub fn try_mls_decrypt(
     conn: &rusqlite::Connection,
     conversation_id: &str,
@@ -3092,13 +2143,8 @@ pub fn try_mls_decrypt_why(
     decryptor.decrypt(ciphertext)
 }
 
-/// Which step of opening one envelope failed (#1520).
-///
-/// The point is the diagnostic: a lost message's `[loss]` line used to say only
-/// "failed", and the openmls error that told a sender reusing a ratchet
-/// generation apart from this device consuming a key without storing the row
-/// was dropped. Every variant names a STEP or an openmls error variant, never
-/// anything derived from the plaintext or a key.
+/// Which step of opening one envelope failed, for `[loss]` diagnostics (#1520).
+/// Never carries anything derived from plaintext or a key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DecryptFailureKind {
     /// This device holds no group for the conversation (never joined, or forgotten).
@@ -3175,11 +2221,9 @@ impl DecryptFailureKind {
     }
 }
 
-/// Why [`MlsDecryptor::decrypt`] could not open an envelope (#1520): the
-/// failing step plus the positions involved. The sender's leaf index and ratchet
-/// generation live inside the ENCRYPTED sender data and the pinned openmls does
-/// not surface them in its errors, so they are not here; the epochs, which are
-/// in the clear header, are.
+/// Why [`MlsDecryptor::decrypt`] could not open an envelope (#1520). The
+/// sender's leaf and ratchet generation are encrypted and openmls doesn't
+/// surface them, so only the clear-header epochs are here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DecryptFailure {
     pub kind: DecryptFailureKind,
@@ -3213,11 +2257,9 @@ impl std::fmt::Display for DecryptFailure {
     }
 }
 
-/// Map an openmls `process_message` error on an APPLICATION message to the step
-/// that failed (#1520). The commit path's [`classify_process_message_error`]
-/// answers a different question (what recovery a commit failure warrants), so
-/// only its eviction case carries over. Matches the error enums, never their
-/// `Display` strings, for the reason given there (#680).
+/// Map an application-message `process_message` error to the step that failed
+/// (#1520). Only the commit classifier's eviction case carries over; enums,
+/// never `Display` strings (#680).
 pub(super) fn classify_decrypt_error<S>(e: &ProcessMessageError<S>) -> DecryptFailureKind {
     use DecryptFailureKind as K;
     use ProcessMessageError as E;
@@ -3257,43 +2299,17 @@ pub(super) fn classify_decrypt_error<S>(e: &ProcessMessageError<S>) -> DecryptFa
     }
 }
 
-/// A group loaded **once** for a RUN of envelopes that are all sealed at the
-/// epoch it currently sits at.
-///
-/// [`try_mls_decrypt`] is this type used for a run of length one, and that was
-/// the whole decrypt path until #875: every envelope re-read the join config,
-/// group context, ratchet tree, transcript hash, confirmation tag, leaf index,
-/// group state, message secrets, resumption PSKs and proposal queue out of
-/// `mls_kv` and re-parsed them, to decrypt one message and throw the lot away.
-/// Measured at 12 `mls_kv` SELECTs + 1 UPDATE per message, so a 200-message
-/// catch-up was 2400 statements where 12 would do.
-///
-/// **Why holding the group is not a shortcut.** Decrypting an application
-/// message mutates exactly one piece of group state — the secret tree inside
-/// `message_secrets_store`, which ratchets forward so a consumed key cannot be
-/// reused — and openmls persists that itself, inside `process_message`, before
-/// it returns (`will_modify_secret_tree` → `write_message_secrets`), precisely
-/// so forward secrecy survives a crash mid-batch. Nothing else about the group
-/// changes. So the reload this replaces was reading back the bytes the previous
-/// decrypt had just written: an in-memory group carried across a run is
-/// byte-identical to a group reloaded before each envelope, and a crash
-/// half-way through a run leaves exactly the state a crash half-way through the
-/// old loop left.
-///
-/// **What it must NOT span.** A commit changes the group out from under a held
-/// copy, so a decryptor must not outlive the epoch it was opened at. The ingest
-/// interleave (`messages::ingest`) opens one per `on_epoch` firing and drops it
-/// before the replay applies the next commit, which is the only correct
-/// lifetime — anything longer would decrypt against a superseded key schedule.
+/// A group loaded once for a run of envelopes sealed at its current epoch
+/// (#875). Safe because openmls persists the only state a decrypt mutates (the
+/// secret tree) inside `process_message`. Must not outlive its epoch: a commit
+/// changes the group out from under it.
 pub struct MlsDecryptor<'a> {
     provider: PollisProvider<'a>,
     group: MlsGroup,
 }
 
 impl<'a> MlsDecryptor<'a> {
-    /// Load the conversation's live group, or `None` when this device has none
-    /// (never joined, or forgotten) — the same "cannot decrypt" answer
-    /// [`try_mls_decrypt`] gives, so callers need no new branch.
+    /// Load the conversation's live group, or `None` when this device has none.
     pub fn open(conn: &'a rusqlite::Connection, conversation_id: &str) -> Option<Self> {
         let group = load_stored_group(conn, conversation_id)?;
         Some(Self {
@@ -3302,22 +2318,15 @@ impl<'a> MlsDecryptor<'a> {
         })
     }
 
-    /// The `(generation, epoch)` the loaded group sits at — the position of
-    /// every envelope this decryptor can open. A staged-but-unmerged own commit
-    /// does not move it: the group is still AT its epoch until the merge.
+    /// The `(generation, epoch)` of every envelope this decryptor can open; a
+    /// staged own commit does not move it until merged.
     pub fn lineage(&self) -> (i64, u64) {
         let raw = String::from_utf8_lossy(self.group.group_id().as_slice()).into_owned();
         let (_, generation) = super::generation::split_mls_group_id(&raw);
         (generation, self.group.epoch().as_u64())
     }
 
-    /// Decrypt one envelope. See [`try_mls_decrypt`] for the contract — this is
-    /// that function's body, and the `(plaintext, MLS-authenticated sender)`
-    /// pair it returns is load-bearing for sealed sender.
-    ///
-    /// On failure the error names the step that failed and, for
-    /// `process_message`, the classified openmls error (#1520) — never the
-    /// plaintext or any key material.
+    /// Decrypt one envelope; same contract as [`try_mls_decrypt`].
     pub fn decrypt(
         &mut self,
         ciphertext: &[u8],
@@ -3337,14 +2346,11 @@ impl<'a> MlsDecryptor<'a> {
         let raw_group_id = String::from_utf8_lossy(protocol_msg.group_id().as_slice()).into_owned();
         let (message_base, message_generation) = super::generation::split_mls_group_id(&raw_group_id);
         let sealed_at = Some((message_generation, protocol_msg.epoch().as_u64()));
-        // Envelopes from a RETIRED lineage cannot be decrypted by the successor,
-        // and their predecessor group is gone. Fail fast rather than handing a
-        // foreign-group message to `process_message`, whose error would be
-        // indistinguishable from a genuine decrypt failure.
+        // Fail fast so a foreign-lineage envelope isn't misreported as a
+        // decrypt failure by `process_message`.
         if protocol_msg.group_id() != self.group.group_id() {
             let own_raw = String::from_utf8_lossy(self.group.group_id().as_slice()).into_owned();
             let (own_base, _) = super::generation::split_mls_group_id(&own_raw);
-            // Same conversation, other generation: a lineage this group is not.
             let kind = if message_base == own_base {
                 DecryptFailureKind::ForeignLineage
             } else {
@@ -3357,7 +2363,6 @@ impl<'a> MlsDecryptor<'a> {
             .process_message(&self.provider, protocol_msg)
             .map_err(|e| fail(classify_decrypt_error(&e), sealed_at))?;
 
-        // Grab the authenticated sender credential BEFORE `into_content` consumes it.
         let sender_user_id = parse_credential_user_id(processed.credential());
 
         match processed.into_content() {
@@ -3375,19 +2380,9 @@ mod stored_group_info_parse_tests {
     use openmls::prelude::*;
     use tls_codec::Serialize as _;
 
-    // The exact byte prefix that broke a shipped build. A bare GroupInfo begins
-    // GroupContext { protocol_version: u16, ciphersuite: u16, .. }; the envelope
-    // reader reads protocol_version then WIRE FORMAT, so it consumes 0x0001,
-    // then reads the ciphersuite 0x0052 where a wire format belongs and reports
-    // `UnknownValue(82)`. This encodes the discriminating prefix directly so the
-    // regression is caught by shape, not by a whole-message fixture.
+    // The ciphersuite bytes an envelope reader sees where a wire format belongs.
     const CS_PQ_CODE_POINT: [u8; 2] = [0x00, 0x52];
 
-    // A bare-GroupInfo payload must NOT be mistaken for an envelope, and the
-    // number in that historical error must remain this build's own ciphersuite —
-    // if the suite is ever renumbered, this assert is the reminder that the
-    // legacy rows on the wire still carry the OLD code point and the fallback is
-    // what keeps them readable.
     #[test]
     fn pq_ciphersuite_is_the_value_that_looked_like_a_wire_format() {
         let cs = u16::from(super::super::provider::CS_PQ);
@@ -3404,8 +2399,6 @@ mod stored_group_info_parse_tests {
         );
     }
 
-    // Garbage that is neither form must still fail, and must name both attempts
-    // rather than silently returning something.
     #[test]
     fn rejects_a_payload_that_is_neither_form() {
         let err = parse_stored_group_info(&[0xff, 0xff, 0xff, 0xff])
@@ -3417,18 +2410,12 @@ mod stored_group_info_parse_tests {
         );
     }
 
-    // An empty row is a real possibility (a dropped publish) and must be an
-    // error, never a panic.
     #[test]
     fn rejects_empty_payload() {
         assert!(parse_stored_group_info(&[]).is_err());
     }
 
-    // Guards the premise of the whole fix: trying the envelope form FIRST can
-    // never swallow a bare GroupInfo, because the value sitting at the second
-    // field differs between them. Asserted against the wire-format space itself
-    // rather than a constructed message — WireFormat is a small enumeration and
-    // the ciphersuite is 0x0052, so the two can never collide.
+    // Trying the envelope form first can never swallow a bare GroupInfo.
     #[test]
     fn no_wire_format_can_collide_with_the_ciphersuite() {
         let cs = u16::from(super::super::provider::CS_PQ);
@@ -3455,48 +2442,32 @@ mod stored_group_info_parse_tests {
 mod group_info_heal_tests {
     use super::group_info_is_stale;
 
-    // The decision at the heart of the bootstrap-durability backstop: republish
-    // the GroupInfo iff the log DB's copy is missing or behind our local epoch.
-    // This is exactly what was missing before — the old republish only ran when a
-    // commit was applied (`any_applied`), so a sole-member creator whose
-    // create-time publish was dropped (`None`) never republished and the group
-    // stayed permanently unjoinable.
     #[test]
     fn republishes_when_groupinfo_never_landed() {
-        // No GroupInfo row at all — the stranded-creator bug. Must republish at
-        // any epoch, including epoch 0 (a freshly created, sole-member group).
+        // Including epoch 0: a sole-member creator whose create-time publish
+        // was dropped.
         assert!(group_info_is_stale(None, (0, 0)));
         assert!(group_info_is_stale(None, (0, 7)));
     }
 
     #[test]
     fn republishes_when_groupinfo_is_behind() {
-        // A later epoch-advance publish was dropped; the stored GroupInfo lags our
-        // local epoch, so the current epoch isn't externally joinable until we heal.
         assert!(group_info_is_stale(Some((0, 0)), (0, 1)));
         assert!(group_info_is_stale(Some((0, 3)), (0, 7)));
     }
 
     #[test]
     fn skips_when_groupinfo_is_current() {
-        // Already durable at our epoch — no DS round-trip needed.
         assert!(!group_info_is_stale(Some((0, 0)), (0, 0)));
         assert!(!group_info_is_stale(Some((0, 5)), (0, 5)));
     }
 
     #[test]
     fn skips_when_groupinfo_is_ahead() {
-        // Another member advanced and published past us; don't republish a stale
-        // view of an epoch we no longer lead.
         assert!(!group_info_is_stale(Some((0, 9)), (0, 4)));
     }
 
-    /// The #454 P4 property the scalar comparison could not express: a successor
-    /// lineage restarts at MLS epoch 0, numerically *below* the retired lineage's
-    /// last epoch. Compared lexicographically on `(generation, epoch)`, the
-    /// published generation-0 GroupInfo is correctly stale against our
-    /// generation-1 head — a scalar `published >= local` would have read the
-    /// migrated group as "already durable" and left the successor unjoinable.
+    /// A successor restarts at epoch 0, below the retired lineage's last (#454).
     #[test]
     fn a_successors_epoch_zero_is_ahead_of_the_retired_lineage() {
         assert!(group_info_is_stale(Some((0, 42)), (1, 0)));
@@ -3514,8 +2485,6 @@ mod flag_kind_tests {
         assert!(flag_for(LeafVerdict::Certified).is_none());
     }
 
-    /// #1127: the alarm is for evidence, and this is evidence — the inputs were
-    /// all present and the leaf is not the key that account certified.
     #[test]
     fn an_uncertified_leaf_alarms() {
         let (reason, kind) =
@@ -3526,11 +2495,6 @@ mod flag_kind_tests {
         assert!(reason.contains("certified key"), "the reason is carried through");
     }
 
-    /// And this is the absence of evidence: a cert row that has not reached the
-    /// snapshot yet, or a commit whose `added_user_id` hint did not name this
-    /// user (#1080). Still flagged — the eviction reconcile re-reads the roster
-    /// and keeps it if it is in fact certified — but the user is not told their
-    /// membership is compromised.
     #[test]
     fn an_unverifiable_leaf_is_flagged_but_does_not_alarm() {
         let (_, kind) = flag_for(LeafVerdict::Unverifiable("no device row"))
@@ -3544,8 +2508,7 @@ mod flag_kind_tests {
         );
     }
 
-    /// Exactly one verdict alarms. Stated so a third verdict added later has to
-    /// make this decision deliberately rather than inherit one.
+    /// Forces a future third verdict to decide deliberately.
     #[test]
     fn only_uncertified_alarms() {
         assert!(FlagKind::Uncertified.alarms());

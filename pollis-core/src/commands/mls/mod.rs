@@ -24,8 +24,7 @@ mod welcomes;
 pub use provider::{
     make_credential, parse_credential_device_id, parse_credential_user_id, PollisProvider,
 };
-// Out-of-module MLS crypto (voice key export). Only the `media` build has such
-// a call site.
+// Out-of-module MLS crypto (voice key export).
 #[cfg(feature = "media")]
 pub(crate) use provider::MlsProvider;
 pub(crate) use join_branch::{

@@ -121,13 +121,11 @@ pub(crate) async fn fetch_welcomes(
     })
 }
 
-/// One undelivered Welcome row.
 pub(crate) struct FetchedWelcome {
     pub id: String,
     pub bytes: Vec<u8>,
-    /// The conversation the row was filed under. `None` from a Delivery Service
-    /// that predates the field. Used to re-join a conversation whose Welcome
-    /// failed to apply (#1571).
+    /// `None` from a Delivery Service that predates the field. Used to re-join a
+    /// conversation whose Welcome failed to apply (#1571).
     pub conversation_id: Option<String>,
 }
 

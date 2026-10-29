@@ -1,9 +1,5 @@
-//! Declarative roster reconciliation and self-repair for MLS groups.
-//!
-//! Compares the desired roster (from Turso) against the actual MLS tree
-//! and issues a single combined add/remove commit + Welcome to bring them
-//! into sync. Also houses the heavyweight repair path that re-creates
-//! the entire MLS group when local state is unrecoverable.
+//! Declarative roster reconciliation for MLS groups: diff the desired roster
+//! against the tree and issue one combined add/remove commit + Welcome.
 
 use openmls::prelude::*;
 use openmls_basic_credential::SignatureKeyPair;
@@ -31,12 +27,8 @@ enum SubmitOutcome {
 
 /// Is the byte-for-byte commit we submitted already canonical at `epoch`?
 ///
-/// Makes submission idempotent (issue #411). A submit outcome can be ambiguous:
-/// a network error may mean the commit LANDED and only the response was lost,
-/// and a stale `LostRace` can be a retry of our OWN already-accepted commit. The
-/// canonical log is the arbiter — if our exact commit bytes sit at this epoch,
-/// we won and must adopt, not roll back and wedge. Any read failure returns
-/// `false` (safe: fall back to the rollback/converge path).
+/// Makes an ambiguous submit idempotent (#411); see [`publish_staged_commit`].
+/// Any read failure returns `false`, falling back to rollback/converge.
 pub(super) async fn our_commit_is_canonical(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -44,11 +36,6 @@ pub(super) async fn our_commit_is_canonical(
     epoch: i64,
     our_commit: &[u8],
 ) -> bool {
-    // Fetch the canonical bytes at this epoch, then run the Kani-proved
-    // adopt/rollback core. An ambiguous submit (LostRace or lost-response Failed)
-    // adopts IFF the log holds OUR exact bytes; a missing row / read failure →
-    // `None` → Rollback → `false` (fall back to the converge path), byte-for-byte
-    // the original behavior.
     let stored = fetch_commit_at_epoch(state, conversation_id, generation, epoch).await;
     matches!(
         crate::commands::mls::invariants::resolve(
@@ -60,10 +47,9 @@ pub(super) async fn our_commit_is_canonical(
     )
 }
 
-/// The canonical commit bytes stored at `epoch` for `conversation_id`, or `None`
-/// if there is no such row or the read fails. The read-only commit-log lookup
-/// behind [`our_commit_is_canonical`]; separated so the adopt/rollback *decision*
-/// is the pure, Kani-proved `invariants::resolve` and this async fn is only I/O.
+/// The canonical commit bytes stored at `epoch`, or `None` if there is no such
+/// row or the read fails. I/O only; the decision is the Kani-proved
+/// `invariants::resolve`.
 async fn fetch_commit_at_epoch(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -82,27 +68,19 @@ async fn fetch_commit_at_epoch(
     )
     .await
     .ok()?;
-    // `None` on any failure keeps the caller's documented bias: `invariants::
-    // resolve` maps "no canonical commit visible" to Rollback, so an unreadable
-    // log can never be mistaken for "our commit won". Adopting on a failed read
-    // would leave the group at a phantom epoch with undecryptable messages.
+    // `None` on failure maps to Rollback: adopting on a failed read would leave
+    // the group at a phantom epoch with undecryptable messages.
     let bytes = snap.commit_at_epoch.as_deref()?;
     super::ds_reads::decode_b64("commit_data", bytes).ok()
 }
 
-/// Apply the side effects of a commit that won its epoch — whether confirmed
-/// synchronously (`Committed`) or discovered canonical after an ambiguous
-/// failure (lost response). Writes Welcomes for added members, merges the
-/// pending commit to advance the local epoch, and republishes GroupInfo. The
-/// pending commit must still be staged (we never cleared it on a win).
+/// Merge the still-staged pending commit of a commit that won its epoch. The DS
+/// already wrote its Welcomes and GroupInfo atomically with the commit.
 async fn finalize_won_commit(
     state: &Arc<AppState>,
     conversation_id: &str,
     generation: i64,
 ) -> crate::error::Result<()> {
-    // Welcomes + the resulting-epoch GroupInfo were already written atomically
-    // with the commit by `submit_commit` (Slice 1), so finalizing a won commit
-    // only advances the local epoch by merging the still-staged pending commit.
     // Scope the !Send provider/group so neither crosses an await.
     let guard = state.local_db.lock().await;
     if let Some(db) = guard.as_ref() {
@@ -112,8 +90,6 @@ async fn finalize_won_commit(
     Ok(())
 }
 
-/// Merge the still-staged pending commit for `conversation_id`, advancing the
-/// local epoch. Suite-generic half of [`finalize_won_commit`].
 fn merge_pending_in_suite<C>(
     provider: &MlsProvider<'_, C>,
     conversation_id: &str,
@@ -147,31 +123,22 @@ pub(super) enum PublishOutcome {
 /// Offer a locally-staged commit to the canonical log, resolve the outcome, and
 /// leave local state consistent either way.
 ///
-/// The single publish path for every commit Pollis produces — roster reconcile
-/// and self-update alike — because the CAS resolution here is subtle enough
-/// that a second copy would drift:
+/// The single publish path for every commit Pollis produces, so the CAS
+/// resolution has one copy:
 ///
 /// - `Committed` → we own the epoch.
-/// - `LostRace` or a transport error → **ambiguous**. A network error may mean
-///   the commit LANDED and only the response was lost, and a stale `LostRace`
-///   can be a retry of our OWN already-accepted commit. The canonical log is the
-///   arbiter ([`our_commit_is_canonical`], whose decision core is Kani-proved):
-///   if our exact bytes sit at this epoch we WON and must adopt rather than roll
-///   back and wedge (issue #411).
+/// - `LostRace` or a transport error → **ambiguous**: the commit may have landed
+///   with its response lost, or a stale `LostRace` may be a retry of our own
+///   accepted commit. If our exact bytes sit at this epoch we adopt rather than
+///   roll back and wedge (#411).
 ///
-/// On a win the pending commit is merged, advancing the local epoch. On a loss
-/// or a genuine failure it is cleared, so a later pass recomputes from scratch
-/// and the local group never sits ahead of the log. The caller owns convergence
-/// after a `LostRace` (it, not this function, holds the MLS lock that the
-/// catch-up needs to re-acquire).
+/// On a loss or failure the pending commit is cleared so the local group never
+/// sits ahead of the log. The caller owns convergence after a `LostRace` (it
+/// holds the MLS lock the catch-up must re-acquire).
 ///
-/// `what` names the caller in logs ("reconcile", "self-update").
-///
-/// `generation` is the suite lineage the commit belongs to (#454 P4), and
-/// `closes_epoch` is set only by a migration opening the next one. Both are
-/// carried through every step of the resolution, because after a migration the
-/// *same* conversation has two lineages and "is our commit canonical at epoch
-/// 3?" has a different answer in each.
+/// `generation` and `closes_epoch` (set only by a migration) are carried through
+/// every step: after a migration one conversation has two lineages with
+/// independent epochs (#454).
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn publish_staged_commit(
     state: &Arc<AppState>,
@@ -189,9 +156,8 @@ pub(super) async fn publish_staged_commit(
 ) -> crate::error::Result<PublishOutcome> {
     let epoch = epoch_before as i64;
 
-    // Claim this epoch through the delivery seam. On a win the seam also writes
-    // the resulting-epoch GroupInfo + the added members' Welcomes — atomically
-    // with the commit, so no Welcome can ever point at a doomed branch.
+    // On a win the DS writes GroupInfo + Welcomes atomically with the commit,
+    // so no Welcome can point at a doomed branch.
     let remote_result: crate::error::Result<SubmitOutcome> = async {
         match super::delivery::submit_commit(
             state,
@@ -247,10 +213,8 @@ pub(super) async fn publish_staged_commit(
 
     match resolution {
         Resolution::Won => {
-            // #1041: the log now holds our commit, so no further envelope can be
-            // sealed at the epoch it closes — the DS refuses them. Whatever WAS
-            // sealed there before the CAS is still decryptable right now and
-            // will never be again once we merge: read it first.
+            // Envelopes sealed at the epoch this commit closes are undecryptable
+            // once we merge: read them first (#1041).
             let swept = sweep_before_merge(
                 state,
                 conversation_id,
@@ -282,24 +246,18 @@ pub(super) async fn publish_staged_commit(
     }
 }
 
-/// The committer's sweep of the epoch a won commit is about to leave (#1041),
-/// with the failure policy that keeps it from losing what it exists to save.
+/// The committer's sweep of the epoch a won commit is about to leave (#1041).
 ///
-/// Returns the envelopes it persisted (their receipts are owed after the
-/// merge) or, when the sweep could not be completed:
+/// Returns the persisted envelopes (receipts owed after the merge) or, on
+/// failure:
 ///
-/// * an ordinary commit → `Err`, and the commit stays STAGED. It has landed,
-///   so it must not be cleared; the next ingesting catch-up starts at the epoch
-///   it closes, decrypts that epoch's envelopes, then adopts it from the log
-///   (`OwnPendingCommit` → merge). Merging blind here would be the exact loss
-///   this sweep prevents.
-/// * a migration (`is_migration`) → `Ok(None)` with a loud log, so the caller
-///   merges anyway. A migration's `Err` path abandons the successor lineage the
-///   log has already opened, which strands every member on a closed one — far
-///   worse than the bounded window this sweep covers.
+/// * an ordinary commit → `Err`, and the landed commit stays STAGED; the next
+///   ingesting catch-up drains its epoch, then adopts it from the log. Merging
+///   blind would be the loss this sweep prevents.
+/// * a migration → `Ok(None)`, so the caller merges anyway: abandoning a
+///   successor lineage the log already opened strands every member.
 ///
-/// One retry: the sweep is one read, and a transient failure straight after a
-/// successful CAS is the common shape of a flaky link.
+/// One retry, for a transient failure right after the CAS.
 async fn sweep_before_merge(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -336,13 +294,11 @@ async fn sweep_before_merge(
     Err(e)
 }
 
-/// Roll back a staged-but-unconfirmed pending commit (best effort; logs on
-/// failure). Used only when our commit genuinely did not land.
+/// Roll back a pending commit that did not land (best effort; logs on failure).
 async fn clear_pending_best_effort(state: &Arc<AppState>, conversation_id: &str, generation: i64) {
     let guard = state.local_db.lock().await;
     if let Some(db) = guard.as_ref() {
-        // Storage-only: dropping a staged commit touches no crypto, so this
-        // needs no suite dispatch.
+        // Storage-only: no crypto, so no suite dispatch.
         let store = store_only(db.conn());
         let group_id = mls_group_id(conversation_id, generation);
         match MlsGroup::load(&store, &group_id) {
@@ -357,19 +313,6 @@ async fn clear_pending_best_effort(state: &Arc<AppState>, conversation_id: &str,
     }
 }
 
-// NOTE: the former `repair_mls_group` (nuke-and-rebuild: re-create the group at
-// epoch 0 and DELETE the conversation's commit log) was removed. Deleting the
-// canonical commit log to repair a single device with missing local state
-// destroyed every member's history and could fork the group — the exact
-// append-only violation INV-1 forbids. The recovery for "my local MLS state is
-// missing" is now `external_join_group` (rejoin THIS device from the published
-// GroupInfo), wired at the `!has_local_group` site in messages/edit_delete. That
-// probe used to be `try_mls_encrypt(..).is_none()`; since #1079 a failed encrypt
-// also means "a commit is staged", and a transient answer must never reach a
-// rebuild.
-
-// ── Declarative reconcile ────────────────────────────────────────────────────
-
 /// Outcome of a single reconcile pass.
 #[derive(Debug, Default)]
 pub struct ReconcileOutcome {
@@ -381,89 +324,33 @@ pub struct ReconcileOutcome {
     pub epoch_after: u64,
     /// True if the committer's own leaf was in `to_remove` and was skipped.
     pub skipped_self_removal: bool,
-    /// `(user_id, device_id)` pairs that belong on the roster but could not be
-    /// added because they have no unclaimed KeyPackage in the group's
-    /// ciphersuite: a pool that ran dry while the device was away (#1412), or —
-    /// since #669 — one not republished since the group's suite stopped being
-    /// the current one. Downgrading the group to admit them is never an option.
-    ///
-    /// Since #1571 it also names every registered roster device with no leaf
-    /// that had no package to claim at all (it used to be dropped before the
-    /// diff ever saw it), and any device whose claim request failed.
-    ///
-    /// Not recorded anywhere, on purpose: the sweep re-derives "a live roster
-    /// device with no leaf and a claimable KeyPackage" on every pass and
-    /// reconciles it in (`sweep::reconcile_if_tree_drifted`), and the device
-    /// external-joins on its own next catch-up. A stored "skipped" list would be
-    /// a second copy of what the tree already says.
+    /// Registered roster devices with no leaf that could not be added: no
+    /// unclaimed KeyPackage in the group's suite (#1412, #1571), or a failed
+    /// claim. Never downgraded in. Deliberately not persisted: the sweep
+    /// re-derives it from the tree each pass (`sweep::reconcile_if_tree_drifted`).
     pub skipped_no_suite_kp: Vec<(String, String)>,
-    /// `(user_id, device_id, reason)` for every claimed KeyPackage the committer
-    /// REFUSED to turn into an Add because its leaf signature key is not the one
-    /// the claimed user's `account_id_pub` certified — or could not be shown to
-    /// be (`LeafVerdict::Unverifiable`). The KeyPackage is burnt (claimed and
-    /// discarded); the device is re-considered on the next reconcile once its
-    /// cert is publishable. This is the committer-side half of cross-signing:
-    /// a DS that substitutes an attacker's KeyPackage at claim time, or a
-    /// device whose cert the user never issued, never reaches `propose_adds`.
+    /// `(user_id, device_id, reason)` for each claimed KeyPackage refused because
+    /// its leaf key is not (or cannot be shown to be) the one the user's
+    /// `account_id_pub` certified. The package is burnt; the device is retried
+    /// on the next reconcile.
     pub refused_uncertified: Vec<(String, String, String)>,
 }
 
-/// Raw bytes produced by a reconcile commit, needed for posting to Turso.
+/// Raw bytes produced by a reconcile commit, for submission to the DS.
 pub struct ReconcileCommitData {
     pub commit_bytes: Vec<u8>,
     pub welcome_bytes: Option<Vec<u8>>,
-    /// TLS-serialized GroupInfo at the *resulting* epoch, captured from the
-    /// commit bundle. Travels with the commit + Welcome so the Delivery
-    /// Service writes all three atomically (Slice 1). `Some` whenever the
-    /// commit builder produced a GroupInfo — our groups always do
-    /// (`use_ratchet_tree_extension(true)` + an explicit `create_group_info(true)`).
+    /// TLS-serialized GroupInfo at the *resulting* epoch; always `Some` for our
+    /// groups (`create_group_info(true)`).
     pub group_info_bytes: Option<Vec<u8>>,
 }
 
-/// The devices that *should* hold a leaf: the single definition of "desired",
-/// extracted from [`reconcile_group_mls_core_staged`] as pure set algebra so the
-/// #679 invariant can be tested without a live MLS group, real KeyPackages, or a
-/// crypto backend.
+/// Whether the `registered_devices` snapshot that decides evictions contains the
+/// actor itself (#1082). One that omits it is indistinguishable from "every
+/// device was revoked" and would evict the whole tree, so the pass is refused.
 ///
-/// Two sources, and **both** are gated on `valid_devices`:
-///
-/// 1. Devices with an available (unclaimed) KeyPackage — these are the additions.
-/// 2. Devices already holding a leaf whose user is still in the roster — these
-///    are the retentions. Retaining them is what stops us evicting the
-///    committer's own device, which consumed its KeyPackage when it created the
-///    group and so has none left to appear in (1).
-///
-/// `valid_devices` is the `revoked_at IS NULL` snapshot from
-/// [`registered_devices`]. Gating both sources on it is the whole point: a
-/// revoked device keeps its published KeyPackage, so filtering only source (2)
-/// leaves source (1) re-admitting the exact device (2) was trying to evict. It
-/// would land in `desired`, therefore never in `to_remove`, and — if its leaf had
-/// already been pruned — be *added back*. That was #679: revocation reduced to a
-/// cosmetic flag while the device went on decrypting every message and deriving
-/// the call media key.
-///
-/// `None` means "no revocation snapshot available" and disables the gate. That is
-/// deliberately a distinct state from an empty set (which means "no device is
-/// valid — remove everything") so a caller that cannot read `user_device` degrades
-/// to the old roster-only behaviour instead of silently emptying the group.
-/// #1082: a `registered_devices` snapshot that omits the actor itself cannot be
-/// trusted to decide who gets evicted.
-///
-/// The actor runs this pass as a member of the roster, so its own
-/// `(user_id, device_id)` MUST appear in any correct snapshot. If it does not —
-/// a truncated answer, a spoofed one, or a read that raced a teardown — then the
-/// snapshot is indistinguishable from "every device was revoked", and
-/// [`desired_set`] would evict every leaf except the actor's own (which survives
-/// only via `skipped_self_removal`). That is mass revocation driven by a single
-/// bad read. Refusing the pass leaves the tree exactly as it was; the next
-/// reconcile with a good snapshot does the real work.
-///
-/// Two states deliberately do NOT gate, mirroring the `None`-vs-empty
-/// distinction [`desired_set`] already draws:
-/// * an EMPTY roster — a conversation with nobody in it is a legitimate
-///   teardown state, and there is no membership left to protect;
-/// * an unknown `actor_device_id` — we cannot evaluate our own presence, so we
-///   must not turn "cannot tell" into "abort everything".
+/// An empty roster (teardown) or an unknown `actor_device_id` (cannot judge)
+/// does not gate.
 pub(super) fn snapshot_includes_actor(
     roster_user_ids: &std::collections::HashSet<String>,
     valid_devices: &std::collections::HashSet<(String, String)>,
@@ -476,6 +363,14 @@ pub(super) fn snapshot_includes_actor(
     valid_devices.contains(&(actor_user_id.to_string(), actor_device_id.to_string()))
 }
 
+/// The devices that *should* hold a leaf: those with an unclaimed KeyPackage,
+/// plus current leaves whose user is still on the roster (which keeps the
+/// committer, whose KeyPackage was spent creating the group).
+///
+/// **Both** sources are gated on `valid_devices`: a revoked device keeps its
+/// published KeyPackage, so gating only the leaves re-admits it (#679).
+/// `None` (no snapshot readable) disables the gate; it is deliberately distinct
+/// from an empty set, which means "remove everything".
 pub(super) fn desired_set<'a>(
     kp_keys: &[(String, String)],
     tree_members: impl Iterator<Item = &'a (String, String)>,
@@ -495,27 +390,14 @@ pub(super) fn desired_set<'a>(
     desired
 }
 
-/// Sync core (staged variant): computes the diff between the desired roster
-/// and the actual MLS tree, then issues a single combined commit. Does NOT
-/// merge the commit locally — the commit is left as a pending commit on the
-/// group. The caller is responsible for either calling `merge_pending_commit`
-/// (after successfully persisting the commit/welcome rows to Turso) or
-/// `clear_pending_commit` (on remote failure) to avoid split-brain between
-/// the local epoch and the remote commit log.
+/// Diff the desired roster against the tree and stage one combined commit,
+/// WITHOUT merging it: the caller merges after the DS accepts the commit, or
+/// clears it on failure, so the local epoch never runs ahead of the log.
+/// `epoch_after` is the epoch the commit will produce once merged.
 ///
-/// Returns the outcome plus optional commit/welcome bytes for the caller to
-/// post to Turso. On the returned `ReconcileOutcome`, `epoch_after` reflects
-/// the epoch the commit WILL produce when merged (i.e. `epoch_before + 1`
-/// when a commit is staged, equal to `epoch_before` on no-op).
-///
-/// `identities` is the roster's cross-signing material. When present, a leaf
-/// already in the tree whose signature key is **positively** not the key its
-/// user certified (`LeafVerdict::Uncertified` — revoked, bad cert, or a key that
-/// is not the certified one) is evicted, exactly as a revoked device is: it is
-/// how a rogue leaf grafted in by a malicious or legacy committer leaves the
-/// tree, append-only, on the next honest reconcile. `Unverifiable` leaves are
-/// retained — absence of a row is not evidence, and `None` (no material read)
-/// disables the gate like `valid_devices = None` does.
+/// With `identities`, an existing leaf that is positively `Uncertified` is
+/// evicted like a revoked device; `Unverifiable` leaves are retained (absence
+/// of a row is not evidence), and `None` disables the gate.
 // Each argument is a distinct piece of MLS state the caller already holds
 // separately; bundling them into a struct would only move the same list.
 #[allow(clippy::too_many_arguments)]
@@ -538,27 +420,12 @@ where
     let epoch_before = group.epoch().as_u64();
     let scheme = signature_scheme(group.ciphersuite());
 
-    // 1. Actual state: walk the MLS tree, ONE ENTRY PER LEAF.
-    //
-    //    Per leaf, not per `(user, device)`: openmls rejects duplicate signature
-    //    and encryption keys but NOT duplicate CREDENTIALS, so two leaves can
-    //    carry the same `"user:device"`. Keyed on the credential (as this was
-    //    before #1161 M7) the second insert overwrote the first index, the
-    //    removal set could only ever name one of them, and the shadowed leaf
-    //    survived every reconcile — including the removal of that user from the
-    //    roster. That is how a grafted leaf becomes permanent.
-    //
-    //    A leaf whose signature key is positively NOT the key its user certified
-    //    is kept OUT of `actual` and queued for removal: excluding it from
-    //    `actual` is what lets the device's genuine KeyPackage (if one is
-    //    available) be added in the same commit, since the `(user, device)` key
-    //    then reads as "not in tree". Our own leaf is never judged — a committer
-    //    cannot remove itself, and its own cert is checked at publish time.
-    //
-    //    "Our own leaf" is the leaf at our own INDEX, never merely one carrying
-    //    our credential: a duplicate claiming the committer's own `user:device`
-    //    would otherwise inherit both the skipped verdict and the self-removal
-    //    guard, making it the one leaf in the tree nothing could ever evict.
+    // One entry per LEAF, not per credential: openmls allows duplicate
+    // credentials, and keying on them let a shadowed grafted leaf survive every
+    // reconcile (#1161 M7). An uncertified leaf is kept out of `actual` so the
+    // device's genuine KeyPackage can be added in the same commit. "Our own
+    // leaf" is the one at our INDEX, so a duplicate of our credential gets no
+    // exemption.
     let own_index = group.own_leaf_index();
     let mut leaves: Vec<((String, String), LeafNodeIndex, Option<String>)> = Vec::new();
     for m in group.members() {
@@ -577,10 +444,8 @@ where
         leaves.push(((uid, did), m.index, verdict));
     }
 
-    // The credential the actor believes it holds, against the leaf it actually
-    // occupies. They can only disagree if the stored group belongs to a
-    // different device than the caller thinks — worth saying out loud, since
-    // every self-exemption below keys on the index.
+    // A mismatch means the stored group belongs to a different device than the
+    // caller thinks; logged because every self-exemption below keys on the index.
     if !actor_device_id.is_empty() {
         if let Some((key, _, _)) = leaves.iter().find(|(_, index, _)| *index == own_index) {
             if key.0 != actor_user_id || key.1 != actor_device_id {
@@ -600,13 +465,9 @@ where
             to_evict.push((key, index, reason));
             continue;
         }
-        // The survivor for a `(user, device)` that several leaves claim. Our own
-        // leaf always wins (MLS forbids removing it); otherwise the first in
-        // tree order, which is the older leaf — openmls fills the leftmost free
-        // slot, so the device that joined honestly holds it and a leaf grafted
-        // later sits to its right. Where the directory can tell the two apart,
-        // the loop above has already removed the uncertified one and this
-        // tie-break never runs.
+        // Several leaves claim one credential: our own leaf wins (MLS forbids
+        // removing it), else the first in tree order — openmls fills the
+        // leftmost free slot, so the older, honest leaf precedes a later graft.
         match actual.entry(key.clone()) {
             std::collections::hash_map::Entry::Vacant(slot) => {
                 slot.insert(index);
@@ -627,19 +488,14 @@ where
         }
     }
 
-    // 2. Build the desired set. Pure set algebra, extracted so it can be tested
-    //    exhaustively without standing up a live MLS group — see `desired_set`.
     let kp_keys: Vec<(String, String)> = available_kps
         .iter()
         .map(|(uid, did, _)| (uid.clone(), did.clone()))
         .collect();
     let desired = desired_set(&kp_keys, actual.keys(), roster_user_ids, valid_devices);
 
-    // 3. Diff.
     let actual_keys: HashSet<(String, String)> = actual.keys().cloned().collect();
 
-    // Leaves in tree but not desired → remove, plus every leaf already queued for
-    // eviction (uncertified, or a duplicate of a credential another leaf holds).
     let mut to_remove: Vec<((String, String), LeafNodeIndex)> = actual
         .iter()
         .filter(|(key, _)| !desired.contains(key))
@@ -653,22 +509,17 @@ where
         to_remove.push((key.clone(), *idx));
     }
 
-    // Devices desired but not in tree → add
     let to_add_keys: HashSet<(String, String)> = desired
         .difference(&actual_keys)
         .cloned()
         .collect();
 
-    // 4. Committer-in-remove-set detection. On the INDEX, not the credential:
-    //    MLS forbids removing our own leaf, and that is a fact about one leaf,
-    //    not about everything claiming our `user:device` (#1161 M7).
     let mut skipped_self_removal = false;
     if to_remove.iter().any(|(_, idx)| *idx == own_index) {
         to_remove.retain(|(_, idx)| *idx != own_index);
         skipped_self_removal = true;
     }
 
-    // Collect validated KPs for the add set.
     let add_kps: Vec<(String, String, KeyPackage)> = available_kps
         .iter()
         .filter(|(uid, did, _)| to_add_keys.contains(&(uid.clone(), did.clone())))
@@ -677,7 +528,6 @@ where
 
     let remove_indices: Vec<LeafNodeIndex> = to_remove.iter().map(|(_, idx)| *idx).collect();
 
-    // 5. No-op check.
     if remove_indices.is_empty() && add_kps.is_empty() {
         return Ok((
             ReconcileOutcome {
@@ -690,7 +540,6 @@ where
         ));
     }
 
-    // 6. Log the diff.
     let removed_desc: Vec<String> = to_remove.iter().map(|((u, d), _)| format!("{u}:{d}")).collect();
     let added_desc: Vec<String> = add_kps.iter().map(|(u, d, _)| format!("{u}:{d}")).collect();
     crate::diag!(
@@ -699,10 +548,6 @@ where
         added_desc.join(", "),
     );
 
-    // 7. Build a single commit with both proposals. `stage_commit` writes the
-    //    commit as a pending commit on the group (persisted via the storage
-    //    provider), but does NOT advance the group's epoch — that only
-    //    happens on `merge_pending_commit`.
     let add_kps_only: Vec<KeyPackage> = add_kps.iter().map(|(_, _, kp)| kp.clone()).collect();
 
     let bundle = group
@@ -717,11 +562,6 @@ where
         .stage_commit(provider)
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("reconcile stage: {e}")))?;
 
-    // 8. Serialize commit + welcome + GroupInfo. All three bytes are available
-    //    pre-merge directly from the commit bundle. The GroupInfo is the
-    //    resulting-epoch tree snapshot a future joiner external-joins against;
-    //    it travels with the commit so the Delivery Service writes commit +
-    //    Welcome + GroupInfo atomically (Slice 1).
     let (commit_out, welcome_opt, group_info_opt) = bundle.into_messages();
 
     let commit_bytes = commit_out
@@ -744,9 +584,6 @@ where
         None => None,
     };
 
-    // `epoch_after` is the epoch this commit will produce when merged. We
-    // don't merge here, but we can report it deterministically: a staged
-    // commit always advances the epoch by exactly one.
     let epoch_after = epoch_before + 1;
 
     let removed: Vec<(String, String)> = to_remove.into_iter().map(|(key, _)| key).collect();
@@ -775,17 +612,9 @@ where
     ))
 }
 
-/// Sync core: computes the diff between the desired roster and the actual MLS
-/// tree, then issues a single combined commit. Testable without Turso or async.
-///
-/// Returns the outcome plus optional commit/welcome bytes for the caller to
-/// post to Turso. The commit is merged locally before returning.
-///
-/// NOTE: async callers should prefer the staged variant
-/// (`reconcile_group_mls_core_staged`) so remote persistence can happen
-/// *before* the local merge, avoiding split-brain on remote failure. This
-/// thin wrapper exists for test helpers and any path that deliberately wants
-/// a local-only merge.
+/// [`reconcile_group_mls_core_staged`] plus an immediate local merge, for test
+/// helpers and local-only paths. Async callers use the staged variant so the
+/// DS accepts the commit before the merge.
 #[allow(clippy::too_many_arguments)]
 pub fn reconcile_group_mls_core<C>(
     provider: &MlsProvider<'_, C>,
@@ -813,8 +642,6 @@ where
         identities,
     )?;
 
-    // If a commit was staged, merge it locally. No-op runs leave the group
-    // in Operational state with no pending commit, so the merge is skipped.
     if commit_data_opt.is_some() {
         crate::commands::file_keys::keep_epoch_kek(provider, group);
         group
@@ -826,35 +653,14 @@ where
     Ok((outcome, commit_data_opt))
 }
 
-
-// #987: `registered_devices` and `desired_roster_user_ids` moved to the
-// Delivery Service (`POST /v1/read/registered-devices`,
-// `POST /v1/conversations/catch-up` with `want_roster`). They were the two
-// definitions `reconcile` and `migrate` had to agree on, and having one copy
-// server-side is what makes agreement structural rather than reviewed — the
-// alternative is a migration that strands whoever the diff would have added.
-
-
-/// Load the group, read its signer, validate the claimed KeyPackages and stage
-/// the reconcile commit — the whole crypto-bearing half of
-/// [`reconcile_group_mls_impl`], generic over the crypto backend so the caller
-/// can dispatch on the group's ciphersuite.
+/// The crypto-bearing half of [`reconcile_group_mls_impl`]: load the group at
+/// `generation`, validate the claimed KeyPackages and stage the commit.
+/// `Ok(None)` means the local group is gone. Migration reuses it to populate a
+/// successor lineage (#454), so KeyPackage validation has one copy.
 ///
-/// `Ok(None)` means the local group is gone; the caller reports a no-op.
-///
-/// `generation` names which lineage's group to stage against. Migration (#454
-/// P4) reuses this against the freshly-created successor at generation `N + 1`,
-/// which is why it is `pub(super)`: standing up a successor is exactly "add the
-/// whole roster to an empty group", and a second copy of the KeyPackage
-/// validation — including the cross-suite refusal below — would drift.
-///
-/// `identities` is the roster's cross-signing material ([`load_pinned_identities`]).
-/// Every claimed KeyPackage's leaf must be [`LeafVerdict::Certified`] against it
-/// before it becomes an Add proposal: the leaf's signature key has to be the very
-/// device key the claimed user's `account_id_pub` certified. The DS hands us the
-/// KeyPackage and is untrusted, so a self-consistent KeyPackage (which is all
-/// `KeyPackageIn::validate` checks) proves only that *someone* holds the leaf's
-/// private key — this check proves that someone is the user's device.
+/// Every claimed leaf must be [`LeafVerdict::Certified`] against `identities`:
+/// the DS is untrusted, and `KeyPackageIn::validate` proves only that *someone*
+/// holds the leaf key, not that it is the user's certified device.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn stage_reconcile_commit<C>(
     provider: &MlsProvider<'_, C>,
@@ -880,7 +686,6 @@ where
         }
     };
 
-    // Read signer.
     let sig_pub_bytes = group
         .own_leaf_node()
         .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("no own leaf node")))?
@@ -894,13 +699,11 @@ where
     )
     .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("signer not found in mls_kv")))?;
 
-    // Resolve pending commit.
     crate::commands::file_keys::keep_epoch_kek(provider, &group);
     group
         .merge_pending_commit(provider)
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("merge pending: {e}")))?;
 
-    // Validate KPs.
     let mut available_kps: Vec<(String, String, KeyPackage)> = Vec::new();
     let mut refused: Vec<(String, String, String)> = Vec::new();
     for (uid, did, kp_raw) in kp_tuples {
@@ -919,10 +722,8 @@ where
                 continue;
             }
         };
-        // Claiming is suite-scoped, but the DS is untrusted: re-check that the
-        // KeyPackage it handed us really is in the group's suite before it can
-        // reach `propose_adds`. A cross-suite KP would otherwise be a
-        // server-driven downgrade of an entire group.
+        // The DS is untrusted: a cross-suite KP would be a server-driven
+        // downgrade of the whole group.
         if kp.ciphersuite() != group.ciphersuite() {
             crate::diag!(
                 "[mls] reconcile: kp suite {:?} != group suite {:?} for {uid}:{did} — refusing",
@@ -943,12 +744,8 @@ where
             );
             continue;
         }
-        // Cross-signing, committer side. The KeyPackage is self-consistent and
-        // names the right credential — now prove its leaf key is the device key
-        // this user's account key certified. Anything short of `Certified` is a
-        // refusal: `Uncertified` is an attacker's (or revoked) leaf, and
-        // `Unverifiable` means we cannot tell, which is not a basis for handing
-        // a leaf the group's key schedule.
+        // Anything short of `Certified` is refused: "cannot tell" is no basis for
+        // handing a leaf the group's key schedule.
         let verdict = identities.leaf_verdict(
             uid,
             did,
@@ -961,10 +758,8 @@ where
             LeafVerdict::Uncertified(why) => Some(why),
         };
         if let Some(reason) = reason {
-            // Test-harness only: the flows suite plays a legacy / malicious
-            // committer by switching this refusal off, so the INBOUND check can
-            // be exercised against a real rogue leaf. Never compiled into a
-            // shipping build.
+            // Lets the flows suite play a malicious committer to exercise the
+            // inbound check.
             #[cfg(feature = "test-harness")]
             if committer_leaf_check_skipped() {
                 crate::diag!(
@@ -983,11 +778,6 @@ where
         available_kps.push((uid.clone(), did.clone(), kp));
     }
 
-    // Stage the commit: builds the commit locally and writes it as a
-    // PENDING commit on the group (persisted to MLS storage) WITHOUT
-    // advancing the local epoch. The merge is deferred until after the
-    // remote INSERTs succeed so a remote failure cannot leave the local
-    // group ahead of the remote commit log.
     let (mut outcome, data) = reconcile_group_mls_core_staged(
         provider,
         &signer,
@@ -1003,15 +793,8 @@ where
     Ok(Some((outcome, data)))
 }
 
-/// The roster's cross-signing material, with the account keys pinned locally.
-///
-/// One DS read (`/v1/read/roster-identities`), then two substitutions the DS
-/// cannot influence: the actor's own account key is replaced by the one in the
-/// device keystore, and any peer whose reported key differs from the local
-/// TOFU pin (`contact_verification`) has its key DROPPED, so every leaf of theirs
-/// verdicts `Unverifiable` and is refused. `batch_check_and_pin_account_keys`
-/// has just run, so an honest DS agrees with the pin; a disagreement here is a
-/// key swapped between two reads of the same reconcile.
+/// The roster's cross-signing material from the DS, with the account keys
+/// pinned locally by [`pin_identities`].
 pub(super) async fn load_pinned_identities(
     state: &Arc<AppState>,
     roster_user_ids: &[String],
@@ -1021,29 +804,18 @@ pub(super) async fn load_pinned_identities(
     pin_identities(state, IdentityDirectory::new(rows), actor_user_id).await
 }
 
-/// The two local substitutions [`load_pinned_identities`] applies, over a
-/// directory built from ANY source of DS rows.
-///
-/// Split out because the RECEIVE side needs the identical treatment and had
-/// none (#1161 M3): the replay loop built its directory straight from
-/// `conversation-state`'s `added_identities`, so a DS that substituted a user's
-/// `account_id_pub` along with a matching device cert could make a rogue leaf
-/// verdict `Certified` inbound. The self-substitution case is the sharpest —
-/// a leaf claiming YOUR OWN user id judged against a DS-supplied copy of your
-/// own account key rather than the one in your keystore — and it is exactly the
-/// case the first substitution below closes.
-///
-/// Both substitutions only ever make a verdict WEAKER (`Certified` →
-/// `Unverifiable`), never stronger, so applying them on a path that also has to
-/// stay live costs nothing but a flag the eviction reconcile self-corrects.
+/// Override DS-reported account keys with local truth, on the send and receive
+/// paths alike (#1161 M3): the actor's own key comes from the keystore, and a
+/// peer whose key differs from its TOFU pin (`contact_verification`) has it
+/// dropped, so its leaves verdict `Unverifiable`. Both only ever weaken a
+/// verdict, never strengthen it.
 pub(super) async fn pin_identities(
     state: &Arc<AppState>,
     mut dir: IdentityDirectory,
     actor_user_id: &str,
 ) -> crate::error::Result<IdentityDirectory> {
-    // Our own root of trust is local. `load_account_id_key` fails only when this
-    // device holds no account identity, in which case it could not have
-    // certified any device either and the DS value is left to speak for itself.
+    // Fails only when this device holds no account identity, so it could not
+    // have certified any device either.
     if let Ok(key) = crate::commands::account_identity::load_account_id_key(state, actor_user_id).await {
         use ml_dsa::Keypair as _;
         dir.set_account_key(actor_user_id, Some(key.verifying_key().encode().to_vec()));
@@ -1082,9 +854,8 @@ pub(super) async fn pin_identities(
     Ok(dir.into_pinned())
 }
 
-/// Test-harness only: when set, `stage_reconcile_commit` adds a KeyPackage whose
-/// leaf FAILS the cross-signing check, playing a malicious or pre-fix committer so
-/// the flows suite can prove the inbound side flags and evicts such a leaf.
+/// Test-harness only: when set, `stage_reconcile_commit` adds leaves that fail
+/// the cross-signing check, so the flows suite can test inbound eviction.
 #[cfg(feature = "test-harness")]
 static SKIP_COMMITTER_LEAF_CHECK: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
@@ -1100,13 +871,8 @@ pub fn set_skip_committer_leaf_check(skip: bool) {
     SKIP_COMMITTER_LEAF_CHECK.store(skip, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// Test-harness only: this device's local epoch for `conversation_id`, and
-/// whether it is holding a staged, unconfirmed commit.
-///
-/// `None` when there is no local group. Exists so a test can assert that an
-/// operation did NOT advance the epoch (#1079) — the pre-fix bug was invisible
-/// from every other observation point, because the phantom advance only showed
-/// up later as a message that silently never arrived.
+/// Test-harness only: this device's local epoch for `conversation_id` and
+/// whether a commit is staged, or `None` with no local group (#1079).
 #[cfg(feature = "test-harness")]
 pub async fn local_epoch_and_pending(
     state: &Arc<AppState>,
@@ -1118,9 +884,7 @@ pub async fn local_epoch_and_pending(
     Some((group.epoch().as_u64(), group.pending_commit().is_some()))
 }
 
-/// Test-harness only: the `(user_id, device_id)` leaves of this device's local
-/// tree for `conversation_id`, so a test can assert what a reconcile admitted
-/// or evicted rather than infer it.
+/// Test-harness only: the `(user_id, device_id)` leaves of the local tree.
 #[cfg(feature = "test-harness")]
 pub async fn local_tree_members(
     state: &Arc<AppState>,
@@ -1144,29 +908,22 @@ pub async fn local_tree_members(
     }
 }
 
-/// How many passes [`reconcile_group_mls_impl`] makes when its commit keeps
-/// losing the epoch race: the first, and two retries on the converged epoch.
+/// Passes [`reconcile_group_mls_impl`] makes while its commit keeps losing the
+/// epoch race.
 const RECONCILE_ATTEMPTS: usize = 3;
 
-/// One reconcile pass's end: done (with what it did), or its commit lost the
-/// epoch race and the device has converged on the winner.
+/// One reconcile pass's end: done, or lost the epoch race and converged.
 enum PassEnd {
     Done(ReconcileOutcome),
     LostRace,
 }
 
-/// Async entry point: reads desired state from Turso, loads local MLS group,
-/// calls `reconcile_group_mls_core`, posts commit + welcome rows.
+/// Reconcile this conversation's MLS tree with its roster and publish the
+/// commit.
 ///
-/// A pass whose commit loses the epoch race is RETRIED on the epoch it converged
-/// to (#1571), at most [`RECONCILE_ATTEMPTS`] passes in all. Reconcile is
-/// declarative, so a retry re-derives the add set from the tree it now holds:
-/// whatever the winning commit already did drops out, and what it did not is
-/// committed. Before, a lost race simply returned, leaving the rest to "a later
-/// reconcile" — and on a mobile-only roster none ever ran. That is how a DM's
-/// creator, whose create-time reconcile lost epoch 0 to the recipient's own
-/// external join, added nobody else: every other device then had to find the
-/// DM and join itself, and one that was not running was left out entirely.
+/// A pass that loses the epoch race is retried on the converged epoch (#1571):
+/// reconcile is declarative, so the retry commits only what the winner did not.
+/// Nothing else guarantees a later reconcile runs (e.g. a mobile-only roster).
 pub async fn reconcile_group_mls_impl(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -1201,24 +958,17 @@ async fn reconcile_pass(
     let conversation_id = conversation_id.to_owned();
     let actor_user_id = actor_user_id.to_owned();
 
-    // Test-harness only: a test can park a reconcile here to line it up against
-    // another device's join (#1041).
+    // Lets a test line a reconcile up against another device's join (#1041).
     #[cfg(feature = "test-harness")]
     super::group_state::rendezvous::park(super::group_state::rendezvous::Point::ReconcileEntry)
         .await;
 
-    // Serialize all MLS mutations for this conversation on this device so two
-    // concurrent reconciles (or a reconcile racing the external-join path)
-    // can't both stage + commit from the same epoch. Held for the whole
-    // function EXCEPT the lost-race converge below, which drops it and runs the
-    // INTERLEAVED ingesting catch-up (which re-acquires the lock) so a converge
-    // that advances/rebuilds can't strand an un-ingested current-epoch message.
+    // Held for the whole pass so two local mutations can't both commit from one
+    // epoch; dropped only for the lost-race converge, whose catch-up re-acquires
+    // it. Also pins the generation: migration takes the same lock.
     let _mls_guard = state.mls_group_lock(&conversation_id).await;
 
-    // 1. Determine roster: group_member + pending invitees, or dm_channel_member.
-    //    Derived server-side since #987, from the ONE definition both this and
-    //    `migrate` use — the two must never disagree about who belongs, or a
-    //    migration would strand whoever the diff would have added.
+    // Server-derived, the one roster definition `migrate` also uses (#987).
     let roster_user_ids: std::collections::HashSet<String> =
         crate::commands::ds_reads::catch_up_full(state, &conversation_id, false, false, true)
             .await?
@@ -1226,17 +976,9 @@ async fn reconcile_pass(
             .into_iter()
             .collect();
 
-    // 1b. TOFU-pin every roster member's account_id_pub before we use
-    //     server-reported keys to add devices to the MLS tree. Without
-    //     this, a malicious Turso write could swap a member's key on the
-    //     fly and the next reconcile would silently graft an attacker's
-    //     device into the group with no inline signal to other members.
-    //     The DM ingest path already does this per-message; groups
-    //     piggyback on reconcile because that's the only choke point
-    //     where roster changes get applied. Skip the actor's own id —
-    //     contact_verification is for peers, not self. Non-fatal: a
-    //     transient failure must not block a legitimate membership
-    //     update. Caught + logged.
+    // TOFU-pin peers' account keys before server-reported keys decide who is
+    // added; reconcile is the groups' only roster choke point. Non-fatal: a
+    // transient failure must not block a legitimate membership update.
     {
         let peers: Vec<String> = roster_user_ids
             .iter()
@@ -1252,44 +994,16 @@ async fn reconcile_pass(
         }
     }
 
-    // The roster as a bindable slice, built once and shared by both reads below
-    // — it used to be cloned separately for each.
-    //
-    // The ids are BOUND as `?n` placeholders rather than interpolated behind a
-    // character filter, matching `registered_devices`. libsql has no array
-    // binding, so the placeholder list is generated but the values are not.
     let ids: Vec<String> = roster_user_ids.iter().cloned().collect();
 
-    // 2. Find devices with unclaimed KPs for all roster users.
-    //
-    // A revoked device keeps its unclaimed KeyPackages, so this query needs the
-    // same `revoked_at IS NULL` predicate as `registered_devices` — it is the
-    // source of `available_kps`, and therefore of the KP half of `desired`.
-    // Without it a revoked device is handed back a claimed KP and re-admitted to
-    // the tree. `compute_diff` now filters this set against `valid_devices` as a
-    // second line of defence; filtering here as well means we never claim (and
-    // so never burn) a revoked device's KeyPackage.
-    //
-    // ONE request for the whole roster, and an ERROR rather than a short list on
-    // failure. That distinction is the important half: this read decides WHICH
-    // devices get added to the tree, and a truncated answer does not fail loudly
-    // — it commits a reconcile without those devices, and they stay out of the
-    // group until something else triggers another one. The DS answers
-    // all-or-nothing for exactly that reason.
+    // Excludes revoked devices, so a revoked device's KeyPackage is never
+    // claimed (burnt). All-or-nothing: a truncated answer would silently commit
+    // without the missing devices.
     let device_pairs: Vec<(String, String)> =
         crate::commands::ds_reads::claimable_devices(state, &ids, None).await?;
 
-    // 2b. Snapshot of every (user_id, device_id) pair still registered in
-    //     `user_device` for the current roster. Used by reconcile to drop
-    //     leaves whose device row was revoked even though the user is still
-    //     a roster member (single-device revoke flow).
     let valid_devices = crate::commands::ds_reads::registered_devices(state, &ids).await?;
 
-    // 2c. The roster's cross-signing material, pinned against the local TOFU
-    //     table and our own keystore. Every KeyPackage claimed below must prove
-    //     its leaf key is the certified device key before it can be added, and
-    //     every leaf already in the tree that positively is NOT gets evicted.
-    //     An error, never a partial answer: this read decides who is admitted.
     let identities = load_pinned_identities(state, &ids, &actor_user_id).await?;
 
     let actor_device_id = state
@@ -1299,8 +1013,6 @@ async fn reconcile_pass(
         .clone()
         .unwrap_or_default();
 
-    // 2d. #1082: refuse the pass if the snapshot that decides evictions does not
-    //     even contain us. See `snapshot_includes_actor`.
     if !snapshot_includes_actor(&roster_user_ids, &valid_devices, &actor_user_id, &actor_device_id) {
         crate::diag!(
             "[reconcile] refusing pass for {conversation_id}: registered_devices snapshot \
@@ -1311,18 +1023,8 @@ async fn reconcile_pass(
         return Ok(PassEnd::Done(ReconcileOutcome::default()));
     }
 
-    // 3. Peek at the current tree to learn which devices are already members.
-    //    This lets us skip claiming KPs for devices that don't need to be added,
-    //    avoiding unnecessary KP exhaustion on repeated reconciles.
-    //
-    //    The same peek yields the group's ciphersuite, which decides the suite
-    //    of every KeyPackage claimed below. Reading the tree is storage-only —
-    //    no crypto backend, hence no suite dispatch, is needed to learn it.
-    //
-    //    It also pins the suite GENERATION for the rest of this pass. Migration
-    //    takes the same per-conversation MLS lock we hold here, so the lineage
-    //    cannot move underneath us: every KeyPackage claimed, every commit
-    //    staged, and the epoch claim itself all belong to this one generation.
+    // Peek at the tree (storage-only) so existing members' KeyPackages aren't
+    // claimed and burnt, and to learn the suite every claim must match.
     let (already_in_tree, group_suite, generation): (
         std::collections::HashSet<(String, String)>,
         Ciphersuite,
@@ -1355,12 +1057,7 @@ async fn reconcile_pass(
         }
     };
 
-    // #1571: diff EVERY registered device of the roster against the tree, not
-    // only the claimable ones. A device that has no package to claim — an
-    // empty pool on a build without a last-resort package, or nothing published
-    // yet — used to be missing from `device_pairs`, so it never reached the
-    // claim loop below and was left out of the tree with no trace anywhere.
-    // It is now named here, logged, and returned in `skipped_no_suite_kp`.
+    // Name every registered device left out for lack of a package (#1571).
     let claimable: std::collections::HashSet<&(String, String)> = device_pairs.iter().collect();
     let mut skipped_no_suite_kp: Vec<(String, String)> =
         unaddable_devices(&valid_devices, &already_in_tree, &claimable, &roster_user_ids);
@@ -1372,31 +1069,15 @@ async fn reconcile_pass(
         );
     }
 
-    // Only claim KPs for devices not already in the tree.
     let devices_to_claim: Vec<(String, String)> = device_pairs
         .into_iter()
         .filter(|pair| !already_in_tree.contains(pair))
         .collect();
 
-    // 4. Claim one KP per device that needs to be added.
-    //
-    // A KP claim is a `claimed = 1` write on a *peer's* row, so under a read-only
-    // Turso token a direct `UPDATE … RETURNING` would fail — it routes through the
-    // Delivery Service. A target device with no unclaimed package is simply
-    // skipped (the DS replies 404 → `Ok(None)`).
-    //
-    // The claim is scoped to the GROUP's ciphersuite, never a fixed one. This is
-    // what makes "a group can never contain a member without a KeyPackage in
-    // that group's suite" hold: a device that has published no KP in the group's
-    // suite has nothing to claim, so it is skipped rather than downgraded in.
-    // #669 left exactly one suite in production, but a group awaiting migration
-    // is still on its predecessor's, so the claim stays group-scoped.
-    //
-    // A claim that FAILS (rather than finding nothing) skips that one device
-    // too, loudly, instead of aborting the pass (#1571). Aborting threw away
-    // every package already claimed for the devices before it — each claim is a
-    // one-way flip — and left every device after it unclaimed, so one bad
-    // response kept the whole rest of the roster out of the tree.
+    // Claims are scoped to the GROUP's suite (a group awaiting migration is
+    // still on its predecessor's), so a device is skipped, never downgraded in.
+    // A failed claim skips only that device (#1571): each claim is a one-way
+    // flip, so aborting would burn the packages already claimed.
     let mut kp_tuples: Vec<(String, String, Vec<u8>)> = Vec::new();
     for (uid, did) in &devices_to_claim {
         let claimed: Option<Vec<u8>> =
@@ -1427,8 +1108,6 @@ async fn reconcile_pass(
         }
     }
 
-    // 5. Validate KPs and call the sync core under the local_db lock, in the
-    //    group's own suite.
     let staged = {
         let guard = state.local_db.lock().await;
         let db = match guard.as_ref() {
@@ -1452,7 +1131,7 @@ async fn reconcile_pass(
     };
     let (mut outcome, commit_data_opt) = match staged {
         Some(v) => v,
-        // Nothing to commit — but a device it could not add is still reported.
+        // No local group, but a device it could not add is still reported.
         None => {
             return Ok(PassEnd::Done(ReconcileOutcome {
                 skipped_no_suite_kp,
@@ -1462,24 +1141,11 @@ async fn reconcile_pass(
     };
     outcome.skipped_no_suite_kp = skipped_no_suite_kp;
 
-    // 5. Post commit + welcome to Turso FIRST, then merge locally.
-    //
-    //    Ordering rationale: if any remote INSERT fails (e.g. libsql hrana
-    //    "stream not found" after the slow MLS crypto work evicted the
-    //    stream), we must NOT advance the local epoch — otherwise this
-    //    client is at epoch N+1 while no other member can see the commit,
-    //    producing permanent split-brain. On remote failure we roll back
-    //    the local pending commit via `clear_pending_commit` so the next
-    //    reconcile recomputes from scratch.
     if let Some(data) = commit_data_opt {
-        // Name every added user and device beside the commit. This is a
-        // PREFETCH HINT: the DS folds these users' cert rows into the commit
-        // batch so replaying members verify the added leaves without a round
-        // trip. It is not what they verify — they read the leaves off the
-        // commit's own Add proposals — so an incomplete or NULL hint can only
-        // make an honest add look unverifiable, never make a rogue one look
-        // verified. Every distinct user, in add order (it used to be the first
-        // user only, which left a multi-user add's other leaves unverifiable).
+        // A prefetch hint so replaying members get the added users' certs in
+        // the commit batch. They verify the leaves from the commit itself, so a
+        // wrong hint can only make an honest add look unverifiable, never a
+        // rogue one verified.
         let (added_uid, added_dids): (Option<String>, Option<String>) = if outcome.added.is_empty() {
             (None, None)
         } else {
@@ -1498,18 +1164,6 @@ async fn reconcile_pass(
             (Some(uids.join(",")), Some(dids))
         };
 
-        // Try the remote INSERTs on a FRESH connection. The libsql hrana
-        // stream captured at the top of this function may have been evicted
-        // by the server during the slow MLS crypto work above; reusing it
-        // would produce "stream not found" for the critical writes. A fresh
-        // connection here is not a retry — it's preventing a stale stream
-        // from being our only attempt. On failure, roll back the local
-        // pending commit before returning.
-        // Build the Welcomes for this commit: one blob per added recipient.
-        // The delivery seam now OWNS Welcomes + GroupInfo — it writes all three
-        // (commit + GroupInfo + Welcomes) as one unit on a win, atomically
-        // through the DS, mirrored by the Direct path. We no longer write
-        // Welcomes inline or republish GroupInfo after the merge.
         let welcomes: Vec<super::delivery::WelcomeOut> = match data.welcome_bytes.as_ref() {
             Some(welcome_bytes) => outcome
                 .added
@@ -1523,9 +1177,6 @@ async fn reconcile_pass(
             None => Vec::new(),
         };
 
-        // Claim this epoch and resolve the (possibly ambiguous) outcome. On a
-        // win the pending commit is merged; on a loss or a genuine failure it is
-        // rolled back. See [`publish_staged_commit`].
         let published = publish_staged_commit(
             state,
             &conversation_id,
@@ -1543,26 +1194,12 @@ async fn reconcile_pass(
         .await;
 
         match published {
-            // We own this epoch. Fall through to the roster hint / voice rotation.
             Ok(PublishOutcome::Won) => {}
-            // Another member committed this epoch first; our staged commit is on
-            // a branch no one will adopt. It has been rolled back — converge on
-            // the winner. The pending invite / membership row persists, so a
-            // later reconcile re-applies our change at the new epoch.
             Ok(PublishOutcome::LostRace) => {
-                // Converge on the winner through the INTERLEAVED ingesting
-                // catch-up rather than a bare commit-only replay. This is a
-                // recovery-seam ADVANCE path: applying the winner's commit (or
-                // rebuilding via external-join if we forked) moves us past our
-                // current epoch, and with `max_past_epochs = 0` a current-epoch
-                // inbound message we haven't ingested yet would have its keys
-                // discarded — the last advance path not covered by the #440/#441
-                // ingest-before-advance invariant. The interleaved catch-up
-                // decrypts each epoch's messages BEFORE advancing past it and
-                // still reaches head. It re-acquires the per-conversation MLS
-                // lock, so we drop ours first; reconcile returns immediately
-                // after, so this is equivalent to reconcile finishing and a
-                // normal catch-up running.
+                // Converge through the INTERLEAVED ingesting catch-up, not a bare
+                // replay: with `max_past_epochs = 0`, advancing past an epoch
+                // before ingesting its messages discards their keys (#440/#441).
+                // It re-acquires the MLS lock, so drop ours first.
                 drop(_mls_guard);
                 if let Err(e) = crate::commands::messages::catch_up_mls_group_interleaved(
                     state,
@@ -1577,46 +1214,31 @@ async fn reconcile_pass(
                 }
                 return Ok(PassEnd::LostRace);
             }
-            // The commit genuinely did not land; the staged pending commit was
-            // already cleared so a later reconcile doesn't merge a commit the
-            // remote never saw. Surface the error.
             Err(e) => {
                 return Err(e);
             }
         }
     }
 
-    // Voice E2EE: the committer path also advances the local epoch (via
-    // `merge_pending_commit` inside `reconcile_group_mls_core`), so the
-    // rotation hook must fire here too — otherwise the user who invites or
-    // removes someone keeps publishing voice frames under the previous
-    // epoch's key while every other member has already rotated.
+    // The committer advances its epoch here too, so per-epoch keys (voice, pin,
+    // file) must rotate on this path as on the receive path; re-wrapping here
+    // lets a member this commit added unwrap at once (#99).
     if outcome.epoch_after > outcome.epoch_before {
         crate::commands::voice_e2ee::on_mls_epoch_changed(state, &conversation_id).await;
-        // Same trigger for the pin key (#99): the committer is exactly the
-        // device most likely to hold Kpin, and re-wrapping here is what lets
-        // a member added by THIS commit (Welcome, at the new epoch) unwrap
-        // immediately instead of waiting for a later pass.
         crate::commands::pinned_messages::maybe_rewrap_pin_key(state, &conversation_id).await;
         crate::commands::file_keys::maybe_rewrap_file_keys(state, &conversation_id).await;
-        // #1382: a removal commit rotates the attachment key ring, so the
-        // removed member cannot open files posted from this epoch on. The
-        // owed-rotation mark it leaves survives a crash before the DS write.
+        // A removal rotates the attachment key ring (#1382).
         if !outcome.removed.is_empty() {
             crate::commands::file_keys::on_member_removed(state, &conversation_id).await;
         }
     }
 
-    // Roster-change hint. Fire only when an actual epoch bump happened —
-    // `outcome.added` / `outcome.removed` are populated only on the committing
-    // branch, and the no-op early-returns above leave them empty. It is a
-    // refetch hint and names no one: membership changes are never announced in
-    // a timeline (#1506), so there is no diff to compute or carry.
+    // A refetch hint that names no one: membership changes are never announced
+    // in a timeline (#1506).
     if outcome.epoch_after > outcome.epoch_before
         && (!outcome.added.is_empty() || !outcome.removed.is_empty())
     {
-        // Local emit. The sink is None during early boot / signed-out;
-        // dropping the send is the right behaviour there.
+        // No sink during early boot or signed-out; dropping the send is correct.
         let sink = state.livekit.lock().await.channel.clone();
         if let Some(ch) = sink {
             let _ = ch.send(crate::realtime::RealtimeEvent::RosterChanged {
@@ -1626,10 +1248,8 @@ async fn reconcile_pass(
             });
         }
 
-        // Room broadcast. §5.3 metadata minimization: the routing handle +
-        // epochs ONLY — LiveKit forwards it in cleartext. Remote peers refetch
-        // the member list (`livekit/mod.rs` dispatch). Non-fatal: a flaky
-        // LiveKit blip mustn't fail the reconcile that already committed.
+        // Routing handle + epochs only: LiveKit forwards it in cleartext (§5.3).
+        // Non-fatal: the reconcile already committed.
         if let Err(e) = crate::commands::livekit::publish_to_room_server(
             state,
             &conversation_id,
@@ -1650,9 +1270,8 @@ async fn reconcile_pass(
     Ok(PassEnd::Done(outcome))
 }
 
-/// Registered devices of roster members that hold no leaf and have no package
-/// to claim (#1571) — the devices a reconcile cannot add this pass. Sorted, so
-/// the log and the outcome read the same on every run.
+/// Registered roster devices with no leaf and no package to claim (#1571),
+/// sorted for stable logs.
 fn unaddable_devices(
     valid_devices: &std::collections::HashSet<(String, String)>,
     tree: &std::collections::HashSet<(String, String)>,
@@ -1677,8 +1296,6 @@ mod tests {
         ids.iter().map(|s| s.to_string()).collect()
     }
 
-    // ─── `desired_set` — the diff chokepoint (#679) ───────────────────────────
-
     fn key(uid: &str, did: &str) -> (String, String) {
         (uid.to_string(), did.to_string())
     }
@@ -1687,11 +1304,7 @@ mod tests {
         pairs.iter().map(|(u, d)| key(u, d)).collect()
     }
 
-    /// The load-bearing #679 case, and the one a `registered_devices`-only fix
-    /// does NOT cover: the revoked device still has an unclaimed KeyPackage, so
-    /// it arrives via `available_kps`. If only the tree-member half were gated,
-    /// the KP half would put it straight back into `desired` — out of
-    /// `to_remove`, and re-added if its leaf were already gone.
+    /// #679: a revoked device's leftover KeyPackage must not re-admit it.
     #[test]
     fn a_revoked_device_with_a_key_package_is_not_desired() {
         let tree = [key("alice", "a1"), key("bob", "b1")];
@@ -1716,10 +1329,6 @@ mod tests {
         );
     }
 
-    /// The committer's own device consumed its KeyPackage creating the group, so
-    /// it appears ONLY as a tree member. Retaining it is why the tree-member half
-    /// of the union exists; losing it would make every reconcile try to evict the
-    /// actor.
     #[test]
     fn the_committers_own_leaf_is_retained_without_a_key_package() {
         let tree = [key("alice", "a1")];
@@ -1738,8 +1347,6 @@ mod tests {
         );
     }
 
-    /// A device whose USER left the roster is undesired regardless of KeyPackages
-    /// or validity — the plain removal case, which must keep working.
     #[test]
     fn a_leaf_whose_user_left_the_roster_is_not_desired() {
         let tree = [key("alice", "a1"), key("bob", "b1")];
@@ -1757,9 +1364,6 @@ mod tests {
         );
     }
 
-    /// A live device that is in the roster and has a KeyPackage but no leaf yet
-    /// is desired — this is the addition path, and it must not be collateral
-    /// damage of the new filter.
     #[test]
     fn a_live_device_awaiting_its_first_leaf_is_desired() {
         let tree: Vec<(String, String)> = vec![key("alice", "a1")];
@@ -1778,9 +1382,7 @@ mod tests {
         );
     }
 
-    /// #1571: a registered roster device with no leaf and nothing to claim is
-    /// named, not dropped; a device in the tree, a claimable one and one whose
-    /// user is off the roster are not.
+    /// #1571: only b2 lacks both a leaf and a package while on the roster.
     #[test]
     fn a_registered_device_with_nothing_to_claim_is_reported() {
         let valid = valid(&[("alice", "a1"), ("bob", "b1"), ("bob", "b2"), ("carol", "c1"), ("zed", "z1")]);
@@ -1791,12 +1393,7 @@ mod tests {
         assert_eq!(got, vec![key("bob", "b2")]);
     }
 
-    // ── #1082: the self-presence gate on the eviction snapshot ──────────────
-
-    /// The consequence the gate exists to prevent, stated as a test: an empty
-    /// `valid_devices` against a live roster makes `desired_set` want NOBODY, so
-    /// the pass would evict every leaf in the tree. This is what a truncated or
-    /// spoofed `registered_devices` answer looks like from inside reconcile.
+    /// What #1082's gate prevents: an empty snapshot evicts every leaf.
     #[test]
     fn an_empty_snapshot_would_evict_the_whole_roster() {
         let tree = [key("alice", "a1"), key("bob", "b1")];
@@ -1809,7 +1406,6 @@ mod tests {
         );
     }
 
-    /// So that input is refused before it can be acted on.
     #[test]
     fn a_snapshot_that_omits_the_actor_is_refused() {
         assert!(
@@ -1821,8 +1417,6 @@ mod tests {
             ),
             "an empty snapshot for a live roster must not be trusted"
         );
-        // Partial is refused for the same reason: our own row is missing, so the
-        // answer is short, not authoritative.
         assert!(
             !snapshot_includes_actor(
                 &roster(&["alice", "bob"]),
@@ -1842,8 +1436,7 @@ mod tests {
             "alice",
             "a1",
         ));
-        // A genuine single-device revocation still gets through: bob's b1 is gone
-        // from the snapshot, we are present, so the eviction is real work.
+        // A genuine single-device revocation still gets through.
         assert!(snapshot_includes_actor(
             &roster(&["alice", "bob"]),
             &valid(&[("alice", "a1")]),
@@ -1852,18 +1445,12 @@ mod tests {
         ));
     }
 
-    /// The two states that deliberately do not gate.
     #[test]
     fn the_gate_does_not_fire_when_it_cannot_judge() {
-        // Empty roster: legitimate teardown, nothing left to protect.
         assert!(snapshot_includes_actor(&roster(&[]), &valid(&[]), "alice", "a1"));
-        // Unknown own device id: "cannot tell" must not become "abort".
         assert!(snapshot_includes_actor(&roster(&["alice"]), &valid(&[]), "alice", ""));
     }
 
-    /// A user may hold several devices and have only one revoked. The live
-    /// sibling must survive — otherwise revoking one device would silently log
-    /// the user out everywhere.
     #[test]
     fn revoking_one_device_spares_its_live_sibling() {
         let tree = [key("alice", "a1"), key("alice", "a2")];
@@ -1882,10 +1469,6 @@ mod tests {
         );
     }
 
-    /// `None` (no snapshot readable) must disable the gate, NOT behave like an
-    /// empty set. An empty set means "nothing is valid — remove everything"; if
-    /// `None` collapsed to that, a transient `user_device` read failure would
-    /// empty the group.
     #[test]
     fn a_missing_snapshot_disables_the_gate_rather_than_emptying_the_group() {
         let tree = [key("alice", "a1"), key("bob", "b1")];

@@ -1,72 +1,6 @@
-//! Cold-launch (or post-reconnect) MLS catch-up sweep.
-//!
-//! Single backend command that, given a user_id, enumerates every MLS
-//! group the user is in (regular groups + DMs) and runs the catch-up
-//! sequence (`poll_mls_welcomes_inner` once + `catch_up_mls_group_interleaved`
-//! per group) so the local MLS state matches the server's published epoch —
-//! decrypting every message sealed en route, not just replaying commits — before
-//! the user can take any MLS-powered action.
-//!
-//! Closes the cold-launch race documented in issue #371 scenario 5: between
-//! sign-in / unlock and the first time any per-call catch-up fires, a user
-//! action (send_message, edit_message, voice join, screen-share) could run
-//! against a stale epoch. Calling this at AppShell mount and awaiting it
-//! before unlocking interactive UI closes that window.
-//!
-//! Best-effort per group: a single group's failure (e.g. revoked device,
-//! transient Turso error) logs and continues to the next so one bad row
-//! never blocks the rest of the sweep.
-//!
-//! ## Eviction/remove reconcile backstop (issue #430 P1)
-//!
-//! The MLS post that evicts a removed member from the ratchet tree
-//! (`remove_member_from_group` / `remove_user_from_dm_channel` → `reconcile`)
-//! is best-effort: if it is dropped, the removed user is deleted from the
-//! server roster but LINGERS in every remaining member's LOCAL tree — still a
-//! recipient of the seals for new messages — until some *unrelated* membership
-//! change happens to run reconcile again. That is a forward-secrecy gap, the
-//! eviction-side analog of the bootstrap gap fixed in #427.
-//!
-//! So after catching a group up, the sweep also runs a reconcile backstop:
-//! it retries the dropped remove/eviction so the removed device is actually
-//! pruned from the local tree. It is gated behind a cheap local-vs-roster
-//! pre-check ([`local_tree_has_stale_leaf`]) so in steady state — when the tree
-//! already matches the roster — it costs only two lightweight SELECTs and a
-//! local MLS load, never the heavyweight reconcile (KP claims, account-key
-//! pinning, commit crypto).
-//!
-//! ## Missing-device re-add backstop (issue #1412)
-//!
-//! The same backstop also covers the opposite drift: a device that belongs in
-//! the tree but holds no leaf, because its KeyPackage pool was empty when the
-//! commit that should have added it was made. Reconcile skips such a device
-//! (there is nothing to claim), and before #1412 nothing revisited it, so a
-//! backgrounded phone added to more conversations than its pool held was left
-//! out of the extra ones for good. The pre-check now also looks for a leafless
-//! live device that has a claimable KeyPackage again and reconciles to add it.
-//! The device recovers on its own too: catching up a conversation it holds no
-//! group for external-joins it, and every Welcome drain refills its pool.
-//!
-//! ## On mobile, and before every seal (#1571)
-//!
-//! The sweep above is desktop's (cold launch, unlock, reconnect). Mobile never
-//! ran it, so in a conversation whose every participant was on a phone nothing
-//! retried a dropped add, and a device left out of the tree stayed out until it
-//! opened the conversation itself — joining at the head and missing everything
-//! before. Two more callers now reach the same backstop:
-//!
-//! * [`reconcile_backstop_all`] — the backstop alone, for every conversation,
-//!   bridged to mobile and run when the app lands and on every return to the
-//!   foreground, after the ingest pass it already makes (so the trees it reads
-//!   are caught up);
-//! * [`backstop_before_seal`] — the same check for ONE conversation, run by a
-//!   sender before it seals, at most once per conversation per
-//!   [`PRE_SEAL_CHECK_INTERVAL`], so the next message into a conversation with
-//!   a missing device re-adds it first.
-//!
-//! With last-resort KeyPackages (#1571) a missing device of a current build
-//! always has something to claim, so `has_addable_device` wakes for it even
-//! when its pool is empty — the claimable set the DS answers includes it.
+//! Cold-launch (or post-reconnect) MLS catch-up sweep (#371), plus the
+//! reconcile backstop that retries dropped evictions (#430) and re-adds
+//! leafless devices (#1412, #1571). See `.codesight/wiki/mls.md`.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -86,8 +20,6 @@ pub async fn catch_up_all_mls_groups(state: &Arc<AppState>, user_id: &str) -> Re
         }
     }
 
-    // Id-only enumeration in ONE request (#987). This is the cold-launch sweep,
-    // so it is the path the round-trip count matters most on.
     let dirs = crate::commands::ds_reads::conversations(state, user_id).await?;
     let group_ids: Vec<String> = dirs.group_ids;
     let dm_ids: Vec<String> = dirs.dm_ids;
@@ -98,22 +30,15 @@ pub async fn catch_up_all_mls_groups(state: &Arc<AppState>, user_id: &str) -> Re
         dm_ids.len()
     );
 
-    // Own-leaf rotations issued this sweep, capped at
-    // [`MAX_SELF_UPDATES_PER_SWEEP`] so a device that has been away long enough
-    // to be overdue everywhere doesn't turn one cold launch into a commit storm.
+    // Per-sweep budgets, so an overdue-everywhere device doesn't turn one cold
+    // launch into a commit storm.
     let mut self_updates = 0usize;
-    // Suite migrations issued this sweep, capped for the same reason and more
-    // sharply: a migration claims a KeyPackage per roster device and publishes a
-    // full add-everyone hybrid commit, so it is the most expensive thing the
-    // sweep can do (#454 P4).
     let mut migrations = 0usize;
 
-    // Regular groups: mls_group_id IS the group id.
     for gid in &group_ids {
         sweep_conversation(state, gid, user_id, "group", &mut self_updates, &mut migrations).await;
     }
 
-    // DMs: mls_group_id IS the dm_channel_id — a single-conversation MLS group.
     for did in &dm_ids {
         sweep_conversation(state, did, user_id, "dm", &mut self_updates, &mut migrations).await;
     }
@@ -130,14 +55,11 @@ pub struct BackstopReport {
     pub reconciled: usize,
 }
 
-/// The reconcile backstop for every conversation the user is in, without the
-/// catch-up, migration and self-update the full sweep adds (#1571).
+/// The reconcile backstop for every conversation, without the sweep's catch-up,
+/// migration and self-update (#1571).
 ///
-/// Mobile's entry to the backstop: it runs right after the app's own ingest
-/// pass (landing in the app, and every return to the foreground), which has
-/// already caught each conversation up, so repeating the catch-up here would
-/// only double the work. Cheap in steady state — see [`local_tree_drift`].
-/// Best-effort per conversation, like the sweep.
+/// Mobile's entry point: it runs right after the app's own ingest pass, which
+/// has already caught each conversation up.
 pub async fn reconcile_backstop_all(
     state: &Arc<AppState>,
     user_id: &str,
@@ -176,13 +98,11 @@ pub async fn reconcile_backstop_one(
 pub(crate) const PRE_SEAL_CHECK_INTERVAL: std::time::Duration =
     std::time::Duration::from_secs(10 * 60);
 
-/// Before sealing into `conversation_id`, re-add any device that belongs in its
-/// tree and is missing — or evict a stale leaf — so the message is sealed to the
-/// tree reconcile wants (#1571). At most once per conversation per
-/// [`PRE_SEAL_CHECK_INTERVAL`] on this device; best-effort, never fails a send.
+/// Before sealing, reconcile `conversation_id` if its tree has drifted (#1571).
+/// At most once per conversation per [`PRE_SEAL_CHECK_INTERVAL`]; never fails a
+/// send.
 ///
-/// The caller has just caught the conversation up and holds no MLS lock, which
-/// is what reconcile needs.
+/// The caller must have just caught the conversation up and hold no MLS lock.
 pub async fn backstop_before_seal(state: &Arc<AppState>, conversation_id: &str, user_id: &str) {
     {
         let mut checked = state.pre_seal_checked.lock().await;
@@ -199,27 +119,15 @@ pub async fn backstop_before_seal(state: &Arc<AppState>, conversation_id: &str, 
     }
 }
 
-/// One conversation's full sweep pass. Ordering is load-bearing:
+/// One conversation's sweep pass. Ordering is load-bearing:
 ///
-/// 1. **Catch up**, through the group-level *interleaved* path (not a bare
-///    commit-only replay) so a returning offline member decrypts every message
-///    sealed at an epoch it is about to advance past, rather than losing anything
-///    sent before a membership change during its offline window. It still
-///    advances to head, so the cold-launch guarantee (#371) is preserved.
-/// 2. **Reconcile backstop** — retry a dropped remove/eviction (#430 P1), or
-///    add a device that was skipped because its KeyPackage pool was empty and
-///    has since refilled (#1412). Before
-///    migration, so a roster that has just shed a member is settled before we
-///    decide who has to come across.
-/// 3. **Migration backstop** — move to the hybrid suite if the whole roster can
-///    now follow (#454 P4).
-/// 4. **Self-update backstop** — rotate our own leaf if overdue (#666). Last,
-///    because a successful migration founds a group where our leaf is already
-///    merged and records the rotation, making this a no-op instead of a wasted
-///    commit on a lineage we just retired.
-///
-/// Best-effort throughout: every step logs and continues so one bad conversation
-/// never blocks the rest of the sweep.
+/// 1. Interleaved catch-up, so messages sealed at epochs we advance past are
+///    still decrypted.
+/// 2. Reconcile backstop, before migration so the roster is settled before we
+///    decide who comes across.
+/// 3. Migration backstop (#454 P4).
+/// 4. Self-update backstop (#666), last because a landed migration already
+///    merged our leaf, making it a no-op.
 async fn sweep_conversation(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -241,17 +149,10 @@ async fn sweep_conversation(
     self_update_backstop(state, conversation_id, user_id, self_updates).await;
 }
 
-/// Post-quantum suite migration for a single conversation (#454 P4).
+/// Post-quantum suite migration for one conversation (#454 P4).
 ///
-/// The only driver of migration: there is no user-facing "upgrade this group"
-/// action and no server push. A conversation moves when every device on its
-/// roster can follow — which is a property that becomes true silently, as the
-/// fleet updates — so the sweep re-asks the question on every cold launch and
-/// reconnect until the answer changes.
-///
-/// Best-effort and capped: `budget` is shared across the sweep, so a device that
-/// is suddenly eligible in twenty conversations migrates a couple per launch
-/// rather than firing twenty add-everyone commits at once.
+/// The only driver of migration: eligibility becomes true silently as the fleet
+/// updates, so every sweep re-asks. `budget` is shared across the sweep.
 async fn migrate_backstop(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -262,8 +163,6 @@ async fn migrate_backstop(
         return;
     }
     match super::migrate::migrate_to_current_suite_if_due(state, conversation_id, user_id).await {
-        // Only a landed migration spends budget: an ineligible conversation did
-        // no work, and a lost race left it eligible for the next sweep to retry.
         Ok(true) => {
             *budget += 1;
         }
@@ -274,23 +173,9 @@ async fn migrate_backstop(
     }
 }
 
-/// Periodic own-leaf rotation for a single conversation (issue #666).
-///
-/// This is where post-compromise security actually comes from. MLS forward
-/// secrecy is free — the ratchet deletes old keys regardless of who commits —
-/// but healing *after* a device is compromised requires that device to publish
-/// fresh key material along its own direct path, which only its own commit can
-/// do. A member that only ever receives other people's commits never heals; an
-/// attacker who stole its leaf key keeps reading the group for as long as it
-/// stays a member. Rotating on a timer bounds that window.
-///
-/// It also catches the post-join rotation the live path
-/// (`poll_mls_welcomes_inner`) missed or deferred, which is what keeps unmerged
-/// leaves — and the linear commit growth they cause — from accumulating.
-///
-/// Best-effort and capped: `budget` is shared across the whole sweep so an
-/// overdue-everywhere device spreads its rotations over several launches instead
-/// of firing one commit per group at once.
+/// Periodic own-leaf rotation for one conversation (#666): the source of
+/// post-compromise security, and the catch-all for a deferred post-join rotation.
+/// `budget` is shared across the sweep.
 async fn self_update_backstop(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -301,8 +186,6 @@ async fn self_update_backstop(
         return;
     }
     match super::self_update::self_update_if_due(state, conversation_id, user_id).await {
-        // Only a landed commit spends budget: a not-due group did no work, and a
-        // lost race left the rotation due for the next sweep to retry.
         Ok(true) => {
             *budget += 1;
             crate::diag!("[mls-sweep] {conversation_id}: rotated own leaf");
@@ -314,52 +197,15 @@ async fn self_update_backstop(
     }
 }
 
-/// Eviction/remove reconcile backstop for a single conversation (issue #430 P1).
-///
-/// Retries a dropped remove/eviction MLS commit so a member deleted from the
-/// server roster is actually pruned from THIS device's local ratchet tree —
-/// closing the forward-secrecy gap where the removed device would otherwise keep
-/// decrypting new messages until an unrelated membership change ran reconcile.
-///
-/// Cheap in steady state: the heavyweight [`reconcile_group_mls_impl`] only runs
-/// when the local tree still holds a leaf the roster no longer justifies
-/// ([`local_tree_has_stale_leaf`]). When the tree already matches the roster this
-/// is a near-no-op (two SELECTs + a local MLS load, no DS round-trips).
-///
-/// Ordering / locking: the caller runs the interleaved ingesting catch-up for
-/// this conversation immediately before this call, so the current epoch's
-/// messages are ingested BEFORE reconcile can advance the epoch (mirrors how
-/// `membership.rs` / `invites.rs` hoist catch-up above reconcile). We hold no MLS
-/// lock across the call — `reconcile_group_mls_impl` takes the per-conversation
-/// `mls_group_lock` for its whole body, and its own lost-race converge re-runs
-/// the interleaved catch-up — so there is no deadlock and no epoch advanced past
-/// an un-ingested message.
 /// Everything a device does when a `membership_changed` wake-up names one of its
-/// conversations. Extracted from the LiveKit event loop so it has a name, a doc
-/// comment, and a test — and so the headless build can exercise it without a
-/// room.
+/// conversations, in the order `groups::membership` uses:
 ///
-/// Order matters, and it is the same order `groups::membership` uses:
+/// 1. Poll Welcomes: this device may be the one just added.
+/// 2. Interleaved catch-up, so messages at epochs we pass are still decrypted.
+/// 3. On a leave only, stage the remove: a leaver cannot commit its own removal
+///    (#1081). Several members racing here converge through the DS CAS.
 ///
-/// 1. **Poll Welcomes** — this device may be the one that was just added.
-/// 2. **Interleaved group catch-up**, not a bare commit-only replay: a
-///    membership commit advances the shared group past an epoch at which a
-///    channel may still hold an un-ingested message, and with
-///    `max_past_epochs = 0` those keys would then be gone. Interleaving decrypts
-///    en route. `conversation_id` is the `mls_group_id` — `group_id` for
-///    channels, `dm_channel_id` for DMs.
-/// 3. **On a leave only**, stage the remove. Every other membership change was
-///    already committed by the device that made it, which is why this step is
-///    normally skipped. A leave cannot be: MLS forbids removing your own leaf,
-///    so the leaver only deleted its roster row and wiped local state. Before
-///    #1081 nobody staged the commit until some remaining member's next
-///    cold-launch sweep, and until then the leaver's leaf sat in every remaining
-///    tree with every new message still sealed for it. Reconciling here is safe
-///    to do from several members at once — they race on the DS commit-log CAS,
-///    one wins and the rest converge through `LostRace`.
-///
-/// Every step is best-effort: this runs from a wake-up, not a user action, and a
-/// failure is logged and left for the next catch-up or the sweep backstop.
+/// Best-effort throughout.
 pub async fn apply_membership_wake(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -392,19 +238,8 @@ pub async fn apply_membership_wake(
     }
 }
 
-/// Reconcile `conversation_id` only if the local tree actually holds a leaf a
-/// reconcile would evict. Two callers, both of which want exactly this shape:
-///
-/// * the sweep's backstop, retrying a remove commit that was dropped;
-/// * [`apply_membership_wake`] on a **leave**, where no member has staged the
-///   remove yet because a leaver cannot commit its own removal (#1081) — before
-///   that, the sweep was the *first* attempt rather than a retry, so the
-///   leaver's leaf sat in every remaining tree until some member's next cold
-///   launch.
-///
-/// The precheck is what makes it cheap enough to run from a wake-up path: a
-/// local MLS load and two small SELECTs, never the DS claim / account-key-pin /
-/// commit-crypto work of a full reconcile.
+/// Reconcile `conversation_id` only if the local tree holds a leaf reconcile
+/// would evict. The cheap precheck is what lets a wake-up path run it.
 async fn reconcile_if_tree_has_stale_leaf(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -421,31 +256,13 @@ async fn reconcile_if_tree_has_stale_leaf(
     Ok(())
 }
 
-/// The sweep's reconcile backstop: everything [`reconcile_if_tree_has_stale_leaf`]
-/// retries, plus the ADD half (#1412).
+/// [`reconcile_if_tree_has_stale_leaf`] plus the add half (#1412). Answers
+/// whether it reconciled.
 ///
-/// A device that belongs in the tree but had no KeyPackage when it was due to
-/// be added — its pool ran dry while it was offline — is skipped by reconcile
-/// and was then never revisited: nothing else re-runs reconcile for a
-/// conversation whose roster has not changed. The skipped device is not
-/// recorded anywhere, deliberately; it is DERIVED, on every pass, as "a live
-/// device of a roster member that holds no leaf and now has a claimable
-/// KeyPackage" — the very set reconcile adds. A record would be a second copy of
-/// that fact, free to disagree with the tree it describes after a concurrent
-/// commit (the device external-joins, another member re-adds it, it is
-/// revoked); the derivation cannot.
-///
-/// Many members may notice the same missing device on their own sweeps. That is
-/// the ordinary reconcile race: one commit wins its epoch on the DS's
-/// compare-and-swap, the rest converge through `LostRace` and find the device
-/// already present. The device itself racing an external join is the same race.
-///
-/// Not run from the membership wake: there every member would answer the same
-/// wake at once, and each racer burns a claim from the very pool that just ran
-/// dry. The staggered sweeps (cold launch, unlock, reconnect) are enough, and
-/// the device recovers on its own whenever it next catches the conversation up.
-///
-/// Answers whether it reconciled.
+/// A skipped device is derived on every pass, never recorded: a record could
+/// disagree with the tree after a concurrent commit. Not run from the membership
+/// wake, where every member would race and burn claims from a pool that just ran
+/// dry.
 pub(crate) async fn reconcile_if_tree_drifted(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -463,7 +280,7 @@ pub(crate) async fn reconcile_if_tree_drifted(
     Ok(true)
 }
 
-/// What the cheap pre-check found, in the order it looks.
+/// What the cheap pre-check found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TreeDrift {
     /// The tree is what reconcile would make it.
@@ -474,18 +291,11 @@ enum TreeDrift {
     MissingDevice,
 }
 
-/// Would reconcile ADD anyone — is a device reconcile wants in the tree, and
-/// could add right now, missing from it (#1412)?
+/// Would reconcile add a device right now (#1412)?
 ///
-/// Derived from [`reconcile::desired_set`] for the same reason
-/// [`has_stale_leaf`] is: one rule, so the pre-check can never predict a
-/// different add set than the reconcile it gates. `claimable` is the KeyPackage
-/// half of that rule — devices with an unclaimed package in the GROUP's suite,
-/// which is exactly what reconcile claims from — so a device with an empty pool
-/// does not wake a reconcile that could only skip it again. Since #1571 a
-/// device's last-resort package counts as claimable (it is never claimed), so a
-/// current build with an empty pool DOES wake it, and is added; only a device
-/// with nothing published at all — an old build's empty pool — still does not.
+/// Derived from [`reconcile::desired_set`], so it can never predict a different
+/// add set than the reconcile it gates. `claimable` must be scoped to the
+/// group's suite, as reconcile's own claim is.
 fn has_addable_device(
     tree_members: &[(String, String)],
     roster: &HashSet<String>,
@@ -501,9 +311,8 @@ fn has_addable_device(
     desired.iter().any(|key| !tree_members.contains(key))
 }
 
-/// Live devices of roster members that hold no leaf — the candidates
-/// [`has_addable_device`] then narrows to the ones with a KeyPackage. Empty in
-/// steady state, which is what lets the pre-check skip the KeyPackage read.
+/// Does a live device of a roster member hold no leaf? False in steady state,
+/// which lets the pre-check skip the KeyPackage read.
 fn has_leafless_device(
     tree_members: &[(String, String)],
     roster: &HashSet<String>,
@@ -516,27 +325,10 @@ fn has_leafless_device(
 
 /// Does the local tree hold a leaf that reconcile would remove?
 ///
-/// Derived FROM [`reconcile::desired_set`] rather than restating its rule. This
-/// used to be a hand-written predicate — "the user left the roster OR the device
-/// row is gone" — which is what `desired_set` computes today, but only by
-/// coincidence: they were two copies of one rule with nothing keeping them in
-/// step. `desired_set` has already grown conditions twice (#679 gating the
-/// KeyPackage half on `valid_devices`, then the cross-signing verdict), and the
-/// next one would have silently left this precheck predicting the wrong thing —
-/// either skipping an eviction the sweep exists to retry, or waking a reconcile
-/// on every cold launch for a leaf reconcile means to keep.
-///
-/// `kp_keys` is empty on purpose: the question is only "which leaves already in
-/// the tree does reconcile still want", i.e. the retention half. An add is not
-/// staleness.
-///
-/// The one thing it adds to `desired_set` is the DUPLICATE test (#1161 M7/H4).
-/// `desired_set` answers about `(user, device)` keys, so it cannot see that two
-/// leaves claim one of them — and a rogue leaf grafted by an external join
-/// naturally claims a REAL, on-roster device, which is precisely the case a
-/// set-based staleness test reads as settled. `tree_members` is a per-leaf list,
-/// so the duplicate is visible here and costs no extra read; reconcile then
-/// judges which of the two is the certified one.
+/// Derived from [`reconcile::desired_set`] (with no KeyPackages: only retention
+/// matters) so the precheck can never drift from reconcile's rule. It adds one
+/// test `desired_set` cannot make: two leaves claiming one `(user, device)`,
+/// the shape of a rogue leaf grafted by an external join (#1161 M7/H4).
 fn has_stale_leaf(
     tree_members: &[(String, String)],
     roster: &HashSet<String>,
@@ -555,38 +347,25 @@ fn has_stale_leaf(
     distinct.len() != tree_members.len()
 }
 
-/// Cheap pre-check for the reconcile backstop: does the LOCAL MLS ratchet tree
-/// differ from what a declarative reconcile would make it?
+/// Cheap pre-check for the reconcile backstop: does the local tree differ from
+/// what reconcile would make it? Adds are considered only with
+/// `include_additions`.
 ///
-/// * a leaf reconcile would evict — a device whose user has left the roster, or
-///   whose `user_device` row is gone ([`has_stale_leaf`]);
-/// * with `include_additions`, a device reconcile would ADD — live, on the
-///   roster, leafless, and holding a claimable KeyPackage in the group's suite
-///   ([`has_addable_device`], #1412).
-///
-/// Returns [`TreeDrift::Settled`] (the steady-state answer) using only a local
-/// MLS load and two lightweight roster/device reads — never the DS claim /
-/// account-key-pin / commit-crypto work of a full reconcile. The KeyPackage read
-/// is a third, made only when some roster device actually lacks a leaf. Both
-/// tests are derived from `desired_set`, so it flags precisely what reconcile
-/// would change and never wakes one for nothing.
+/// The steady-state answer costs a local MLS load and two small reads; the
+/// KeyPackage read happens only when a roster device lacks a leaf.
 async fn local_tree_drift(
     state: &Arc<AppState>,
     conversation_id: &str,
     include_additions: bool,
 ) -> Result<TreeDrift> {
-    // 1. Local tree membership and the group's suite — a local SQLite read, no
-    //    network. Scope the !Send provider/group so neither crosses an await.
+    // Scoped so the !Send group never crosses an await.
     let (tree_members, suite): (Vec<(String, String)>, _) = {
         let guard = state.local_db.lock().await;
         let db = match guard.as_ref() {
             Some(db) => db,
-            // No local group open (never joined / already forgotten): this
-            // device has nothing to evict and cannot commit an add.
             None => return Ok(TreeDrift::Settled),
         };
-        // Reading the tree is storage-only, so this needs no crypto backend
-        // and therefore no suite dispatch.
+        // Storage-only read, so no suite dispatch is needed.
         match load_stored_group(db.conn(), conversation_id) {
             Some(group) => (
                 group
@@ -599,7 +378,6 @@ async fn local_tree_drift(
                     .collect(),
                 group.ciphersuite(),
             ),
-            // Missing / unreadable local group: nothing this device can commit.
             None => return Ok(TreeDrift::Settled),
         }
     };
@@ -607,11 +385,8 @@ async fn local_tree_drift(
         return Ok(TreeDrift::Settled);
     }
 
-    // 2. Desired roster: group_member + pending invitees, or dm_channel_member.
-    //    THE definition, server-side (#987) — the same one
-    //    `reconcile_group_mls_impl` diffs against, so this pre-check can never
-    //    disagree with the reconcile it gates. Pending invitees count as desired
-    //    so their as-yet-unjoined leaves are never mistaken for stale ones.
+    // The same roster `reconcile_group_mls_impl` diffs against, including
+    // pending invitees so their leaves are never mistaken for stale ones.
     let roster: HashSet<String> =
         crate::commands::ds_reads::catch_up_full(state, conversation_id, false, false, true)
             .await?
@@ -619,13 +394,9 @@ async fn local_tree_drift(
             .into_iter()
             .collect();
 
-    // 3. Valid (user_id, device_id) pairs still registered for the roster — the
-    //    same `user_device` snapshot reconcile uses to drop revoked single
-    //    devices of a still-present user.
     let roster_ids: Vec<String> = roster.iter().cloned().collect();
     let valid_devices = crate::commands::ds_reads::registered_devices(state, &roster_ids).await?;
 
-    // 4. A leaf is stale iff reconcile would remove it — see [`has_stale_leaf`].
     if has_stale_leaf(&tree_members, &roster, &valid_devices) {
         return Ok(TreeDrift::StaleLeaf);
     }
@@ -633,9 +404,7 @@ async fn local_tree_drift(
         return Ok(TreeDrift::Settled);
     }
 
-    // 5. Someone who belongs here has no leaf. Worth a reconcile only if it has
-    //    a KeyPackage in THIS group's suite to claim — otherwise reconcile would
-    //    skip it again. Same read, same suite scoping, as reconcile's own.
+    // Same read and suite scoping as reconcile's own claim.
     let claimable = crate::commands::ds_reads::claimable_devices(
         state,
         &roster_ids,
@@ -682,9 +451,7 @@ mod tests {
         ));
     }
 
-    /// #1083 names this case specifically: single-device revocation must be seen
-    /// as stale WITHOUT the live sibling being dragged in with it — otherwise
-    /// revoking one device would look like logging the user out everywhere.
+    /// Revoking one device must not drag its live sibling out with it (#1083).
     #[test]
     fn a_revoked_device_is_stale_but_its_live_sibling_is_not() {
         let tree = [key("alice", "a1"), key("alice", "a2")];
@@ -694,7 +461,6 @@ mod tests {
             has_stale_leaf(&tree, &roster, &valid(&[("alice", "a1")])),
             "the revoked a2 must register as stale"
         );
-        // And with both live, nothing is stale — the sibling alone is not a reason.
         assert!(!has_stale_leaf(
             &tree,
             &roster,
@@ -702,10 +468,7 @@ mod tests {
         ));
     }
 
-    /// #1161 M7: two leaves claiming ONE `(user, device)` is stale even when the
-    /// device is a real, on-roster one — that is exactly the shape a leaf grafted
-    /// by an external join takes, and the set-based test above reads it as
-    /// settled. Only the per-leaf list can see it.
+    /// A duplicate leaf for a real, on-roster device is stale (#1161 M7).
     #[test]
     fn two_leaves_claiming_one_device_are_stale() {
         assert!(has_stale_leaf(
@@ -715,9 +478,7 @@ mod tests {
         ));
     }
 
-    /// The precheck must agree with `desired_set` about the committer's own leaf,
-    /// which holds no KeyPackage (it consumed one creating the group). Treating
-    /// that as stale would make every cold launch wake a pointless reconcile.
+    /// The committer's own leaf holds no KeyPackage and must not read as stale.
     #[test]
     fn a_retained_leaf_without_a_key_package_is_not_stale() {
         assert!(!has_stale_leaf(
@@ -727,8 +488,7 @@ mod tests {
         ));
     }
 
-    /// #1412: the device whose pool ran dry. It is live and on the roster but
-    /// holds no leaf; once it has a KeyPackage again, reconcile would add it.
+    /// The device whose pool ran dry, once it has a KeyPackage again (#1412).
     #[test]
     fn a_leafless_device_with_a_key_package_is_addable() {
         let tree = [key("alice", "a1"), key("bob", "b1")];
@@ -738,8 +498,7 @@ mod tests {
         assert!(has_addable_device(&tree, &roster, &valid, &[key("alice", "a2")]));
     }
 
-    /// Still dry: reconcile could only skip it again, so the sweep must not
-    /// wake one (every cold launch would otherwise pay a full reconcile).
+    /// Still dry: reconcile could only skip it again.
     #[test]
     fn a_leafless_device_without_a_key_package_is_not_addable() {
         let tree = [key("alice", "a1"), key("bob", "b1")];
@@ -748,8 +507,7 @@ mod tests {
         assert!(!has_addable_device(&tree, &roster, &valid, &[]));
     }
 
-    /// A package from a revoked device, or from a user who is not on the roster,
-    /// is not a reason to reconcile — `desired_set` would not add either (#679).
+    /// `desired_set` adds neither a revoked device nor an off-roster user (#679).
     #[test]
     fn revoked_or_off_roster_packages_are_not_addable() {
         let tree = [key("alice", "a1")];
@@ -764,8 +522,7 @@ mod tests {
         assert!(!has_leafless_device(&tree, &roster, &valid));
     }
 
-    /// A device already in the tree keeps unclaimed packages; that is the
-    /// normal state of every member and must read as settled.
+    /// Spare packages on a device already in the tree are the normal state.
     #[test]
     fn a_member_with_spare_key_packages_is_not_addable() {
         let tree = [key("alice", "a1"), key("bob", "b1")];
