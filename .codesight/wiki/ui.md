@@ -605,6 +605,13 @@ node as an atom on its own.
 wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 `setComposerText` for the same reason on the WebDriver side.
 
+### Terminal pane (`TerminalView.tsx`)
+
+- **Renderer, best first: WebGL > canvas > DOM.** DOM repaints spans on the CPU, which makes typing feel staggered. macOS (WKWebView) gets WebGL. Linux launches with `WEBKIT_DISABLE_COMPOSITING_MODE=1` (`src-tauri/src/main.rs`, so WebKitGTK doesn't abort on drivers without GBM/EGL), and with compositing off WebKitGTK has no WebGL, so canvas is the rung that matters there. The chosen renderer is logged (`[terminal] renderer: …`) because addon failures are otherwise invisible; `dom` on a capable machine is the bug.
+- **Bytes, not strings.** Output arrives raw (`InvokeResponseBody::Raw`) and goes to `xterm.write()` as a `Uint8Array`, never TextDecoded per chunk, since xterm's decoder holds multi-byte sequences split across chunks. Input is symmetric: raw UTF-8 bytes as the invoke body (`InvokeBody::Raw`), terminal id in a header.
+- **`terminal_ack` credit is coalesced**, flushed per frame or at once when enough is outstanding to risk parking a bulk producer. Acking per write callback cost an IPC hop per echoed keystroke on WebKitGTK. Batching is safe because the aggregator only needs eventual credit: it parks above 1 MiB and resumes below 256 KiB (`commands/terminal_unix.rs`).
+- **The PTY spawns after the first fit**, so the shell inherits the real COLUMNS/LINES; spawning at xterm's 80x24 default makes zsh's PROMPT_SP padding leave a stray `%` line above every prompt.
+
 ## Components
 
 > Generated from `frontend/src` by `scripts/ui-inventory.mjs` — the article said

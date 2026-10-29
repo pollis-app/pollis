@@ -140,9 +140,25 @@ line to the `endpoints!` table in `pollis-api/src/lib.rs`, bump the count in
 route it in `pollis-delivery` as `.route(<Body as DsRequest>::PATH, post(handler))`.
 The flows harness needs no edit — it mounts the real router.
 
-**What the contract does not cover:** response bodies (callers still derive their
-own local structs), field *values*, and version skew against an
-already-deployed DS — additive/optional/defaulted wire rules still apply.
+**Responses are in the contract too (#922).** Each endpoint declares its success body
+as `DsRequest::Response`. The DS returns it via `writes::ok_response::<B>`, which
+accepts only `B::Response`, and `pollis-core` decodes it via `ds_post_json::<B>()`, so a
+renamed response field breaks both ends at compile time. Endpoints with no body declare
+`Empty` (accepted only by `ok_empty`); a plain `{"status":"ok"}` is the tagged
+`StatusOk` enum, so `{"status":"borked"}` can neither typecheck nor decode.
+
+Each table row also carries an `Audience` (#925): `Client` rows get the
+`ClientRequest` marker every `ds_post*` requires, so an `Operator` endpoint (recovery
+levers such as `/v1/welcomes/resubmit`, `/v1/envelopes/gc`) cannot gain a client call
+site; operator rows must be listed in `docs/ds-operator-endpoints.md` (a test reads it).
+A trailing `idempotent` marks endpoints that may be resent after an ambiguous
+connection failure (#1497). The only GETs the DS serves are `/health`, `/version`,
+`/v1/config` and `/v1/retention/metrics`: any read about user data must be a POST in
+the table, because a GET's query string is outside the request signature (#681).
+
+**What the contract does not cover:** field *values* (e.g. `actor_id: None` where
+`Some(me)` was meant), version skew against an already-deployed DS (additive/optional/
+defaulted wire rules still apply), and 4xx/5xx error bodies (callers branch on status).
 
 The `pollis-api` crate is dependency-light (serde only) on purpose, mirroring
 `pollis-schema` and `pollis-device-cert`: sharing it does not make the DS depend
@@ -279,6 +295,12 @@ Saved messages and message permalinks (#854). **Every command here is device-loc
 — pure rusqlite against the encrypted local DB (`bookmark` table in
 `db/local_schema.sql`). None of them touch the DS or Turso, and no DS endpoint backs
 any of them.
+
+Why device-local: which messages a user saved is interest metadata, a ranked list of
+the moments and conversations they care most about. The server already sees envelope
+routing; a bookmark set would tell it strictly more, in its most sensitive shape. The
+cost is that bookmarks don't follow a user to a new device, consistent with accepted
+loss (2).
 
 - `save_message(message_id)` — save a message. The conversation is read from the local
   `message` row, never taken from the caller, so a bookmark cannot point at the wrong

@@ -220,6 +220,8 @@ no LiveKit or R2 secret:
   never going to close #917's residual, and it made every shipped binary a
   credential to be extracted.
 
+**Not rotated per call.** Closing the within-room linkage (the SFU can count "this opaque participant joined this opaque room 14 times") needs a per-call epoch in the key. The only epoch the DS could see without new state is the LiveKit room's creation time, which costs a `ListRooms` round trip on the join hot path and breaks LiveKit's duplicate-identity eviction: a mid-call reconnect on a new epoch leaves the stale participant beside the new one as a duplicate tile. Not taken, matching the same call for room names in #828.
+
 ## Why R2 presign has no per-object READ authz — and what it does gate
 
 Pollis media is sealed under a key the DS never holds (#1382; `pollis-core`'s
