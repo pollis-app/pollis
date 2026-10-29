@@ -1,20 +1,23 @@
 // What a sensitive attachment (#1568) shows while covered: its blurhash with
-// one crossed-out eye centred on it — the same in a message row, the viewer
-// and the Vault grid, and desktop's `SensitiveCover`. With no blurhash (a
-// video whose poster could not be read) it is a plain surface with the same
-// eye, never the media. Purely visual: it fills its parent, which owns the
-// reveal.
+// one crossed-out eye centred on it — the same on a composer card, a message
+// row, the viewer and the Vault grid, and desktop's `SensitiveCover`. With no
+// blurhash (a video whose poster could not be read) it is a plain surface
+// with the same eye, never the media. Purely visual: it fills its parent,
+// which owns the reveal. The eye sits on the theme's raised disc, the same
+// filled control as the toolbar and the play glyph — never a near-black one.
 //
-// `SensitiveHideButton` is the matching top-right eye on a revealed one: one
-// tap covers it again. It is an open eye — what is true now, the media is
-// showing — as the composer's toggle shows.
+// `SensitiveHideButton` is the top-right eye on a revealed one: one tap
+// covers it again. It IS the attachment toolbar, with one action — the same
+// capsule as the composer card's, an open eye (what is true now: the media
+// shows).
 
-import { Pressable, View } from "react-native";
+import { View } from "react-native";
 import { Image } from "expo-image";
 import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
 import { useThemeRerender } from "../theme";
-import { r, semantic } from "../../theme/tokens";
+import { AttachmentToolbar, TOOLBAR_GLYPH } from "./AttachmentToolbar";
+import { semantic } from "../../theme/tokens";
 
 const FILL = { position: "absolute", top: 0, bottom: 0, start: 0, end: 0 } as const;
 
@@ -36,7 +39,7 @@ export function SensitiveCover({ blurhash, testID }: { blurhash?: string; testID
           borderRadius: 22,
           alignItems: "center",
           justifyContent: "center",
-          backgroundColor: semantic.bg,
+          backgroundColor: semantic.raised,
         }}
       >
         <Icon.eyeOff size={20} color={semantic.text} />
@@ -57,25 +60,16 @@ export function SensitiveHideButton({
   useThemeRerender();
   const { t } = useTranslation("chat");
   return (
-    <Pressable
-      testID={testID}
-      onPress={onHide}
-      accessibilityRole="button"
-      accessibilityLabel={t("attachment.sensitiveHide", { filename })}
-      hitSlop={8}
-      style={{
-        position: "absolute",
-        top: 6,
-        end: 6,
-        width: 32,
-        height: 32,
-        borderRadius: r.sm,
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: semantic.bg,
-      }}
-    >
-      <Icon.eye size={16} color={semantic.text} />
-    </Pressable>
+    <AttachmentToolbar
+      actions={[
+        {
+          key: "hide",
+          testID: testID ?? "btn-sensitive-hide",
+          accessibilityLabel: t("attachment.sensitiveHide", { filename }),
+          icon: (color) => <Icon.eye size={TOOLBAR_GLYPH} color={color} />,
+          onPress: onHide,
+        },
+      ]}
+    />
   );
 }

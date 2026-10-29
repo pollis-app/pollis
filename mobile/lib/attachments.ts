@@ -19,6 +19,14 @@ export interface PickedAttachment {
   mimeType: string;
   width?: number;
   height?: number;
+  /** Marked sensitive in the composer (#1568): sent with `sens`, so every
+   *  receiver sees it covered until revealed. */
+  sensitive?: boolean;
+  /** The blurhash the composer drew the sensitive cover with, worked out from
+   *  the picked file once it was marked. Sent along so a video (whose
+   *  blurhash the core cannot compute) is covered in colour too; an image's
+   *  own, from the upload, wins. */
+  blurhash?: string;
 }
 
 /** Mirror of `pollis_core::commands::r2::MediaUploadResult`. */
@@ -45,8 +53,10 @@ export interface OutgoingAttachment {
   path: string;
   filename: string;
   contentType: string;
+  blurhash?: string;
   width?: number;
   height?: number;
+  sensitive?: boolean;
 }
 
 /**
@@ -62,6 +72,9 @@ export function outgoingAttachments(attachments: PickedAttachment[]): OutgoingAt
     contentType: att.mimeType,
     width: att.width,
     height: att.height,
+    ...(att.blurhash ? { blurhash: att.blurhash } : {}),
+    // Only when set, as desktop sends it (#1568).
+    ...(att.sensitive ? { sensitive: true } : {}),
   }));
 }
 
@@ -110,7 +123,7 @@ export async function buildMessageContent(
   const results = settled.map((s) => (s as PromiseFulfilledResult<MediaUploadResult>).value);
 
   const envelope: Record<string, unknown> = {
-    _att: results.map((r) => ({
+    _att: results.map((r, i) => ({
       key: r.key,
       url: r.url,
       name: r.filename,
@@ -119,9 +132,11 @@ export async function buildMessageContent(
       hash: r.content_hash,
       kv: r.key_version,
       sha: r.sha256,
-      bh: r.blurhash ?? undefined,
+      bh: r.blurhash ?? attachments[i]?.blurhash ?? undefined,
       w: r.width ?? undefined,
       h: r.height ?? undefined,
+      // Only when set, as the core's outbox and desktop write it (#1568).
+      ...(attachments[i]?.sensitive ? { sens: true } : {}),
     })),
   };
   if (contentText) {

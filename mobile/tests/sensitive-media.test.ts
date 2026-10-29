@@ -112,3 +112,50 @@ test("the message tile, the viewer and the Vault grid all read the reveal", () =
   assert.match(covered, /onPress=\{sensitivity\.reveal\}/);
   assert.doesNotMatch(covered, /onOpen/);
 });
+
+// ── Composer half ───────────────────────────────────────────────────────────
+
+test("only a picture or a video offers the toggle, and a marked card does not open", async () => {
+  const { canMarkSensitive, cardOpens, pickedToMessageAttachment } = await import(
+    "../lib/composerAttachments.ts"
+  );
+  assert.equal(canMarkSensitive("image/jpeg"), true);
+  assert.equal(canMarkSensitive("video/mp4"), true);
+  assert.equal(canMarkSensitive("application/pdf"), false);
+  assert.equal(cardOpens({ mimeType: "image/jpeg" }), true);
+  assert.equal(cardOpens({ mimeType: "image/jpeg", sensitive: true }), false);
+  // The optimistic row is covered from the first frame, with the composer's
+  // blurhash.
+  const row = pickedToMessageAttachment(
+    { id: "p1", uri: "file:///a.jpg", name: "a.jpg", mimeType: "image/jpeg", sensitive: true, blurhash: "LKO2" },
+    0,
+  );
+  assert.equal(row.sensitive, true);
+  assert.equal(row.blurhash, "LKO2");
+});
+
+test("the eye sits before remove, and a marked attachment is sent sensitive", () => {
+  const card = readFileSync(new URL("../components/chat/ComposerAttachmentPreview.tsx", import.meta.url), "utf8");
+  assert.ok(card.indexOf('key: "sensitive"') < card.indexOf('key: "remove"'), "eye before remove");
+  assert.match(card, /selected: sensitive,/);
+  assert.match(card, /sensitive \? \(\s*<Icon\.eyeOff size=\{TOOLBAR_GLYPH\}/);
+  assert.match(card, /<Icon\.eye size=\{TOOLBAR_GLYPH\}/);
+  assert.match(card, /canMarkSensitive\(attachment\.mimeType\)/);
+  assert.match(card, /if \(sensitive\) \{\s*body = <SensitiveCover/);
+  const lib = readFileSync(new URL("../lib/attachments.ts", import.meta.url), "utf8");
+  // The outbox path and the Vault's own envelope, both only when set.
+  assert.match(lib, /\.\.\.\(att\.sensitive \? \{ sensitive: true \} : \{\}\)/);
+  assert.match(lib, /\.\.\.\(attachments\[i\]\?\.sensitive \? \{ sens: true \} : \{\}\)/);
+  for (const screen of ["app/chat/[id].tsx", "app/vault.tsx"]) {
+    const src = readFileSync(new URL(`../${screen}`, import.meta.url), "utf8");
+    assert.match(src, /onChangeAttachment=\{/, screen);
+  }
+});
+
+test("the hide button is the toolbar capsule, and the cover's disc is themed", () => {
+  const src = readFileSync(new URL("../components/chat/SensitiveCover.tsx", import.meta.url), "utf8");
+  assert.match(src, /<AttachmentToolbar/);
+  assert.match(src, /backgroundColor: semantic\.raised,/);
+  assert.doesNotMatch(src, /semantic\.bg\b/);
+  assert.doesNotMatch(src, /["'`]#[0-9a-fA-F]{3,8}["'`]|rgba?\(/);
+});

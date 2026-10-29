@@ -58,6 +58,7 @@ export function Composer({
   onAttach,
   pendingAttachments,
   onRemoveAttachment,
+  onChangeAttachment,
   canSendEmptyText = false,
   focusRequest = 0,
   placeholder,
@@ -73,6 +74,8 @@ export function Composer({
   onAttach?: () => void;
   pendingAttachments?: PickedAttachment[];
   onRemoveAttachment?: (id: string) => void;
+  /** Marks a pending attachment sensitive, or records its cover's blurhash (#1568). */
+  onChangeAttachment?: (id: string, patch: Partial<PickedAttachment>) => void;
   /** True when attachments alone make the message sendable. */
   canSendEmptyText?: boolean;
   // Each increase focuses the field (a reply starting, #1270). 0 never does.
@@ -282,6 +285,7 @@ export function Composer({
               attachment={att}
               index={index}
               onRemove={(id) => onRemoveAttachment?.(id)}
+              onChange={onChangeAttachment}
               onOpen={(picked) => openDraft(pendingAttachments, picked.id)}
             />
           ))}
