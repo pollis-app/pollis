@@ -272,6 +272,25 @@ pub async fn catch_up_mls_group_interleaved(
     // missed — instead of an empty view until the next wake-up.
     if !held_before && held(state).await {
         catch_up_once(state, mls_group_id, user_id).await?;
+        // A device that has just joined is, at that moment, the member most
+        // likely to be online and least likely to have looked at the tree: run
+        // the re-add backstop once, now (#1571). In the incident the user's new
+        // desktop external-joined the DM seconds after it was created, while the
+        // creator's add of the user's OLDER desktop lost its race — and nothing
+        // on the new desktop ever re-added it, because its only backstop was the
+        // cold-launch sweep and the app stayed open for thirteen hours. Same
+        // user or not makes no difference to the rule (`desired_set`); what was
+        // missing was a trigger. Boxed: reconcile's lost-race converge re-enters
+        // this catch-up (with a group held, so it does not come back here).
+        if let Err(e) = Box::pin(crate::commands::mls::reconcile_backstop_one(
+            state,
+            mls_group_id,
+            user_id,
+        ))
+        .await
+        {
+            crate::diag!("[mls-backstop] after joining {mls_group_id}: {e}");
+        }
     }
     Ok(())
 }

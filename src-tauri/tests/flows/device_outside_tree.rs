@@ -419,10 +419,14 @@ async fn a_creator_whose_reconcile_loses_epoch_zero_still_adds_the_other_devices
         .await
         .expect("init_mls_group");
 
-    // alice_d1 sees the request and joins epoch 0 first.
+    // alice_d1 sees the request and joins epoch 0 first. alice_d2 has nothing
+    // published at that moment, so alice_d1's own post-join backstop cannot
+    // add it — only the creator's retry can, once it has a pool again.
+    drop_all_packages(&d2).await;
     alice_d1.fetch_dm_messages(&dm).await;
     assert!(holds_group(&alice_d1, &dm).await, "precondition: alice_d1 external-joined");
     assert_eq!(crate::harness::ds_head_epoch(&dm).await, 1, "precondition: epoch 0 is taken");
+    crate::harness::republish_key_packages(&alice_d2).await;
 
     // The creator's reconcile, still on epoch 0 locally, loses — and retries.
     pollis_lib::commands::mls::reconcile_group_mls_impl(&bob.state, &dm, &bob_id)
@@ -457,4 +461,93 @@ async fn enrollment_publishes_a_pool_and_a_last_resort_package_at_once() {
     let (regular, last_resort, _) = pool(&identity(&alice_d1).await).await;
     assert_eq!((regular, last_resort), (5, 1), "and sign-up does the same");
     drop((alice_d1, alice_d2));
+}
+
+/// The prod metadata's second gap: the user's NEW desktop external-joined the
+/// DM while the creator's add of the user's OLDER desktop (full pool) was
+/// still in flight and then lost its race. The new desktop stayed a member,
+/// active, for thirteen hours and never re-added its sibling — its only
+/// backstop was the cold-launch sweep. Now the device that joins runs the
+/// backstop once, so the sibling is added with a Welcome and reads the whole
+/// history. Here the creator's reconcile never runs at all, so only alice_d1
+/// can have added alice_d2.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_device_that_joins_adds_its_own_users_other_device() {
+    use pollis_api::DsRequest;
+    wipe().await;
+    let (alice_d1, alice_d2, bob, alice_id, bob_id) = alice_two_devices_and_bob().await;
+    let d2 = identity(&alice_d2).await;
+    assert_eq!(pool(&d2).await.0, 5, "precondition: alice_d2 has a full pool");
+
+    let dm = ulid::Ulid::new().to_string();
+    let body = pollis_api::profile::CreateDmBody {
+        id: dm.clone(),
+        creator_id: bob_id.clone(),
+        member_ids: vec![bob_id.clone(), alice_id.clone()],
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+    let status = crate::harness::signed_post_status(
+        &bob,
+        <pollis_api::profile::CreateDmBody as DsRequest>::PATH,
+        &serde_json::to_vec(&body).expect("serialize CreateDmBody"),
+    )
+    .await;
+    assert_eq!(status, 200, "create_dm rows");
+    pollis_lib::commands::mls::init_mls_group(&bob.state, &dm, &bob_id)
+        .await
+        .expect("init_mls_group");
+
+    // alice_d1 sees the DM and joins it; nobody else does anything.
+    alice_d1.fetch_dm_messages(&dm).await;
+    assert!(holds_group(&alice_d1, &dm).await, "precondition: alice_d1 joined");
+    assert!(
+        tree_has(&alice_d1, &dm, &d2).await,
+        "the joining device must add its own user's other device"
+    );
+
+    bob.fetch_dm_messages(&dm).await;
+    bob.send_channel_message(&dm, "from bob").await;
+    alice_d1.fetch_dm_messages(&dm).await;
+    alice_d1.send_channel_message(&dm, "from alice_d1").await;
+
+    alice_d2.poll().await;
+    let (bodies, placeholders) = open_dm(&alice_d2, &dm).await;
+    assert!(bodies.contains(&"from bob".to_string()), "got {bodies:?}");
+    assert!(bodies.contains(&"from alice_d1".to_string()), "got {bodies:?}");
+    assert_eq!(placeholders, 0);
+
+    drop((alice_d1, alice_d2, bob));
+}
+
+/// The sweep (desktop cold launch) and mobile's backstop on a member re-add the
+/// member's OWN other device too: alice_d2 had nothing to claim when it was due
+/// to be added, then published a full pool; alice_d1's sweep adds it, and
+/// alice_d2 reads everything from then on.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_members_sweep_re_adds_its_own_users_other_device() {
+    wipe().await;
+    let (alice_d1, alice_d2, bob, alice_id, bob_id) = alice_two_devices_and_bob().await;
+    let d2 = identity(&alice_d2).await;
+    drop_all_packages(&d2).await;
+
+    let dm = bob.create_dm(&[bob_id.as_str(), alice_id.as_str()]).await;
+    alice_d1.accept_dm_request(&dm).await;
+    alice_d1.fetch_dm_messages(&dm).await;
+    assert!(!tree_has(&alice_d1, &dm, &d2).await, "precondition: alice_d2 is outside");
+
+    crate::harness::republish_key_packages(&alice_d2).await;
+    assert_eq!(pool(&d2).await.0, 5, "a full pool, outside the tree");
+    alice_d1.sweep().await;
+    assert!(tree_has(&alice_d1, &dm, &d2).await, "alice_d1's sweep must add alice_d2");
+
+    bob.fetch_dm_messages(&dm).await;
+    bob.send_channel_message(&dm, "after the sweep").await;
+    alice_d2.poll().await;
+    let (bodies, placeholders) = open_dm(&alice_d2, &dm).await;
+    assert!(bodies.contains(&"after the sweep".to_string()), "got {bodies:?}");
+    assert_eq!(placeholders, 0);
+
+    drop((alice_d1, alice_d2, bob));
 }
