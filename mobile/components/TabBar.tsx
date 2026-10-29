@@ -9,7 +9,13 @@ import { Icon } from "./icons";
 import { useBottomInset, PressInPressable } from "./ui";
 import { appStore } from "../stores/appStore";
 import { emitTabReselect } from "../lib/tabReselect";
-import { useDMChannels, useUserGroupsWithChannels } from "../hooks/queries";
+import {
+  useDMChannels,
+  useDMRequests,
+  usePendingGroupInvites,
+  useUserGroupsWithChannels,
+} from "../hooks/queries";
+import { badgeText, badgeTotal, tabA11yLabel, tabBadges } from "../lib/tabBadges";
 
 // Groups / Direct / Link / Self (Main.dc.html): 22pt icon over a
 // 12pt label, set 10pt below the bar's top hairline; active = accent icon and
@@ -55,20 +61,28 @@ export const TabBar = observer(function TabBar({ state, navigation }: any) {
   // Home-indicator inset on iOS; on Android the nav-bar inset, floored so
   // the labels never sit on the glass edge (see useBottomInset).
   const bottomInset = useBottomInset();
-  // Per-tab unread badge: sum the store's unread counts over the ids each tab
-  // lists. The same cached queries the tabs render from split the id space
-  // into channels (Groups) and DM conversations (Direct). Read `unreadCounts`
-  // directly (not via a store method — MobX actions run untracked, so a
-  // method call from render would not subscribe this observer).
+  // Per-tab badge (#1561): unread messages plus what is waiting on the user
+  // there, Slack/Discord style — Direct counts pending message requests,
+  // Groups pending group invites (lib/tabBadges.ts). Unread sums the store's
+  // counts over the ids each tab lists; the same cached queries the tabs
+  // render from split the id space into channels (Groups) and DM
+  // conversations (Direct). The requests and invites queries are invalidated
+  // by the inbox realtime events and by accept / decline / block, so the
+  // badge follows without polling. Read `unreadCounts` directly (not via a
+  // store method — MobX actions run untracked, so a method call from render
+  // would not subscribe this observer).
   const unreadCounts = appStore.unreadCounts;
   const { data: groups = [] } = useUserGroupsWithChannels();
   const { data: dms = [] } = useDMChannels();
-  const sumUnread = (items: { id: string }[]) =>
-    items.reduce((sum, x) => sum + (unreadCounts[x.id] ?? 0), 0);
-  const badgeByTab: Record<string, number> = {
-    groups: sumUnread(groups.flatMap((g) => g.channels)),
-    direct: sumUnread(dms),
-  };
+  const { data: requests = [] } = useDMRequests();
+  const { data: invites = [] } = usePendingGroupInvites();
+  const badgeByTab = tabBadges({
+    unreadCounts,
+    channelIds: groups.flatMap((g) => g.channels.map((c) => c.id)),
+    dmIds: dms.map((d) => d.id),
+    requestCount: requests.length,
+    inviteCount: invites.length,
+  });
   return (
     <View
       // "tabbar" exists only on iOS; Android throws "Invalid accessibility
@@ -92,7 +106,8 @@ export const TabBar = observer(function TabBar({ state, navigation }: any) {
         const color = focused ? semantic.accent : semantic.dim;
         const label = tab.label(t);
         const spoken = tab.a11yLabel?.(t) ?? label;
-        const count = badgeByTab[tab.name] ?? 0;
+        const badge = badgeByTab[tab.name];
+        const count = badgeTotal(badge);
         const onPress = () => {
           if (tab.push) {
             router.push(tab.push);
@@ -117,9 +132,7 @@ export const TabBar = observer(function TabBar({ state, navigation }: any) {
             onPress={onPress}
             testID={`tab-${tab.name}`}
             accessibilityRole={tab.push ? "button" : "tab"}
-            accessibilityLabel={
-              count > 0 ? t("tabs.withUnread", { label: spoken, count }) : spoken
-            }
+            accessibilityLabel={tabA11yLabel(t, tab.name, spoken, badge)}
             accessibilityState={tab.push ? undefined : { selected: focused }}
             style={{
               flex: 1,
@@ -171,7 +184,7 @@ export const TabBar = observer(function TabBar({ state, navigation }: any) {
                       color: semantic.onAccent,
                     }}
                   >
-                    {count > 99 ? "99+" : count}
+                    {badgeText(count)}
                   </Text>
                 </View>
               ) : null}

@@ -269,6 +269,16 @@ cleared after another relaunch (`3-cold-start.yaml`). Reading on one device
 clearing the count on another is pinned by the core's cursor-merge tests, not
 here: it needs a second device of the same account.
 
+**Tab badges for pending requests and invites (automated, #1561):** `mobile/scripts/maestro-pending-badges.sh <device>`
+— `pollis-tui`'s `pending_badge_peer` example, run as three fresh accounts.
+The device signs up with no badge on either tab
+(`two-client/pending-badges/1-signup.yaml`); two strangers then open DMs with
+it and a third creates two groups and invites it to both. Without opening
+Direct or Groups, `badge-direct` and `badge-groups` must each read 2; accepting
+one request drops Direct to 1 and blocking the other sender clears it
+(`2-requests.yaml`); declining one invite drops Groups to 1 and accepting the
+other clears it (`3-invites.yaml`).
+
 **Store-listing screenshots:** `mobile/scripts/maestro-store-shots.sh <device> [out-dir]`
 — `pollis-tui`'s `store_shots_peer` example plays the second person (dev DS
 only). The device shoots sign-in, signs up, makes "Design Team" with #General,

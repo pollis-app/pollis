@@ -1,0 +1,53 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# PENDING BADGES (#1561), part 3 of 3. The device still has two group
+# invites, so `badge-groups` reads 2. On the Groups tab (the tab bar stays on
+# screen): declining one drops it to 1, accepting the other clears it. The
+# new group has no messages yet, so nothing unread takes the invite's place.
+
+- launchApp:
+    stopApp: false
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../../subflows/enter-pin.yaml
+- tapOn:
+    id: "tab-groups"
+- extendedWaitUntil:
+    visible:
+      id: "badge-groups"
+      containsChild:
+        text: "2"
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      id: "row-invite-.*"
+    timeout: 30000
+
+- tapOn:
+    id: "btn-decline-invite-.*"
+    index: 0
+- extendedWaitUntil:
+    visible:
+      id: "badge-groups"
+      containsChild:
+        text: "1"
+    timeout: 15000
+- takeScreenshot: pending-badges-05-one-invite
+
+- tapOn:
+    id: "btn-accept-invite-.*"
+    index: 0
+- extendedWaitUntil:
+    notVisible:
+      id: "badge-groups"
+    timeout: 30000
+- assertNotVisible:
+    id: "row-invite-.*"
+- assertNotVisible:
+    id: "badge-direct"
+- takeScreenshot: pending-badges-06-all-cleared

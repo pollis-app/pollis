@@ -459,6 +459,8 @@
     "groups": "群组",
     "self": "我的",
     "signInDevice": "关联",
+    "withInvites_other": "{{label}}，{{count}} 个群组邀请",
+    "withRequests_other": "{{label}}，{{count}} 条消息请求",
     "withUnread_other": "{{label}}，{{count}} 条未读"
   },
   "thread": {

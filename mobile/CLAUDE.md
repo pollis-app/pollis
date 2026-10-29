@@ -1307,6 +1307,13 @@ Current state:
   `sync_read_cursors` runs on unlock and resume, so reading on one device
   clears the others. The `useInboxRealtime` bump stays as the instant path.
   Maestro: `scripts/maestro-unread.sh` (dev-DS peer `unread_peer`).
+  The tab badges also count what is waiting on the user (#1561,
+  `lib/tabBadges.ts`): Direct adds pending message requests
+  (`useDMRequests`), Groups pending group invites (`usePendingGroupInvites`),
+  Slack/Discord style, and the spoken label names each part. Both queries are
+  refreshed by the inbox realtime (`dm_created`, `membership_changed`); accept
+  and block drop the request from the cache on the tap. Maestro:
+  `scripts/maestro-pending-badges.sh` (dev-DS peer `pending_badge_peer`).
 - **Voice — libraries installed, NOT activated (#343).** Mobile will take the
   **JS LiveKit SDK** path (`@livekit/react-native` + `@livekit/react-native-webrtc`)
   rather than desktop's Rust media pipeline — see the architectural note in epic
