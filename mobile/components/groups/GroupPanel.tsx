@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ScrollView, Text, View } from "react-native";
+import { useRouter } from "expo-router";
 import { useNav } from "../pane/paneContext";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
@@ -55,6 +56,8 @@ function GroupPanelImpl({
   const { t } = useTranslation("mobile");
   // iPad two-pane: group pages open in the detail pane (useNav).
   const router = useNav();
+  // Search is a tab-level destination (the top of Self), never a pane page.
+  const rootRouter = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
 
@@ -173,14 +176,14 @@ function GroupPanelImpl({
         />
       </View>
 
-      {/* Looks like a field; opens Search. */}
+      {/* Looks like a field; opens search, at the top of Self (#1550). */}
       <View style={{ paddingHorizontal: space.xxl, paddingBottom: space.lg }}>
         <PressInPressable
           pressIn
           testID="btn-search-group"
           accessibilityRole="button"
           accessibilityLabel={t("group.panel.search", { name: groupName })}
-          onPress={() => router.push("/(tabs)/search")}
+          onPress={() => rootRouter.navigate({ pathname: "/(tabs)/self", params: { search: "1" } })}
           style={{
             minHeight: layout.touchMin,
             borderRadius: r.sm,

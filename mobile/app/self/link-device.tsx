@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Text, View } from "react-native";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { useObserver } from "mobx-react-lite";
@@ -46,6 +46,9 @@ export default function ScanToSignIn() {
   useThemeRerender();
   const { t } = useTranslation("settings");
   const router = useRouter();
+  // The tab bar's shield (#1550) opens this page from any tab, so back there
+  // is plain "Back", not "Back to Security".
+  const { from } = useLocalSearchParams<{ from?: string }>();
   const regular = useIsRegular();
   const userId = useObserver(() => appStore.currentUser?.id ?? null);
   const [permission, requestPermission] = useCameraPermissions();
@@ -164,7 +167,12 @@ export default function ScanToSignIn() {
     setStep({ kind: "scan" });
   };
 
-  const crumb = <Header title={t("mobile:self.scanDevice.heading")} backTo={t("settings:security.title")} />;
+  const crumb = (
+    <Header
+      title={t("mobile:self.scanDevice.heading")}
+      backTo={from === "tab" ? undefined : t("settings:security.title")}
+    />
+  );
 
   if (step.kind === "pin") {
     const pushDigit = (d: string) => {

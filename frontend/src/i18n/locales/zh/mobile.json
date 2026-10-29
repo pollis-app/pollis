@@ -309,6 +309,7 @@
   },
   "search": {
     "channels": "频道",
+    "clear": "清除搜索",
     "hint": "至少输入 2 个字符进行搜索。要查找某人，请输入其准确的用户名并按回车。",
     "filtersLabel": "筛选",
     "messages": "消息",
@@ -456,8 +457,8 @@
   "tabs": {
     "direct": "私信",
     "groups": "群组",
-    "search": "搜索",
     "self": "我的",
+    "signInDevice": "关联",
     "withUnread_other": "{{label}}，{{count}} 条未读"
   },
   "thread": {

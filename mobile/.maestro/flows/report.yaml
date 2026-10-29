@@ -13,7 +13,7 @@ tags:
 
 - runFlow: ../subflows/sign-in.yaml
 - tapOn:
-    id: "tab-search"
+    id: "tab-self"
 - tapOn:
     id: "input-search"
 - inputText: "${MAESTRO_PEER_HANDLE}"

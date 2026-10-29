@@ -1,4 +1,4 @@
-// Cross-content search hook. Backs the (tabs)/search screen.
+// Cross-content search hook. Backs the global search at the top of Self ((tabs)/self, #1550).
 //
 // `search_messages` goes through the local FTS index and returns a page of
 // SearchResult rows; this hook pages through them (#1202). User search

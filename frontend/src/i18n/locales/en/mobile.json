@@ -326,6 +326,7 @@
   },
   "search": {
     "channels": "Channels",
+    "clear": "Clear search",
     "hint": "Type at least 2 characters to search. To find a person, enter their exact username and press return.",
     "filtersLabel": "Filters",
     "messages": "Messages",
@@ -480,8 +481,8 @@
   "tabs": {
     "direct": "Direct",
     "groups": "Groups",
-    "search": "Search",
     "self": "Self",
+    "signInDevice": "Link",
     "withUnread_one": "{{label}}, {{count}} unread",
     "withUnread_other": "{{label}}, {{count}} unread"
   },
