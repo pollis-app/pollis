@@ -49,8 +49,7 @@ export function useBlockUser() {
         blockedId,
       });
     },
-    // Blocking declines the sender's request: it leaves the list, and the
-    // Direct tab badge, on the tap (#1561).
+    // Blocking declines the sender's DM request, so it drops on the tap (#1561).
     onMutate: async (blockedId: string) => {
       await dropDMRequests(queryClient, currentUser?.id ?? null, (r) => r.user2_id === blockedId);
     },
@@ -66,7 +65,6 @@ export function useBlockUser() {
       queryClient.invalidateQueries({
         queryKey: dmQueryKeys.channels(currentUser?.id ?? null),
       });
-      // Blocking is also the decline path for a DM request.
       queryClient.invalidateQueries({
         queryKey: dmQueryKeys.requests(currentUser?.id ?? null),
       });

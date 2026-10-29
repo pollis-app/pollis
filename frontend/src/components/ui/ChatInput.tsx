@@ -507,7 +507,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
       return;
     }
     pendingCaretRef.current = null;
-      // Passive, so it runs after RichTextInput rebuilt its projection.
+    // Passive, so it runs after RichTextInput rebuilt its projection.
     inputRef.current.setSelection(pending);
     setCaret(pending);
   }, [message]);
@@ -694,7 +694,6 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     setAttachments((prev) => {
       const att = prev.find((a) => a.id === id);
       if (att?.preview) { URL.revokeObjectURL(att.preview); }
-      // Release the staged bytes, not just the card.
       const stagedId = att ? stagedIdOf(att) : null;
       if (stagedId) { void discardStagedAttachment(stagedId); }
       return prev.filter((a) => a.id !== id);

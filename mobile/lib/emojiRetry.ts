@@ -1,10 +1,6 @@
-// When a custom emoji that failed to show tries again (#1562). Pure, so
-// tests/emoji-retry.test.ts pins it without a renderer.
-//
-// A failure is not final: one offline moment or a cold DS used to leave the
-// `:shortcode:` text in place until the row remounted. The schedule is short
-// and finite, never a poll; past it, the app coming back to the foreground
-// tries again (`retryOnForeground`).
+// When a custom emoji that failed to show tries again (#1562): a short,
+// finite schedule, never a poll, then each return to the foreground. Pure, so
+// tests/emoji-retry.test.ts pins it.
 
 /** Delay before the retry that follows the Nth consecutive failure (0-based). */
 export const EMOJI_RETRY_DELAYS_MS: readonly number[] = [2_000, 10_000, 30_000];

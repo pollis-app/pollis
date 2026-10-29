@@ -26,9 +26,8 @@ export interface NavigableListProps<T> {
   // Mouse click on the row body (not its controls). Separate from
   // `onEnterRow`, which some consumers wire to a destructive action.
   onClickRow?: (item: T) => void;
-  // `"press"`: `onClickRow` runs on a plain mouse pointer-down (#1529) — only
-  // when it navigates (free to undo). Enter and assistive tech still act on
-  // their own path; a mouse press runs it once.
+  // `"press"`: `onClickRow` runs on a plain mouse pointer-down (#1529); only
+  // for a row that navigates.
   activateRowOn?: ActivateOn;
 
   isLoading?: boolean;
@@ -135,7 +134,6 @@ export function NavigableList<T>({
       const rowControlCount = item && controls ? controls(item).length : 0;
       const maxCol = rowControlCount;
 
-      // Now actively navigated, so focus-following may grab focus.
       if (
         e.key === "ArrowUp" ||
         e.key === "ArrowDown" ||

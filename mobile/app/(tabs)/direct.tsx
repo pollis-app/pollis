@@ -49,11 +49,8 @@ function Direct() {
   const selectedConversationId = appStore.selectedConversationId;
   const unreadCounts = appStore.unreadCounts;
   const currentUserId = appStore.currentUser?.id;
-  // On regular (iPad) width the list is the left column of a two-pane
-  // master-detail; on compact it is the whole screen with push navigation.
   const isRegular = useLayoutClass() === "regular";
-  // The right pane's own page stack (conversation info, a profile…) on
-  // regular width; another conversation starts it over.
+  // The right pane's page stack; another conversation starts it over.
   const pane = usePaneStack();
   const resetPane = pane.api.reset;
   useEffect(() => {
@@ -61,12 +58,10 @@ function Direct() {
   }, [selectedConversationId, resetPane]);
   const selectedDm = dms.find((d) => d.id === selectedConversationId);
   const selectedHandle = selectedDm?.user2_identifier || undefined;
-  // Local filter over the conversations already loaded — no extra lookup.
   const [query, setQuery] = useState("");
   const needle = query.trim().toLowerCase();
 
-  // One batched preview fetch for every DM row, never one call per row. A
-  // conversation with no locally-ingested messages renders without a preview.
+  // One batched preview fetch for every row, never one call per row.
   const dmIds = useMemo(() => dms.map((d) => d.id), [dms]);
   const { data: lastMessages = {} } = useLastMessages(dmIds);
 
@@ -83,10 +78,8 @@ function Direct() {
     });
   }, [dms, lastMessages, needle]);
 
-  // On compact, being on this list means no conversation is open — clear the
-  // selection so realtime `new_message` events for the conversation the user
-  // just left count as unread again. On regular the detail pane keeps the
-  // conversation visible, so the selection (and unread suppression) stands.
+  // On compact no conversation is open here, so clear the selection and let
+  // the one just left count unread again; on regular the pane still shows it.
   useFocusEffect(
     useCallback(() => {
       if (!isRegular) {
@@ -97,16 +90,12 @@ function Direct() {
 
   const openNew = () => router.push("/dm/new");
 
-  // The single-column content — rendered as the whole screen on compact, or as
-  // the left list column of the two-pane on regular. Identical on both save
-  // for the row onPress, which only skips the push on regular.
   const listColumn = (
     <>
       <Header
         variant="large"
         title={t("tabs.direct")}
         actions={
-          // Opens the new-message page, free to undo: touch-down (#1529).
           <IconButton
             testID="btn-new-dm"
             pressIn
@@ -131,8 +120,6 @@ function Direct() {
         </View>
       ) : null}
       <Body contentContainerStyle={{ paddingHorizontal: space.sm, gap: 2 }}>
-        {/* The Vault (#1316) — a chat with yourself heads the list, as on
-            desktop. Hidden while a search filters the conversations. */}
         {!needle ? (
           <>
             <VaultRow onPress={() => router.push("/vault")} />
@@ -233,7 +220,6 @@ function Direct() {
                 // over it.
                 resetPane();
                 markConversationRead(d.id);
-                // On regular the right pane updates in place; on compact push.
                 if (!isRegular) {
                   router.push({
                     pathname: "/chat/[id]",
@@ -248,9 +234,8 @@ function Direct() {
     </>
   );
 
-  // Regular width: list + conversation side by side once there is something
-  // to pick (or a conversation was just opened from elsewhere, ahead of the
-  // list's refetch); the empty state is one centred column.
+  // A conversation just opened from elsewhere counts, ahead of the list's
+  // refetch.
   const hasList =
     dms.length > 0 || requests.length > 0 || !!selectedConversationId;
   let body: React.ReactNode = listColumn;

@@ -1,30 +1,18 @@
-// Type definitions for Pollis app
-//
-// ARCHITECTURE NOTE:
-// - Remote DB (Turso): Users, groups, channels, membership, profiles
-// - Local DB: ONLY encrypted messages, encryption keys, crypto state
-// - Everything else fetched from remote via React Query (network-first)
-//
-// This is MLS (e2e encryption) + Slack (group features)
-
 import type { ParticipantAudio, ParticipantVideo } from './voice-state';
 
-// Shape returned by the `detect_managed_install` command. Non-null means
-// the running binary is owned by a system package manager (AUR / .deb /
-// .rpm / future MAS / MS Store / Flatpak) and the in-app updater must NOT
-// run — the user is expected to update via their package manager. Rendered
-// by the Software Update page when set.
+// Returned by `detect_managed_install`. Non-null means a system package manager
+// owns the binary, so the in-app updater must not run.
 export type ManagedInstallInfo = {
   kind: "aur" | "linux_system";
   display_name: string;
-  // null when we know it's a managed install but can't guess the package
-  // manager (.deb on Debian/Ubuntu vs .rpm on Fedora vs. snap, etc.).
+  // null when the package manager can't be guessed (.deb vs .rpm vs snap, etc.).
   update_command: string | null;
 };
 
 export interface User {
   id: string;
-  clerk_id: string; // Legacy Clerk field, unused — kept for compatibility
+  // Legacy Clerk field, unused.
+  clerk_id: string;
   email?: string;
   username?: string;
   preferred_name?: string;
@@ -33,14 +21,13 @@ export interface User {
 }
 
 export interface Group {
-  // Stored in: Remote DB (Turso)
-  // Fetched via: useUserGroups() React Query hook
-  id: string; // ULID
+  id: string;
   slug: string;
   name: string;
   description?: string;
-  icon_url?: string; // R2 object key or public URL for group icon
-  created_by: string; // user_id
+  // R2 object key or public URL.
+  icon_url?: string;
+  created_by: string;
   created_at: number;
   updated_at: number;
 }
@@ -55,38 +42,37 @@ export interface GroupMember {
 }
 
 export interface Channel {
-  id: string; // ULID
+  id: string;
   group_id: string;
   slug?: string;
   name: string;
   description?: string;
   channel_type: 'text' | 'voice';
-  created_by: string; // user_id
+  created_by: string;
   created_at: number;
   updated_at: number;
 }
 
 export interface Message {
-  // Stored in: Local DB (encrypted)
-  // Fetched via: useChannelMessages() or useConversationMessages() React Query hooks
-  // CRITICAL: Encrypted content NEVER leaves device in plaintext
-  id: string; // ULID
-  channel_id?: string; // NULL for direct messages
-  conversation_id?: string; // ULID (required - channel or DM conversation)
-  sender_id: string; // user_id
-  sender_username?: string; // resolved at fetch time from Turso JOIN
-  ciphertext: Uint8Array; // encrypted content (MLS protocol)
-  nonce: Uint8Array; // nonce for encryption
-  content_decrypted?: string; // Decrypted content (client-side only, never persisted)
-  reply_to_message_id?: string; // ULID of message being replied to
-  thread_id?: string; // ULID of thread root (NULL if not in thread)
+  id: string;
+  // NULL for direct messages.
+  channel_id?: string;
+  conversation_id?: string;
+  sender_id: string;
+  sender_username?: string;
+  ciphertext: Uint8Array;
+  nonce: Uint8Array;
+  content_decrypted?: string;
+  reply_to_message_id?: string;
+  // The thread root's id; NULL if not in a thread.
+  thread_id?: string;
   is_pinned: boolean;
-  created_at: number; // primary timestamp
-  delivered: boolean; // delivery status
+  created_at: number;
+  delivered: boolean;
   attachments?: MessageAttachment[];
-  // Edit/delete metadata
-  edited_at?: string; // ISO timestamp if message was edited
-  deleted_at?: string; // ISO timestamp if message was soft-deleted
+  // ISO timestamps; `deleted_at` marks a soft delete.
+  edited_at?: string;
+  deleted_at?: string;
   // Our edit of it is stored but its delivery failed (#1555); the outbox
   // drain retries it. `content_decrypted` is already the edited text.
   edit_unsent?: boolean;
@@ -94,7 +80,6 @@ export interface Message {
   undecryptable?: boolean;
   // How many consecutive placeholders this row stands for (MessageList collapses runs)
   undecryptable_count?: number;
-  // UI state
   status?: 'pending' | 'sending' | 'sent' | 'failed' | 'cancelled';
   // The core's id for our own outgoing message (#1335) — the stored outbox
   // row that Retry / Discard name. Set on optimistic stubs and on unsent rows.
@@ -112,24 +97,24 @@ export interface ReplyPreview {
 }
 
 export interface DMConversation {
-  id: string; // ULID (conversation_id)
-  user1_id: string; // user_id
-  user2_identifier: string; // username/email/phone of other user
+  id: string;
+  user1_id: string;
+  // Username/email/phone of the other user.
+  user2_identifier: string;
   user2_id?: string;
   user2_avatar_url?: string;
-  /** Total members including the viewer. Group DMs have 3+; a 1:1 has 2.
-   * Drives the per-reader receipt summary (#857) — optional because callers
-   * that only need the "other side" never populate it. */
+  /** Total members including the viewer; drives the per-reader receipt summary
+   * (#857). Optional because callers that only need the other side never set it. */
   member_count?: number;
-  /** Every member except the viewer; a group DM has several. Drives the
-   * right panel's roster and its one-per-peer safety numbers (#1563). */
+  /** Every member except the viewer; drives the right panel's roster and its
+   * one-per-peer safety numbers (#1563). */
   peers?: Array<{ user_id: string; username?: string; avatar_url?: string }>;
   created_at: number;
   updated_at: number;
 }
 
 export interface MessageQueueItem {
-  id: string; // ULID
+  id: string;
   message_id: string;
   status: 'pending' | 'sending' | 'sent' | 'failed' | 'cancelled';
   retry_count: number;
@@ -138,8 +123,9 @@ export interface MessageQueueItem {
 }
 
 export interface Profile {
-  id: string; // Clerk user ID
-  user_id: string; // Local User ID (links to users table)
+  // Clerk user ID.
+  id: string;
+  user_id: string;
   avatar_url?: string;
   last_used_at: number;
   created_at: number;
@@ -152,29 +138,21 @@ export interface PresignedUploadResponse {
   public_url: string;
 }
 
-// Mirrors `pollis_core::commands::messages::Reaction`. NO renderer code reads
-// this today — the reactions UI was removed in #874 as dead (it was commented
-// out at both call sites). The type stays because the Rust struct and the
-// `add_reaction` / `remove_reaction` / `get_reactions` commands behind it are
-// still registered and still work; this is the TS mirror they are kept in sync
-// with. Delete both sides together or neither.
+// Mirrors `pollis_core::commands::messages::Reaction`. No renderer code reads it
+// (#874), but the Rust reaction commands are still registered; delete both sides
+// together or neither.
 export interface Reaction {
   emoji: string;
   user_ids: string[];
   count: number;
 }
 
-// One custom per-group emoji (#848). Mirrors `pollis_core::commands::emoji::CustomEmoji`
-// field for field — keep the two in sync.
-//
-// `content_hash` is the identity: the same image registered by fifteen groups is
-// fifteen of these pointing at ONE stored object. It is also what travels inside
-// message text as `<:shortcode:content_hash>`, which is why a recipient can render
-// an emoji from a group they are not in — the hash resolves without any membership
-// check, deliberately.
+// One custom per-group emoji (#848), mirroring `pollis_core::commands::emoji::CustomEmoji`.
+// `content_hash` is the identity and travels in message text as
+// `<:shortcode:content_hash>`; it resolves without a membership check,
+// deliberately, so a recipient outside the group can still render it.
 export interface CustomEmoji {
   group_id: string;
-  // The registering group's display name — the picker's section header.
   group_name: string;
   // `[a-z0-9_]{2,32}`, enforced at the DS.
   shortcode: string;
@@ -183,22 +161,16 @@ export interface CustomEmoji {
   content_type: string;
   animated: boolean;
   size_bytes: number;
-  // Who added it to this group. Only they or a group admin may remove it.
+  // Only they or a group admin may remove it.
   created_by: string;
 }
 
 /**
- * Delivery / read receipts held for ONE message in a DM (#857).
+ * Delivery / read receipts for ONE message in a DM (#857), mirroring
+ * `MessageReceipts` in `pollis-core/src/commands/messages/receipts.rs`.
  *
- * Mirrors `MessageReceipts` in `pollis-core/src/commands/messages/receipts.rs`.
- *
- * Both fields are lists of user ids, never booleans — a DM can have several
- * members, so "delivered" and "read" are sets, and the 1:1 case is just the
- * one-element case. `read_by` is always a subset of `delivered_by`: the local
- * schema has a trigger making "read but never delivered" unrepresentable.
- *
- * Receipts are device-local and exist only for DMs; group channels never
- * produce them.
+ * Both are user-id sets (a DM can have several members); `read_by` is always a
+ * subset of `delivered_by`, enforced by a local-schema trigger.
  */
 export interface MessageReceipts {
   message_id: string;
@@ -221,11 +193,13 @@ export type ContentOrigin = { conversationId: string } | "vault";
 
 export interface MessageAttachment {
   id: string;
-  object_key: string;       // R2 object key — empty string while upload is in progress
+  // Empty string while the upload is in progress.
+  object_key: string;
   // The object's random file id (#1382). NOT derived from the content: the key
   // comes from the conversation's MLS-wrapped key ring (or the Vault key).
   content_hash: string;
-  sha256: string;           // plaintext SHA-256, verified after decrypt
+  // Verified after decrypt.
+  sha256: string;
   // null while uploading, or for a pre-#1382 reference that can no longer be opened
   key_scope: AttachmentKeyScope | null;
   filename: string;
@@ -235,24 +209,20 @@ export interface MessageAttachment {
   blurhash?: string;
   width?: number;
   height?: number;
-  localPreviewUrl?: string; // Blob URL for optimistic display — never persisted or sent to server
+  // Blob URL for optimistic display — never persisted or sent to the server.
+  localPreviewUrl?: string;
 }
 
-// ─── On-device message search (#850) ─────────────────────────────────────────
-// Mirrors `pollis_core::commands::messages::types` field for field. Keep the
-// two in sync; the mobile copy lives in `mobile/hooks/queries/useSearch.ts`.
+// On-device message search (#850), mirroring `pollis_core::commands::messages::types`;
+// the mobile copy lives in `mobile/hooks/queries/useSearch.ts`.
 
 /** `sent_at DESC`, or bm25 with a recency decay. */
 export type SearchSort = "recent" | "relevant";
 
 /**
- * A snippet plus where to mark it.
- *
- * `highlights` are `[start, end)` pairs in UTF-16 code units — i.e. plain
- * JavaScript string indices — so the renderer slices `text` directly and builds
- * `<mark>` elements. Ranges rather than HTML: nothing a message body contains
- * can become markup, and there is no `dangerouslySetInnerHTML` anywhere near
- * search.
+ * A snippet plus where to mark it. `highlights` are `[start, end)` UTF-16
+ * code-unit ranges (plain JS string indices) rather than HTML, so nothing a
+ * message body contains can become markup.
  */
 export interface SearchSnippet {
   text: string;
@@ -282,11 +252,9 @@ export interface SearchCursor {
 }
 
 /**
- * What this device actually holds — the numbers behind the results footer.
- *
- * Search covers this device's decrypted history and nothing else, because
- * message bodies are E2EE and the server has only ciphertext. The UI says so
- * out loud rather than letting "no results" imply "no such message".
+ * What this device holds — the numbers behind the results footer. Search covers
+ * only this device's decrypted history, so the UI says so rather than letting
+ * "no results" imply "no such message".
  */
 export interface SearchCorpus {
   message_count: number;
@@ -325,21 +293,16 @@ export type VoiceConnectionQuality = "excellent" | "good" | "poor" | "lost";
 export interface VoiceParticipant {
   identity: string;
   name: string;
-  // Single carrier of this participant's mute + speaking state. Modelled as a
-  // DU so "muted ⇒ not speaking" cannot be represented (#385). Transition it
+  // A DU so "muted ⇒ not speaking" cannot be represented (#385). Transition it
   // only via voice/participantAudio.ts.
   audio: ParticipantAudio;
-  // This participant's screenshare, folded onto the participant (#385) so a
-  // share lives on the same object as the participant that publishes it —
-  // replacing the old parallel `appStore.screenShareRemotes` map. `none` when
-  // not sharing. Camera stays on `cameraRemotes` (it coexists with screenshare,
-  // #394); this DU is the screenshare axis only. Transition it only via
+  // This participant's screenshare (#385), `none` when not sharing; camera
+  // stays on `cameraRemotes` (#394). Transition it only via
   // VoiceSessionManager's setScreenShare/clearScreenShare.
   video: ParticipantVideo;
   isLocal: boolean;
   avatarKey?: string | null;
-  // LiveKit's categorical link health for this participant. Undefined until
-  // we receive the first `connection_quality_changed` event for them.
+  // Undefined until the first `connection_quality_changed` event for them.
   connectionQuality?: VoiceConnectionQuality;
 }
 
@@ -351,28 +314,26 @@ export interface AudioDevice {
 
 export interface UserAlias {
   id: string;
-  user_id: string; // User who owns this alias
-  group_id: string; // Per-user, per-group display name (required)
-  name: string; // Display name in this group
-  avatar_hash?: string; // R2 object key for group-specific avatar
+  user_id: string;
+  group_id: string;
+  name: string;
+  // R2 object key for the group-specific avatar.
+  avatar_hash?: string;
   created_at: number;
 }
 
 export * from "./blocks";
 
-// ── Account-key transparency (issue #330) ──────────────────────────────────
-// Mirrors the Rust shapes returned by the `self_audit_account_key` and
-// `audit_peer_account_key` commands (pollis-core/src/commands/transparency.rs).
-// Verdicts come from the SAME shared verifier the `pollis-verify` auditor CLI
-// runs, so the client can never disagree with a third-party auditor. All
-// statuses are advisory — they alert, they never block sends.
+// Account-key transparency (#330), mirroring `pollis-core/src/commands/transparency.rs`.
+// Verdicts come from the same verifier `pollis-verify` runs; all statuses are
+// advisory — they alert, they never block sends.
 
-// One identity-key version in a user's published chain (from the log).
 export interface AccountKeyVersion {
   identity_version: number;
   seq: number;
-  account_id_pub: string; // lowercase hex
-  included: boolean; // did its inclusion proof verify against the signed head
+  account_id_pub: string;
+  // Its inclusion proof verified against the signed head.
+  included: boolean;
 }
 
 // A verified per-user key-history report (the `/verify/account/<id>` shape).
@@ -386,7 +347,6 @@ export interface AccountReport {
   violations: string[];
 }
 
-// Verdict of an account-key audit.
 //   ok          — chain verifies, published latest matches the local key
 //   pending     — local key/version not in the log yet (publishes daily); advisory
 //   alarm       — published chain disagrees at same-or-higher version, pinned-key
@@ -394,27 +354,28 @@ export interface AccountReport {
 //   unavailable — the log host was unreachable; "couldn't check", not "failed"
 export type AuditStatus = "ok" | "pending" | "alarm" | "unavailable";
 
-// Result of `self_audit_account_key`.
 export interface SelfAuditReport {
   status: AuditStatus;
-  detail: string; // one-line, human-readable explanation
+  detail: string;
   my_identity_version: number;
-  my_account_id_pub: string; // lowercase hex
-  report: AccountReport | null; // null when unavailable
+  my_account_id_pub: string;
+  // null when unavailable.
+  report: AccountReport | null;
 }
 
-// Result of `audit_peer_account_key`.
 export interface PeerAuditReport {
   status: AuditStatus;
   detail: string;
   peer_user_id: string;
-  pinned_identity_version: number | null; // null if no local TOFU pin
-  key_rotated: boolean; // pinned key present AND a newer version published
+  // null if no local TOFU pin.
+  pinned_identity_version: number | null;
+  // Pinned key present AND a newer version published.
+  key_rotated: boolean;
   report: AccountReport | null;
 }
 
-// Verdict of an in-app "verify this build" check (issue #484). Kept in sync with
-// the Rust `BuildVerifyStatus` enum (snake_case).
+// Verdict of the in-app "verify this build" check (#484), mirroring the Rust
+// `BuildVerifyStatus` (snake_case).
 //   verified — this build's payload fingerprint is published in the binaries log
 //   pending  — the release tag isn't in the published tree yet (advisory)
 //   mismatch — tag present but our hash absent, or the tree/served key failed the
@@ -428,42 +389,45 @@ export type BuildVerifyStatus =
   | "mismatch"
   | "unavailable";
 
-// One released artifact in a tag's set, mirroring the Rust `ReleaseArtifact`.
+// Mirrors the Rust `ReleaseArtifact`.
 export interface ReleaseArtifact {
-  platform: string; // darwin | windows | linux
-  arch: string; // aarch64 | x86_64
-  bundle: string; // dmg | app | nsis | appimage | deb | rpm
+  // darwin | windows | linux
+  platform: string;
+  // aarch64 | x86_64
+  arch: string;
+  // dmg | app | nsis | appimage | deb | rpm
+  bundle: string;
   // payload — the reproducible pre-signature unit (rebuilders' target)
   // signed  — the shipped, signed/notarized wrapper
   // exe     — the main executable as installed; the only layer a running app
   //           can hash itself against
   layer: "payload" | "signed" | "exe";
   artifact_name: string;
-  payload_sha256: string; // lowercase hex
-  artifact_sha256: string; // lowercase hex
+  payload_sha256: string;
+  artifact_sha256: string;
   provenance_uri: string;
-  // The build recipe recorded in this artifact's leaf. Every field reads
-  // "unknown" for tags attested before #939, and the tree is append-only, so
-  // those cannot be backfilled — treat "unknown" as absent, never as a value.
+  // Every field reads "unknown" for tags attested before #939, and the tree is
+  // append-only, so treat "unknown" as absent, never as a value.
   toolchain: Toolchain;
-  included: boolean; // inclusion proof verified against the latest binaries STH
+  // Inclusion proof verified against the latest binaries STH.
+  included: boolean;
 }
 
 // The reproducibility recipe pinned into each binary-transparency leaf,
 // mirroring the Rust `Toolchain` (`verifiable_log_builder::binaries`).
 export interface Toolchain {
-  rustc: string; // e.g. "1.96.0", or "unknown" pre-#939
+  rustc: string;
   node: string;
   pnpm: string;
   // CI runner image identity, e.g. "ubuntu22@20260810.260.1", with a
   // "+helper:<os>@<version>" suffix on Linux because the AppImage embeds a
   // capture helper compiled on a second image.
   runner_image: string;
-  source_date_epoch: number; // Unix seconds — the tag commit's timestamp
+  // Unix seconds — the tag commit's timestamp.
+  source_date_epoch: number;
 }
 
-// Result of verifying a single release tag's binaries, mirroring the Rust
-// `ReleaseReport` (`verifiable_log_serve::release`).
+// Mirrors the Rust `ReleaseReport` (`verifiable_log_serve::release`).
 export interface ReleaseReport {
   release_tag: string;
   found: boolean;
@@ -474,33 +438,32 @@ export interface ReleaseReport {
   violations: string[];
 }
 
-// Result of `verify_own_build`. Kept in sync with the Rust `BuildVerifyReport`.
+// Result of `verify_own_build`, mirroring the Rust `BuildVerifyReport`.
 export interface BuildVerifyReport {
   status: BuildVerifyStatus;
-  detail: string; // one-line, human-readable explanation
-  version: string; // package version, e.g. "1.1.0"
-  commit: string | null; // exact source commit, or null if not baked in
-  my_payload_sha256: string; // the payload hash this device computed
-  report: ReleaseReport | null; // null when unavailable
+  detail: string;
+  version: string;
+  // null if not baked in.
+  commit: string | null;
+  my_payload_sha256: string;
+  // null when unavailable.
+  report: ReleaseReport | null;
 }
 
 export interface AppState {
-  // Current user
   currentUser: User | null;
 
-  // Selected views
   selectedGroupId: string | null;
   selectedChannelId: string | null;
-  selectedConversationId: string | null; // For DMs
+  selectedConversationId: string | null;
 
-  // Data (messages and DM conversations managed by React Query, not the store)
+  // Messages and DM conversations live in React Query, not the store.
   groups: Group[];
-  channels: Record<string, Channel[]>; // group_id -> channels
+  // group_id -> channels
+  channels: Record<string, Channel[]>;
 
-  // Message queue
   messageQueue: MessageQueueItem[];
 
-  // UI state
   replyToMessageId: string | null;
   showThreadId: string | null;
   isLoading: boolean;

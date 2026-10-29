@@ -89,9 +89,6 @@ export const InlineAudioPlayer: React.FC<InlineAudioPlayerProps> = ({
         cursor: onClick ? "pointer" : "default",
       }}
       onClick={press.onClick}
-      // The play button and the seek bar are their own controls: a press on
-      // them never opens the viewer (usePressActivation leaves nested
-      // controls alone).
       onPointerDown={press.onPointerDown}
       onMouseDown={press.onMouseDown}
     >

@@ -1,11 +1,6 @@
-// Custom-emoji image resolution. `get_emoji_path` (bridge PR #967) verifies
-// the object hash and materialises the image to the sandbox cache dir,
-// returning a `file://` URI — the emoji analogue of `get_media_path`
-// (mobile can't run desktop's loopback media server).
-//
-// Unlike message media (plaintext unlinked on last release), emoji files are
-// tiny, unencrypted-at-rest by design (they're public group assets verified
-// by hash) and heavily reused across messages, so they stay cached.
+// `get_emoji_path` verifies the object hash and writes the image to the cache
+// dir as a `file://` URI. Unlike message media, emoji files are public group
+// assets verified by hash, tiny and heavily reused, so they stay cached.
 
 import * as FileSystem from "expo-file-system/legacy";
 import { invoke } from "./native";

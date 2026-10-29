@@ -32,9 +32,7 @@ function DMInfo() {
   const currentUser = appStore.currentUser;
   const [confirmLeave, setConfirmLeave] = useState(false);
 
-  // Same `get_dm_channel` source the DM list rows come from (#907) — the
-  // shared hook keys it under the ["dm"] prefix so realtime roster/DM events
-  // invalidate this roster along with the list.
+  // Keyed under ["dm"], so realtime DM events invalidate it with the list (#907).
   const channel = useDMChannel(channelId);
 
   const leave = useLeaveDM();
@@ -54,8 +52,6 @@ function DMInfo() {
   };
 
   const members = channel.data?.members ?? [];
-  // A safety number belongs to a pair (#1563): one per other member, never
-  // one for "the conversation".
   const peers = members.filter((m) => m.user_id !== currentUser?.id);
 
   return (

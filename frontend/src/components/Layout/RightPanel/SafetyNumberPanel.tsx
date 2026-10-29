@@ -19,14 +19,9 @@ interface SafetyNumberPanelProps {
 }
 
 /**
- * "You & <name>" (#1563): the safety number of a PAIR, shown in the DM's right
- * panel instead of on the other person's profile. pollis-core's
- * `get_safety_number` combines your account key with theirs, so a group DM
- * opens one of these per other member, never one for the conversation.
- *
- * The QR carries the digits themselves: `qr_payload` (both ML-DSA-44 keys in
- * hex, about 5 KB) is past what a QR code can hold, while the 60 digits fit in
- * a small one any phone camera can read and compare.
+ * "You & <name>" (#1563): the safety number of a pair, so a group DM has one
+ * per other member. The QR carries the 60 digits, not `qr_payload` (~5 KB of
+ * keys, past what a QR code holds).
  */
 export const SafetyNumberPanel: React.FC<SafetyNumberPanelProps> = observer(
   ({ peerUserId, peerLabel, onBack }) => {

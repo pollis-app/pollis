@@ -102,8 +102,7 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
     };
   }, [open, setOpen]);
 
-  // Re-resolve on resize and on any ancestor scroll while open. `capture`
-  // because scroll doesn't bubble.
+  // `capture`: scroll doesn't bubble, and any ancestor's scroll re-resolves.
   useEffect(() => {
     if (!open) {
       return;

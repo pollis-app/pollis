@@ -35,11 +35,9 @@ export const groupQueryKeys = {
 /**
  * The channels this account muted (#1431), as a set of channel ids.
  *
- * Stored on the DS for the whole account: the push fan-out reads it to skip a
- * muted member (unless they are @named), every device reads the same row, and
- * the DS nudges the account's other devices (`channel_mutes_changed`) to
- * refetch this query. `useLiveKitRealtime` mirrors it into `notify.ts` so the
- * desktop's own OS notifications follow the same rule.
+ * Account-wide on the DS: push fan-out skips a muted member unless @named, and
+ * `channel_mutes_changed` refetches it on the other devices. `useLiveKitRealtime`
+ * mirrors it into `notify.ts` for desktop OS notifications.
  */
 export function useMutedChannels() {
   const currentUser = useObserver(() => appStore.currentUser);
@@ -128,11 +126,8 @@ export function useUserGroups() {
   });
 }
 
-// There is deliberately no `useGroupChannels` (#929). The sidebar — the only
-// surface that ever wanted a group's channel list — reads
-// `list_user_groups_with_channels` instead, so the per-group hook had zero
-// callers. `groupQueryKeys.channels` stays: it is still the invalidation
-// target for channel create / rename / delete and for `membership_changed`.
+// No `useGroupChannels` (#929): the sidebar reads `list_user_groups_with_channels`.
+// `groupQueryKeys.channels` stays as an invalidation target.
 
 export function useCreateGroup() {
   const queryClient = useQueryClient();
@@ -315,7 +310,6 @@ export function useCreateChannel() {
       queryClient.invalidateQueries({
         queryKey: groupQueryKeys.channels(variables.groupId),
       });
-      // Also invalidate the combined groups+channels query used by the sidebar
       queryClient.invalidateQueries({
         queryKey: groupQueryKeys.userGroupsWithChannels(currentUser?.id ?? null),
       });
@@ -448,10 +442,8 @@ export function usePendingInvites() {
 
 /**
  * Accept an invite (#1560). Optimistic: the invite leaves the pending list and
- * the group joins the sidebar on the same frame as the click, so the UI never
- * shows neither. A failure puts both back and the caller shows the error. The
- * mutation stays pending until the refetches that replace the optimistic rows
- * have landed.
+ * the group joins the sidebar on the same frame; a failure puts both back. The
+ * mutation stays pending until the refetches replacing the optimistic rows land.
  */
 export function useAcceptInvite() {
   const queryClient = useQueryClient();
@@ -467,9 +459,8 @@ export function useAcceptInvite() {
         throw new Error('No current user');
       }
       await invoke('accept_group_invite', { inviteId, userId: currentUser.id });
-      // Drain MLS Welcome messages the inviter pre-generated so we can decrypt
-      // channel messages immediately after navigating into the group. Awaited:
-      // the accept is not done until the group can be opened.
+      // Drain the Welcomes the inviter pre-generated. Awaited: the accept is not
+      // done until the group can be opened.
       await invoke('poll_mls_welcomes', { userId: currentUser.id }).catch((err) => {
         console.warn('[mls] poll_mls_welcomes after accept:', err);
       });
@@ -549,25 +540,16 @@ export interface GroupMemberWithGroup extends GroupMember {
 }
 
 /**
- * Fetches members for every group the current user is in, returning a flat
- * deduplicated list keyed by user_id. Used by Cmd+K search to surface users.
- *
- * `enabled` is not decoration — it is the whole point (#874). The only caller
- * is the Cmd+K panel, which mounts on every app start and sits CLOSED, and
- * this hook has to live above that panel's `if (!isOpen) return null` because
- * hooks cannot be conditional. So it used to issue one `get_group_members`
- * remote query PER GROUP at every launch and every window focus, for a panel
- * most sessions never open. The caller passes `isOpen`; the fan-out now
- * happens when someone actually asks to search.
+ * Members of every group the current user is in, deduplicated by user_id, for
+ * Cmd+K. `enabled` matters (#874): the closed Cmd+K panel calls this on every
+ * start, so it passes `isOpen` to skip one roster fetch per group per launch.
  */
 export function useAllGroupMembers(enabled: boolean): { members: GroupMemberWithGroup[] } {
   const { data: groups = [] } = useUserGroupsWithChannels();
   const currentUser = useObserver(() => appStore.currentUser);
 
-  // #917: every group here comes from `useUserGroupsWithChannels`, which is
-  // already scoped to the current user's memberships — so the roster guard can
-  // never deny one of these. The id is threaded through because the command
-  // requires it, not because the set being fetched has changed.
+  // #917: these groups are the user's own memberships, so the roster guard
+  // never denies one; the id is passed because the command requires it.
   const queries = useQueries({
     queries: (enabled ? groups : []).map((g) => ({
       queryKey: groupQueryKeys.members(g.id),
@@ -760,10 +742,8 @@ export function useGroupJoinRequests(groupId: string | null) {
       return await invoke<JoinRequest[]>('get_group_join_requests', { groupId, requesterId: currentUser.id });
     },
     enabled: !!currentUser && !!groupId,
-    // Was `0` — refetch on every mount — back when nothing else kept this
-    // fresh. `join_requests_changed` now invalidates this exact key, and
-    // `useAllPendingJoinRequests` reads the same entries (#874), so opening the
-    // group page is a cache hit rather than a third fetch of the same list.
+    // `join_requests_changed` invalidates this key, and `useAllPendingJoinRequests`
+    // shares its entries (#874).
     staleTime: 1000 * 30,
   });
 }
@@ -781,9 +761,6 @@ export function useApproveJoinRequest() {
       return groupId;
     },
     onSuccess: (groupId) => {
-      // One key now serves both the per-group list and the cross-group
-      // aggregate (#874) — `useAllPendingJoinRequests` reads these very
-      // entries, so there is no second key left to invalidate.
       queryClient.invalidateQueries({ queryKey: groupQueryKeys.joinRequests(groupId) });
     },
   });
@@ -802,31 +779,15 @@ export function useRejectJoinRequest() {
       return groupId;
     },
     onSuccess: (groupId) => {
-      // One key now serves both the per-group list and the cross-group
-      // aggregate (#874) — `useAllPendingJoinRequests` reads these very
-      // entries, so there is no second key left to invalidate.
       queryClient.invalidateQueries({ queryKey: groupQueryKeys.joinRequests(groupId) });
     },
   });
 }
 
 /**
- * Every pending join request across the groups the current user admins.
- *
- * Two things changed here in #874.
- *
- * The cache key used to be `adminGroupIds.LENGTH` — so two entirely different
- * sets of three groups collided on one entry and the second set silently read
- * the first set's requests. It is the ids that identify the query, and they are
- * what the per-group entries below are keyed on now.
- *
- * And the fan-out is no longer hidden. This was one `useQuery` wrapping a
- * `Promise.all` of N `get_group_join_requests` calls, which meant N calls that
- * no devtool attributed, no per-group caching, and a duplicate fetch whenever
- * the group page's own `useGroupJoinRequests` was mounted alongside it. As
- * `useQueries` over the SAME per-group keys, the N calls are visible, each is
- * cached and invalidated on its own, and the overlap with the group page is a
- * cache hit instead of a second round trip.
+ * Every pending join request across the groups the current user admins, as
+ * `useQueries` over the same per-group keys as `useGroupJoinRequests` (#874):
+ * each group is cached and invalidated on its own.
  */
 export function useAllPendingJoinRequests() {
   const currentUser = useObserver(() => appStore.currentUser);
@@ -866,15 +827,12 @@ export function useAllPendingJoinRequests() {
   return { data, isLoading: queries.some((q) => q.isLoading) };
 }
 
-// ── #847 shareable invite links ──────────────────────────────────────────────
-
 /**
- * A freshly minted invite link. Mirrors `CreatedInviteLink` in
+ * A freshly minted invite link (#847). Mirrors `CreatedInviteLink` in
  * `pollis-core/src/commands/groups/types.rs`.
  *
- * `token`/`url` arrive exactly once, from the create call. Nothing persists
- * them — the server stores only `sha256(secret)` — so once this value is
- * discarded the link can never be displayed again.
+ * `token`/`url` arrive exactly once: the server stores only `sha256(secret)`,
+ * so once this value is discarded the link can never be displayed again.
  */
 export type CreatedInviteLink = {
   id: string;
@@ -989,10 +947,8 @@ export function useRedeemGroupInviteLink() {
       });
     },
     onSuccess: () => {
-      // A successful redemption changes this user's group list and the
-      // group's member list. Invalidate broadly rather than surgically: the
-      // redeemer has just crossed into a group they could not see before, so
-      // most group-scoped caches are now stale.
+      // Broad on purpose: the redeemer just crossed into a group they could not
+      // see, so most group-scoped caches are stale.
       queryClient.invalidateQueries({ queryKey: groupQueryKeys.all });
     },
   });

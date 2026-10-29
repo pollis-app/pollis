@@ -142,7 +142,6 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) =
   );
 });
 
-
 /**
  * Pending invites (#1506), visible to every member; the inviter and admins can
  * revoke. Hidden when there are none.

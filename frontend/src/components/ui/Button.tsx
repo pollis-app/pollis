@@ -28,11 +28,8 @@ interface ButtonProps {
   /** `idle` / `copied` / `failed`, the marker copy affordances carry (#889, #898). */
   "data-copy-state"?: string;
   /**
-   * `"press"` acts on a plain mouse pointer-down instead of the click (#1529)
-   * — only for a button whose accidental press is free to undo (navigating,
-   * opening a panel, switching a view). Never send, save, confirm, destroy
-   * or toggle with it. The keyboard and assistive tech still activate it on
-   * click, and a mouse press runs it once. Default `"click"`.
+   * `"press"` acts on a plain mouse pointer-down (#1529; rules in
+   * `utils/pressActivation.ts`). Never for send, save, confirm, destroy or toggle.
    */
   activateOn?: ActivateOn;
 }

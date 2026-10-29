@@ -10,12 +10,10 @@ import {
 // out a tiny empty view, and these must take no touches.
 const PROBE = { position: "absolute", top: 0, bottom: 0, start: 0, end: 0 } as const;
 
-// Invisible e2e hooks (#1562), drawn by <Screen>:
-//   emoji-image-<shortcode>     some mounted custom emoji with that shortcode
-//                               has DRAWN its image;
-//   emoji-fallback-<shortcode>  some mounted one shows its `:shortcode:` text.
-// An emoji sits inside a message or list row, which is one accessible element,
-// so its own testID never reaches Maestro; these do. No content, no touches.
+// Invisible e2e hooks (#1562), drawn by <Screen>: `emoji-image-<shortcode>`
+// once a mounted emoji has drawn its image, `emoji-fallback-<shortcode>` while
+// one shows its text. An emoji's own testID never reaches Maestro: its row is
+// one accessible element.
 export function EmojiProbe() {
   useSyncExternalStore(subscribeEmojiShown, emojiShownVersion);
   const drawn = shortcodesShowing("image");

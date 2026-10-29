@@ -1,8 +1,5 @@
-// The bottom tab bar's badges (#1561). Each tab's number is its unread
-// messages plus the pending items waiting on the user there, counted in the
-// way Slack and Discord count message requests into the DM badge: Direct adds
-// pending message requests, Groups adds pending group invites. Pure, so the
-// counting and the spoken label are pinned by tests/tab-badges.test.ts.
+// The tab bar's badges (#1561): unread plus what waits on the user there,
+// Slack/Discord style. Pure, so tests/tab-badges.test.ts pins it.
 
 /** What one tab's badge is made of. */
 export interface TabBadge {

@@ -26,12 +26,8 @@ import { useThemeRerender } from "../theme";
 const ROSTER_RETRIES = 3;
 const ROSTER_RETRY_MS = 1500;
 
-// One group's channel sheet (Main.dc.html, the panel under the group strip):
-// group header (name + chevron → group menu, member count) with Invite, a
-// "Search <group>" button, then "Text channels" (+ create, for admins) and
-// "This group" (Members, Group settings, Join requests). Shared by the Groups
-// tab (under the pill strip) and the /group/[id] route (under a back bar), so
-// both entry points render the same thing.
+// One group's channel panel, shared by the Groups tab and the /group/[id]
+// route.
 function GroupPanelImpl({
   groupId,
   selectedChannelId,
@@ -125,7 +121,6 @@ function GroupPanelImpl({
         overflow: "hidden",
       }}
     >
-      {/* Group header: the name opens the group menu. */}
       <View
         style={{
           flexDirection: "row",
@@ -137,9 +132,6 @@ function GroupPanelImpl({
           paddingEnd: space.sm,
         }}
       >
-        {/* The header above the channel list is fixed: its menu, invite and
-            search only open a sheet or page, so they act on touch-down
-            (#1529). The channel rows scroll and stay on release. */}
         <PressInPressable
           pressIn
           testID="btn-group-menu"

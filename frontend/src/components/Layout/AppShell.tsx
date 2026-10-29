@@ -112,7 +112,6 @@ export const AppShell: React.FC = observer(() => {
 
   const currentUser = appStore.currentUser;
   const skin = useSkin();
-  // Panel open state lives in `useRightPanel`; AppShell only needs the toggle.
   const { toggle: toggleRightPanel } = useRightPanel();
 
   // Ringtone loop off the incomingCall slot. Rust owns playback (`start_ring` /
@@ -528,7 +527,7 @@ export const AppShell: React.FC = observer(() => {
         if (peer?.name) {
           return peer.name;
         }
-          // Peer not in the room yet (outgoing ring): use the incoming-call name.
+        // Peer not in the room yet (outgoing ring): use the incoming-call name.
         if (incomingCall && incomingCall.callerId === peerId) {
           return incomingCall.callerUsername;
         }
@@ -565,7 +564,7 @@ export const AppShell: React.FC = observer(() => {
 
       <BreadcrumbNav />
 
-        {/* The screen-share viewer mounts inside this region so the chrome stays usable. */}
+      {/* The screen-share viewer mounts inside this region so the chrome stays usable. */}
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "row", position: "relative" }}>
         <Sidebar isOpen={isSidebarOpen} onToggle={toggleSidebar} />
         <div
@@ -581,7 +580,7 @@ export const AppShell: React.FC = observer(() => {
           <Outlet />
           <ScreenShareViewer />
         </div>
-          {/* #824: a flex sibling, so opening it reflows the list rather than covering it. */}
+        {/* #824: a flex sibling, so opening it reflows the list rather than covering it. */}
         {!isTerminal && <RightPanel />}
         {terminalActivated && (
           <div
@@ -705,7 +704,6 @@ export const AppShell: React.FC = observer(() => {
                 const callId = incomingCall.callId;
                 setIncomingCall(null);
                 invoke("cancel_call", { otherUserId: callerId, callId }).catch((e) => console.warn("cancel_call failed", e));
-                // Stop ringing on this user's other devices.
                 if (currentUser) {
                   invoke("dismiss_call_on_my_devices", {
                     userId: currentUser.id,

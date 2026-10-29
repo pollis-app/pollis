@@ -20,19 +20,8 @@ type Activator = <E extends Element = HTMLButtonElement>(
 ) => PressActivationHandlers<E>;
 
 // Handlers for opt-in pointer-down activation (#1529; rules in
-// utils/pressActivation.ts), spread onto a button or row. With `activateOn`
-// "click" (the default) they are the plain `onClick`. With "press" a plain
-// primary mouse press acts on pointerdown and its click is swallowed, while
-// the keyboard, assistive tech, touch, pen and modified clicks still act on
-// click — so the action runs exactly once whichever way it is activated.
-//
-// The press's own mousedown default is prevented once it has acted, so the
-// pressed element never takes focus back from whatever the action focused.
-// A press that starts on a control nested inside the element is left to that
-// control.
-//
-// One activator serves any number of elements (the rows of a list): only one
-// press is ever in flight, so they share a single guard.
+// utils/pressActivation.ts), spread onto a button or row. One activator serves
+// many elements: only one press is ever in flight, so they share one guard.
 export function usePressActivator(): Activator {
   const guard = useRef<PressGuard | null>(null);
   if (!guard.current) {
@@ -45,18 +34,15 @@ export function usePressActivator(): Activator {
     }
     return {
       onPointerDown: (e) => {
-        // A press on a control nested inside this one (a row's own settings
-        // button, an audio card's play button) belongs to that control: it
-        // acts on its own click, and this one stays out of it.
+        // A press on a nested control belongs to that control.
         const inner = (e.target as Element).closest(NESTED_CONTROL);
         if (inner && inner !== e.currentTarget && e.currentTarget.contains(inner)) {
           return;
         }
         const acted = g.pointerDown(e, () => onClick(e));
         if (acted) {
-          // The click that ends this press comes in the same task as its
-          // pointerup; if the release lands elsewhere there is no click, so
-          // forget the press a tick after the pointer comes up.
+          // A release elsewhere yields no click, so disarm a tick after
+          // pointerup (the press's own click arrives in the same task).
           const release = () => {
             window.removeEventListener("pointerup", release, true);
             window.removeEventListener("pointercancel", release, true);
@@ -67,10 +53,8 @@ export function usePressActivator(): Activator {
         }
       },
       onMouseDown: (e) => {
-        // The press already acted, and the action may move focus — at once
-        // (search opens with its field focused) or a frame later (Reply
-        // focuses the composer). The press's own mousedown would then hand
-        // focus back to the pressed element, so its default is prevented.
+        // The action may have moved focus; the press's mousedown default
+        // would hand it back to the pressed element.
         if (g.armed) {
           e.preventDefault();
         }
@@ -80,7 +64,6 @@ export function usePressActivator(): Activator {
   };
 }
 
-// The single-element form of `usePressActivator`.
 export function usePressActivation<E extends Element = HTMLButtonElement>(
   onClick: ((e: React.MouseEvent<E>) => void) | undefined,
   activateOn: ActivateOn | undefined,

@@ -2,43 +2,28 @@ import { useEffect, useState } from "react";
 import { invoke } from "../../bridge";
 
 /**
- * Resolve a custom emoji's content hash to a loopback URL an `<img>` can use.
- *
- * The Rust side fetches the (unencrypted) object, verifies `sha256(bytes)`
- * against the hash and the size ceiling, caches it, and hands back a
- * `http://127.0.0.1:<port>/<token>/<hash>` URL — bytes never cross the JSON IPC.
- *
- * Deliberately unauthorized: this is the render path, and #848 requires a user
- * who is in NONE of the groups that registered an emoji to still see it when
- * someone sends it. The permission rule applies to *sending*, never to viewing.
- *
- * The in-flight map is module-level rather than per-component because a picker
- * renders hundreds of cells at once and a message list re-renders constantly;
- * without it the same hash would be resolved once per mount.
+ * Resolve a custom emoji's content hash to a verified loopback URL. Deliberately
+ * unauthorized: anyone who receives an emoji may view it (#848). Module-level so
+ * every mount shares one in-flight resolve per hash.
  */
 const inFlight = new Map<string, Promise<string>>();
 
 /**
- * The promise for one hash's URL, shared across every caller.
- *
- * Exported because the composer's rich input builds its emoji nodes
- * imperatively (a `contentEditable`'s children cannot be React's, or the caret
- * dies on every reconciliation), so it has no component to hang `useEmojiImage`
- * off — but it must hit the same in-flight cache, or a message full of the same
- * emoji would resolve it once per node.
+ * The promise for one hash's URL, shared across every caller. Exported for the
+ * composer's imperatively built `contentEditable` nodes, which have no component
+ * to hang `useEmojiImage` off.
  */
 export function resolveEmojiUrl(contentHash: string): Promise<string> {
   const cached = inFlight.get(contentHash);
   if (cached) {
     return cached;
   }
-  // Only the hash: the Rust side looks the content type up from the object row,
-  // so an animated emoji cannot be fetched under a static emoji's key.
+  // Only the hash: Rust looks the content type up itself, so an animated emoji
+  // cannot be fetched under a static emoji's key.
   const promise = invoke<string>("get_emoji_url", { contentHash });
   inFlight.set(contentHash, promise);
   promise.catch(() => {
-    // Drop the rejection so a transient failure (offline, locked) retries on
-    // the next render rather than being cached as permanently broken.
+    // Uncache the rejection so a transient failure retries on the next render.
     inFlight.delete(contentHash);
   });
   return promise;
@@ -50,11 +35,8 @@ export interface EmojiImageState {
 }
 
 /**
- * How long after each failed resolve the next attempt runs (#1562). A failure
- * is not final: one offline moment or a cold DS used to leave the
- * `:shortcode:` text in place until the row remounted. The schedule is short
- * and finite (no polling); past it, the window coming back into view or the
- * network coming back tries again.
+ * Delay before each retry of a failed resolve (#1562). Finite, so not polling;
+ * past it, regaining visibility or the network retries.
  */
 export const EMOJI_RETRY_DELAYS_MS = [2_000, 10_000, 30_000] as const;
 

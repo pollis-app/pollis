@@ -6,26 +6,13 @@ import { emojiRetryDelay, retryOnForeground } from "../../lib/emojiRetry";
 import { reportEmojiShown } from "../../lib/emojiRenderState";
 
 /**
- * One custom emoji, rendered inline. Resolves the content hash to a cached
- * `file://` image; while unresolved it holds a fixed-size placeholder (no
- * reflow), and on failure it degrades to the literal `:shortcode:` text —
- * which is the entire reason the shortcode travels alongside the hash.
+ * One custom emoji, inline: the cached `file://` image for its content hash,
+ * or the literal `:shortcode:` text on failure, retried (#1562).
  *
- * The placeholder is a plain View, never an <Image> without a source: on iOS
- * a source-less <Image> fires `onError` ("The file “Pollis” couldn't be
- * opened"), which used to latch the fallback before `get_emoji_path` had even
- * answered, so every custom emoji showed as text on iOS (#1562).
- *
- * A failure is not final (#1562): a failed resolve, or an image that would not
- * draw, retries on `emojiRetryDelay`'s short schedule and then whenever the
- * app returns to the foreground.
- *
- * What it shows (image or fallback) is reported to `lib/emojiRenderState`,
- * which `EmojiProbe` turns into the `emoji-image-<shortcode>` /
- * `emoji-fallback-<shortcode>` testIDs the Maestro tier asserts on.
- *
- * Uses the core RN <Image> (not expo-image) so it participates in inline
- * <Text> layout.
+ * While unresolved it is a plain View, never a source-less <Image>: on iOS
+ * that fires `onError` and latched the fallback (#1562). Core RN <Image>, not
+ * expo-image, so it takes part in inline <Text> layout. What it shows is
+ * reported to `lib/emojiRenderState` for `EmojiProbe`.
  */
 export function CustomEmojiImage({
   shortcode,
@@ -39,7 +26,6 @@ export function CustomEmojiImage({
   const [uri, setUri] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const [drawn, setDrawn] = useState(false);
-  // Bumped to run the resolve again.
   const [attempt, setAttempt] = useState(0);
   const failures = useRef(0);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -66,7 +52,6 @@ export function CustomEmojiImage({
     }
   };
 
-  // A new emoji starts from a clean slate.
   useEffect(() => {
     failures.current = 0;
     setFailed(false);

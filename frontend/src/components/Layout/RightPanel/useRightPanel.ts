@@ -64,7 +64,6 @@ export function useRightPanel() {
         replace: true,
       });
     },
-    // Without `pathname` the callback would navigate to a stale route.
     [navigate, pathname],
   );
 

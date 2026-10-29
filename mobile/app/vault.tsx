@@ -1,8 +1,6 @@
-// The Vault (#1316): a private chat with yourself, ported from desktop's
-// frontend/src/pages/Vault.tsx over the same core commands. Entries sync
-// across every enrolled device (the account key decrypts them, so a new
-// device starts FULL here, not empty). A long press opens the entry sheet in
-// place of desktop's hover actions.
+// The Vault (#1316), desktop's frontend/src/pages/Vault.tsx over the same
+// core commands. The account key decrypts entries, so a new device starts
+// full here, not empty.
 
 import { useCallback, useMemo, useState } from "react";
 import { FlatList, Text, View } from "react-native";
@@ -55,8 +53,6 @@ const SAVE_FAILED_COPY: Record<VaultSaveFailure, string> = {
   other: "mobile:vault.saveFailed",
 };
 
-// Rows of the inverted list — entries interleaved with day separators,
-// newest first.
 type VaultListItem =
   | { type: "sep"; key: string; label: string }
   | { type: "entry"; key: string; entry: VaultMessage };
@@ -136,7 +132,6 @@ function VaultScreen() {
     );
   };
 
-  // Images from the library — the same picker and upload flow as the chat.
   const onAttach = useCallback(async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: "images",
@@ -246,7 +241,6 @@ function VaultScreen() {
           paddingTop: space.xs,
         }}
       >
-        {/* A view switch is free to undo: touch-down (#1529). */}
         <Chip
           testID="chip-vault-view-chat"
           pressIn

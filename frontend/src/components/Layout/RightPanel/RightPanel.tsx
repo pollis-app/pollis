@@ -13,31 +13,18 @@ import { ResizeHandle } from "../ResizeHandle";
 import { usePanelWidth } from "../usePanelWidth";
 
 /**
- * The right-hand context panel slot (#824).
- *
- * Deliberately a generic slot rather than a members-only sidebar: it switches
- * on the panel kind, so the thread panel (#825) lands as another branch here
- * instead of a second competing sidebar.
- *
- * Whether this renders at all is device-local state that navigation must not
- * disturb (#904); everything below the `isOpen` guard is the part that IS
- * route-reactive. See `useRightPanel`.
- *
- * Rendered as a flex sibling of `<Outlet />`, never a fixed overlay — the
- * project bans modals and backdrops, and a real column also means the message
- * list reflows instead of being covered.
+ * The right-hand context panel slot (#824): one slot switching on panel kind.
+ * Whether it renders is device-local state navigation must not disturb (#904);
+ * see `useRightPanel`. A flex column, never an overlay (no modals).
  */
 export const RightPanel: React.FC = observer(() => {
   const { t } = useTranslation("nav");
   const { kind, isOpen, threadId, safetyPeerId, setPanel, setSafety } =
     useRightPanel();
   const { data: dmConversations = [] } = useDMConversations();
-  // Live label for the same command AppShell binds — rebinding the shortcut
-  // in Preferences relabels this footer with no extra wiring.
   const toggleRightPanelLabel = useShortcutLabel("app.toggleRightPanel");
-  // Collapsing by drag goes through `setPanel("none")` — the same writer the
-  // footer button and `mod+shift+b` use, so the panel has exactly one closed
-  // state and reopening restores the width it was dragged from.
+  // Drag-collapse uses the same writer as the footer and shortcut, so there is
+  // one closed state and reopening restores the dragged width.
   const closePanel = useCallback(() => setPanel("none"), [setPanel]);
   const { ref, widthClass, widthStyle, handleProps } = usePanelWidth(
     "rightPanel",
@@ -47,16 +34,11 @@ export const RightPanel: React.FC = observer(() => {
   const groupId = appStore.selectedGroupId;
   const channelId = appStore.selectedChannelId;
   const conversationId = appStore.selectedConversationId;
-  // Routes like Preferences, Search and the root page have no conversation.
-  // The panel used to collapse entirely there; now only its CONTENT is
-  // contextual — `MembersPanel` degrades to the plain online roster and drops
-  // the media grid, because "who is online" is useful on every route while
-  // "media shared in this conversation" is not.
+  // Context-free routes still show the panel; `MembersPanel` degrades to the
+  // plain online roster there.
   const hasContext = Boolean(channelId || conversationId || groupId);
-  // A thread is meaningless without the conversation it hangs off, so a
-  // stale `?thread=` on a context-free route falls back to the roster
-  // rather than rendering an empty thread. Pins (#99) are conversation-scoped
-  // for the same reason.
+  // A stale `?thread=` or pins view on a context-free route falls back to the
+  // roster rather than rendering empty.
   const shownThreadId = kind === "thread" && hasContext ? threadId : null;
   const showPins =
     kind === "pins" && hasContext && Boolean(channelId || conversationId);
@@ -87,12 +69,8 @@ export const RightPanel: React.FC = observer(() => {
   return (
     <aside
       ref={ref}
-      // `font-mono` is the whole skin switch: terminal renders it as DM Mono,
-      // refined re-points `.font-mono:not(.font-machine)` at the sans face.
-      // Width tracks `--side-w` so the panel mirrors the left sidebar's
-      // per-skin measure instead of a fixed 18rem, until the user drags it —
-      // then it is a dragged pixel value instead, never both. `relative`
-      // anchors the resize handle to this edge.
+      // `font-mono` is the skin switch: refined re-points
+      // `.font-mono:not(.font-machine)` at the sans face.
       className={`relative flex ${widthClass} shrink-0 flex-col border-s border-line bg-surface font-mono`}
       style={widthStyle}
       data-testid="right-panel"
@@ -122,9 +100,6 @@ export const RightPanel: React.FC = observer(() => {
         )}
       </div>
 
-      {/* Footer, not a header: the same affordance the left sidebar puts at
-          its bottom edge, mirrored to this one. Label on the left, live key
-          combo on the right, whole strip is the toggle. */}
       <button
         type="button"
         data-testid="right-panel-close"

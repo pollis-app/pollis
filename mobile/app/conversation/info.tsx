@@ -1,5 +1,4 @@
-// Conversation info — member roster + shared media for a channel or DM, the
-// counterpart of desktop's right-hand context panel (#826).
+// Desktop's right-hand context panel, for a channel or DM (#826).
 
 import { useMemo } from "react";
 import { View, Text, Pressable, useWindowDimensions } from "react-native";
@@ -83,13 +82,10 @@ function ConversationInfo() {
       }));
   }, [kind, groupMembers, dmChannel.data]);
 
-  // Shared media comes from the same message cache the chat screen fills —
-  // the most recent image attachments this device holds, newest first,
-  // capped at MEDIA_LIMIT.
+  // From the message cache the chat screen fills; `flattenPages` is
+  // newest-first, so the grid leads with the most recent media.
   const { data: messagesData } = useMessages(conversationId, kind);
   const attachments = useMemo(() => {
-    // `flattenPages` yields newest-first, so a forward walk leads the grid
-    // with the most recent media.
     const messages = flattenPages(messagesData);
     const seen = new Set<string>();
     const out: NonNullable<(typeof messages)[number]["attachments"]> = [];
@@ -113,8 +109,6 @@ function ConversationInfo() {
   }, [messagesData]);
 
   const title = params.name ?? t("conversationInfo.fallbackTitle");
-  // Three-column grid: screen width minus the 16pt side gutters and the two
-  // inter-tile gaps.
   const tile = Math.floor((width - 16 * 2 - 6 * 2) / 3);
 
   return (
@@ -227,8 +221,6 @@ function ConversationInfo() {
               paddingVertical: 4,
             }}
           >
-            {/* Each tile opens the full-screen viewer (#1248), as desktop's
-                media grid opens its lightbox. */}
             {attachments.map((a) => (
               <Pressable
                 key={a.id}
@@ -243,8 +235,7 @@ function ConversationInfo() {
           </View>
         )}
 
-        {/* The export block's heading has no top padding of its own; give it
-            the same gap every other section gets above its title. */}
+        {/* The export block's heading has no top padding of its own. */}
         <View style={{ paddingTop: space.xxxl }}>
           <ExportArchive conversationId={conversationId} />
         </View>

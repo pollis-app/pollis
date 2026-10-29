@@ -1,20 +1,8 @@
-// What accepting a group invite does to the cached lists, before the accept
-// has answered (#1560).
-//
-// `useAcceptInvite` used to await `accept_group_invite` and
-// `poll_mls_welcomes`, then fire the invalidations without awaiting them. The
-// busy state ended, and the invite row and the group list only changed when
-// those refetches came back — a visible pause with nothing happening. Now the
-// invite leaves the pending list and the group joins the group lists on the
-// same frame as the tap, and a failure puts every list back as it was.
-//
-// The rule that matters: the UI never shows NEITHER the invite nor the group.
-// So the group goes into every loaded group list in the same pass that takes
-// the invite out, and a rollback restores all of them together.
-//
-// Kept pure and free of React Query so the rules can be tested with a plain
-// in-memory cache (frontend/tests/invite-accept-optimistic.test.ts). The mobile
-// twin is mobile/hooks/queries/inviteAcceptOptimistic.ts.
+// Optimistic group-invite accept on the cached lists (#1560). Invariant: the UI
+// never shows NEITHER the invite nor the group, so the group enters every
+// loaded group list in the same pass that removes the invite, and rollback
+// restores them together. Pure so it tests without React Query; mobile twin:
+// mobile/hooks/queries/inviteAcceptOptimistic.ts.
 
 /** The slice of a QueryClient this module needs. */
 export interface CacheLike {

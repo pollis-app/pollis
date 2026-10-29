@@ -14,8 +14,6 @@ import { useMessagePermalink } from "../hooks/useMessagePermalink";
 import { useGlobalShortcut, useShortcutLabel } from "../keyboard";
 import { usePressActivator } from "../hooks/usePressActivation";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-
 type SearchResultItem =
   | {
       type: "channel";
@@ -34,10 +32,8 @@ type SearchResultItem =
       channelId: string;
     }
   | {
-      // A "person" entry: clicking opens the existing DM if one exists,
-      // otherwise the user's profile page (where they can request a new DM).
-      // Replaces the previous separate user / dm entry types so the same
-      // person never appears twice in the menu.
+      // One entry per person: opens the existing DM if there is one, otherwise
+      // the profile page (where a new DM is requested).
       type: "person";
       id: string;
       name: string;
@@ -56,12 +52,8 @@ type SearchResultItem =
       keywords: string;
     }
   | {
-      // "Search messages for …" — the handoff to the full-text search page
-      // (#850). Cmd+K stays a NAVIGATOR: it jumps to places you already know
-      // the name of, instantly and locally. Message hits are a different
-      // question with a different answer shape — ranked, snippeted, filterable,
-      // paginated — and rendering them inline would make every keystroke run a
-      // real query and turn one list into two competing ones.
+      // The handoff to the full-text search page (#850). Cmd+K stays a
+      // navigator; message hits are a different, ranked and paginated answer.
       type: "messages";
       id: string;
       name: string;
@@ -69,14 +61,10 @@ type SearchResultItem =
       query: string;
     };
 
-// ─── Props ───────────────────────────────────────────────────────────────────
-
 interface SearchPanelProps {
   isOpen: boolean;
   onClose: () => void;
 }
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function buildChannelResults(
   groups: GroupWithChannels[] | undefined
@@ -132,20 +120,14 @@ function buildVoiceResults(
   return results;
 }
 
-/**
- * Build the unified "person" list: every reachable user (group members
- * the current user shares a group with, plus existing DM partners) gets
- * one entry. If a DM already exists, `conversationId` is filled in so
- * clicking jumps straight there; otherwise clicking goes to the profile
- * page, which is where new DMs are initiated.
- */
+/** One entry per reachable user: shared-group members plus existing DM partners. */
 function buildPersonResults(
   groupMembers: GroupMemberWithGroup[],
   dmConversations: Array<{ id: string; user2_id?: string; user2_identifier: string; user2_avatar_url?: string }> | undefined,
   currentUserId: string | null,
 ): SearchResultItem[] {
-  // user_id → existing DM conversation_id, so we can attach it to any
-  // matching group-member row and avoid emitting a duplicate person.
+  // user_id → existing DM, so a group-member row picks it up instead of
+  // emitting a duplicate person.
   const dmByUserId = new Map<string, { conversationId: string; identifier: string; avatarKey?: string | null }>();
   if (dmConversations) {
     for (const c of dmConversations) {
@@ -201,13 +183,9 @@ function buildPersonResults(
 }
 
 /**
- * A jumpable static page, before its copy is resolved.
- *
- * `nameKey` and `keywordsKey` are translation keys, not copy: this table is
- * module-level, so it cannot call `t()` itself without freezing the language at
- * import time. The panel resolves both at render time, which is also what keeps
- * matching honest — the query is compared against the label the user can
- * actually see, in whatever language they are reading.
+ * A jumpable static page. `nameKey`/`keywordsKey` are translation keys, resolved
+ * at render so the language isn't frozen at import time and the query matches
+ * the visible label.
  */
 interface PageResultSpec {
   id: string;
@@ -258,8 +236,6 @@ function filterResults(
   });
 }
 
-// ─── SearchPanel ─────────────────────────────────────────────────────────────
-
 export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClose }) => {
   const { t } = useTranslation("search");
   const [query, setQuery] = useState("");
@@ -279,9 +255,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
 
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const { data: dmConversations } = useDMConversations();
-  // Gated on `isOpen` (#874): this fans out to one `get_group_members` query
-  // PER GROUP, and the panel is mounted-but-closed for the whole session until
-  // someone presses Cmd+K.
+  // Gated on `isOpen` (#874): one roster query per group.
   const { members: allGroupMembers } = useAllGroupMembers(isOpen);
   const activeVoiceChannelId =
     appStore.voiceState.kind === 'idle' ? null : appStore.voiceState.channelId;
@@ -349,14 +323,8 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
     };
   }, [permalink, openPermalink, onClose]);
 
-  // Filter based on query, with the message-search handoff appended.
-  //
-  // LAST, not first. Enter in this panel has always meant "go to the
-  // best-matching place", and this row is not a place — it is the door to a
-  // different question. Pinning it to the top would quietly redefine the
-  // default action of the app's most-used shortcut. It carries the query
-  // across, so `/search` opens already searching instead of asking the user to
-  // type it twice.
+  // The message-search handoff goes LAST: Enter means "go to the best-matching
+  // place", and this row is not a place.
   const filteredItems = useMemo(() => {
     const matches = filterResults(allItems, query);
     const trimmed = query.trim();
@@ -373,12 +341,10 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
     return [...matches, handoff];
   }, [allItems, query, t]);
 
-  // Reset selection when results change
   useEffect(() => {
     setSelectedIndex(0);
   }, [filteredItems.length, query]);
 
-  // Focus input when panel opens, reset state
   useEffect(() => {
     if (isOpen) {
       setQuery("");
@@ -390,7 +356,6 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
     }
   }, [isOpen]);
 
-  // Scroll selected item into view
   useEffect(() => {
     itemRefs.current[selectedIndex]?.scrollIntoView({
       behavior: "smooth",
@@ -533,7 +498,6 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
         overflow: "hidden",
       }}
       onClick={(e) => {
-        // Close when clicking the backdrop
         if (e.target === e.currentTarget) {
           onClose();
         }
@@ -554,7 +518,6 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
         }}
         onKeyDown={handleKeyDown}
       >
-        {/* Search input */}
         <div
           className="border-b border-line"
           style={{
@@ -596,7 +559,6 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
           </kbd>
         </div>
 
-        {/* Keyboard hints */}
         <div
           className="flex items-center gap-1 px-4 py-1.5 text-xs font-mono flex-shrink-0 border-b border-line text-muted"
         >
@@ -616,7 +578,6 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
           <span>{t("panel.hintClose")}</span>
         </div>
 
-        {/* Results */}
         <div
           ref={resultsRef}
           data-testid="search-panel-results"
@@ -670,7 +631,6 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
                   {...press<HTMLDivElement>(() => handleSelect(item), item.type === "voice" ? "click" : "press")}
                   onMouseEnter={() => setSelectedIndex(index)}
                 >
-                  {/* Icon */}
                   <div
                     className={`flex-shrink-0 w-5 h-5 flex items-center justify-center ${isSelected ? "text-accent" : "text-dim"}`}
                   >
@@ -692,7 +652,6 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
                     )}
                   </div>
 
-                  {/* Name and breadcrumb */}
                   <div className="flex-1 min-w-0">
                     <div
                       className={`font-sans text-sm truncate flex items-center gap-2 ${isSelected ? "text-accent" : "text-fg"}`}

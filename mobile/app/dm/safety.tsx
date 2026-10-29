@@ -18,10 +18,8 @@ interface RawProfile {
   preferred_name?: string;
 }
 
-// "You & <name>" (#1563): the safety number of a PAIR — your key combined
-// with theirs (pollis-core `get_safety_number`) — so it lives in the DM, not
-// on their profile. Reached from DM info: one row for a 1:1, one row per
-// other member in a group DM. Never one number for "the conversation".
+// "You & <name>": a safety number belongs to a pair, your key with theirs, so
+// it lives in the DM, one per other member, never on a profile (#1563).
 function DMSafetyNumber() {
   useThemeRerender();
   const { t } = useTranslation("dms");

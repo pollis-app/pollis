@@ -42,10 +42,8 @@ function Self() {
   const { minutes: autoLockMinutes } = useAutoLockMinutes();
   const lockNow = useLockNow();
 
-  // Global search lives at the top of Self (#1550), the way iOS / Android
-  // Settings do it: focusing the field or typing swaps the menu below for
-  // results in place, and Cancel, the clear button or a second tap on the
-  // Self tab brings the menu back. No navigation either way.
+  // Global search (#1550), Settings-style: focusing or typing swaps the menu
+  // for results in place, with no navigation.
   const params = useLocalSearchParams<{ search?: string }>();
   const searchRef = useRef<TextInput>(null);
   const [q, setQ] = useState("");
@@ -62,7 +60,6 @@ function Self() {
     searchRef.current?.blur();
   };
 
-  // A second tap on the Self tab ends a search, like a tab root popping.
   useEffect(() => onTabReselect("self", endSearch), []);
 
   // Android back ends a search before it leaves Self. Only while Self is the

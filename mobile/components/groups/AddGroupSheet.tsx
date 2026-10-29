@@ -11,8 +11,6 @@ export function AddGroupSheet({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   return (
     <SheetOverlay title={t("groups.addGroup")} onClose={onClose} testID="sheet-add-group">
-      {/* The sheet does not scroll and both rows only open a page, so they act
-          on touch-down (#1529). */}
       <Group surface="high">
         <ListRow
           testID="btn-create-group"

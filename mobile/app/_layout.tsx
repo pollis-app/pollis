@@ -31,9 +31,8 @@ import { onDeviceRevoked, setSessionNotice } from "../lib/deviceRevoked";
 
 SplashScreen.preventAutoHideAsync();
 
-// App-level signed-in services, under the providers so they have a
-// QueryClient + router and run only after the bridge is ready. Each hook is a
-// no-op until a user is signed in.
+// Under the providers so these get a QueryClient and router, and run only
+// after the bridge is ready; each is a no-op until sign-in.
 function SignedInServicesGate() {
   usePushNotifications();
   useInboxRealtime();
@@ -90,10 +89,8 @@ export default function RootLayout() {
     hydrateLanguage().finally(() => setLanguageReady(true));
   }, []);
 
-  // #1338: this device was revoked from another device on the account. The
-  // core has already refused the command that found out; end the session (the
-  // core wipes a revoked device's keys and id whatever `deleteData` says) and
-  // say why on sign-in, instead of leaving every screen empty.
+  // Another device revoked this one (#1338): end the session and say why on
+  // sign-in, instead of leaving every screen empty.
   useEffect(
     () =>
       onDeviceRevoked(async () => {
@@ -156,14 +153,10 @@ export default function RootLayout() {
           <ThemeProvider>
             <StatusBar style="light" />
             <SignedInServicesGate />
-            {/* Auto-lock (#899): captures touch starts to refresh the idle
-                deadline and locks on background-elapsed / foreground-idle. */}
             <AutoLockProvider>
             <RootStack>
-              {/* Boot router cuts in with nothing. Entering the tab container
-                  fades — this is the Initializing → app handoff (and cold-boot
-                  → app); tab switches *inside* (tabs) stay un-animated, handled
-                  by the tab navigator. */}
+              {/* Entering (tabs) fades (the boot → app handoff); switches
+                  inside it stay un-animated. */}
               <Stack.Screen name="index" options={{ animation: "none" }} />
               <Stack.Screen name="(auth)" />
               <Stack.Screen name="(tabs)" options={{ animation: "fade" }} />

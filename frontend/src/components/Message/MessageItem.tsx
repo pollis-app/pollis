@@ -395,7 +395,6 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
                 {message.edit_unsent ? t("message.editUnsent") : t("message.edited")}
               </span>
             )}
-            {/* Only a FAILED send is labelled. */}
             {message.status === "failed" && (
               <span className="ms-1 text-xs text-muted">
                 [{t(`status.${message.status}`)}]

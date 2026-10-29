@@ -38,8 +38,7 @@ export function ChannelMenuSheet({
           onToggle={() => setMuted.mutate({ channelId, muted: !isMuted })}
         />
       </Group>
-      {/* Navigation rows in a sheet that does not scroll: touch-down (#1529).
-          The mute switch above stays on release. */}
+      {/* Navigation rows: touch-down (#1529); the mute switch stays on release. */}
       <Group surface="high">
         <ListRow
           testID="btn-menu-info"

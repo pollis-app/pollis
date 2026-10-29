@@ -17,17 +17,9 @@ import {
 } from "../hooks/queries";
 import { badgeText, badgeTotal, tabA11yLabel, tabBadges } from "../lib/tabBadges";
 
-// Groups / Direct / Link / Self (Main.dc.html): 22pt icon over a
-// 12pt label, set 10pt below the bar's top hairline; active = accent icon and
-// label, a bolder label, and a short rounded accent bar at the top of the
-// cell (so where you are is not told by colour alone); inactive = dim. The
-// `tab-<name>` testIDs and the `badge-<name>` anchors are load-bearing in
-// e2e flows.
-//
-// The shield (#1550) is not a tab: it is a shortcut that pushes "Scan to
-// sign in a device" (the same screen as Self → Security) onto the root
-// stack, so back returns to whichever tab you were on. It is never the
-// selected cell and is announced as a button. Search moved into Self.
+// The `tab-<name>` testIDs and `badge-<name>` anchors are load-bearing in e2e
+// flows. The shield (#1550) is a shortcut, not a tab: it pushes onto the root
+// stack so back returns to the tab you were on, and is never selected.
 const ICON = 22;
 const TABS: {
   name: string;
@@ -61,16 +53,9 @@ export const TabBar = observer(function TabBar({ state, navigation }: any) {
   // Home-indicator inset on iOS; on Android the nav-bar inset, floored so
   // the labels never sit on the glass edge (see useBottomInset).
   const bottomInset = useBottomInset();
-  // Per-tab badge (#1561): unread messages plus what is waiting on the user
-  // there, Slack/Discord style — Direct counts pending message requests,
-  // Groups pending group invites (lib/tabBadges.ts). Unread sums the store's
-  // counts over the ids each tab lists; the same cached queries the tabs
-  // render from split the id space into channels (Groups) and DM
-  // conversations (Direct). The requests and invites queries are invalidated
-  // by the inbox realtime events and by accept / decline / block, so the
-  // badge follows without polling. Read `unreadCounts` directly (not via a
-  // store method — MobX actions run untracked, so a method call from render
-  // would not subscribe this observer).
+  // Per-tab badges (#1561, lib/tabBadges.ts). Read `unreadCounts` directly:
+  // MobX actions run untracked, so a store method would not subscribe this
+  // observer.
   const unreadCounts = appStore.unreadCounts;
   const { data: groups = [] } = useUserGroupsWithChannels();
   const { data: dms = [] } = useDMChannels();
@@ -124,8 +109,6 @@ export const TabBar = observer(function TabBar({ state, navigation }: any) {
           navigation.navigate(tab.name);
         };
         return (
-          // Switching tabs, and opening the shortcut's page, are free to
-          // undo, so they act on touch-down (#1529).
           <PressInPressable
             key={tab.name}
             pressIn

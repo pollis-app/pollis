@@ -200,8 +200,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
   const openSearch = () => {
     window.dispatchEvent(new CustomEvent("pollis:open-search"));
   };
-  // Every control in the bar navigates or opens search, all free to undo, so
-  // a mouse press acts on pointer-down (#1529).
+  // Every control here is free to undo, so all act on pointer-down (#1529).
   const press = usePressActivator();
   const goSettings = () => router.navigate({ to: "/settings" });
 

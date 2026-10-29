@@ -14,10 +14,8 @@ import {
   type SendState,
 } from "../../utils/pendingMessages";
 
-// Per-conversation timestamp of the last background ingest. Used to debounce
-// rapid channel-switching so we don't fire one ingest per click. Realtime
-// hints also write here when they trigger an ingest, so a focus immediately
-// after a realtime-driven ingest skips the redundant call.
+// Per-conversation time of the last background ingest, debouncing rapid channel
+// switches; realtime-driven ingests write here too.
 const lastIngestAt = new Map<string, number>();
 const INGEST_DEBOUNCE_MS = 5_000;
 
@@ -44,9 +42,7 @@ export const messageQueryKeys = {
 
 export const lastMessageQueryKeys = {
   all: ["last-message"] as const,
-  // One entry per SET of conversations, not per conversation (#874). The
-  // sidebar asks for all its preview rows at once, so the cache key is the
-  // request, and every invalidation path targets the `all` prefix.
+  // One entry per SET of conversations (#874); every invalidation targets `all`.
   batch: (conversationIds: string[]) =>
     ["last-message", "batch", conversationIds.join(",")] as const,
 };
@@ -80,7 +76,6 @@ type RawMessage = {
   sent_at: string;
 };
 
-// Returned by get_channel_messages — fetches from Turso, decrypts, includes sender_username
 export type RawChannelMessage = {
   id: string;
   conversation_id: string;
@@ -122,13 +117,10 @@ type RawDmChannel = {
   members: Array<{ user_id: string; username?: string; avatar_url?: string; added_by: string; added_at: string }>;
 };
 
-// Parses structured attachment JSON embedded in message content.
-// Plain-text messages are returned as-is. Content with attachments looks like:
+// Content with attachments looks like:
 //   {"_att":[{"key":"media/…","url":"…","name":"…","ct":"…","size":N,"hash":"…","kv":N,"sha":"…","bh":"…","w":N,"h":N}],"_txt":"caption"}
-// Exported for the surfaces that render the SAME content-string shape from
-// other sources — pinned-message snapshots (#99) and vault entries (#107) —
-// so there is one decoder for the envelope, not three. `origin` says where
-// the content lives, which is what names each attachment's key (#1382).
+// The one decoder, shared with pinned snapshots (#99) and vault entries (#107);
+// `origin` names each attachment's key (#1382).
 export function parseContent(
   raw: string | undefined,
   origin: ContentOrigin,
@@ -183,9 +175,6 @@ function keyScopeFor(a: AttachmentWire, origin: ContentOrigin): AttachmentKeySco
 }
 
 function transformMessage(m: RawMessage): Message {
-  // m.content is undefined when the server returned null (e.g. decryption failure).
-  // Keep content_decrypted as undefined in that case so MessageList can show
-  // [encrypted] instead of silently filtering the message out.
   const parsed = m.content !== undefined ? parseContent(m.content, { conversationId: m.conversation_id }) : null;
   return {
     id: m.id,
@@ -206,9 +195,8 @@ function transformMessage(m: RawMessage): Message {
 }
 
 export function transformChannelMessage(m: RawChannelMessage): Message {
-  // m.content is undefined when the server returned null (e.g. decryption failure).
-  // Keep content_decrypted as undefined in that case so MessageList can show
-  // [encrypted] instead of silently filtering the message out.
+  // Undefined content (a decryption failure) stays undefined so MessageList shows
+  // [encrypted] rather than dropping the row.
   const parsed = m.content !== undefined ? parseContent(m.content, { conversationId: m.conversation_id }) : null;
   return {
     id: m.id,
@@ -283,10 +271,8 @@ export function useMessages(channelId: string | null, conversationId: string | n
     staleTime: 1000 * 30,
   });
 
-  // Fire ingest in the background after the local read mounts. Skipped if a
-  // recent ingest (incl. one driven by a realtime hint) already covered this
-  // conversation. Invalidates the query on completion so newly-decrypted
-  // messages and freshly-cached usernames show up.
+  // Background ingest after the local read mounts, unless a recent one covered
+  // this conversation; the invalidation afterwards shows what it decrypted.
   const ingestInflight = useRef<string | null>(null);
   useEffect(() => {
     if (!currentUser || !targetId) {
@@ -358,7 +344,8 @@ export function useSendMessage() {
       // ULID of the thread root when sending into a thread (#825). Carried
       // inside the MLS ciphertext, never in the DS request body.
       threadId?: string;
-      optimisticId?: string; // used by onSuccess to replace the optimistic stub
+      // The optimistic stub onSuccess replaces.
+      optimisticId?: string;
       // The core's id for this message (#1335), from `new_message_id`. The
       // caller that drew a stub passes it so stub and stored row are one
       // message; otherwise one is asked for here.
@@ -389,8 +376,6 @@ export function useSendMessage() {
         ? messageQueryKeys.channel(variables.channelId)
         : messageQueryKeys.conversation(variables.conversationId);
 
-      // Replace the optimistic stub (if any) with the confirmed server message,
-      // or append it if there was no stub.
       const confirmedMessage: Message = {
         ...transformMessage(newMessage),
         sender_username: currentUser?.username ?? undefined,
@@ -405,17 +390,14 @@ export function useSendMessage() {
         };
       });
 
-      // Update the last-message preview immediately. Previews are batched per
-      // set of conversations (#874), so patch the entry inside whichever cached
-      // batches contain this conversation rather than writing a per-id key.
+      // Previews are batched per set of conversations (#874): patch every cached
+      // batch that names this one.
       const previewId = variables.channelId || variables.conversationId;
       queryClient.setQueriesData<LastMessageMap>(
         {
           queryKey: lastMessageQueryKeys.all,
-          // Only the batches that ASKED for this conversation. Keyed on the id
-          // list rather than on the cached data, so the first message ever sent
-          // into a conversation still lands — an empty conversation has no
-          // entry to match against, but its batch still named it.
+          // Matched on the id list, not the cached data, so a conversation's
+          // first message still lands.
           predicate: (query) => {
             const idList = query.queryKey[2];
             return typeof idList === "string" && idList.split(",").includes(previewId);
@@ -424,12 +406,9 @@ export function useSendMessage() {
         (old) => ({ ...(old ?? {}), [previewId]: confirmedMessage }),
       );
 
-      // Then invalidate in the background so we stay in sync with the server.
       queryClient.invalidateQueries({ queryKey });
 
-      // A threaded send (#825) also changes the open thread and that
-      // conversation's reply counts; without this the thread panel would show
-      // the reply only after a refetch on focus.
+      // A threaded send (#825) also changes the open thread and the reply counts.
       if (variables.threadId) {
         queryClient.invalidateQueries({
           queryKey: messageQueryKeys.thread(variables.threadId),
@@ -592,23 +571,13 @@ export type LastMessageMap = Record<string, Message>;
 
 /**
  * The newest message for every conversation in `conversationIds`, in ONE IPC
- * call (#874).
- *
- * Previously each preview row owned its own `useLastMessage`, so a sidebar of
- * N channels plus M DMs fired N+M `read_channel_messages` / `read_dm_messages`
- * calls — on mount, again on every window focus, and again on every
- * `deleted_message` event. The backend does the same indexed scan and the same
- * username hydration either way, so asking once is strictly cheaper.
- *
- * Callers pass the ids and hand each row its own entry; the map is keyed by
- * conversation id and a conversation with no messages is simply absent.
+ * call (#874). A conversation with no messages is absent from the map.
  */
 export function useLastMessages(conversationIds: string[]) {
   const currentUser = useObserver(() => appStore.currentUser);
 
   // Sorted + de-duplicated so the cache key is a property of the SET, not of
-  // the render order the caller happened to produce. Two renders listing the
-  // same conversations must hit the same entry rather than refetching.
+  // render order.
   const idsKey = conversationIds.join(",");
   const ids = useMemo(
     () => Array.from(new Set(conversationIds)).sort(),
@@ -703,7 +672,6 @@ export function useDeleteMessage() {
       });
     },
     onSuccess: () => {
-      // Invalidate all message caches so the deleted message disappears.
       queryClient.invalidateQueries({ queryKey: messageQueryKeys.all });
       queryClient.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
     },

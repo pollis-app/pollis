@@ -1,9 +1,6 @@
-// A second tap on the tab you are already on (#1550): the custom `TabBar`
-// calls `emitTabReselect`, and a tab root subscribes to react — Self ends a
-// search, the way a tab root pops on iOS. A plain registry rather than
-// React Navigation's `tabPress` event: expo-router's `useNavigation()` inside
-// a tab route does not reliably reach the listeners of a custom tab bar's
-// `emit`, and this keeps the rule testable without a renderer.
+// A second tap on the focused tab (#1550). A plain registry, not React
+// Navigation's `tabPress`: expo-router's `useNavigation()` in a tab route does
+// not reliably reach a custom tab bar's `emit`.
 
 type Listener = () => void;
 

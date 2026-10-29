@@ -134,7 +134,6 @@ export const AttachmentDisplay: React.FC<AttachmentDisplayProps> = ({
     prevViewerOpenRef.current = viewerOpen;
   }, [viewerOpen]);
 
-  // Video: read duration + capture a poster frame via canvas.
   useEffect(() => {
     if (!isVideo) { return; }
     const src = attachment.localPreviewUrl ?? downloadUrl;

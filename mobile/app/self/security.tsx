@@ -55,10 +55,9 @@ export default function Security() {
   const approveEnrollment = useApproveEnrollment();
   const rejectEnrollment = useRejectEnrollment();
   const [confirmRevoke, setConfirmRevoke] = useState<string | null>(null);
-  // The code the approver TYPES off the new device's screen, per request
-  // (#1096). Never pre-filled — the server's copy is no longer even sent to the
-  // client, because submitting it back would put the server on both sides of the
-  // comparison the SAS exists to make.
+  // The code the approver types off the new device's screen (#1096). Never
+  // pre-filled: a server-supplied copy would put the server on both sides of
+  // the comparison the SAS exists to make.
   const [typedCodes, setTypedCodes] = useState<Record<string, string>>({});
   const { minutes: autoLockMinutes, setMinutes: setAutoLockMinutes } =
     useAutoLockMinutes();
@@ -177,7 +176,6 @@ export default function Security() {
 
         <View style={sectionGap} onLayout={sectionLayout("devices")}>
           <Group title={t("security.devicesHeading")}>
-            {/* Sign in another device by scanning the code it shows (#1361). */}
             <ListRow
               testID="row-link-device"
               glyph={<Icon.plus size={22} color={semantic.text} />}
@@ -244,8 +242,7 @@ export default function Security() {
 
         <View style={sectionGap} onLayout={sectionLayout("events")}>
           <Group title={t("security.eventsHeading")}>
-            {/* Only the newest few (#1548): the DS is asked for exactly that
-                many, and the whole log is its own screen. */}
+            {/* Only the newest few (#1548); the whole log is its own screen. */}
             {events.map((ev) => (
               <SecurityEventRow key={ev.id} event={ev} />
             ))}

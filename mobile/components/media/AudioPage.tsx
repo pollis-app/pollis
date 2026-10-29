@@ -156,9 +156,8 @@ export function AudioPage({
           {clock}
         </Text>
 
-        {/* Play, pause and skip are free to undo, so they act on touch-down
-            (#1529). The seek bar above stays on release: it reads where the
-            finger lifts. */}
+        {/* The seek bar above stays on release: it reads where the finger
+            lifts. */}
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: space.xxl }}>
           <IconButton
             testID="btn-media-audio-back"

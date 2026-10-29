@@ -26,13 +26,10 @@ import type { CustomEmoji } from "../../hooks/queries/useEmoji";
 import type { PickedAttachment } from "../../lib/attachments";
 
 /**
- * Bottom composer bar. Typing `@…` opens mention suggestions from the visible
- * roster (#886); typing `:…` opens emoji suggestions, and the closing `:` of a
- * complete shortcode substitutes it Slack-style. A trigger only opens at a
- * word start (so `http://` and `10:30` are inert), and everything is
- * substituted before send — a standard emoji as the character, a custom one
- * as the `<:shortcode:hash>` token — so the wire format is unchanged. An open
- * mention query suppresses the emoji one.
+ * Bottom composer bar: `@…` suggests from the visible roster (#886), `:…`
+ * suggests emoji, and a closing `:` substitutes a complete shortcode. A
+ * trigger opens only at a word start (`http://`, `10:30` stay inert).
+ * Everything is substituted before send, so the wire format is unchanged.
  */
 export function Composer({
   draft,
@@ -61,18 +58,16 @@ export function Composer({
   pendingAttachments?: PickedAttachment[];
   onRemoveAttachment?: (id: string) => void;
   canSendEmptyText?: boolean;
-  // Each increase focuses the field (a reply starting, #1270). 0 never does.
+  // Each increase focuses the field (a reply starting, #1270).
   focusRequest?: number;
-  // The field's hint; the chat's own when omitted (the Vault passes its own).
+  // The chat's own hint when omitted.
   placeholder?: string;
 }) {
   const { t } = useTranslation("common");
   const [caret, setCaret] = useState(0);
-  // iOS keeps a multiline field's height when `value` is reset to "", so after
-  // a two-line message the empty composer stayed two lines tall. Record the
-  // field's one-line height the first time it lays out empty and cap an empty
-  // field at it. That needs the native input to have no placeholder (a
-  // multiline TextInput sizes to it), hence the overlay hint below.
+  // iOS keeps a multiline field's height when `value` resets to "", so an empty
+  // field is capped at its first empty one-line height. A multiline TextInput
+  // sizes to its placeholder, hence the overlay hint below instead.
   const [emptyHeight, setEmptyHeight] = useState<number | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const inputRef = useRef<TextInput>(null);
@@ -96,12 +91,12 @@ export function Composer({
       return;
     }
     onChangeDraft(next.text);
-    // RN moves the native caret to the end after a programmatic value
-    // change; track the logical caret so the query closes either way.
+    // RN moves the native caret to the end after a programmatic change; track
+    // the logical caret so the query closes either way.
     setCaret(next.caret);
   };
 
-  // ~1600 standard rows, so built once per mount rather than per keystroke.
+  // ~1600 standard rows: built once per mount, not per keystroke.
   const shortcodeEntries = useMemo(
     () => [...customShortcodeEntries(customEmoji ?? []), ...standardShortcodeEntries()],
     [customEmoji],
@@ -129,10 +124,9 @@ export function Composer({
     setCaret(next.caret);
   };
 
-  // The ':' that closes a known shortcode is swallowed and the emoji takes its
-  // place. Gated on a single-character insertion so a paste ending in a colon
-  // is left alone; `onChangeText` carries no caret, so this only fires for a
-  // colon typed at the end of the draft.
+  // A ':' that closes a known shortcode is swallowed for the emoji. Only for a
+  // single typed character at the end (`onChangeText` carries no caret), so a
+  // paste ending in a colon is left alone.
   const handleChangeText = (next: string) => {
     if (next.length === draft.length + 1 && next.endsWith(":")) {
       const closed = completedShortcodeAt(next, next.length);
@@ -292,8 +286,7 @@ export function Composer({
           backgroundColor: semantic.bg,
         }}
       >
-        {/* Opening the picker is free to undo: touch-down (#1529). Send is
-            not, and stays on release. */}
+        {/* Touch-down (#1529) for the picker; send stays on release. */}
         <PressInPressable
           pressIn
           testID="btn-attach"
@@ -308,7 +301,7 @@ export function Composer({
             borderRadius: layout.touchMin / 2,
             alignItems: "center",
             justifyContent: "center",
-            // No border; unavailable is a solid disc + dim glyph, never a fade.
+            // Unavailable is a solid disc + dim glyph, never a fade.
             backgroundColor: pressed && onAttach ? semantic.high : semantic.raised,
           })}
         >
@@ -319,8 +312,7 @@ export function Composer({
             ref={inputRef}
             testID="input-composer"
             accessibilityLabel={t("composer.inputLabel")}
-            // The visible hint is the overlay below, which screen readers skip;
-            // they hear it here instead.
+            // The visible hint is the overlay below, which screen readers skip.
             accessibilityHint={hint}
             value={draft}
             onChangeText={handleChangeText}
@@ -352,7 +344,6 @@ export function Composer({
               textAlignVertical: "center",
             }}
             trailing={
-              // Opening the picker is free to undo: touch-down (#1529).
               <PressInPressable
                 pressIn
                 testID="btn-composer-emoji"
@@ -373,9 +364,7 @@ export function Composer({
             }
           />
           {draft === "" ? (
-            // Drawn here rather than by the native input so it is always ONE
-            // line (it ellipsizes instead of wrapping); lets every touch
-            // through to the input.
+            // Drawn here so it is always ONE line (ellipsized); touches pass through.
             <View
               pointerEvents="none"
               accessibilityElementsHidden
@@ -404,8 +393,7 @@ export function Composer({
             </View>
           ) : null}
         </View>
-        {/* With nothing to send it is announced as disabled and leaves the
-            focus order. */}
+        {/* With nothing to send it is announced disabled and leaves the focus order. */}
         <Pressable
           onPress={onSend}
           disabled={sendDisabled}
@@ -437,8 +425,7 @@ export function Composer({
   );
 }
 
-// The field's insets and its trailing emoji button, shared with the
-// placeholder overlay so it covers exactly the text area.
+// Shared with the placeholder overlay so it covers exactly the text area.
 const FIELD_PAD_START = 16;
 const FIELD_PAD_END = 4;
 const FIELD_GAP = 4;

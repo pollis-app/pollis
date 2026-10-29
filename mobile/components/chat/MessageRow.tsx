@@ -29,20 +29,16 @@ import type { Reaction } from "../../hooks/queries/useReactions";
 import type { MessageReceipts } from "../../hooks/queries/useReceipts";
 import type { MessageAttachment } from "../../types";
 
-// Avatar column (40) + gap (12): a continued message's body lines up with
-// the header message's body.
+// Avatar column (40) + gap (12), so a continued row's body lines up.
 const AVATAR = 40;
 const AVATAR_GAP = 12;
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 /**
- * One timeline message, Discord-style. `continued` rows (same sender, shortly
- * after) drop the avatar and name. A message that mentions the reader gets a
- * full-width accent tint — never an edge stripe.
- *
- * The whole row is ONE accessible element: its label always carries the
- * sender and text, even when the header is visually collapsed.
+ * One timeline message. A mention of the reader is a full-width accent tint,
+ * never an edge stripe. The row is ONE accessible element whose label always
+ * carries the sender and text, even when the header is collapsed.
  */
 export function MessageRow({
   av,
@@ -99,7 +95,6 @@ export function MessageRow({
   peerCount?: number;
   showReceipt?: boolean;
   threadCount?: number;
-  // Formatted time of the newest reply, for the thread chip.
   threadLastReply?: string;
   onOpenThread?: () => void;
   mentionNames?: ReadonlySet<string>;
@@ -113,12 +108,9 @@ export function MessageRow({
   // whose original is not loaded.
   replyTo?: { name: string; snippet: string } | null;
   onPressReplyQuote?: () => void;
-  // A brief tint after a quote was tapped to jump here.
   highlighted?: boolean;
-  // Same sender as the row above, within the grouping window.
   continued?: boolean;
-  // The sender joined the group within a week of this message (#1506): a
-  // small "new" tag after their name. Group channels only.
+  // Group channels only (#1506).
   isNew?: boolean;
   testID?: string;
   messageId?: string;
@@ -159,8 +151,7 @@ export function MessageRow({
     press.value = withTiming(0, { duration: PRESS_FEEDBACK.fadeOutMs });
   };
 
-  // Only a touch long press plays the haptic; the screen reader speaks the
-  // accessibility action.
+  // A screen reader speaks the accessibility action; only a touch plays the haptic.
   const onLongPressTouch = onLongPress
     ? () => {
         haptic("longPress");
@@ -171,9 +162,8 @@ export function MessageRow({
   const showHeader = !continued;
   const statusLabel = failed ? t("status.failed") : null;
 
-  // The row is one accessible element, so the nested avatar and attachment
-  // buttons are out of a screen reader's reach; they are offered as custom
-  // actions instead.
+  // The row is one accessible element, so its nested avatar and attachment
+  // buttons are offered as custom actions.
   const openableAttachments = onOpenAttachment
     ? (attachments ?? []).filter((a) => !!a.object_key || !!a.localPreviewUri)
     : [];
@@ -320,8 +310,7 @@ export function MessageRow({
                     </Text>
                   </View>
                 ) : null}
-                {/* A pending row renders exactly like a sent one: a "sending"
-                    label made a fast send feel slow. Only a failure is labelled. */}
+                {/* A pending row draws like a sent one: a "sending" label made sends feel slow. */}
                 <Text
                   style={[
                     ty.meta,

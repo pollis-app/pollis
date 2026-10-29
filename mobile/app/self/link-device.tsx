@@ -17,13 +17,9 @@ import { haptic } from "../../lib/haptics";
 import { useThemeRerender } from "../../components/theme";
 
 /**
- * Scan to sign in a device (#1361): the new device shows a QR; this signed-in
- * phone scans it and confirms with its PIN.
- *
- * The code carries the new device's ephemeral public key and a link id, never
- * a secret. The PIN is verified in Rust before anything is sent; Rust then
- * wraps the account key ONLY to an enrollment request whose key is
- * byte-for-byte the one scanned here, so neither the server nor anyone who
+ * Scan to sign in a device (#1361). The code carries the new device's
+ * ephemeral public key, never a secret; Rust checks the PIN, then wraps the
+ * account key only to that exact key, so neither the server nor anyone who
  * photographed the code can substitute their own.
  */
 
@@ -180,8 +176,6 @@ export default function ScanToSignIn() {
     return (
       <Screen testID="screen-link-device">
         {crumb}
-        {/* iPad: the PIN block (heading, dots, keypad) centred vertically
-            rather than the keypad pinned to the bottom edge. */}
         <View style={regular ? { flex: 1, justifyContent: "center", gap: 32 } : { flex: 1 }}>
           <View style={{ flex: regular ? 0 : 1, paddingHorizontal: 24, paddingTop: regular ? 0 : 32, gap: 32 }}>
             <Heading

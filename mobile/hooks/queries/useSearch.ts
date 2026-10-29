@@ -1,11 +1,3 @@
-// Cross-content search hook. Backs the global search at the top of Self ((tabs)/self, #1550).
-//
-// `search_messages` goes through the local FTS index and returns a page of
-// SearchResult rows; this hook pages through them (#1202). User search
-// (`search_user_by_username`) is exposed via `useUserSearch` and groups can be
-// filtered client-side from the cached `useUserGroupsWithChannels` list, so a
-// single Rust invoke covers the typeahead.
-//
 // The types below mirror `pollis_core::commands::messages::types` field for
 // field; the desktop copy lives in `frontend/src/types/index.ts`. Keep all
 // three in sync.
@@ -48,9 +40,8 @@ export interface SearchCursor {
 }
 
 /**
- * What this device holds. Search only ever covers messages this device has
- * decrypted — bodies are E2EE, so the server has nothing to search — and these
- * are the numbers a UI needs to say so out loud.
+ * What this device holds: search covers only messages it has decrypted, and
+ * these are the numbers a UI needs to say so.
  */
 export interface SearchCorpus {
   message_count: number;
@@ -80,14 +71,9 @@ export const searchQueryKeys = {
 const PAGE_SIZE = 25;
 
 /**
- * On-device message search, paginated — the mirror of desktop's
- * `useSearchMessages` (#1202). Mobile used to ask for one fixed page of 25
- * and could never show the rest of a large result set.
- *
- * `sort` is optional: omitted, Rust picks (relevance for a global search) and
- * the page reports which ordering it applied. Query filters (`from:@user`,
- * `in:#channel`, `before:`/`after:`/`on:`, `has:attachment`, `has:link`) are
- * parsed in the core, so they work here unchanged.
+ * On-device message search, paginated, as desktop's `useSearchMessages`
+ * (#1202). With `sort` omitted Rust picks, and the page reports which
+ * ordering it applied. The core parses the query filters.
  */
 export function useSearchMessages(query: string, sort: SearchSort | null = null) {
   const trimmed = query.trim();

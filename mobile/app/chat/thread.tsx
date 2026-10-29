@@ -28,10 +28,8 @@ import { observer } from "mobx-react-lite";
 import { useTheme } from "../../components/theme";
 
 /**
- * Slack-style thread screen (#831): the root message pinned at the top,
- * replies chronologically below, own composer sending with `threadId`.
- * Pushed with its own route state, so thread drafts and lists are isolated
- * per thread and per conversation (#837).
+ * Thread screen (#831): the root at the top, replies below, a composer sending
+ * with `threadId`. Its own route state isolates drafts per thread (#837).
  */
 function ThreadScreen() {
   const { accentHex } = useTheme();
@@ -68,8 +66,7 @@ function ThreadScreen() {
   const retryMessage = useRetryMessage(conversationId, kind, threadId);
   const discardUnsent = useDiscardUnsent(conversationId, kind, threadId);
 
-  // Mentions (#886) — same roster-only pool as the parent conversation.
-  // Channels resolve the group from the store (set when the channel opened).
+  // Mentions (#886): channels resolve the group from the store.
   const mentionGroupId =
     kind === "channel" ? appStore.selectedGroupId ?? null : null;
   const mentionCandidates = useMentionCandidates(
@@ -117,7 +114,6 @@ function ThreadScreen() {
         !!prev &&
         prev.sender_id === m.sender_id &&
         m.created_at - prev.created_at < GROUP_WINDOW_MS;
-      // A failed send (#1335) offers Retry when the core stored it.
       const retryId = retryTarget(m);
       const mine = currentUser?.id === m.sender_id;
       const name =

@@ -29,8 +29,7 @@ export const ChannelPage: React.FC = observer(() => {
       setSelectedGroupId(groupId);
     }
     setSelectedChannelId(channelId);
-    // Mark read on any arrival path (URL, back-nav, deep link): clears the
-    // badge and advances the persisted cursor (#844).
+    // Mark read on any arrival path, durably (#844).
     markConversationRead(channelId);
     return () => { setSelectedChannelId(null); };
   }, [groupId, channelId, setSelectedGroupId, setSelectedChannelId, markConversationRead]);

@@ -56,8 +56,6 @@ export function GroupMenuSheet({
 
   return (
     <SheetOverlay title={groupName} onClose={onClose} testID="sheet-group-menu">
-      {/* Navigation rows in a sheet that does not scroll: touch-down (#1529).
-          Leave, below, stays on release. */}
       <Group surface="high">
         <ListRow
           testID="btn-menu-members"

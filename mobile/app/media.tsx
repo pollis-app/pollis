@@ -1,10 +1,5 @@
-// Full-screen media viewer (#1248, #1492): a pushed page, never a modal.
-//
-// The pager is virtualised for rolls of hundreds: only the page on screen and
-// one each side are mounted. An image page decrypts on mount and releases
-// (unlinks) its plaintext file on unmount; a video page takes its file only
-// while on screen. Every byte shown is the locally decrypted file the chat
-// already uses (`useMediaUri` / `get_media_path`).
+// Full-screen media viewer (#1248, #1492): a pushed page, never a modal. A
+// page decrypts on mount and unlinks its plaintext file on unmount.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, FlatList, Linking, Text, View } from "react-native";
@@ -91,11 +86,9 @@ export default function MediaViewerScreen() {
     return [...(root ? [root] : []), ...(replies ?? [])];
   }, [conversationData, replies, threadId, fromVault]);
 
-  // Both ids follow a pending → confirmed swap (`currentAttachmentId`): the
-  // viewer may open on a just-sent attachment before its send settles. The
-  // swap lands with the cache update that re-renders this screen.
-  // From the Vault the roll is the media grid's, in the grid's order
-  // (newest first), so a swipe walks what the grid showed (#1492).
+  // `currentAttachmentId` follows a pending → confirmed swap: the viewer may
+  // open on a just-sent attachment before its send settles. From the Vault
+  // the roll is the grid's, in grid order (#1492).
   const { items, index: initialIndex } = useMemo(
     () =>
       fromVault
@@ -220,11 +213,8 @@ export default function MediaViewerScreen() {
     [items, currentIndex],
   );
 
-  // Swipe down to dismiss (#1492). The pan is simultaneous with the pager's
-  // own scroll gesture and fails as soon as the drag turns sideways, so a
-  // horizontal swipe always pages; it starts only downwards, with one
-  // finger (a pinch stays the image's), and not at all while zoomed, when
-  // a drag pans the image.
+  // Swipe down to dismiss (#1492). It fails once the drag turns sideways, so
+  // a horizontal swipe always pages; one finger, so a pinch stays the image's.
   const pagerGesture = useMemo(() => Gesture.Native(), []);
   const dragY = useSharedValue(0);
   const pageHeight = size?.height ?? 0;
@@ -315,8 +305,7 @@ export default function MediaViewerScreen() {
                   index,
                 })}
                 // One page each side: neighbours decrypt ahead of the swipe,
-                // and nothing further away is mounted, so nothing further
-                // away holds plaintext on disk — however long the roll.
+                // and nothing further away holds plaintext on disk.
                 windowSize={3}
                 initialNumToRender={1}
                 maxToRenderPerBatch={1}
@@ -383,8 +372,6 @@ export default function MediaViewerScreen() {
               ) : null}
             </View>
           ) : null}
-          {/* Prev / next only move the pager, free to undo: touch-down
-              (#1529). Save and share stay on release. */}
           <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
             {multiple ? (
               <IconButton

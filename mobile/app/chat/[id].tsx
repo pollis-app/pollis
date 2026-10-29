@@ -71,8 +71,8 @@ import { messageJumpStore } from "../../stores/messageJumpStore";
 import { nextJumpStep } from "../../lib/messageJump";
 import { useTheme, useThemeRerender } from "../../components/theme";
 
-// Props let this screen double as the embedded right-pane conversation on
-// regular (iPad) width. Route usage passes none and falls back to the params.
+// Props make this screen the embedded right-pane conversation on iPad; the
+// route passes none and reads the params.
 type ChatViewProps = {
   conversationId?: string | null;
   kind?: ConversationKind | null;
@@ -81,16 +81,13 @@ type ChatViewProps = {
   embedded?: boolean;
 };
 
-// Rows for the inverted timeline list — messages interleaved with day
-// separators, newest first.
 type ChatListItem =
   | { type: "sep"; key: string; label: string }
   | { type: "msg"; key: string; message: Message; continued: boolean };
 
 function TextChat(props: ChatViewProps = {}) {
   const { accentHex } = useTheme();
-  // Embedded in the iPad two-pane, pushes of info / thread / profile pages
-  // land in the detail pane (useNav); on phones it is the router.
+  // In the iPad two-pane, pushes land in the detail pane (useNav).
   const router = useNav();
   const { t } = useTranslation("mobile");
   const params = useLocalSearchParams<{
@@ -115,12 +112,9 @@ function TextChat(props: ChatViewProps = {}) {
   const [pickerTarget, setPickerTarget] = useState<Message | null>(null);
   const [editTarget, setEditTarget] = useState<Message | null>(null);
   const [editDraft, setEditDraft] = useState("");
-  // The message the composer is replying to (#1270). Sending, dismissing or
-  // starting an edit clears it.
+  // The message the composer is replying to (#1270).
   const [replyTarget, setReplyTarget] = useState<Message | null>(null);
-  // Bumped to focus the composer when a reply starts.
   const [composerFocus, setComposerFocus] = useState(0);
-  // The row a tapped reply quote jumped to, tinted for a moment.
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const currentUser = appStore.currentUser;
@@ -133,7 +127,7 @@ function TextChat(props: ChatViewProps = {}) {
     hasNextPage,
     isFetchingNextPage,
   } = useMessages(conversationId, kind);
-  // Newest-first (matches the inverted list's render order).
+  // Newest-first, the inverted list's render order.
   const messages = useMemo(() => flattenPages(data), [data]);
   const messageIds = useMemo(
     () => messages.filter((m) => !m.pending && !m.failed).map((m) => m.id),
@@ -145,9 +139,8 @@ function TextChat(props: ChatViewProps = {}) {
     messageIds,
   );
 
-  // DM receipts (#892): one fetch per open conversation; mark-read reporting
-  // via the list's viewability config, gated on the reciprocal synced
-  // preference. Channels render nothing and report nothing.
+  // DM receipts (#892), gated on the reciprocal synced preference. Channels
+  // render and report nothing.
   const isDm = kind === "dm";
   const sendReadReceipts = useSendReadReceipts();
   const { data: receiptsByMessage } = useConversationReceipts(
@@ -158,8 +151,7 @@ function TextChat(props: ChatViewProps = {}) {
     currentUser?.id ?? null,
     isDm && sendReadReceipts,
   );
-  // Mobile DMs are strictly 1:1 (desktop derives from member_count with the
-  // same 2-member fallback).
+  // Mobile DMs are strictly 1:1.
   const peerCount = 1;
   const sendMessage = useSendMessage(conversationId, kind);
   const retryMessage = useRetryMessage(conversationId, kind);
@@ -169,15 +161,13 @@ function TextChat(props: ChatViewProps = {}) {
   const editMessage = useEditMessage(conversationId, kind);
   const deleteMessage = useDeleteMessage(conversationId, kind);
 
-  // Foreground realtime, so peer messages land without a refocus. A group room
-  // is named by group_id, a DM's by its conversation_id.
+  // A group room is named by group_id, a DM's by its conversation_id.
   const groupId =
     props.groupId ??
     (kind === "channel" ? appStore.selectedGroupId ?? undefined : undefined);
   useConversationRealtime(conversationId, kind, groupId);
 
-  // Contextual notification permission: ask on opening a conversation, not at
-  // login. `ensurePushRegistration` won't re-prompt once answered.
+  // Ask for notification permission on opening a conversation, not at login.
   useEffect(() => {
     const uid = currentUser?.id;
     if (!uid) {
@@ -186,8 +176,6 @@ function TextChat(props: ChatViewProps = {}) {
     void ensurePushRegistration(uid);
   }, [currentUser?.id]);
 
-  // Ingest on focus: catches up a chat returned to after the app was
-  // backgrounded.
   useFocusEffect(
     useCallback(() => {
       if (conversationId && kind) {
@@ -196,9 +184,8 @@ function TextChat(props: ChatViewProps = {}) {
     }, [conversationId, kind, ingest]),
   );
 
-  // Unread (#1422): an on-screen conversation never badges, and its read cursor
-  // advances on arrival (however it was reached) and again on leaving. The
-  // newest-message effect below covers arrivals while it stays open.
+  // Unread (#1422): an on-screen conversation never badges; its read cursor
+  // advances on arrival and again on leaving.
   useFocusEffect(
     useCallback(() => {
       if (!conversationId) {
@@ -213,10 +200,8 @@ function TextChat(props: ChatViewProps = {}) {
     }, [conversationId]),
   );
 
-  // Auto-scroll to bottom when a NEW newest message lands (arrival or
-  // optimistic send). Keyed on the newest id rather than the array length so
-  // loading an older page never yanks the reader away from the history they
-  // are reading.
+  // Keyed on the newest id, not the length, so loading an older page never
+  // yanks the reader away from the history they are reading.
   const listRef = useRef<FlatList<ChatListItem>>(null);
   const newestId = messages[0]?.id;
   useEffect(() => {
@@ -228,8 +213,7 @@ function TextChat(props: ChatViewProps = {}) {
     });
   }, [newestId]);
 
-  // A message that arrives while the conversation is on screen is read: move
-  // the cursor so the persisted count agrees once this screen is left.
+  // So the persisted count agrees once this screen is left.
   useEffect(() => {
     if (!conversationId || !newestId) {
       return;
@@ -240,8 +224,8 @@ function TextChat(props: ChatViewProps = {}) {
     markConversationRead(conversationId);
   }, [conversationId, newestId]);
 
-  // The embedded (iPad) pane keeps this component mounted across
-  // conversations, so a reply must never outlive the one it was started in.
+  // The embedded (iPad) pane stays mounted across conversations, so a reply
+  // must never outlive the one it was started in.
   useEffect(() => {
     setReplyTarget(null);
     setHighlightId(null);
@@ -269,7 +253,6 @@ function TextChat(props: ChatViewProps = {}) {
     });
   };
 
-  // Rust encrypts and uploads the attachments on send.
   const onAttach = useCallback(async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: "images",
@@ -306,30 +289,23 @@ function TextChat(props: ChatViewProps = {}) {
     );
   };
 
-  // Reply-count chips for thread roots (#831).
   const { data: threadSummaries } = useThreadSummaries(conversationId);
 
-  // Mention candidates come from the visible roster only (#886); the
-  // resolution set for rendering adds `all` and the reader's own name so
-  // self-mentions highlight.
-  // The composer resolves `:shortcode:` against these before send, which is
-  // also the set the picker offers — one source, one permission rule.
+  // Mention candidates come from the visible roster only (#886); rendering
+  // adds `all` and the reader's own name so self-mentions highlight. The
+  // composer resolves `:shortcode:` against the same set the picker offers.
   const { data: usableEmoji } = useUsableEmoji();
   const mentionCandidates = useMentionCandidates(
     kind,
     conversationId,
     groupId ?? null,
   );
-  // Saved messages (#887): one query feeds every row's saved state.
   const savedIds = useSavedMessageIds();
   const toggleSaved = useToggleSavedMessage();
-  // Pinned messages (#99, #1315): one query feeds the sheet's Pin / Unpin.
-  // Keyed on the channel or DM id, which is this screen's `conversationId`.
   const pinnedIds = usePinnedMessageIds(conversationId);
   const togglePin = useTogglePinnedMessage();
 
-  // #897: copy is VERIFIED — the boolean comes from the clipboard call, and
-  // a thrown write reads as failure, never assumed success.
+  // #897: copy is VERIFIED; a thrown write reads as failure.
   const copyToClipboard = useCallback(async (text: string) => {
     let copied = false;
     try {
@@ -353,11 +329,10 @@ function TextChat(props: ChatViewProps = {}) {
     return set;
   }, [mentionCandidates, selfName]);
 
-  // Inverted-list items: built chronologically (day separator before each
-  // day's first message), then reversed so index 0 is the newest row. Thread
-  // replies render only in the thread screen (same filter as desktop).
+  // Built chronologically, then reversed so index 0 is the newest row. Thread
+  // replies render only in the thread screen.
   const items = useMemo(() => {
-    // A run of lost messages (#1312) is one row, as on desktop.
+    // A run of lost messages (#1312) is one row.
     const chrono = collapseUndecryptable(
       [...messages].reverse().filter((m) => !m.thread_id || m.thread_id === m.id),
     );
@@ -371,9 +346,8 @@ function TextChat(props: ChatViewProps = {}) {
         lastKey = k;
         prev = null;
       }
-      // Discord-style grouping: the same sender again within the window
-      // (and on the same day) hangs under the previous header. A reply
-      // always starts its own group, so its quote sits over a header.
+      // The same sender within the window hangs under the previous header; a
+      // reply always starts its own group, so its quote sits over a header.
       const continued =
         prev !== null &&
         !m.reply_to_id &&
@@ -386,11 +360,9 @@ function TextChat(props: ChatViewProps = {}) {
     return out;
   }, [messages]);
 
-  // The loaded originals of every reply, in one pass.
   const repliedTo = useMemo(() => replyTargets(messages), [messages]);
 
-  // Jump to a replied-to message and tint it briefly. Only loaded messages
-  // are reachable; the quote of an unloaded one is not pressable.
+  // Only loaded messages are reachable; an unloaded one's quote is not pressable.
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
@@ -415,8 +387,8 @@ function TextChat(props: ChatViewProps = {}) {
     },
     [items],
   );
-  // Rows far off screen have no measured position yet: get near by the
-  // average row height, then aim again once those rows have laid out.
+  // Rows far off screen have no measured position: get near by the average
+  // row height, then aim again once they have laid out.
   const onScrollToIndexFailed = useCallback(
     (info: { index: number; averageItemLength: number }) => {
       listRef.current?.scrollToOffset({
@@ -434,9 +406,8 @@ function TextChat(props: ChatViewProps = {}) {
     [],
   );
 
-  // A jump queued by the pinned list, Saved or a permalink
-  // (stores/messageJumpStore.ts): page back until the row is rendered, then
-  // scroll to it, tint it, and claim the jump so it fires once.
+  // A jump queued by pins, Saved or a permalink (stores/messageJumpStore.ts):
+  // page back until the row is rendered, then claim it so it fires once.
   const jumpConversationId = messageJumpStore.conversationId;
   const jumpMessageId = messageJumpStore.messageId;
   const pageCount = data?.pages.length ?? 0;
@@ -454,7 +425,7 @@ function TextChat(props: ChatViewProps = {}) {
     });
     if (step.kind === "scroll") {
       messageJumpStore.claim(jumpMessageId);
-      // On the next frame: the list has no layout for a just-rendered row.
+      // Next frame: a just-rendered row has no layout yet.
       requestAnimationFrame(() => scrollToMessage(jumpMessageId));
     } else if (step.kind === "loadOlder") {
       void fetchNextPage();
@@ -481,8 +452,7 @@ function TextChat(props: ChatViewProps = {}) {
     }
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  // Toggle a reaction by its CURRENT state — tapping a pill you're in
-  // removes, anything else adds (desktop's toggle semantics).
+  // Toggle by the CURRENT state, as desktop does.
   const reactWithEmoji = useCallback(
     (messageId: string, emoji: string) => {
       const existing = reactionsByMessage
@@ -500,9 +470,7 @@ function TextChat(props: ChatViewProps = {}) {
     [reactionsByMessage, currentUser, toggleReaction],
   );
 
-  // Header context for a channel: its group's name (subtitle + "Back to"),
-  // the member count, and the channel's own name when the opener passed none
-  // (the two-pane groups layout embeds this view without a name).
+  // The two-pane groups layout embeds this view without a channel name.
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const group = useMemo(
     () =>
@@ -518,16 +486,13 @@ function TextChat(props: ChatViewProps = {}) {
   const { data: groupMembers } = useGroupMembers(
     kind === "channel" ? groupId ?? null : null,
   );
-  // The "new" member tag (#1506): a sender's messages are tagged for a week
-  // after their server-side `joined_at`, in every channel of the group. Same
-  // rule as desktop (`lib/newMember.ts`), from the same server data.
+  // The "new" member tag (#1506), the same rule as desktop (`lib/newMember.ts`).
   const newMemberJoinMs = useMemo(
     () => newMemberJoins(groupMembers ?? [], group?.owner_id),
     [groupMembers, group?.owner_id],
   );
 
-  // Header title: the name passed by the opener, else (DMs) the other
-  // participant's username from the messages. Never the raw conversation ULID.
+  // Never the raw conversation ULID.
   const peerName = useMemo(() => {
     if (kind !== "dm") {
       return null;
@@ -606,7 +571,6 @@ function TextChat(props: ChatViewProps = {}) {
           : null
         : undefined;
       const settled = !m.pending && !m.failed;
-      // A failed send (#1335) offers Retry when the core stored it.
       const retryId = retryTarget(m);
       return (
         <MessageRow
@@ -701,8 +665,7 @@ function TextChat(props: ChatViewProps = {}) {
             <Icon.hash size={15} color={semantic.dim} />
           ) : undefined
         }
-        // Each action only opens a page or sheet, so it acts on touch-down
-        // (#1529).
+        // Each action only opens a page or sheet: touch-down (#1529).
         actions={
           <>
             <IconButton
@@ -809,17 +772,14 @@ function TextChat(props: ChatViewProps = {}) {
         // `renderItem` is memoised: re-render the rows on a palette change.
         extraData={accentHex}
         style={{ flex: 1 }}
-        // `flexGrow` + `justifyContent` anchor a SHORT thread to the visual top;
-        // `inverted` flips the axis, so `flex-end` here is the visual TOP.
+        // `inverted` flips the axis, so `flex-end` anchors a short list to the visual TOP.
         contentContainerStyle={{
           paddingTop: 4,
           paddingBottom: 12,
           flexGrow: 1,
           justifyContent: "flex-end",
         }}
-        // With `inverted`, the "end" is the visual top — the oldest loaded message.
-        // RN re-evaluates onEndReached on content-size changes too, so a prepend
-        // that leaves no scroll offset still advances.
+        // Inverted, the "end" is the visual top, the oldest loaded message.
         onEndReached={onEndReached}
         onEndReachedThreshold={0.4}
         onScrollToIndexFailed={onScrollToIndexFailed}
@@ -940,8 +900,7 @@ function TextChat(props: ChatViewProps = {}) {
           onOpenPicker={() => {
             const m = actionTarget;
             setActionTarget(null);
-            // A second sheet (Modal) only after the first is dismissed — iOS
-            // refuses to present over a modal that is still going away.
+            // iOS refuses to present a Modal over one that is still going away.
             afterSheetClose(() => setPickerTarget(m));
           }}
           onReply={() => {
@@ -995,7 +954,6 @@ function TextChat(props: ChatViewProps = {}) {
           channelId={conversationId}
           onInfo={() => {
             setMenuOpen(false);
-            // Navigate once the sheet's Modal is dismissed (see afterSheetClose).
             afterSheetClose(() =>
               router.push({
                 pathname: "/conversation/info",
@@ -1022,8 +980,7 @@ function TextChat(props: ChatViewProps = {}) {
     </>
   );
 
-  // Embedded, this sits inside the list screen's own <Screen>, so a plain View
-  // avoids double-insetting. It keeps the `screen-chat` id for e2e flows.
+  // Embedded, this sits inside the list screen's own <Screen>.
   return embedded ? (
     <View testID="screen-chat" style={{ flex: 1, backgroundColor: semantic.bg }}>
       {content}
@@ -1037,11 +994,9 @@ function TextChat(props: ChatViewProps = {}) {
 
 export const ChatView = observer(TextChat);
 
-// Regular width (iPad) never shows a conversation full screen: whoever pushed
-// this route (a notification, a permalink, an older call site), the
-// conversation is selected in its tab and drawn in the two-pane's right pane.
-// Call sites use useOpenConversation to go there directly; this is the net
-// for anything that still lands here.
+// Regular width (iPad) never shows a conversation full screen: this route
+// selects it in its tab instead. Call sites use useOpenConversation; this is
+// the net for anything that still lands here.
 function ChatRedirect() {
   const router = useRouter();
   const params = useLocalSearchParams<{ id?: string; kind?: string; name?: string }>();
@@ -1053,7 +1008,6 @@ function ChatRedirect() {
       router.dismissTo("/(tabs)/groups" as Href);
       return;
     }
-    // A channel needs its group, which the groups list knows.
     if (kind === "channel" && isLoading) {
       return;
     }

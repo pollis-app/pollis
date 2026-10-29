@@ -33,7 +33,6 @@ export function ReplyBar({
       }}
     >
       <Icon.reply size={16} color={semantic.dim} />
-      {/* Jumping to the original is free to undo: touch-down (#1529). */}
       <PressInPressable
         pressIn
         onPress={onPressQuote}

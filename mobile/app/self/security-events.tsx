@@ -1,6 +1,4 @@
-// The whole security-event log (#1548): keyset pages from the DS, the next one
-// fetched as the list nears its end, narrowed by quick-filter chips. Self →
-// Security shows only the newest three and links here. Desktop twin:
+// The whole security-event log (#1548). Desktop twin:
 // `frontend/src/pages/SecurityEventsPage.tsx`.
 
 import { useMemo, useState } from "react";
@@ -91,9 +89,8 @@ export default function SecurityEvents() {
         borderBottomLeftRadius: index === last ? r.lg : 0,
         borderBottomRightRadius: index === last ? r.lg : 0,
         overflow: "hidden",
-        // The previous filter's rows stay up, dimmed, until the new filter's
-        // first page lands — feedback on the same frame as the tap, and no
-        // flash of an empty list.
+        // The previous filter's rows stay up, dimmed, until the new first
+        // page lands: same-frame feedback, no flash of an empty list.
         opacity: isPlaceholderData ? 0.5 : 1,
       }}
     >

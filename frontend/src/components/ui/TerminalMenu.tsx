@@ -23,9 +23,8 @@ export interface TerminalMenuItem {
   // Fires when the row becomes selected (hover or keys), for intent warmups
   // such as preparing a voice connection.
   onSelect?: () => void;
-  // `"press"`: a plain mouse press acts on pointer-down (#1529) — only for an
-  // item whose accidental press is free to undo (navigation). Logout, exit,
-  // block, joining a voice channel and the like stay on click.
+  // `"press"`: act on a plain mouse pointer-down (#1529); only for an item
+  // whose accidental press is free to undo.
   activateOn?: ActivateOn;
 }
 

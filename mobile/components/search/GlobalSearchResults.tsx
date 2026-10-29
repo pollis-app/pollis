@@ -28,9 +28,7 @@ import { appStore } from "../../stores/appStore";
 import { useOpenConversation } from "../../hooks/useOpenConversation";
 import { useThemeRerender } from "../theme";
 
-// Search filter syntax, shown as pills. The operators are typed literally,
-// so they are not translated; only the label above them is. `token` is what a
-// tap adds to the query (the operator, ready for its value).
+// The operators are typed literally, so they are not translated.
 const SEARCH_FILTERS = [
   { example: "from:@user", token: "from:@" },
   { example: "in:#channel", token: "in:#" },
@@ -43,14 +41,10 @@ const SEARCH_FILTERS = [
 
 /**
  * Global search results (#1202), shown in place of the Self menu while its
- * search field is in use (#1550 — iOS / Android Settings style; this used to
- * be the Search tab). Self owns the field and the query; this renders
- * everything under it: the hint and filter pills, then pages, groups,
- * channels, the account lookup and message hits.
+ * field is in use (#1550); Self owns the field and the query.
  *
- * `userQuery` is the exact-match account lookup, set by the field's return
- * key only (#1216): a lookup per keystroke would let anyone walk the
- * directory by prefix.
+ * `userQuery` is the exact-match account lookup, set on return only (#1216):
+ * a lookup per keystroke would let anyone walk the directory by prefix.
  */
 export function GlobalSearchResults({
   q,
@@ -63,7 +57,6 @@ export function GlobalSearchResults({
 }) {
   useThemeRerender();
   const router = useRouter();
-  // Phones push the conversation/group; iPad opens it in its tab's two-pane.
   const { openConversation, openGroup } = useOpenConversation();
   const { t } = useTranslation("mobile");
   const trimmed = q.trim();
@@ -79,17 +72,12 @@ export function GlobalSearchResults({
   );
   const messageTotal = firstPage?.total ?? 0;
   const activeSort: SearchSort = sort ?? firstPage?.sort ?? "relevant";
-  // Message/group search below is local and runs as you type; the account
-  // lookup is an exact-match DS query, so it runs only on return.
   const user = useUserSearch(userQuery);
   const userShown = !!user.data && userQuery === trimmed;
   const { data: groups = [] } = useUserGroupsWithChannels();
   const { data: dms = [] } = useDMChannels();
 
-  // `search_messages` rows carry only a conversation_id — no kind — so a DM
-  // hit navigated as kind:"channel" opened the wrong conversation type.
-  // Resolve the kind by cross-referencing the id against the cached channel
-  // and DM lists (the same sources the tabs render from).
+  // The kind of a hit indexed before rows carried one, from the cached lists.
   const conversationKinds = useMemo(() => {
     const kinds = new Map<
       string,
@@ -106,9 +94,8 @@ export function GlobalSearchResults({
     return kinds;
   }, [groups, dms]);
 
-  // Client-side filter of cached groups/channels. The Rust DB doesn't
-  // expose a single "search everything" command — desktop also stitches
-  // these on the frontend.
+  // Client-side over the cached lists, as desktop does: there is no
+  // search-everything command.
   const filtered = useMemo(() => {
     if (trimmed.length < 2) {
       return {
@@ -146,8 +133,7 @@ export function GlobalSearchResults({
     return { groups: matchingGroups, channels: matchingChannels };
   }, [groups, trimmed]);
 
-  // Quick-jump to settings pages — desktop's PAGE_RESULTS, for the pages the
-  // mobile Self hub offers. Matched on title and subtitle, like desktop.
+  // Desktop's PAGE_RESULTS, for the pages the Self hub offers.
   const pages = useMemo(() => {
     if (trimmed.length < 2) {
       return [];
@@ -172,7 +158,6 @@ export function GlobalSearchResults({
         s: t("mobile:self.hub.securitySub"),
         to: "/self/security" as const,
       },
-      // The full security-event log (#1548), desktop's /security/events.
       {
         id: "security-events",
         n: t("search:pages.securityEventsName"),
@@ -186,8 +171,6 @@ export function GlobalSearchResults({
         s: t("mobile:self.hub.savedSub"),
         to: "/self/saved" as const,
       },
-      // The Vault (#1316), also matched on desktop's keywords ("notes",
-      // "files", "note to self"…).
       {
         id: "vault",
         n: t("search:pages.vaultName"),
@@ -216,7 +199,6 @@ export function GlobalSearchResults({
     !user.isLoading &&
     totalResults === 0;
 
-  // Tapping a filter pill adds its operator to the query, ready to finish.
   const addFilter = (token: string) => {
     setQ((prev) => {
       const base = prev.trimEnd();
@@ -350,7 +332,6 @@ export function GlobalSearchResults({
                 name={c.name}
                 sub={c.groupName}
                 onPress={() => {
-                  // Mirror the groups-tab rows: select + clear unread on open.
                   appStore.setSelectedGroupId(c.groupId);
                   appStore.setSelectedChannelId(c.id);
                   markConversationRead(c.id);
@@ -407,9 +388,6 @@ export function GlobalSearchResults({
               columnGap: space.sm,
             }}
           >
-            {/* The one result count (desktop's "About N results"); a second
-                total under the field only repeated it. Announced as it
-                changes while typing. */}
             <Txt
               variant="meta"
               testID="search-about-results"
@@ -457,13 +435,11 @@ export function GlobalSearchResults({
                   isSelf={m.sender_id === appStore.currentUser?.id}
                   conversationLabel={label}
                   onPress={() => {
-                    // The row carries its kind now; the cached lists are the
-                    // fallback for rows indexed before it did. Unknown (a
-                    // conversation since left): channel, the old behaviour.
+                    // Unknown (a conversation since left) falls back to channel.
                     const kind =
                       m.conversation_kind ?? info?.kind ?? "channel";
-                    // Mirror the list rows: opening a conversation selects it
-                    // (suppresses its realtime unread) and clears its count.
+                    // Selecting it suppresses its realtime unread, as the
+                    // list rows do.
                     if (kind === "dm") {
                       appStore.setSelectedConversationId(m.conversation_id);
                     } else {
@@ -510,5 +486,4 @@ export function GlobalSearchResults({
   );
 }
 
-// Section headings inside the padded results column.
 const sectionStyle = { paddingHorizontal: 0, paddingTop: space.xxl };

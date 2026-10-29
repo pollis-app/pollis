@@ -78,7 +78,6 @@ export const PreferencesPage: React.FC = observer(() => {
   const currentUser = appStore.currentUser;
   const toggleSidebarLabel = useShortcutLabel("app.toggleSidebar");
   const toggleRightPanelLabel = useShortcutLabel("app.toggleRightPanel");
-  // Live panel state, so the switch reflects what's on screen.
   const { isOpen: isRightPanelOpen, setPanel: setRightPanel } = useRightPanel();
   const [skin, setSkin] = useState<Skin>("terminal");
   const [hue, setHue] = useState<number>(38);
@@ -150,7 +149,6 @@ export const PreferencesPage: React.FC = observer(() => {
     }
   }, [query.data, currentUser?.id]);
 
-  // Sync state and hex inputs from the current CSS vars on mount.
   useEffect(() => {
     const h = parseInt(getRootVar("--accent-h"));
     const s = parseInt(getRootVar("--accent-s"));
@@ -406,7 +404,6 @@ export const PreferencesPage: React.FC = observer(() => {
   const handleMenubarIcon = (val: boolean) => {
     setMenubarIcon(val);
     save({ menubarIcon: val });
-    // Push now, as with close-to-tray.
     void setTrayEnabled(val).catch((err) => {
       console.warn("[tray] setTrayEnabled failed:", err);
     });
@@ -649,7 +646,6 @@ export const PreferencesPage: React.FC = observer(() => {
                 ))}
               </div>
             </section>
-
 
             {/* Display: this device only, not synced. */}
             <section className="flex flex-col gap-4 mb-12">

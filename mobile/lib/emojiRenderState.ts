@@ -1,9 +1,5 @@
-// What every mounted custom emoji is showing right now — its image, or its
-// `:shortcode:` fallback text (#1562). Read only by `EmojiProbe`, the
-// invisible e2e hook <Screen> draws: an emoji sits inside a message row or a
-// list row, each ONE accessible element, so the image's own testID is hidden
-// from the Maestro tier. Pure (no react-native), so tests/emoji-retry.test.ts
-// pins it.
+// What every mounted custom emoji is showing (#1562), read only by
+// `EmojiProbe`. Pure, so tests/emoji-retry.test.ts pins it.
 
 export type EmojiShown = "image" | "fallback";
 
