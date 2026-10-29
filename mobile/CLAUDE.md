@@ -374,6 +374,16 @@ check `mobile/.env`:
 
 - `EXPO_PUBLIC_POLLIS_DELIVERY_URL` **must** be `https://api.pollis.com` (prod
   DS), not api-dev.
+
+**Give every store build a private Metro cache.** Metro's transform cache lives
+in `$TMPDIR/metro-cache`, which every worktree and every agent on this machine
+shares, and an inlined `EXPO_PUBLIC_*` value is **not** part of its cache key.
+So a store build of the same source can silently reuse a module transformed by
+an earlier api-dev build: the 1.0.22 AAB first came out with
+`https://api-dev.pollis.com` baked in while `.env` and the environment were
+both prod. Run the whole store build (prebuild, Xcode archive, Gradle) with
+`export TMPDIR="$(mktemp -d)"`, and still grep the finished IPA/AAB bundle for
+`api-dev` before uploading (the binary checks below).
 - `EXPO_PUBLIC_LIVEKIT_API_KEY` / `EXPO_PUBLIC_LIVEKIT_API_SECRET` /
   `EXPO_PUBLIC_RESEND_API_KEY` / `EXPO_PUBLIC_R2_ACCESS_KEY_ID` /
   `EXPO_PUBLIC_R2_SECRET_KEY` / `EXPO_PUBLIC_TURSO_TOKEN` must **not** exist in
