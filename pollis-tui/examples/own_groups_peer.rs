@@ -1,11 +1,7 @@
 //! Dev-DS peer for the mobile Maestro `own-groups` two-device flow.
 //!
-//! A group one of a user's devices creates must reach the user's OTHER devices
-//! without a refresh, in both directions. This peer is the account's FIRST
-//! device (standing in for the user's desktop): it signs up on the DS named by
-//! `POLLIS_DELIVERY_URL` (the dev DS — it fixes the OTP) and prints the
-//! account's recovery key, which the phone under test uses to enroll as the
-//! second device. Then:
+//! A group one device creates must reach the user's other devices without a refresh. This peer
+//! is the FIRST device; the phone enrolls with its recovery key. Then:
 //!
 //! 1. The phone creates a group with #General and posts in it. The peer must
 //!    list that group and read the post — so the phone's create added this
@@ -61,7 +57,6 @@ async fn main() -> Result<()> {
     let mine = state.device_id.lock().await.clone().context("device id")?;
     println!("PEER_RECOVERY_KEY={recovery}");
 
-    // The phone enrolls with the recovery key: a second live device appears.
     let started = Instant::now();
     loop {
         let devices = auth::list_user_devices(&state, me.id.clone()).await?;
@@ -79,7 +74,6 @@ async fn main() -> Result<()> {
     }
     println!("PEER_SAW_PHONE");
 
-    // 1. The phone's group, and the post in its #General.
     let started = Instant::now();
     let channel_id = loop {
         let listed = groups::list_user_groups_with_channels(me.id.clone(), &state).await?;
@@ -94,8 +88,7 @@ async fn main() -> Result<()> {
     println!("PEER_SAW_PHONE_GROUP");
     let started = Instant::now();
     loop {
-        // Ingest-then-read, as opening the channel does: this is what applies
-        // the Welcome the phone's create queued for this device.
+        // Ingest-then-read applies the Welcome the phone's create queued.
         match pollis_tui::data::channel_messages(&state, &me.id, &channel_id, None).await {
             Ok(page) => {
                 let read = page.messages.iter().any(|m| {
@@ -114,7 +107,6 @@ async fn main() -> Result<()> {
     }
     println!("PEER_READ_PHONE_MESSAGE");
 
-    // 2. The other direction, on the script's word.
     let started = Instant::now();
     while !std::path::Path::new(&go).exists() {
         if started.elapsed() > WAIT {
@@ -134,8 +126,7 @@ async fn main() -> Result<()> {
     .context("create the peer's group")?;
     println!("PEER_CREATED_GROUP={}", made.id);
 
-    // The wake-up is sent on a spawned task; give it time to leave before the
-    // runtime goes away with this process.
+    // The wake-up is sent on a spawned task; let it leave before exiting.
     tokio::time::sleep(Duration::from_secs(10)).await;
     Ok(())
 }

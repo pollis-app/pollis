@@ -1,7 +1,6 @@
 //! Dev-DS peer for the mobile Maestro `pins` two-client flow (#1315).
 //!
-//! Pins are conversation state every member shares, so the device tier has to
-//! show one member's pin reaching another, both ways. This peer signs up a
+//! Shows one member's pin reaching another, both ways. This peer signs up a
 //! fresh account on the DS named by `POLLIS_DELIVERY_URL` (the dev DS — it
 //! fixes the OTP), prints its handle, waits for the phone under test to open a
 //! DM with it, sends a message and PINS it (minting the DM's pin key), prints
@@ -60,7 +59,6 @@ async fn main() -> Result<()> {
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
     };
-    // Join the DM's MLS group before sending into it.
     pollis_tui::data::dm_messages(&state, &me.id, &dm_id, None).await?;
 
     let sent = messages::send_message(
@@ -79,18 +77,15 @@ async fn main() -> Result<()> {
         .context("pin it")?;
     println!("PEER_PINNED dm={dm_id}");
 
-    // The phone pins its own message, then unpins the peer's. Each is a DS
-    // write the peer can only see by listing, so list until it shows.
+    // Each is a DS write the peer only sees by listing.
     let started = Instant::now();
     let mut saw_device_pin = false;
     loop {
-        // Ingest so the phone's messages are in the local user cache and the
-        // pin key re-wrap backstop runs, as an open conversation would.
+        // Ingest so the pin key re-wrap backstop runs, as an open conversation would.
         let _ = pollis_tui::data::dm_messages(&state, &me.id, &dm_id, None).await;
         match pinned_messages::list_pinned_messages(dm_id.clone(), me.id.clone(), &state).await {
             Ok(pins) => {
-                // Case-insensitive: the phone's keyboard capitalises the
-                // first letter of what Maestro types.
+                // Case-insensitive: the phone's keyboard capitalises.
                 let device_pin = pins
                     .iter()
                     .any(|p| p.content.to_lowercase().contains(DEVICE_TEXT));

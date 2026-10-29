@@ -1,32 +1,22 @@
 //! Pure UI-state + decision logic for the M4b multi-device enrollment / recovery
-//! screens — the interactive shell on top of the already-gated `pollis_tui::enroll`
-//! data path (`enroll_smoke` / `recover_smoke`).
-//!
-//! Everything here is a **pure function of state**, mirroring the `home.rs`
-//! discipline: the async work (requesting enrollment, polling status, approving)
-//! lives in `app.rs`; the branch/transition rules — which flow a profile takes,
-//! what a status poll means, list-selection movement — live here so they are
-//! unit-tested in isolation and the screens stay correct-by-construction.
+//! screens; pure, like `home.rs`, with the async work in `app.rs`.
 
 use crate::enroll::{EnrollmentStatus, PendingEnrollmentRequest};
 
 /// Which onboarding flow the shared [`crate::app::Screen::SetPin`] screen finishes
-/// into. First-device signup and a second device diverge only in the SetPin tail
-/// (`initialize_identity` alone vs `finalize` → `initialize_identity`), so one
-/// flag on `App` is enough to route the success handler.
+/// into: a second device adds `finalize` before `initialize_identity`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PinFlow {
-    /// First device: `set_pin` → `initialize_identity` (unchanged M1 path).
+    /// First device: `set_pin` → `initialize_identity`.
     #[default]
     FirstDevice,
-    /// A second device that has already installed the account key into
-    /// `state.unlock` (via sibling approval OR Secret-Key recovery):
-    /// `set_pin` → `enroll::finalize` → `initialize_identity`.
+    /// A second device holding the account key: `set_pin` → `enroll::finalize` →
+    /// `initialize_identity`.
     NewDevice,
 }
 
 /// The two paths offered on the enroll-choice screen when `verify_otp` reports
-/// `enrollment_required` (this email already has an account on another device).
+/// `enrollment_required`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EnrollChoice {
     /// Ask an existing device to approve this one (`enroll::request_enrollment`).
@@ -57,9 +47,7 @@ impl EnrollChoice {
     }
 }
 
-/// What a new device's poll of `enrollment_status` means for the UI. Kept a pure
-/// projection of [`EnrollmentStatus`] (which isn't `Copy`/`Eq`) so the waiting
-/// screen's state machine is unit-tested without a live request.
+/// What a new device's `enrollment_status` poll means for the UI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PollOutcome {
     /// Still `Pending` — keep polling on the next tick.
@@ -83,9 +71,7 @@ pub fn poll_outcome(status: &EnrollmentStatus) -> PollOutcome {
 }
 
 /// The existing-device "Pending device enrollments" view state: the fetched
-/// requests plus which row is highlighted. No modal — this backs a full-screen
-/// list (see `ui.rs`). Selection movement/clamping is pure so it survives a
-/// live-refresh of the list without landing out of bounds.
+/// requests plus the highlighted row.
 #[derive(Debug, Default)]
 pub struct ApprovalState {
     pub requests: Vec<PendingEnrollmentRequest>,
@@ -94,8 +80,7 @@ pub struct ApprovalState {
 }
 
 impl ApprovalState {
-    /// Replace the list (from `enroll::pending_requests`), clamping the selection
-    /// so a shrunk list can't leave the highlight past the end.
+    /// Replace the list, clamping the selection.
     pub fn set_requests(&mut self, requests: Vec<PendingEnrollmentRequest>) {
         self.requests = requests;
         self.selected = clamp_index(self.requests.len(), self.selected);
@@ -112,8 +97,7 @@ impl ApprovalState {
     }
 }
 
-/// Clamp `idx` into `[0, len)` (or 0 when empty). Keeps a re-fetched, shorter
-/// list from stranding the highlight off the end.
+/// Clamp `idx` into `[0, len)` (or 0 when empty).
 pub fn clamp_index(len: usize, idx: usize) -> usize {
     if len == 0 {
         0
@@ -182,11 +166,9 @@ mod tests {
         s.set_requests(vec![req("a"), req("b"), req("c")]);
         s.selected = 2;
         assert_eq!(s.current().map(|r| r.request_id.as_str()), Some("c"));
-        // A refresh that drops the last two requests must not strand the highlight.
         s.set_requests(vec![req("a")]);
         assert_eq!(s.selected, 0);
         assert_eq!(s.current().map(|r| r.request_id.as_str()), Some("a"));
-        // Emptied list → no current, selection safe at 0.
         s.set_requests(vec![]);
         assert_eq!(s.selected, 0);
         assert!(s.current().is_none());
@@ -198,7 +180,6 @@ mod tests {
         s.set_requests(vec![req("a"), req("b")]);
         s.move_selection(1);
         assert_eq!(s.selected, 1);
-        // Off the bottom stays put.
         s.move_selection(1);
         assert_eq!(s.selected, 1);
         s.move_selection(-1);

@@ -1,12 +1,7 @@
 //! The `pollis` binary's command line, run as a real process (#1337).
 //!
-//! Every case runs with an EMPTY environment and stdin/stdout that are not a
-//! terminal — exactly the situation in which the binary used to say nothing:
-//! `--help` died on `missing env var: R2_S3_ENDPOINT` in a dev build, and a bare
-//! `pollis` exited 1 with `entering raw mode: Device not configured` only in its
-//! log. One `#[test]` per file is the crate rule for tests that touch the data
-//! dir; this one never does (it never gets past argument parsing / the TTY
-//! check), so several are fine.
+//! Each case runs with an empty environment and no terminal; it never touches the data dir, so
+//! several tests are fine.
 
 use std::process::{Command, Output, Stdio};
 
@@ -65,6 +60,5 @@ fn without_a_terminal_it_says_so_instead_of_exiting_silently() {
     assert!(!out.status.success(), "{out:?}");
     let stderr = text(&out.stderr);
     assert!(stderr.contains("not a terminal"), "{stderr}");
-    // It must fail on the terminal check, before reading any config.
     assert!(!stderr.contains("missing env var"), "{stderr}");
 }

@@ -1,9 +1,6 @@
 //! Dev-DS peer for the mobile Maestro `pending-badges` flow (#1561).
 //!
-//! The phone's tab bar counts pending message requests into the Direct badge
-//! and pending group invites into the Groups badge. This peer is the stranger
-//! who sends them. It runs against the DS named by `POLLIS_DELIVERY_URL` (the
-//! dev DS — it fixes the OTP) in one of two modes, each a fresh account:
+//! The stranger who sends the phone message requests and group invites, in one of two modes:
 //!
 //! * `request <email> <phone-email>` — sign up, wait until the phone's account
 //!   exists, open a DM with it (the phone sees a message request) and print
@@ -94,7 +91,6 @@ async fn main() -> Result<()> {
                     .await
                     .with_context(|| format!("create {name:?}"))?;
                 let group_id = made.id.clone();
-                // Until the phone has signed up the invite answers "not found".
                 wait_for("invite the phone", || async {
                     Ok(groups::send_group_invite(group_id.clone(), me.clone(), phone.to_string(), &state)
                         .await
@@ -106,8 +102,7 @@ async fn main() -> Result<()> {
         }
         other => bail!("unknown mode {other:?}: request|invite"),
     }
-    // Wake-ups are sent on spawned tasks; let them leave before the runtime
-    // goes away with this process.
+    // Wake-ups are sent on spawned tasks; let them leave before exiting.
     tokio::time::sleep(Duration::from_secs(5)).await;
     Ok(())
 }

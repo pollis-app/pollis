@@ -2,20 +2,11 @@
 //! another client, decrypted end-to-end over real MLS — driven purely through
 //! `pollis_tui::sync::sync_once`.
 //!
-//! Two clients share ONE in-process `pollis-delivery` over ONE main + ONE log
-//! `pollis_delivery::db::Db`, exactly like the flows harness's shared world.
-//! Since #987 neither client holds a database handle of its own — each has its
-//! OWN `AppState` and reaches the shared world only through signed POSTs.
+//! Two clients share one in-process DS; neither holds a database handle (#987).
 //!
 //! ## Conversation type: DM (not group), and why
 //!
-//! The task allows a DM as the "receives a message from another client" gate if
-//! it needs fewer DS routes. It does: a DM needs only `dm/create` + `dm/accept`
-//! for membership, versus a group's `groups/create` + `channels/create` +
-//! `invites/create` + `invites/accept`. The MLS add-to-tree + Welcome + commit +
-//! message path is identical either way (it's the same reconcile-on-create /
-//! send machinery), so the DM proves the same crypto round-trip with a smaller
-//! DS surface.
+//! A DM proves the same MLS round trip as a group with a smaller DS surface.
 //!
 //! ## Scenario
 //! 1. A signs up; B signs up (first-device signup through the DS).
@@ -25,7 +16,6 @@
 //! 4. A sends "hello from A" — while B is offline.
 //! 5. B is driven ONLY through `sync::sync_once` (a few rounds): welcomes →
 //!    commits → read. B ends up decrypting exactly one message: "hello from A".
-//! 6. Assert B never needed a direct remote write (its handle is `query_only`).
 
 mod common;
 
@@ -35,14 +25,12 @@ use common::{spawn_world, TestClient};
 async fn tui_client_receives_message_from_another_client_via_sync() {
     let world = spawn_world().await;
 
-    // ── Two clients, each its own AppState + read-only main view ──
     let mut alice = TestClient::new(&world);
     let mut bob = TestClient::new(&world);
 
     let _alice_profile = alice.sign_up("alice@test.local").await;
     let bob_profile = bob.sign_up("bob@test.local").await;
 
-    // ── A opens a DM to B; B sees it as a pending request ──
     let dm_id = alice.create_dm(&bob_profile.id).await;
 
     let requests = bob.dm_requests().await;
@@ -53,17 +41,13 @@ async fn tui_client_receives_message_from_another_client_via_sync() {
     );
     assert_eq!(requests[0].id, dm_id, "the pending request is A's DM");
 
-    // B accepts (routes through the DS — B's own handle is read-only).
     bob.accept_dm(&dm_id).await;
 
-    // ── A sends while B is offline ──
     alice.send(&dm_id, "hello from A").await;
 
-    // ── Drive B purely through the sync loop. ~4 rounds settle an interleaved
-    //    welcomes→commits→read catch-up (spec §6). ──
+    // ~4 rounds settle an interleaved catch-up (spec §6).
     bob.sync_rounds(4).await;
 
-    // ── B must now have exactly ONE decrypted message: "hello from A". ──
     let page = bob.read_dm(&dm_id).await;
     let contents: Vec<&str> = page
         .messages
@@ -76,7 +60,6 @@ async fn tui_client_receives_message_from_another_client_via_sync() {
         "B should have decrypted exactly A's one message, got: {:#?}",
         page.messages
     );
-    // The message is attributed to A (proves it came from the other client).
     assert_eq!(
         page.messages.len(),
         1,
@@ -86,14 +69,4 @@ async fn tui_client_receives_message_from_another_client_via_sync() {
         page.messages[0].sender_id, _alice_profile.id,
         "the message's sender is A"
     );
-
-    // ── Invariant: every read AND write went through the DS.
-    //
-    //    This used to be a runtime assertion: each client's main handle was a
-    //    `query_only` view, so a direct write had to fail. #987 replaced the
-    //    property with a stronger one that no runtime check can express —
-    //    `pollis-core` does not link `libsql` at all, so a client cannot open a
-    //    connection to open. The tripwire is
-    //    `pollis-core/tests/no_client_side_remote_reads.rs`, which fails if the
-    //    dependency ever comes back by any path.
 }

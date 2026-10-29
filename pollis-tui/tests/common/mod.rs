@@ -1,23 +1,10 @@
 //! In-box, Tauri-free test rig for the pollis-tui data/sync core.
 //!
-//! This is the flows harness (`src-tauri/tests/flows/harness.rs`) distilled to
-//! exactly what a two-client "A sends, B receives" scenario needs, and with the
-//! Tauri layer removed: clients call `pollis_core::commands::*` **directly** (the
-//! way the TUI does), not through a `MockRuntime` webview + `invoke`.
+//! The flows harness distilled to a two-client scenario, calling `pollis_core::commands::*`
+//! directly.
 //!
-//! Shared world, mirroring production `pollis_delivery::AppState { db, log_db }`:
-//! - ONE main `Db` (users / groups / DMs / envelopes / auth) and ONE for the
-//!   commit log (`mls_commit_log` / `mls_welcome` / `mls_group_info`) — two
-//!   genuinely separate libsql files, so a misrouted query fails loudly (the
-//!   #420 split). Both belong to the DS.
-//! - ONE in-process `pollis-delivery` server, bound on loopback, that every
-//!   client read AND write routes through. Since #987 a client has no database
-//!   handle at all — `pollis-core` does not link `libsql` — so "everything went
-//!   through the DS" is a compile-time fact rather than something a `query_only`
-//!   PRAGMA had to catch at runtime.
-//!
-//! Each `TestClient` gets its OWN `AppState` + `InMemoryKeystore`, exactly like
-//! the flows `TestClient`.
+//! Separate main and commit-log libsql files, so a misrouted query fails, behind one in-process
+//! DS that every client goes through (#987).
 
 #![allow(dead_code)]
 
@@ -40,8 +27,7 @@ use pollis_core::db::{
 use pollis_core::keystore::{default_os_keystore, InMemoryKeystore, Keystore};
 use pollis_core::state::AppState;
 
-/// DEV_OTP short-circuits the email send in the DS and fixes the OTP so
-/// verify-otp accepts a known code with no real email.
+/// verify-otp accepts a known code.
 pub const DEV_OTP: &str = "000000";
 /// Fixed PIN so every client's local SQLCipher DB is open after signup.
 pub const TEST_PIN: &str = "0000";
@@ -49,10 +35,7 @@ pub const TEST_PIN: &str = "0000";
 /// The three MLS control-plane tables that live ONLY on the commit-log DB.
 const LOG_TABLES: [&str; 3] = ["mls_commit_log", "mls_welcome", "mls_group_info"];
 
-// ─── Schema bootstrap (public `pollis_core::db` constants — no src-tauri dep) ──
-
 async fn bootstrap_schema(conn: &libsql::Connection) -> anyhow::Result<()> {
-    // `users` is created by the baseline and never dropped — marker for "applied".
     let has_baseline = conn
         .query(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='users'",
@@ -107,12 +90,7 @@ async fn bootstrap_schema(conn: &libsql::Connection) -> anyhow::Result<()> {
 
 async fn bootstrap_log_schema(conn: &libsql::Connection) -> anyhow::Result<()> {
     run_sql_script(conn, LOG_DB_SCHEMA).await?;
-    // Post-baseline log-DB migrations (mirrors the flows harness + db-apply.sh's
-    // second apply). Without these the log DB is missing e.g. migration 000002's
-    // `mls_welcome` UNIQUE index, so the DS's idempotent welcome upsert
-    // (`ON CONFLICT`) errors and the recipient never gets welcomed (#487). The
-    // log DB is fresh per test and each migration is idempotent, so apply
-    // unconditionally.
+    // Post-baseline log-DB migrations; without them the welcome upsert fails (#487).
     for (_version, _description, sql) in POST_BASELINE_LOG_MIGRATIONS {
         run_sql_script(conn, sql).await?;
     }
@@ -137,10 +115,7 @@ async fn run_sql_script(conn: &libsql::Connection, sql: &str) -> anyhow::Result<
     Ok(())
 }
 
-/// Split on `;`, honoring `--` line comments, `'...'` string literals, and
-/// `CREATE TRIGGER ... BEGIN <stmt>; END` bodies (whose inner `;` are not
-/// statement boundaries). All appear in the migrations. Copied from the flows
-/// harness.
+/// `CREATE TRIGGER ... BEGIN <stmt>; END` bodies. Copied from the flows harness.
 fn split_sql_statements(sql: &str) -> Vec<String> {
     let mut statements = Vec::new();
     let mut current = String::new();
@@ -170,9 +145,8 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
                 }
             }
             ';' => {
-                // A `CREATE TRIGGER` body carries its own statement-terminating
-                // `;` (`BEGIN <stmt>; END`). Those inner `;` are NOT statement
-                // boundaries — the trigger ends only at the `;` after its `END`.
+                // A trigger body's inner `;` is not a statement boundary; it ends at the `;`
+                // after `END`.
                 let upper = current.trim().to_ascii_uppercase();
                 if upper.starts_with("CREATE TRIGGER") && !upper.ends_with("END") {
                     current.push(c);
@@ -194,11 +168,8 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
     statements
 }
 
-// ─── Shared world ─────────────────────────────────────────────────────────────
-
 /// The shared backend for one test: two libsql files (main + log), the config
-/// pointing at the in-process DS, and the temp dir backing per-user SQLCipher
-/// DBs. Every client shares `main`/`log`; each opens its own read-only view.
+/// pointing at the in-process DS, and the temp dir backing per-user DBs.
 pub struct World {
     pub main: Arc<Db>,
     pub log: Arc<Db>,
@@ -209,10 +180,7 @@ pub struct World {
 
 impl World {
     /// Carve out a per-device data dir under the world's temp dir. Two
-    /// devices of the SAME user MUST NOT share a data dir — their local SQLCipher
-    /// DB (`pollis_{user_id}.db`), file keystore, and `accounts.json` all key off
-    /// data dir, so a shared dir would have the second device clobber the
-    /// first. Used by the multi-device enrollment + recovery smokes.
+    /// devices of the SAME user must not share one: their DB and keystore key off it.
     pub fn device_dir(&self, name: &str) -> std::path::PathBuf {
         let dir = self._tmp.join(name);
         std::fs::create_dir_all(&dir).expect("create per-device data dir");
@@ -224,19 +192,8 @@ impl World {
 /// in-process Delivery Service. Call once per test.
 pub async fn spawn_world() -> World {
     let tmp = tempfile::tempdir().expect("tempdir").keep();
-    // The file keystore is bypassed (InMemoryKeystore per client), but the local
-    // SQLCipher DB path derives from the data dir — keyed per user, so all
-    // clients can share one dir.
-    //
-    // `set_data_dir`, never `std::env::set_var`: this rig runs background sync
-    // tasks and an in-process DS on other threads, and mutating the process
-    // environment while any of them might be reading it is a data race that
-    // shows up as a rare load-dependent failure and nothing else (#923).
-    //
-    // There is no `DEV_OTP` here either. The DS half takes the code as an
-    // explicit `OtpConfig { dev_otp }` (see `spawn_in_process_delivery`) and the
-    // client half is handed `DEV_OTP` literally at every `verify_otp` call, so
-    // the environment was never actually in the loop — only in the race.
+    // Per-user DB paths, so clients share one dir. `set_data_dir`, never `std::env::set_var`,
+    // which races the rig's threads (#923).
     pollis_core::db::local::set_data_dir(&tmp);
 
     let main = Arc::new(
@@ -262,15 +219,12 @@ pub async fn spawn_world() -> World {
 
     let delivery_url = spawn_in_process_delivery(main.clone(), log.clone()).await;
 
-    // Config literal: R2/livekit fields are placeholders (nothing here touches
-    // them); only the DS URL is real — since #987 it is the only backend there
-    // is.
+    // Only the DS URL is real; it is the only backend (#987).
     let config = Config {
         r2_endpoint: String::new(),
         r2_public_url: String::new(),
         livekit_url: String::new(),
         pollis_delivery_url: Some(delivery_url),
-        // Overlay off: the smoke rig talks to the in-process DS directly.
         overlay_mode: pollis_core::config::OverlayMode::Off,
         overlay_relay_url: None,
         overlay_relay_cert: None,
@@ -287,31 +241,14 @@ pub async fn spawn_world() -> World {
     }
 }
 
-// ─── In-process Delivery Service ──────────────────────────────────────────────
-
 /// Boot the REAL `pollis-delivery` router on a dedicated OS thread + runtime, so
 /// the server outlives the per-test runtime.
 ///
-/// # Why this is the real router now (#987)
-///
-/// This used to be ~900 lines of hand-rolled handlers: a second implementation
-/// of every endpoint the DM path touched, wired to the same `apply_*` functions
-/// but with its own routing table, its own auth glue and its own response
-/// bodies. It was already the wrong shape — a test double of a server is exactly
-/// where a hand-written literal drifts from the server without anything noticing
-/// — and #987 made it untenable: with every client READ now a `POST /v1/read/…`,
-/// the double would have had to grow twenty more handlers whose only job was to
-/// agree with the originals.
-///
-/// So it is gone, and this rig mounts `pollis_delivery::build_router_with_state`
-/// exactly as the flows harness does. Anything the TUI exercises is served by
-/// the code that serves it in production.
+/// The real router, as the flows harness mounts it, rather than a hand-rolled test double (#987).
 async fn spawn_in_process_delivery(main: Arc<Db>, log: Arc<Db>) -> String {
     use std::sync::mpsc;
 
-    // Auth ENFORCED, like production and like the flows harness: the smokes
-    // drive the signed path end to end, so a regression in request signing or
-    // server-side authz fails here rather than in a release.
+    // Auth enforced, like production, so a signing or authz regression fails here.
     let state = pollis_delivery::AppState::new_with_log_db(main, log, true)
         .with_otp_config(pollis_delivery::otp::OtpConfig {
             resend_api_key: None,
@@ -320,16 +257,11 @@ async fn spawn_in_process_delivery(main: Arc<Db>, log: Arc<Db>) -> String {
             session_ttl_secs: 600,
             resend_throttle_secs: 0,
             max_attempts: 5,
-            // Every sign-in in the suite uses a handful of fixed mailboxes, so
-            // the production per-mailbox send budget (3 codes per TTL) would read
-            // one test run as one abused mailbox. Raised, not disabled — the OTP
-            // unit tests pin the real number.
+            // Fixed mailboxes would trip the per-mailbox budget; raised, not disabled.
             max_sends_per_window: u32::MAX,
             ..pollis_delivery::otp::OtpConfig::default()
         })
-        // Every request arrives from 127.0.0.1, so the production per-IP limits
-        // would read one test run as a single abusive client. Raised, not
-        // disabled — `ratelimit.rs`'s own unit tests pin the real numbers.
+        // Every request comes from 127.0.0.1; raised, not disabled.
         .with_ratelimit_config(pollis_delivery::ratelimit::RateLimitConfig {
             request_otp_max: 1_000_000,
             request_otp_window_secs: 1,
@@ -372,18 +304,13 @@ async fn spawn_in_process_delivery(main: Arc<Db>, log: Arc<Db>) -> String {
     rx.recv().expect("delivery: receive url")
 }
 
-// ─── Test client (no Tauri; calls pollis_core directly) ───────────────────────
-
-/// One simulated device for one user. Owns its own read-only main view +
-/// `AppState` + `InMemoryKeystore`; shares the world's writable `main`/`log`
-/// (which only the DS writes through).
+/// One simulated device: its own `AppState` and `InMemoryKeystore` on the shared world.
 pub struct TestClient {
     pub state: Arc<AppState>,
     pub profile: Option<auth::UserProfile>,
     /// When set, this device's own data dir — repointed (via [`use_dir`])
-    /// before any keystore/local-DB/`accounts.json` touch. `None` means "use the
-    /// world's shared dir" (the single-device smokes). Two devices of the SAME
-    /// user MUST each set their own, or they collide on disk.
+    /// before any on-disk touch; `None` uses the shared dir. Two devices of one user need their
+    /// own.
     data_dir: Option<std::path::PathBuf>,
 }
 
@@ -402,15 +329,8 @@ impl TestClient {
         }
     }
 
-    /// Point the process's data dir at this client's own, if it has one. Called at
-    /// the start of every keystore/DB-touching path so a second device of the same
-    /// user reads/writes its OWN on-disk state. No-op for shared-dir clients.
-    ///
-    /// Which device is current is still one process-wide value — two devices of
-    /// one user genuinely cannot share a directory — but it is swapped through
-    /// [`pollis_core::db::local::set_data_dir`], which is a locked write, rather
-    /// than through `std::env::set_var`, which is a data race against every other
-    /// thread's `getenv` and was the suspected cause of #923.
+    /// Point the process's data dir at this client's own, if any, via the locked `set_data_dir`
+    /// (#923).
     fn use_dir(&self) {
         if let Some(dir) = &self.data_dir {
             pollis_core::db::local::set_data_dir(dir);
@@ -418,11 +338,7 @@ impl TestClient {
     }
 
     /// Build a fresh, signed-out client whose keystore is the **file-backed**
-    /// `default_os_keystore` (persistent under the data dir) rather than the
-    /// in-memory one. Needed by the restart/resync gate: the identity + session
-    /// must survive a `drop` of the `AppState`, which only a file keystore does.
-    /// Media/os-keystore are off under pollis-tui's build, so `default_os_keystore`
-    /// resolves to the file JSON store (spec §5) — no dbus, zero extra deps.
+    /// `default_os_keystore`, so identity and session survive dropping the `AppState`.
     pub fn new_persistent(world: &World) -> Self {
         let state = Arc::new(AppState::new_with_parts(
             world.config.clone(),
@@ -436,14 +352,9 @@ impl TestClient {
     }
 
     /// Like [`new_persistent`], but pinned to its OWN data dir (a subdir
-    /// `name` under the world's temp dir). Required whenever two clients belong to
-    /// the SAME user (the multi-device enrollment + Secret-Key recovery smokes):
-    /// each device needs an isolated local DB + keystore + accounts index. The dir
-    /// is repointed just-in-time by [`use_dir`] before every on-disk touch.
+    /// `name`), for two clients of the SAME user.
     pub fn new_persistent_in(world: &World, name: &str) -> Self {
         let dir = world.device_dir(name);
-        // Build the keystore under THIS device's dir (the file keystore resolves
-        // the data dir on every operation).
         pollis_core::db::local::set_data_dir(&dir);
         let state = Arc::new(AppState::new_with_parts(
             world.config.clone(),
@@ -457,20 +368,10 @@ impl TestClient {
     }
 
     /// Simulate a quit→relaunch: drop the current `AppState` and rebuild a NEW
-    /// one on the SAME data dir + same libsql handles, with a FRESH
-    /// `default_os_keystore`. The profile is retained in-memory only as the
-    /// test's record of "who this device is" — the rebuilt state knows nothing
-    /// until `auth::boot` rehydrates it from the persisted accounts index +
-    /// keystore. Re-activates this user first so the accounts index's
-    /// `last_active_user` points back at them (a prior client's `activate` may
-    /// have moved it), which is what `get_session` keys off.
+    /// one on the same data dir with a fresh `default_os_keystore`, re-activating this user first.
     pub fn restart(&mut self, world: &World) {
         self.activate();
-        // Rebuild the keystore against THIS device's dir; `activate` already
-        // repointed the process at it via `use_dir`.
-        // Replace the Arc: the old AppState (and its file keystore handle) drops
-        // when the last reference goes. The rebuilt state reads the same on-disk
-        // keystore + local SQLCipher DB the previous instance wrote.
+        // The old AppState drops; the rebuilt one reads the same on-disk state.
         self.state = Arc::new(AppState::new_with_parts(
             world.config.clone(),
             default_os_keystore(),
@@ -482,24 +383,17 @@ impl TestClient {
     }
 
     /// Point the process-global active user (accounts.json `last_active_user`) at
-    /// THIS client. `current_user_id` prefers `state.unlock`, so per-client
-    /// signing already works after signup; this keeps the shared fallback honest
-    /// for any path that consults it.
+    /// THIS client.
     pub fn activate(&self) {
-        // Repoint the data dir FIRST so the accounts-index write below (and
-        // every subsequent DB/keystore touch) lands in THIS device's dir.
+        // Repoint the data dir first so the accounts-index write lands here.
         self.use_dir();
         if let Some(p) = &self.profile {
             let _ = accounts::upsert_account(&p.id, &p.username, None);
         }
     }
 
-    /// First-device signup: the exact §7 order via the pollis-tui auth wrappers
-    /// (request_otp → verify_otp → set_pin → initialize_identity). Everything
-    /// routes through the in-process DS.
+    /// First-device signup in the §7 order via the pollis-tui auth wrappers.
     pub async fn sign_up(&mut self, email: &str) -> auth::UserProfile {
-        // Repoint the data dir before verify_otp generates identity material +
-        // writes the device id to the keystore (both key off the data dir).
         self.use_dir();
         pollis_tui::auth::request_otp(&self.state, email)
             .await
@@ -515,9 +409,7 @@ impl TestClient {
         profile
     }
 
-    /// Create a 2-person DM to `other`, returning the DM channel id. Reconcile
-    /// (inside `create_dm_channel`) adds `other`'s device to the MLS tree and
-    /// queues their Welcome.
+    /// Create a 2-person DM to `other`, returning its id.
     pub async fn create_dm(&self, other_user_id: &str) -> String {
         self.activate();
         let dm = dm::create_dm_channel(
@@ -555,7 +447,6 @@ impl TestClient {
             self.user_id().to_string(),
             content.to_string(),
             None,
-            // reply_to_id / thread_id: an ordinary channel message.
             None,
             username,
             &self.state,
@@ -564,10 +455,7 @@ impl TestClient {
         .unwrap_or_else(|e| panic!("send_message({conversation_id}): {e}"));
     }
 
-    /// Send a text message through the TUI's OWN write layer
-    /// (`pollis_tui::send::send_text`) — the code under test for the M3 gate —
-    /// rather than reaching into `pollis_core::commands` directly like [`send`].
-    /// Routes through the DS exactly the same way.
+    /// Send through the TUI's own write layer (`pollis_tui::send::send_text`).
     pub async fn send_text(&self, conversation_id: &str, content: &str) {
         self.activate();
         let username = self.profile.as_ref().map(|p| p.username.clone());
@@ -600,8 +488,7 @@ impl TestClient {
             .expect("dm_messages")
     }
 
-    /// The set of conversation ids this device currently sees (proves an enrolled
-    /// device picked up the account's DMs/groups after external-join).
+    /// The conversation ids this device currently sees.
     pub async fn conversation_ids(&self) -> Vec<String> {
         self.activate();
         pollis_tui::data::load_conversations(&self.state, self.user_id())
@@ -610,13 +497,7 @@ impl TestClient {
             .conversation_ids()
     }
 
-    // ── M4: multi-device enrollment + Secret-Key recovery (the code under test) ──
-
-    /// A FRESH device signing in against an EXISTING account's email. Runs
-    /// `request_otp` → `verify_otp`; `verify_otp` resolves to the existing
-    /// `user_id`, registers this device (session-gated), mints the in-memory
-    /// `enrollment_session`, and reports `enrollment_required = true`. Sets
-    /// `self.profile` but the device does NOT yet hold the account key.
+    /// A fresh device signing in against an existing account (`enrollment_required = true`).
     pub async fn begin_enrollment(&mut self, email: &str) -> auth::UserProfile {
         self.use_dir();
         pollis_tui::auth::request_otp(&self.state, email)
@@ -634,8 +515,7 @@ impl TestClient {
         profile
     }
 
-    /// New device: kick off an enrollment request (returns the handle carrying the
-    /// request id + verification code).
+    /// New device: kick off an enrollment request.
     pub async fn request_enrollment(&self) -> pollis_tui::enroll::EnrollmentHandle {
         self.activate();
         pollis_tui::enroll::request_enrollment(&self.state, self.user_id().to_string())
@@ -662,8 +542,7 @@ impl TestClient {
     }
 
     /// Existing device: approve a pending request with the code the approver
-    /// TYPED (#1096) — in a test, the value the new device derived and is
-    /// displaying, which is what a human reads off its screen.
+    /// TYPED (#1096); in a test, the value the new device displays.
     pub async fn approve_enrollment(&self, request_id: &str, verification_code: &str) {
         self.try_approve_enrollment(request_id, verification_code)
             .await
@@ -671,8 +550,7 @@ impl TestClient {
     }
 
     /// [`Self::approve_enrollment`] without the `expect`, for the negative case:
-    /// a wrong code must be REFUSED, and a test that can only panic on failure
-    /// cannot assert that.
+    /// a wrong code must be refused.
     pub async fn try_approve_enrollment(
         &self,
         request_id: &str,
@@ -688,9 +566,7 @@ impl TestClient {
     }
 
     /// New device: complete an enrollment/recovery after the account key is in
-    /// `AppState.unlock`. Mirrors what the desktop `App.tsx` runs after pin-create:
-    /// `set_pin` (opens the local DB) → `finalize` (cert/KPs/external-join) →
-    /// `initialize_identity`.
+    /// `AppState.unlock`: `set_pin` → `finalize` → `initialize_identity`, like desktop.
     pub async fn finish_enrollment(&self) {
         self.activate();
         pin::set_pin(&self.state, None, TEST_PIN.to_string())
@@ -704,8 +580,7 @@ impl TestClient {
             .expect("initialize_identity on enrolled device");
     }
 
-    /// Poll to approval, then finish. Bounded loop — the approve write has already
-    /// committed by the time we get here, so this resolves on the first poll.
+    /// Poll to approval, then finish; resolves on the first poll.
     pub async fn await_approval_and_finish(&self, request_id: &str) {
         use pollis_tui::enroll::EnrollmentStatus;
         for attempt in 0..20 {
@@ -719,8 +594,7 @@ impl TestClient {
     }
 
     /// New device: Secret-Key recovery. Unwraps the account key with `secret_key`
-    /// (into `AppState.unlock`), then runs the same tail as enrollment: `set_pin`
-    /// → `finalize` → `initialize_identity`.
+    /// (into `AppState.unlock`), then runs the enrollment tail.
     pub async fn recover(&self, secret_key: &str) {
         self.activate();
         pollis_tui::enroll::recover(

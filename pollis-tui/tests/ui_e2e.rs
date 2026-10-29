@@ -3,24 +3,8 @@
 //! `ui::render`) against a `TestBackend`, and proves a message typed on one
 //! client's UI surfaces on the OTHER client's RENDERED screen.
 //!
-//! This closes the gap the `*_smoke.rs` tests leave open: they exercise only the
-//! library core (`auth`/`data`/`send`/`sync`/`enroll`) and never touch
-//! `app.rs`/`ui.rs`. Here the send AND the receive-surfacing both go through the
-//! real UI, and every assertion is on visible RENDERED text (`buffer_text`), not
-//! model state — that is what makes this a UI e2e rather than another core smoke.
-//!
-//! ## What goes through the real UI vs. the core
-//! - Through the UI: signup (Email → OTP → PIN screens), opening the DM,
-//!   composing + sending a message, and the receive-surfacing (Refresh → render).
-//! - Through the core command layer: establishing DM MEMBERSHIP (create + accept).
-//!   Wiring the full start-DM prompt + accept handshake through the UI is
-//!   disproportionately fiddly for a first test (it needs username resolution and
-//!   a synced pending-request row on the peer); the smokes establish membership
-//!   the same way. The SEND + RECEIVE path — the point of this test — is 100% UI.
-//!
-//! Determinism: no fixed unconditional sleep is the mechanism of correctness. The
-//! background sync loop runs at a short cadence and surfacing is asserted with the
-//! bounded poll-until-visible `Driver::wait_for`.
+//! Send and receive both go through the real UI and every assertion is on rendered text; DM
+//! membership is set up through the core layer, as in the smokes.
 
 mod common;
 
@@ -29,14 +13,8 @@ use std::time::Duration;
 use common::{spawn_world, Driver};
 use crossterm::event::{KeyCode, KeyModifiers};
 
-// These two bounds are HANG GUARDS, not latency assertions. `wait_for` returns
-// the instant the text appears — a healthy run reaches both in a second or two —
-// so the only thing a tighter bound buys is a red run on a busy machine. At 25s
-// this test failed ~2 runs in 15 with every test binary and 40 spinners sharing
-// the box (the whole run took 36s), which is precisely the "re-run and it's
-// green" signal that teaches people to stop reading CI (#923). Sized instead so
-// that reaching them means the message genuinely never surfaced; a real hang is
-// caught by the job timeout, and the panic still dumps the rendered buffer.
+// Hang guards, not latency bounds: `wait_for` returns as soon as the text appears; tighter
+// bounds only flaked on busy machines (#923).
 
 /// Message pane surfacing can need several MLS sync rounds (welcome + commit +
 /// ingest).
@@ -48,57 +26,32 @@ const SIDEBAR_TIMEOUT: Duration = Duration::from_secs(60);
 async fn message_typed_on_one_ui_surfaces_on_the_others_rendered_screen() {
     let world = spawn_world().await;
 
-    // Two headless UI clients, each its own AppState/keystore against the shared
-    // in-process DS.
     let mut alice = Driver::new(&world, "alice-device");
     let mut bob = Driver::new(&world, "bob-device");
 
-    // ── Sign both up through the REAL Email → OTP → PIN screens ──
     alice.signup_dev("alice@e2e.local").await;
     bob.signup_dev("bob@e2e.local").await;
 
-    // ── Establish the 1:1 DM. A creates it through the core layer (the DS path);
-    //    B accepts it through the REAL UI. The UI accept (`a` → Action::AcceptDm →
-    //    send::accept_dm) does the MLS membership work that the bare core
-    //    `dm::accept_dm_request` skips — without it B's conversation stays a
-    //    DmRequest and the UI gates compose ("Accept this request first"). ──
+    // A creates the DM through the core layer; B accepts through the real UI, which does the
+    // MLS membership work the bare core accept skips.
     let _dm_id = alice.create_dm(&bob.user_id()).await;
 
-    // B: the pending request syncs into the sidebar under "Requests" (row
-    // "@ alice (pending)"). Its row is the only selectable one on a fresh account,
-    // so `a` accepts it; then it graduates to a compose-able "Direct Messages" row.
+    // B accepts the pending request, its only selectable row.
     bob.wait_for("pending", SIDEBAR_TIMEOUT).await;
     bob.press(KeyCode::Char('a'), KeyModifiers::NONE).await;
-    // The DM graduates from a pending "Requests" row to a compose-able "Direct
-    // Messages" row once B has joined the MLS group and the accept has synced.
-    //
-    // This accept is where #1041 used to lose A's first message: B's post-join
-    // self-update catches up and THEN commits, and a message A seals at the
-    // epoch in between is decryptable by nobody once the commit merges
-    // (`max_past_epochs = 0`). The DS now refuses an envelope sealed behind the
-    // log head, a committer sweeps the epoch it closes before merging, and a
-    // receiver's replay is bounded to the head its envelope fetch saw — the
-    // deterministic proofs are `dms::message_sealed_*` in the flows suite. This
-    // e2e is the UI-level check that the accept converges with the real sync
-    // loop running.
+    // Graduates to "Direct Messages" once B joined and the accept synced; this is where #1041
+    // lost A's first message.
     bob.wait_for("Direct Messages", SIDEBAR_TIMEOUT).await;
 
-    // ── Direction 1: A opens the DM, composes, and sends — all through the UI ──
-    // Wait for the accepted-DM section to render (not just the peer's name, which
-    // also appears on a pending "Requests" row): the DM only moves under "Direct
-    // Messages" once B's accept has synced, so this waits out any stale snapshot
-    // and guarantees the row opens as an accepted DM (compose-able), not a request.
+    // Wait for the accepted-DM section, not just the peer's name, so the row opens as an
+    // accepted DM.
     alice.wait_for("Direct Messages", SIDEBAR_TIMEOUT).await;
-    // Enter on the sidebar opens the highlighted DM (selection defaults onto it,
-    // headers being unselectable).
     alice.enter().await;
-    // `i` enters compose; type the message; Enter sends it (Action::SendMessage).
     alice.press(KeyCode::Char('i'), KeyModifiers::NONE).await;
     alice.send_keys("PING_ACROSS_THE_UI").await;
     alice.enter().await;
-    // A's own rendered message pane shows the just-sent message. The text alone
-    // proves nothing (a failed send leaves it sitting in the composer); a
-    // failed send is what puts "Send failed" on the status line.
+    // The text alone proves nothing (a failed send leaves it in the composer); "Send failed"
+    // would show.
     let alice_after_send = alice.buffer_text();
     assert!(
         alice_after_send.contains("PING_ACROSS_THE_UI")
@@ -106,12 +59,9 @@ async fn message_typed_on_one_ui_surfaces_on_the_others_rendered_screen() {
         "A's own rendered pane should show the message it just sent, buffer:\n{alice_after_send}"
     );
 
-    // B opens the now-accepted DM and the message surfaces on B's RENDERED screen
-    // — driven purely by the background sync loop + Refresh.
     bob.enter().await;
     bob.wait_for("PING_ACROSS_THE_UI", SURFACE_TIMEOUT).await;
 
-    // ── Direction 2 (prove it isn't one-directional): B replies, A sees it ──
     bob.press(KeyCode::Char('i'), KeyModifiers::NONE).await;
     bob.send_keys("PONG_BACK_ACROSS_UI").await;
     bob.enter().await;
@@ -123,21 +73,9 @@ async fn message_typed_on_one_ui_surfaces_on_the_others_rendered_screen() {
 
     alice.wait_for("PONG_BACK_ACROSS_UI", SURFACE_TIMEOUT).await;
 
-    // ── Both directions surfaced on the RENDERED screen. Final sanity: A's pane
-    //    holds BOTH messages at once. ──
     let alice_final = alice.buffer_text();
     assert!(
         alice_final.contains("PING_ACROSS_THE_UI") && alice_final.contains("PONG_BACK_ACROSS_UI"),
         "A's rendered pane should hold both messages, buffer:\n{alice_final}",
     );
-
-    // ── Invariant: every read AND write went through the DS.
-    //
-    //    This used to be a runtime assertion: each client's main handle was a
-    //    `query_only` view, so a direct write had to fail. #987 replaced the
-    //    property with a stronger one that no runtime check can express —
-    //    `pollis-core` does not link `libsql` at all, so a client cannot open a
-    //    connection to open. The tripwire is
-    //    `pollis-core/tests/no_client_side_remote_reads.rs`, which fails if the
-    //    dependency ever comes back by any path.
 }

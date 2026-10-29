@@ -54,7 +54,6 @@ async fn main() -> Result<()> {
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
     };
-    // Join the DM's MLS group before sending into it.
     pollis_tui::data::dm_messages(&state, &me.id, &dm_id, None).await?;
 
     let send = |text: &'static str| {
@@ -68,7 +67,6 @@ async fn main() -> Result<()> {
         }
     };
     send("before the lost message").await?;
-    // Two in a row: the phone collapses a run into one row.
     messages::test_hooks::corrupt_next_send();
     send("this message is lost in transit").await?;
     messages::test_hooks::corrupt_next_send();

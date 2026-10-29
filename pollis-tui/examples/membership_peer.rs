@@ -1,8 +1,6 @@
 //! Dev-DS peer for the mobile Maestro `membership` flow (#1506).
 //!
-//! Group channels carry no membership lines; a fresh member's messages carry a
-//! "new" tag instead, and the member page lists pending invites with a revoke.
-//! This peer plays a group's creator against the phone under test. It runs
+//! Plays a group's creator against the phone under test. It runs
 //! against the DS named by `POLLIS_DELIVERY_URL` (the dev DS — it fixes the
 //! OTP) in one of two modes:
 //!
@@ -99,8 +97,7 @@ async fn admin(email: &str, phone: &str, pending: &str) -> Result<()> {
         .context("create the group")?;
     let group_id = made.id.clone();
 
-    // The phone signs up while this runs; until it has, the invite answers
-    // "not found".
+    // Until the phone has signed up, the invite answers "not found".
     wait_for("invite the phone", || async {
         Ok(groups::send_group_invite(group_id.clone(), me.clone(), phone.to_string(), &state)
             .await
@@ -120,9 +117,7 @@ async fn admin(email: &str, phone: &str, pending: &str) -> Result<()> {
     groups::send_group_invite(group_id.clone(), me.clone(), pending.to_string(), &state)
         .await
         .context("invite the pending account")?;
-    // The list must show it before "gone" can mean anything: a DS without
-    // the invite list answers an empty one, which would pass the wait below
-    // without the phone doing a thing.
+    // The list must show it first: a DS without the invite list answers empty.
     wait_for("the pending invite is listed", || async {
         let invites = groups::list_group_invites(group_id.clone(), me.clone(), &state).await?;
         Ok((!invites.is_empty()).then_some(()))
@@ -140,8 +135,7 @@ async fn admin(email: &str, phone: &str, pending: &str) -> Result<()> {
     .await?;
     println!("PEER_SAW_REVOKE");
 
-    // Wake-ups are sent on spawned tasks; let them leave before the runtime
-    // goes away with this process.
+    // Wake-ups are sent on spawned tasks; let them leave before exiting.
     tokio::time::sleep(Duration::from_secs(5)).await;
     Ok(())
 }
