@@ -38,8 +38,7 @@ pub async fn stop_camera(state: State<'_, Arc<AppState>>) -> Result<()> {
     pollis_core::commands::camera::stop_camera(&state).await
 }
 
-/// Preview-only capture for the Voice & Video settings picker (issue #434): local
-/// self-preview with no voice room and nothing published.
+/// Preview-only capture for the settings picker (#434); nothing published.
 #[tauri::command]
 pub async fn start_camera_preview(
     state: State<'_, Arc<AppState>>,

@@ -1,39 +1,14 @@
 //! #1412: a device whose KeyPackage pool runs dry is left out of new
 //! conversations, and must still end up in every one of them.
-//!
-//! The pool is 5 packages. Every conversation that adds a device claims one, and
-//! the device only tops the pool back up when it runs (processing Welcomes, or
-//! signing in). So a backgrounded phone added to a sixth conversation before it
-//! wakes has nothing left to claim, and reconcile skips it — the conversation
-//! commits without its leaf and there is no Welcome for it.
-//!
-//! Before the fix nothing ever put that device in: the sweep backstop only
-//! removed stale leaves, and the device's own catch-up never visited a
-//! conversation it held no group for. These tests pin both recovery halves:
-//!
-//! * the stranded device itself, coming back (desktop cold launch / unlock =
-//!   the sweep; mobile foreground = a per-conversation ingest), joins every
-//!   conversation it belongs to and is missing from, and refills its pool;
-//! * a CURRENT member, on its own sweep, re-adds a missing device the moment it
-//!   has a KeyPackage again — which is how a device running an older build (one
-//!   that only republishes its pool at sign-in) is recovered with no update.
-//!
-//! Since #1571 a device on a current build also holds a last-resort package,
-//! which is never consumed, so its pool running dry no longer strands it at all
-//! (`device_outside_tree.rs`). These tests therefore play a device on a build
-//! that predates last-resort packages: [`as_pre_last_resort_build`] removes its
-//! last-resort row before the pool is drained. Those builds are in the stores
-//! for as long as store builds lag, so the recovery paths below still matter.
+//! These play a pre-#1571 build (no last-resort package), still in the stores.
 
 use crate::harness::{enroll_second_device, wipe, TestClient};
 use serde_json::json;
 use serial_test::serial;
 
-/// One more than the pool size, so the last conversation finds it empty.
 const CONVERSATIONS: usize = 6;
 
-/// Make `client` look like a device on a build that predates last-resort
-/// packages (#1571): its pool, and no last-resort package to fall back on.
+/// Pool only, no last-resort package (pre-#1571).
 async fn as_pre_last_resort_build(client: &TestClient) {
     let (user, device) = identity(client).await;
     crate::harness::writable_remote()
@@ -49,7 +24,6 @@ async fn as_pre_last_resort_build(client: &TestClient) {
         .expect("drop the last-resort package");
 }
 
-/// `(user_id, device_id)` of `client`.
 async fn identity(client: &TestClient) -> (String, String) {
     let device = client
         .state
@@ -61,14 +35,12 @@ async fn identity(client: &TestClient) -> (String, String) {
     (client.user_id().to_string(), device)
 }
 
-/// Whether `client`'s local tree for `conversation_id` holds `who`'s leaf.
 async fn tree_has(client: &TestClient, conversation_id: &str, who: &(String, String)) -> bool {
     pollis_lib::commands::mls::local_tree_members(&client.state, conversation_id)
         .await
         .contains(who)
 }
 
-/// Decrypted message bodies `client` holds for `channel_id`, after ingesting.
 async fn read_channel(client: &TestClient, channel_id: &str) -> Vec<String> {
     client
         .invoke_json(
@@ -87,9 +59,7 @@ async fn read_channel(client: &TestClient, channel_id: &str) -> Vec<String> {
         .collect()
 }
 
-/// Alice runs two devices; `alice_d2` is "backgrounded" — it executes nothing
-/// at all while bob puts alice in [`CONVERSATIONS`] new groups, which alice
-/// accepts on `alice_d1`. Returns the groups, oldest first.
+/// `alice_d2` runs nothing while alice joins [`CONVERSATIONS`] groups on `alice_d1`.
 async fn strand_second_device(
     bob: &TestClient,
     alice_d1: &TestClient,
@@ -111,8 +81,7 @@ async fn strand_second_device(
     groups
 }
 
-/// The failure, stated: the device holds no leaf in the last group. If this
-/// ever stops holding, the scenario no longer exercises #1412.
+/// If this ever stops holding, the scenario no longer exercises #1412.
 async fn assert_stranded(bob: &TestClient, groups: &[String], d2: &(String, String)) {
     bob.sweep().await;
     let last = groups.last().expect("groups");
@@ -127,8 +96,7 @@ async fn assert_stranded(bob: &TestClient, groups: &[String], d2: &(String, Stri
     );
 }
 
-/// Every group: the stranded device holds a leaf (in bob's tree, which is the
-/// one that seals for it), reads bob's message, and bob reads its reply.
+/// Leaf in bob's tree (the one sealing for it), and messages both ways.
 async fn assert_full_member_everywhere(
     bob: &TestClient,
     alice_d2: &TestClient,
@@ -160,8 +128,7 @@ async fn assert_full_member_everywhere(
     }
 }
 
-/// The device itself recovers when it comes back — the desktop shape: cold
-/// launch / unlock / reconnect runs the sweep.
+/// Desktop shape: cold launch / unlock runs the sweep.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_device_whose_pool_ran_dry_joins_every_conversation_on_its_next_sweep() {
@@ -182,7 +149,6 @@ async fn a_device_whose_pool_ran_dry_joins_every_conversation_on_its_next_sweep(
 
     assert_full_member_everywhere(&bob, &alice_d2, &groups, &d2).await;
 
-    // And the pool is back up, so the next conversation does not strand it.
     let next = bob.create_group("After recovery").await;
     bob.invite(&next, &alice.username).await;
     assert!(
@@ -195,8 +161,7 @@ async fn a_device_whose_pool_ran_dry_joins_every_conversation_on_its_next_sweep(
     drop(bob);
 }
 
-/// The mobile shape: a phone returning to the foreground does not run the
-/// sweep, it ingests each conversation in its list. That alone must be enough.
+/// Mobile shape: a per-conversation ingest, no sweep.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_device_whose_pool_ran_dry_joins_a_conversation_when_it_ingests_it() {
@@ -225,10 +190,7 @@ async fn a_device_whose_pool_ran_dry_joins_a_conversation_when_it_ingests_it() {
     drop(bob);
 }
 
-/// A current member re-adds the missing device as soon as it has a KeyPackage
-/// again, without the device doing anything but publishing one. This is the
-/// path that recovers a device on an older build, whose only refill is the pool
-/// it republishes when it signs in.
+/// A current member re-adds the device once it has a KeyPackage (old-build recovery).
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_member_re_adds_a_missing_device_once_it_publishes_key_packages() {
@@ -245,10 +207,8 @@ async fn a_member_re_adds_a_missing_device_once_it_publishes_key_packages() {
     let groups = strand_second_device(&bob, &alice_d1, &alice.username).await;
     assert_stranded(&bob, &groups, &d2).await;
 
-    // Sign-in on an old build: a fresh pool, nothing else.
     crate::harness::republish_key_packages(&alice_d2).await;
 
-    // Bob's next sweep is what notices.
     bob.sweep().await;
     let last = groups.last().expect("groups");
     assert!(
@@ -256,7 +216,6 @@ async fn a_member_re_adds_a_missing_device_once_it_publishes_key_packages() {
         "bob's sweep must re-add alice_d2 once it has a KeyPackage again"
     );
 
-    // The Welcome is waiting; the device reads from then on.
     alice_d2.poll().await;
     let channel = bob.general_channel_id(last).await;
     bob.send_channel_message(&channel, "welcome back").await;
@@ -268,11 +227,7 @@ async fn a_member_re_adds_a_missing_device_once_it_publishes_key_packages() {
     drop(bob);
 }
 
-/// The DM shape of the same failure — #1412 was found investigating a DM that a
-/// second device never showed (#1410). Six people each open a DM with alice,
-/// who accepts on `alice_d1`; the sixth finds `alice_d2`'s pool empty. Opening
-/// each DM on `alice_d2` (what a phone's foreground pass does) must make it a
-/// full member of every one.
+/// DM shape (#1410): opening each DM on `alice_d2` must make it a member.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_device_whose_pool_ran_dry_joins_every_dm_when_it_opens_them() {
@@ -323,7 +278,6 @@ async fn a_device_whose_pool_ran_dry_joins_every_dm_when_it_opens_them() {
     drop(peers);
 }
 
-/// The unclaimed packages of `(user_id, device_id)`, counted server-side.
 async fn unclaimed(who: &(String, String)) -> i64 {
     let conn = crate::harness::writable_remote().await.conn().await.expect("remote conn");
     let mut rows = conn
@@ -337,11 +291,7 @@ async fn unclaimed(who: &(String, String)) -> i64 {
     rows.next().await.expect("row").expect("row").get::<i64>(0).expect("count")
 }
 
-/// Packages leave the pool without a Welcome ever reaching the device — a
-/// claim whose commit lost its epoch race is burnt, and so is a leaf the
-/// committer refused. Refilling only after processing a Welcome let exactly
-/// those drain a device to zero unseen. The drain reports the count now, so the
-/// next one refills, Welcomes or not — and only once, however many drains run.
+/// Burnt claims drain the pool with no Welcome; the drain must refill once regardless.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_pool_burnt_without_welcomes_is_refilled_by_the_next_drain() {
@@ -352,8 +302,7 @@ async fn a_pool_burnt_without_welcomes_is_refilled_by_the_next_drain() {
     let me = identity(&alice).await;
     assert_eq!(unclaimed(&me).await, 5, "sign-in publishes a full pool");
 
-    // Server-side stand-in for five burnt claims: lost-race commits leave the
-    // package claimed and write no Welcome.
+    // Five burnt claims: claimed packages, no Welcome.
     crate::harness::writable_remote()
         .await
         .conn()
@@ -367,7 +316,6 @@ async fn a_pool_burnt_without_welcomes_is_refilled_by_the_next_drain() {
         .expect("burn the pool");
     assert_eq!(unclaimed(&me).await, 0);
 
-    // Several drains at once, as a foreground pass makes them.
     tokio::join!(alice.poll(), alice.poll(), alice.poll());
     alice.poll().await;
 

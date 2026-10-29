@@ -1,14 +1,4 @@
 //! The attachment key ring (#1382), end to end through the real MLS pipeline.
-//!
-//! Attachments are sealed under a per-conversation ring of keys that only MLS
-//! members can unwrap. The promises, each pinned here:
-//!
-//!   * the ring exists from group creation, and a member who joins later opens
-//!     it (so files posted before they joined stay readable to them);
-//!   * removing a member rotates the ring, and the remaining members pick up
-//!     the new key;
-//!   * the removed member cannot reach the ring any more;
-//!   * what the server stores is a wrap of the ring, never a bare key.
 
 use crate::harness::{wipe, writable_remote, TestClient};
 use serial_test::serial;
@@ -70,7 +60,6 @@ async fn late_joiners_open_the_ring_and_a_removal_rotates_it_out_of_reach() {
     let channel_id = alice.general_channel_id(&group_id).await;
     assert_eq!(probe(&alice, &channel_id).await, Some(1), "creation mints the ring");
 
-    // Joining after the ring was minted: both open the same ring.
     join(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
     join(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
     alice.process_commits_for(&channel_id).await;
@@ -78,12 +67,10 @@ async fn late_joiners_open_the_ring_and_a_removal_rotates_it_out_of_reach() {
     assert_eq!(probe(&bob, &channel_id).await, Some(1), "a late joiner opens the ring");
     assert_eq!(probe(&carol, &channel_id).await, Some(1));
 
-    // At rest: one wrapped entry, never a bare key.
     let (version, wrap_len) = stored_ring(&group_id).await;
     assert_eq!(version, 1);
     assert_eq!(wrap_len, 48 + 16, "the stored ring is a wrap (entry + tag), not a key");
 
-    // Removing carol rotates the ring.
     alice.remove_member(&group_id, &carol_p.id).await;
     assert_eq!(probe(&alice, &channel_id).await, Some(2), "the remover rotates");
     let (version, wrap_len) = stored_ring(&group_id).await;
@@ -93,8 +80,7 @@ async fn late_joiners_open_the_ring_and_a_removal_rotates_it_out_of_reach() {
     bob.process_commits_for(&channel_id).await;
     assert_eq!(probe(&bob, &channel_id).await, Some(2), "remaining members pick up the new key");
 
-    // Carol kept her copy of v1, but the server refuses her the ring and she
-    // has no exporter for the epoch it is wrapped at: v2 is out of reach.
+    // Carol kept v1, but has neither the ring nor the exporter for its epoch.
     carol.poll().await;
     let carol_sees = probe(&carol, &channel_id).await;
     assert!(
@@ -107,15 +93,8 @@ async fn late_joiners_open_the_ring_and_a_removal_rotates_it_out_of_reach() {
     drop(carol);
 }
 
-// ── A DM member without the ring ─────────────────────────────────────────────
-//
-// Production report: a photo in a 1:1 DM failed with "this conversation's
-// file key is not available on this device yet", while text in the same DM
-// went through. The ring is wrapped under ONE epoch's exporter, and a device
-// that was not holding the ring could open it only while sitting at exactly
-// that epoch.
+// A DM member without the ring: it is wrapped under ONE epoch's exporter.
 
-/// Clears the outbox upload stub however the test ends.
 struct StubbedUploads;
 
 impl StubbedUploads {
@@ -131,7 +110,6 @@ impl Drop for StubbedUploads {
     }
 }
 
-/// Alice and Bob in an accepted 1:1 DM, both caught up. Returns the DM id.
 async fn dm_pair(alice: &mut TestClient, bob: &mut TestClient) -> String {
     let a = alice.sign_up("fk-dm-alice@test.local").await;
     let b = bob.sign_up("fk-dm-bob@test.local").await;
@@ -144,9 +122,7 @@ async fn dm_pair(alice: &mut TestClient, bob: &mut TestClient) -> String {
     dm_id
 }
 
-/// Make the DM look like one created before the ring existed (#1382 shipped
-/// in 1.0.11): no ring on the DS, and no ring and no kept KEKs on either
-/// device. The first upload then mints it.
+/// A DM from before the ring existed (pre-1.0.11): the first upload mints it.
 async fn forget_the_ring(dm_id: &str, clients: &[&TestClient]) {
     let remote = writable_remote().await;
     remote
@@ -164,22 +140,18 @@ async fn forget_the_ring(dm_id: &str, clients: &[&TestClient]) {
     }
 }
 
-/// Drop everything this device knows about the ring: its cached copy and any
-/// exporter KEKs it kept for past epochs.
+/// Drop the cached ring and any kept exporter KEKs.
 async fn wipe_local_ring(client: &TestClient, dm_id: &str) {
     let guard = client.state.local_db.lock().await;
     let db = guard.as_ref().expect("signed in");
     db.conn()
         .execute("DELETE FROM file_key_cache WHERE conversation_id = ?1", [dm_id])
         .expect("clear cache");
-    // A DM is generation 0, whose MLS group id is the DM id.
     db.conn()
         .execute("DELETE FROM file_kek_history WHERE mls_group_id = ?1", [dm_id])
         .expect("clear kept KEKs");
 }
 
-/// Send a one-attachment message through the outbox. Returns the message id
-/// and the send's result.
 async fn send_photo(
     client: &TestClient,
     dm_id: &str,
@@ -215,7 +187,7 @@ async fn send_photo(
     (id, result)
 }
 
-/// The sender's own copy's `send_state` (`None` once delivered).
+/// `send_state` of the sender's copy (`None` once delivered).
 async fn own_send_state(client: &TestClient, dm_id: &str, id: &str) -> Option<String> {
     let page = client
         .invoke_json(
@@ -233,7 +205,6 @@ async fn own_send_state(client: &TestClient, dm_id: &str, id: &str) -> Option<St
     row.get("send_state").and_then(|s| s.as_str()).map(str::to_string)
 }
 
-/// The captions of every attachment message `client` can read in the DM.
 async fn received_captions(client: &TestClient, dm_id: &str) -> Vec<String> {
     client
         .fetch_dm_messages(dm_id)
@@ -245,9 +216,7 @@ async fn received_captions(client: &TestClient, dm_id: &str) -> Vec<String> {
         .collect()
 }
 
-/// The peer minted the ring and then moved the epoch on; this device has not
-/// processed that commit yet. The upload runs before the send's catch-up, so
-/// it met a wrap from an epoch it had not reached — and every Retry did too.
+/// The peer minted the ring, then moved the epoch; the upload ran before catch-up.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_dm_member_behind_the_rings_epoch_still_sends_a_photo() {
@@ -271,10 +240,7 @@ async fn a_dm_member_behind_the_rings_epoch_still_sends_a_photo() {
     drop((alice, bob));
 }
 
-/// The peer minted the ring; this device then committed (a self-update) before
-/// the peer processed it, so the only wrap is at an epoch this device has
-/// left. Its exporter for that epoch is gone after the merge, so it could not
-/// open the wrap until the peer came online and re-wrapped.
+/// This device committed past the ring's only wrap epoch before the peer re-wrapped.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_dm_member_past_the_rings_epoch_still_sends_a_photo() {
@@ -287,8 +253,7 @@ async fn a_dm_member_past_the_rings_epoch_still_sends_a_photo() {
 
     let (_, sent) = send_photo(&alice, &dm_id, "alice mints").await;
     sent.expect("alice's photo mints the ring");
-    // Bob moves past the ring's epoch while alice is offline: she does not
-    // process his commit, so she cannot re-wrap at his epoch.
+    // Alice is offline, so she cannot re-wrap at bob's epoch.
     assert!(bob.self_update(&dm_id).await, "bob moves the epoch on");
 
     let (id, sent) = send_photo(&bob, &dm_id, "The icon is so tiny on my phone!").await;
@@ -300,9 +265,7 @@ async fn a_dm_member_past_the_rings_epoch_still_sends_a_photo() {
     drop((alice, bob));
 }
 
-/// When the key genuinely is not reachable yet (only an offline peer can wrap
-/// it at an epoch this device can open), the photo is not a failure: it stays
-/// queued, and the outbox delivers it once the peer's re-wrap lands.
+/// An unreachable key keeps the photo queued until the peer's re-wrap lands.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_photo_waiting_for_the_file_key_stays_queued_and_goes_out_once_it_arrives() {
@@ -316,8 +279,6 @@ async fn a_photo_waiting_for_the_file_key_stays_queued_and_goes_out_once_it_arri
     let (_, sent) = send_photo(&alice, &dm_id, "alice mints").await;
     sent.expect("alice's photo mints the ring");
     assert!(bob.self_update(&dm_id).await, "bob moves the epoch on");
-    // And has no way to open the epoch the ring is wrapped at: a device that
-    // never sat at that epoch, or whose build kept no KEKs.
     wipe_local_ring(&bob, &dm_id).await;
 
     let (id, _) = send_photo(&bob, &dm_id, "waits for the key").await;
@@ -327,7 +288,6 @@ async fn a_photo_waiting_for_the_file_key_stays_queued_and_goes_out_once_it_arri
         "a missing file key is a wait, not a failure"
     );
 
-    // Alice comes online, processes bob's commit and re-wraps at his epoch.
     alice.process_commits_for(&dm_id).await;
     bob.invoke_json("flush_outbox", serde_json::json!({})).await;
     assert_eq!(own_send_state(&bob, &dm_id, &id).await, None, "delivered by the drain");

@@ -1,5 +1,4 @@
-//! The files the soak stores: seeded random bytes at the configured sizes, one
-//! exact duplicate (to prove nothing converges), and real media files.
+//! The soak corpus: seeded random files, one exact duplicate, real media.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -25,15 +24,13 @@ pub struct SoakFile {
     pub label: String,
     pub kind: Kind,
     pub path: PathBuf,
-    /// The name the upload carries. Holds `token`, so the name itself is a
-    /// needle: no server-side byte may contain it.
+    /// Holds `token`, so the name itself is a needle.
     pub filename: String,
     pub token: String,
     pub content_type: String,
     pub size: u64,
     pub sha256: [u8; 32],
-    /// Plaintext samples (offset, bytes) — the needles. Prefix and suffix are
-    /// included when distinctive enough to be meaningful.
+    /// Plaintext samples (offset, bytes): the needles.
     pub samples: Vec<(String, Vec<u8>)>,
 }
 
@@ -61,12 +58,10 @@ fn content_type_for(path: &Path) -> &'static str {
     }
 }
 
-/// Stream `path` once: its SHA-256 plus the needle samples.
 fn fingerprint(path: &Path, size: u64) -> ([u8; 32], Vec<(String, Vec<u8>)>) {
     let mut f = std::fs::File::open(path).expect("open corpus file");
     let mut hasher = Sha256::new();
     let mut whole = Vec::new();
-    // Samples are read back with explicit seeks after hashing.
     let mut buf = vec![0u8; 8 * 1024 * 1024];
     loop {
         let n = f.read(&mut buf).expect("read corpus file");
@@ -104,8 +99,7 @@ fn fingerprint(path: &Path, size: u64) -> ([u8; 32], Vec<(String, Vec<u8>)>) {
     if distinct(&suffix) >= 8 {
         samples.push((format!("suffix[{}..]", size - WINDOW as u64), suffix));
     }
-    // Evenly spaced interior windows; for low-entropy media, walk forward to
-    // the first distinctive window near each target.
+    // Low-entropy media walks forward to the first distinctive window.
     for i in 1..=WINDOWS_PER_FILE {
         let mut off = size * i as u64 / (WINDOWS_PER_FILE as u64 + 1);
         for _ in 0..64 {
@@ -167,9 +161,7 @@ pub fn build(dir: &Path, sizes: &[u64], media_dir: Option<&Path>, seed: u64) -> 
         });
     }
 
-    // One exact copy of the smallest random file, under another name: two
-    // uploads of identical bytes must share nothing — not the file id, not the
-    // key, not the ciphertext (#1382 removed convergent encryption).
+    // Identical uploads must share nothing (#1382 removed convergent encryption).
     if let Some(orig) = files.iter().position(|f| f.kind == Kind::Random) {
         let src = files[orig].clone();
         let tok = token(&mut rng);
@@ -221,10 +213,7 @@ pub fn build(dir: &Path, sizes: &[u64], media_dir: Option<&Path>, seed: u64) -> 
     files
 }
 
-/// The plaintext and metadata needles for the whole corpus: every sample
-/// window, each file's name token, and its plaintext SHA-256 (hex and raw) —
-/// the digest lives only inside the encrypted entry, so it must never show up
-/// on a server.
+/// Needles: sample windows, name tokens and plaintext SHA-256s (hex and raw).
 pub fn add_needles(scanner: &mut Scanner, files: &[SoakFile]) {
     for (i, f) in files.iter().enumerate() {
         for (what, bytes) in &f.samples {

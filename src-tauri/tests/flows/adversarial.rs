@@ -1,19 +1,6 @@
 //! Adversarial MLS recovery suite.
 //!
-//! Governing theme (`docs/backend-core-invariants.md`): *make invalid states
-//! unrepresentable*, and *group-membership encryption must be bulletproof — we
-//! can't rely on timeliness or best-case; any member may be offline for
-//! arbitrarily long and must pick up seamlessly*. Every scenario here tries to
-//! CREATE an invalid / lossy state through the DS fault seam (see
-//! `harness::DsFault` and `harness::drop_commit_row`) and then proves the group
-//! either refuses the invalid state or *converges* out of it — happy-path replay
-//! is explicitly NOT what these tests cover.
-//!
-//! Convergence is asserted the way the rest of the harness asserts it: through
-//! the real command pipeline (`fetch_channel_messages` decrypts, `group_member_ids`
-//! reads the roster, `ds_head_epoch` reads the commit-log head). A member that
-//! forked onto a divergent tree, wedged at a stale epoch, or squatted a duplicate
-//! leaf would fail the decrypt assertions — those are the load-bearing checks.
+//! Each scenario creates an invalid state through the DS fault seam and proves the group refuses or converges out of it.
 
 use crate::harness::{
     arm_ds_fault, corrupt_commit_row, drop_commit_row, ds_fault_armed, ds_head_epoch,
@@ -23,35 +10,7 @@ use crate::harness::{
 };
 use serial_test::serial;
 
-// ─── Scenario 6 — cross-channel epoch strand (regression) ────────────────────
-
-/// **Regression test for the cross-channel variant of the sweep/realtime
-/// message-loss bug.** All channels in a group share ONE MLS group
-/// (`mls_group_id == group_id`), but message ingest is per-channel
-/// (`get_channel_messages(channel_id)` pulls only that channel's envelopes). Before
-/// the fix, opening one channel advanced the *shared* local MLS group past an epoch
-/// at which a *sibling* channel held an un-ingested message — and with
-/// `max_past_epochs = 0` that message's keys were then gone, exactly as in the
-/// cold-launch sweep, but triggered through the normal fetch path with no sweep
-/// involved. The group-level interleaved catch-up
-/// (`catch_up_mls_group_interleaved`) closes this: opening ANY channel catches up
-/// the WHOLE group, decrypting every sibling channel's messages at each epoch
-/// before advancing past it.
-///
-/// Sequence: alice + carol in a group with two text channels A and B.
-/// 1. alice sends `mB0` on channel B at epoch E (carol is a member but has not
-///    fetched B yet, so it sits un-ingested).
-/// 2. alice adds bob — a membership commit advancing the shared MLS group E→E+1.
-/// 3. carol opens channel A (`fetch` A) — this applies the pending commit,
-///    advancing carol's shared local group to E+1 and discarding epoch-E keys,
-///    WITHOUT ingesting channel B's `mB0`.
-/// 4. carol opens channel B — its ingest now starts from E+1; `mB0` (sealed at E)
-///    is behind the epoch wall and is dropped.
-///
-/// The assertion is the bulletproof invariant: carol, a continuous member since
-/// `mB0` was sent, MUST decrypt it. This test is EXPECTED TO FAIL until the fix
-/// (group-level interleaved catch-up) lands — it exists to confirm the
-/// cross-channel variant is real, not just reasoned.
+/// Channels share one MLS group, so opening channel A must not strand sibling channel B's message.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn cross_channel_sibling_message_is_not_stranded() {
@@ -69,29 +28,20 @@ async fn cross_channel_sibling_message_is_not_stranded() {
     let chan_a = alice.general_channel_id(&group_id).await;
     let chan_b = alice.create_channel(&group_id, "beta").await;
 
-    // Carol is a full member of the group's (shared) MLS group.
     join_member(&alice, &carol, &group_id, &chan_a, &carol_p.username).await;
     carol.process_commits_for(&chan_a).await;
 
-    // (1) alice sends on channel B at the current epoch E. Carol does NOT fetch B,
-    // so mB0 stays un-ingested for her.
+    // Carol does not fetch B.
     alice.send_channel_message(&chan_b, "mB0").await;
 
-    // (2) membership change: adding bob advances the SHARED MLS group E→E+1.
     join_member(&alice, &bob, &group_id, &chan_a, &bob_p.username).await;
     alice.process_commits_for(&chan_a).await;
 
-    // (3) carol opens channel A first. This applies bob's commit (E→E+1) for the
-    // shared group and discards epoch-E keys — without ingesting channel B.
+    // Applies bob's commit without ingesting channel B.
     let _ = contents(&carol, &chan_a).await;
 
-    // (4) carol opens channel B. mB0 was sealed at E, which carol was advanced
-    // past in step 3.
     let carol_b = contents(&carol, &chan_b).await;
 
-    // Bulletproof invariant: a continuous member must decrypt every message sent
-    // while they were a member. With the group-level interleaved catch-up, opening
-    // channel A caught carol up on the whole group — including channel B's mB0.
     assert!(
         carol_b.contains(&"mB0".to_string()),
         "CROSS-CHANNEL STRAND: carol was a continuous member when mB0 was sent on channel B, \
@@ -104,25 +54,7 @@ async fn cross_channel_sibling_message_is_not_stranded() {
     drop(carol);
 }
 
-// ─── Scenario 7 — removed (not revoked) member lockout on catch-up (repro) ───
-
-/// **Deterministic repro for the fuzzer's second finding.** The model fuzzer, on
-/// `[Add(1), Add(2), Remove(1), Add(3)]`, flagged: a member who was REMOVED from
-/// the group (but whose device was NOT revoked) ended a convergence catch-up
-/// holding a message sent AFTER their removal — a `MEMBERSHIP LEAK`. Static
-/// reading says this can't happen: removal deletes the `group_member` row, the DS
-/// gates commit submission by `is_member`, and self-eviction deletes the local
-/// group; so a removed member's external-join recovery should be DS-rejected and
-/// their view empty. This test mirrors the minimal fuzzer sequence deterministically
-/// to settle whether the leak is REAL or a fuzzer-oracle artifact.
-///
-/// bob is added, carol is added, bob is REMOVED (device left registered — this is
-/// NOT the revoked-device case), dave is added, then alice sends a post-removal
-/// message. bob then comes online and runs the same catch-up a returning client
-/// runs. The lockout invariant: removed bob must NOT decrypt the post-removal
-/// message, and must not be a current member. carol (a continuous member) MUST
-/// decrypt it — proving the message was genuinely delivered and it's specifically
-/// removed bob who must be locked out.
+/// Fuzzer finding `[Add(1), Add(2), Remove(1), Add(3)]`: a removed (not revoked) member stays locked out.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn removed_member_locked_out_on_catchup() {
@@ -141,7 +73,6 @@ async fn removed_member_locked_out_on_catchup() {
     let group_id = alice.create_group("RemovedLockout").await;
     let channel_id = alice.general_channel_id(&group_id).await;
 
-    // [Add(1), Add(2), Remove(1), Add(3)] — bob in, carol in, bob out, dave in.
     join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
     join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
     alice.remove_member(&group_id, bob_p.id.as_str()).await;
@@ -149,34 +80,26 @@ async fn removed_member_locked_out_on_catchup() {
     join_member(&alice, &dave, &group_id, &channel_id, &dave_p.username).await;
     alice.process_commits_for(&channel_id).await;
 
-    // Post-removal message (the fuzzer's final "probe"): sent while bob is out.
     alice.send_channel_message(&channel_id, "post-removal").await;
     carol.process_commits_for(&channel_id).await;
     dave.process_commits_for(&channel_id).await;
 
-    // bob (removed, device still registered) comes online and catches up exactly
-    // as a returning client does — the fuzzer's convergence step for an ever-member.
     bob.poll().await;
     bob.process_commits_for(&channel_id).await;
     let bob_view = contents(&bob, &channel_id).await;
 
-    // Sanity: bob is not a current member.
     let members = alice.group_member_ids(&group_id).await;
     assert!(
         !members.contains(&bob_p.id),
         "bob should not be a current member after removal, got: {members:?}"
     );
 
-    // Positive control: carol (continuous member) DID receive the post-removal
-    // message — so it was genuinely delivered, isolating the question to bob.
+    // Positive control: delivered, isolating the question to bob.
     assert!(
         contents(&carol, &channel_id).await.contains(&"post-removal".to_string()),
         "carol (a continuous member) must decrypt the post-removal message"
     );
 
-    // LOCKOUT INVARIANT: removed bob must NOT decrypt a message sent after his
-    // removal. If this fails, the fuzzer's MEMBERSHIP LEAK is real — a removed
-    // (not revoked) member climbed back in via the catch-up / external-join path.
     assert!(
         !bob_view.contains(&"post-removal".to_string()),
         "MEMBERSHIP LEAK CONFIRMED: removed bob decrypted a post-removal message via catch-up — \
@@ -189,28 +112,7 @@ async fn removed_member_locked_out_on_catchup() {
     drop(dave);
 }
 
-// ─── Scenario 7b — removed member climbs back via external-join (repro) ──────
-
-/// **Deterministic repro for the fuzzer's `[Add(1), Remove(1), Add(2)]` finding
-/// (membership leak #2).** Scenario 7 proves a removed member cannot read a
-/// message sent BEFORE they come online, but a removed member's external-join
-/// still *climbs them back into the MLS tree* — the leak only becomes observable
-/// once a NEW message is sent AFTER the climb-back, at an epoch the re-joined leaf
-/// holds keys for. This scenario forces exactly that ordering and is the tighter
-/// repro: the add-then-immediately-remove shape (bob added, then removed at the
-/// very next commit) leaves the smallest gap for the recovery to slip through.
-///
-/// Root cause: the DS `/v1/commits` endpoint does NOT gate submissions on group
-/// membership, and the client-side recovery guard gated ONLY on
-/// `local_device_registered` (device-not-revoked), NOT on current group
-/// membership. So bob — removed but not revoked — self-evicts on catch-up, then
-/// external-joins and WINS its epoch on the CAS, rejoining the tree. alice's next
-/// catch-up applies bob's external-join, and a message she then sends is sealed
-/// for bob too. The fix gates the external-join recovery on CURRENT membership as
-/// well, so a removed member never rebuilds itself.
-///
-/// carol (added after bob's removal, a continuous member) is the positive control:
-/// she MUST decrypt the post-climb message, isolating the invariant to bob.
+/// `[Add(1), Remove(1), Add(2)]`: external-join recovery is gated on current membership, not just registration.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn removed_member_cannot_climb_back_via_external_join() {
@@ -227,50 +129,37 @@ async fn removed_member_cannot_climb_back_via_external_join() {
     let group_id = alice.create_group("RemovedClimbBack").await;
     let channel_id = alice.general_channel_id(&group_id).await;
 
-    // [Add(1), Remove(1), Add(2)] — bob in, bob out at the very next commit, carol in.
     join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
     alice.remove_member(&group_id, bob_p.id.as_str()).await;
     alice.process_commits_for(&channel_id).await;
     join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
     alice.process_commits_for(&channel_id).await;
 
-    // bob (removed, device still registered) comes online and runs the returning-
-    // client catch-up. WITHOUT the membership gate this self-evicts then external-
-    // joins bob back into the tree.
+    // Without the membership gate this external-joins bob back in.
     bob.poll().await;
     bob.process_commits_for(&channel_id).await;
 
-    // alice catches up (applying bob's external-join, if it landed) and THEN sends
-    // a fresh message. If bob climbed back into alice's tree, this is sealed for
-    // bob too — the leak. Sent AFTER the climb-back is what makes the leak
-    // observable (unlike Scenario 7's pre-climb message).
+    // A message sent after the climb-back is what makes the leak observable.
     alice.process_commits_for(&channel_id).await;
     alice.send_channel_message(&channel_id, "post-climb").await;
 
-    // bob makes one more recovery pass and reads.
     bob.poll().await;
     bob.process_commits_for(&channel_id).await;
     let bob_view = contents(&bob, &channel_id).await;
 
-    // Positive control: carol (continuous member) decrypts post-climb — it was
-    // genuinely delivered, isolating the question to bob.
+    // Positive control: delivered, isolating the question to bob.
     carol.process_commits_for(&channel_id).await;
     assert!(
         contents(&carol, &channel_id).await.contains(&"post-climb".to_string()),
         "carol (a continuous member) must decrypt the post-climb message"
     );
 
-    // Sanity: bob is not a current member (removal deleted his roster row and an
-    // external-join never re-adds it).
     let members = alice.group_member_ids(&group_id).await;
     assert!(
         !members.contains(&bob_p.id),
         "bob should not be a current member after removal, got: {members:?}"
     );
 
-    // LOCKOUT INVARIANT: removed bob must NOT decrypt a message sent after his
-    // removal — even one sent after his own recovery pass. If this fails, a
-    // removed (not revoked) member climbed back into the tree via external-join.
     assert!(
         !bob_view.contains(&"post-climb".to_string()),
         "MEMBERSHIP LEAK CONFIRMED: removed bob decrypted a post-climb message — he rebuilt \
@@ -283,23 +172,7 @@ async fn removed_member_cannot_climb_back_via_external_join() {
     drop(carol);
 }
 
-// ─── Scenario 8 — committer strands its own un-ingested inbound msg (repro) ──
-
-/// **Deterministic repro for the fuzzer's committer-ingest finding (issue #440).**
-/// The group-level catch-up fix (#438) covers the *fetch/sweep/realtime* paths, but
-/// NOT the commit-INITIATION paths. When a member initiates a commit (invite /
-/// remove) they merge their own commit and advance their epoch immediately; if they
-/// were holding an un-ingested inbound message at the current epoch, `max_past_epochs
-/// = 0` discards its keys and it is lost to them.
-///
-/// Mirrors the fuzzer's minimal sequence `[Add(2), Send(2), Add(1)]`: carol joins,
-/// carol sends `m0` (alice is a member but has NOT fetched, so `m0` is un-ingested
-/// for her), then alice adds bob — merging her own add commit and advancing past
-/// `m0`'s epoch before ingesting it. The invariant: alice, a continuous member since
-/// `m0` was sent, MUST decrypt it. The committer-ingest fix (#440) makes the commit-
-/// INITIATION paths (invite / remove / send / edit) run the interleaved ingesting
-/// catch-up before advancing their own epoch, so alice decrypts `m0` before merging
-/// her add commit — this regression test locks that in.
+/// #440: a committer ingests the current epoch before advancing past it (`[Add(2), Send(2), Add(1)]`).
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn committer_does_not_strand_inbound_message() {
@@ -316,28 +189,20 @@ async fn committer_does_not_strand_inbound_message() {
     let group_id = alice.create_group("CommitterIngest").await;
     let channel_id = alice.general_channel_id(&group_id).await;
 
-    // carol joins; alice is caught up to carol's join epoch.
     join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
 
-    // carol sends m0 at the current epoch. alice does NOT fetch — m0 stays
-    // un-ingested for her.
+    // alice does not fetch.
     carol.send_channel_message(&channel_id, "m0").await;
 
-    // alice initiates a commit (adds bob) WITHOUT first ingesting m0: `invite`
-    // merges her own add commit and advances her epoch past m0's epoch.
     join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
 
-    // alice fetches. m0 was sealed at the pre-add epoch she advanced past.
     let alice_view = contents(&alice, &channel_id).await;
 
-    // Positive control: carol (the sender) has m0 locally — it was genuinely sent.
     assert!(
         contents(&carol, &channel_id).await.contains(&"m0".to_string()),
         "carol (sender) must have m0"
     );
 
-    // Bulletproof invariant: alice was a member when m0 was sent, so she MUST
-    // decrypt it. Fails until the committer-ingest fix (#440) lands.
     assert!(
         alice_view.contains(&"m0".to_string()),
         "COMMITTER STRAND: alice lost m0 (sent by carol while alice was a member) because she \
@@ -349,35 +214,7 @@ async fn committer_does_not_strand_inbound_message() {
     drop(carol);
 }
 
-// ─── Scenario 9 — sweep backstops a dropped remove/eviction commit (#430 P1) ─
-
-/// **Deterministic repro for the eviction-side forward-secrecy gap (issue #430
-/// P1).** The MLS commit that evicts a removed member from the ratchet tree
-/// (`remove_member_from_group` → `reconcile`) is best-effort. If it is dropped,
-/// the DS deletes the member's `group_member` row but the removed device LINGERS
-/// in every remaining member's LOCAL tree — still a recipient of the seals for
-/// new messages — until some *unrelated* membership change happens to run
-/// reconcile again. That is the eviction-side analog of the bootstrap gap fixed
-/// in #427.
-///
-/// The fix is a reconcile backstop in the background sweep
-/// (`catch_up_all_mls_groups`): after catching a group up, the sweep retries a
-/// dropped remove so the stale leaf is actually pruned.
-///
-/// Sequence: alice, bob, carol are members; bob decrypts a pre-removal message
-/// (proving he was a genuine member with live ratchet state). We then simulate a
-/// DROPPED remove commit by deleting bob's `group_member` row directly on the
-/// server — exactly the state `remove_member_from_group` leaves behind when its
-/// best-effort reconcile post is lost: bob is off the roster but still in alice's
-/// local tree. alice runs the sweep, then sends a post-eviction message.
-///
-/// FORWARD-SECRECY INVARIANT: after the sweep, evicted bob must NOT decrypt the
-/// post-eviction message — the backstop pruned his leaf and re-sealed at a new
-/// epoch. carol (a continuous member) is the positive control: she MUST decrypt
-/// it, isolating the lockout to bob. WITHOUT the backstop bob's leaf never leaves
-/// alice's tree, so alice's post-eviction message is still sealed for him and he
-/// decrypts it — failing the invariant. This test is EXPECTED TO FAIL until the
-/// sweep reconcile backstop lands.
+/// #430 P1: the sweep's reconcile backstop prunes the leaf of a member whose remove commit was dropped.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn sweep_backstops_dropped_remove_eviction() {
@@ -399,19 +236,14 @@ async fn sweep_backstops_dropped_remove_eviction() {
     bob.process_commits_for(&channel_id).await;
     carol.process_commits_for(&channel_id).await;
 
-    // Baseline: bob decrypts while a genuine member — his leaf is in the tree and
-    // he holds live ratchet state.
+    // Baseline: bob has live ratchet state.
     alice.send_channel_message(&channel_id, "pre-removal").await;
     assert!(
         contents(&bob, &channel_id).await.contains(&"pre-removal".to_string()),
         "bob must decrypt the pre-removal message while still a member"
     );
 
-    // Simulate a DROPPED remove/eviction commit: delete bob's group_member row
-    // server-side (the roster delete `/v1/members/remove` performs) WITHOUT
-    // running the best-effort reconcile that would prune his leaf. This is exactly
-    // the state remove_member_from_group leaves behind when its reconcile MLS post
-    // is lost: bob off the roster, but still in alice's local ratchet tree.
+    // A dropped remove: delete the roster row server-side without pruning the leaf.
     {
         let remote = writable_remote().await;
         let conn = remote.conn().await.expect("remote conn");
@@ -425,39 +257,28 @@ async fn sweep_backstops_dropped_remove_eviction() {
         assert_eq!(affected, 1, "expected exactly one group_member row for bob to delete");
     }
 
-    // The background sweep runs (cold-launch / reconnect). WITHOUT the reconcile
-    // backstop this leaves bob's leaf in alice's tree; WITH it, the sweep retries
-    // the dropped remove and prunes him.
     alice.sweep().await;
 
-    // alice settles her own reconcile commit, then sends a post-eviction message.
     alice.process_commits_for(&channel_id).await;
     alice.send_channel_message(&channel_id, "post-eviction").await;
 
-    // Positive control: carol (a continuous member) decrypts post-eviction — it
-    // was genuinely delivered, isolating the question to bob.
+    // Positive control: delivered, isolating the question to bob.
     carol.process_commits_for(&channel_id).await;
     assert!(
         contents(&carol, &channel_id).await.contains(&"post-eviction".to_string()),
         "carol (a continuous member) must decrypt the post-eviction message"
     );
 
-    // Sanity: bob is no longer a current member.
     let members = alice.group_member_ids(&group_id).await;
     assert!(
         !members.contains(&bob_p.id),
         "bob should not be a current member after removal, got: {members:?}"
     );
 
-    // bob attempts to catch up and read.
     bob.poll().await;
     bob.process_commits_for(&channel_id).await;
     let bob_view = contents(&bob, &channel_id).await;
 
-    // FORWARD-SECRECY INVARIANT: the sweep's reconcile backstop evicted bob from
-    // the local tree, so a message sealed AFTER the backstop is unreadable to him.
-    // Fails without the backstop — bob's leaf never left alice's tree, so
-    // post-eviction is still sealed for him.
     assert!(
         !bob_view.contains(&"post-eviction".to_string()),
         "EVICTION FORWARD-SECRECY GAP: removed bob decrypted a post-eviction message — the sweep \
@@ -470,11 +291,7 @@ async fn sweep_backstops_dropped_remove_eviction() {
     drop(carol);
 }
 
-// ─── shared helpers ──────────────────────────────────────────────────────────
-
-/// Invite `member` to `group_id`, accept, drain the Welcome, and replay commits
-/// so the member is a fully-joined participant of the channel's MLS group.
-/// Mirrors the proven join sequence in `rejoin.rs` / `heavy_churn.rs`.
+/// Invite, accept, drain the Welcome and replay commits.
 async fn join_member(
     inviter: &TestClient,
     member: &TestClient,
@@ -496,7 +313,6 @@ async fn join_member(
     member.process_commits_for(channel_id).await;
 }
 
-/// The decrypted plaintext bodies visible to `client` in `channel_id`.
 async fn contents(client: &TestClient, channel_id: &str) -> Vec<String> {
     client
         .fetch_channel_messages(channel_id)
@@ -506,24 +322,7 @@ async fn contents(client: &TestClient, channel_id: &str) -> Vec<String> {
         .collect()
 }
 
-// ─── Scenario 1 — generalized #411: adopt-your-own-canonical-commit ──────────
-
-/// **Invalid state it attacks:** a committer that treats a lost DS success
-/// response as "my commit failed", rolls back, and wedges — while the DS has in
-/// fact durably committed the commit (the #411 shape, generalized to
-/// `Fail500PostWrite`).
-///
-/// Here the commit under the fault is a **member removal**, not an add — so this
-/// exercises `reconcile::our_commit_is_canonical` on a different commit type from
-/// the ported add-based test in `messages.rs`. Alice removes carol; the DS
-/// persists the remove commit + resulting GroupInfo, then returns 500. Alice must
-/// observe her own commit is canonical at that epoch and ADOPT it (advance her
-/// epoch, keep the roster change) rather than roll back.
-///
-/// **Convergence proved:** the fault fires exactly once; alice is not wedged (she
-/// can still send and the remaining member bob decrypts it); the roster converged
-/// (carol is gone, alice+bob remain); and evicted carol cannot read the
-/// post-adopt traffic. A rollback-and-wedge would fail the "bob decrypts" check.
+/// A committer must adopt its own canonical removal commit after a `Fail500PostWrite` (#411).
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn fail500_post_write_commit_is_adopted_not_wedged() {
@@ -544,8 +343,7 @@ async fn fail500_post_write_commit_is_adopted_not_wedged() {
     join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
     bob.process_commits_for(&channel_id).await;
 
-    // Arm: the DS will PERSIST alice's next commit (the carol-removal) and its
-    // GroupInfo, then answer 500. Alice believes the submit failed.
+    // The DS persists the removal, then answers 500.
     arm_ds_fault(DsFault::Fail500PostWrite);
     alice.remove_member(&group_id, carol_p.id.as_str()).await;
 
@@ -554,11 +352,9 @@ async fn fail500_post_write_commit_is_adopted_not_wedged() {
         "Fail500PostWrite should have fired exactly once on the removal commit"
     );
 
-    // Both remaining members settle on the adopted commit.
     alice.process_commits_for(&channel_id).await;
     bob.process_commits_for(&channel_id).await;
 
-    // Roster converged: carol removed, alice + bob remain.
     let members = alice.group_member_ids(&group_id).await;
     assert!(
         members.contains(&alice.user_id().to_string()) && members.contains(&bob_p.id),
@@ -569,9 +365,7 @@ async fn fail500_post_write_commit_is_adopted_not_wedged() {
         "carol must be removed after alice adopted her own canonical removal commit, got: {members:?}"
     );
 
-    // LOAD-BEARING: alice did not wedge — she sends and the remaining member bob
-    // decrypts. A rollback would have stranded alice at the pre-removal epoch and
-    // this message would be undecryptable to bob.
+    // Load-bearing: a rollback would strand alice at the pre-removal epoch.
     alice.send_channel_message(&channel_id, "post-adopt").await;
     bob.process_commits_for(&channel_id).await;
     assert!(
@@ -580,7 +374,6 @@ async fn fail500_post_write_commit_is_adopted_not_wedged() {
          wedged/rolled-back her own canonical commit otherwise"
     );
 
-    // Evicted carol cannot read post-removal traffic.
     assert!(
         !contents(&carol, &channel_id).await.contains(&"post-adopt".to_string()),
         "REMOVAL BYPASS: evicted carol decrypted a post-removal message"
@@ -591,19 +384,7 @@ async fn fail500_post_write_commit_is_adopted_not_wedged() {
     drop(carol);
 }
 
-/// Contrast case to the post-write fault: `Fail500PreWrite` is a CLEAN failure —
-/// the DS returns 500 WITHOUT persisting anything. This pins the distinction the
-/// fault menu draws. A post-write fault leaves a canonical commit the client must
-/// ADOPT; a pre-write fault leaves NOTHING, so the client must roll its staged
-/// commit back cleanly — never adopt a phantom epoch, never wedge.
-///
-/// **Convergence proved:** after a pre-write-faulted add attempt, (1) the
-/// commit-log head is UNCHANGED — nothing landed — which is the direct evidence
-/// that a pre-write fault is not a lost-response case; and (2) alice is not
-/// wedged or forked onto a phantom epoch: she still round-trips a message with
-/// the existing member bob at her real, unchanged epoch. A client that wrongly
-/// "adopted" the never-persisted commit would advance past bob and this decrypt
-/// would fail.
+/// `Fail500PreWrite` persists nothing: the head is unchanged and alice rolls back cleanly.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn fail500_pre_write_persists_nothing_and_does_not_wedge() {
@@ -622,13 +403,9 @@ async fn fail500_pre_write_persists_nothing_and_does_not_wedge() {
 
     join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
 
-    // Baseline head after bob's add.
     let head_before = ds_head_epoch(&group_id).await;
 
-    // Arm a pre-write failure, then attempt to add carol. The add commit's submit
-    // 500s BEFORE persisting, so `reconcile` finds its commit is NOT canonical
-    // and rolls back cleanly (surfacing an error). Use the non-panicking form —
-    // a clean surfaced error is the CORRECT outcome here.
+    // A clean surfaced error is the correct outcome, hence the non-panicking form.
     arm_ds_fault(DsFault::Fail500PreWrite);
     let _ = alice
         .invoke_try(
@@ -645,16 +422,12 @@ async fn fail500_pre_write_persists_nothing_and_does_not_wedge() {
         "Fail500PreWrite should have fired exactly once"
     );
 
-    // (1) Nothing landed: the commit-log head did not move. A lost-RESPONSE
-    // (post-write) fault would have advanced it; a pre-write fault must not.
     assert_eq!(
         ds_head_epoch(&group_id).await,
         head_before,
         "Fail500PreWrite persisted a commit — the head advanced when nothing should have landed"
     );
 
-    // (2) No wedge / no phantom epoch: alice still talks to the existing member
-    // bob at her real epoch.
     alice.send_channel_message(&channel_id, "post-prewrite").await;
     bob.process_commits_for(&channel_id).await;
     assert!(
@@ -668,42 +441,7 @@ async fn fail500_pre_write_persists_nothing_and_does_not_wedge() {
     drop(carol);
 }
 
-// ─── Scenario 2 — epoch-gap recovery (#430-P2 / F1) ─────────────────────────
-
-/// **Invalid state it attacks:** a non-contiguous commit log (invariant F1). A
-/// member is offline while the group advances several epochs, and one *interior*
-/// commit row is then dropped (`drop_commit_row`) — the exact "a row deleted
-/// after another member applied it" shape the DB-trigger work (I1) is meant to
-/// make impossible. The returning member must NOT wedge forever on the gap: it
-/// drops its stale local group and recovers onto the current published epoch via
-/// external-join.
-///
-/// **Convergence proved:** the returning member reaches the shared DS head, is a
-/// current member, retains the in-membership message it had already ratcheted
-/// past the gap for (M1, decrypted by the interleave hook before the gap is
-/// hit), and decrypts fresh post-recovery traffic. The whole group agrees on the
-/// head epoch.
-///
-/// **Accepted loss (documented, not fought):** messages sealed at the epochs the
-/// gap forces the member to *jump over* via external-join are unrecoverable for
-/// that member — that is the direct consequence of the injected F1 gap, and is
-/// exactly what the I1 DB triggers exist to prevent upstream. This test proves
-/// the CLIENT recovers and converges; it does not claim the gap itself is lossless.
-///
-/// **Also the deterministic repro for the fuzzer/marathon
-/// message-strand-through-rebuild finding (#4)** — it absorbed the former
-/// `continuous_member_keeps_mid_replay_message_through_rebuild`, which ran this
-/// exact sequence and dropped the same row. Every epoch-ADVANCING path,
-/// including a recovery rebuild, must INGEST the current epoch's messages
-/// *before* advancing past it, because `max_past_epochs = 0` discards the
-/// ratchet keys the instant the group advances (#440 / #441 for the fetch /
-/// send / commit-initiation paths; this closes it on the RECOVERY seam). So bob
-/// holds TWO un-ingested messages: M1 at his *join* epoch (initial-epoch hook)
-/// and M2 at a *mid-replay* epoch he only reaches after applying a commit — the
-/// load-bearing one, caught by the post-commit hook the instant his replay
-/// reaches that epoch, *before* the gap forces the jump to head. The lost-race
-/// converge path (`reconcile.rs`) runs the same interleaved catch-up; that path
-/// is timing-sensitive and is gated by the model fuzzer + marathon.
+/// F1 gap: a dropped interior commit forces external-join; M1 and mid-replay M2 must be ingested first (#440/#441).
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn epoch_gap_recovers_via_external_join() {
@@ -722,32 +460,18 @@ async fn epoch_gap_recovers_via_external_join() {
     let group_id = alice.create_group("Gap").await;
     let channel_id = alice.general_channel_id(&group_id).await;
 
-    // Bob joins (the add commit, then bob's own #666 post-join self-update). His
-    // MLS epoch is the head that leaves behind; he then goes "offline" (no further
-    // poll/process/fetch until the very end).
+    // Bob joins, then goes offline until the end.
     join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
     let bob_join_epoch = ds_head_epoch(&group_id).await;
 
-    // A message at bob's join epoch — the interleave hook decrypts this on his
-    // return, BEFORE the replay reaches the gap, so it must survive.
+    // Decrypted before the replay reaches the gap.
     alice.send_channel_message(&channel_id, "M1-at-join-epoch").await;
 
-    // Churn while bob is offline: carol joins, carol is removed, dave joins. The
-    // epoch the carol-remove commit lands at is READ off the log rather than
-    // counted, because the number of commits a join produces is not a constant —
-    // `join_member` costs the add plus the joiner's own #666 post-join
-    // self-update. What the scenario needs is the *identity* of the row to drop,
-    // not a commit census, and the head is exactly the epoch the next commit will
-    // be built from.
+    // The row to drop is read off the log: a join's commit count isn't constant (#666).
     join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
     let remove_epoch = ds_head_epoch(&group_id).await;
 
-    // (M2) at a MID-replay epoch — the epoch the carol-remove row is built
-    // from. Bob only reaches it AFTER applying the carol-add commits, so it
-    // exercises the post-commit interleave hook, not the initial one. Asserted
-    // rather than assumed: if a future change made the carol join a no-op, M2
-    // would silently collapse onto bob's join epoch and the load-bearing M2
-    // assertion below would go vacuous.
+    // M2 must sit at a mid-replay epoch, or its assertion goes vacuous.
     assert!(
         remove_epoch > bob_join_epoch,
         "M2 must sit at an epoch bob reaches only by APPLYING a commit \
@@ -760,9 +484,7 @@ async fn epoch_gap_recovers_via_external_join() {
     alice.process_commits_for(&channel_id).await;
     join_member(&alice, &dave, &group_id, &channel_id, &dave_p.username).await;
 
-    // Sanity: the log advanced past the row we are about to drop, so the gap will
-    // be INTERIOR (a higher epoch is present above it) — which is what makes the
-    // replay classify it as a gap instead of simply "nothing new yet".
+    // The gap must be interior to be classified as a gap.
     let head_before_gap = ds_head_epoch(&group_id).await;
     assert!(
         head_before_gap > remove_epoch + 1,
@@ -770,9 +492,6 @@ async fn epoch_gap_recovers_via_external_join() {
          interior, head is {head_before_gap}"
     );
 
-    // Punch the gap: delete the carol-remove commit. The log now reads
-    // …,[gap],… — a returning member replaying from below sees the epochs either
-    // side of it and nothing at it.
     drop_commit_row(&group_id, remove_epoch).await;
     assert_eq!(
         ds_head_epoch(&group_id).await,
@@ -780,18 +499,14 @@ async fn epoch_gap_recovers_via_external_join() {
         "dropping an interior row must not change the head (MAX(epoch)+1)"
     );
 
-    // Bob comes back. This single fetch drains his backlog: the hook decrypts
-    // M1 at epoch 1, the replay applies the epoch-1 commit, then hits the gap at
-    // epoch 3, forgets the stale group, and external-joins onto the head.
+    // Hook decrypts M1, replay hits the gap, then external-join onto the head.
     let bob_after_return = contents(&bob, &channel_id).await;
     assert!(
         bob_after_return.contains(&"M1-at-join-epoch".to_string()),
         "bob must retain the message at his join epoch (decrypted before the gap \
          is hit), got: {bob_after_return:?}"
     );
-    // The gap sits directly ABOVE M2, so bob ingests it before the rebuild —
-    // a mid-replay epoch's message must be ingested before the external-join
-    // rebuild discards its keys (#440 / #441 on the recovery seam).
+    // M2 is ingested before the rebuild discards its keys.
     assert!(
         bob_after_return.contains(&"M2-mid-replay".to_string()),
         "STRAND THROUGH REBUILD: bob lost M2, sent at a mid-replay epoch he held keys for. The \
@@ -799,12 +514,9 @@ async fn epoch_gap_recovers_via_external_join() {
          the local group to head. got: {bob_after_return:?}"
     );
 
-    // Alice applies bob's recovery external-join, then sends fresh traffic.
     alice.process_commits_for(&channel_id).await;
     alice.send_channel_message(&channel_id, "after-recovery").await;
 
-    // LOAD-BEARING: bob recovered — he is a current member and decrypts
-    // post-recovery traffic instead of wedging on the gap forever.
     let members = alice.group_member_ids(&group_id).await;
     assert!(
         members.contains(&bob_p.id),
@@ -815,7 +527,6 @@ async fn epoch_gap_recovers_via_external_join() {
         "bob must decrypt post-recovery traffic — he wedged on the epoch gap otherwise"
     );
 
-    // Whole group converges on the head: dave (a continuous member) also reads it.
     dave.process_commits_for(&channel_id).await;
     assert!(
         contents(&dave, &channel_id).await.contains(&"after-recovery".to_string()),
@@ -828,39 +539,12 @@ async fn epoch_gap_recovers_via_external_join() {
     drop(dave);
 }
 
-// ─── Scenario 2c — commit-log RETENTION prune recovers via external-join (#539) ─
-
-/// **Invariant it exercises:** the I4 retention floor (#539). The DS prunes
-/// `mls_commit_log` below a floor to bound storage; a member pruned PAST its
-/// epoch must not wedge — it drops its stale local group and external-joins onto
-/// the head, forfeiting ONLY the pruned-gap messages (accepted loss #1). A member
-/// that was REMOVED from the group must NOT climb back via that same recovery
-/// (may_rejoin / I5 holds even for a pruned gap).
-///
-/// This is the client-side complement to the DS-side floor unit tests
-/// (`pollis-delivery/tests/retention.rs`): those prove the floor is never above
-/// the slowest current member (Tier 1) + Tier 2's hard cap; this proves the
-/// CLIENT recovers when Tier 2 does prune past it, and that recovery stays gated
-/// on current membership.
-///
-/// Sequence (bob is the straggler, carol is removed, dave is continuous):
-///   bob add    — bob's local epoch becomes the head, then he goes offline
-///   msg  "M1"  at bob's join epoch — decrypted by his interleave hook on return
-///   carol add
-///   msg  "M2"  sent while bob is offline; this one lands in the PRUNED gap
-///   carol remove
-///   dave add
-/// Then prune every commit below the epoch dave's add landed at (Tier-2 style),
-/// so bob and the removed carol both replay into a log whose earliest row is
-/// above their own epoch. Epoch numbers are read off the log rather than counted:
-/// `join_member` costs the add PLUS the joiner's own #666 post-join self-update,
-/// so a commit census here would be a second, silently-drifting spec.
+/// #539: a member pruned past its epoch external-joins (losing only the gap); a removed one must not (I5).
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn commit_log_prune_recovers_via_external_join() {
     wipe().await;
-    // The pruned-gap message is lost on bob on purpose (a Tier-2 prune past a
-    // current member), and asserted on below.
+    // The pruned-gap message is lost on bob on purpose.
     expect_losses();
 
     let mut alice = TestClient::new().await;
@@ -876,13 +560,10 @@ async fn commit_log_prune_recovers_via_external_join() {
     let group_id = alice.create_group("Prune").await;
     let channel_id = alice.general_channel_id(&group_id).await;
 
-    // Bob joins; his MLS epoch is the head that leaves behind. He goes offline.
     join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
     alice.send_channel_message(&channel_id, "M1-at-join-epoch").await;
 
-    // Churn while bob is offline. A message is sent after carol joins — that is
-    // the one that lands in bob's pruned gap. Carol is then removed and dave
-    // added; the epoch dave's add lands at becomes the prune floor.
+    // The message after carol joins lands in bob's pruned gap; dave's add is the floor.
     join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
     alice.send_channel_message(&channel_id, "M2-in-pruned-gap").await;
     alice.remove_member(&group_id, carol_p.id.as_str()).await;
@@ -897,9 +578,6 @@ async fn commit_log_prune_recovers_via_external_join() {
          head is {head_before_prune}"
     );
 
-    // Prune the whole prefix below dave's add — the retention floor advanced past
-    // both bob and the removed carol, so a member replaying from below now reads
-    // an earliest-available epoch above its own.
     let pruned = prune_commits_below(&group_id, dave_add_epoch).await;
     assert_eq!(
         pruned, dave_add_epoch as u64,
@@ -911,7 +589,6 @@ async fn commit_log_prune_recovers_via_external_join() {
         "pruning below the head must not change MAX(epoch)+1"
     );
 
-    // ── Bob (a CURRENT member) recovers via external-join, losing ONLY the gap ──
     let bob_after = contents(&bob, &channel_id).await;
     assert!(
         bob_after.contains(&"M1-at-join-epoch".to_string()),
@@ -922,7 +599,6 @@ async fn commit_log_prune_recovers_via_external_join() {
         "bob must NOT recover the message sealed in the pruned gap (accepted loss #1), got: {bob_after:?}"
     );
 
-    // Alice applies bob's recovery external-join, then sends fresh traffic.
     alice.process_commits_for(&channel_id).await;
     alice.send_channel_message(&channel_id, "after-recovery").await;
 
@@ -936,16 +612,13 @@ async fn commit_log_prune_recovers_via_external_join() {
         "bob must decrypt post-recovery traffic — he wedged on the pruned gap otherwise"
     );
 
-    // Dave (continuous member) converges on the head too.
     dave.process_commits_for(&channel_id).await;
     assert!(
         contents(&dave, &channel_id).await.contains(&"after-recovery".to_string()),
         "dave must decrypt post-recovery traffic — the group forked at the prune otherwise"
     );
 
-    // ── Carol (REMOVED) must NOT climb back via the same recovery (I5) ──
-    // Her catch-up hits the same pruned gap, but may_rejoin gates the
-    // external-join on current membership, which she lacks.
+    // Carol (removed) must not climb back: may_rejoin checks membership.
     let _ = contents(&carol, &channel_id).await;
     alice.process_commits_for(&channel_id).await;
     let members = alice.group_member_ids(&group_id).await;
@@ -965,34 +638,7 @@ async fn commit_log_prune_recovers_via_external_join() {
     drop(dave);
 }
 
-// ─── Scenario 2d — a forged retention high-water cannot wipe the live log (#681) ─
-
-/// **Invariant it exercises:** the retention floor's head clamp (#681, Half 1) —
-/// the client-side complement to `pollis-delivery/tests/retention.rs`'s
-/// `bogus_high_water_above_head_cannot_wipe_the_live_log`. A catch-up high-water
-/// is client-REPORTED and therefore untrusted: a report far above the real head
-/// must NOT drive the retention floor at/above head and delete the whole commit
-/// log. If it did, EVERY member — even one sitting exactly at head — would be
-/// unable to advance, and anyone who could not external-join would lose history.
-/// The clamp retains the head commit, so the group stays advanceable.
-///
-/// This is the E2E complement to the #681 unit/integration coverage: those prove
-/// `prune_floor` never returns a floor at/above head and that a bogus high-water
-/// cannot delete the live log at the DB layer; this proves a real client can
-/// still ADVANCE afterward. The forged high-water is injected directly (its
-/// authenticated report path is now closed by Half 2 — that is the point), then
-/// the DS runs its REAL event-driven prune and the assertions run through the
-/// real client pipeline.
-///
-/// Verified fail-before: reverting ONLY the `prune_floor` clamp (keeping the
-/// harness and this test intact) drives the floor to `head + 100_000 - SLACK`,
-/// far above head, so the real `ds_prune_commit_log` deletes the whole log. The
-/// `report.floor < head_before` assertion fires first (observed: "the floor 99994
-/// must stay below head 2"), with the head-reset and add/convergence assertions
-/// behind it. With the clamp restored the same run passes. The identical
-/// `prune_floor` wipe is demonstrated fail-before at the unit and integration
-/// layers too (`floor_never_reaches_head_even_for_a_bogus_report`,
-/// `bogus_high_water_above_head_cannot_wipe_the_live_log`).
+/// #681: a forged high-water far above head must not let the retention prune wipe the live log.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn forged_retention_high_water_cannot_wipe_the_live_log() {
@@ -1009,7 +655,6 @@ async fn forged_retention_high_water_cannot_wipe_the_live_log() {
     let group_id = alice.create_group("Retention").await;
     let channel_id = alice.general_channel_id(&group_id).await;
 
-    // A non-trivial head: bob joins (commits), then a message everyone decrypts.
     join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
     alice.send_channel_message(&channel_id, "M1").await;
     bob.process_commits_for(&channel_id).await;
@@ -1021,14 +666,11 @@ async fn forged_retention_high_water_cannot_wipe_the_live_log() {
         "the group must have a real commit history, head is {head_before}"
     );
 
-    // A forged high-water astronomically above the real head, for the WHOLE
-    // roster — the pre-#681 unauthenticated report's sticky, recorded effect.
+    // A forged high-water for the whole roster.
     force_high_water_for_all_members(&group_id, head_before + 100_000).await;
 
-    // The DS runs its real event-driven retention prune off those high-waters.
     let report = ds_prune_commit_log(&group_id).await;
 
-    // The clamp holds: the floor never reaches head, so the head commit survives.
     assert!(
         report.floor < head_before,
         "the floor {} must stay below head {head_before} — a forged report must not wipe the log",
@@ -1040,9 +682,7 @@ async fn forged_retention_high_water_cannot_wipe_the_live_log() {
         "a forged high-water must not reset the conversation head (the log-wipe)"
     );
 
-    // The group is still advanceable through the REAL client path: a fresh member
-    // add lands and every current member converges on it. Pre-fix the wiped log
-    // would have frozen the group (its head reset to 0, rejecting further commits).
+    // The group must still advance through the real client path.
     join_member(&alice, &dave, &group_id, &channel_id, &dave_p.username).await;
     alice.send_channel_message(&channel_id, "after-clamp").await;
     bob.process_commits_for(&channel_id).await;
@@ -1067,19 +707,7 @@ async fn forged_retention_high_water_cannot_wipe_the_live_log() {
     drop(dave);
 }
 
-// ─── Scenario 3 — dropped Welcome recovers via external-join ────────────────
-
-/// **Invalid state it attacks:** a newly-added member stranded because their only
-/// Welcome was lost (invariant F5). The add commit + resulting GroupInfo land,
-/// but `DropWelcome` prevents the Welcome from ever being persisted, so the new
-/// member cannot join from a Welcome. Because the member's leaf was already added
-/// by the (landed) commit, recovering via external-join creates a *second* leaf —
-/// the duplicate-leaf-prune path the staying members must resolve.
-///
-/// **Convergence proved:** the new member ends up a functional current member —
-/// they decrypt a message alice sends after they recover, alice decrypts a
-/// message they send, and the roster lists them exactly once. A fork from an
-/// unpruned duplicate leaf would fail the cross-direction decrypt checks.
+/// F5: a dropped Welcome recovers via external-join, with the duplicate leaf pruned.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn dropped_welcome_recovers_via_external_join() {
@@ -1094,8 +722,6 @@ async fn dropped_welcome_recovers_via_external_join() {
     let group_id = alice.create_group("DropWelcome").await;
     let channel_id = alice.general_channel_id(&group_id).await;
 
-    // Arm the Welcome drop, THEN add bob. The commit + GroupInfo land; bob's
-    // Welcome never becomes fetchable.
     arm_ds_fault(DsFault::DropWelcome);
     alice.invite(&group_id, &bob_p.username).await;
     assert!(
@@ -1103,9 +729,7 @@ async fn dropped_welcome_recovers_via_external_join() {
         "DropWelcome should have fired exactly once on bob's add"
     );
 
-    // Bob accepts and polls — but there is no Welcome to drain. His commit-log
-    // catch-up finds no local group and must external-join from the published
-    // GroupInfo instead.
+    // No Welcome to drain, so the catch-up must external-join.
     let invite_id = bob
         .first_pending_invite()
         .await
@@ -1117,10 +741,8 @@ async fn dropped_welcome_recovers_via_external_join() {
     bob.poll().await;
     bob.process_commits_for(&channel_id).await;
 
-    // Alice reconciles bob's external-join (and prunes his stale add-leaf).
     alice.process_commits_for(&channel_id).await;
 
-    // Roster lists bob exactly once — no duplicate-leaf residue at the user level.
     let members = alice.group_member_ids(&group_id).await;
     assert_eq!(
         members.iter().filter(|m| **m == bob_p.id).count(),
@@ -1128,8 +750,7 @@ async fn dropped_welcome_recovers_via_external_join() {
         "bob must appear exactly once in the roster after dropped-Welcome recovery, got: {members:?}"
     );
 
-    // LOAD-BEARING both directions: a fork from an unpruned duplicate leaf would
-    // break one of these decrypts.
+    // Load-bearing both ways: an unpruned duplicate leaf would break one.
     alice.send_channel_message(&channel_id, "alice-to-bob").await;
     bob.process_commits_for(&channel_id).await;
     assert!(
@@ -1148,19 +769,7 @@ async fn dropped_welcome_recovers_via_external_join() {
     drop(bob);
 }
 
-// ─── Scenario 4 — eviction then re-add, with a provable blackout window ──────
-
-/// **Invalid state it attacks:** an evicted member who can still read traffic
-/// sent while they were out (a membership/forward-secrecy leak) — or, conversely,
-/// a re-added member who is wedged out of the conversation they legitimately
-/// rejoined.
-///
-/// Bob joins, reads a pre-removal message, is removed, and while he is out alice
-/// sends two messages; then bob is re-added. Bob must: (1) still hold the
-/// pre-removal message he decrypted while a member, (2) decrypt post-re-add
-/// traffic, and (3) **provably NOT** decrypt the two messages sent while he was
-/// evicted (sealed at epochs he was not a member of — bounded-history caveat (a)
-/// plus MLS forward secrecy). The roster must list him exactly once.
+/// Evict then re-add: bob keeps pre-removal history, reads post-re-add, and never the blackout window.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn eviction_then_readd_has_provable_blackout() {
@@ -1177,29 +786,22 @@ async fn eviction_then_readd_has_provable_blackout() {
 
     join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
 
-    // Bob reads a message while he is a member — it lands in his local message
-    // store and must survive the removal (removal forgets MLS crypto state, not
-    // decrypted history).
+    // Removal forgets MLS state, not decrypted history.
     alice.send_channel_message(&channel_id, "pre-removal").await;
     assert!(
         contents(&bob, &channel_id).await.contains(&"pre-removal".to_string()),
         "bob must decrypt the pre-removal message while still a member"
     );
 
-    // Evict bob and settle his leaf out of the tree.
     alice.remove_member(&group_id, bob_p.id.as_str()).await;
     alice.process_commits_for(&channel_id).await;
 
-    // Blackout window: messages bob must never be able to read.
     alice.send_channel_message(&channel_id, "evicted-1").await;
     alice.send_channel_message(&channel_id, "evicted-2").await;
 
-    // Re-add bob.
     join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
     alice.process_commits_for(&channel_id).await;
 
-    // Roster lists bob exactly once (a stale + fresh leaf would double-count at
-    // the tree level; the user-level roster must still be clean).
     let members = alice.group_member_ids(&group_id).await;
     assert_eq!(
         members.iter().filter(|m| **m == bob_p.id).count(),
@@ -1207,7 +809,6 @@ async fn eviction_then_readd_has_provable_blackout() {
         "bob must appear exactly once after re-add, got: {members:?}"
     );
 
-    // Post-re-add traffic must reach bob.
     alice.send_channel_message(&channel_id, "post-readd").await;
     bob.process_commits_for(&channel_id).await;
     let bob_contents = contents(&bob, &channel_id).await;
@@ -1220,8 +821,6 @@ async fn eviction_then_readd_has_provable_blackout() {
         "bob must retain the pre-removal message he decrypted while a member, got: {bob_contents:?}"
     );
 
-    // PROVABLE BLACKOUT: the two evicted-window messages must be undecryptable to
-    // bob even after re-add.
     for blacked_out in ["evicted-1", "evicted-2"] {
         assert!(
             !bob_contents.contains(&blacked_out.to_string()),
@@ -1234,28 +833,7 @@ async fn eviction_then_readd_has_provable_blackout() {
     drop(bob);
 }
 
-// ─── Scenario 4b — removed member RE-ROSTERED recovers via external-join ─────
-
-/// **Positive counterpart to the removed/revoked lockout tests (Scenarios 5, 7,
-/// 7b) — the recovery gate's deny must NOT be permanent.** Those prove a removed
-/// member (or a revoked device) is correctly GATED OUT of the external-join
-/// recovery path (`may_rejoin_via_external_join` → `false`). This proves the
-/// other half of that invariant: once the member is RE-ROSTERED, the very same
-/// gate must flip back to ALLOW and let them recover — a removal is a revocable
-/// state, not a tombstone.
-///
-/// The distinction from `eviction_then_readd_has_provable_blackout` (Scenario 4)
-/// is the RECOVERY SEAM. That test re-adds bob via a fresh Welcome, so bob never
-/// touches `may_rejoin_via_external_join`. Here bob's re-add Welcome is DROPPED
-/// (`DsFault::DropWelcome`), so — exactly like Scenario 3 — bob has no Welcome and
-/// no local group (he self-evicted on the removal) and can ONLY come back through
-/// the external-join gate. That gate is the one hardened to fail CLOSED on a
-/// transient check error; this test proves it still ALLOWS a *legitimate*
-/// re-rostered member (registered device, membership restored) — the fail-closed
-/// change did not over-reach into the happy path.
-///
-/// carol (a continuous member throughout) is the positive control that isolates
-/// every assertion to bob.
+/// Re-rostered after removal, with the re-add Welcome dropped: the external-join gate must allow him back.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn removed_then_rerostered_member_recovers_via_external_join() {
@@ -1277,28 +855,21 @@ async fn removed_then_rerostered_member_recovers_via_external_join() {
     bob.process_commits_for(&channel_id).await;
     carol.process_commits_for(&channel_id).await;
 
-    // Baseline: bob decrypts while a genuine member — proving he had live ratchet
-    // state before the removal.
     alice.send_channel_message(&channel_id, "pre-removal").await;
     assert!(
         contents(&bob, &channel_id).await.contains(&"pre-removal".to_string()),
         "bob must decrypt the pre-removal message while still a member"
     );
 
-    // Remove bob; remaining members prune his leaf.
     alice.remove_member(&group_id, bob_p.id.as_str()).await;
     alice.process_commits_for(&channel_id).await;
     carol.process_commits_for(&channel_id).await;
 
-    // A message sent while bob is OUT — the blackout probe. bob must never read it,
-    // even after he is re-rostered (he rejoins at a fresh leaf, not the old epoch).
+    // Blackout probe.
     alice.send_channel_message(&channel_id, "blackout").await;
     carol.process_commits_for(&channel_id).await;
 
-    // bob comes online WHILE removed: he sees the removal commit, self-evicts
-    // (deletes his local group), and his external-join recovery is GATED OUT — he
-    // is no longer a current member. He is now out with no local group. This is the
-    // gate's deny half (the negative tests own it); here it just sets the stage.
+    // Removed: he self-evicts and the external-join is gated out.
     bob.poll().await;
     bob.process_commits_for(&channel_id).await;
     let members_while_out = alice.group_member_ids(&group_id).await;
@@ -1307,9 +878,7 @@ async fn removed_then_rerostered_member_recovers_via_external_join() {
         "bob must be out of the roster while removed, got: {members_while_out:?}"
     );
 
-    // ── RE-ROSTER bob, but DROP his re-add Welcome so he can only come back through
-    //    the external-join gate (not a fresh Welcome). The add commit + GroupInfo
-    //    land; bob's Welcome never becomes fetchable (the Scenario 3 shape).
+    // Re-roster with the Welcome dropped, so only the external-join gate can let him in.
     arm_ds_fault(DsFault::DropWelcome);
     alice.invite(&group_id, &bob_p.username).await;
     assert!(
@@ -1317,9 +886,7 @@ async fn removed_then_rerostered_member_recovers_via_external_join() {
         "DropWelcome should have fired exactly once on bob's re-add"
     );
 
-    // bob accepts (his group_member row is restored) and polls — no Welcome to
-    // drain and no local group, so his catch-up must external-join. With membership
-    // restored, may_rejoin_via_external_join now ALLOWS the rejoin.
+    // Membership restored, so may_rejoin now allows it.
     let invite_id = bob
         .first_pending_invite()
         .await
@@ -1331,11 +898,8 @@ async fn removed_then_rerostered_member_recovers_via_external_join() {
     bob.poll().await;
     bob.process_commits_for(&channel_id).await;
 
-    // alice reconciles bob's external-join (and prunes his stale add-leaf).
     alice.process_commits_for(&channel_id).await;
 
-    // Roster lists bob exactly once after the re-roster recovery — no duplicate-leaf
-    // residue at the user level.
     let members = alice.group_member_ids(&group_id).await;
     assert_eq!(
         members.iter().filter(|m| **m == bob_p.id).count(),
@@ -1343,24 +907,18 @@ async fn removed_then_rerostered_member_recovers_via_external_join() {
         "re-rostered bob must appear exactly once in the roster, got: {members:?}"
     );
 
-    // Post-re-add traffic.
     alice.send_channel_message(&channel_id, "post-readd").await;
     bob.process_commits_for(&channel_id).await;
     let bob_contents = contents(&bob, &channel_id).await;
 
-    // Positive control: carol (a continuous member) decrypts post-readd — it was
-    // genuinely delivered, isolating the invariant to bob.
+    // Positive control: delivered, isolating the invariant to bob.
     carol.process_commits_for(&channel_id).await;
     assert!(
         contents(&carol, &channel_id).await.contains(&"post-readd".to_string()),
         "carol (a continuous member) must decrypt the post-readd message"
     );
 
-    // LOAD-BEARING (the positive gate flip): re-rostered bob recovered through the
-    // external-join gate and decrypts post-re-add traffic. If the gate wrongly
-    // stayed CLOSED for a legitimate re-rostered member — or the fail-closed
-    // hardening over-reached the error branch into the happy path — bob would be
-    // permanently locked out and this fails.
+    // Load-bearing: the fail-closed gate must not over-reach into the happy path.
     assert!(
         bob_contents.contains(&"post-readd".to_string()),
         "RE-ROSTER LOCKOUT: bob was re-added to the group but never recovered through the \
@@ -1368,15 +926,11 @@ async fn removed_then_rerostered_member_recovers_via_external_join() {
          bob view={bob_contents:?}"
     );
 
-    // bob retains the pre-removal message he decrypted while a member (removal
-    // forgets MLS crypto state, not decrypted history).
     assert!(
         bob_contents.contains(&"pre-removal".to_string()),
         "bob must retain the pre-removal message he decrypted while a member, got: {bob_contents:?}"
     );
 
-    // PROVABLE BLACKOUT: the message sent while bob was OUT stays unreadable — he
-    // rejoined at a fresh leaf/epoch, never climbing back into the evicted one.
     assert!(
         !bob_contents.contains(&"blackout".to_string()),
         "MEMBERSHIP LEAK: re-rostered bob decrypted the blackout message sent while he was \
@@ -1389,30 +943,7 @@ async fn removed_then_rerostered_member_recovers_via_external_join() {
     drop(carol);
 }
 
-// ─── Scenario 5 — revoked-device lockout across every recovery path ─────────
-
-/// **Invalid state it attacks:** a revoked device climbing back into a group it
-/// was removed from (invariant: a device whose `user_device` row is tombstoned
-/// must stay out).
-///
-/// **Scope note (#679):** this scenario revokes the device *and* removes the
-/// member, so the leaf is pruned by the explicit `remove_member`. It therefore
-/// does NOT cover "revocation prunes the leaf on its own" — that is
-/// [`revoking_one_device_prunes_its_leaf_with_no_roster_change`]. Do not read a
-/// pass here as evidence that revocation itself works; it passed throughout the
-/// entire lifetime of the #679 bug.
-///
-/// The device drives EVERY recovery entry point a client has —
-/// `process_pending_commits` and `get_channel_messages` — and each must fail
-/// CLEANLY: a no-op, never a panic, never a wedge of the rest of the group.
-///
-/// **Asserted loudly (never a silent no-op as a pass):** the `local_device_registered`
-/// gate can silently skip external-join, so the load-bearing checks are the
-/// *observable lockout* — the revoked device cannot decrypt any post-removal
-/// message and is not in the roster — combined with the group staying live
-/// (carol keeps receiving). If the gate wrongly let the device back in, the
-/// "cannot decrypt" assertions fail; if it wrongly wedged the group, carol's
-/// assertions fail.
+/// A revoked and removed device stays out across every recovery entry point, without wedging the group.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn revoked_device_locked_out_of_every_recovery_path() {
@@ -1434,8 +965,6 @@ async fn revoked_device_locked_out_of_every_recovery_path() {
     bob.process_commits_for(&channel_id).await;
     carol.process_commits_for(&channel_id).await;
 
-    // Baseline: everyone decrypts, bob included — he is a real, decrypting
-    // member before the revoke.
     alice.send_channel_message(&channel_id, "before-revoke").await;
     for (c, label) in [(&alice, "alice"), (&bob, "bob"), (&carol, "carol")] {
         assert!(
@@ -1444,9 +973,7 @@ async fn revoked_device_locked_out_of_every_recovery_path() {
         );
     }
 
-    // Revoke bob's device server-side: tombstone its `user_device` row (the
-    // #372 revoked-device state). Poke the writable MAIN handle directly — the
-    // client's own view is read-only.
+    // Tombstone bob's `user_device` row (#372) via the writable main handle.
     {
         let remote = writable_remote().await;
         let conn = remote.conn().await.expect("remote conn");
@@ -1458,14 +985,12 @@ async fn revoked_device_locked_out_of_every_recovery_path() {
         .expect("tombstone bob user_device");
     }
 
-    // Remove bob from the group; remaining members prune his leaf.
     alice.remove_member(&group_id, bob_p.id.as_str()).await;
     alice.process_commits_for(&channel_id).await;
     carol.process_commits_for(&channel_id).await;
 
     alice.send_channel_message(&channel_id, "after-revoke-1").await;
 
-    // The legitimate members read the first post-revoke message.
     for (c, label) in [(&alice, "alice"), (&carol, "carol")] {
         assert!(
             contents(c, &channel_id).await.contains(&"after-revoke-1".to_string()),
@@ -1473,14 +998,10 @@ async fn revoked_device_locked_out_of_every_recovery_path() {
         );
     }
 
-    // Bob drives EVERY recovery entry point. Both must return cleanly (these
-    // helpers panic on an `Err`, so reaching the assertions proves no panic/error)
-    // and neither may climb the revoked device back in.
+    // These helpers panic on Err, so reaching the assertions proves no panic.
     bob.process_commits_for(&channel_id).await;
     let bob_contents = contents(&bob, &channel_id).await;
 
-    // LOAD-BEARING lockout: the revoked device cannot read post-removal traffic
-    // and is not in the roster.
     assert!(
         !bob_contents.contains(&"after-revoke-1".to_string()),
         "REVOCATION BYPASS: revoked bob decrypted a post-removal message — it climbed \
@@ -1492,7 +1013,6 @@ async fn revoked_device_locked_out_of_every_recovery_path() {
         "revoked bob must not reappear in the roster, got: {members:?}"
     );
 
-    // No wedge: the group keeps advancing for the legitimate members.
     alice.send_channel_message(&channel_id, "after-revoke-2").await;
     carol.process_commits_for(&channel_id).await;
     assert!(
@@ -1501,7 +1021,6 @@ async fn revoked_device_locked_out_of_every_recovery_path() {
          receive a new message"
     );
 
-    // And bob is STILL out after a second recovery attempt on fresh traffic.
     let bob_contents = contents(&bob, &channel_id).await;
     assert!(
         !bob_contents.contains(&"after-revoke-2".to_string()),
@@ -1514,47 +1033,7 @@ async fn revoked_device_locked_out_of_every_recovery_path() {
     drop(carol);
 }
 
-// ─── Scenario — post-compromise security after a leaf steal (#666) ───────────
-
-/// **A stolen device state stops working once the victim rotates its leaf.**
-///
-/// This is the property #666 exists for, and until #666 Pollis did not have it.
-/// Forward secrecy — old keys are gone, so a *future* compromise cannot read
-/// *past* traffic — comes free from the ratchet and was never in doubt.
-/// Post-compromise security is the other direction: after a device is
-/// compromised, does the group *heal*? MLS says it heals when the compromised
-/// member publishes a fresh leaf secret along its direct path, and nothing but
-/// that member's own commit can do that. Pollis issued no such commit, so a
-/// member added by someone else and never committing anything of its own could
-/// be read forever by whoever took a copy of its state — for as long as it
-/// stayed in the group.
-///
-/// The adversary here is passive and honest about it: it exfiltrates bob's
-/// `mls_kv` (every MLS secret the device holds, the ML-DSA-44 request-signing
-/// key among them) and then only listens. It is given the DS's entire envelope
-/// set for the conversation and runs the real production decrypt over all of it,
-/// and it catches up on commits by presenting the stolen device's identity —
-/// which #987 made necessary and the stolen bytes already permit. Before #987 it
-/// did not have to: every binary carried a whole-database read token, so the
-/// commit log was readable with no credential at all. It never writes, commits,
-/// or external-joins — an adversary that *acts* could rejoin as bob with the same
-/// key, but that is device impersonation, which no key rotation defends against
-/// and which the roster/eviction tests cover instead.
-///
-/// Three-sided by construction, because a bare lockout assertion is worthless on
-/// its own — an attacker that could never read anything, or one that any epoch
-/// change would strand, passes it trivially:
-/// 1. Sealed at the compromised epoch → the attacker MUST read it. Proves the
-///    steal is real.
-/// 2. Sealed after **alice** commits → the attacker MUST STILL read it. This is
-///    the control that gives the test its teeth: it proves the adversary rides
-///    the commit chain forward (alice's UpdatePath is addressed to the copath,
-///    which contains bob's stolen leaf), so the lockout in (3) cannot be credited
-///    to "the epoch moved" — only to *whose* commit moved it.
-/// 3. Sealed after **bob** commits → the attacker MUST NOT read it. A committer's
-///    own leaf is the one position an UpdatePath carries no ciphertext for, so
-///    bob's fresh path secret is unreachable from his old state. This is
-///    post-compromise security, and #666 is what makes bob issue that commit.
+/// #666: a passive attacker with bob's stolen state reads until alice commits, and loses access once bob commits.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_stolen_leaf_is_locked_out_once_the_victim_rotates() {
@@ -1581,10 +1060,7 @@ async fn a_stolen_leaf_is_locked_out_once_the_victim_rotates() {
     alice.process_commits_for(&channel_id).await;
     bob.process_commits_for(&channel_id).await;
 
-    // Bob joined, so the welcome poller already rotated his leaf once (#666 M2).
-    // The steal happens AFTER that, at a settled epoch — otherwise the lockout
-    // below could be credited to the join-time rotation rather than the one this
-    // test performs.
+    // Steal after the join-time rotation, so the lockout is credited to this one.
     alice.send_channel_message(&channel_id, "before-steal").await;
     bob.process_commits_for(&channel_id).await;
     let _ = bob.fetch_channel_messages(&channel_id).await;
@@ -1592,7 +1068,6 @@ async fn a_stolen_leaf_is_locked_out_once_the_victim_rotates() {
     let attacker = steal_leaf(&bob).await;
     assert_eq!(attacker.victim(), bob_p.id, "we stole the right device");
 
-    // (1) Teeth: at the compromised epoch, the attacker reads everything bob can.
     alice.send_channel_message(&channel_id, "attacker-can-read-this").await;
     assert!(
         attacker
@@ -1602,10 +1077,7 @@ async fn a_stolen_leaf_is_locked_out_once_the_victim_rotates() {
          the compromise never happened, so the lockout below would prove nothing"
     );
 
-    // (2) Control: someone ELSE rotates. Alice's UpdatePath re-keys every node on
-    // her direct path and is addressed to the copath — which contains bob's leaf,
-    // whose key the attacker holds. So the group advancing an epoch does NOT evict
-    // the attacker, and the lockout in (3) cannot be blamed on epoch churn.
+    // Control: alice's UpdatePath reaches bob's stolen leaf, so epoch churn alone doesn't evict.
     assert!(
         alice.self_update(&group_id).await,
         "alice's rotation must land — she is the only committer at this point"
@@ -1622,23 +1094,14 @@ async fn a_stolen_leaf_is_locked_out_once_the_victim_rotates() {
          produce it. Fix the model, not the assertion."
     );
 
-    // Bob heals: his own commit replaces his leaf secret and refreshes every node
-    // on his direct path. A committer's own leaf is the one position an UpdatePath
-    // carries no ciphertext for, so the stolen state has no way to the new secret.
+    // An UpdatePath carries no ciphertext for the committer's own leaf.
     assert!(
         bob.self_update(&group_id).await,
         "bob's rotation must land — he is the only committer at this point"
     );
     alice.process_commits_for(&channel_id).await;
 
-    // (3) Post-compromise security. Observable mechanism, for anyone reading the
-    // captured log: the attacker's replay reaches bob's commit and openmls refuses
-    // it with "Cannot decrypt own messages" — the attacker sits at bob's leaf, and
-    // that leaf is the one the UpdatePath has no ciphertext for. The client's
-    // divergence recovery then deletes the diverged group and declines to
-    // external-join (the attacker's device is not registered to bob). Both steps
-    // are downstream of the same cryptographic fact: the new path secret is
-    // unreachable from bob's old state.
+    // The attacker's replay fails with "Cannot decrypt own messages" and does not external-join.
     alice.send_channel_message(&channel_id, "attacker-must-not-read-this").await;
     bob.process_commits_for(&channel_id).await;
     assert!(
@@ -1650,7 +1113,6 @@ async fn a_stolen_leaf_is_locked_out_once_the_victim_rotates() {
          key or did not land."
     );
 
-    // And the group is healthy for its real members — healing must not wedge it.
     let bob_view = contents(&bob, &channel_id).await;
     assert!(
         bob_view.contains(&"attacker-must-not-read-this".to_string()),
@@ -1671,29 +1133,7 @@ async fn a_stolen_leaf_is_locked_out_once_the_victim_rotates() {
     drop(bob);
 }
 
-// ─── Scenario 5b — revocation ALONE must prune the leaf (#679) ───────────────
-
-/// **Invalid state it attacks:** a device whose `user_device` row is tombstoned
-/// (`revoked_at`) still holding a leaf in a live MLS group.
-///
-/// **Why this is not covered by [`revoked_device_locked_out_of_every_recovery_path`]:**
-/// that scenario tombstones the device *and* calls `remove_member`, so the leaf
-/// is pruned by the explicit roster removal — it would pass even if revocation
-/// were a complete no-op, which is exactly what #679 turned out to be. This test
-/// removes the roster change entirely: the user stays a member in good standing,
-/// only one of their DEVICES is revoked, and the reconcile backstop must prune
-/// that device's leaf on its own.
-///
-/// The regression it pins: `revoke_device` tombstones rather than hard-deletes
-/// (migration 000004, #372), but `registered_devices` filtered on neither, so the
-/// tombstoned row still counted as "registered", stayed in `desired`, and never
-/// reached `to_remove`. Revocation was cosmetic — the revoked device went on
-/// decrypting every subsequent message.
-///
-/// **Asserted loudly:** the load-bearing check is the *observable* one — the
-/// revoked device cannot decrypt a message sent after revocation, while a
-/// third-party member still can (proving the group stayed live and we did not
-/// pass by wedging everyone). A silent no-op cannot satisfy both halves.
+/// #679: revoking one device, with no roster change, must prune its leaf on its own.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn revoking_one_device_prunes_its_leaf_with_no_roster_change() {
@@ -1709,16 +1149,12 @@ async fn revoking_one_device_prunes_its_leaf_with_no_roster_change() {
     let group_id = alice.create_group("RevokeDevice").await;
     let channel_id = alice.general_channel_id(&group_id).await;
 
-    // Bob is the victim: his device gets revoked but he STAYS in the roster.
-    // Carol is the control — an untouched member who must keep decrypting, so a
-    // "pass" can never be earned by wedging the whole group.
+    // Carol is the control, so a pass can't be earned by wedging the group.
     join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
     join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
     bob.process_commits_for(&channel_id).await;
     carol.process_commits_for(&channel_id).await;
 
-    // BASELINE — bob is a real, decrypting member holding a real leaf reached by
-    // a real key exchange. If this fails, nothing below proves anything.
     alice.send_channel_message(&channel_id, "before-revoke").await;
     bob.process_commits_for(&channel_id).await;
     assert!(
@@ -1729,12 +1165,7 @@ async fn revoking_one_device_prunes_its_leaf_with_no_roster_change() {
          demonstrate anything about revocation"
     );
 
-    // Revoke bob's device: tombstone the `user_device` row exactly as
-    // `revoke_device` does. Deliberately NO `remove_member` and NO roster change
-    // — that single omission is what separates this test from
-    // `revoked_device_locked_out_of_every_recovery_path`, and it is the entire
-    // bug: with a roster change the leaf is pruned by the removal, so the
-    // revocation path is never exercised.
+    // Deliberately no `remove_member`: that is the entire bug.
     {
         let remote = writable_remote().await;
         let conn = remote.conn().await.expect("remote conn");
@@ -1749,24 +1180,20 @@ async fn revoking_one_device_prunes_its_leaf_with_no_roster_change() {
         assert_eq!(affected, 1, "exactly one device row tombstoned");
     }
 
-    // The roster is deliberately UNCHANGED. This assertion is the test's scope
-    // guarantee: if a future edit adds a `remove_member`, this fires and the test
-    // stops silently degrading into a duplicate of the removal scenario.
+    // Scope guard: a future `remove_member` would make this a duplicate test.
     assert!(
         alice.group_member_ids(&group_id).await.contains(&bob_p.id),
         "bob must still be a roster member — only his DEVICE was revoked; without \
          this, the leaf would be pruned by the removal and #679 would go untested"
     );
 
-    // The reconcile backstop inside the sweep is now the ONLY thing that can
-    // prune bob's leaf. This is the step that did nothing before #679.
+    // The sweep's backstop is now the only thing that can prune the leaf.
     alice.sweep().await;
     alice.process_commits_for(&channel_id).await;
     carol.process_commits_for(&channel_id).await;
 
     alice.send_channel_message(&channel_id, "after-revoke").await;
 
-    // Control: the group is still live for everyone who belongs.
     carol.process_commits_for(&channel_id).await;
     assert!(
         contents(&carol, &channel_id)
@@ -1776,8 +1203,6 @@ async fn revoking_one_device_prunes_its_leaf_with_no_roster_change() {
          revoked device must not wedge the group"
     );
 
-    // THE INVARIANT. Give the revoked device every chance to climb back in: both
-    // recovery entry points, then a decrypt attempt.
     bob.process_commits_for(&channel_id).await;
     bob.sweep().await;
     bob.process_commits_for(&channel_id).await;
@@ -1790,8 +1215,7 @@ async fn revoking_one_device_prunes_its_leaf_with_no_roster_change() {
          key. bob view={bob_view:?}"
     );
 
-    // And bob is STILL a roster member, so the eviction really was device-scoped
-    // rather than a removal in disguise.
+    // Still a roster member: the eviction was device-scoped.
     assert!(
         alice.group_member_ids(&group_id).await.contains(&bob_p.id),
         "bob's leaf must be pruned WITHOUT removing him from the roster"
@@ -1802,8 +1226,7 @@ async fn revoking_one_device_prunes_its_leaf_with_no_roster_change() {
     drop(carol);
 }
 
-/// Count remaining envelopes for a conversation via a direct libsql query on the
-/// writable world handle (a client's own `remote_db` is a read-only view).
+/// Raw envelope count on the writable world handle.
 async fn gc_envelope_count(conversation_id: &str) -> i64 {
     let remote = writable_remote().await;
     let conn = remote.conn().await.expect("remote conn");
@@ -1817,25 +1240,7 @@ async fn gc_envelope_count(conversation_id: &str) -> i64 {
     rows.next().await.expect("row").expect("some row").get::<i64>(0).expect("count")
 }
 
-/// #685 — a REVOKED device must not wedge envelope GC. A revoked device can never
-/// rejoin the tree, so it is not part of the roster the watermark gate is measured
-/// against; counting it there is the bug.
-///
-/// **The mechanism.** Envelope cleanup deletes an envelope once `sent_at` is below
-/// `MIN(cw.last_fetched_at)` across every current member device — but only when
-/// `COUNT(device) == COUNT(watermark)`, i.e. every device has reported. Bob has a
-/// second device that was revoked before it ever synced this channel, so it has NO
-/// `conversation_watermark` row. Pre-#685 that revoked device was still counted, so
-/// `COUNT(device) != COUNT(watermark)`, the CASE returned NULL, and the watermark
-/// gate was disabled ENTIRELY — an envelope every live device had long since read
-/// stayed on the server forever (this is the harsher of the two failure modes; the
-/// stale-row mode is covered in the unit + integration layers).
-///
-/// **Asserted the way the GC suite asserts** ([`envelope_cleanup_is_watermark_gated_and_never_ttl_gated`]
-/// in `messages.rs`): the *observable* raw row count. `old-msg` — young (TTL cannot
-/// fire) and read past by both live devices — must be pruned, while `new-msg` (equal
-/// to the watermark) survives. A control assertion confirms the group stays live, so
-/// a "pass" can never be earned by wedging everyone.
+/// #685: a revoked, never-synced device must not wedge the watermark GC gate.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn revoked_device_does_not_wedge_envelope_gc() {
@@ -1852,10 +1257,7 @@ async fn revoked_device_does_not_wedge_envelope_gc() {
 
     let remote = writable_remote().await;
 
-    // Give bob a SECOND device that is revoked and has never synced this channel
-    // (no watermark row) — the server-side state the DS's revoke endpoint leaves
-    // behind for a device retired before it caught up. This is the row that,
-    // pre-#685, disabled pruning for the whole channel.
+    // A revoked second device with no watermark row.
     {
         let conn = remote.conn().await.expect("remote conn");
         let affected = conn
@@ -1869,9 +1271,7 @@ async fn revoked_device_does_not_wedge_envelope_gc() {
         assert_eq!(affected, 1, "exactly one revoked device row inserted");
     }
 
-    // Reset the add-member-seeded watermarks so the lag pattern is exactly what
-    // this test establishes (mirrors the `clear_watermarks` step in
-    // `envelope_cleanup_is_watermark_gated_and_never_ttl_gated`).
+    // Reset the add-member-seeded watermarks.
     remote
         .conn()
         .await
@@ -1883,29 +1283,21 @@ async fn revoked_device_does_not_wedge_envelope_gc() {
         .await
         .expect("clear watermarks");
 
-    // old-msg: the envelope that must be pruned once every LIVE device reads past it.
     alice.send_channel_message(&channel_id, "old-msg").await;
     alice.fetch_channel_messages(&channel_id).await;
     bob.fetch_channel_messages(&channel_id).await;
 
-    // A strictly-later message; once every live device fetches it, their
-    // watermarks advance above old-msg.
     alice.send_channel_message(&channel_id, "new-msg").await;
     alice.fetch_channel_messages(&channel_id).await;
 
-    // Setup check: bob has not fetched new-msg yet, so the slowest live watermark
-    // is still at old-msg and nothing is pruned regardless of the fix.
+    // Setup check: nothing is pruned yet regardless of the fix.
     assert_eq!(
         gc_envelope_count(&channel_id).await,
         2,
         "SETUP: both envelopes present before every live device catches up"
     );
 
-    // Bob catches up — now BOTH live devices' watermarks sit at new-msg. The GC
-    // sweep (the server-side trigger, #689) then prunes: the revoked ghost has no
-    // watermark, so pre-#685 it disabled the gate and old-msg would survive; with
-    // #685 it is excluded and old-msg is pruned. GC no longer rides the ingest
-    // path, so the sweep is what drives it.
+    // Pre-#685 the ghost disabled the gate; the sweep drives GC (#689).
     bob.fetch_channel_messages(&channel_id).await;
     {
         let conn = remote.conn().await.expect("remote conn");
@@ -1915,11 +1307,7 @@ async fn revoked_device_does_not_wedge_envelope_gc() {
             .expect("gc sweep");
     }
 
-    // Both envelopes go, not just the older one: since #1087 the gate is
-    // `seq <= MIN(last_seq)`, and the cursor means "handled up to and
-    // INCLUDING", so an envelope at the floor has been read by everyone. The
-    // property under test is unchanged — the revoked ghost must not wedge the
-    // gate — and a wedge would leave BOTH envelopes, not one.
+    // `seq <= MIN(last_seq)` (#1087), so both go; a wedge would leave both.
     assert_eq!(
         gc_envelope_count(&channel_id).await,
         0,
@@ -1927,8 +1315,6 @@ async fn revoked_device_does_not_wedge_envelope_gc() {
          pruning — the live devices have read past both envelopes, so both must go."
     );
 
-    // Control: the group is still live for a real member — the pass was not earned
-    // by wedging everyone.
     assert!(
         contents(&alice, &channel_id).await.contains(&"new-msg".to_string()),
         "alice must still read new-msg — GC must not have broken the live channel"
@@ -1938,35 +1324,7 @@ async fn revoked_device_does_not_wedge_envelope_gc() {
     drop(bob);
 }
 
-// ─── Scenario — #680: a commit that can't be applied wedges the group ─────────
-
-/// **Invalid state it attacks (issue #680):** "the group exists locally but can
-/// never advance." A commit whose bytes a replaying member cannot deserialize used
-/// to hit one of four `apply_one_commit` `Stop` arms; the caller did `Stop =>
-/// break` and only recovered when the local group was ABSENT, so a member whose
-/// group still EXISTED but was stuck at a stale epoch wedged there forever — no
-/// external-join, no signal, silently mistaken for "caught up".
-///
-/// This is the `MlsMessageIn::tls_deserialize` wedge site (group_state.rs). A real
-/// member's commit lands normally; its persisted bytes are then corrupted in the
-/// log (a disk-bitrot / replication-fault shape, the deserialize-wedge analogue of
-/// [`drop_commit_row`]) while its epoch column is left intact — so a returning
-/// member still classifies it as the next commit to APPLY, reaches the deserialize
-/// step, and fails there.
-///
-/// **Must FAIL before #680 and PASS after.** On pre-#680 code bob wedges at the
-/// corrupt epoch (`Stop => break`, group still present so the `!group_exists`
-/// backstop never fires) and can never decrypt post-corruption traffic. After
-/// #680 the deserialize failure is an explicit `Recover(MalformedCommit)`: bob
-/// drops the stale group and external-joins onto the head, converging with the
-/// rest of the group.
-///
-/// **Accepted loss (documented, CLAUDE.md loss #1):** the corrupt commit's own
-/// epoch is jumped over via external-join, so any message sealed AT that epoch is
-/// unrecoverable for bob — the same class as "messages sent before you joined the
-/// (rebuilt) MLS tree." Everything bob had already ratcheted past before the
-/// corruption (M1 at his join epoch, decrypted by the interleave hook) survives,
-/// and all post-recovery traffic is delivered.
+/// #680: an undeserializable commit must trigger `Recover(MalformedCommit)` and external-join, not a wedge.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn corrupt_commit_recovers_instead_of_wedging() {
@@ -1985,21 +1343,15 @@ async fn corrupt_commit_recovers_instead_of_wedging() {
     let group_id = alice.create_group("Wedge").await;
     let channel_id = alice.general_channel_id(&group_id).await;
 
-    // Bob joins, catches up to his join epoch, then goes offline.
     join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
 
-    // A message at bob's join epoch — his interleave hook decrypts this on return,
-    // BEFORE the replay reaches the corrupt commit, so it must survive.
     alice.send_channel_message(&channel_id, "M1-at-join-epoch").await;
 
-    // The NEXT commit (carol's add) lands at the current head epoch. Read it off
-    // the log rather than counting commits — a join costs the add plus the joiner's
-    // own #666 post-join self-update, so a census would silently drift.
+    // Read off the log, not counted (#666).
     let corrupt_epoch = ds_head_epoch(&group_id).await;
     join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
 
-    // Churn on so the corrupt row is INTERIOR — a higher epoch above it means the
-    // replay classifies it as "apply this commit", not "nothing new yet".
+    // Keep the corrupt row interior.
     join_member(&alice, &dave, &group_id, &channel_id, &dave_p.username).await;
     let head_before = ds_head_epoch(&group_id).await;
     assert!(
@@ -2007,8 +1359,7 @@ async fn corrupt_commit_recovers_instead_of_wedging() {
         "the dave add must sit above the corrupt epoch {corrupt_epoch} (head {head_before})"
     );
 
-    // Corrupt the carol-add commit's bytes. Its epoch column is untouched, so the
-    // replay reaches `apply_one_commit` and fails at `tls_deserialize`.
+    // Epoch column intact, so the replay reaches `tls_deserialize`.
     corrupt_commit_row(&group_id, corrupt_epoch).await;
     assert_eq!(
         ds_head_epoch(&group_id).await,
@@ -2016,9 +1367,6 @@ async fn corrupt_commit_recovers_instead_of_wedging() {
         "corrupting a row's bytes must not change the head"
     );
 
-    // Bob comes back. His hook decrypts M1 at epoch 1; the replay then hits the
-    // corrupt commit. Pre-#680 he wedges here; post-#680 he external-joins onto
-    // the head.
     let bob_after_return = contents(&bob, &channel_id).await;
     assert!(
         bob_after_return.contains(&"M1-at-join-epoch".to_string()),
@@ -2026,13 +1374,9 @@ async fn corrupt_commit_recovers_instead_of_wedging() {
          commit is hit), got: {bob_after_return:?}"
     );
 
-    // Alice applies bob's recovery external-join, then sends fresh traffic.
     alice.process_commits_for(&channel_id).await;
     alice.send_channel_message(&channel_id, "after-recovery").await;
 
-    // LOAD-BEARING — the #680 invariant made observable: bob's group exists AND
-    // advanced. A wedged bob (group present, stuck at the corrupt epoch) would
-    // fail both checks.
     let members = alice.group_member_ids(&group_id).await;
     assert!(
         members.contains(&bob_p.id),
@@ -2044,7 +1388,6 @@ async fn corrupt_commit_recovers_instead_of_wedging() {
          (the 'exists locally but can never advance' state #680 makes unreachable)"
     );
 
-    // Whole group converges on the head: dave (a continuous member) reads it too.
     dave.process_commits_for(&channel_id).await;
     assert!(
         contents(&dave, &channel_id).await.contains(&"after-recovery".to_string()),
@@ -2057,26 +1400,7 @@ async fn corrupt_commit_recovers_instead_of_wedging() {
     drop(dave);
 }
 
-// ─── Scenario 13 — a voluntary leave must be committed by somebody ───────────
-
-/// **Invalid state it attacks:** the leaver's leaf lingering in every remaining
-/// member's ratchet tree, with every message sealed after the leave still sealed
-/// for it (#1081).
-///
-/// A member cannot commit its own removal — MLS rejects `remove_members` with
-/// self as target — so leaving is two halves: the leaver deletes its roster row
-/// and wipes local state, and someone still online has to stage the remove.
-/// `leave_group` broadcast a `membership_changed` wake-up for exactly that, but
-/// the receiver ran Welcome polling and the catch-up only, on the (true for
-/// invite/remove/approve, false for leave) grounds that the change was already
-/// committed by the device that made it. So nothing staged the remove until some
-/// remaining member's next cold-launch sweep.
-///
-/// Here Bob leaves and Alice does only what the wake-up now makes her do —
-/// `apply_membership_wake(.., is_leave = true)`, no `sweep()` — and the message
-/// she sends afterwards must be unreadable to him. Carol is the positive
-/// control: a continuous member must still decrypt it, so the assertion is about
-/// Bob's eviction and not about a broken send.
+/// #1081: MLS forbids a self-remove, so the leave wake-up must make a remaining member stage it.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_leave_is_committed_by_a_remaining_member_not_left_for_the_sweep() {
@@ -2098,26 +1422,22 @@ async fn a_leave_is_committed_by_a_remaining_member_not_left_for_the_sweep() {
     bob.process_commits_for(&channel_id).await;
     carol.process_commits_for(&channel_id).await;
 
-    // Baseline: bob is a genuine member and decrypts.
     alice.send_channel_message(&channel_id, "pre-leave").await;
     assert!(
         contents(&bob, &channel_id).await.contains(&"pre-leave".to_string()),
         "bob must decrypt while still a member"
     );
 
-    // Bob leaves for real, through the command: DS roster delete, local wipe,
-    // and the `kind: "leave"` wake-up to the room.
     bob.leave_group(&group_id).await;
 
-    // Before: bob's leaf is still in alice's tree. Leaving cannot remove it —
-    // MLS refuses a self-remove, so all bob did was delete his roster row.
+    // Leaving can't remove the leaf: MLS refuses a self-remove.
     let before = pollis_lib::commands::mls::local_tree_members(&alice.state, &group_id).await;
     assert!(
         before.iter().any(|(u, _)| u == &bob_p.id),
         "bob's leaf must still be in alice's tree immediately after he leaves: {before:?}"
     );
 
-    // Alice has run no sweep. All she does is handle the wake-up.
+    // No sweep: only the wake-up.
     pollis_lib::commands::mls::apply_membership_wake(
         &alice.state,
         &group_id,
@@ -2126,8 +1446,6 @@ async fn a_leave_is_committed_by_a_remaining_member_not_left_for_the_sweep() {
     )
     .await;
 
-    // The assertion the ticket is about: the wake-up alone evicted him, with no
-    // cold launch and no sweep in between.
     let after = pollis_lib::commands::mls::local_tree_members(&alice.state, &group_id).await;
     assert!(
         !after.iter().any(|(u, _)| u == &bob_p.id),
@@ -2136,19 +1454,14 @@ async fn a_leave_is_committed_by_a_remaining_member_not_left_for_the_sweep() {
          still sealed for the leaf of a device that has left. tree={after:?}"
     );
 
-    // And it is only bob who went: carol's leaf is the control.
     assert!(
         after.iter().any(|(u, _)| u == &carol_p.id),
         "carol must still be in the tree: {after:?}"
     );
 
-    // She staged the remove, so bob is gone from her tree before anything else
-    // happens. Settle it and send.
     alice.process_commits_for(&channel_id).await;
     alice.send_channel_message(&channel_id, "post-leave").await;
 
-    // Positive control: carol still decrypts, so the message was genuinely
-    // delivered to the surviving members.
     carol.poll().await;
     carol.process_commits_for(&channel_id).await;
     assert!(
@@ -2156,17 +1469,13 @@ async fn a_leave_is_committed_by_a_remaining_member_not_left_for_the_sweep() {
         "carol (a continuous member) must decrypt the post-leave message"
     );
 
-    // Roster sanity: bob is not a member any more.
     let members = alice.group_member_ids(&group_id).await;
     assert!(
         !members.contains(&bob_p.id),
         "bob should not be a current member after leaving, got: {members:?}"
     );
 
-    // Bob himself reads nothing, but that proves little on its own: `leave_group`
-    // wiped his local state, so his view is empty whether or not he was evicted.
-    // The load-bearing assertion is the tree walk above — it is what decides
-    // whether a disk image of his pre-leave state could open the message.
+    // His wiped view proves little; the tree walk above is load-bearing.
     bob.poll().await;
     bob.process_commits_for(&channel_id).await;
     assert!(
@@ -2179,23 +1488,7 @@ async fn a_leave_is_committed_by_a_remaining_member_not_left_for_the_sweep() {
     drop(carol);
 }
 
-// ─── Scenario 14 — a member cannot delete another member's envelope ──────────
-
-/// **Invalid state it attacks:** one member removing another member's
-/// not-yet-fetched envelope, with no tombstone, so an offline device simply
-/// never receives the message (#1086).
-///
-/// Sealed sender (#607) blinds `message_envelope.sender_id`, so the Delivery
-/// Service cannot tell whose envelope a row is. Its self-delete branch therefore
-/// trusted the caller's own `msg_sender_id` hint and gated on membership alone —
-/// and any member of the conversation could delete anything in it. CLAUDE.md
-/// allows exactly three message losses; that was a fourth, and unlike the other
-/// three it was attacker-controlled rather than a bound on storage.
-///
-/// The fix is a per-envelope capability: the sender stores `SHA-256(token)` with
-/// the row and must present the preimage. This drives the REAL client send path,
-/// so it proves the client actually computes and sends a hash — the DS unit
-/// tests in `messages::delete_capability_tests` only prove the DS checks one.
+/// #1086: a member cannot delete another's envelope; the client really sends the capability hash.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_member_cannot_delete_another_members_envelope() {
@@ -2217,8 +1510,7 @@ async fn a_member_cannot_delete_another_members_envelope() {
 
     let conn = writable_remote().await.conn().await.expect("remote conn");
 
-    // The client really did attach a capability. Without this the rest of the
-    // test would pass vacuously against the legacy NULL path.
+    // Otherwise the test passes vacuously on the legacy NULL path.
     let stored: Option<String> = {
         let mut rows = conn
             .query(
@@ -2239,8 +1531,7 @@ async fn a_member_cannot_delete_another_members_envelope() {
         "the send path must attach a deletion capability, or this proves nothing"
     );
 
-    // THE ATTACK. Bob is a genuine member, so the membership check passes, and
-    // his hint claims the self-branch. He cannot produce Alice's capability.
+    // Bob passes membership but can't produce Alice's capability.
     let attack = pollis_delivery::messages::apply_delete_message(
         &conn,
         Some(bob_p.id.as_str()),
@@ -2259,8 +1550,6 @@ async fn a_member_cannot_delete_another_members_envelope() {
         "a member must not delete another member's envelope, got {attack:?}"
     );
 
-    // And the envelope is still there, so a recipient who has not fetched yet
-    // still receives it.
     let survives: i64 = {
         let mut rows = conn
             .query(
@@ -2276,15 +1565,13 @@ async fn a_member_cannot_delete_another_members_envelope() {
         "MESSAGE LOSS: bob removed alice's envelope before its recipients fetched it"
     );
 
-    // Bob does in fact receive it — the message was never his to delete.
     bob.process_commits_for(&channel_id).await;
     assert!(
         contents(&bob, &channel_id).await.contains(&"alice's message".to_string()),
         "bob must receive the message he could not delete"
     );
 
-    // The control: the real author still deletes her own message through the
-    // real command, so the capability does not break what it protects.
+    // Control: the author still deletes her own.
     alice.delete_message(&message_id).await;
     let after: i64 = {
         let mut rows = conn

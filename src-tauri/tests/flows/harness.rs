@@ -1,32 +1,13 @@
 //! End-to-end integration harness for Pollis.
 //!
-//! Drives the real `#[tauri::command]` functions through the tauri IPC
-//! pipeline — no `_inner` shims, no mocked DB layer. Each [`TestClient`]
-//! owns its own `App<MockRuntime>` backed by its own `InMemoryKeystore`,
-//! while all clients share a single [`TestWorld`] pointed at a process-local
-//! libsql file (no network round-trip — see `Db::connect_local`).
-//!
-//! Since #987 a client has NO database handle of its own: `pollis-core` does not
-//! link `libsql` at all, so every read a client performs is a signed POST to the
-//! in-process Delivery Service, exactly like its writes. The world's two handles
-//! belong to the DS. Tests that need to construct server-side state directly —
-//! backdating envelopes, clearing watermarks, seeding an emoji row — use
-//! [`writable_remote`] / [`writable_log`], which are those DS handles: they stand
-//! in for effects that happen server-side in production, never for client
-//! writes.
+//! Clients hold no DB handle (#987); [`writable_remote`] / [`writable_log`] are the DS's, for server-side state only.
 //!
 //! Run with:
 //! ```
 //! cargo test --features test-harness --test flows
 //! ```
 //!
-//! Tests serialize on a process-wide mutex (`serial_test`) so the per-test DB
-//! wipe can't race. Note there is NO shared Turso involved: since #420 each run
-//! uses process-local libsql files, and since #987 there is no Turso credential
-//! anywhere in the build to point at one. An intermittent failure here is a real
-//! race in the code, never contention on a shared database — a stale comment
-//! claiming otherwise sent one investigation down exactly that wrong path
-//! (#832).
+//! No shared Turso: an intermittent failure here is a real race, never DB contention (#832).
 
 use std::sync::Arc;
 
@@ -45,28 +26,14 @@ use tauri::{App, WebviewWindow};
 use tokio::sync::OnceCell;
 
 pub(crate) const DEV_OTP: &str = "000000";
-/// Fixed PIN used by `TestClient::sign_up` so every harness client
-/// has its DB open after signup. Real users get four random digits;
-/// the test value is just a constant.
+/// Fixed PIN so every harness client has its DB open after signup.
 pub(crate) const TEST_PIN: &str = "0000";
 
-// ─── World ──────────────────────────────────────────────────────────────────
-
-/// Shared across all clients in a single test. Owns the libsql file that
-/// stands in for "remote Turso" plus a temp dir that backs per-user
-/// SQLCipher files.
-///
-/// Construction is lazy + process-wide so integration tests share one
-/// backend file but still run serially (the wipe would race otherwise).
+/// Process-wide shared backend; tests run serially or the wipe would race.
 pub(crate) struct TestWorld {
-    /// Main DB — users/devices/groups/channels/membership/messages, plus the
-    /// auth lookups (`user_device`) the DS verifies against.
+    /// Main DB, including the `user_device` auth lookups.
     pub(crate) remote: Arc<Db>,
-    /// Commit-log DB — the three MLS control-plane tables (`mls_commit_log`,
-    /// `mls_welcome`, `mls_group_info`) and NOTHING else. A genuinely separate
-    /// libsql file so a misrouted query (a main read on the log handle, or a
-    /// log read on the main handle) fails with "no such table" instead of
-    /// silently succeeding on one shared file. Mirrors the #420 production split.
+    /// Commit-log DB, a separate file so a misrouted query fails with "no such table" (#420).
     pub(crate) log: Arc<Db>,
     pub(crate) config: Config,
 }
@@ -76,30 +43,15 @@ static WORLD: OnceCell<TestWorld> = OnceCell::const_new();
 pub(crate) async fn world() -> &'static TestWorld {
     WORLD
         .get_or_init(|| async {
-            // Loads .env.test and bypasses R2/LiveKit/Resend with placeholders.
             let mut config = Config::for_test().expect("Config::for_test");
 
-            // Isolate local SQLCipher files to a process-unique temp dir so
-            // stale `pollis_{user_id}.db` files can't leak between `cargo test`
-            // invocations.
+            // Process-unique, so stale DB files can't leak between runs.
             let tmp = tempfile::tempdir().expect("tempdir");
-            // Keep the tempdir alive for the life of the process — cleanup
-            // runs at exit. Dropping it during an ongoing test would delete
-            // open DBs.
+            // Kept for the process; dropping it mid-test would delete open DBs.
             let path = tmp.keep();
-            // Not `std::env::set_var`: the harness runs an in-process DS and
-            // per-client background work on other threads, and mutating the
-            // process environment while another thread may be reading it is a
-            // data race (#923). `set_data_dir` is a locked write.
+            // Not `std::env::set_var`: mutating the env with other threads running is a data race (#923).
             pollis_core::db::local::set_data_dir(&path);
 
-            // No `DEV_OTP` in the environment: the in-process DS is handed the
-            // code explicitly as `OtpConfig { dev_otp }` and every client posts
-            // `DEV_OTP` literally to verify-otp, so the env var was carrying
-            // nothing but the same `set_var` race (#923).
-
-            // Stand-in for "remote Turso" (the MAIN DB) — a libsql file in the
-            // same temp dir as the per-user SQLCipher DBs. No network round-trip.
             let remote_db_path = path.join("test_turso.db");
             let remote = Arc::new(
                 Db::connect_local(remote_db_path.to_str().expect("utf-8 path"))
@@ -111,12 +63,7 @@ pub(crate) async fn world() -> &'static TestWorld {
                 .await
                 .expect("bootstrap test turso schema");
 
-            // SECOND physical libsql file for the commit-log DB. This is the
-            // whole point of the split harness: the three MLS control-plane
-            // tables live ONLY here, so a query routed to the wrong connection
-            // hits "no such table" instead of silently finding every table on a
-            // single shared file (which masked the #420 cross-signing misroute,
-            // commit 3134899).
+            // A second file, so a misrouted control-plane query fails loudly.
             let log_db_path = path.join("test_log.db");
             let log = Arc::new(
                 Db::connect_local(log_db_path.to_str().expect("utf-8 path"))
@@ -126,26 +73,12 @@ pub(crate) async fn world() -> &'static TestWorld {
             bootstrap_log_schema(&log.conn().await.expect("log conn"))
                 .await
                 .expect("bootstrap log db schema");
-            // The baseline created the three MLS tables on MAIN too (for old
-            // shipped clients); drop them so main no longer has them and any
-            // stray main-side access fails loudly.
+            // Drop the baseline's MLS tables from main so stray access fails loudly.
             drop_log_tables_from_main(&remote.conn().await.expect("main conn"))
                 .await
                 .expect("drop log tables from main");
 
-            // Spin up the real MLS Delivery Service in-process and route every
-            // client's commit submission through it. This exercises the deployed
-            // DS path (HTTP → pollis-delivery::commit::submit_commit) end to end
-            // in the flows suite instead of the Direct write path.
-            //
-            // The DS gets BOTH handles, exactly mirroring production
-            // (`pollis-delivery`'s `AppState { db, log_db }`): it authenticates
-            // and checks membership on the MAIN handle, and writes/reads the
-            // commit log on the LOG handle. Sharing the harness's own handles
-            // (rather than opening second `Builder::new_local`s) makes the DS the
-            // sole writer to the very rows the clients read — two independent
-            // libsql `Database`s on one file don't share WAL writes promptly. A
-            // single shared DS for the whole test run is fine.
+            // The real DS gets the harness's own handles: two `Database`s on one file don't share WAL writes promptly.
             let delivery_url = spawn_in_process_delivery(remote.clone(), log.clone()).await;
             config.pollis_delivery_url = Some(delivery_url);
 
@@ -155,69 +88,35 @@ pub(crate) async fn world() -> &'static TestWorld {
 }
 
 /// One-shot fault menu for the in-process Delivery Service.
-///
-/// When armed, the next commit submit (`POST /v1/commits`) — or, for the
-/// message-path faults, the next send, edit, commit fetch or cursor report —
-/// that the fault *applies to* is perturbed exactly once and the arm is then atomically
-/// consumed — so a fault set up for one operation can never bleed into a later
-/// one, even though every `#[serial]` test shares the single in-process DS
-/// (`spawn_in_process_delivery`). This generalizes the old
-/// `LOSE_NEXT_DS_RESPONSE: AtomicBool` (issue #411) into the failure taxonomy the
-/// adversarial recovery suite drives (see `flows/adversarial.rs`).
-///
 /// SAFETY / SCOPE: every fault lives in the HARNESS layer (this file), NEVER in
 /// `pollis-delivery`. Production commit semantics stay untouched — the real
 /// client code path runs against a DS that behaves exactly as prod plus the one
 /// injected perturbation. `DropWelcome` is realized by clearing the Welcomes off
 /// the parsed body *before* `submit_commit` (so they're simply never persisted),
 /// not by patching the delivery crate.
-///
-/// The commit-log GAP fault (`DropCommitRow`, #430-P2 / F1) is deliberately NOT a
-/// variant here: deleting an already-acked commit row is done post-hoc by
-/// [`drop_commit_row`], because a live-path deletion of the *head* row only lowers
-/// the head (the next committer refills it) and never leaves a durable interior
-/// gap. See that helper's docs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DsFault {
-    /// The commit + GroupInfo + Welcomes LAND, then the success response is
-    /// turned into a 500 — the #411 "lost success-response" shape from the
-    /// client's view. The client must adopt its own canonical commit, not wedge.
+    /// Lands, then the success response becomes a 500 (#411). The client must adopt its commit.
     DropResponse,
-    /// Same mechanism as [`DsFault::DropResponse`], named for the generalized-#411
-    /// scenario: the DS persists the write, THEN returns 500, so the client
-    /// believes the submit failed while the DS has in fact committed it. Recovery
-    /// is the `our_commit_is_canonical` adopt path.
+    /// Same mechanism as [`DsFault::DropResponse`]; recovery is `our_commit_is_canonical`.
     Fail500PostWrite,
-    /// The DS returns 500 WITHOUT persisting anything — the clean, retryable
-    /// failure (the contrast case to `Fail500PostWrite`). Nothing lands, so a
-    /// straight resubmit succeeds; no adoption, no gap.
+    /// 500 with nothing persisted; a resubmit succeeds.
     Fail500PreWrite,
-    /// The commit + GroupInfo land, but the Welcomes carried by this add are
-    /// never persisted, so the added member's Welcome never becomes fetchable.
-    /// The new member must recover via external-join instead.
+    /// Commit + GroupInfo land but this add's Welcomes don't; recovery is external-join.
     DropWelcome,
 
-    // ── Message path (#1524) ─────────────────────────────────────────────────
-    // A "timeout" is a 504 the client sees in place of the real answer: the
-    // client sets no request timeout of its own (`ds_client`), so what a real
-    // one would hand it is an error with no knowledge of what the DS did —
-    // exactly what this is.
-    /// A message send or edit LANDS, then the client's answer is lost. The
-    /// sender believes it failed while every recipient can already fetch it.
+    // Message path (#1524). A "timeout" is a 504: the client sets no timeout of its own.
+    /// A send or edit lands, then the answer is lost.
     SendLandsThenTimesOut,
     /// A message send or edit times out before the DS stores anything.
     SendTimesOutUnlanded,
-    /// A catch-up times out part-way: the envelope list arrives (and what is
-    /// sealed at the device's current epoch is decrypted), then the commit
-    /// fetch that would carry the replay further times out.
+    /// The envelope list arrives, then the commit fetch times out.
     CatchUpTimesOutMidway,
-    /// A catch-up decrypts everything, then its cursor report times out, so
-    /// the next fetch hands the device every one of those envelopes again.
+    /// Everything decrypts, then the cursor report times out.
     WatermarkTimesOut,
 }
 
 impl DsFault {
-    /// Every message-path fault, for a driver that draws one at random.
     pub(crate) const MESSAGE_PATH: [DsFault; 4] = [
         DsFault::SendLandsThenTimesOut,
         DsFault::SendTimesOutUnlanded,
@@ -226,35 +125,24 @@ impl DsFault {
     ];
 }
 
-/// The single armed one-shot DS fault, or `None`. A `Mutex<Option<_>>` (rather
-/// than an atomic) so it can carry the fault *kind*, and `const`-constructible so
-/// it can live in a `static`. Only ever locked across non-await sections
-/// ([`peek_ds_fault`] / [`take_ds_fault`] copy the value out and drop the guard
-/// immediately), so it never blocks the async runtime.
+/// The armed one-shot fault; only locked across non-await sections.
 pub(crate) static NEXT_DS_FAULT: std::sync::Mutex<Option<DsFault>> =
     std::sync::Mutex::new(None);
 
-/// Arm the next-commit DS fault. One-shot: consumed the first time it applies.
+/// One-shot: consumed the first time it applies.
 pub(crate) fn arm_ds_fault(fault: DsFault) {
     *NEXT_DS_FAULT.lock().expect("NEXT_DS_FAULT poisoned") = Some(fault);
 }
 
-/// Force-disarm any armed fault. Deterministic scenarios arm-and-consume in the
-/// same breath, so they never need this; the model/proptest fuzzer
-/// (`flows/model.rs`) calls it at the start of every generated case as a
-/// belt-and-suspenders guard, so a fault armed for a commit-producing op that a
-/// later case never issued can never bleed across cases sharing the singleton
-/// `NEXT_DS_FAULT`.
+/// Force-disarm; the fuzzer calls it per case so nothing bleeds across cases.
 pub(crate) fn clear_ds_fault() {
     *NEXT_DS_FAULT.lock().expect("NEXT_DS_FAULT poisoned") = None;
 }
 
-/// Peek the armed fault without consuming it.
 fn peek_ds_fault() -> Option<DsFault> {
     *NEXT_DS_FAULT.lock().expect("NEXT_DS_FAULT poisoned")
 }
 
-/// Atomically consume (disarm) the armed fault, returning what was armed.
 fn take_ds_fault() -> Option<DsFault> {
     NEXT_DS_FAULT
         .lock()
@@ -262,39 +150,19 @@ fn take_ds_fault() -> Option<DsFault> {
         .take()
 }
 
-/// True iff a DS fault is still armed — for the "armed before, disarmed after"
-/// assertion that proves the fault fired exactly once (replaces the old
-/// `LOSE_NEXT_DS_RESPONSE.load(...)`).
+/// True iff a fault is still armed, to prove it fired exactly once.
 pub(crate) fn ds_fault_armed() -> bool {
     peek_ds_fault().is_some()
 }
 
-/// State for the ONE endpoint the harness serves itself: the fault-injecting
-/// `/v1/commits` override. Everything else runs on the real
-/// `pollis_delivery::AppState`.
-///
-/// Two handles, mirroring production `AppState { db, log_db }`: the signature
-/// check runs on `main`, the commit-log write on `log`. Splitting them is what
-/// lets a misrouted query (a `user_device` read on the log handle, or an `mls_*`
-/// read on the main handle) fail loudly rather than silently succeed.
+/// State for the one harness-served endpoint, the fault-injecting `/v1/commits` override.
 #[derive(Clone)]
 struct DsState {
-    /// Main DB — `user_device`, for the signature check.
     main: Arc<Db>,
-    /// Commit-log DB — `mls_commit_log` / `mls_welcome` / `mls_group_info`.
     log: Arc<Db>,
 }
 
-/// Shared auth gate for the in-process DS: verify the device signature over the
-/// RAW body (the signature binds `sha256(body)`, so we must hash the exact wire
-/// bytes) and return the authenticated `user_id`, or an auth-rejection response.
-///
-/// Auth is ALWAYS enforced here — the in-process DS mirrors production with
-/// `POLLIS_DS_REQUIRE_AUTH` on, so the flows suite exercises the signed write
-/// path end to end (this is #420 / #419 Step 1's acceptance: "auth on + clients
-/// signing → full flows suite still passes"). It reuses the real
-/// `pollis_delivery::auth::verify_request` against the MAIN DB — `user_device`
-/// (the auth lookup) lives there, not on the log DB.
+/// Verify the device signature over the RAW body against MAIN; auth is always on.
 async fn ds_auth(
     remote: &Db,
     method: &axum::http::Method,
@@ -332,11 +200,7 @@ fn ds_bad_request() -> axum::response::Response {
     (axum::http::StatusCode::BAD_REQUEST, "invalid body").into_response()
 }
 
-/// The `/v1/commits` submit handler, driven against the SHARED `Db` that also
-/// answers every client read, so a write is visible to the next read. Mirrors
-/// `pollis_delivery`'s real `submit` arm: verify the signature over the raw
-/// body, bind `sender_id` to the authenticated user, then submit — PLUS the
-/// harness-only lost-response fault injection the #411 test depends on.
+/// `/v1/commits`, mirroring the real handler plus harness-only fault injection.
 async fn delivery_submit(
     axum::extract::State(state): axum::extract::State<DsState>,
     method: axum::http::Method,
@@ -357,19 +221,14 @@ async fn delivery_submit(
         Err(_) => return ds_bad_request(),
     };
 
-    // Identity binding: a validly-signed request may only write as itself.
     if parsed.sender_id != authed {
         return pollis_delivery::error::AuthRejection::Forbidden.into_response();
     }
 
-    // ── Pre-write faults, each consumed ONLY when it applies ──────────────────
-    // (peek, then take at the application point, so an armed fault is never
-    // wasted on a submit it wasn't meant for).
+    // Pre-write faults: peek, then take only where the fault applies.
     match peek_ds_fault() {
         Some(DsFault::Fail500PreWrite) => {
             take_ds_fault();
-            // Nothing is persisted — the clean, retryable failure. The client
-            // may simply resubmit and win the same epoch.
             return (
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                 "simulated pre-write failure (test fault injection)",
@@ -378,18 +237,13 @@ async fn delivery_submit(
         }
         Some(DsFault::DropWelcome) => {
             take_ds_fault();
-            // Commit + GroupInfo still land; the added member's Welcome never
-            // does. Clearing the body's Welcomes means `submit_commit` never
-            // writes an `mls_welcome` row, so the new member can't join from a
-            // Welcome and must recover via external-join.
+            // Cleared Welcomes are never written, so the new member must external-join.
             parsed.welcomes.clear();
         }
         _ => {}
     }
 
-    // The commit log lives on the LOG DB; MEMBERSHIP — which the bundle's
-    // Welcome rows are now checked against — lives on the MAIN DB, so
-    // `submit_commit` takes both.
+    // The log is on LOG; Welcome membership checks are on MAIN.
     let conn = match state.log.conn().await {
         Ok(c) => c,
         Err(e) => return ds_internal_error(format!("conn: {e}")),
@@ -408,11 +262,7 @@ async fn delivery_submit(
         )
             .into_response(),
         Ok(pollis_delivery::commit::SubmitVerdict::Response(outcome)) => {
-            // Post-write faults: the commit + GroupInfo + any Welcomes have
-            // already LANDED above; turn the success response into a 500 so the
-            // client must recover by observing the commit is canonical and
-            // adopting it (issue #411 / `our_commit_is_canonical`). `DropResponse`
-            // and `Fail500PostWrite` share this mechanism.
+            // Post-write faults: everything landed; turn success into a 500 so the client must adopt.
             if matches!(outcome, SubmitResponse::Accepted { .. })
                 && matches!(
                     peek_ds_fault(),
@@ -436,49 +286,11 @@ async fn delivery_submit(
     }
 }
 
-/// Boot the REAL `pollis-delivery` router in-process against the harness's own
-/// libsql handles, bind it on a loopback port, and serve it on a DEDICATED OS
-/// thread with its own runtime so the server outlives every individual
-/// `#[tokio::test]` runtime.
-///
-/// # This mounts the production router, not a copy of it (#918)
-///
-/// It used to re-declare every route and re-implement every handler here — 60
-/// wrappers and a 70-line route table, all of them `gate → parse → apply →
-/// map outcome` around the same `pollis_delivery::*` functions the real handlers
-/// call. The only thing that forced the duplication was the DB handle type
-/// (`Arc<Db>` here, `Arc<pollis_delivery::db::Db>` there). #918 removed it by
-/// sharing one handle; #987 removed the question entirely, because the clients
-/// hold no database handle to disagree with — the harness builds ONE
-/// `pollis_delivery::db::Db` and `Arc::clone`s it into the router, and every
-/// client read is a signed POST to that router.
-///
-/// The copy was not free. It silently omitted ~10 routes: `/v1/invite-links/*`
-/// 404'd under test while working in production, and custom emoji (#848) had no
-/// integration coverage at all. A mirror cannot go stale if there is no mirror.
-///
-/// `/v1/commits` is the ONE exception, and it is an override rather than a
-/// re-declaration: the harness needs pre- and post-write fault injection
-/// ([`DsFault`]) that production must never have. It is mounted on an outer
-/// router whose `fallback_service` is the real one, so every other path — today's
-/// and tomorrow's — reaches the production handler with no edit here.
-///
-/// Why a dedicated thread: each `#[tokio::test(flavor = "multi_thread")]` spins
-/// up and tears down its OWN Tokio runtime. If we spawned the server on the
-/// first test's runtime, it would die when that test finished, and every later
-/// test would hit a dead port (connection refused). Owning the server on a
-/// separate thread + runtime decouples its lifetime from the per-test runtimes,
-/// so the single shared DS stays up for the whole `cargo test` process.
 /// The in-process DS's device-key cache, captured when the DS boots.
 static DS_DEVICE_KEYS: std::sync::OnceLock<pollis_delivery::auth::DeviceKeyCache> =
     std::sync::OnceLock::new();
 
-/// Stand in for `DEVICE_KEY_CACHE_TTL_SECS` elapsing for one user: evict every
-/// cached device key of `user_id` from the in-process DS, so the next signed
-/// request re-reads `user_device` (and the suspension check that rides on the
-/// same query). For server-side state a test mutates directly — e.g. an operator
-/// suspension written with `scripts/suspend-account.sh`, which has no eviction
-/// hook and relies on the TTL — instead of sleeping the TTL out in real time.
+/// Evict `user_id`'s cached device keys from the DS instead of sleeping out the TTL.
 pub(crate) fn expire_ds_device_keys(user_id: &str) {
     DS_DEVICE_KEYS
         .get()
@@ -486,9 +298,7 @@ pub(crate) fn expire_ds_device_keys(user_id: &str) {
         .invalidate_user(user_id);
 }
 
-/// Stand in for `LAST_SEEN_BUMP_INTERVAL_SECS` elapsing for one user: forget the
-/// in-process DS's `last_seen` throttle stamps for `user_id`, so their devices'
-/// next verified request bumps `user_device.last_seen` again.
+/// Forget the DS's `last_seen` throttle for `user_id`.
 pub(crate) fn expire_ds_last_seen_throttle(user_id: &str) {
     DS_DEVICE_KEYS
         .get()
@@ -500,22 +310,13 @@ pub(crate) fn expire_ds_last_seen_throttle(user_id: &str) {
 async fn spawn_in_process_delivery(main: Arc<Db>, log: Arc<Db>) -> String {
     use std::sync::mpsc;
 
-    // The DS gets the harness's OWN handles, not second ones opened on the same
-    // files: two independent `Database`s on one file do not share WAL writes
-    // promptly, and a test reading rows the DS has "already written" is exactly
-    // the ghost failure this suite exists to rule out. Since #987 they are
-    // `pollis_delivery::db::Db` outright — there is no client-side handle type
-    // left to bridge from.
+    // The harness's own handles: a second `Database` on one file doesn't see WAL writes promptly.
     let ds_main = Arc::clone(&main);
     let ds_log = Arc::clone(&log);
 
-    // Auth is ENFORCED. The suite drives the signed write path end to end, so a
-    // regression in request signing or in server-side authz fails here rather
-    // than in production. (The DS's no-auth mode is covered by unit tests in
-    // `pollis-delivery`, which can exercise it without a signing client.)
+    // Auth is ENFORCED; no-auth mode is covered by `pollis-delivery` unit tests.
     let real_state = pollis_delivery::AppState::new_with_log_db(ds_main, ds_log, true)
-        // DEV_OTP forces the fixed harness code and skips the email send; no
-        // resend throttle so back-to-back sign-ups in one test aren't blocked.
+        // Fixed DEV_OTP, no email send, no resend throttle.
         .with_otp_config(pollis_delivery::otp::OtpConfig {
             resend_api_key: None,
             dev_otp: Some(DEV_OTP.to_string()),
@@ -523,18 +324,11 @@ async fn spawn_in_process_delivery(main: Arc<Db>, log: Arc<Db>) -> String {
             session_ttl_secs: 600,
             resend_throttle_secs: 0,
             max_attempts: 5,
-            // Every sign-in in the suite uses a handful of fixed mailboxes, so
-            // the production per-mailbox send budget (3 codes per TTL) would read
-            // one test run as one abused mailbox. Raised, not disabled — the OTP
-            // unit tests pin the real number.
+            // A handful of fixed mailboxes; raised, not disabled (OTP unit tests pin it).
             max_sends_per_window: u32::MAX,
             ..pollis_delivery::otp::OtpConfig::default()
         })
-        // Every request in the suite arrives from 127.0.0.1, so the production
-        // per-IP limits (10 OTP requests / 10 min) read the whole test run as one
-        // abusive client. Raised, not disabled — `ratelimit.rs`'s own unit tests
-        // pin the real numbers; here the limiter must simply not be the thing
-        // that fails a flow.
+        // Everything comes from 127.0.0.1; raised, not disabled (`ratelimit.rs` pins it).
         .with_ratelimit_config(pollis_delivery::ratelimit::RateLimitConfig {
             request_otp_max: 1_000_000,
             request_otp_window_secs: 1,
@@ -552,11 +346,9 @@ async fn spawn_in_process_delivery(main: Arc<Db>, log: Arc<Db>) -> String {
             get_window_secs: 1,
         });
 
-    // Keep a handle on the DS's device-key cache (a shallow `Arc` clone, so it
-    // is the very map the auth gate consults) for `expire_ds_device_keys`.
+    // The very map the auth gate consults, for `expire_ds_device_keys`.
     let _ = DS_DEVICE_KEYS.set(real_state.device_keys.clone());
 
-    // Only `/v1/commits` is served by the harness, for fault injection.
     let fault_state = DsState { main, log };
     let (tx, rx) = mpsc::channel::<String>();
     std::thread::Builder::new()
@@ -567,11 +359,7 @@ async fn spawn_in_process_delivery(main: Arc<Db>, log: Arc<Db>) -> String {
                 .build()
                 .expect("delivery: build runtime");
             rt.block_on(async move {
-                // The real production router, verbatim, with ONE path overridden for
-                // fault injection. `fallback_service` (not `merge`/`route`) is what makes
-                // the override legal: axum panics on a duplicate route, but everything the
-                // outer router does not match falls through to the inner one — including
-                // every endpoint added to `pollis-delivery` after today, with no edit here.
+                // The production router with `/v1/commits` overridden; `fallback_service` avoids axum's duplicate-route panic.
                 let router = axum::Router::new()
                     .route(
                         <pollis_delivery::commit::SubmitBody as pollis_api::DsRequest>::PATH,
@@ -581,7 +369,6 @@ async fn spawn_in_process_delivery(main: Arc<Db>, log: Arc<Db>) -> String {
                     .fallback_service(pollis_delivery::build_router_with_state(real_state))
                     .layer(axum::middleware::from_fn(record_send_data))
                     .layer(axum::middleware::from_fn(inject_message_fault));
-                // Bind :0 so the OS hands us a free port; read it back before serving.
                 let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
                     .await
                     .expect("delivery: bind loopback");
@@ -597,24 +384,18 @@ async fn spawn_in_process_delivery(main: Arc<Db>, log: Arc<Db>) -> String {
     rx.recv().expect("delivery: receive url")
 }
 
-/// One realtime wake-up a client asked the DS to fan out
-/// (`POST /v1/livekit/send-data`), as the in-process DS saw it.
+/// One `POST /v1/livekit/send-data` wake-up as the in-process DS saw it.
 #[derive(Clone, Debug)]
 pub(crate) struct SentWakeUp {
-    /// The logical room (`inbox-<user>`, a group id, …).
     pub(crate) room: String,
     pub(crate) payload: serde_json::Value,
-    /// The real handler's answer. The suite has no LiveKit, so a request that
-    /// passes authz ends in 503 "not configured"; a refused one is a 4xx.
+    /// No LiveKit here: accepted = 503 "not configured", refused = 4xx.
     pub(crate) status: u16,
 }
 
 static SENT_WAKE_UPS: std::sync::Mutex<Vec<SentWakeUp>> = std::sync::Mutex::new(Vec::new());
 
-/// Observe every `send-data` request on its way to the REAL handler, which
-/// still decides it. There is no LiveKit in the suite, so this log is the only
-/// place a test can see that a wake-up was asked for at all — the publish is
-/// fire-and-forget on the client.
+/// Log every `send-data` request; the real handler still decides it.
 async fn record_send_data(
     req: axum::extract::Request,
     next: axum::middleware::Next,
@@ -646,10 +427,7 @@ async fn record_send_data(
     resp
 }
 
-/// Apply an armed message-path [`DsFault`] to the request it is for (#1524),
-/// in front of the REAL handler. Consumed only when it applies: a
-/// [`DsFault::SendLandsThenTimesOut`] armed for a send the DS then refuses
-/// (an epoch-behind 409 the client re-seals after) stays armed for the retry.
+/// Apply an armed message-path fault (#1524), consumed only when it applies.
 async fn inject_message_fault(
     req: axum::extract::Request,
     next: axum::middleware::Next,
@@ -692,9 +470,7 @@ async fn inject_message_fault(
     }
 }
 
-/// The push audience one `POST /v1/messages/send` asked the DS for (#1431):
-/// `push_to` and `push_mentions` exactly as the client sent them. The suite
-/// has no Expo, so this is where a test sees who a send would wake.
+/// The push audience one send asked for (#1431), as sent.
 #[derive(Clone, Debug)]
 pub(crate) struct SentPushAudience {
     pub(crate) message_id: String,
@@ -727,7 +503,6 @@ async fn record_push_audience(
         .await
 }
 
-/// The push audience the send of `message_id` carried, if it reached the DS.
 pub(crate) fn sent_push_audience(message_id: &str) -> Option<SentPushAudience> {
     SENT_PUSH_AUDIENCES
         .lock()
@@ -738,8 +513,7 @@ pub(crate) fn sent_push_audience(message_id: &str) -> Option<SentPushAudience> {
         .cloned()
 }
 
-/// Wait (bounded) for a wake-up to `room` matching `pred`. Publishes are
-/// spawned, so the request can land a moment after the command returns.
+/// Bounded wait for a matching wake-up; publishes are spawned.
 pub(crate) async fn await_wake_up(
     room: &str,
     pred: impl Fn(&serde_json::Value) -> bool,
@@ -747,10 +521,7 @@ pub(crate) async fn await_wake_up(
     await_nth_wake_up(room, pred, 1).await
 }
 
-/// Wait (bounded) for the `n`th wake-up (1-based) to `room` matching `pred`.
-/// For a scenario where the same room is woken with the same payload twice by
-/// different actions — the payload names no sender, so order is what tells
-/// them apart.
+/// Bounded wait for the `n`th matching wake-up (1-based).
 pub(crate) async fn await_nth_wake_up(
     room: &str,
     pred: impl Fn(&serde_json::Value) -> bool,
@@ -772,7 +543,6 @@ pub(crate) async fn await_nth_wake_up(
     }
 }
 
-/// How many wake-ups to `room` matching `pred` the DS has seen so far.
 pub(crate) fn wake_up_count(room: &str, pred: impl Fn(&serde_json::Value) -> bool) -> usize {
     SENT_WAKE_UPS
         .lock()
@@ -782,19 +552,11 @@ pub(crate) fn wake_up_count(room: &str, pred: impl Fn(&serde_json::Value) -> boo
         .count()
 }
 
-// ─── Zero-loss invariant (#1524) ────────────────────────────────────────────
-//
-// Every flow fails on a message it lost without setting out to: when a
-// `TestClient` is dropped at the end of a test that did not call
-// [`expect_losses`], its local DB must hold no undecryptable placeholder and
-// the process must have logged no `[loss]` line (the accepted pre-join pass
-// excepted — see `pollis_core::diag::loss_tap`). A lost edit leaves no
-// placeholder, only the line, which is why both are checked.
+// Zero-loss invariant (#1524): unless [`expect_losses`], a dropped client must hold no placeholder and log no `[loss]`.
 
 static LOSSES_EXPECTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Opt this test out of the zero-loss check: it creates a loss on purpose and
-/// asserts on it itself. Reset by [`wipe`].
+/// Opt out of the zero-loss check. Reset by [`wipe`].
 pub(crate) fn expect_losses() {
     LOSSES_EXPECTED.store(true, std::sync::atomic::Ordering::SeqCst);
 }
@@ -803,10 +565,7 @@ fn losses_expected() -> bool {
     LOSSES_EXPECTED.load(std::sync::atomic::Ordering::SeqCst)
 }
 
-/// `(conversation, message id, reason)` for every placeholder in `client`'s
-/// local DB, or `None` when the DB is closed (a locked or signed-out client)
-/// or stayed busy. The busy wait is bounded: a background drain spawned by an
-/// unlock can hold the lock for a moment past the test body.
+/// Placeholders in the local DB, or `None` when it is closed or stayed busy.
 fn placeholder_rows(client: &TestClient) -> Option<Vec<(String, String, String)>> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     let guard = loop {
@@ -834,7 +593,6 @@ fn placeholder_rows(client: &TestClient) -> Option<Vec<(String, String, String)>
     Some(rows)
 }
 
-/// The zero-loss check one client runs as it is dropped; see the section docs.
 fn assert_no_unexpected_loss(client: &TestClient) {
     if std::thread::panicking() || losses_expected() {
         return;
@@ -870,50 +628,21 @@ pub(crate) async fn wipe() {
     )
     .await
     .expect("wipe test turso");
-    // The current-suite pin is process-global (see `set_current_suite`), so a
-    // scenario that panics between pinning and clearing would otherwise hand the
-    // next test a world running on a retired code point. Resetting here rather
-    // than in each scenario's teardown means no test can forget.
+    // The suite pin is process-global; reset it here so no test can forget.
     set_current_suite(None);
 }
 
-/// The main-DB handle — the very one the in-process DS reads and writes through.
-///
-/// Clients have no handle at all since #987: `pollis-core` does not link
-/// `libsql`, so a stray client-side query is a compile error rather than
-/// something a `query_only` PRAGMA has to catch at runtime. Tests that must seed
-/// or mutate *server-side* state directly — backdating envelopes or clearing
-/// watermarks to set up an envelope-GC scenario, tombstoning a revoked device's
-/// `user_device` row — stand in for effects that happen server-side in
-/// production (envelope GC, DS-driven device revocation), never for client
-/// writes.
+/// The DS's main-DB handle, for server-side effects only.
 pub(crate) async fn writable_remote() -> Arc<Db> {
     world().await.remote.clone()
 }
 
-/// The commit-log handle, for the same reason and with the same caveat as
-/// [`writable_remote`]. The three MLS control-plane tables live ONLY here.
+/// The DS's commit-log handle; the MLS control-plane tables live only here.
 pub(crate) async fn writable_log() -> Arc<Db> {
     world().await.log.clone()
 }
 
-/// Register a custom emoji in `group_id`, server-side (#917 / #848).
-///
-/// Emoji registration is a DS write backed by an R2 upload, and the flows world
-/// has neither an R2 nor the re-encoder's input. Seeding the two rows the
-/// upload would have produced — one `custom_emoji_object`, one `group_emoji` —
-/// through the WRITABLE handle stands in for exactly that server-side effect,
-/// the same way the envelope-GC scenarios seed backdated envelopes. It lets the
-/// suite exercise the two READ paths, which is what #917 is about.
-///
-/// `r2_key` is deliberately stored WRONG (it does not match
-/// `emoji/<hash>.<ext>`). `get_emoji_url` re-derives the key and refuses to
-/// fetch on a mismatch, which gives the render path a deterministic terminal
-/// error reached AFTER the object lookup and BEFORE any network call. That is
-/// what makes a hermetic assertion about the render path possible at all: the
-/// interesting question is never "did the bytes arrive", it is "was membership
-/// consulted on the way", and this stops the test at the first point where the
-/// answer is knowable.
+/// Seed a custom emoji server-side (#917 / #848), with a deliberately wrong `r2_key` so rendering stops before any network call.
 pub(crate) async fn seed_group_emoji(
     group_id: &str,
     shortcode: &str,
@@ -947,26 +676,7 @@ pub(crate) async fn seed_group_emoji(
     .expect("insert group_emoji");
 }
 
-/// Post-hoc commit-log GAP injection for the epoch-gap recovery scenario
-/// (#430-P2 / invariant F1).
-///
-/// A live submit-path fault can't leave a durable *interior* gap: dropping the
-/// head commit row merely lowers the head, and the next committer refills it. A
-/// real gap — epochs `… N-1, [N missing], N+1 …` — persists only when a row is
-/// removed AFTER a higher epoch has already been appended above it. So the gap
-/// scenario lets every commit land normally, then deletes ONE interior row
-/// directly on the LOG DB — the very handle the in-process DS writes through, so
-/// the deletion is as authoritative as a DS write. A member catching up from
-/// below then reads `N-1` immediately followed by `N+1`, trips the
-/// append-only-log gap detector in `process_pending_commits`, drops its stale
-/// local group, and must recover via external-join rather than wedge.
-///
-/// `conversation_id` is the MLS group id. For a group channel that is the
-/// `group_id` (see `process_pending_commits`'s channel→group resolution in
-/// `group_state.rs`), NOT the channel id.
-///
-/// Asserts loudly that exactly one row was removed — a silent no-op would mean
-/// the scenario armed the wrong epoch and would prove nothing.
+/// Delete one interior commit row post-hoc to make a durable F1 gap; asserts exactly one row went.
 pub(crate) async fn drop_commit_row(conversation_id: &str, epoch: i64) {
     let log = world().await.log.clone();
     let conn = log.conn().await.expect("log conn for drop_commit_row");
@@ -988,44 +698,13 @@ pub(crate) async fn drop_commit_row(conversation_id: &str, epoch: i64) {
     );
 }
 
-/// Post-hoc commit-BYTES corruption for the #680 deserialize-wedge scenario.
+/// Truncate one interior commit's bytes (epoch intact) for the #680 deserialize wedge.
 ///
-/// The analogue of [`drop_commit_row`], but instead of removing the row it
-/// TRUNCATES its `commit_data` blob (a disk-bitrot / replication-fault shape) while
-/// leaving the `epoch` column intact. A member replaying from below therefore
-/// still classifies the row as the next commit to APPLY (the epoch-gap check
-/// passes — the epoch is untouched), reaches `apply_one_commit`, and fails at
-/// `MlsMessageIn::tls_deserialize`. On pre-#680 code that was a `Stop` that wedged
-/// the member permanently (the group exists locally yet can never advance); after
-/// #680 it is an explicit `Recover(MalformedCommit)` that external-joins onto the
-/// head.
-///
-/// `conversation_id` is the MLS group id (the `group_id` for a group channel).
-/// Asserts exactly one row was corrupted — a silent no-op would prove nothing.
-///
-/// IMPLEMENTATION NOTE — why this is a DELETE-then-INSERT, not a straight
-/// `UPDATE ... SET commit_data`. Log-DB migration 000005 (#691) added
-/// `trg_mls_commit_log_immutable`, a BEFORE UPDATE trigger that RAISE(ABORT)s any
-/// UPDATE that changes `commit_data` — commit-payload immutability is the "rewrite"
-/// half of invariant F2 and is the most valuable clause in that migration, so it
-/// must NOT be weakened to accommodate this test. Instead we reproduce the exact
-/// same observable end state — one INTERIOR row whose `commit_data` is a two-byte
-/// stub, every other column (including `seq`, the catch-up order key, and the
-/// untouched `epoch`) identical, the head unchanged — by deleting the row and
-/// re-inserting it with the stub payload. That satisfies both new triggers as
-/// written: the DELETE guard (`trg_..._keep_head`) only protects the live head, and
-/// this row is provably interior (the caller asserts a higher epoch sits above it);
-/// the INSERT guard (`trg_..._no_forward_gap`) only rejects `epoch > head + 1`, and
-/// re-inserting a below-head epoch (the head row is never removed) is `epoch <= head`,
-/// so it passes. Do NOT "simplify" this back into an UPDATE — you will hit a
-/// confusing ABORT from the immutability trigger.
+/// DELETE+INSERT, not UPDATE: `trg_mls_commit_log_immutable` (#691) aborts payload updates. Don't "simplify" it.
 pub(crate) async fn corrupt_commit_row(conversation_id: &str, epoch: i64) {
     let log = world().await.log.clone();
     let conn = log.conn().await.expect("log conn for corrupt_commit_row");
-    // Snapshot the full row first — we must re-insert it byte-for-byte except for
-    // the payload, preserving `seq` so the row keeps its position in the seq-ordered
-    // catch-up replay (a fresh AUTOINCREMENT seq would re-order the corrupt commit to
-    // the tail and change what the replay observes).
+    // Re-insert byte-for-byte except the payload, keeping `seq` (the replay order key).
     let mut rows = conn
         .query(
             "SELECT seq, generation, sender_id, created_at, added_user_id, added_device_ids \
@@ -1047,34 +726,21 @@ pub(crate) async fn corrupt_commit_row(conversation_id: &str, epoch: i64) {
                  the scenario's setup is wrong (no such epoch)"
             )
         });
-    // ORDERING IS LOAD-BEARING — read every column out of `row` into a local BEFORE
-    // the duplicate-row check below. A `libsql::Row` is a view over the statement's
-    // current cursor position, not an owned snapshot of its values: calling
-    // `rows.next()` again to look for a second row steps the statement and
-    // invalidates the `Row` already handed out, after which every `row.get(i)` reads
-    // back `NULL` (surfacing as a misleading `NullValue` on `seq`, an
-    // `INTEGER PRIMARY KEY AUTOINCREMENT` that can never actually be NULL). Do NOT
-    // "tidy" the assert back up next to its `next()` call — that reintroduces the
-    // dead-cursor read and wedges `corrupt_commit_recovers_instead_of_wedging`.
+    // Read every column BEFORE the duplicate check: stepping the cursor invalidates `row`.
     let seq: i64 = row.get(0).expect("seq");
     let generation: i64 = row.get(1).expect("generation");
     let sender_id: String = row.get(2).expect("sender_id");
     let created_at: String = row.get(3).expect("created_at");
     let added_user_id: Option<String> = row.get(4).expect("added_user_id");
     let added_device_ids: Option<String> = row.get(5).expect("added_device_ids");
-    // Now safe to step the cursor: the duplicate-row guard catches a genuinely wrong
-    // scenario setup (two commits at the same epoch/generation), but must run only
-    // after the reads above.
+    // Only now is it safe to step the cursor.
     assert!(
         rows.next().await.expect("second row check").is_none(),
         "corrupt_commit_row: more than one commit at epoch {epoch} for {conversation_id} — \
          the scenario's setup is wrong (a duplicate row)"
     );
 
-    // Truncate to a two-byte stub: too short to be a valid TLS-serialised
-    // MlsMessageOut, so `tls_deserialize` fails outright. The row is interior, so the
-    // DELETE never trips the head guard; the re-insert lands below the head, so it
-    // never trips the forward-gap guard.
+    // Too short to deserialize; interior, so neither DELETE nor INSERT guard trips.
     let deleted = conn
         .execute(
             "DELETE FROM mls_commit_log WHERE seq = ?1",
@@ -1113,15 +779,7 @@ pub(crate) async fn corrupt_commit_row(conversation_id: &str, epoch: i64) {
     );
 }
 
-/// Prune the commit log below `floor` (EXCLUSIVE) via the REAL DS retention
-/// DELETE (`pollis_delivery::commit::delete_commits_below`) — the exact statement
-/// the event-driven prune runs (#539). Models a Tier-2 prune whose floor has
-/// advanced PAST a straggler: a member below `floor` then reads an
-/// earliest-available epoch above its own, trips the append-only gap detector in
-/// `process_pending_commits`, and recovers via external-join. Returns the number
-/// of commit rows pruned (asserted non-zero — a no-op would prove nothing).
-///
-/// `conversation_id` is the MLS group id (the `group_id` for a group channel).
+/// Prune below `floor` (exclusive) via the real retention DELETE (#539). Asserts it pruned something.
 pub(crate) async fn prune_commits_below(conversation_id: &str, floor: i64) -> u64 {
     let log = world().await.log.clone();
     let conn = log.conn().await.expect("log conn for prune_commits_below");
@@ -1140,16 +798,7 @@ pub(crate) async fn prune_commits_below(conversation_id: &str, floor: i64) -> u6
     pruned
 }
 
-/// Record a catch-up high-water at `since` for EVERY current member device of a
-/// conversation, straight onto the DS DBs — a test stand-in for a forged/buggy
-/// high-water that has already been recorded (the #681 attack's EFFECT; the
-/// monotone store makes such a value sticky). Covering the whole roster is what
-/// makes it dangerous: the floor then reads "fully reported" and Tier 1 is driven
-/// off the injected value, so with `since` far above head only the retention
-/// floor's head clamp stands between it and a full commit-log wipe. Membership is
-/// read off MAIN exactly as `pollis_delivery::commit::prune_commit_log` does.
-///
-/// `conversation_id` is the MLS group id (the `group_id` for a group channel).
+/// Record a forged high-water for every current member device (#681's effect).
 pub(crate) async fn force_high_water_for_all_members(conversation_id: &str, since: i64) {
     let w = world().await;
     let main_conn = w.remote.conn().await.expect("main conn for force_high_water");
@@ -1191,12 +840,7 @@ pub(crate) async fn force_high_water_for_all_members(conversation_id: &str, sinc
     }
 }
 
-/// Run the REAL event-driven retention prune for a conversation
-/// (`pollis_delivery::commit::prune_commit_log`) against the live DS DBs — the
-/// exact call the DS makes on a commit append / catch-up report — and return its
-/// report. Membership on MAIN, log on LOG, as production splits them.
-///
-/// `conversation_id` is the MLS group id (the `group_id` for a group channel).
+/// Run the real event-driven retention prune and return its report.
 pub(crate) async fn ds_prune_commit_log(
     conversation_id: &str,
 ) -> pollis_delivery::commit::PruneReport {
@@ -1208,13 +852,7 @@ pub(crate) async fn ds_prune_commit_log(
         .expect("prune_commit_log")
 }
 
-/// The Delivery Service's head epoch for a conversation — `MAX(epoch) + 1` over
-/// the commit log — read straight from the LOG DB via
-/// `pollis_delivery::commit::head_epoch`. Convergence assertions use this to
-/// confirm the group advanced (and past a dropped epoch) and that a returning
-/// member reached the shared head.
-///
-/// `conversation_id` is the MLS group id (the `group_id` for a group channel).
+/// The DS head epoch (`MAX(epoch) + 1`), read from the LOG DB.
 pub(crate) async fn ds_head_epoch(conversation_id: &str) -> i64 {
     let log = world().await.log.clone();
     let conn = log.conn().await.expect("log conn for ds_head_epoch");
@@ -1223,11 +861,7 @@ pub(crate) async fn ds_head_epoch(conversation_id: &str) -> i64 {
         .expect("head_epoch")
 }
 
-/// The Delivery Service's head SUITE GENERATION for a conversation (#454 P4) —
-/// `COALESCE(MAX(generation), 0)` over the commit log. 0 until the conversation
-/// migrates off the classic suite, so every pre-P4 assertion reads the same.
-///
-/// `conversation_id` is the MLS group id (the `group_id` for a group channel).
+/// The DS head suite generation (#454 P4); 0 until a migration.
 pub(crate) async fn ds_head_generation(conversation_id: &str) -> i64 {
     let log = world().await.log.clone();
     let conn = log.conn().await.expect("log conn for ds_head_generation");
@@ -1236,7 +870,6 @@ pub(crate) async fn ds_head_generation(conversation_id: &str) -> i64 {
         .expect("head_generation")
 }
 
-/// The in-process Delivery Service base URL (e.g. `http://127.0.0.1:NNNNN`).
 pub(crate) async fn delivery_url() -> String {
     world()
         .await
@@ -1246,11 +879,7 @@ pub(crate) async fn delivery_url() -> String {
         .expect("in-process delivery URL configured")
 }
 
-/// Minimal, dependency-free HTTP/1.1 `POST` used only by the sole-writer
-/// acceptance test: send `body` to `{base}{path}` with the given extra headers
-/// and `Connection: close`, then return the numeric HTTP status code. We craft
-/// the request over a raw `TcpStream` rather than pull an HTTP-client crate into
-/// the test deps just to prove the DS rejects unsigned writes.
+/// Raw-`TcpStream` HTTP POST returning the status, to prove the DS rejects unsigned writes.
 pub(crate) async fn raw_post_status(
     base: &str,
     path: &str,
@@ -1280,7 +909,6 @@ pub(crate) async fn raw_post_status(
     stream.read_to_end(&mut resp).await.expect("read response");
     let text = String::from_utf8_lossy(&resp);
     let status_line = text.lines().next().expect("HTTP status line");
-    // "HTTP/1.1 401 Unauthorized" → 401
     status_line
         .split_whitespace()
         .nth(1)
@@ -1288,12 +916,7 @@ pub(crate) async fn raw_post_status(
         .unwrap_or_else(|| panic!("could not parse status from: {status_line:?}"))
 }
 
-/// Sign `body` with `client`'s stable device key — byte-for-byte as
-/// `ds_client::ds_post` does — and POST it to `{delivery_url}{path}`, returning
-/// the HTTP status. This is the ONLY way to drive a *validly signed* request as
-/// an arbitrary user, which is what the domain-A authorization tests need: a
-/// non-member / non-sender must get 403 (proved identity, lacking permission),
-/// not the 401 an unsigned/garbled request gets.
+/// POST signed as `client`'s device key, byte-for-byte as `ds_client::ds_post` does.
 pub(crate) async fn signed_post_status(client: &TestClient, path: &str, body: &[u8]) -> u16 {
     use openmls_traits::signatures::Signer;
 
@@ -1313,8 +936,7 @@ pub(crate) async fn signed_post_status(client: &TestClient, path: &str, body: &[
         let guard = client.state.local_db.lock().await;
         let db = guard.as_ref().expect("client local db open");
         let provider = pollis_lib::commands::mls::PollisProvider::new(db.conn());
-        // DS request auth signs with the certified device identity's ML-DSA-44
-        // half (#668 P5), mirroring `ds_client::ds_post`.
+        // ML-DSA-44 half of the device identity (#668 P5).
         let (signer, _pub) = pollis_lib::commands::mls::load_or_create_device_signer(
             &provider,
             &user_id,
@@ -1337,47 +959,28 @@ pub(crate) async fn signed_post_status(client: &TestClient, path: &str, body: &[
     raw_post_status(&base, path, &headers, body).await
 }
 
-// ─── Client ─────────────────────────────────────────────────────────────────
-
-/// One simulated device for one user. Holds a `MockRuntime` app with its own
-/// isolated keystore + managed `AppState`. All clients in a given test share
-/// the `Arc<Db>` on `TestWorld`, so they actually round-trip through
-/// the same test Turso DB the way real clients round-trip through production
-/// Turso.
+/// One simulated device: its own `MockRuntime` app, keystore and `AppState`.
 pub(crate) struct TestClient {
-    /// App must outlive the webview — keep it alive for the lifetime of the
-    /// client.
+    /// Must outlive the webview.
     pub(crate) _app: App<MockRuntime>,
     pub(crate) webview: WebviewWindow<MockRuntime>,
     #[allow(dead_code)]
     pub(crate) state: Arc<AppState>,
-    /// Populated after `sign_up` / `sign_in`. Commands like `create_group`
-    /// need this to identify the caller.
     pub(crate) profile: Option<UserProfile>,
 }
 
 impl TestClient {
-    /// Build a fresh client. Does NOT sign in — call [`sign_up`] after
-    /// construction.
+    /// Does NOT sign in; call [`sign_up`].
     pub(crate) async fn new() -> Self {
         Self::new_with_config(world().await.config.clone()).await
     }
 
-    /// Shared constructor: build a client backed by an explicit Config. Sealed
-    /// sender is UNCONDITIONAL (#607) — there is no per-client seal toggle to
-    /// flip; every client seals every outbound envelope.
+    /// Sealed sender is unconditional (#607); there is no toggle.
     async fn new_with_config(config: Config) -> Self {
         let keystore: Arc<dyn Keystore> = Arc::new(InMemoryKeystore::new());
-        // No database handle (#987). The `query_only_view` this used to pass was
-        // the runtime gate that a client never wrote the shared DB directly;
-        // `pollis-core` no longer links `libsql`, so the same guarantee — now
-        // covering READS too — holds at compile time, and
-        // `pollis-core/tests/no_client_side_remote_reads.rs` pins it.
+        // No database handle (#987); `pollis-core/tests/no_client_side_remote_reads.rs` pins it.
         let state = Arc::new(AppState::new_with_parts(config, keystore));
-        // Each client is its own device, so it gets its own local database
-        // (#1524): two devices of one account must not share a history or an
-        // MLS store. `accounts.json` and the rest stay in the shared data dir —
-        // `activate` relies on that.
+        // Each device gets its own local DB (#1524); `accounts.json` stays shared.
         static NEXT_DEVICE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = NEXT_DEVICE.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let dir = pollis_core::db::local::dirs_path().join(format!("device-{n}"));
@@ -1391,15 +994,7 @@ impl TestClient {
         }
     }
 
-    /// First-device signup via the real OTP flow (bypassed by `DEV_OTP`).
-    /// Populates `self.profile`, sets a fixed test PIN ("0000") so the
-    /// local SQLCipher DB opens, and runs `initialize_identity` to
-    /// publish the device's MLS key package. Returns the final profile.
-    ///
-    /// PIN is required: post-#194, `verify_otp` deliberately leaves the
-    /// local DB closed; `set_pin` is what calls `load_user_db_with_key`.
-    /// Skipping it would make every DB-touching command in the test
-    /// harness fail with "Not signed in".
+    /// Signup via the real OTP flow, then `set_pin` (required post-#194 to open the DB).
     pub(crate) async fn sign_up(&mut self, email: &str) -> UserProfile {
         invoke::<()>(&self.webview, "request_otp", json!({ "email": email }))
             .await
@@ -1437,16 +1032,7 @@ impl TestClient {
         &self.profile.as_ref().expect("not signed in").id
     }
 
-    /// Point the process-global "active user" (`accounts.json`'s
-    /// `last_active_user`) at THIS client before it dispatches a command.
-    ///
-    /// Production runs exactly one active user per process, and the signed DS
-    /// write client (`ds_client::ds_post`) derives the `X-Pollis-User` signing
-    /// identity from that global. The harness runs many users in one process
-    /// sharing one `accounts.json`, so without this every signed DS write would
-    /// be attributed to whichever client signed up LAST and fail auth (401/403).
-    /// Tests are `#[serial]` and each command is fully awaited before the next,
-    /// so flipping the active user immediately before dispatch is race-free.
+    /// Point `accounts.json`'s active user at this client: `ds_post` signs as that global user.
     pub(crate) fn activate(&self) {
         if let Some(p) = &self.profile {
             let _ = pollis_lib::accounts::upsert_account(&p.id, &p.username, None);
@@ -1460,9 +1046,7 @@ impl TestClient {
             .unwrap_or_else(|e| panic!("{cmd}: {e}"))
     }
 
-    /// Like [`invoke_json`] but returns the `Result` so a test can assert on a
-    /// command that is EXPECTED to fail (e.g. a rejected DS write). Still
-    /// activates this client first so signed DS writes go out under its identity.
+    /// Like [`invoke_json`] but returns the `Result`, for expected failures.
     pub(crate) async fn invoke_try(
         &self,
         cmd: &str,
@@ -1479,13 +1063,8 @@ impl Drop for TestClient {
     }
 }
 
-// ─── Helpers for multi-client scenarios ─────────────────────────────────────
-
 impl TestClient {
-    /// Drain any pending MLS welcomes queued for this client on Turso. Real
-    /// clients call this on login and when the livekit inbox pings them; the
-    /// harness drives it explicitly. Scoped to welcomes only — commits are
-    /// per-channel (see [`process_commits_for`]).
+    /// Drain pending MLS welcomes; commits are per-channel ([`process_commits_for`]).
     pub(crate) async fn poll(&self) {
         self.activate();
         let _: serde_json::Value = invoke(
@@ -1497,9 +1076,7 @@ impl TestClient {
         .unwrap_or_else(|e| panic!("poll_mls_welcomes: {e}"));
     }
 
-    /// Run the cold-launch / post-reconnect MLS sweep for this client — catches
-    /// every group + DM up to head and runs the eviction/remove reconcile
-    /// backstop (issue #430 P1). Real clients fire this at AppShell mount.
+    /// The cold-launch / reconnect MLS sweep, including the reconcile backstop (#430 P1).
     #[allow(dead_code)]
     pub(crate) async fn sweep(&self) {
         self.activate();
@@ -1512,9 +1089,7 @@ impl TestClient {
         .unwrap_or_else(|e| panic!("catch_up_all_mls_groups: {e}"));
     }
 
-    /// Drain pending MLS commits for a single channel. Must be called
-    /// per-channel because commit processing is keyed by MLS group, which
-    /// corresponds 1:1 with a conversation (channel or DM).
+    /// Drain pending commits for one conversation's MLS group.
     #[allow(dead_code)]
     pub(crate) async fn process_commits_for(&self, channel_id: &str) {
         self.activate();
@@ -1528,9 +1103,7 @@ impl TestClient {
     }
 
     pub(crate) async fn create_group(&self, name: &str) -> String {
-        // Tests expect the auto-created #General text channel; opt in
-        // explicitly because the production frontend now defaults both
-        // toggles to off.
+        // Opt in to #General: the frontend now defaults to off.
         let g: serde_json::Value = self
             .invoke_json(
                 "create_group",
@@ -1559,7 +1132,6 @@ impl TestClient {
             .await;
     }
 
-    /// Fetch this client's pending invites and return the first one, if any.
     pub(crate) async fn first_pending_invite(&self) -> Option<serde_json::Value> {
         let invites: serde_json::Value = self
             .invoke_json("get_pending_invites", json!({ "userId": self.user_id() }))
@@ -1585,7 +1157,6 @@ impl TestClient {
         .await;
     }
 
-    /// The group's pending invites as its member page lists them (#1506).
     pub(crate) async fn list_group_invites(&self, group_id: &str) -> Vec<serde_json::Value> {
         let invites: serde_json::Value = self
             .invoke_json(
@@ -1596,7 +1167,6 @@ impl TestClient {
         invites.as_array().expect("invites array").clone()
     }
 
-    /// Withdraw a pending invite from the member page (#1506).
     pub(crate) async fn try_revoke_invite(
         &self,
         group_id: &str,
@@ -1650,10 +1220,7 @@ impl TestClient {
         channels.as_array().expect("channels array").clone()
     }
 
-    /// Create an additional text channel in a group and return its ID. All
-    /// channels in a group share the group's single MLS group (`mls_group_id ==
-    /// group_id`), so this is how a test builds the multi-channel topology needed
-    /// to exercise cross-channel epoch interactions.
+    /// Another text channel; all channels share the group's one MLS group.
     #[allow(dead_code)]
     pub(crate) async fn create_channel(&self, group_id: &str, name: &str) -> String {
         let ch: serde_json::Value = self
@@ -1671,7 +1238,6 @@ impl TestClient {
         ch["id"].as_str().expect("channel id").to_string()
     }
 
-    /// Return the #General text channel ID for a group.
     pub(crate) async fn general_channel_id(&self, group_id: &str) -> String {
         self.list_group_channels(group_id)
             .await
@@ -1717,9 +1283,7 @@ impl TestClient {
         .await;
     }
 
-    /// Voluntarily leave a group. Deletes this user's `group_member` row,
-    /// forgets local MLS state, and signals remaining members to reconcile
-    /// away the leaver's stale leaf.
+    /// Voluntarily leave, signalling remaining members to reconcile.
     pub(crate) async fn leave_group(&self, group_id: &str) {
         self.invoke_json(
             "leave_group",
@@ -1781,7 +1345,6 @@ impl TestClient {
         .await;
     }
 
-    /// Try to invoke `send_message`, returning the error string if it failed.
     pub(crate) async fn try_send_message(
         &self,
         conversation_id: &str,
@@ -1802,12 +1365,7 @@ impl TestClient {
         .await
     }
 
-    /// Send a reply INTO a thread (#825). `thread_id` is the root message's
-    /// ULID. Returns the new message so a caller can assert on its id.
-    ///
-    /// Takes `conversation_id` like every other send here: the local `message`
-    /// table keys channels and DMs on the same column, which is precisely why
-    /// threads are expected to behave identically in both.
+    /// Reply in a thread (#825); `thread_id` is the root's ULID.
     pub(crate) async fn send_thread_reply(
         &self,
         conversation_id: &str,
@@ -1831,7 +1389,6 @@ impl TestClient {
         .unwrap_or_else(|e| panic!("send_thread_reply({conversation_id}, {thread_id}): {e}"))
     }
 
-    /// Replies this device holds for one thread, oldest first.
     pub(crate) async fn read_thread(&self, thread_id: &str) -> Vec<serde_json::Value> {
         self.activate();
         invoke::<Vec<serde_json::Value>>(
@@ -1843,7 +1400,6 @@ impl TestClient {
         .unwrap_or_else(|e| panic!("read_thread_messages({thread_id}): {e}"))
     }
 
-    /// Reply counts per thread for one conversation (channel id or DM id).
     pub(crate) async fn thread_summaries(&self, conversation_id: &str) -> Vec<serde_json::Value> {
         self.activate();
         invoke::<Vec<serde_json::Value>>(
@@ -1861,8 +1417,6 @@ impl TestClient {
             .unwrap_or_else(|e| panic!("send_message({conversation_id}): {e}"));
     }
 
-    /// Like `send_channel_message` but returns the new message's ID so the
-    /// caller can later edit or delete it.
     pub(crate) async fn send_channel_message_id(&self, conversation_id: &str, content: &str) -> String {
         let msg = self
             .try_send_message(conversation_id, content)
@@ -1871,8 +1425,7 @@ impl TestClient {
         msg["id"].as_str().expect("message id").to_string()
     }
 
-    /// Edit a previously-sent message. Republishes the ciphertext at the
-    /// current MLS epoch and replaces any prior edit envelope.
+    /// Re-seals at the current epoch and replaces any prior edit envelope.
     pub(crate) async fn edit_message(&self, conversation_id: &str, message_id: &str, new_content: &str) {
         self.invoke_json(
             "edit_message",
@@ -1886,9 +1439,7 @@ impl TestClient {
         .await;
     }
 
-    /// Delete a message the caller sent — "delete for everyone". Sends the E2EE
-    /// redaction and removes the original envelope; recipients soft-delete their
-    /// local copy on next ingest.
+    /// Delete for everyone.
     pub(crate) async fn delete_message(&self, message_id: &str) {
         self.invoke_json(
             "delete_message",
@@ -1900,14 +1451,7 @@ impl TestClient {
         .await;
     }
 
-    /// Fetch the FULL message history for a channel, following the cursor across
-    /// every page. The production read (`get_channel_messages`) is paginated
-    /// (default page 50, newest-first); reading only the first page would make an
-    /// oracle over a long history (e.g. the 500-op marathon, which sends >50
-    /// messages) falsely report the OLDEST messages as lost for a member who has
-    /// been present since the start — they're simply below the first page. The
-    /// model's bulletproof-delivery assertion needs the whole history, so page
-    /// through to the end.
+    /// The FULL history across every page; one page would fake losses in long runs.
     pub(crate) async fn fetch_channel_messages(&self, channel_id: &str) -> Vec<serde_json::Value> {
         let mut all: Vec<serde_json::Value> = Vec::new();
         let mut cursor: Option<serde_json::Value> = None;
@@ -1927,8 +1471,7 @@ impl TestClient {
         all
     }
 
-    /// Drive the group-level catch-up for `channel_id` without reading a page
-    /// — what a realtime hint or a resume does.
+    /// Group-level catch-up without reading a page.
     pub(crate) async fn ingest_channel(&self, channel_id: &str) {
         self.invoke_json(
             "ingest_channel_envelopes",
@@ -1937,13 +1480,11 @@ impl TestClient {
         .await;
     }
 
-    /// Drain the outbox — what a reconnect, a resume or an unlock does. Returns
-    /// the drain's report (`delivered` / `failed` id lists).
+    /// Drain the outbox, returning its report.
     pub(crate) async fn flush_outbox(&self) -> serde_json::Value {
         self.invoke_json("flush_outbox", json!({})).await
     }
 
-    /// Change a member's role in a group (`"admin"` or `"member"`).
     pub(crate) async fn set_member_role(&self, group_id: &str, target_user_id: &str, role: &str) {
         self.invoke_json(
             "set_member_role",
@@ -1957,19 +1498,12 @@ impl TestClient {
         .await;
     }
 
-    /// Give this client a media-server port and token (#917).
-    ///
-    /// `get_emoji_url` bails immediately when the loopback media server has not
-    /// started, which every flows client is — so without this the render path
-    /// would fail before reaching any authorization-relevant code and a test
-    /// asserting on it would prove nothing. The values are never connected to;
-    /// they only have to exist for the command to proceed to the object lookup.
+    /// Fake media-server values (#917), so `get_emoji_url` reaches the object lookup.
     pub(crate) async fn arm_media_server(&self) {
         *self.state.media_server_port.lock().await = Some(1);
         *self.state.media_server_token.lock().await = Some("test-token".to_string());
     }
 
-    /// Return the (user_id, role) pairs for every current member of a group.
     pub(crate) async fn group_member_roles(&self, group_id: &str) -> Vec<(String, String)> {
         let members: serde_json::Value = self
             .invoke_json(
@@ -1990,12 +1524,8 @@ impl TestClient {
 
 }
 
-// ─── Multi-device helpers ───────────────────────────────────────────────────
-
 impl TestClient {
-    /// Fetch a DM channel page through the real `get_dm_messages` command.
-    /// Mirrors `fetch_channel_messages` but drives the DM code path, which
-    /// polls welcomes and processes commits before decrypting.
+    /// `get_dm_messages`, which polls welcomes and processes commits first.
     pub(crate) async fn fetch_dm_messages(&self, dm_channel_id: &str) -> Vec<serde_json::Value> {
         let page: serde_json::Value = self
             .invoke_json(
@@ -2009,9 +1539,7 @@ impl TestClient {
             .clone()
     }
 
-    /// Leave a DM. Used both as "reject pending request" (when the user hasn't
-    /// accepted yet) and "leave accepted channel" — the row is deleted either
-    /// way, so both flows go through this single command.
+    /// Leave a DM; also how a pending request is rejected.
     pub(crate) async fn leave_dm(&self, dm_channel_id: &str) {
         self.invoke_json(
             "leave_dm_channel",
@@ -2029,20 +1557,9 @@ impl TestClient {
     }
 }
 
-/// Spin up a new `TestClient` and enroll it as a second device for an
-/// existing user. Drives the real `device_enrollment` command chain end to
-/// end — `start_device_enrollment` → `list_pending_enrollment_requests` →
-/// `approve_device_enrollment` → `poll_enrollment_status` — so the returned
-/// client holds a valid local copy of `account_id_key`, has published its
-/// own device cert + MLS key packages, and can participate in MLS groups
-/// immediately.
-///
-/// `primary` must already be signed in as the target user.
+/// Enroll a second device for `primary`'s user through the real enrollment commands.
 pub(crate) async fn enroll_second_device(primary: &TestClient, email: &str) -> TestClient {
-    // 1. Build a fresh client. Unlike `TestClient::new` → `sign_up`, we sign
-    //    in against the email of an existing user, so `verify_otp` finds the
-    //    user row and returns enrollment_required = true (instead of minting
-    //    a new account).
+    // 1. Sign in as an existing user, so enrollment is required.
     let mut new_client = TestClient::new().await;
 
     invoke::<()>(
@@ -2073,8 +1590,6 @@ pub(crate) async fn enroll_second_device(primary: &TestClient, email: &str) -> T
 
     new_client.profile = Some(profile.clone());
 
-    // 2. New device kicks off an enrollment request — ephemeral X25519 pub
-    //    lands on Turso, the private half stays in AppState.
     let handle: serde_json::Value = new_client
         .invoke_json(
             "start_device_enrollment",
@@ -2090,9 +1605,7 @@ pub(crate) async fn enroll_second_device(primary: &TestClient, email: &str) -> T
         .expect("verification_code")
         .to_string();
 
-    // 3. Primary sees the pending request and approves it. The approver
-    //    wraps account_id_key under the requester's ephemeral pub and
-    //    flips the row to 'approved'.
+    // 3. The approver wraps account_id_key under the requester's ephemeral key.
     let pending: serde_json::Value = primary
         .invoke_json(
             "list_pending_enrollment_requests",
@@ -2109,20 +1622,13 @@ pub(crate) async fn enroll_second_device(primary: &TestClient, email: &str) -> T
                  got {pending_arr:#?}"
             )
         });
-    // The approver's list carries NO verification code (#1096). It used to, and
-    // the approving UI displayed that copy and submitted it straight back — so
-    // the comparison the code exists for was performed by nobody, and a Delivery
-    // Service that swapped the new device's ephemeral key and its stored code to
-    // match passed every check. Asserting the two copies were equal was asserting
-    // exactly that insecure property, so the assertion is the ABSENCE of a copy.
+    // The approver's list carries NO verification code (#1096); it must be typed.
     assert!(
         matching.get("verification_code").is_none(),
         "the approver's list must not carry a verification code: {matching:#?}"
     );
 
-    // `verification_code` here is the NEW device's own locally-derived value —
-    // what a human reads off its screen and types on the approving device. That
-    // is the only place it legitimately comes from.
+    // The new device's own code, as a human would type it.
     primary
         .invoke_json(
             "approve_device_enrollment",
@@ -2133,10 +1639,7 @@ pub(crate) async fn enroll_second_device(primary: &TestClient, email: &str) -> T
         )
         .await;
 
-    // 4. New device polls until approved. Bounded loop — 20 iterations is
-    //    orders of magnitude more than needed because the approve write
-    //    above has already committed to Turso by the time we get here. No
-    //    raw sleeps.
+    // 4. Bounded poll; the approve has already committed.
     let mut status: String = String::new();
     for attempt in 0..20 {
         let resp: serde_json::Value = new_client
@@ -2161,11 +1664,7 @@ pub(crate) async fn enroll_second_device(primary: &TestClient, email: &str) -> T
     }
     assert_eq!(status, "approved", "enrollment should end in 'approved'");
 
-    // 5. Post-#194: poll_enrollment_status now hands the unwrapped
-    //    account_id_key to AppState.unlock instead of writing it raw,
-    //    and defers finalize_enrollment. The test must mirror what
-    //    App.tsx does after pin-create completes:
-    //       set_pin → finalize_device_enrollment → initialize_identity.
+    // 5. Mirror App.tsx after pin-create: set_pin → finalize_device_enrollment → initialize_identity.
     invoke::<()>(
         &new_client.webview,
         "set_pin",
@@ -2190,7 +1689,6 @@ pub(crate) async fn enroll_second_device(primary: &TestClient, email: &str) -> T
     .await
     .unwrap_or_else(|e| panic!("initialize_identity on enrolled device: {e}"));
 
-    // 6. Sanity: remote now lists two devices for this user.
     let devices: serde_json::Value = new_client
         .invoke_json(
             "list_user_devices",
@@ -2206,56 +1704,19 @@ pub(crate) async fn enroll_second_device(primary: &TestClient, email: &str) -> T
     new_client
 }
 
-// ─── Attacker model: a stolen leaf (issue #666) ──────────────────────────────
-
-/// A passive adversary holding an exfiltrated copy of one device's MLS state.
-///
-/// Everything openmls keeps for a device — leaf secret, epoch secrets, ratchet
-/// state, the group itself — lives in the local `mls_kv` table, so copying that
-/// table IS the compromise. The copy is planted in a *separate* client's local
-/// DB, which is what makes the adversary strong enough to be worth testing: it
-/// gets its own state that evolves independently of the victim's, so nothing it
-/// can (or cannot) read is an artefact of sharing the victim's live database.
-///
-/// Crucially the attacker **follows the commit chain**. A snapshot that only ever
-/// decrypted at its stolen epoch would be locked out by *any* epoch change, and a
-/// lockout assertion over it would prove nothing about rotation. A real adversary
-/// holding the victim's leaf key can decrypt the path secrets in every *other*
-/// member's commit — those commits are addressed to the copath, which contains the
-/// victim's leaf — and so rides the group forward indefinitely. Only a commit by
-/// the victim itself cuts it off, because a committer's own leaf is the one
-/// position an UpdatePath carries no ciphertext for. That gap is exactly what
-/// issue #666's self-update closes, and `catch_up` is what forces the test to
-/// prove it rather than assume it.
-///
-/// Passive is the honest scope. `mls_kv` also holds the device's *signing* key,
-/// so an adversary willing to act could authenticate to the DS and external-join
-/// as the victim — but that is a full device impersonation, and no amount of key
-/// rotation defends against it. Post-compromise security is the claim that a
-/// *listener* is evicted once the victim rotates, and that is what this models.
+/// A passive adversary with a copy of one device's `mls_kv`, riding the commit chain until the victim commits (#666).
 pub(crate) struct StolenLeaf {
-    /// The attacker's own client. Its identity is its own (it never authenticates
-    /// as the victim); only the MLS key material is the victim's.
+    /// The attacker's own client; only the MLS key material is the victim's.
     client: TestClient,
     victim: String,
 }
 
-/// Exfiltrate `victim`'s entire MLS state as of right now onto an attacker-owned
-/// device.
-///
-/// The attacker signs up so it has an unlocked local DB to plant the stolen rows
-/// in; that signup is a bystander account which never joins any group. Its own
-/// `mls_kv` rows are dropped first — a stolen device holds the victim's key
-/// material and nothing else.
+/// Copy `victim`'s `mls_kv` onto a fresh attacker device, replacing its own rows.
 pub(crate) async fn steal_leaf(victim: &TestClient) -> StolenLeaf {
     let mut client = TestClient::new().await;
     client.sign_up("attacker@test.local").await;
 
-    // Columns are read as dynamically-typed `Value`s because `mls_kv` genuinely
-    // holds a mix: openmls' own rows bind `scope` as the empty *blob*, while
-    // sibling modules writing through `raw_conn` bind it as text, and SQLite
-    // stores whatever it was given regardless of the declared affinity. Copying
-    // `Value`s keeps every row byte- and type-identical to the victim's.
+    // As `Value`s: `scope` is stored as blob or text depending on the writer.
     type Row = (
         rusqlite::types::Value,
         rusqlite::types::Value,
@@ -2293,23 +1754,7 @@ pub(crate) async fn steal_leaf(victim: &TestClient) -> StolenLeaf {
         }
     }
 
-    // Adopt the victim's (user_id, device_id) as the identity this state signs
-    // and reads AS.
-    //
-    // Not an escalation: `mls_kv` — which we just copied wholesale — is where the
-    // device's ML-DSA-44 request-signing key lives, so a copy of it IS a copy of
-    // the credential. What changed in #987 is where that matters. Before it, a
-    // client could fetch the commit log with the whole-database read token every
-    // binary carried, so an attacker holding only `mls_kv` caught up without ever
-    // presenting a credential; the harness could model that by leaving the
-    // attacker signed in as itself. There is no ambient read capability any more
-    // — the DS answers `conversation-state` for the VERIFIED signer and nobody
-    // else — so catching up now requires presenting the stolen device's identity,
-    // which the stolen bytes already permit.
-    //
-    // The adversary stays PASSIVE: it reads and decrypts, and never commits,
-    // writes, or external-joins. Device impersonation is a different attack that
-    // no key rotation defends against, and the roster/eviction tests cover it.
+    // Sign as the victim: the stolen `mls_kv` holds its signing key, and the DS only answers the verified signer (#987).
     *client.state.device_id.lock().await = victim.state.device_id.lock().await.clone();
     if let Some(u) = victim.state.unlock.lock().await.as_ref() {
         *client.state.unlock.lock().await = Some(pollis_lib::commands::pin::UnlockState {
@@ -2326,13 +1771,7 @@ pub(crate) async fn steal_leaf(victim: &TestClient) -> StolenLeaf {
 }
 
 impl StolenLeaf {
-    /// Ride the commit chain forward as far as the stolen keys allow.
-    ///
-    /// Runs the real client replay (`process_pending_commits_inner`) as the
-    /// victim, which is what an adversary running the stolen device's own binary
-    /// would do. It succeeds through other members' commits and stalls at the
-    /// victim's own — the whole point of the model, so the result is deliberately
-    /// ignored here and judged by what [`can_read`](Self::can_read) sees.
+    /// Ride the commit chain as far as the stolen keys allow; stalls at the victim's own commit.
     pub(crate) async fn catch_up(&self, mls_group_id: &str) {
         if let Err(e) = pollis_lib::commands::mls::process_pending_commits_inner(
             &self.client.state,
@@ -2345,17 +1784,7 @@ impl StolenLeaf {
         }
     }
 
-    /// Can the attacker still read `body` out of `conversation_id`?
-    ///
-    /// Catches up first, then runs the real production decrypt
-    /// (`try_mls_decrypt`) against the stolen state over every envelope the DS
-    /// holds for the conversation — the exact capability a wiretap plus a stolen
-    /// device would have.
-    ///
-    /// Both ids are needed because they are not the same key: envelopes are
-    /// stored per *conversation* (a channel id, for group traffic), while the MLS
-    /// group every channel in a group shares is keyed by the group id. For a DM
-    /// the two coincide. Mirrors `send_message`'s own `mls_group_id` lookup.
+    /// Catch up, then try the real decrypt over every stored envelope (channel id vs group id).
     pub(crate) async fn can_read(
         &self,
         conversation_id: &str,
@@ -2374,7 +1803,7 @@ impl StolenLeaf {
             ) else {
                 continue;
             };
-            // Plaintext is padded before sealing, so the body is a substring.
+            // Plaintext is padded, so the body is a substring.
             if plain
                 .windows(body.len())
                 .any(|w| w == body.as_bytes())
@@ -2390,8 +1819,7 @@ impl StolenLeaf {
     }
 }
 
-/// Every MLS ciphertext the DS is holding for `conversation_id`, decoded from
-/// the `mls:<hex>` envelope framing. This is the wiretap half of the attacker.
+/// Every MLS ciphertext the DS holds for `conversation_id`.
 pub(crate) async fn envelope_ciphertexts(conversation_id: &str) -> Vec<Vec<u8>> {
     let remote = world().await.remote.clone();
     let conn = remote.conn().await.expect("remote conn for envelopes");
@@ -2413,47 +1841,15 @@ pub(crate) async fn envelope_ciphertexts(conversation_id: &str) -> Vec<Vec<u8>> 
     out
 }
 
-// ─── Suite generations / suite migration (#454 P4, #669) ────────────────────
-
-/// MLS code point `0x0001` (`MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`) —
-/// the suite Pollis shipped before #454, retired by #669.
-///
-/// The migration scenarios need *a* suite that is not the current one, and this
-/// is the honest choice: it is the only other suite this build's provider
-/// implements, and it differs from `CS_PQ` in every dimension (KEM, AEAD, KDF,
-/// signature scheme), so a group born on it exercises the boundary rather than a
-/// relabelling.
+/// The pre-#454 suite, retired by #669; the only other suite the provider implements.
 pub(crate) const SUITE_LEGACY: u16 = 0x0001;
 
-/// Pin the suite this process treats as current, or `None` for the build's own
-/// (`CS_PQ`).
-///
-/// #669 left production with exactly one suite, which means the only way a group
-/// can end up on a *non*-current suite is a change to the `CS_PQ` constant — a
-/// renumber of the provisional `draft-ietf-mls-pq-ciphersuites` code point, which
-/// has already happened once. A test cannot wait for that, so `pollis-core`
-/// exposes the constant as a `test-harness`-only seam and this is the handle on
-/// it: pin `SUITE_LEGACY` before the fleet signs up to get a world running on the
-/// old number, then clear it and let each client's next login
-/// ([`republish_key_packages`]) and sweep carry the world across, which is
-/// exactly the two steps a real renumber would take.
-///
-/// Global, not per-client, because a code point is a property of the *build* —
-/// there is no production world in which two clients disagree about it. Flows
-/// tests are `#[serial]`, and [`wipe`] clears it, so a scenario that panics
-/// mid-migration cannot leak its pin into the next one.
+/// Pin the process's current suite (`None` = `CS_PQ`) to simulate a code-point renumber; [`wipe`] clears it.
 pub(crate) fn set_current_suite(code_point: Option<u16>) {
     pollis_lib::commands::mls::set_current_suite_override(code_point);
 }
 
-/// Republish this device's KeyPackage pool in whatever suite is current now.
-///
-/// This is production's own `ensure_mls_key_package`, the same call
-/// `initialize_identity` makes at login — not a harness shortcut. It is what a
-/// user does by updating their app and signing in, and it is the *first* of the
-/// two steps that carry a fleet onto a new code point: until every roster device
-/// has a KeyPackage in the target suite, `migrate_to_current_suite_if_due`
-/// refuses to move the group at all rather than leave one behind.
+/// Production's `ensure_mls_key_package`, as at login.
 pub(crate) async fn republish_key_packages(client: &TestClient) {
     let user_id = client.user_id().to_string();
     let device_id = client
@@ -2468,8 +1864,7 @@ pub(crate) async fn republish_key_packages(client: &TestClient) {
         .expect("republish key package pool");
 }
 
-/// This device's local suite generation for `conversation_id` (#454 P4) — which
-/// lineage it believes it is on. 0 until it adopts a successor.
+/// Local suite generation for `conversation_id` (#454 P4).
 pub(crate) async fn local_generation_of(client: &TestClient, conversation_id: &str) -> i64 {
     let guard = client.state.local_db.lock().await;
     let db = guard.as_ref().expect("client local db open");
@@ -2482,13 +1877,7 @@ pub(crate) async fn local_generation_of(client: &TestClient, conversation_id: &s
         .unwrap_or(0)
 }
 
-/// The ciphersuite of the `GroupInfo` the Delivery Service currently publishes
-/// for `conversation_id`, as a raw RFC 9420 code point.
-///
-/// Read off the server-visible blob rather than asked of a client, so it proves
-/// what actually travelled: `0x0001` = classic
-/// (`MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`), `0x0052` = the PQ suite
-/// (`MLS_128_MLKEM768X25519_CHACHA20POLY1305_SHA384_MLDSA44`).
+/// The published GroupInfo's ciphersuite code point, read off the server blob.
 pub(crate) async fn ds_group_info_suite(conversation_id: &str) -> u16 {
     use openmls::prelude::*;
     use tls_codec::Deserialize as _;
@@ -2518,8 +1907,7 @@ pub(crate) async fn ds_group_info_suite(conversation_id: &str) -> u16 {
     }
 }
 
-/// Every undelivered-or-delivered `Welcome` blob the Delivery Service holds for
-/// `conversation_id`, oldest first.
+/// Every Welcome blob the DS holds for `conversation_id`, oldest first.
 pub(crate) async fn welcome_blobs(conversation_id: &str) -> Vec<Vec<u8>> {
     let log = world().await.log.clone();
     let conn = log.conn().await.expect("log conn for welcomes");
@@ -2538,44 +1926,13 @@ pub(crate) async fn welcome_blobs(conversation_id: &str) -> Vec<Vec<u8>> {
     out
 }
 
-/// Ceiling for a commit that adds nobody, in bytes.
-///
-/// This is the number that must NOT grow with the roster. A self-update or a
-/// remove carries an UpdatePath and nothing else, so its size is logarithmic in
-/// the tree once every leaf is merged (#666) — `pollis-core`'s
-/// `pq_payloads_stay_under_their_ceilings` pins the same 20 KiB for an 8-member
-/// merged commit on the hybrid suite.
+/// Ceiling for a commit that adds nobody: must stay logarithmic in the roster (#666).
 pub(crate) const COMMIT_CEILING_NO_ADDS: usize = 20_480;
 
-/// Ceiling for ONE added member's inlined KeyPackage, in bytes.
-///
-/// `add_members` puts Add proposals in the commit **by value**, so a commit that
-/// admits `k` members carries `k` KeyPackages. On the hybrid suite a KeyPackage
-/// is the most expensive routine object there is — two X-Wing public keys, a
-/// 1,312 B ML-DSA-44 signature key and a 2,420 B signature — and `pollis-core`
-/// asserts it stays under 12 KiB. Measured today it is ~8.7 KiB, so this leaves
-/// roughly 40% headroom without stopping being a bound.
+/// Ceiling per inlined KeyPackage (~8.7 KiB measured today).
 pub(crate) const COMMIT_CEILING_PER_ADD: usize = 12_288;
 
-/// Check every stored commit for `conversation_id` against the budget its own
-/// contents justify, returning a description of the worst offender.
-///
-/// The distinction this draws is the whole point. Two commits obey completely
-/// different growth laws, and collapsing them into one number is what let a
-/// roster-linear commit hide:
-///
-/// - A commit that adds nobody must be **logarithmic** in the roster
-///   ([`COMMIT_CEILING_NO_ADDS`]). This is the property #666 exists to defend,
-///   and it is the one where a regression means "a ratchet tree or a Welcome got
-///   inlined".
-/// - A commit that adds `k` members is **linear in `k` by construction**
-///   ([`COMMIT_CEILING_PER_ADD`] each), because it must convey each new member's
-///   KeyPackage. The migration opening commit is the extreme case: `super::
-///   migrate` builds the successor as a group of one and reconciles the whole
-///   roster into it, so a single commit carries `roster - 1` KeyPackages.
-///
-/// Checked per row rather than against `MAX(LENGTH(...))` so the budget can
-/// depend on what that specific commit admitted.
+/// Check each commit against its own budget: no-add commits are logarithmic, k-add commits linear in k.
 pub(crate) async fn commit_budget_violation(conversation_id: &str) -> Option<String> {
     let log = world().await.log.clone();
     let conn = log.conn().await.expect("log conn for commit budgets");
@@ -2593,8 +1950,7 @@ pub(crate) async fn commit_budget_violation(conversation_id: &str) -> Option<Str
         let generation: i64 = row.get(0).expect("generation");
         let epoch: i64 = row.get(1).expect("epoch");
         let size = row.get::<i64>(2).expect("commit length") as usize;
-        // `added_metadata` writes the added device ids as a comma-separated list,
-        // and NULL when the commit added nobody.
+        // Comma-separated added device ids, NULL for none.
         let added = row
             .get::<Option<String>>(3)
             .ok()
@@ -2619,28 +1975,14 @@ pub(crate) async fn commit_budget_violation(conversation_id: &str) -> Option<Str
 }
 
 impl TestClient {
-    /// Rotate this device's own leaf in `conversation_id` (issue #666).
-    ///
-    /// Calls production's [`self_update_group`] directly rather than through an
-    /// `invoke` shim because there is no user-facing command for it: rotation is
-    /// driven by the welcome poller on join and by the cold-launch sweep on a
-    /// timer. Tests need to place it at an exact point in a sequence, which
-    /// neither of those affords.
-    ///
-    /// Returns whether a commit actually landed (`false` = another member won
-    /// the epoch race, which the caller must treat as "not yet rotated").
+    /// Rotate this device's leaf (#666); `false` means another member won the epoch.
     pub(crate) async fn self_update(&self, conversation_id: &str) -> bool {
         self.try_self_update(conversation_id)
             .await
             .unwrap_or_else(|e| panic!("self_update_group({conversation_id}): {e}"))
     }
 
-    /// Fallible [`self_update`](Self::self_update), for the fuzzer.
-    ///
-    /// The landing DS faults are supposed to recover *internally* (the command
-    /// still returns `Ok`), so an `Err` here is a finding — and a generated case
-    /// needs to report it with its op sequence attached rather than panic out of
-    /// the proptest closure with no repro.
+    /// Fallible [`self_update`](Self::self_update): an `Err` is a fuzzer finding.
     pub(crate) async fn try_self_update(&self, conversation_id: &str) -> Result<bool, String> {
         let user_id = self.user_id().to_string();
         pollis_lib::commands::mls::self_update_group(&self.state, conversation_id, &user_id)

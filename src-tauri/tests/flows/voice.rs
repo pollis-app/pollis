@@ -1,13 +1,7 @@
 use crate::harness::{wipe, TestClient};
 use serial_test::serial;
 
-/// Voice E2EE: members of the same MLS group derive identical voice keys at
-/// the same epoch; the key changes when the epoch advances; a member added
-/// at the new epoch derives the same new key everyone else does. Proves the
-/// FrameCryptor input is consistent across peers without needing a real
-/// LiveKit server in the loop. Also exercises the `on_mls_epoch_changed`
-/// rotation hook: after a commit is applied, a client whose `VoiceState` is
-/// "in a call" sees its `e2ee_epoch` advance and its `KeyProvider` re-keyed.
+/// Voice E2EE keys agree across members per epoch and rotate via `on_mls_epoch_changed`.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn voice_e2ee_keys_match_across_members_and_rotate_on_epoch() {
@@ -39,7 +33,6 @@ async fn voice_e2ee_keys_match_across_members_and_rotate_on_epoch() {
     let alice_id = alice.user_id().to_owned();
     let bob_id = bob.user_id().to_owned();
 
-    // ── Epoch N: alice + bob derive the same key ─────────────────────────
     let (alice_key, alice_idx, alice_epoch, alice_group) =
         voice_e2ee::derive_voice_key(&alice.state, &channel_id, &alice_id, None)
             .await
@@ -66,16 +59,12 @@ async fn voice_e2ee_keys_match_across_members_and_rotate_on_epoch() {
     let epoch_n = alice_epoch;
     let resolved_mls_group = alice_group.clone();
 
-    // ── Simulate alice being "in a call" so the rotation hook has work. ──
-    // We plumb in the same KeyProvider build_e2ee_options would have
-    // produced at join time, plus the group id and the current epoch.
+    // Alice "in a call", so the rotation hook has work.
     let alice_kp = {
         let opts = voice_e2ee::build_e2ee_options(key_at_epoch_n.clone(), alice_idx);
         opts.key_provider.clone()
     };
-    // The join key must sit in the join epoch's own ring slot — the slot
-    // every sender cryptor is pointed at — not only in the slot-0 seed
-    // `with_shared_key` hardcodes.
+    // The join key must sit in the join epoch's ring slot, not only slot 0.
     assert_eq!(alice_idx, voice_key_index(epoch_n));
     assert!(
         alice_kp.get_shared_key(alice_idx).is_some(),
@@ -90,7 +79,6 @@ async fn voice_e2ee_keys_match_across_members_and_rotate_on_epoch() {
         voice.e2ee_key_index = alice_idx;
     }
 
-    // ── Add carol → epoch advances ───────────────────────────────────────
     let mut carol = TestClient::new().await;
     let cp = carol.sign_up("carol@test.local").await;
     alice.invite(&group_id, &cp.username).await;
@@ -104,12 +92,10 @@ async fn voice_e2ee_keys_match_across_members_and_rotate_on_epoch() {
     carol.accept_invite(&invite_id).await;
     carol.poll().await;
 
-    // Existing members apply the add commit (this is the path that fires
-    // `on_mls_epoch_changed` inside `process_pending_commits_inner`).
+    // This path fires `on_mls_epoch_changed`.
     alice.process_commits_for(&channel_id).await;
     bob.process_commits_for(&channel_id).await;
 
-    // ── Epoch N+1: all three derive the same new key ─────────────────────
     let carol_id = carol.user_id().to_owned();
     let (alice_key2, alice_idx2, alice_epoch2, _) =
         voice_e2ee::derive_voice_key(&alice.state, &channel_id, &alice_id, None)
@@ -142,7 +128,6 @@ async fn voice_e2ee_keys_match_across_members_and_rotate_on_epoch() {
         "voice key must change when MLS epoch advances (context binding)"
     );
 
-    // ── Rotation hook fired on alice's VoiceState ────────────────────────
     let (alice_voice_epoch, alice_voice_group, alice_voice_idx) = {
         let voice = alice.state.voice.lock().await;
         (
@@ -157,12 +142,7 @@ async fn voice_e2ee_keys_match_across_members_and_rotate_on_epoch() {
     );
     assert_eq!(alice_voice_group.as_deref(), Some(resolved_mls_group.as_str()));
 
-    // ── The rotation actually reached the key ring ───────────────────────
-    // The new epoch's slot is inside the ring (the old `epoch & 0x7FFF_FFFF`
-    // derivation walked off the 16-slot ring at epoch 16 and libwebrtc
-    // silently rejected the install), the new key is really installed there,
-    // and the slot every local sender cryptor is re-pointed at is that same
-    // slot — the sender-side half `with_shared_key`'s slot-0 seed never had.
+    // The slot must be inside the 16-slot ring (the old `epoch & 0x7FFF_FFFF` walked off it).
     assert_eq!(alice_idx2, voice_key_index(alice_epoch2));
     assert!(
         (0..VOICE_KEY_RING_SIZE).contains(&alice_idx2),
@@ -185,13 +165,10 @@ async fn voice_e2ee_keys_match_across_members_and_rotate_on_epoch() {
         alice_idx2,
         "the provider's latest key index must move to the new epoch's slot"
     );
-    // The previous epoch's key is still present for the grace window, so a
-    // peer that has not applied the commit yet keeps decrypting.
+    // The previous key stays for the grace window.
     assert!(alice_kp.get_shared_key(alice_idx).is_some());
 
-    // ── Negative control: bob did NOT have voice "armed" ─────────────────
-    // His VoiceState should still report epoch 0 / no group, proving the
-    // hook is a no-op when voice is idle (no spurious state churn).
+    // Negative control: the hook is a no-op when voice is idle.
     let (bob_voice_epoch, bob_voice_group) = {
         let voice = bob.state.voice.lock().await;
         (voice.e2ee_epoch, voice.e2ee_mls_group_id.clone())

@@ -1,31 +1,8 @@
-//! #1571: a device ends up outside a DM's MLS tree, and the DM is empty on it
-//! with no error anywhere.
-//!
-//! The incident: a user's phone, enrolled minutes before a peer opened a DM
-//! with them, never got a leaf. The creator's create-time reconcile lost epoch
-//! 0 to the recipient's own external join and added nobody else; no device on
-//! the (all-mobile) roster ever retried the add; and when the phone finally
-//! opened the DM it joined at the head, and the ingest passed every earlier
-//! message as "sent before this device joined" — the silent pass a NEW device
-//! gets. Each test below pins one layer of the fix:
-//!
-//! * a device whose regular pool is empty is still added, through its
-//!   last-resort KeyPackage — which is never consumed;
-//! * a device with nothing to claim at all (a build without last-resort
-//!   packages) is NAMED by reconcile, and its late join shows what it missed;
-//! * a device left out is re-added with no desktop sweep: by a sender, before
-//!   it seals, and by mobile's landing/resume backstop;
-//! * a Welcome that fails to apply is acknowledged AND the device re-joins at
-//!   once, and what it missed is shown;
-//! * a creator whose reconcile loses its epoch race retries and adds the rest
-//!   of the roster;
-//! * enrollment publishes a pool and a last-resort package straight away;
-//! * a NEW device's empty start stays silent (loss #2).
+//! #1571: a device left outside a DM's MLS tree, silently. Each test pins one layer of the fix.
 
 use crate::harness::{enroll_second_device, expect_losses, wipe, writable_log, writable_remote, TestClient};
 use serial_test::serial;
 
-/// `(user_id, device_id)` of `client`.
 async fn identity(client: &TestClient) -> (String, String) {
     let device = client
         .state
@@ -50,8 +27,7 @@ async fn holds_group(client: &TestClient, conversation_id: &str) -> bool {
         .is_some_and(|db| pollis_lib::commands::mls::has_local_group(db.conn(), conversation_id))
 }
 
-/// Readable message bodies and the number of placeholders `client` shows for
-/// `dm` after opening it.
+/// Readable bodies and placeholder count after opening `dm`.
 async fn open_dm(client: &TestClient, dm: &str) -> (Vec<String>, usize) {
     let rows = client.fetch_dm_messages(dm).await;
     let bodies = rows
@@ -65,9 +41,7 @@ async fn open_dm(client: &TestClient, dm: &str) -> (Vec<String>, usize) {
     (bodies, placeholders)
 }
 
-/// Spend every REGULAR package of `who` server-side — the state a pool is in
-/// after its device was away for more adds than it holds, or lost claims to
-/// commit races. The last-resort package, if any, is left alone.
+/// Spend every REGULAR package of `who`; the last-resort one stays.
 async fn burn_regular_pool(who: &(String, String)) {
     writable_remote()
         .await
@@ -83,8 +57,7 @@ async fn burn_regular_pool(who: &(String, String)) {
         .expect("burn the pool");
 }
 
-/// Remove every package of `who`, last-resort included — a device on a build
-/// that predates last-resort packages, with its pool spent.
+/// Remove every package, as on a pre-last-resort build.
 async fn drop_all_packages(who: &(String, String)) {
     writable_remote()
         .await
@@ -117,25 +90,18 @@ async fn pool(who: &(String, String)) -> (i64, i64, i64) {
     (row.get(0).unwrap(), row.get(1).unwrap(), row.get(2).unwrap())
 }
 
-/// Alice on two devices, bob on one. Returns `(alice_d1, alice_d2, bob, alice_id, bob_id)`.
 async fn alice_two_devices_and_bob() -> (TestClient, TestClient, TestClient, String, String) {
     let mut alice_d1 = TestClient::new().await;
     let alice = alice_d1.sign_up("alice@test.local").await;
     let alice_d2 = enroll_second_device(&alice_d1, "alice@test.local").await;
     let mut bob = TestClient::new().await;
     let bob_profile = bob.sign_up("bob@test.local").await;
-    // `user_device.created_at` is second-granular, and a registration in the
-    // same second as the membership decides nothing (`join_branch::
-    // ds_instant_window`). In the incident the phone was enrolled eleven
-    // minutes before the DM; one second is enough to say "before".
+    // `created_at` is second-granular (`join_branch::ds_instant_window`).
     tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
     (alice_d1, alice_d2, bob, alice.id, bob_profile.id)
 }
 
-/// The issue's first scenario, on a current build: alice_d2's regular pool is
-/// empty when bob opens the DM. Its last-resort package is claimed instead, so
-/// it is in the tree from the start and reads everything — and the package is
-/// still there, unclaimed, for the next add.
+/// Empty regular pool: the last-resort package is claimed and stays unclaimed for the next add.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_device_with_an_empty_pool_is_added_through_its_last_resort_package() {
@@ -179,11 +145,7 @@ async fn a_device_with_an_empty_pool_is_added_through_its_last_resort_package() 
     drop((alice_d1, alice_d2, bob, carol));
 }
 
-/// A device on a build that predates last-resort packages, pool spent: there
-/// is nothing to add it with. Reconcile names it instead of dropping it before
-/// the diff, and when the device finally opens the DM and joins at the head,
-/// what it missed is shown — it was registered before the DM existed, so this
-/// is not the silent "new device" pass.
+/// Pre-last-resort build: reconcile names the device, and its late join shows what it missed.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_device_with_nothing_to_claim_is_reported_and_its_late_join_is_shown() {
@@ -209,7 +171,6 @@ async fn a_device_with_nothing_to_claim_is_reported_and_its_late_join_is_shown()
     alice_d1.send_channel_message(&dm, "also while d2 was out").await;
     assert!(!tree_has(&bob, &dm, &d2).await, "precondition: alice_d2 was left out");
 
-    // ONE open: the pass that joins at the head also shows what was missed.
     let (bodies, placeholders) = open_dm(&alice_d2, &dm).await;
     assert!(holds_group(&alice_d2, &dm).await, "opening the DM joins it");
     assert!(
@@ -229,8 +190,7 @@ async fn a_device_with_nothing_to_claim_is_reported_and_its_late_join_is_shown()
     drop((alice_d1, alice_d2, bob));
 }
 
-/// Loss #2 stays silent: a device enrolled AFTER the DM and its messages starts
-/// empty there, with no placeholder (the zero-loss check on drop fails on any).
+/// Loss #2 stays silent: a device enrolled after the DM starts empty, no placeholder.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_new_device_still_starts_empty_without_placeholders() {
@@ -244,8 +204,7 @@ async fn a_new_device_still_starts_empty_without_placeholders() {
     bob.send_channel_message(&dm, "before the new device").await;
     alice_d1.fetch_dm_messages(&dm).await;
 
-    // `user_device.created_at` is second-granular: keep the new device's
-    // registration unambiguously after the membership.
+    // `created_at` is second-granular.
     tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
     let alice_d2 = enroll_second_device(&alice_d1, "alice@test.local").await;
     let (bodies, placeholders) = open_dm(&alice_d2, &dm).await;
@@ -259,11 +218,7 @@ async fn a_new_device_still_starts_empty_without_placeholders() {
     drop((alice_d1, alice_d2, bob));
 }
 
-/// The issue's second scenario: a mobile-only roster, so no desktop sweep ever
-/// runs. alice_d2 had nothing to claim when bob opened the DM; it then signs in
-/// on a current build (a pool and a last-resort package). Bob's next message
-/// re-adds it before sealing, and the device reads that message — no sweep, and
-/// without opening the DM first.
+/// Mobile-only roster: bob's next send re-adds alice_d2 before sealing.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_sender_re_adds_a_missing_device_before_it_seals() {
@@ -288,9 +243,7 @@ async fn a_sender_re_adds_a_missing_device_before_it_seals() {
     drop((alice_d1, alice_d2, bob));
 }
 
-/// Mobile's landing / resume backstop (`reconcile_backstop_all`, bridged for
-/// the app): a current member re-adds the missing device with no sweep and no
-/// send.
+/// Mobile's `reconcile_backstop_all` re-adds the device with no sweep and no send.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn the_mobile_backstop_re_adds_a_missing_device() {
@@ -316,7 +269,6 @@ async fn the_mobile_backstop_re_adds_a_missing_device() {
     let (bodies, _) = open_dm(&alice_d2, &dm).await;
     assert!(bodies.contains(&"after the backstop".to_string()), "got {bodies:?}");
 
-    // Steady state: nothing to do, nothing done.
     let again = pollis_core::commands::mls::reconcile_backstop_all(&alice_d1.state, &alice_id)
         .await
         .expect("backstop");
@@ -325,11 +277,7 @@ async fn the_mobile_backstop_re_adds_a_missing_device() {
     drop((alice_d1, alice_d2, bob));
 }
 
-/// The issue's third scenario: alice_d2 is added, but its Welcome cannot be
-/// applied. The drain acknowledges it (an unappliable Welcome must not be
-/// retried forever) AND re-joins the DM in the same pass, so the device is a
-/// member again at once. What was sealed for its unusable leaf in between is
-/// cryptographically gone; it is shown, and everything after is read.
+/// An unappliable Welcome is acknowledged and the device re-joins in the same pass.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_welcome_that_fails_to_apply_is_acked_and_the_device_rejoins_at_once() {
@@ -343,8 +291,7 @@ async fn a_welcome_that_fails_to_apply_is_acked_and_the_device_rejoins_at_once()
     bob.fetch_dm_messages(&dm).await;
     assert!(tree_has(&bob, &dm, &d2).await, "precondition: alice_d2 was added");
 
-    // The Welcome cannot be opened (its blob is garbage — the same outcome as a
-    // KeyPackage private key lost with a wiped local DB).
+    // A garbage blob, as with a KeyPackage key lost in a wiped local DB.
     let log = writable_log().await.conn().await.expect("log conn");
     let n = log
         .execute(
@@ -380,17 +327,12 @@ async fn a_welcome_that_fails_to_apply_is_acked_and_the_device_rejoins_at_once()
     let (bodies, _) = open_dm(&alice_d2, &dm).await;
     assert!(bodies.contains(&"after the re-join".to_string()), "got {bodies:?}");
 
-    // A second drain finds nothing to retry.
     alice_d2.poll().await;
 
     drop((alice_d1, alice_d2, bob));
 }
 
-/// The incident's ordering (prod metadata): the recipient's device external-
-/// joined epoch 0 seconds after the DM was created, BEFORE the creator's
-/// reconcile committed. That reconcile lost the race and, before the fix,
-/// returned — so no other device was ever added by it, and every one had to
-/// join itself. It now retries on the converged epoch and adds the rest.
+/// The creator's reconcile loses epoch 0 to the recipient's external join, then retries.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_creator_whose_reconcile_loses_epoch_zero_still_adds_the_other_devices() {
@@ -399,8 +341,6 @@ async fn a_creator_whose_reconcile_loses_epoch_zero_still_adds_the_other_devices
     let (alice_d1, alice_d2, bob, alice_id, bob_id) = alice_two_devices_and_bob().await;
     let d2 = identity(&alice_d2).await;
 
-    // The DM rows and the creator's epoch-0 group; the reconcile half is run
-    // by hand below, after the recipient's join.
     let dm = ulid::Ulid::new().to_string();
     let body = pollis_api::profile::CreateDmBody {
         id: dm.clone(),
@@ -419,16 +359,13 @@ async fn a_creator_whose_reconcile_loses_epoch_zero_still_adds_the_other_devices
         .await
         .expect("init_mls_group");
 
-    // alice_d1 sees the request and joins epoch 0 first. alice_d2 has nothing
-    // published at that moment, so alice_d1's own post-join backstop cannot
-    // add it — only the creator's retry can, once it has a pool again.
+    // alice_d2 has nothing published, so only the creator's retry can add it.
     drop_all_packages(&d2).await;
     alice_d1.fetch_dm_messages(&dm).await;
     assert!(holds_group(&alice_d1, &dm).await, "precondition: alice_d1 external-joined");
     assert_eq!(crate::harness::ds_head_epoch(&dm).await, 1, "precondition: epoch 0 is taken");
     crate::harness::republish_key_packages(&alice_d2).await;
 
-    // The creator's reconcile, still on epoch 0 locally, loses — and retries.
     pollis_lib::commands::mls::reconcile_group_mls_impl(&bob.state, &dm, &bob_id)
         .await
         .expect("reconcile");
@@ -445,9 +382,7 @@ async fn a_creator_whose_reconcile_loses_epoch_zero_still_adds_the_other_devices
     drop((alice_d1, alice_d2, bob));
 }
 
-/// Lead (b) from the prod metadata: a freshly enrolled device must be addable
-/// the moment enrollment finishes — a full pool and a last-resort package, with
-/// nothing else having run on it.
+/// A freshly enrolled device is addable at once (pool + last-resort package).
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn enrollment_publishes_a_pool_and_a_last_resort_package_at_once() {
@@ -463,14 +398,7 @@ async fn enrollment_publishes_a_pool_and_a_last_resort_package_at_once() {
     drop((alice_d1, alice_d2));
 }
 
-/// The prod metadata's second gap: the user's NEW desktop external-joined the
-/// DM while the creator's add of the user's OLDER desktop (full pool) was
-/// still in flight and then lost its race. The new desktop stayed a member,
-/// active, for thirteen hours and never re-added its sibling — its only
-/// backstop was the cold-launch sweep. Now the device that joins runs the
-/// backstop once, so the sibling is added with a Welcome and reads the whole
-/// history. Here the creator's reconcile never runs at all, so only alice_d1
-/// can have added alice_d2.
+/// The joining device runs the backstop once, so it adds its own sibling.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_device_that_joins_adds_its_own_users_other_device() {
@@ -498,7 +426,6 @@ async fn a_device_that_joins_adds_its_own_users_other_device() {
         .await
         .expect("init_mls_group");
 
-    // alice_d1 sees the DM and joins it; nobody else does anything.
     alice_d1.fetch_dm_messages(&dm).await;
     assert!(holds_group(&alice_d1, &dm).await, "precondition: alice_d1 joined");
     assert!(
@@ -520,10 +447,7 @@ async fn a_device_that_joins_adds_its_own_users_other_device() {
     drop((alice_d1, alice_d2, bob));
 }
 
-/// The sweep (desktop cold launch) and mobile's backstop on a member re-add the
-/// member's OWN other device too: alice_d2 had nothing to claim when it was due
-/// to be added, then published a full pool; alice_d1's sweep adds it, and
-/// alice_d2 reads everything from then on.
+/// The sweep and mobile's backstop re-add the member's OWN other device too.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_members_sweep_re_adds_its_own_users_other_device() {
@@ -552,12 +476,7 @@ async fn a_members_sweep_re_adds_its_own_users_other_device() {
     drop((alice_d1, alice_d2, bob));
 }
 
-/// The CI churn failure, made deterministic: a device whose FIRST hold was a
-/// late one (so it recorded an entitlement), then removed and re-added. What
-/// was sent while it was out is #1524's silent removal gap, not owed to it —
-/// the entitlement covers only the gap before its first hold. The seconds of
-/// sleep put every message clearly after the membership's second-granular
-/// stamp, which is what the CI run hit by timing.
+/// A late first hold, then remove + re-add: the removal gap is not owed (#1524).
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_removal_gap_after_a_late_first_join_stays_silent() {
@@ -584,7 +503,6 @@ async fn a_removal_gap_after_a_late_first_join_stays_silent() {
     let msgs = bob.fetch_channel_messages(&channel_id).await;
     let bodies: Vec<&str> = msgs.iter().filter_map(|m| m["content"].as_str()).collect();
     assert!(bodies.contains(&"bob is back"), "got {bodies:?}");
-    // The zero-loss check on drop fails on any placeholder or `[loss]` line.
     drop((alice, bob));
 }
 

@@ -14,18 +14,14 @@ pub async fn upload_file(key: String, data: Vec<u8>, content_type: String, state
     pollis_core::commands::r2::upload_file(key, data, content_type, &state).await
 }
 
-// `path` is read off the disk and uploaded, so it has to be a file the user
-// picked or dropped — see `crate::pathscope`. The staged variant below takes no
-// path at all (the bytes are already in this process's memory) and needs no
-// gate.
+// `path` must be a file the user picked or dropped (`crate::pathscope`).
 #[tauri::command]
 pub async fn upload_media(path: String, filename: String, content_type: String, scope: State<'_, PathScope>, state: State<'_, Arc<AppState>>) -> Result<MediaUploadResult> {
     scope.require(std::path::Path::new(&path), "upload_media")?;
     pollis_core::commands::r2::upload_media(path, filename, content_type, &state).await
 }
 
-// `target_path` is where the attachment lands on the user's disk, so it has to
-// be a location they picked in the save panel — see `crate::pathscope`.
+// `target_path` must be picked in the save panel (`crate::pathscope`).
 #[tauri::command]
 pub async fn save_media_to_path(r2_key: String, content_hash: String, sha256: String, key_scope: AttachmentKeyScope, target_path: String, scope: State<'_, PathScope>, state: State<'_, Arc<AppState>>) -> Result<String> {
     scope.require(std::path::Path::new(&target_path), "save_media_to_path")?;

@@ -5,31 +5,13 @@ use serde_json::json;
 use pollis_lib::commands::auth::UserProfile;
 use serial_test::serial;
 
-/// Scales the group up from 1 → 9 members and back down to 1, sending a
-/// labeled message after every membership change. Verifies:
-///   - After each add, every current member (including the newcomer) can
-///     decrypt the subsequently-sent message. Newcomers cannot decrypt
-///     messages that were sent before they joined — MLS Welcomes do not
-///     carry history, so `content` comes back as null for pre-join envelopes.
-///   - After each remove, the removed member can no longer decrypt any
-///     subsequent message (their epoch is stale; their keys don't open the
-///     new commit).
-///   - Every surviving member's epoch ratchet stays consistent: they keep
-///     decrypting every post-change message, proving that commit processing
-///     (add and remove) advances their local MLS state correctly.
-///   - The creator can finish the test alone and still send + decrypt —
-///     the group state survives the full shrink.
-///
-/// This is the main stress test for MLS epoch ratcheting under heavy
-/// membership churn.
+/// Grow 1 → 9 members and shrink back, checking who can decrypt after every change.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn epoch_ratchet_nine_users_add_remove() {
     wipe().await;
 
-    // Nine fully-signed-up clients. Index 0 is the creator and stays for
-    // the whole test; indices 1..9 are added in order and then removed in
-    // reverse order.
+    // Index 0 is the creator and stays; 1..9 join in order and leave in reverse.
     let mut clients: Vec<TestClient> = Vec::with_capacity(9);
     let mut profiles: Vec<UserProfile> = Vec::with_capacity(9);
     for i in 0..9 {
@@ -42,13 +24,10 @@ async fn epoch_ratchet_nine_users_add_remove() {
     let group_id = clients[0].create_group("Ratchet").await;
     let channel_id = clients[0].general_channel_id(&group_id).await;
 
-    // ── Growth phase: 2 → 9 members ──
     for n in 1..9 {
-        // Creator invites user n+1.
         let invitee_username = profiles[n].username.clone();
         clients[0].invite(&group_id, &invitee_username).await;
 
-        // Invitee accepts + applies their Welcome.
         let invite = clients[n]
             .first_pending_invite()
             .await
@@ -57,16 +36,13 @@ async fn epoch_ratchet_nine_users_add_remove() {
         clients[n].accept_invite(&invite_id).await;
         clients[n].poll().await;
 
-        // Already-members apply the add commit so their local epoch advances.
         for k in 0..n {
             clients[k].process_commits_for(&channel_id).await;
         }
 
-        // Creator sends a step-labeled message.
         let label = format!("msg-{n}");
         clients[0].send_channel_message(&channel_id, &label).await;
 
-        // Every current member decrypts the latest message.
         for k in 0..=n {
             let msgs = clients[k].fetch_channel_messages(&channel_id).await;
             let contents: Vec<&str> = msgs.iter().filter_map(|m| m["content"].as_str()).collect();
@@ -80,8 +56,7 @@ async fn epoch_ratchet_nine_users_add_remove() {
             );
         }
 
-        // Newcomer cannot decrypt any of the prior messages — they joined
-        // after those were encrypted to older epochs.
+        // Welcomes carry no history.
         if n >= 2 {
             let newcomer_msgs = clients[n].fetch_channel_messages(&channel_id).await;
             for prior in 1..n {
@@ -99,15 +74,11 @@ async fn epoch_ratchet_nine_users_add_remove() {
         }
     }
 
-    // ── Shrink phase: 9 → 1 members ──
-    // Remove users 9, 8, ..., 2 (user 0 is creator and stays). After each
-    // removal, send a new message and assert (a) every remaining member
-    // decrypts it, (b) the just-removed user cannot.
+    // Shrink: remove 9..2; remaining members decrypt, the removed one cannot.
     for n in (1..9).rev() {
         let target_id = profiles[n].id.clone();
         clients[0].remove_member(&group_id, &target_id).await;
 
-        // Remaining members apply the remove commit.
         for k in 0..n {
             clients[k].process_commits_for(&channel_id).await;
         }
@@ -115,7 +86,6 @@ async fn epoch_ratchet_nine_users_add_remove() {
         let label = format!("post-remove-{}", n + 1);
         clients[0].send_channel_message(&channel_id, &label).await;
 
-        // Remaining members decrypt.
         for k in 0..n {
             let msgs = clients[k].fetch_channel_messages(&channel_id).await;
             let contents: Vec<&str> = msgs.iter().filter_map(|m| m["content"].as_str()).collect();
@@ -129,7 +99,6 @@ async fn epoch_ratchet_nine_users_add_remove() {
             );
         }
 
-        // Removed user cannot decrypt the post-removal message.
         let removed_msgs = clients[n].fetch_channel_messages(&channel_id).await;
         let removed_contents: Vec<&str> = removed_msgs
             .iter()
@@ -144,7 +113,6 @@ async fn epoch_ratchet_nine_users_add_remove() {
         );
     }
 
-    // Creator alone at epoch N can still send + decrypt.
     clients[0]
         .send_channel_message(&channel_id, "alone-again")
         .await;
@@ -158,14 +126,11 @@ async fn epoch_ratchet_nine_users_add_remove() {
     drop(clients);
 }
 
-/// Seeded xorshift64 — deterministic and dependency-free. We intentionally
-/// avoid pulling `StdRng` in from `rand` here so changes to its default
-/// feature set can't silently re-seed this scenario.
+/// Seeded xorshift64, so `rand` feature changes can't re-seed this scenario.
 struct XorShift64(u64);
 
 impl XorShift64 {
     fn new(seed: u64) -> Self {
-        // 0 is a fixed point for xorshift; nudge it if the caller passes 0.
         Self(if seed == 0 { 0x9E37_79B9_7F4A_7C15 } else { seed })
     }
 
@@ -178,29 +143,13 @@ impl XorShift64 {
         x
     }
 
-    /// Uniform `[0, n)`.
     fn gen_range(&mut self, n: usize) -> usize {
         assert!(n > 0);
         (self.next_u64() as usize) % n
     }
 }
 
-/// Seeded random churn across membership and role changes. At every step the
-/// harness verifies that:
-///   - `get_group_members` on the creator exactly matches the scenario's
-///     expected membership and per-member admin flag.
-///   - A message sent by the current admin or a current non-admin member
-///     is decryptable by every present member and opaque to every
-///     non-present client (including members removed earlier in the run).
-///
-/// This catches subtle regressions the linear growth test can't hit:
-///   - An admin's epoch becoming stale across role toggles.
-///   - An add/remove/add sequence failing to advance a long-present member's
-///     ratchet.
-///   - `set_member_role` silently mutating membership state.
-///
-/// Uses a fixed xorshift seed; failure logs print the full op sequence via
-/// `eprintln!` so a red run is reproducible.
+/// Seeded churn across membership and role changes; the op log prints on failure.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn random_admin_and_membership_churn() {
@@ -211,7 +160,6 @@ async fn random_admin_and_membership_churn() {
     const NUM_OPS: usize = 30;
     const SEED: u64 = 0xC0FFEE_BEEF_F00D;
 
-    // Index 0 is the creator; 1..=5 are other pre-signed-up clients.
     let mut clients: Vec<TestClient> = Vec::with_capacity(NUM_OTHERS + 1);
     let mut profiles: Vec<UserProfile> = Vec::with_capacity(NUM_OTHERS + 1);
     for i in 0..=NUM_OTHERS {
@@ -224,20 +172,16 @@ async fn random_admin_and_membership_churn() {
     let group_id = clients[0].create_group("Churn").await;
     let channel_id = clients[0].general_channel_id(&group_id).await;
 
-    // Tracked expected state: who is a member, who is an admin. The creator
-    // is always both and stays in the group.
     use std::collections::BTreeSet;
     let mut members: BTreeSet<usize> = BTreeSet::from([0]);
     let mut admins: BTreeSet<usize> = BTreeSet::from([0]);
 
-    // Ordered log of ops executed, printed on failure for reproducibility.
     let mut op_log: Vec<String> = Vec::new();
     let mut msg_counter: u32 = 0;
 
     let mut rng = XorShift64::new(SEED);
 
     for op_idx in 0..NUM_OPS {
-        // Pick a candidate op; skip if it can't apply.
         let pick = rng.gen_range(6);
         let op_name: &'static str = match pick {
             0 => "add",
@@ -248,7 +192,6 @@ async fn random_admin_and_membership_churn() {
             _ => "send_from_member",
         };
 
-        // Precompute the population each op needs so we can skip cleanly.
         let non_members: Vec<usize> = (1..=NUM_OTHERS).filter(|i| !members.contains(i)).collect();
         let removable: Vec<usize> = members.iter().copied().filter(|&i| i != 0).collect();
         let promotable: Vec<usize> = members
@@ -284,12 +227,10 @@ async fn random_admin_and_membership_churn() {
                 clients[idx].accept_invite(&invite_id).await;
                 clients[idx].poll().await;
 
-                // Every already-member (including creator) applies the add commit.
                 for &k in members.iter() {
                     clients[k].process_commits_for(&channel_id).await;
                 }
-                // Newcomer also processes commits — `poll` applied the Welcome but
-                // later commits could have landed before this point in a real run.
+                // Later commits could have landed after the Welcome.
                 clients[idx].process_commits_for(&channel_id).await;
 
                 members.insert(idx);
@@ -371,7 +312,6 @@ async fn random_admin_and_membership_churn() {
             _ => unreachable!(),
         }
 
-        // After every op, verify membership + role state matches expectations.
         let observed = clients[0].group_member_roles(&group_id).await;
         let observed_ids: BTreeSet<String> =
             observed.iter().map(|(id, _)| id.clone()).collect();
@@ -408,9 +348,7 @@ async fn random_admin_and_membership_churn() {
     drop(clients);
 }
 
-/// Shared assertion for send-from-admin / send-from-member ops in the churn
-/// scenario: every current member must decrypt the message; no non-member
-/// may see its plaintext.
+/// Every current member decrypts; no non-member sees the plaintext.
 async fn verify_message_visibility(
     clients: &[TestClient],
     members: &std::collections::BTreeSet<usize>,
@@ -439,26 +377,7 @@ async fn verify_message_visibility(
     }
 }
 
-/// Exercises `edit_message` across MLS membership changes. Three phases in
-/// one scenario:
-///
-/// 1. **Add-then-edit**: after alice+bob are in the group, alice sends
-///    "hello"; bob fetches and sees it. Carol is invited and joins; alice
-///    then edits the message. Bob and carol both see the edited content on
-///    their next fetch. Carol never saw "hello" (Welcomes don't carry
-///    history) — that's fine; we only assert she can decrypt the edit once
-///    she's a member because `edit_message` re-encrypts at the post-add
-///    epoch.
-/// 2. **Remove-then-edit**: alice removes carol, then edits again. Bob
-///    picks up the new edit; carol does not — the edit envelope is
-///    encrypted to an epoch she's no longer in, so her local cache is
-///    frozen at whatever she last decrypted.
-/// 3. **Edit → add → edit**: final sanity check that edits written across
-///    a second add advance too. Alice edits ("v2"), adds a new user, then
-///    edits again ("v3"). All current members converge on "v3", proving
-///    the second edit's ciphertext targets the correct (post-add) epoch
-///    and that a stale first edit cannot linger and win — `edit_message`
-///    does a DELETE+INSERT so only the latest envelope survives.
+/// `edit_message` across adds and removes; a stale edit can never win (DELETE+INSERT).
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn edit_message_across_membership_changes() {
@@ -475,8 +394,6 @@ async fn edit_message_across_membership_changes() {
     let group_id = alice.create_group("Edit Churn").await;
     let channel_id = alice.general_channel_id(&group_id).await;
 
-    // ── Phase 1: add-then-edit ──
-    // alice + bob are in the group; alice sends "hello".
     alice.invite(&group_id, &bob_profile.username).await;
     let invite_id = bob
         .first_pending_invite()
@@ -493,7 +410,6 @@ async fn edit_message_across_membership_changes() {
         .send_channel_message_id(&channel_id, "hello")
         .await;
 
-    // Bob can decrypt the original pre-add.
     let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
     let bob_contents: Vec<&str> = bob_msgs.iter().filter_map(|m| m["content"].as_str()).collect();
     assert!(
@@ -501,7 +417,6 @@ async fn edit_message_across_membership_changes() {
         "bob should decrypt 'hello' before carol is added, got: {bob_contents:?}"
     );
 
-    // Now add carol and advance everyone's epoch.
     alice.invite(&group_id, &carol_profile.username).await;
     let invite_id = carol
         .first_pending_invite()
@@ -515,12 +430,11 @@ async fn edit_message_across_membership_changes() {
     alice.process_commits_for(&channel_id).await;
     bob.process_commits_for(&channel_id).await;
 
-    // Alice edits; the edit envelope is encrypted at the 3-member epoch.
+    // Encrypted at the 3-member epoch.
     alice
         .edit_message(&channel_id, &msg_id, "HELLO edited")
         .await;
 
-    // Bob's local cache flips to the edited content.
     let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
     let bob_msg = bob_msgs
         .iter()
@@ -536,12 +450,7 @@ async fn edit_message_across_membership_changes() {
         "bob's view should carry an edited_at timestamp"
     );
 
-    // Carol fetches too. She never had a local row for `msg_id` (the
-    // original envelope was encrypted at the pre-join epoch she can't
-    // decrypt), and the current edit-apply path only UPDATEs an existing
-    // row — so carol's view of this specific message is null content.
-    // The important property here is that she must NOT have recovered the
-    // pre-join plaintext "hello".
+    // Carol has no row for the pre-join original; she must not recover "hello".
     let carol_msgs = carol.fetch_channel_messages(&channel_id).await;
     let carol_contents: Vec<&str> = carol_msgs
         .iter()
@@ -552,9 +461,6 @@ async fn edit_message_across_membership_changes() {
         "carol should not see the pre-join plaintext 'hello', got: {carol_contents:?}"
     );
 
-    // ── Phase 2: remove-then-edit ──
-    // Snapshot carol's view BEFORE removal so we can confirm her cache
-    // freezes after she loses access.
     let carol_view_before_remove: Vec<(String, Option<String>)> = carol
         .fetch_channel_messages(&channel_id)
         .await
@@ -570,12 +476,10 @@ async fn edit_message_across_membership_changes() {
     alice.remove_member(&group_id, &carol_profile.id).await;
     bob.process_commits_for(&channel_id).await;
 
-    // Alice publishes a second edit at the post-remove epoch.
     alice
         .edit_message(&channel_id, &msg_id, "HELLO edited again")
         .await;
 
-    // Bob follows the edit.
     let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
     let bob_msg = bob_msgs
         .iter()
@@ -587,8 +491,6 @@ async fn edit_message_across_membership_changes() {
         "bob should follow the post-remove edit"
     );
 
-    // Carol cannot decrypt the new envelope; her local cache is frozen at
-    // whatever she last saw. She definitely must not see the new content.
     let carol_msgs_after = carol.fetch_channel_messages(&channel_id).await;
     let carol_contents_after: Vec<&str> = carol_msgs_after
         .iter()
@@ -598,8 +500,7 @@ async fn edit_message_across_membership_changes() {
         !carol_contents_after.contains(&"HELLO edited again"),
         "removed carol should NOT see the post-remove edit, got: {carol_contents_after:?}"
     );
-    // Her view of msg_id either retains the prior cached value or is None,
-    // but never the new content.
+    // Prior cached value or None, never the new content.
     let prior = carol_view_before_remove
         .iter()
         .find(|(id, _)| id == &msg_id)
@@ -613,8 +514,7 @@ async fn edit_message_across_membership_changes() {
         Some("HELLO edited again"),
         "carol's row for the edited message must not show the post-remove edit"
     );
-    // If carol had cached the first edit, she should still have it — removal
-    // shouldn't retroactively wipe what's already decrypted locally.
+    // Removal doesn't wipe what was already decrypted.
     if prior.as_deref() == Some("HELLO edited") {
         assert_eq!(
             now.as_deref(),
@@ -623,8 +523,6 @@ async fn edit_message_across_membership_changes() {
         );
     }
 
-    // ── Phase 3: edit → add → edit ──
-    // Fresh message on the current (post-remove) epoch.
     let msg_id_v = alice
         .send_channel_message_id(&channel_id, "v1")
         .await;
@@ -632,13 +530,7 @@ async fn edit_message_across_membership_changes() {
 
     alice.edit_message(&channel_id, &msg_id_v, "v2").await;
 
-    // Sealed EDIT, self, at an unchanged epoch (#607, formerly
-    // `sealed_self_edit_is_visible_to_recipient`): the author edits her OWN
-    // message and the recipient ingests the new content. This is the case that
-    // 403'd before Solution A — with sealing on, the DS's old author-equality
-    // check compared the sentinel to the real editor and refused the edit. It
-    // also puts "v2" in bob's local cache, which is what the v3 convergence
-    // below is about.
+    // Sealed self-edit at an unchanged epoch (#607): 403'd before Solution A.
     let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
     let bob_row = bob_msgs
         .iter()
@@ -654,7 +546,6 @@ async fn edit_message_across_membership_changes() {
         "the edited row must carry an edited_at timestamp"
     );
 
-    // Add a brand-new user dave; advance everyone's epoch.
     let mut dave = TestClient::new().await;
     let dave_profile = dave.sign_up("dave@test.local").await;
     alice.invite(&group_id, &dave_profile.username).await;
@@ -670,11 +561,7 @@ async fn edit_message_across_membership_changes() {
     alice.process_commits_for(&channel_id).await;
     bob.process_commits_for(&channel_id).await;
 
-    // Second edit at the post-add epoch — must overwrite the first edit,
-    // which is still sitting in `message_envelope`. DELETE+INSERT inside
-    // edit_message guarantees only "v3" survives remotely, so a member
-    // whose local cache holds v2 must converge on v3 (never see "v2" or
-    // the original "v1" after fetching).
+    // Must overwrite the first edit; members holding v2 converge on v3.
     alice.edit_message(&channel_id, &msg_id_v, "v3").await;
 
     let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
@@ -688,11 +575,7 @@ async fn edit_message_across_membership_changes() {
         "post-add edit must overwrite the prior edit for a member that had the original"
     );
 
-    // Dave — like carol earlier — has no local row for the pre-join
-    // message, so his fetch returns content=None and the prior edits
-    // can't "leak through" as a cached decrypted copy. The invariant we do
-    // care about is that he never observes a stale prior edit as
-    // plaintext.
+    // Dave has no row for the pre-join message, so no stale edit can leak.
     let dave_msgs = dave.fetch_channel_messages(&channel_id).await;
     let dave_contents: Vec<&str> = dave_msgs
         .iter()
@@ -711,8 +594,7 @@ async fn edit_message_across_membership_changes() {
     drop(dave);
 }
 
-/// Count remaining envelopes for a conversation via a direct libsql query.
-/// Bypasses any Tauri command so we observe the raw row state.
+/// Raw envelope count, bypassing any command.
 async fn envelope_count(remote: &Arc<pollis_delivery::db::Db>, conversation_id: &str) -> i64 {
     let conn = remote.conn().await.expect("remote conn");
     let mut rows = conn
@@ -726,9 +608,7 @@ async fn envelope_count(remote: &Arc<pollis_delivery::db::Db>, conversation_id: 
     row.get::<i64>(0).expect("count")
 }
 
-/// Backdate every envelope in a conversation to a known timestamp. Used to
-/// simulate old envelopes without waiting 30 days. Applies to envelopes of
-/// any type.
+/// Backdate every envelope in a conversation.
 async fn backdate_envelopes(
     remote: &Arc<pollis_delivery::db::Db>,
     conversation_id: &str,
@@ -743,9 +623,7 @@ async fn backdate_envelopes(
     .expect("backdate envelopes");
 }
 
-/// Wipe conversation watermarks for a specific conversation so the test can
-/// reconstruct a known lag pattern. Add-member seeding would otherwise leave
-/// recent watermarks that mask the behavior we want to exercise.
+/// Wipe a conversation's watermarks so add-member seeding can't mask the gate.
 async fn clear_watermarks(
     remote: &Arc<pollis_delivery::db::Db>,
     conversation_id: &str,
@@ -759,10 +637,7 @@ async fn clear_watermarks(
     .expect("clear watermarks");
 }
 
-/// Run the server-side envelope-GC sweep against the shared test DB. GC is no
-/// longer fired from the client ingest path (#689) — it is the DS's own periodic
-/// sweep — so tests drive that sweep directly, standing in for the DS task. The
-/// deletion predicate is unchanged; only what triggers it moved.
+/// Drive the DS's own envelope-GC sweep (#689).
 async fn run_gc_sweep(remote: &Arc<pollis_delivery::db::Db>) {
     let conn = remote.conn().await.expect("remote conn");
     let stale = pollis_delivery::messages::watermark_stale_modifier();
@@ -771,27 +646,7 @@ async fn run_gc_sweep(remote: &Arc<pollis_delivery::db::Db>) {
         .expect("gc sweep");
 }
 
-/// Exercises the envelope-cleanup gate. There is now exactly ONE gate — the
-/// all-member-devices-caught-up delivery watermark — and the scenario drives
-/// three cases. Member fetches advance watermarks (via `/v1/watermarks/advance`);
-/// GC itself is triggered by the server-side sweep (#689), which the test drives
-/// with `run_gc_sweep` since GC no longer rides the client ingest path:
-///
-/// - **Negative**: young envelope, only the sender has fetched. The gate cannot
-///   fire (bob has no watermark row, so the CASE returns NULL) — envelope stays.
-/// - **Watermark**: young envelope, both members have fetched past it. The gate
-///   fires and the envelope is deleted.
-/// - **No-TTL regression**: an envelope backdated 400 days into the past while
-///   bob's watermark row is absent. The envelope MUST SURVIVE. This is failure
-///   mode F3: there used to be a second, OR'd `sent_at < datetime('now','-30
-///   days')` arm that deleted such a row on its own, without consulting a single
-///   watermark, so a member offline for over a month silently and permanently
-///   lost messages. Retention is now bounded by the slowest member device and by
-///   nothing else (invariant I3 — see `docs/backend-core-invariants.md`).
-///
-/// The backdating + watermark hacks poke the remote DB directly — there's
-/// no production command that lets a test manipulate `sent_at` or
-/// `conversation_watermark`, and we intentionally don't add one.
+/// The single GC gate is the all-devices delivery watermark; age alone never deletes (F3, I3).
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn envelope_cleanup_is_watermark_gated_and_never_ttl_gated() {
@@ -817,20 +672,14 @@ async fn envelope_cleanup_is_watermark_gated_and_never_ttl_gated() {
     let channel_id = alice.general_channel_id(&group_id).await;
     alice.process_commits_for(&channel_id).await;
 
-    // The backdating + watermark hacks below poke the "server" DB directly,
-    // standing in for server-side envelope GC effects. The client's own
-    // Server-side state, so use the DS's own handle (#987 — a client has none).
+    // Server-side state, so use the DS's own handle (#987).
     let remote = crate::harness::writable_remote().await;
 
-    // ── Negative: young envelope, only sender fetched ──
-    // Wipe watermarks first so add-member's seeded "now" rows don't satisfy
-    // the watermark gate on their own.
+    // Negative: wipe watermarks so add-member's seeded rows don't satisfy the gate.
     clear_watermarks(&remote, &channel_id).await;
 
     alice.send_channel_message(&channel_id, "neg-hello").await;
-    // Alice fetches — advancing only her watermark; bob has not fetched. The GC
-    // sweep's subquery requires every current member device to have a watermark
-    // row; bob does not, so the gate returns NULL — envelope stays.
+    // Bob has no watermark row, so the gate returns NULL.
     alice.fetch_channel_messages(&channel_id).await;
     run_gc_sweep(&remote).await;
     assert_eq!(
@@ -839,14 +688,7 @@ async fn envelope_cleanup_is_watermark_gated_and_never_ttl_gated() {
         "young envelope with a lagging member should not be cleaned up"
     );
 
-    // ── Watermark: both members caught up, so BOTH envelopes go ──
-    // Since #1087 the gate is `seq <= MIN(last_seq)`, not `sent_at < MIN(cw)`.
-    // The cursor means "the highest position this device has HANDLED", so an
-    // envelope AT the floor has provably been read by everyone and is
-    // collectable. The old `<` was conservative for one reason only: two
-    // envelopes could share a `sent_at`, so the one at the cursor might not be
-    // the one that was handled. A sequence is unique, so that tie cannot exist
-    // and retention is now exact rather than off by one.
+    // Both caught up: the gate is `seq <= MIN(last_seq)` (#1087), so both go.
     bob.fetch_channel_messages(&channel_id).await;
     alice.send_channel_message(&channel_id, "neg-hello-2").await;
     alice.fetch_channel_messages(&channel_id).await;
@@ -859,20 +701,13 @@ async fn envelope_cleanup_is_watermark_gated_and_never_ttl_gated() {
          — an envelope AT the floor is handled by everyone (#1087)"
     );
 
-    // ── No-TTL regression (F3): ancient envelopes nobody has collected ──
-    // Send another envelope, then rewind EVERY envelope in the conversation to
-    // 2020 — over 400 days old, more than 13x the deleted 30-day TTL.
+    // F3: rewind every envelope to 2020.
     alice.send_channel_message(&channel_id, "very-old").await;
     backdate_envelopes(&remote, &channel_id, "2020-01-01T00:00:00+00:00").await;
-    // `backdate_envelopes` rewrites the whole conversation, so this covers every
-    // surviving envelope, not just the one just sent.
     let ancient = envelope_count(&remote, &channel_id).await;
     assert!(ancient > 0, "fixture must leave ancient envelopes to protect");
 
-    // Wipe watermarks so the gate CANNOT fire: alice's upsert during her fetch
-    // re-creates her row, but bob's is missing until he fetches, so
-    // `COUNT(ud) != COUNT(cw)` → CASE returns NULL → nothing is deletable.
-    // Bob is still owed these messages, so age alone must not remove them.
+    // Bob's watermark is missing, so nothing is deletable however old.
     clear_watermarks(&remote, &channel_id).await;
     alice.fetch_channel_messages(&channel_id).await;
     run_gc_sweep(&remote).await;
@@ -885,10 +720,7 @@ async fn envelope_cleanup_is_watermark_gated_and_never_ttl_gated() {
          lost bob's messages)"
     );
 
-    // Still reclaimable, so removing the TTL bounds retention rather than
-    // disabling GC. The cursor is INCLUSIVE since #1087 (`seq <= MIN(last_seq)`),
-    // so once both members have fetched everything there is nothing left to
-    // keep — including the newest, which they have also read.
+    // Still reclaimable once both have fetched.
     bob.fetch_channel_messages(&channel_id).await;
     alice.send_channel_message(&channel_id, "fresh").await;
     alice.fetch_channel_messages(&channel_id).await;
@@ -905,9 +737,7 @@ async fn envelope_cleanup_is_watermark_gated_and_never_ttl_gated() {
     drop(bob);
 }
 
-/// Count distinct commit blobs at a given epoch for a conversation. Used to
-/// confirm the fork precondition (two competing commits at one epoch) was
-/// actually produced — diagnostic only, not an invariant.
+/// Distinct commits at one epoch; diagnostic only.
 async fn distinct_commits_at_epoch(
     remote: &Arc<pollis_delivery::db::Db>,
     conversation_id: &str,
@@ -926,26 +756,7 @@ async fn distinct_commits_at_epoch(
     row.get::<i64>(0).expect("count")
 }
 
-/// Reproduces the Bluestone production fork (prod group `01KQYX89...`).
-///
-/// Two admins commit from the SAME MLS epoch before either has processed the
-/// other's commit. Both commits are posted to `mls_commit_log` at the same
-/// epoch — and because the log has no uniqueness on `(conversation_id, epoch)`,
-/// BOTH land. Every member then processes `ORDER BY epoch ASC, seq ASC` and
-/// applies the lower-`seq` commit (branch A), advancing past it. The author of
-/// the higher-`seq` commit already merged its OWN commit (branch B) locally,
-/// so it sits on a divergent epoch-N tree and can never apply branch A's later
-/// commits — it is permanently forked.
-///
-/// Symptom (matches the prod report): the forked member and the branch-A
-/// members cannot decrypt each other's messages, even though group membership
-/// never changed.
-///
-/// This asserts the product invariant — every CURRENT member can message every
-/// other current member — so it FAILS on today's forking code and should PASS
-/// once two commits racing for the same epoch are resolved by a
-/// compare-and-swap (only one wins; the loser rolls back its local merge and
-/// re-applies the winner before retrying).
+/// The Bluestone fork: two admins commit from the same epoch; every current member must still read every other.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn concurrent_commits_at_same_epoch_must_not_fork_a_member() {
@@ -961,8 +772,6 @@ async fn concurrent_commits_at_same_epoch_must_not_fork_a_member() {
     let dave_p = dave.sign_up("dave@test.local").await;
     let erin_p = erin.sign_up("erin@test.local").await;
 
-    // alice creates the group and adds bob; both settle at the same epoch
-    // with the same tree {alice, bob}.
     let group_id = alice.create_group("Fork").await;
     let channel_id = alice.general_channel_id(&group_id).await;
     alice.invite(&group_id, &bob_p.username).await;
@@ -978,40 +787,30 @@ async fn concurrent_commits_at_same_epoch_must_not_fork_a_member() {
     alice.process_commits_for(&channel_id).await;
     bob.process_commits_for(&channel_id).await;
 
-    // bob must be an admin to invite (mirrors Bluestone: all members admin).
+    // Bob must be an admin to invite.
     alice
         .set_member_role(&group_id, bob.user_id(), "admin")
         .await;
 
-    // ── Concurrent commits from the same epoch ──
-    // alice invites dave: alice reconciles and commits (add dave) from the
-    // current epoch → branch A. This merges locally and gets the lower seq.
+    // Branch A: alice commits from the current epoch.
     alice.invite(&group_id, &dave_p.username).await;
-    // bob has NOT processed alice's commit, so bob is still at the prior
-    // epoch. bob invites erin: bob reconciles and commits from that SAME
-    // epoch → branch B, higher seq. Two distinct commits now occupy one epoch.
+    // Branch B: bob, still at the prior epoch, commits from the same one.
     bob.invite(&group_id, &erin_p.username).await;
 
-    // Precondition sanity (diagnostic): the fork was actually produced. The
-    // add-bob commit was epoch 0, so the concurrent adds race for epoch 1.
-    // The commit log lives on the LOG DB (split harness), so inspect it there.
+    // Diagnostic: the fork was produced (on the log DB).
     let log = crate::harness::writable_log().await;
     let distinct = distinct_commits_at_epoch(&log, &group_id, 1).await;
     eprintln!("[test] distinct commits at epoch 1 = {distinct} (fork iff > 1)");
 
-    // Membership never shrank — bob is still a current member.
     let members = alice.group_member_ids(&group_id).await;
     assert!(
         members.contains(&bob.user_id().to_string()),
         "precondition: bob must still be a current group member, got: {members:?}"
     );
 
-    // alice sends from branch A.
     alice.send_channel_message(&channel_id, "from-alice").await;
 
-    // INVARIANT: bob, a current member, must be able to read alice's message.
-    // On the forking code bob is stranded on branch B and cannot — its content
-    // comes back null.
+    // On the forking code bob is stranded on branch B.
     bob.process_commits_for(&channel_id).await;
     let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
     let bob_contents: Vec<&str> = bob_msgs
@@ -1025,7 +824,6 @@ async fn concurrent_commits_at_same_epoch_must_not_fork_a_member() {
          tree. got: {bob_msgs:#?}"
     );
 
-    // And the reverse: bob sends, alice (branch A) must read it.
     bob.send_channel_message(&channel_id, "from-bob").await;
     let alice_msgs = alice.fetch_channel_messages(&channel_id).await;
     let alice_contents: Vec<&str> = alice_msgs
@@ -1043,15 +841,7 @@ async fn concurrent_commits_at_same_epoch_must_not_fork_a_member() {
     drop(erin);
 }
 
-/// Issue #411: a lost SUCCESS-response must not wedge the committer or strand
-/// the member they just added. The DS writes the add-carol commit (it lands
-/// canonically) but alice sees a network error. The fix must make alice ADOPT
-/// her own landed commit — merge to advance her epoch AND write carol's Welcome
-/// + publish GroupInfo — rather than roll back, delete her group, and wedge.
-///
-/// On the pre-fix code alice clears the pending commit and never writes the
-/// Welcome, so carol can't join and alice later self-deletes against a stale
-/// GroupInfo: both assertions below fail.
+/// #411: a lost success response must make alice adopt her landed commit, not wedge.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn lost_submit_response_is_adopted_not_wedged() {
@@ -1068,7 +858,6 @@ async fn lost_submit_response_is_adopted_not_wedged() {
     let group_id = alice.create_group("Lossy").await;
     let channel_id = alice.general_channel_id(&group_id).await;
 
-    // Add bob and settle both at a shared epoch.
     alice.invite(&group_id, &bob_p.username).await;
     let bob_inv = bob
         .first_pending_invite()
@@ -1082,10 +871,7 @@ async fn lost_submit_response_is_adopted_not_wedged() {
     alice.process_commits_for(&channel_id).await;
     bob.process_commits_for(&channel_id).await;
 
-    // Arm the one-shot fault on the in-process Delivery Service: alice's next
-    // commit lands (commit + Welcome + GroupInfo all written) but the DS's
-    // success response is dropped — a lost success-response on the real HTTP
-    // path. The client must adopt its own canonical commit, not wedge.
+    // The next commit lands but its response is dropped.
     crate::harness::arm_ds_fault(crate::harness::DsFault::DropResponse);
 
     alice.invite(&group_id, &carol_p.username).await;
@@ -1095,8 +881,6 @@ async fn lost_submit_response_is_adopted_not_wedged() {
         "DS lost-response fault should have fired exactly once"
     );
 
-    // INVARIANT 1 — carol's Welcome was written despite the lost response, so
-    // she can join.
     let carol_inv = carol
         .first_pending_invite()
         .await
@@ -1109,9 +893,6 @@ async fn lost_submit_response_is_adopted_not_wedged() {
     alice.process_commits_for(&channel_id).await;
     carol.process_commits_for(&channel_id).await;
 
-    // INVARIANT 2 — alice did not wedge: she can still send, and both the
-    // existing member (bob) and the member added through the lost-response
-    // commit (carol) decrypt it.
     alice
         .send_channel_message(&channel_id, "after-lost-response")
         .await;
@@ -1133,7 +914,6 @@ async fn lost_submit_response_is_adopted_not_wedged() {
     drop(carol);
 }
 
-/// Read the `mls_group_info` row (epoch, byte length) for a conversation, if any.
 async fn group_info_row(
     remote: &Arc<pollis_delivery::db::Db>,
     conversation_id: &str,
@@ -1156,7 +936,6 @@ async fn group_info_row(
     }
 }
 
-/// Count `mls_welcome` rows for a recipient in a conversation.
 async fn welcome_count(
     remote: &Arc<pollis_delivery::db::Db>,
     conversation_id: &str,
@@ -1174,19 +953,7 @@ async fn welcome_count(
     row.get::<i64>(0).expect("count")
 }
 
-/// Slice 1 — commit + Welcome + GroupInfo land atomically through the Delivery
-/// Service. The whole flows harness routes submission through an in-process
-/// `pollis-delivery` instance (see `harness::world`), so this asserts the DS
-/// path specifically:
-///
-///   1. When alice adds bob, the DS writes the add commit, bob's Welcome, AND
-///      the resulting-epoch GroupInfo as one unit — all three rows are present
-///      remotely after the single `invite` call (no separate inline Welcome
-///      write, no post-merge GroupInfo republish).
-///   2. Bob joins purely from the DS-written Welcome and decrypts alice's
-///      message — proving the Welcome the DS persisted is the real one.
-///   3. The GroupInfo the DS wrote sits at the resulting epoch (epoch after the
-///      add), so a future device could external-join from it.
+/// Commit + Welcome + GroupInfo land atomically through the DS.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn commit_welcome_groupinfo_land_atomically_via_delivery_service() {
@@ -1200,33 +967,24 @@ async fn commit_welcome_groupinfo_land_atomically_via_delivery_service() {
 
     let group_id = alice.create_group("Atomic").await;
     let channel_id = alice.general_channel_id(&group_id).await;
-    // The MLS control-plane tables (`mls_group_info`, `mls_welcome`) live on the
-    // LOG DB in the split harness — inspect them there, not on the main DB.
+    // Control-plane tables live on the LOG DB.
     let remote = crate::harness::writable_log().await;
 
-    // Baseline GroupInfo: init_mls_group published the epoch-0 GroupInfo. The
-    // MLS group is keyed by group_id (the channel's group), so that's the
-    // conversation id for the control-plane rows.
+    // The MLS group is keyed by group_id.
     let (epoch0, _) = group_info_row(&remote, &group_id)
         .await
         .expect("epoch-0 GroupInfo should exist after group creation");
     assert_eq!(epoch0, 0, "fresh group's GroupInfo should be at epoch 0");
 
-    // Alice invites bob. reconcile builds the add commit and hands commit +
-    // Welcome + GroupInfo to the delivery seam, which here is the in-process
-    // Delivery Service over HTTP. The DS writes all three atomically on the win.
     alice.invite(&group_id, &bob_p.username).await;
 
-    // (1) The DS wrote bob's Welcome.
     assert_eq!(
         welcome_count(&remote, &group_id, &bob_p.id).await,
         1,
         "the DS should have written exactly one Welcome for bob alongside the commit"
     );
 
-    // (1) The DS advanced the stored GroupInfo to the resulting epoch (1). The
-    // committer no longer republishes GroupInfo after the merge — this row came
-    // from the commit bundle, written atomically with the commit by the DS.
+    // From the commit bundle; the committer no longer republishes.
     let (epoch_after_add, gi_len) = group_info_row(&remote, &group_id)
         .await
         .expect("GroupInfo should exist after the add commit");
@@ -1236,7 +994,6 @@ async fn commit_welcome_groupinfo_land_atomically_via_delivery_service() {
     );
     assert!(gi_len > 0, "GroupInfo blob must be non-empty");
 
-    // (2) Bob joins purely from the DS-written Welcome, then decrypts a message.
     bob.accept_invite(
         bob.first_pending_invite()
             .await
@@ -1263,21 +1020,7 @@ async fn commit_welcome_groupinfo_land_atomically_via_delivery_service() {
     drop(bob);
 }
 
-/// Regression: a dropped bootstrap GroupInfo publish is self-healed on the next
-/// "group touched" pass, instead of bricking the group forever.
-///
-/// The bug: `init_mls_group` publishes the epoch-0 GroupInfo best-effort. If that
-/// DS post fails (a transient outage right as the group is created), nothing ever
-/// retried it — the post-merge republish only fired when a commit was applied
-/// (`any_applied`), which is never true for a freshly created, sole-member group.
-/// With no GroupInfo in the log DB, no member could ever external-join, so a group
-/// created during an outage was permanently unjoinable (and any message sent into
-/// it was silently lost).
-///
-/// We reproduce the stranded state directly — delete the epoch-0 GroupInfo row
-/// from the log DB (exactly what a failed publish leaves behind) — then run an
-/// ordinary commit-processing pass and assert the row reappears at the same epoch.
-/// Before the fix this pass was a no-op and the row stayed gone.
+/// A dropped bootstrap GroupInfo publish is self-healed by the next commit-processing pass.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn dropped_bootstrap_group_info_is_healed_on_next_touch() {
@@ -1288,17 +1031,14 @@ async fn dropped_bootstrap_group_info_is_healed_on_next_touch() {
 
     let group_id = alice.create_group("Stranded").await;
     let channel_id = alice.general_channel_id(&group_id).await;
-    // MLS control-plane rows live on the LOG DB; the MLS group is keyed by group_id.
     let log = crate::harness::writable_log().await;
 
-    // Baseline: init_mls_group published the epoch-0 GroupInfo.
     let (epoch0, _) = group_info_row(&log, &group_id)
         .await
         .expect("epoch-0 GroupInfo should exist after group creation");
     assert_eq!(epoch0, 0, "fresh group's GroupInfo should be at epoch 0");
 
-    // Simulate the create-time publish having been dropped by a transient DS
-    // failure: remove the only GroupInfo row. This is the exact bricked state.
+    // The bricked state a failed create-time publish leaves.
     {
         let conn = log.conn().await.expect("log conn");
         conn.execute(
@@ -1313,14 +1053,9 @@ async fn dropped_bootstrap_group_info_is_healed_on_next_touch() {
         "precondition: GroupInfo row should be gone (simulating the dropped publish)"
     );
 
-    // An ordinary touch — the same commit-processing pass the sweep, send, and
-    // realtime ingest all run. No commit is applied (sole-member group), so the
-    // old `any_applied` republish would NOT fire; only the new durability backstop
-    // does.
+    // No commit applies here, so only the durability backstop can republish.
     alice.process_commits_for(&channel_id).await;
 
-    // The heal republished the current-epoch GroupInfo, so a member can once
-    // again external-join the group.
     let (healed_epoch, len) = group_info_row(&log, &group_id)
         .await
         .expect("GroupInfo should be republished by the self-heal on the next touch");
@@ -1333,8 +1068,7 @@ async fn dropped_bootstrap_group_info_is_healed_on_next_touch() {
     drop(alice);
 }
 
-/// Add `member` (already signed up, with `profile`) to `group_id`, accepting the
-/// invite and syncing every listed client's MLS state to the new epoch.
+/// Invite, accept, and sync every listed client to the new epoch.
 async fn add_member_and_sync(
     admin: &TestClient,
     group_id: &str,
@@ -1359,11 +1093,7 @@ async fn add_member_and_sync(
     }
 }
 
-/// "Delete for everyone": a sender deleting their OWN message must redact it on
-/// the devices of members who ALREADY received it — the whole point of the
-/// change. alice, bob, and carol are all members and all fetch alice's message;
-/// alice then deletes it, and bob + carol (who already had a local copy) must
-/// see it soft-deleted, as must alice's own view.
+/// Delete for everyone redacts copies members already received.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn self_delete_redacts_already_delivered_recipients() {
@@ -1387,7 +1117,6 @@ async fn self_delete_redacts_already_delivered_recipients() {
         .send_channel_message_id(&channel_id, "top secret")
         .await;
 
-    // bob and carol both receive and decrypt the original.
     for client in [&bob, &carol] {
         let msgs = client.fetch_channel_messages(&channel_id).await;
         let m = msgs
@@ -1398,11 +1127,8 @@ async fn self_delete_redacts_already_delivered_recipients() {
         assert!(m["deleted_at"].is_null(), "not deleted yet");
     }
 
-    // alice deletes her own message — delete for everyone.
     alice.delete_message(&msg_id).await;
 
-    // bob and carol, who already had it locally, now see it redacted: content
-    // cleared and a deleted_at tombstone set.
     for (label, client) in [("bob", &bob), ("carol", &carol)] {
         let msgs = client.fetch_channel_messages(&channel_id).await;
         let m = msgs
@@ -1420,7 +1146,6 @@ async fn self_delete_redacts_already_delivered_recipients() {
         );
     }
 
-    // alice's own view is a tombstone too (soft-delete, not a silent vanish).
     let alice_msgs = alice.fetch_channel_messages(&channel_id).await;
     let alice_m = alice_msgs
         .iter()
@@ -1432,39 +1157,7 @@ async fn self_delete_redacts_already_delivered_recipients() {
     drop((alice, bob, carol));
 }
 
-// ─── Solution A (#607): client-side edit/delete authz under unconditional
-// sealed sender ──────────────────────────────────────────────────────────────
-//
-// The DS no longer checks authorship on edit/delete (the stored sender_id is
-// always the sealed sentinel). Authorship is enforced CLIENT-side on ingest.
-// These prove both halves: the legitimate cases still work now that the DS
-// stopped blocking them, and the forged cases are rejected by the client. The
-// self-EDIT case lives in `edit_message_across_membership_changes` (phase 3).
-
-/// Sealed EDIT and REDACTION, non-author rejected — the edit now at BOTH layers.
-///
-/// Security invariant (invalid states unrepresentable): a redaction is honored
-/// ONLY when its MLS-authenticated author is the target message's author, and
-/// so is an edit. carol — a member, but neither the author nor an admin —
-/// forges both for alice's message; bob must STILL see it unchanged. (The
-/// redaction half was `redaction_from_non_author_is_ignored`, which built the
-/// identical three-member world.)
-///
-/// Carol (a member, but NOT the author) forges an edit envelope for alice's
-/// message via the test-only `edit_message_as`, bypassing the client-send
-/// self-gate.
-///
-/// Since #1086 the DS refuses it outright: an edit replaces the target's pending
-/// edit, and `idx_envelope_one_edit_per_message` allows exactly one per message,
-/// so accepting carol's would delete alice's — the clobber. Carol cannot open
-/// alice's per-envelope deletion capability, so her write is a 403.
-///
-/// The ingest-side check this test was originally written for is UNCHANGED and
-/// still load-bearing: it is what covers a legacy envelope whose capability is
-/// NULL, where the DS still accepts any member's edit. So the assertion is that
-/// alice's message survives carol's attempt, whichever layer stopped it — and
-/// the test exercises the ingest path directly below by persisting a forged edit
-/// against a legacy target.
+/// Non-author edits and redactions are rejected: the edit at the DS (#1086), both on ingest for legacy envelopes.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn sealed_non_author_edit_is_ignored() {
@@ -1487,7 +1180,6 @@ async fn sealed_non_author_edit_is_ignored() {
         .send_channel_message_id(&channel_id, "carol cannot edit this")
         .await;
 
-    // bob receives the original.
     let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
     assert_eq!(
         bob_msgs
@@ -1498,10 +1190,7 @@ async fn sealed_non_author_edit_is_ignored() {
         Some("carol cannot edit this")
     );
 
-    // carol forges an edit targeting alice's message: a real, decryptable MLS
-    // edit envelope — but authored by carol, not alice.
-    // The DS layer (#1086): carol cannot prove the capability, so the write never
-    // lands. Before #1086 this returned Ok and the envelope was stored.
+    // #1086: carol cannot prove the capability, so the write never lands.
     let refused = pollis_core::commands::messages::edit_message_as(
         &carol.state,
         &channel_id,
@@ -1516,9 +1205,7 @@ async fn sealed_non_author_edit_is_ignored() {
          deletion capability (#1086), got {refused:?}"
     );
 
-    // carol also forges a REDACTION targeting alice's message. It is a real,
-    // decryptable MLS message — but authored by carol, not alice — so the
-    // recipient must reject the mismatched-author redaction on ingest.
+    // A real forged redaction; ingest must reject the author mismatch.
     pollis_core::commands::messages::send_redaction_as(
         &carol.state,
         &channel_id,
@@ -1528,8 +1215,6 @@ async fn sealed_non_author_edit_is_ignored() {
     .await
     .expect("forged redaction send");
 
-    // bob re-fetches: the message is UNCHANGED — the edit and the redaction were
-    // both rejected because carol is not the author.
     let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
     let m = bob_msgs
         .iter()
@@ -1552,13 +1237,7 @@ async fn sealed_non_author_edit_is_ignored() {
     drop((alice, bob, carol));
 }
 
-/// Sealed DELETE, self (NON-admin author): bob — a plain member, not a group
-/// admin — self-deletes his OWN message. Before Solution A this was broken under
-/// sealing: the client resolved the author from the sealed envelope (sentinel),
-/// misrouted the delete to the admin path, and bob (no admin role) was refused.
-/// Now the client resolves authorship from its local row, takes the self path
-/// (membership-gated), the redaction applies for synced members, and the DS
-/// removes the envelope.
+/// A non-admin author self-deletes; authorship comes from the local row, not the sealed envelope.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn sealed_non_admin_self_delete_works() {
@@ -1572,10 +1251,8 @@ async fn sealed_non_admin_self_delete_works() {
 
     let group_id = alice.create_group("Self Delete").await;
     let channel_id = alice.general_channel_id(&group_id).await;
-    // bob is a plain member (never promoted to admin).
     add_member_and_sync(&alice, &group_id, &channel_id, &bob, &bob_profile, &[]).await;
 
-    // bob sends; alice fetches so she holds a local copy to be redacted.
     let msg_id = bob
         .send_channel_message_id(&channel_id, "bob's message")
         .await;
@@ -1589,10 +1266,8 @@ async fn sealed_non_admin_self_delete_works() {
         Some("bob's message")
     );
 
-    // bob self-deletes his own message — the non-admin self path.
     bob.delete_message(&msg_id).await;
 
-    // alice (already had it) now sees it redacted: content cleared + tombstone.
     let alice_msgs = alice.fetch_channel_messages(&channel_id).await;
     let m = alice_msgs
         .iter()
@@ -1608,7 +1283,6 @@ async fn sealed_non_admin_self_delete_works() {
         "alice's copy must carry a deleted_at tombstone"
     );
 
-    // The original envelope was removed from the server.
     let remote = writable_remote().await;
     let conn = remote.conn().await.expect("remote conn");
     let mut rows = conn
@@ -1630,27 +1304,7 @@ async fn sealed_non_admin_self_delete_works() {
     drop((alice, bob));
 }
 
-/// #693 / #661 (WS1) — self-diagnosing report for a failed admin-delete
-/// redaction. When carol's copy is NOT redacted, this inspects the state that
-/// distinguishes the issue's candidates at the MOMENT of failure, so the next CI
-/// flake says WHICH mechanism it was instead of only "got bob's post":
-///
-///   * **tombstone never written** — no `type='delete'` row on the server ⇒ the
-///     admin branch didn't run (e.g. the client misresolved self-vs-admin).
-///   * **never fetched (candidate 1 — ordering/visibility)** — the tombstone
-///     exists but sorts at/under carol's reported watermark
-///     (`last_fetched_at`), so her `sent_at > watermark` fetch skipped it. The
-///     offline `admin_delete_visibility_tests` prove this cannot happen at the
-///     envelope layer, so seeing it here would be a genuine surprise worth the
-///     shout.
-///   * **fetched but not applied (candidate 2)** — the tombstone sorts strictly
-///     above carol's watermark (she DID fetch it) yet her local row is still
-///     unredacted ⇒ the drop is in `ingest.rs`'s APPLICATION of the tombstone
-///     (the redaction `UPDATE` is fire-and-forget and the watermark advances
-///     past a `delete` unconditionally — `is_handled(Delete) == true`).
-///
-/// Read-only: it only observes state, never waits or retries, so it cannot mask
-/// the flake (the hard rule in #693).
+/// #693: classify a failed admin-delete redaction (no tombstone / never fetched / not applied); read-only.
 async fn diagnose_admin_delete_failure(
     carol: &TestClient,
     conversation_id: &str,
@@ -1659,7 +1313,6 @@ async fn diagnose_admin_delete_failure(
     let remote = writable_remote().await;
     let conn = remote.conn().await.expect("remote conn");
 
-    // The tombstone the admin delete should have written (if any).
     let tombstone: Option<String> = {
         let mut rows = conn
             .query(
@@ -1706,7 +1359,6 @@ async fn diagnose_admin_delete_failure(
             .map(|r| r.get::<String>(0).expect("last_fetched_at"))
     };
 
-    // carol's LOCAL row — the copy the assertion reads.
     let (local_content, local_deleted_at): (Option<String>, Option<String>) = {
         use rusqlite::OptionalExtension;
         let guard = carol.state.local_db.lock().await;
@@ -1730,8 +1382,7 @@ async fn diagnose_admin_delete_failure(
         }
         (Some(ts), wm) => {
             let fetched = match wm {
-                // No watermark row, or a watermark strictly below the tombstone,
-                // means carol's `sent_at > watermark` fetch WOULD return it.
+                // No watermark, or one below the tombstone: the fetch would return it.
                 None => true,
                 Some(w) => ts.as_str() > w.as_str(),
             };
@@ -1765,10 +1416,7 @@ async fn diagnose_admin_delete_failure(
     )
 }
 
-/// Sealed DELETE, admin: an admin (alice, the group creator) deletes ANOTHER
-/// member's (bob's) message via the tombstone path. The DS re-derives alice's
-/// admin role (a permission check, not an author check), removes the envelope,
-/// and writes a `type='delete'` tombstone that every member applies on ingest.
+/// Admin deletes another member's message via the tombstone path.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn sealed_admin_delete_of_other_member_works() {
@@ -1787,7 +1435,6 @@ async fn sealed_admin_delete_of_other_member_works() {
     add_member_and_sync(&alice, &group_id, &channel_id, &bob, &bob_profile, &[]).await;
     add_member_and_sync(&alice, &group_id, &channel_id, &carol, &carol_profile, &[&bob]).await;
 
-    // bob sends; alice + carol fetch so they hold local copies.
     let msg_id = bob
         .send_channel_message_id(&channel_id, "bob's post")
         .await;
@@ -1802,20 +1449,14 @@ async fn sealed_admin_delete_of_other_member_works() {
         );
     }
 
-    // alice (admin) deletes bob's message — the tombstone path.
     alice.delete_message(&msg_id).await;
 
-    // carol applies the tombstone on next ingest: content cleared + tombstone.
     let carol_msgs = carol.fetch_channel_messages(&channel_id).await;
     let m = carol_msgs
         .iter()
         .find(|m| m["id"] == msg_id)
         .expect("row present as a tombstone");
-    // #693/#661 (WS1): on the flaky failure, report WHICH mechanism it was
-    // (tombstone never written / never fetched / fetched-but-not-applied) rather
-    // than only the observed content. Read-only — no wait/retry, so it can't mask
-    // the flake. Kept as a branch (not an `assert!` message) because gathering the
-    // diagnosis is async.
+    // #693: report which mechanism failed; async, so a branch rather than an assert message.
     if !m["content"].is_null() {
         let diag = diagnose_admin_delete_failure(&carol, &channel_id, &msg_id).await;
         panic!(
@@ -1828,7 +1469,6 @@ async fn sealed_admin_delete_of_other_member_works() {
         "carol's copy must carry a deleted_at tombstone"
     );
 
-    // A `type='delete'` tombstone was written and the original envelope removed.
     let remote = writable_remote().await;
     let conn = remote.conn().await.expect("remote conn");
     let mut rows = conn
@@ -1849,17 +1489,7 @@ async fn sealed_admin_delete_of_other_member_works() {
     drop((alice, bob, carol));
 }
 
-/// Sealed DELETE, admin: the AUTHOR's own copy must be redacted too.
-///
-/// The existing admin-delete test proves a THIRD PARTY (carol) applies the
-/// tombstone. It never re-reads bob — the member whose message was removed — so
-/// nothing pinned the case a real user is most likely to notice: your post is
-/// gone for everyone else, and you are the only person still looking at it.
-///
-/// This is not the same code path as a self-delete. Bob did not initiate the
-/// delete and does not author the tombstone; he receives one authored by someone
-/// else and has to apply it to a row he wrote himself. Distinct enough from both
-/// the self-delete path and carol's path to be worth its own test.
+/// Admin delete: the author applies a tombstone he did not write to his own row.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn admin_delete_redacts_the_authors_own_copy() {
@@ -1879,8 +1509,6 @@ async fn admin_delete_redacts_the_authors_own_copy() {
         .send_channel_message_id(&channel_id, "bob's post")
         .await;
 
-    // Bob holds his own decrypted copy locally, and alice has fetched it — so the
-    // redaction below has to reach a row that already exists on both sides.
     let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
     assert_eq!(
         bob_msgs
@@ -1900,10 +1528,8 @@ async fn admin_delete_redacts_the_authors_own_copy() {
         Some("bob's post")
     );
 
-    // alice (admin) removes it.
     alice.delete_message(&msg_id).await;
 
-    // THE ASSERTION: bob applies a tombstone he did not author, to his own row.
     let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
     let bob_m = bob_msgs
         .iter()
@@ -1922,20 +1548,7 @@ async fn admin_delete_redacts_the_authors_own_copy() {
     drop((alice, bob));
 }
 
-/// Threads (#825) must behave identically in a DM and in a group channel.
-///
-/// They share one code path by construction — the local `message` table keys
-/// both on `conversation_id`, and `read_thread_messages` filters on `thread_id`
-/// alone — but nothing pinned that, and the two surfaces reach it through
-/// different UI. This runs the same thread through both and asserts the same
-/// answers, so a future change that special-cases channels fails here.
-///
-/// What it pins, for each surface:
-///   - a reply sent with `threadId` is readable back as a reply of that thread
-///   - the reply does NOT come back in the conversation's main message list
-///     (the channel feed shows the root's "N replies" instead — a reply in
-///     both places is the double-post bug threads exist to avoid)
-///   - `list_thread_summaries` counts it against the root
+/// Threads (#825) behave identically in a DM and a group channel.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn threads_behave_the_same_in_dms_and_channels() {
@@ -1947,7 +1560,6 @@ async fn threads_behave_the_same_in_dms_and_channels() {
     let alice_profile = alice.sign_up("alice@test.local").await;
     let bob_profile = bob.sign_up("bob@test.local").await;
 
-    // ---- surface 1: a group channel ----
     let group_id = alice.create_group("Threads").await;
     alice.invite(&group_id, &bob_profile.username).await;
     let invite_id = bob
@@ -1968,7 +1580,6 @@ async fn threads_behave_the_same_in_dms_and_channels() {
         .send_thread_reply(&channel_id, &channel_root, "channel reply")
         .await;
 
-    // ---- surface 2: a DM ----
     let dm_id = alice.create_dm(&[bob_profile.id.as_str()]).await;
     bob.poll().await;
     let dm_root = alice.send_channel_message_id(&dm_id, "dm root").await;
@@ -1976,7 +1587,6 @@ async fn threads_behave_the_same_in_dms_and_channels() {
         .send_thread_reply(&dm_id, &dm_root, "dm reply")
         .await;
 
-    // ---- the same three assertions against each ----
     for (label, conversation_id, root_id, reply_text) in [
         ("channel", &channel_id, &channel_root, "channel reply"),
         ("dm", &dm_id, &dm_root, "dm reply"),
@@ -1991,7 +1601,6 @@ async fn threads_behave_the_same_in_dms_and_channels() {
             "{label}: the thread should hold its reply, got: {replies:#?}"
         );
 
-        // The reply belongs to the thread, not the conversation's own feed.
         let feed = alice.fetch_channel_messages(conversation_id).await;
         let feed_has_reply = feed
             .iter()
@@ -2023,29 +1632,7 @@ async fn threads_behave_the_same_in_dms_and_channels() {
     drop(bob);
 }
 
-/// Reactions, end to end through the real dispatch path — #931.
-///
-/// The reaction commands (`add_reaction` / `remove_reaction` / `get_reactions`)
-/// have been registered and callable for a long time with **no test anywhere**
-/// and, since #874 deleted the desktop UI, no desktop caller either. Mobile
-/// calls them, so they cannot simply be deleted — but "mobile uses it" is not
-/// evidence that the path still works, and the desktop UI is about to be built
-/// back on top of it. This is that evidence.
-///
-/// It exercises the whole seam rather than the Rust function in isolation:
-/// two real clients, a real MLS group, a real message, and reactions written
-/// and read back through the Delivery Service (`/v1/reactions/add`,
-/// `/v1/reactions/remove`, and the grouped read in `/v1/messages/lookup`),
-/// which is where #987 moved them.
-///
-/// What it pins down:
-///   - a reaction added by one member is visible to ANOTHER member, which is
-///     the whole point and the thing a local-only implementation would fake
-///   - grouping is by emoji, with `user_ids` accumulating across users
-///   - adding the same reaction twice is idempotent, not a duplicate or an
-///     error (the UNIQUE constraint is relied on by the UI's toggle)
-///   - removing is scoped to the (message, user, emoji) triple: it must not
-///     remove another user's identical reaction
+/// Reactions (#931) through the DS: cross-member, grouped, idempotent, per-user removal.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn reactions_round_trip_between_two_members() {
@@ -2074,8 +1661,7 @@ async fn reactions_round_trip_between_two_members() {
         .send_channel_message_id(&channel_id, "worth reacting to")
         .await;
 
-    // Alice reacts. Bob must SEE it — a client-local store would pass a
-    // single-client assertion and fail this one.
+    // Bob must see it: a local-only store would fail this.
     alice
         .invoke_json(
             "add_reaction",
@@ -2098,8 +1684,6 @@ async fn reactions_round_trip_between_two_members() {
     assert_eq!(seen_by_bob[0]["emoji"], "👍");
     assert_eq!(seen_by_bob[0]["count"], 1);
 
-    // Same emoji from a second user groups into ONE pill with two user_ids —
-    // this is what the pill UI renders, so it is the contract that matters.
     bob.invoke_json(
         "add_reaction",
         serde_json::json!({
@@ -2120,8 +1704,7 @@ async fn reactions_round_trip_between_two_members() {
     );
     assert_eq!(grouped[0]["count"], 2, "count should accumulate: {grouped:#?}");
 
-    // Idempotent: the UI toggle relies on a repeat add being a no-op rather
-    // than an error or a duplicate row.
+    // The UI toggle relies on a repeat add being a no-op.
     alice
         .invoke_json(
             "add_reaction",
@@ -2140,9 +1723,7 @@ async fn reactions_round_trip_between_two_members() {
         "re-adding an existing reaction must not duplicate it: {after_repeat:#?}"
     );
 
-    // Removal is scoped to one user. Alice unreacting must leave Bob's alone —
-    // a remove keyed only on (message, emoji) would wipe both and would pass
-    // every single-user test.
+    // Must leave Bob's identical reaction alone.
     alice
         .invoke_json(
             "remove_reaction",
@@ -2195,16 +1776,7 @@ async fn react(client: &TestClient, user_id: &str, message_id: &str, emoji: &str
         .await;
 }
 
-/// #1433: reactions on a message whose envelope the DS has collected.
-///
-/// Envelope GC (#689) deletes a `message_envelope` row once every member device
-/// has read past it — routinely, within one sweep of a quiet conversation. The
-/// reaction WRITE survives that (#1161 gates it on the client's declared
-/// conversation), but the READ in `/v1/messages/lookup` was gated on the
-/// envelope alone, so from then on the message had no reactions for anyone: a
-/// tap showed the pill optimistically and the refetch took it away again —
-/// "can't add emoji reactions to certain messages". Reactions made BEFORE the
-/// sweep vanished with it too.
+/// #1433: reactions survive GC of the message's envelope (#689).
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn reactions_survive_envelope_collection() {
@@ -2235,12 +1807,9 @@ async fn reactions_survive_envelope_collection() {
     let late = alice
         .send_channel_message_id(&channel_id, "reacted to after the sweep")
         .await;
-    // Bob reacts while the envelope still exists (he has fetched it, so he
-    // holds the local copy the reaction is declared against).
     bob.fetch_channel_messages(&channel_id).await;
     react(&bob, &bob_profile.id, &early, "👀").await;
 
-    // Everyone has read past both messages, and the sweep collects them.
     alice.fetch_channel_messages(&channel_id).await;
     bob.fetch_channel_messages(&channel_id).await;
     let remote = crate::harness::writable_remote().await;
@@ -2251,7 +1820,6 @@ async fn reactions_survive_envelope_collection() {
         "fixture: both envelopes must have been collected"
     );
 
-    // A reaction made after collection is readable by both members.
     react(&alice, &alice_profile.id, &late, "👍").await;
     for (who, client) in [("alice", &alice), ("bob", &bob)] {
         let seen = client
@@ -2265,7 +1833,6 @@ async fn reactions_survive_envelope_collection() {
         assert_eq!(seen[0]["emoji"], "👍");
     }
 
-    // And one made before the sweep did not disappear with the envelope.
     let seen = alice
         .invoke_json("get_reactions", serde_json::json!({ "messageId": early }))
         .await;
@@ -2280,17 +1847,7 @@ async fn reactions_survive_envelope_collection() {
     drop(bob);
 }
 
-/// #1087: the delivery sequence, end to end through the real stack.
-///
-/// The rest of this suite proves delivery *works*, which is the property that
-/// matters — but it proves it implicitly, so a cursor that quietly stopped being
-/// assigned would surface as some unrelated test failing much later. This one
-/// looks at the columns directly: a real client send lands with a sequence, the
-/// sequences increase, and the recipient's reported cursor advances past them.
-///
-/// That is the whole loop — DS assignment on write, client report on ingest, DS
-/// storage of the cursor — which no single unit test can cover because each half
-/// lives in a different crate.
+/// #1087: DS-assigned sequences increase and the recipient's cursor advances past them.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_real_send_assigns_a_delivery_sequence_and_advances_the_cursor() {
@@ -2349,8 +1906,6 @@ async fn a_real_send_assigns_a_delivery_sequence_and_advances_the_cursor() {
         .expect("a real send must land with a delivery sequence");
     assert!(s1 < s2, "sequences must increase: {s1} then {s2}");
 
-    // Bob fetches — the client computes its cursor over the sequence and
-    // reports it, and the DS stores it.
     bob.fetch_channel_messages(&channel_id).await;
 
     let cursor: Option<i64> = {
@@ -2381,9 +1936,7 @@ async fn a_real_send_assigns_a_delivery_sequence_and_advances_the_cursor() {
     drop(bob);
 }
 
-/// What a device shows after a realtime `new_message` wake-up: the renderer
-/// runs the conversation's ingest, then re-reads the LOCAL page. Not
-/// `get_*_messages` (which ingests inside the read) — this is the live path.
+/// The live path: ingest, then re-read the LOCAL page.
 async fn live_receive(client: &TestClient, conversation_id: &str, is_channel: bool) -> Vec<String> {
     let (ingest, read, key) = if is_channel {
         ("ingest_channel_envelopes", "read_channel_messages", "channelId")
@@ -2404,14 +1957,7 @@ async fn live_receive(client: &TestClient, conversation_id: &str, is_channel: bo
         .collect()
 }
 
-/// One user, two devices: a message sent from one device must reach the
-/// other on the live path, in a group channel AND a DM, exactly as a message
-/// from someone else does. Any "own message, already have it" dedupe may only
-/// key on the message id — never on the sender's user id.
-///
-/// Covers both enrollment orders: one group exists BEFORE alice's second
-/// device does (the new leaf has to be added to an existing tree), and a group
-/// plus a DM are created AFTER it.
+/// Own messages reach the user's other device live; dedupe keys on message id only.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_users_own_message_reaches_their_other_device_live() {
@@ -2422,14 +1968,12 @@ async fn a_users_own_message_reaches_their_other_device_live() {
     let mut bob = TestClient::new().await;
     let bob_profile = bob.sign_up("bob@test.local").await;
 
-    // A group that exists before alice's second device does.
     let early_group = alice_d1.create_group("Early").await;
     let early_channel = alice_d1.general_channel_id(&early_group).await;
     add_member_and_sync(&alice_d1, &early_group, &early_channel, &bob, &bob_profile, &[]).await;
 
     let alice_d2 = enroll_second_device(&alice_d1, "alice@test.local").await;
 
-    // A group and a DM created after it.
     let late_group = alice_d1.create_group("Late").await;
     let late_channel = alice_d1.general_channel_id(&late_group).await;
     add_member_and_sync(&alice_d1, &late_group, &late_channel, &bob, &bob_profile, &[&alice_d2])
@@ -2439,7 +1983,6 @@ async fn a_users_own_message_reaches_their_other_device_live() {
         .await;
     bob.accept_dm_request(&dm_id).await;
 
-    // Warm every device the way opening the app does.
     for c in [&alice_d1, &alice_d2, &bob] {
         c.poll().await;
         c.sweep().await;
@@ -2450,7 +1993,6 @@ async fn a_users_own_message_reaches_their_other_device_live() {
         ("late channel", &late_channel, true),
         ("dm", &dm_id, false),
     ] {
-        // d1 → d2, with bob as the control (a message from someone else).
         let from_d1 = format!("{label}: from alice_d1");
         alice_d1.send_channel_message(conversation_id, &from_d1).await;
         let on_d2 = live_receive(&alice_d2, conversation_id, is_channel).await;
@@ -2461,7 +2003,6 @@ async fn a_users_own_message_reaches_their_other_device_live() {
         let on_bob = live_receive(&bob, conversation_id, is_channel).await;
         assert!(on_bob.contains(&from_d1), "{label}: bob must receive it too, got {on_bob:?}");
 
-        // d2 → d1, the other direction.
         let from_d2 = format!("{label}: from alice_d2");
         alice_d2.send_channel_message(conversation_id, &from_d2).await;
         let on_d1 = live_receive(&alice_d1, conversation_id, is_channel).await;
@@ -2470,7 +2011,6 @@ async fn a_users_own_message_reaches_their_other_device_live() {
             "{label}: alice_d1 must receive alice_d2's message live, got {on_d1:?}"
         );
 
-        // Someone else's message still lands on both of alice's devices.
         let from_bob = format!("{label}: from bob");
         bob.send_channel_message(conversation_id, &from_bob).await;
         for (client, who) in [(&alice_d1, "alice_d1"), (&alice_d2, "alice_d2")] {

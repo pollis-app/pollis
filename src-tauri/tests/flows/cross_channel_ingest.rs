@@ -1,14 +1,6 @@
 //! A device catching a group up in one pass must decrypt in the order senders
 //! sealed, not channel by channel.
-//!
-//! Every channel of a group shares one MLS group, so a sender's ratchet
-//! generations run across all of its channels, and openmls refuses a
-//! generation more than 5 below the newest one it has opened for that sender
-//! ("too distant in the past"). The catch-up used to decrypt each epoch's
-//! envelopes conversation by conversation; a member reading along live opens
-//! them in arrival order and loses nothing, but a device that was away (a phone
-//! in the background) caught up channel by channel and lost every message more
-//! than 5 generations behind the sender's last message in an earlier channel.
+//! A group's channels share one MLS group, and openmls refuses generations >5 behind the newest.
 
 use crate::harness::{wipe, TestClient};
 use serde_json::json;
@@ -34,7 +26,6 @@ async fn ingest(c: &TestClient, channel: &str) {
     .await;
 }
 
-/// `want` all present on `c` in `channel`, and nothing shown as lost.
 async fn assert_reads_all(c: &TestClient, who: &str, channel: &str, want: &[String]) {
     let msgs = c.fetch_channel_messages(channel).await;
     let got = contents(&msgs);
@@ -43,12 +34,7 @@ async fn assert_reads_all(c: &TestClient, who: &str, channel: &str, want: &[Stri
     assert_eq!(placeholders(&msgs), 0, "{who} shows a loss: {msgs:#?}");
 }
 
-/// The shape of the field report: a sender talks in one channel — messages and
-/// edits, another member replying live — after also posting in a sibling
-/// channel; a device away the whole time catches the group up at once (several
-/// ingests racing, as a resume fires them). Interleaved both ways
-/// round, so whichever channel the catch-up lists first, the old per-channel
-/// order loses messages.
+/// A device away the whole time catches up with racing ingests, channels interleaved both ways.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_device_catching_up_reads_a_sender_who_interleaved_channels() {
@@ -58,8 +44,6 @@ async fn a_device_catching_up_reads_a_sender_who_interleaved_channels() {
     desk.sign_up("alice@test.local").await;
     let mut bob = TestClient::new().await;
     let bob_p = bob.sign_up("bob@test.local").await;
-    // The device that is away for the whole conversation — a phone in the
-    // background, say.
     let mut phone = TestClient::new().await;
     let phone_p = phone.sign_up("carol@test.local").await;
 
@@ -116,25 +100,17 @@ async fn a_device_catching_up_reads_a_sender_who_interleaved_channels() {
     desk.send_channel_message(&y, "y after").await;
     say(&mut want_y, "y after");
 
-    // The away device catches up — several ingests at once, as a resume fires
-    // them, on both channels.
     let p = &phone;
     tokio::join!(ingest(p, &x), ingest(p, &y), ingest(p, &x), ingest(p, &y));
     assert_reads_all(&phone, "the away device", &x, &want_x).await;
     assert_reads_all(&phone, "the away device", &y, &want_y).await;
 
-    // So does the other member, who was not reading along either.
     ingest(&bob, &y).await;
     assert_reads_all(&bob, "bob", &x, &want_x).await;
     assert_reads_all(&bob, "bob", &y, &want_y).await;
 }
 
-/// The field report again, on the shape it actually had (#1524): the device
-/// that was away is the SENDER's own phone — a sibling leaf, so the desktop's
-/// messages are someone else's ratchet to it — and its catch-up does not run
-/// clean. The commit fetch times out part-way through the first pass, and the
-/// second dies between opening an envelope and storing it. A commit lands in
-/// the middle of the conversation, so the catch-up has to cross an epoch too.
+/// #1524: the away device is the sender's own phone, and its catch-up crosses an epoch and fails twice.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn the_senders_own_phone_catches_up_through_a_faulty_resume() {
@@ -176,7 +152,6 @@ async fn the_senders_own_phone_catches_up_through_a_faulty_resume() {
     let first = desk.send_channel_message_id(&x, "x1").await;
     desk.edit_message(&x, &first, "x1 edited").await;
     want_x.push("x1 edited".into());
-    // The epoch moves under the conversation; the phone has not seen it.
     assert!(bob.self_update(&group).await);
     for i in 2..=7 {
         let t = format!("x{i}");
@@ -187,10 +162,8 @@ async fn the_senders_own_phone_catches_up_through_a_faulty_resume() {
         want_y.push(t);
     }
 
-    // First resume: the commit fetch times out part-way.
     arm_ds_fault(DsFault::CatchUpTimesOutMidway);
     ingest(&phone, &y).await;
-    // Second: the process dies with a key spent and its row unwritten.
     test_hooks::crash_next_send(Crash::AfterDecrypt);
     phone.activate();
     let (state, uid, ch) = (phone.state.clone(), phone.user_id().to_string(), x.clone());
@@ -199,7 +172,6 @@ async fn the_senders_own_phone_catches_up_through_a_faulty_resume() {
     })
     .await;
     assert!(matches!(&died, Err(e) if e.is_panic()), "the simulated kill unwound the catch-up: {died:?}");
-    // Third: it comes back for real, every channel at once.
     let p = &phone;
     tokio::join!(ingest(p, &x), ingest(p, &y), ingest(p, &x));
     assert_reads_all(&phone, "alice's phone", &x, &want_x).await;

@@ -1,12 +1,6 @@
-//! Zero message loss (#1524): every message sent to current members decrypts on
-//! every current member device — through message-path faults, through a
-//! process killed at the two points where a key is spent before its effect is
-//! durable, and across a long multi-device, multi-channel run.
+//! Zero message loss (#1524): through faults, kills and a long multi-device run.
 //!
-//! `lost_messages.rs` proves a loss is *visible*. This file proves there is
-//! none. Every test here also runs under the harness's zero-loss check
-//! (`harness::assert_no_unexpected_loss`): any placeholder or `[loss]` line
-//! fails it, whatever the assertions below say.
+//! Every test also runs under `harness::assert_no_unexpected_loss`.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -40,7 +34,6 @@ async fn join(admin: &TestClient, group: &str, channel: &str, member: &TestClien
     admin.process_commits_for(channel).await;
 }
 
-/// Alice and Bob in one group, both caught up. Returns (alice, bob, group, channel).
 async fn pair() -> (TestClient, TestClient, String, String) {
     wipe().await;
     let mut alice = TestClient::new().await;
@@ -85,9 +78,7 @@ async fn send_with_id(
     .await
 }
 
-/// Drain `c`'s outbox until nothing is left unsent, as successive reconnects
-/// would. Panics if a message is still unsent after a few rounds — that is a
-/// message the sender saw accepted and nobody received.
+/// Drain until nothing is unsent; panics if a message stays unsent.
 async fn drain(c: &TestClient) {
     for _ in 0..4 {
         let report = c.flush_outbox().await;
@@ -99,8 +90,6 @@ async fn drain(c: &TestClient) {
     panic!("the outbox never emptied");
 }
 
-/// Every one of `want` present exactly once on `c` in `channel`, nothing shown
-/// as lost.
 async fn assert_reads_all(c: &TestClient, who: &str, channel: &str, want: &[&str]) {
     let msgs = c.fetch_channel_messages(channel).await;
     let got = contents(&msgs);
@@ -111,8 +100,7 @@ async fn assert_reads_all(c: &TestClient, who: &str, channel: &str, want: &[&str
     assert_eq!(placeholders(&msgs), 0, "{who} shows a loss: {msgs:#?}");
 }
 
-/// The check has teeth: a loss the test did not ask for fails it, even though
-/// no assertion in the test body looks.
+/// The check has teeth: an unasked-for loss fails the test.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 #[should_panic(expected = "zero-loss invariant")]
@@ -124,10 +112,7 @@ async fn an_unexpected_loss_fails_the_test() {
     drop((alice, bob));
 }
 
-// ── Message-path faults ─────────────────────────────────────────────────────
-
-/// The send lands and the sender never hears so. The message is marked failed,
-/// the next drain re-posts it as a replay, and everyone holds it exactly once.
+/// The answer is lost; the drain replays it, held exactly once.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_send_that_lands_then_times_out_reaches_everyone_once() {
@@ -139,7 +124,6 @@ async fn a_send_that_lands_then_times_out_reaches_everyone_once() {
         .expect_err("the sender sees a timeout");
     assert!(!crate::harness::ds_fault_armed(), "the fault fired");
 
-    // The recipient can read it before the sender has done anything about it.
     assert_reads_all(&bob, "bob", &channel, &["landed, answer lost"]).await;
 
     drain(&alice).await;
@@ -147,8 +131,7 @@ async fn a_send_that_lands_then_times_out_reaches_everyone_once() {
     assert_reads_all(&bob, "bob", &channel, &["landed, answer lost"]).await;
 }
 
-/// The send times out before the DS stores anything. Nobody has it until the
-/// drain delivers it; then everyone does.
+/// Times out before the DS stores anything; the drain delivers it.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_send_that_times_out_unlanded_is_delivered_by_the_drain() {
@@ -160,15 +143,12 @@ async fn a_send_that_times_out_unlanded_is_delivered_by_the_drain() {
         .expect_err("the sender sees a timeout");
     assert!(!contents(&bob.fetch_channel_messages(&channel).await).contains(&"never landed".into()));
 
-    // A commit lands meanwhile, so the retry has to seal at a newer epoch.
     assert!(bob.self_update(&_group).await);
     drain(&alice).await;
     assert_reads_all(&bob, "bob", &channel, &["never landed"]).await;
     assert_reads_all(&alice, "alice", &channel, &["never landed"]).await;
 }
 
-/// An edit whose answer is lost, retried by the user: the final text is what
-/// everyone sees.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn an_edit_that_lands_then_times_out_converges() {
@@ -193,8 +173,7 @@ async fn an_edit_that_lands_then_times_out_converges() {
     assert_reads_all(&alice, "alice", &channel, &["final"]).await;
 }
 
-/// A device away across several epochs catches up, and the commit fetch times
-/// out part-way. What it decrypted stays; the rest arrives on the next pass.
+/// The commit fetch times out mid catch-up; the rest arrives next pass.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_catch_up_that_times_out_midway_loses_nothing() {
@@ -206,7 +185,6 @@ async fn a_catch_up_that_times_out_midway_loses_nothing() {
             alice.send_channel_message(&channel, &t).await;
             want.push(t);
         }
-        // A commit bob has not seen: the next round is sealed one epoch on.
         assert!(alice.self_update(&group).await);
     }
     arm_ds_fault(DsFault::CatchUpTimesOutMidway);
@@ -217,9 +195,7 @@ async fn a_catch_up_that_times_out_midway_loses_nothing() {
     assert_reads_all(&bob, "bob", &channel, &want).await;
 }
 
-/// The cursor report after a catch-up is lost, so the next catch-up hands the
-/// device every envelope again — messages, edits and (in a DM) receipts it
-/// already opened. None of them may come back as a loss.
+/// A lost cursor report replays opened envelopes; none may show as a loss.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_lost_cursor_report_redelivers_without_a_loss() {
@@ -250,11 +226,7 @@ async fn a_lost_cursor_report_redelivers_without_a_loss() {
     }
 }
 
-// ── A process killed where a key is spent ───────────────────────────────────
-
-/// The receiving device dies after `process_message` opened the envelope —
-/// its ratchet key spent and persisted — and before the row was written. On
-/// restart the same envelope is fetched again and must still open.
+/// Dies after opening (key spent) and before the row write; the refetch must open.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_receiver_killed_between_decrypt_and_insert_still_reads_the_message() {
@@ -283,9 +255,7 @@ async fn a_receiver_killed_between_decrypt_and_insert_still_reads_the_message() 
     .await;
 }
 
-/// The sending device dies after sealing — its own ratchet already past that
-/// generation — and before the post. The outbox drain after restart must
-/// deliver it, and it must open everywhere.
+/// Dies after sealing and before the post; the drain must deliver it.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_sender_killed_between_seal_and_post_still_delivers() {
@@ -311,7 +281,6 @@ async fn a_sender_killed_between_seal_and_post_still_delivers() {
     }
 }
 
-/// The row for `id` as `c` reads it.
 async fn read_one(c: &TestClient, channel: &str, id: &str) -> serde_json::Value {
     c.fetch_channel_messages(channel)
         .await
@@ -340,11 +309,7 @@ async fn restart(c: &TestClient) {
         .await;
 }
 
-/// The editing device dies with the edit stored and nothing posted (#1555) —
-/// the point where, before the edit outbox, the sender's copy had already
-/// changed and nobody else's ever would. Now the sender's row still holds what
-/// everyone holds; its read shows the edit as pending; and after the restart
-/// the drain delivers it, so every member's copy matches.
+/// Dies with the edit stored and unposted (#1555); the drain delivers it.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn an_editor_killed_between_storing_and_posting_converges() {
@@ -356,7 +321,6 @@ async fn an_editor_killed_between_storing_and_posting_converges() {
     let err = try_edit(&alice, &channel, &id, "final").await.expect_err("the kill ends the edit");
     assert!(err.contains("simulated process death"), "{err}");
 
-    // Nothing reached the DS, and the sender's view says so.
     assert_reads_all(&bob, "bob", &channel, &["draft"]).await;
     let mine = read_one(&alice, &channel, &id).await;
     assert_eq!(mine["content"], "final");
@@ -372,10 +336,7 @@ async fn an_editor_killed_between_storing_and_posting_converges() {
     }
 }
 
-/// The editing device dies after the DS took the edit and before it recorded
-/// that (#1555). The other members already hold the new text; the sender's
-/// retry after the restart re-posts the same edit (same envelope id) and lands
-/// on the same text, never a second, different one.
+/// Dies after the DS took the edit (#1555); the retry lands the same envelope.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn an_editor_killed_after_the_post_converges_without_a_fork() {
@@ -396,8 +357,7 @@ async fn an_editor_killed_after_the_post_converges_without_a_fork() {
     }
 }
 
-/// An edit that cannot reach the DS stays queued, shown as failed, and the
-/// next drain delivers it — no user action, no lost edit (#1555).
+/// An unreachable edit stays queued and the drain delivers it (#1555).
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn an_edit_that_times_out_unlanded_is_delivered_by_the_drain() {
@@ -409,33 +369,22 @@ async fn an_edit_that_times_out_unlanded_is_delivered_by_the_drain() {
     assert_eq!(read_one(&alice, &channel, &id).await["edit_state"], "failed");
     assert_reads_all(&bob, "bob", &channel, &["draft"]).await;
 
-    // A commit lands meanwhile, so the retry seals at a newer epoch.
     assert!(bob.self_update(&group).await);
     drain(&alice).await;
     assert_reads_all(&bob, "bob", &channel, &["final"]).await;
     assert_reads_all(&alice, "alice", &channel, &["final"]).await;
 }
 
-// ── The soak ────────────────────────────────────────────────────────────────
-
-/// One message the soak sent: where, by which device, and its text now.
 struct Sent {
     channel: usize,
     by: usize,
     text: String,
-    /// The DS has it (the send returned, or a drain since delivered it).
     landed: bool,
 }
 
 const EMOJI: [&str; 3] = ["👍", "🎉", "👀"];
 
-/// Two users, three devices (alice on a desktop and a phone), three channels
-/// in one group, a few hundred interleaved sends, edits, reactions,
-/// self-updates and catch-ups, with the message-path faults switched on at
-/// random. The phone is away for long stretches and catches up in large
-/// batches. Pass = zero losses on every device, every message present once
-/// with its final text, every reaction where it was put.
-///
+/// Long randomized multi-device soak with faults; pass = zero losses everywhere.
 /// `POLLIS_ZERO_LOSS_SOAK_OPS` lengthens it (default 240) and
 /// `POLLIS_ZERO_LOSS_SOAK_SEED` replays a run; the seed is printed.
 #[tokio::test(flavor = "multi_thread")]
@@ -480,7 +429,6 @@ async fn zero_loss_soak_multi_device_multi_channel() {
     let mut faults = 0usize;
     let mut kills = 0usize;
     for step in 0..ops {
-        // The phone acts and reads far less often: away, then a big catch-up.
         let d = match rng.gen_range(0..10) {
             0 => 1,
             1..=5 => 0,
@@ -488,17 +436,13 @@ async fn zero_loss_soak_multi_device_multi_channel() {
         };
         let dev = devices[d];
         if rng.gen_bool(0.2) {
-            // Re-arming over one that never applied would hide it: count only
-            // those that fired.
+            // Count only faults that fired.
             if !crate::harness::ds_fault_armed() {
                 let f = DsFault::MESSAGE_PATH[rng.gen_range(0..DsFault::MESSAGE_PATH.len())];
                 arm_ds_fault(f);
                 faults += 1;
             }
         } else if rng.gen_bool(0.05) {
-            // A sender killed with its envelope sealed and unposted, or an
-            // editor killed with its edit stored, or posted and unrecorded
-            // (#1555).
             const KILLS: [Crash; 3] = [Crash::AfterSeal, Crash::EditAfterEnqueue, Crash::EditAfterPost];
             test_hooks::crash_next_send(KILLS[rng.gen_range(0..KILLS.len())]);
             kills += 1;
@@ -529,8 +473,7 @@ async fn zero_loss_soak_multi_device_multi_channel() {
                     "userId": dev.user_id(),
                     "newContent": text,
                 });
-                // A failed (or killed) edit stays in the edit outbox (#1555):
-                // the drains deliver it, and its author sees it meanwhile.
+                // A failed edit stays in the edit outbox (#1555).
                 let landed = dev.invoke_try("edit_message", args).await.is_ok();
                 let mine = dev
                     .fetch_channel_messages(&channels[s.channel])
@@ -561,8 +504,6 @@ async fn zero_loss_soak_multi_device_multi_channel() {
                 reactions.insert((id, dev.user_id().to_string(), emoji));
             }
             72..=75 => {
-                // A commit: rotation is what moves the epoch under in-flight
-                // sends and away devices.
                 let _ = dev.try_self_update(&group).await;
             }
             76..=81 => {
@@ -571,8 +512,6 @@ async fn zero_loss_soak_multi_device_multi_channel() {
             }
             _ => {
                 if d == 1 {
-                    // The phone comes back and catches every channel at once,
-                    // as a resume fires them.
                     tokio::join!(
                         dev.ingest_channel(&channels[0]),
                         dev.ingest_channel(&channels[1]),
@@ -587,7 +526,6 @@ async fn zero_loss_soak_multi_device_multi_channel() {
     clear_ds_fault();
     test_hooks::disarm_crash();
 
-    // Everyone reconnects: drains, then reads every channel.
     for d in devices {
         drain(d).await;
     }

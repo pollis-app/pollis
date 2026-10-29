@@ -6,16 +6,7 @@ use pollis_lib::test_harness::invoke;
 use serde_json::json;
 use serial_test::serial;
 
-// ─── PIN lifecycle ──────────────────────────────────────────────────────────
-
-/// set_pin → lock → unlock roundtrip against the real command pipeline.
-///
-/// `TestClient::sign_up` already calls `set_pin(TEST_PIN)` so the local
-/// DB opens. This test focuses on the lock/unlock half of the cycle:
-/// asserts the wrapped blobs and pin_meta are present, the legacy
-/// session blob is gone, lock drops unlock state, wrong PIN fails,
-/// correct PIN restores access. Then changes the PIN: the old one fails
-/// after the change and the new one unlocks.
+/// set_pin → lock → unlock roundtrip, then a PIN change.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn pin_set_lock_unlock_roundtrip() {
@@ -25,9 +16,7 @@ async fn pin_set_lock_unlock_roundtrip() {
     let profile = alice.sign_up("alice@test.local").await;
     let uid = profile.id.clone();
 
-    // sign_up's set_pin populated AppState.unlock and persisted the
-    // wrapped blobs. Legacy session blob never written; legacy
-    // unwrapped slots deleted (load-bearing post-#194).
+    // Legacy session blob never written; unwrapped slots deleted (post-#194).
     let snap: serde_json::Value = alice.invoke_json("get_unlock_state", json!({})).await;
     assert_eq!(snap["is_unlocked"], true);
     assert_eq!(snap["pin_set"], true);
@@ -43,13 +32,11 @@ async fn pin_set_lock_unlock_roundtrip() {
     assert!(ks.load_for_user("db_key_wrapped", &uid).await.unwrap().is_some());
     assert!(ks.load_for_user("account_id_key_wrapped", &uid).await.unwrap().is_some());
 
-    // Lock → not unlocked, pin_set still true.
     invoke::<()>(&alice.webview, "lock", json!({})).await.expect("lock");
     let snap: serde_json::Value = alice.invoke_json("get_unlock_state", json!({})).await;
     assert_eq!(snap["is_unlocked"], false);
     assert_eq!(snap["pin_set"], true);
 
-    // Wrong PIN is rejected.
     let err = invoke::<serde_json::Value>(
         &alice.webview,
         "unlock",
@@ -62,7 +49,6 @@ async fn pin_set_lock_unlock_roundtrip() {
         "expected pin-related error, got: {err}"
     );
 
-    // Correct PIN re-unlocks.
     let outcome: serde_json::Value = invoke(
         &alice.webview,
         "unlock",
@@ -75,8 +61,6 @@ async fn pin_set_lock_unlock_roundtrip() {
     let snap: serde_json::Value = alice.invoke_json("get_unlock_state", json!({})).await;
     assert_eq!(snap["is_unlocked"], true);
 
-    // Changing the PIN: old fails after change, new succeeds (formerly
-    // `pin_change_roundtrip`, a separate sign-up for the same PIN slots).
     invoke::<()>(
         &alice.webview,
         "set_pin",
@@ -87,7 +71,6 @@ async fn pin_set_lock_unlock_roundtrip() {
 
     invoke::<()>(&alice.webview, "lock", json!({})).await.unwrap();
 
-    // Old PIN must now fail.
     let err = invoke::<serde_json::Value>(
         &alice.webview,
         "unlock",
@@ -97,7 +80,6 @@ async fn pin_set_lock_unlock_roundtrip() {
     .expect_err("old PIN must fail after change");
     assert!(err.to_lowercase().contains("pin"), "unexpected error: {err}");
 
-    // New PIN succeeds.
     invoke::<serde_json::Value>(
         &alice.webview,
         "unlock",
@@ -109,14 +91,7 @@ async fn pin_set_lock_unlock_roundtrip() {
     drop(alice);
 }
 
-/// Lock closes the local DB. With the DB closed, DB-touching commands
-/// fail until unlock re-opens it. This is the load-bearing property:
-/// the PIN isn't merely a UI gate, it gates SQLCipher decryption.
-///
-/// And a wrong PIN must NOT open it. The wrapped blobs stay untouched,
-/// AppState.unlock stays empty, and DB-touching commands continue to fail.
-/// (Formerly two tests, `pin_locks_db_access` and `wrong_pin_keeps_db_locked`,
-/// that each signed up just to lock.)
+/// Lock closes the local DB, so the PIN gates SQLCipher decryption; a wrong PIN keeps it closed.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn pin_locks_db_access_and_wrong_pin_keeps_it_locked() {
@@ -126,8 +101,6 @@ async fn pin_locks_db_access_and_wrong_pin_keeps_it_locked() {
     let profile = alice.sign_up("alice@test.local").await;
     let uid = profile.id.clone();
 
-    // Sanity: signed in, DB open, list_messages returns Ok (empty
-    // is fine — we just need a command that touches local_db).
     invoke::<serde_json::Value>(
         &alice.webview,
         "list_messages",
@@ -138,7 +111,6 @@ async fn pin_locks_db_access_and_wrong_pin_keeps_it_locked() {
 
     invoke::<()>(&alice.webview, "lock", json!({})).await.expect("lock");
 
-    // After lock, the DB handle is dropped — list_messages must fail.
     let err = invoke::<serde_json::Value>(
         &alice.webview,
         "list_messages",
@@ -154,7 +126,6 @@ async fn pin_locks_db_access_and_wrong_pin_keeps_it_locked() {
         "expected DB-closed error, got: {err}"
     );
 
-    // Capture the wrapped blobs before any failed unlock attempts.
     let ks = alice.state.keystore.clone();
     let wrapped_db_before = ks
         .load_for_user("db_key_wrapped", &uid)
@@ -167,7 +138,6 @@ async fn pin_locks_db_access_and_wrong_pin_keeps_it_locked() {
         .unwrap()
         .expect("wrapped account_id_key present after sign_up");
 
-    // Wrong PIN.
     invoke::<serde_json::Value>(
         &alice.webview,
         "unlock",
@@ -176,7 +146,6 @@ async fn pin_locks_db_access_and_wrong_pin_keeps_it_locked() {
     .await
     .expect_err("wrong PIN must fail");
 
-    // DB still closed — list_messages must still fail.
     invoke::<serde_json::Value>(
         &alice.webview,
         "list_messages",
@@ -185,9 +154,7 @@ async fn pin_locks_db_access_and_wrong_pin_keeps_it_locked() {
     .await
     .expect_err("list_messages must fail after wrong PIN");
 
-    // Wrapped blobs untouched (only the failed_attempts counter inside
-    // pin_meta should have changed; the key blobs themselves are
-    // immutable until set_pin or lockout-nuke).
+    // Key blobs are immutable until set_pin or a lockout nuke.
     let wrapped_db_after = ks
         .load_for_user("db_key_wrapped", &uid)
         .await
@@ -201,7 +168,6 @@ async fn pin_locks_db_access_and_wrong_pin_keeps_it_locked() {
     assert_eq!(wrapped_db_before, wrapped_db_after);
     assert_eq!(wrapped_aik_before, wrapped_aik_after);
 
-    // Correct PIN still opens it.
     invoke::<serde_json::Value>(
         &alice.webview,
         "unlock",
@@ -221,17 +187,7 @@ async fn pin_locks_db_access_and_wrong_pin_keeps_it_locked() {
     drop(alice);
 }
 
-/// Reset the account identity and confirm every existing `user_device`
-/// row's cross-signing cert is re-signed against the new
-/// `account_id_pub` in lock-step with the rotation. Without the
-/// re-sign, the old cert lingers and fails verification on every other
-/// client (advisory `process_pending_commits` then logs a warning per
-/// commit forever, and the cross-signing defense is effectively off).
-///
-/// Drives the pure rotation path (`account_identity::reset_identity`)
-/// rather than the full `reset_identity_and_recover` Tauri command so
-/// the assertion is focused on the cert-resign behavior and not on the
-/// downstream group / DM / device-row cleanup.
+/// Identity reset re-signs every `user_device` cert against the new `account_id_pub`.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn reset_identity_resigns_device_cert() {
@@ -391,23 +347,7 @@ async fn reset_identity_resigns_device_cert() {
     drop(alice);
 }
 
-/// The graceful sign-out path, end to end (#685, part E).
-///
-/// `revoke_device` publishes a `device_revoked` inbox nudge; the nudge is
-/// per-USER, so it reaches every device, and each one is supposed to
-/// authoritatively re-check with `is_current_device_registered` so that only the
-/// device that was actually revoked signs itself out (a forged nudge must not be
-/// able to sign out a valid device).
-///
-/// That check was inert two ways at once. Since #372 revocation is a TOMBSTONE,
-/// not a hard delete, so the bare `SELECT 1 FROM user_device` returned a row —
-/// and hence `true` — for a revoked device. And on desktop there was no
-/// `#[tauri::command]` shim at all, so the renderer's `invoke` rejected and the
-/// handler's deliberate never-sign-out-on-a-blip `.catch` swallowed it.
-///
-/// Asserts `true` while live (the control — the command must exist and answer,
-/// which alone would have caught the missing shim) and `false` once the row
-/// carries a tombstone.
+/// #685 E: `is_current_device_registered` is `true` while live and `false` once tombstoned.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn revoked_device_reports_itself_unregistered() {
@@ -437,8 +377,7 @@ async fn revoked_device_reports_itself_unregistered() {
          pass for the wrong reason (#685)"
     );
 
-    // Tombstone this device exactly as `POST /v1/devices/revoke` does: the row
-    // stays, `revoked_at` is set.
+    // Tombstone as `POST /v1/devices/revoke` does.
     conn.execute(
         "UPDATE user_device SET revoked_at = datetime('now') WHERE user_id = ?1",
         libsql::params![user_id.clone()],
@@ -456,20 +395,7 @@ async fn revoked_device_reports_itself_unregistered() {
     drop(alice);
 }
 
-/// **A revoked device that missed the nudge still signs itself out (#1338).**
-///
-/// Revocation used to reach a device only through the live `device_revoked`
-/// inbox nudge. A device asleep at the time missed it, and from then on every
-/// signed call — including the `is_current_device_registered` check the nudge
-/// handler runs — came back a bare 401: an error, read as "transient", so the
-/// device sat signed in on empty screens forever.
-///
-/// Now the DS answers that device's own signature with `device_revoked`. This
-/// asserts the whole client side: an ordinary command fails with exactly that,
-/// the registration check answers `false` instead of erroring, later calls fail
-/// the same way without reaching the DS, and a plain (keep-data) sign-out still
-/// wipes the device's id and keys, so the next sign-in is a new device rather
-/// than the revoked one again.
+/// A revoked device that missed the nudge still signs itself out (#1338).
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_revoked_device_that_missed_the_nudge_is_told_and_wiped() {
@@ -486,9 +412,7 @@ async fn a_revoked_device_that_missed_the_nudge_is_told_and_wiped() {
     };
     groups().await.expect("control: a live device lists its groups");
 
-    // Revoked while it was not listening: tombstone the row as
-    // `POST /v1/devices/revoke` does, and drop the DS's cached key as that
-    // endpoint's eviction does. No nudge is delivered.
+    // Tombstone and evict the DS key cache, with no nudge.
     let w = world().await;
     let conn = w.remote.conn().await.expect("remote conn");
     conn.execute(
@@ -518,7 +442,6 @@ async fn a_revoked_device_that_missed_the_nudge_is_told_and_wiped() {
     let err = groups().await.expect_err("still revoked");
     assert!(err.contains("device_revoked"), "{err}");
 
-    // The UI's ordinary sign-out (keep data) — the revoked device is wiped anyway.
     invoke::<()>(&alice.webview, "logout", json!({ "deleteData": false }))
         .await
         .expect("logout");
@@ -539,13 +462,7 @@ async fn a_revoked_device_that_missed_the_nudge_is_told_and_wiped() {
     drop(alice);
 }
 
-/// **A late `device_revoked` answer never touches the session that replaced it
-/// (#1338 review).** Requests already in flight when a revoked device is
-/// signed out can come back refused afterwards. If that re-armed a bare
-/// "revoked" flag, the next sign-out would wipe whichever account the index
-/// names next, and the next new device's first call would short-circuit.
-/// The revocation is bound to the exact device that signed the refused
-/// request, and recorded only while it is still this process's device.
+/// A late `device_revoked` answer is bound to the device that signed it, never its successor (#1338).
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_late_revocation_answer_never_touches_the_next_account() {
@@ -571,11 +488,9 @@ async fn a_late_revocation_answer_never_touches_the_next_account() {
         .await
         .expect("logout alice");
 
-    // Another account signs in on the same app.
     let bob = client.sign_up("bob@test.local").await;
     client.create_group("Bob's group").await;
 
-    // An in-flight request of alice's comes back refused only now.
     let recorded = pollis_lib::commands::auth::note_revoked_response(
         &client.state,
         &alice.id,
@@ -591,7 +506,6 @@ async fn a_late_revocation_answer_never_touches_the_next_account() {
         .await
         .expect("bob's signed calls still work");
 
-    // Bob signing out normally keeps his data: no forced wipe.
     invoke::<()>(&client.webview, "logout", json!({ "deleteData": false }))
         .await
         .expect("logout bob");
@@ -604,19 +518,7 @@ async fn a_late_revocation_answer_never_touches_the_next_account() {
     drop(client);
 }
 
-/// Revoking a device leaves a trail in the account's own security log (#947).
-///
-/// "I just revoked the laptop that was stolen — did it take effect?" is the
-/// question the flow produces, and `list_security_events` is where the app
-/// answers it. Before this, revocation wrote nothing: enrollments and
-/// rejections were logged, revocation — the one a user goes looking for under
-/// pressure — was not, and the only trace was a row vanishing from a list.
-///
-/// Drives the real `revoke_device` command against the in-process Delivery
-/// Service, so the event travels the same signed `POST /v1/security-events`
-/// path production uses rather than being written into the table by the test.
-/// The control assertion is that the log starts without the entry: a log that
-/// contained it before the revocation would pass for the wrong reason.
+/// Revoking a device logs a security event via the real signed path (#947).
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn revoking_a_device_records_a_security_event() {
@@ -629,7 +531,7 @@ async fn revoking_a_device_records_a_security_event() {
     let w = world().await;
     let conn = w.remote.conn().await.expect("remote conn");
 
-    // A sibling device to revoke — the current device cannot revoke itself.
+    // The current device cannot revoke itself.
     let sibling = "sibling-device-947";
     conn.execute(
         "INSERT INTO user_device (device_id, user_id, device_name) VALUES (?1, ?2, ?3)",
@@ -688,16 +590,7 @@ async fn revoking_a_device_records_a_security_event() {
     );
 }
 
-/// Revoking returns once the device is tombstoned, and the leaf removal that
-/// follows in the background still reaches the tree — with a second revoke
-/// landing while that pass runs, which must coalesce into one queued pass
-/// rather than lose or duplicate the work.
-///
-/// `revoke_device` used to reconcile every group and DM before it returned, one
-/// commit per conversation in series, which held "Revoking…" for minutes and
-/// made clearing several stale devices impractical. What has to survive the
-/// change is the outcome: the revoked leaf gone from the tree, with no manual
-/// reconcile or sweep from the test, and the revoking device still in it.
+/// Revoke returns once tombstoned; the background leaf removal coalesces a second revoke.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_revoked_device_leaves_the_tree_after_revoke_returns() {
@@ -710,8 +603,7 @@ async fn a_revoked_device_leaves_the_tree_after_revoke_returns() {
     let laptop_id = laptop.state.device_id.lock().await.clone().expect("laptop device id");
     let alice_id = alice.state.device_id.lock().await.clone().expect("alice device id");
 
-    // A second, leafless sibling — the harness enrolls only one real extra
-    // device — so its revoke arrives while the laptop's pass is running.
+    // A leafless sibling, so its revoke lands mid-pass.
     let w = world().await;
     let conn = w.remote.conn().await.expect("remote conn");
     let stale = "stale-sibling-revoke";
@@ -740,8 +632,7 @@ async fn a_revoked_device_leaves_the_tree_after_revoke_returns() {
         .expect("revoke_device");
     }
 
-    // The removal runs detached, so wait for it — bounded, and with nothing
-    // from the test that could do the removal itself.
+    // Bounded wait, with nothing from the test that could do the removal.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     let tree = loop {
         let tree = pollis_lib::commands::mls::local_tree_members(&alice.state, &group_id).await;
@@ -760,32 +651,7 @@ async fn a_revoked_device_leaves_the_tree_after_revoke_returns() {
     drop(laptop);
 }
 
-/// Boot-time self-heal and its negative twin (#685, part C): the boot-time sweep
-/// must re-sign a stale LIVE sibling and must NOT re-sign a stale REVOKED one.
-///
-/// The live half: a sibling device's `user_device` row whose
-/// `cert_identity_version` is behind `users.identity_version` (e.g. because
-/// another device rotated the account identity while this one was offline) gets
-/// re-signed during `unlock`, without that sibling device having to come online
-/// itself — at the current identity_version, with bytes that verify against
-/// `account_id_pub`. The rows do NOT belong to the test client's current device,
-/// so `ensure_device_cert` — which only touches the calling device — leaves them
-/// alone and only `resign_stale_device_certs` can re-sign them. (This was the
-/// separate `unlock_resigns_stale_sibling_device_cert`, which built the same
-/// phantom-sibling world for its one row.)
-///
-/// This is a security property, not hygiene. `pollis-device-cert` verification is
-/// offline by design (#455 relay cert auth) — it binds `identity_version` and
-/// `issued_at` and consults no revocation list. So bumping `identity_version` is
-/// the ONLY mechanism that invalidates a revoked device's relay cert, and an
-/// identity rotation is exactly what you do after a device is compromised. Handing
-/// the revoked device a freshly-signed cert at the new version defeats that kill
-/// switch.
-///
-/// Both phantom rows are stale at `cert_identity_version = 0`, differing ONLY in
-/// `revoked_at`, so the revocation predicate is the sole thing that can produce
-/// different outcomes. The live phantom is the control: without it a pass could be
-/// earned by a sweep that re-signs nothing at all.
+/// #685 C: unlock re-signs a stale LIVE sibling cert but never a REVOKED one (bumping `identity_version` is the only relay-cert kill switch).
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn unlock_never_resigns_a_revoked_sibling_device_cert() {
@@ -802,8 +668,7 @@ async fn unlock_never_resigns_a_revoked_sibling_device_cert() {
     let sig_pub_pq = vec![0xCDu8; pollis_lib::commands::account_identity::MLDSA44_PUB_LEN];
     let placeholder = vec![0u8; pollis_lib::commands::account_identity::MLDSA44_SIG_LEN];
 
-    // Two synthetic siblings, both stale at cert_identity_version = 0. Identical
-    // in every respect except that one carries a revocation tombstone.
+    // Identical except for the tombstone.
     for (device_id, revoked) in [("live-sibling", false), ("revoked-sibling", true)] {
         conn.execute(
             "INSERT INTO user_device \
@@ -826,8 +691,6 @@ async fn unlock_never_resigns_a_revoked_sibling_device_cert() {
         .expect("insert phantom user_device row");
     }
 
-    // Sanity: the placeholder cert is bogus and would never verify against the
-    // user's real account_id_pub.
     let (account_id_pub, identity_version): (Vec<u8>, i64) = {
         let mut rows = conn
             .query(
@@ -856,7 +719,6 @@ async fn unlock_never_resigns_a_revoked_sibling_device_cert() {
         "placeholder cert must not verify (sanity check)"
     );
 
-    // Lock + unlock to trigger the boot-time sweep.
     invoke::<()>(&alice.webview, "lock", json!({}))
         .await
         .expect("lock");
@@ -889,9 +751,6 @@ async fn unlock_never_resigns_a_revoked_sibling_device_cert() {
         }
     };
 
-    // The live stale sibling WAS re-signed — at the current identity_version,
-    // with bytes that verify against account_id_pub. This is both the boot-time
-    // self-heal property and the control that the sweep really ran.
     let (live_cert, live_version, live_issued_at) = cert_state("live-sibling").await;
     assert!(
         live_version > 0 && live_cert != placeholder,
@@ -913,7 +772,6 @@ async fn unlock_never_resigns_a_revoked_sibling_device_cert() {
     )
     .expect("re-signed live sibling cert must verify against account_id_pub");
 
-    // The property: the revoked sibling is untouched at the stale version.
     let (revoked_cert, revoked_version, _) = cert_state("revoked-sibling").await;
     assert_eq!(
         revoked_version, 0,
@@ -929,19 +787,7 @@ async fn unlock_never_resigns_a_revoked_sibling_device_cert() {
     drop(alice);
 }
 
-// ─── Email change (device-signed, through the DS) ────────────────────────────
-
-/// Email change routed through the Delivery Service end to end. The request +
-/// verify are DEVICE-SIGNED (the user is already authenticated); the OTP only
-/// proves control of the NEW mailbox.
-///
-/// Asserts the happy path AND the two security properties:
-///   1. a wrong code is refused (the change does not go through);
-///   2. a DIFFERENT signed user can't consume alice's pending change — the
-///      requester binding (authed == the user who asked) blocks it, and crucially
-///      does NOT burn alice's still-valid code;
-///   3. alice's correct code then swaps `users.email`, bound to HER signature
-///      (never the body), leaving bob's email untouched.
+/// Device-signed email change; the OTP only proves the new mailbox, bound to the requester.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn email_change_through_ds_happy_and_security() {
@@ -956,8 +802,6 @@ async fn email_change_through_ds_happy_and_security() {
 
     let new_email = "alice-new@test.local";
 
-    // Alice requests the change — DS records (alice → new_email) and stores the
-    // OTP (DEV_OTP) keyed by new_email. Always 200.
     alice
         .invoke_json(
             "request_email_change_otp",
@@ -965,10 +809,7 @@ async fn email_change_through_ds_happy_and_security() {
         )
         .await;
 
-    // 0. A wrong CURRENT-address code is refused (#1161) — the proof a borrowed
-    //    unlocked device cannot produce. Checked before the new-address code, so
-    //    this attempt does not spend an attempt against it either: step 3 below
-    //    still succeeds with the same code.
+    // 0. A wrong current-address code is refused (#1161), without spending the new-address attempt.
     let err = alice
         .invoke_try(
             "verify_email_change",
@@ -981,7 +822,6 @@ async fn email_change_through_ds_happy_and_security() {
         "expected a current-address error, got: {err}"
     );
 
-    // 1. A wrong code is refused (and keeps the binding so a retry is possible).
     let err = alice
         .invoke_try(
             "verify_email_change",
@@ -994,9 +834,7 @@ async fn email_change_through_ds_happy_and_security() {
         "expected an invalid-code error, got: {err}"
     );
 
-    // 2. Bob (a DIFFERENT signed user) can't consume alice's pending change, even
-    //    with the correct code — the requester binding rejects it before the OTP
-    //    is even checked, so alice's code stays valid.
+    // 2. Bob can't consume alice's change; refused before the OTP check, so her code stays valid.
     let cross = bob
         .invoke_try(
             "verify_email_change",
@@ -1009,7 +847,6 @@ async fn email_change_through_ds_happy_and_security() {
         "expected a binding/forbidden error, got: {cross}"
     );
 
-    // 3. Alice's correct code swaps her email, bound to HER signature.
     alice
         .invoke_json(
             "verify_email_change",
@@ -1045,14 +882,7 @@ async fn email_change_through_ds_happy_and_security() {
     drop(bob);
 }
 
-// ─── Safety numbers / contact verification ───────────────────────────────────
-
-/// Full lifecycle of the Signal-style safety number:
-///   1. Creating a DM TOFU-pins the peer → status "unverified", 60 digits.
-///   2. Both sides compute the *same* number regardless of who asks.
-///   3. `set_contact_verified` flips status → "verified".
-///   4. A Turso-side `account_id_pub` swap (the exact attack this defends
-///      against) is detected → status "changed".
+/// Safety numbers: TOFU pin, order-independent, verify, and a server-side key swap shows "changed".
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn safety_number_lifecycle_and_key_change_detection() {
@@ -1065,7 +895,6 @@ async fn safety_number_lifecycle_and_key_change_detection() {
     let alice_id = alice.user_id().to_string();
     let bob_id = bob.user_id().to_string();
 
-    // Creating the DM runs check_and_pin_account_key for bob on alice's side.
     alice.create_dm(&[&bob_id]).await;
 
     let a_view = alice
@@ -1082,7 +911,6 @@ async fn safety_number_lifecycle_and_key_change_detection() {
         "safety number must be 60 digits"
     );
 
-    // Order independence: bob asking about alice yields the identical number.
     let b_view = bob
         .invoke_json(
             "get_safety_number",
@@ -1095,7 +923,6 @@ async fn safety_number_lifecycle_and_key_change_detection() {
         "both parties must derive the same safety number"
     );
 
-    // Explicit verification.
     alice
         .invoke_json(
             "set_contact_verified",
@@ -1110,8 +937,6 @@ async fn safety_number_lifecycle_and_key_change_detection() {
         .await;
     assert_eq!(verified["status"], "verified");
 
-    // Simulate the attack: someone with Turso write access swaps bob's
-    // account_id_pub. alice's locally-pinned key no longer matches.
     let conn = world().await.remote.conn().await.expect("remote conn");
     conn.execute(
         "UPDATE users SET account_id_pub = ?1, identity_version = identity_version + 1 \
@@ -1136,24 +961,7 @@ async fn safety_number_lifecycle_and_key_change_detection() {
     drop(bob);
 }
 
-/// Same MITM defence as the DM path, but through the GROUP roster-reconcile
-/// hook (refs #277): `reconcile_group_mls_impl` now calls
-/// `batch_check_and_pin_account_keys` so a Turso-side `account_id_pub` swap
-/// for a group member flips the local pin to `changed` next time reconcile
-/// runs — closing the historical hole where DMs had TOFU but groups didn't.
-///
-/// Flow:
-///   1. Alice + Bob + Carol all sign up.
-///   2. Alice creates a group, invites Bob; Bob accepts. This puts Bob in
-///      Alice's MLS roster and Alice reconciles → Bob's key gets pinned.
-///   3. Alice explicitly verifies Bob (status = "verified").
-///   4. Someone with Turso write access swaps Bob's `account_id_pub`.
-///   5. Alice invites Carol — this is the trigger for the next reconcile on
-///      Alice's side, which calls `batch_check_and_pin_account_keys` and
-///      observes Bob's mismatch.
-///   6. Assert: Alice's status for Bob has flipped to "changed", her
-///      `verified` flag was cleared, and `list_peer_verifications` reports
-///      `key_changed = true`.
+/// Group reconcile also pins account keys (#277), so a swapped key flips verified → changed.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn group_reconcile_tofu_detects_key_swap() {
@@ -1168,8 +976,6 @@ async fn group_reconcile_tofu_detects_key_swap() {
     let alice_id = alice_profile.id.clone();
     let bob_id = bob_profile.id.clone();
 
-    // 1. Group + invite + accept. Bob joining triggers reconcile on Alice's
-    //    side; the new batch helper pins Bob's account_id_pub.
     let group_id = alice.create_group("TOFU Group").await;
     alice.invite(&group_id, &bob_profile.username).await;
     let invite = bob
@@ -1180,7 +986,6 @@ async fn group_reconcile_tofu_detects_key_swap() {
     bob.accept_invite(&invite_id).await;
     bob.poll().await;
 
-    // Confirm Alice has Bob pinned (unverified, no change yet).
     let pre = alice
         .invoke_json(
             "get_safety_number",
@@ -1192,7 +997,6 @@ async fn group_reconcile_tofu_detects_key_swap() {
         "after invite+accept Alice should have Bob TOFU-pinned via group reconcile"
     );
 
-    // 2. Alice marks Bob verified out-of-band.
     alice
         .invoke_json(
             "set_contact_verified",
@@ -1200,8 +1004,6 @@ async fn group_reconcile_tofu_detects_key_swap() {
         )
         .await;
 
-    // 3. The attack — Turso writer swaps Bob's account_id_pub. Local pin
-    //    on Alice is now stale (verified=true against the old key).
     let conn = world().await.remote.conn().await.expect("remote conn");
     conn.execute(
         "UPDATE users SET account_id_pub = ?1, identity_version = identity_version + 1 \
@@ -1211,9 +1013,7 @@ async fn group_reconcile_tofu_detects_key_swap() {
     .await
     .expect("swap bob account_id_pub");
 
-    // Pre-reconcile snapshot: Alice still has the OLD pin and verified=1,
-    // but a fresh comparison against Turso flags key_changed=true. This
-    // is the "stale pin" state — exactly what the batch helper resolves.
+    // Stale pin: old key still verified, but a fresh comparison flags the change.
     let stale = alice
         .invoke_json("list_peer_verifications", json!({}))
         .await;
@@ -1231,17 +1031,9 @@ async fn group_reconcile_tofu_detects_key_swap() {
         "list_peer_verifications must flag the Turso swap as key_changed before reconcile"
     );
 
-    // 4. Trigger the next reconcile on Alice's side by inviting Carol.
-    //    invite_to_group walks reconcile_group_mls_impl on Alice's side,
-    //    which now batch-checks every roster member's account_id_pub.
-    //    The helper observes Bob's mismatch, updates the pin in place,
-    //    clears verified, and emits KeyChanged.
+    // The next reconcile (inviting Carol) batch-checks every roster key.
     alice.invite(&group_id, &carol_profile.username).await;
 
-    // 5. Post-reconcile assertions. The helper has absorbed the change:
-    //    - verified flipped from true → false (the security signal)
-    //    - key_changed is now false because the pin matches the new Turso key
-    //    - get_safety_number reports "unverified" (status is post-resolve)
     let post = alice
         .invoke_json(
             "get_safety_number",
@@ -1273,9 +1065,7 @@ async fn group_reconcile_tofu_detects_key_swap() {
          flags key_changed"
     );
 
-    // Self-check: Alice's OWN pin row was never created — the batch helper
-    // explicitly excludes the actor's user_id to keep contact_verification
-    // peer-only.
+    // The actor's own row is excluded.
     let alice_entry = entries.iter().find(|e| e["peer_user_id"] == alice_id);
     assert!(
         alice_entry.is_none(),
@@ -1287,11 +1077,7 @@ async fn group_reconcile_tofu_detects_key_swap() {
     drop(carol);
 }
 
-/// Bucket-C C4 end-to-end: `logout(delete_data = true)` removes this device's
-/// remote `user_device` row by routing a DEVICE-SIGNED `POST /v1/auth/logout`
-/// through the DS — issued BEFORE the local DB / signing key are torn down. Under
-/// the read-only Turso token this is the path that keeps logout working (the old
-/// direct DELETE would have failed). Asserts the row is gone afterwards.
+/// C4: `logout(delete_data = true)` removes the device row via a signed DS call before teardown.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn logout_with_delete_removes_device_via_ds() {
@@ -1301,7 +1087,6 @@ async fn logout_with_delete_removes_device_via_ds() {
     let profile = alice.sign_up("alice@test.local").await;
     let user_id = profile.id.clone();
 
-    // The device row exists after sign-up (a cert was published by set_pin).
     let device_id: String = {
         let db = crate::harness::writable_remote().await;
         let conn = db.conn().await.expect("remote conn");
@@ -1320,14 +1105,10 @@ async fn logout_with_delete_removes_device_via_ds() {
             .expect("device_id")
     };
 
-    // Drive the real command — its DS-routed device removal must run while the
-    // signer is still live.
     invoke::<()>(&alice.webview, "logout", json!({ "deleteData": true }))
         .await
         .expect("logout(delete_data=true)");
 
-    // The shared remote handle is unaffected by the local teardown, so we can
-    // confirm the DS DELETE landed.
     let db = crate::harness::writable_remote().await;
     let conn = db.conn().await.expect("remote conn");
     let mut rows = conn
@@ -1345,17 +1126,13 @@ async fn logout_with_delete_removes_device_via_ds() {
     drop(alice);
 }
 
-/// #1256: deleting an account empties that user's media cache. `logout` always
-/// wiped it, but `delete_account` only removed the user DB — and the cache root
-/// is not under the data directory — so every cached attachment outlived the
-/// account it belonged to.
+/// #1256: deleting an account empties that user's media cache.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn delete_account_clears_the_users_media_cache() {
     wipe().await;
 
-    // No other flow installs a cache root, and `set_media_cache_dir` is
-    // first-call-wins, so this one is the root for the rest of the process.
+    // `set_media_cache_dir` is first-call-wins, so this is the process's root.
     let root = std::env::temp_dir().join(format!("pollis-flows-media-{}", std::process::id()));
     pollis_core::commands::r2::set_media_cache_dir(root.clone());
 
@@ -1380,24 +1157,7 @@ async fn delete_account_clears_the_users_media_cache() {
     drop(alice);
 }
 
-/// #1099: a registered-but-not-yet-enrolled device whose LOCAL address index has
-/// gone stale must not be stranded by the pre-enrollment soft reset.
-///
-/// `verify_otp` binds the OTP session to a device id it picks before the DS has
-/// told it anything — normally a fresh candidate, but for a returning,
-/// not-yet-enrolled device it looks its stable id up from the typed address
-/// (`stable_device_id_for_reenrollment`). When that lookup misses — the local
-/// accounts index does not know the address, which is what an email change made
-/// on another device leaves behind — the session ends up bound to a fresh
-/// candidate while the device keeps its older stored id.
-///
-/// That combination used to break the soft reset. `rotate-identity` under a bare
-/// session runs the `reset-recover` wipe in the same transaction and keeps
-/// exactly ONE device: the one the SESSION names, read from the server-side
-/// session record and never from the request body (trusting the body is the
-/// account-takeover finding). Bound to a candidate that has no row, the wipe
-/// deleted the device's own row, and everything after it — the cert publish
-/// above all — failed until the user re-enrolled by hand.
+/// #1099: a stale local address index must not let the soft reset delete the device's own row.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_stale_local_address_index_does_not_strand_an_unenrolled_device() {
@@ -1407,9 +1167,7 @@ async fn a_stale_local_address_index_does_not_strand_an_unenrolled_device() {
     let mut primary = TestClient::new().await;
     let user_id = primary.sign_up(email).await.id;
 
-    // A second device signs in against the existing account and registers, but
-    // stops short of enrollment — it holds no account key yet. This is the state
-    // the bug needs.
+    // Registered but not enrolled: the state the bug needs.
     let second = TestClient::new().await;
     invoke::<()>(&second.webview, "request_otp", json!({ "email": email }))
         .await
@@ -1433,9 +1191,7 @@ async fn a_stale_local_address_index_does_not_strand_an_unenrolled_device() {
         .clone()
         .expect("the second device has a device_id after its first sign-in");
 
-    // Make its local index stale about the address, which is what an email change
-    // performed on `primary` would leave behind. The key mirrors
-    // `auth::LOGIN_EMAIL_KEY`, the slot `local_user_id_for_email` matches against.
+    // Mirrors `auth::LOGIN_EMAIL_KEY`.
     second
         .state
         .keystore
@@ -1443,8 +1199,6 @@ async fn a_stale_local_address_index_does_not_strand_an_unenrolled_device() {
         .await
         .expect("overwrite the stored login address");
 
-    // Sign in again. `stable_device_id_for_reenrollment` now misses, so the
-    // session is bound to a fresh candidate.
     invoke::<()>(&second.webview, "request_otp", json!({ "email": email }))
         .await
         .expect("second request_otp");
@@ -1467,25 +1221,13 @@ async fn a_stale_local_address_index_does_not_strand_an_unenrolled_device() {
         "the device must adopt the session's id, not keep the one the session cannot authorize"
     );
 
-    // The invariant that makes the wipe safe: an unenrolled device's own id and
-    // the id its OTP session is bound to are the same string, so "keep exactly
-    // the session's device" and "keep this device" cannot diverge.
-    //
-    // Two observable consequences, both of which used to be false here. First,
-    // the session-gated path is live at all — the stale-index sign-in took the
-    // "already known device" branch, which never stashes the enrollment session,
-    // so every session-gated write after it (the enrollment request, the soft
-    // reset) failed with "no verified-email session".
+    // The device's id and its OTP session's id must be the same string.
     assert!(
         second.state.enrollment_session.lock().await.is_some(),
         "the sign-in must leave a usable session for the writes that follow"
     );
 
-    // Second, the DS has a row for the device the session names, so the
-    // session-credentialed `reset-recover` wipe
-    // (`account::reset_recover_in_tx`, `DELETE FROM user_device WHERE user_id = ?
-    // AND device_id != <session's device>`) keeps this device rather than
-    // deleting it along with the siblings.
+    // The DS keeps the session's device in the `reset-recover` wipe.
     let w = world().await;
     let conn = w.remote.conn().await.expect("remote conn");
     let rows_for_session_device: i64 = {
@@ -1503,8 +1245,6 @@ async fn a_stale_local_address_index_does_not_strand_an_unenrolled_device() {
         "register-device under the session must have created the row the wipe keeps"
     );
 
-    // And the stale id is gone from the keystore, so nothing downstream can pick
-    // it back up on the next launch.
     let persisted = second
         .state
         .keystore
@@ -1519,16 +1259,7 @@ async fn a_stale_local_address_index_does_not_strand_an_unenrolled_device() {
     );
 }
 
-// ─── Device "last seen" ─────────────────────────────────────────────────────
-
-/// Settings → Devices' "last seen" moves when a device is used. Regression: once
-/// every remote write moved behind the DS (#987) nothing bumped
-/// `user_device.last_seen` after registration, so it read as the creation time
-/// forever. The DS now bumps it on a verified device-signed request.
-///
-/// The row is backdated (creation AND last seen) to stand in for a device that
-/// registered long ago, and the DS's throttle is expired to stand in for the
-/// interval elapsing; then ordinary use must move `last_seen` past `created_at`.
+/// `last_seen` moves on signed DS use (it was frozen after #987); the row is backdated.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn using_a_device_moves_its_last_seen_past_its_creation() {
@@ -1551,7 +1282,6 @@ async fn using_a_device_moves_its_last_seen_past_its_creation() {
         .unwrap();
     expire_ds_last_seen_throttle(&uid);
 
-    // A few ordinary operations, each a device-signed DS call.
     alice.create_group("Last seen").await;
     alice.list_group_ids().await;
 

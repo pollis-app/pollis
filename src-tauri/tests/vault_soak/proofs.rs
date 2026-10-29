@@ -1,5 +1,4 @@
-//! The checks every hop is put through: plaintext and key-material scanning,
-//! entropy, file-format magic, and the AEAD open with right and wrong keys.
+//! Plaintext/key scanning, entropy, magic and AEAD checks for every hop.
 
 use std::sync::Arc;
 
@@ -13,7 +12,6 @@ use sha2::{Digest, Sha256};
 pub const CHUNK: usize = 4 * 1024 * 1024;
 pub const TAG: usize = 16;
 
-/// Ciphertext length the upload pipeline must produce for `n` plaintext bytes.
 pub fn sealed_len(n: u64) -> u64 {
     let chunks = n.div_ceil(CHUNK as u64).max(1);
     n + chunks * TAG as u64
@@ -23,7 +21,6 @@ pub fn sha256(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
 }
 
-/// Shannon entropy in bits per byte.
 pub fn entropy(bytes: &[u8]) -> f64 {
     if bytes.is_empty() {
         return 0.0;
@@ -43,10 +40,7 @@ pub fn entropy(bytes: &[u8]) -> f64 {
         .sum()
 }
 
-/// The entropy a uniformly random buffer of `n` bytes falls below only by
-/// chance: the expected shortfall of the empirical entropy is about
-/// `255 / (2 n ln 2)` bits, so three times that plus a small margin. `None`
-/// below 64 KiB, where the estimate is too noisy to call.
+/// ~3x the expected entropy shortfall `255 / (2 n ln 2)`; `None` below 64 KiB.
 pub fn entropy_floor(n: usize) -> Option<f64> {
     if n < 64 * 1024 {
         return None;
@@ -55,8 +49,7 @@ pub fn entropy_floor(n: usize) -> Option<f64> {
     Some(8.0 - 3.0 * shortfall - 0.002)
 }
 
-/// Number of distinct byte values — a window with few is not distinctive
-/// enough to be a needle (a run of zeros would "match" anything padded).
+/// Distinct byte values; a low-variety window would match anything padded.
 pub fn distinct(bytes: &[u8]) -> usize {
     let mut seen = [false; 256];
     for &b in bytes {
@@ -65,7 +58,6 @@ pub fn distinct(bytes: &[u8]) -> usize {
     seen.iter().filter(|s| **s).count()
 }
 
-/// A file-format signature at the start of `bytes`, if any.
 pub fn known_magic(bytes: &[u8]) -> Option<&'static str> {
     let table: &[(&[u8], usize, &str)] = &[
         (b"\x89PNG\r\n\x1a\n", 0, "PNG"),
@@ -87,7 +79,6 @@ pub fn known_magic(bytes: &[u8]) -> Option<&'static str> {
     None
 }
 
-/// What a needle is evidence of when it turns up somewhere it must not.
 #[derive(Clone, Debug)]
 pub struct Needle {
     /// The corpus file it belongs to (`None` for account-wide secrets).
@@ -98,7 +89,6 @@ pub struct Needle {
     pub secret: bool,
 }
 
-/// One multi-pattern search over everything that must not appear.
 pub struct Scanner {
     ac: Option<AhoCorasick>,
     needles: Vec<Needle>,
@@ -145,7 +135,6 @@ impl Scanner {
         &self.needles
     }
 
-    /// Every distinct needle found in `hay`.
     pub fn scan(&self, hay: &[u8]) -> Vec<usize> {
         let Some(ac) = &self.ac else {
             return Vec::new();
@@ -168,8 +157,7 @@ impl Scanner {
     }
 }
 
-/// The verdict on one opaque blob: is it ciphertext-shaped and free of every
-/// needle.
+/// Verdict on one blob: ciphertext-shaped and needle-free.
 #[derive(Clone, Debug, Default)]
 pub struct BlobVerdict {
     pub len: usize,
@@ -216,8 +204,7 @@ impl BlobVerdict {
     }
 }
 
-/// Open the FIRST chunk of a sealed object (`commands::r2::encrypt_chunked`:
-/// chunk 0's nonce is the base nonce unchanged).
+/// Open chunk 0, whose nonce is the base nonce unchanged.
 pub fn open_chunk0(object: &[u8], key: &[u8; 32], nonce: &[u8; 12]) -> Result<Vec<u8>, ()> {
     let end = object.len().min(CHUNK + TAG);
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
@@ -226,7 +213,6 @@ pub fn open_chunk0(object: &[u8], key: &[u8; 32], nonce: &[u8; 12]) -> Result<Ve
         .map_err(|_| ())
 }
 
-/// Open the WHOLE sealed object, chunk by chunk.
 pub fn open_all(object: &[u8], key: &[u8; 32], nonce: &[u8; 12]) -> Result<Vec<u8>, ()> {
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
     let mut out = Vec::with_capacity(object.len());
@@ -241,9 +227,7 @@ pub fn open_all(object: &[u8], key: &[u8; 32], nonce: &[u8; 12]) -> Result<Vec<u
     Ok(out)
 }
 
-/// The file key `commands::file_keys::derive_file_key` would produce from
-/// `ring` — used to model what someone holding only server-side values could
-/// derive.
+/// `derive_file_key` applied to `ring`, to model a server-side attacker.
 pub fn derive_like_file_key(ring: &[u8; 32], file_id: &[u8; 32]) -> ([u8; 32], [u8; 12]) {
     let hk = hkdf::Hkdf::<Sha256>::new(Some(file_id), ring);
     let mut key = [0u8; 32];
@@ -253,10 +237,7 @@ pub fn derive_like_file_key(ring: &[u8; 32], file_id: &[u8; 32]) -> ([u8; 32], [
     (key, nonce)
 }
 
-/// The keys an attacker holding everything EXCEPT the account key could try:
-/// server-visible values (the file id, the object key, the plaintext hash a
-/// convergent scheme would use) fed through the real derivation, and plain
-/// random. Every one must fail to open the object.
+/// Keys an attacker without the account key could try; every one must fail.
 pub fn attacker_keys(file_id: &[u8; 32], plaintext_sha: &[u8; 32]) -> Vec<(String, [u8; 32], [u8; 12])> {
     let mut out = Vec::new();
     let (k, n) = derive_like_file_key(&[0u8; 32], file_id);

@@ -78,12 +78,7 @@ pub async fn revoke_device(state: State<'_, Arc<AppState>>, user_id: String, dev
     pollis_core::commands::auth::revoke_device(&state, user_id, device_id).await
 }
 
-/// Backs the `device_revoked` inbox nudge's authoritative re-check. This shim was
-/// missing entirely (#685): `useLiveKitRealtime` has always invoked
-/// `is_current_device_registered`, so on desktop the call rejected with "command
-/// not found", the handler's `.catch` treated the rejection as "still registered"
-/// (the deliberate never-sign-out-on-a-blip behaviour), and a revoked device never
-/// signed itself out. Only the uniffi bridge (mobile) had a route to it.
+/// Re-check for the `device_revoked` nudge; without it a revoked desktop device never signed out (#685).
 #[tauri::command]
 pub async fn is_current_device_registered(state: State<'_, Arc<AppState>>, user_id: String) -> Result<bool> {
     pollis_core::commands::auth::is_current_device_registered(&state, user_id).await

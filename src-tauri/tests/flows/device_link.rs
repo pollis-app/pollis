@@ -1,15 +1,10 @@
-//! QR device link, end to end through the real dispatch path (#1207):
-//! an enrolled device shows a QR, a fresh client claims it (no email OTP),
-//! enrolls, and the enrolled device approves on the link tag instead of a
-//! typed code. Plus the guardrails: the PIN gate, single use, and a forged tag
-//! that must never be approvable. `docs/qr-device-link-design.md`.
+//! QR device link (#1207), plus its guardrails. `docs/qr-device-link-design.md`.
 
 use crate::harness::{wipe, TestClient, TEST_PIN};
 use pollis_core::commands::auth::UserProfile;
 use serde_json::json;
 use serial_test::serial;
 
-/// Claim a QR payload on `client`, decoding the profile.
 async fn claim(client: &TestClient, payload: &str, name: &str) -> Result<UserProfile, String> {
     client
         .invoke_try("claim_device_link", json!({ "payload": payload, "deviceName": name }))
@@ -17,8 +12,6 @@ async fn claim(client: &TestClient, payload: &str, name: &str) -> Result<UserPro
         .map(|v| serde_json::from_value(v).expect("UserProfile"))
 }
 
-/// The primary: signed up, PIN set, with a group to prove the linked device
-/// really joins the account.
 async fn primary_with_group(email: &str) -> (TestClient, String) {
     let mut primary = TestClient::new().await;
     primary.sign_up(email).await;
@@ -55,7 +48,6 @@ async fn a_qr_link_enrolls_a_phone_without_the_email_otp() {
     let (link_id, payload) = create_link(&primary).await;
     assert_eq!(link_state(&primary, &link_id).await["state"], "open");
 
-    // The phone scans: signed in by the link alone.
     let mut phone = TestClient::new().await;
     let profile = claim(&phone, &payload, "Test Phone").await.unwrap_or_else(|e| panic!("claim_device_link: {e}"));
     assert_eq!(profile.id, primary.user_id(), "the link signs the phone into the creator's account");
@@ -66,19 +58,13 @@ async fn a_qr_link_enrolls_a_phone_without_the_email_otp() {
     assert_eq!(claimed["state"], "claimed");
     assert_eq!(claimed["device_name"], "Test Phone");
 
-    // The phone files its (tagged) enrollment request…
     let handle = phone.invoke_json("start_device_enrollment", json!({ "userId": profile.id })).await;
     let request_id = handle["request_id"].as_str().expect("request_id").to_string();
 
-    // …and the creator sees it as approvable — the tag verified — without
-    // anyone typing a code.
     let ready = link_state(&primary, &link_id).await;
     assert_eq!(ready["state"], "ready_to_approve", "the tag must verify: {ready}");
 
-    // The typed-code approval never sees it: the phone shows no code, so the
-    // sign-in-time fallback that raises desktop's "a new device wants to
-    // enroll" card (and mobile's) must not list a link-bound request. The live
-    // nudge is skipped on its `link_id` instead (core `dispatch_data`).
+    // Link-bound requests must not show up in the typed-code approval list.
     let pending = primary
         .invoke_json("list_pending_enrollment_requests", json!({ "userId": primary.user_id() }))
         .await;
@@ -100,7 +86,6 @@ async fn a_qr_link_enrolls_a_phone_without_the_email_otp() {
     }
     assert_eq!(status, "approved");
 
-    // The order the apps use: PIN (opens the local DB), then finalize.
     phone
         .invoke_try("set_pin", json!({ "newPin": TEST_PIN, "oldPin": null }))
         .await
@@ -118,7 +103,6 @@ async fn a_qr_link_enrolls_a_phone_without_the_email_otp() {
         "the linked phone sees the account's group: {groups}"
     );
 
-    // Audit: the enrollment is recorded as a QR link.
     let events = primary
         .invoke_json("list_security_events", json!({ "userId": primary.user_id(), "limit": 10 }))
         .await;
@@ -128,9 +112,7 @@ async fn a_qr_link_enrolls_a_phone_without_the_email_otp() {
         "a device_enrolled event with via=qr_link: {events}"
     );
 
-    // #1548: the same command pages and filters through the real dispatch path.
-    // A `kinds` filter keeps only that kind, and a one-row page of a log with
-    // more than one row hands back a cursor that resumes strictly after it.
+    // #1548: `kinds` filters, and a one-row page returns a resuming cursor.
     let filtered = primary
         .invoke_json(
             "list_security_events",
@@ -189,9 +171,7 @@ async fn a_qr_can_only_be_claimed_once() {
     assert!(again.is_err(), "a QR is single use: {:?}", again.map(|p| p.id));
 }
 
-/// A request whose tag was not keyed by the QR's secret — what a server that
-/// substituted the phone's ephemeral key would have to present — is reported
-/// as tampered and refused, never wrapped to.
+/// A tag not keyed by the QR secret (a key-substituting server) is refused as tampered.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_forged_link_tag_is_never_approvable() {
@@ -203,7 +183,6 @@ async fn a_forged_link_tag_is_never_approvable() {
     let profile = claim(&phone, &payload, "Forger").await.unwrap_or_else(|e| panic!("claim: {e}"));
     phone.profile = Some(profile.clone());
 
-    // Key the phone's tag with a MAC key that is NOT derived from the QR.
     {
         let mut pending = phone.state.device_link_pending.lock().await;
         let link = pending.as_mut().expect("claim leaves pending link state");
@@ -221,9 +200,8 @@ async fn a_forged_link_tag_is_never_approvable() {
     assert!(approve.is_err(), "approval must refuse a tampered request: {approve:?}");
 }
 
-// ── v2: the NEW device shows the QR, a signed-in device scans it (#1361) ─────
+// v2: the new device shows the QR (#1361)
 
-/// The new device offers a code; returns `(link_id, qr_payload)`.
 async fn offer(new_device: &TestClient) -> (String, String) {
     let handle = new_device
         .invoke_json("create_device_offer", json!({ "deviceName": "Test Desktop" }))
@@ -252,11 +230,9 @@ async fn a_scanned_code_signs_the_showing_device_in_without_the_email_otp() {
     let mut desktop = TestClient::new().await;
     let (link_id, payload) = offer(&desktop).await;
 
-    // The phone scans it and confirms with its PIN.
     let accepted = accept(&phone, &payload, TEST_PIN).await.unwrap_or_else(|e| panic!("accept: {e}"));
     assert_eq!(accepted["device_name"], "Test Desktop");
 
-    // The desktop collects its session: signed in by the scan alone.
     let wait = desktop.invoke_json("await_device_offer", json!({ "linkId": link_id })).await;
     assert_eq!(wait["state"], "signed_in", "{wait}");
     let profile: UserProfile = serde_json::from_value(wait["profile"].clone()).expect("UserProfile");
@@ -267,7 +243,7 @@ async fn a_scanned_code_signs_the_showing_device_in_without_the_email_otp() {
     let handle = desktop.invoke_json("start_device_enrollment", json!({ "userId": profile.id })).await;
     let request_id = handle["request_id"].as_str().expect("request_id").to_string();
 
-    // The phone wraps to the key it read off the QR — no Approve, no code.
+    // Wraps to the key read off the QR; no Approve, no code.
     let done = phone
         .invoke_json("finish_device_offer", json!({ "userId": phone.user_id(), "linkId": link_id }))
         .await;
@@ -311,15 +287,12 @@ async fn a_code_cannot_be_accepted_without_the_pin_or_twice() {
     assert!(accept(&phone, &payload, wrong).await.is_err(), "a wrong PIN must not accept");
 
     accept(&phone, &payload, TEST_PIN).await.unwrap_or_else(|e| panic!("accept: {e}"));
-    // Bound once: another account cannot take it over, nor can this one again.
     let (other, _) = primary_with_group("scan-other@test.local").await;
     assert!(accept(&other, &payload, TEST_PIN).await.is_err(), "an accepted code is single use");
     assert!(accept(&phone, &payload, TEST_PIN).await.is_err(), "an accepted code is single use");
 }
 
-/// The key the account identity is wrapped to must be the one the QR showed.
-/// A request carrying any other key — what a server substituting it would have
-/// to present — is refused and nothing is wrapped.
+/// A request carrying a key other than the QR's is refused and nothing is wrapped.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_request_whose_key_is_not_the_scanned_one_is_never_wrapped_to() {
@@ -332,7 +305,6 @@ async fn a_request_whose_key_is_not_the_scanned_one_is_never_wrapped_to() {
     let profile: UserProfile = serde_json::from_value(wait["profile"].clone()).expect("UserProfile");
     desktop.profile = Some(profile.clone());
 
-    // Enroll with a key that is NOT the one the QR carried.
     {
         let mut pending = desktop.state.device_link_pending.lock().await;
         let link = pending.as_mut().expect("collecting the offer leaves pending link state");
@@ -351,7 +323,6 @@ async fn a_request_whose_key_is_not_the_scanned_one_is_never_wrapped_to() {
     assert_eq!(status["status"], "pending", "nothing was approved: {status}");
 }
 
-/// Each side refuses the other direction's code, saying where it belongs.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn the_wrong_device_for_a_code_says_so() {

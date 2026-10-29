@@ -1,22 +1,4 @@
-//! Vault media soak (#1491) — the Vault's media mode used as a file store,
-//! end to end, with every place a file passes through checked for plaintext
-//! and key material.
-//!
-//! AD HOC ONLY. Not part of any CI test run: the target needs the `vault-soak`
-//! feature and the test is `#[ignore]`. Run it with `scripts/vault-soak.sh`
-//! (local: in-process DS + SeaweedFS; dev: api-dev + dev R2), or the
-//! `vault-soak` workflow_dispatch. How-to and what each proof means:
-//! `.codesight/wiki/testing.md` → "Vault media soak".
-//!
-//! For each corpus file (seeded random bytes, an exact duplicate, real media):
-//! upload through the real command dispatch (`upload_media` →
-//! `send_vault_message`), then prove it is encrypted in transit (taps on the DS
-//! and object-storage hops), at rest in storage (the raw object), in the DS's
-//! rows, and in the local cache and SQLCipher DB; view it (loopback media
-//! server) and show the plaintext is gone once viewing ends; save it back and
-//! byte-compare; delete it and prove the object, the rows, the cache entry and
-//! any fresh session's access are all gone. A report with per-file timings and
-//! every proof's evidence lands at `$POLLIS_SOAK_REPORT`.
+//! Vault media soak (#1491), ad hoc only (`#[ignore]`; `scripts/vault-soak.sh`). See `.codesight/wiki/testing.md`.
 
 #[path = "vault_soak/config.rs"]
 mod config;
@@ -42,7 +24,6 @@ use proofs::{attacker_keys, open_all, open_chunk0, sealed_len, sha256, BlobVerdi
 use report::{FileRun, Proof};
 use world::{operator_get, plain_get, Client, World};
 
-/// What a stored file left behind for the later phases.
 struct Stored {
     idx: usize,
     entry_id: String,
@@ -72,7 +53,6 @@ async fn vault_media_soak() {
     let t_all = Instant::now();
     eprintln!("[vault-soak] target {:?}, workdir {}, seed {}", cfg.target, cfg.workdir.display(), cfg.seed);
 
-    // ── Corpus + needles ───────────────────────────────────────────────────
     let t = Instant::now();
     let files = corpus::build(&cfg.workdir.join("corpus"), &cfg.sizes, cfg.media_dir.as_deref(), cfg.seed);
     eprintln!("[vault-soak] corpus: {} files, {} in {:.1}s", files.len(), human(files.iter().map(|f| f.size).sum()), t.elapsed().as_secs_f64());
@@ -84,9 +64,7 @@ async fn vault_media_soak() {
     let alice = Client::sign_up(&world, &format!("pollis-soak-{suffix}@example.com")).await;
     eprintln!("[vault-soak] signed up {}", alice.user_id);
 
-    // Account-wide secrets join the needle set before the first upload: the
-    // account identity key seed, the Vault file root, and this device's
-    // local-DB key. None may ever leave the device or reach its disk raw.
+    // Account-wide secrets that must never leave the device or reach its disk raw.
     let account = pollis_core::commands::vault::test_hooks::vault_file_secrets(&alice.state, &alice.user_id, &"00".repeat(32))
         .await
         .expect("vault secrets");
@@ -120,7 +98,6 @@ async fn vault_media_soak() {
     let cap = pollis_api::broker::R2_MEDIA_MAX_BYTES;
     let cache_cap = pollis_core::commands::r2::MEDIA_CACHE_MAX_FILE_BYTES;
 
-    // ── Upload, prove, view, save ──────────────────────────────────────────
     for (i, f) in files.iter().enumerate() {
         let run = &mut runs[i];
         eprintln!("[vault-soak] {} ({}) …", f.label, human(f.size));
@@ -191,7 +168,6 @@ async fn vault_media_soak() {
             format!("content_hash {file_id} ≠ sha256(plaintext)"),
         ));
 
-        // This file's own key joins the needle set.
         let sec = pollis_core::commands::vault::test_hooks::vault_file_secrets(&alice.state, &alice.user_id, &file_id)
             .await
             .expect("file secrets");
@@ -199,7 +175,6 @@ async fn vault_media_soak() {
         scanner.add_secret(&sec.file_nonce, Some(i), &format!("{} file nonce", f.label));
         built = set_scanner(&scanner);
 
-        // ── at rest: the raw object, as the bucket's operator sees it ──────
         let (status, object) = operator_get(&world.http, &cfg.s3, &key).await;
         let verdict = BlobVerdict::of(&built, &object);
         let want_len = sealed_len(f.size);
@@ -243,7 +218,6 @@ async fn vault_media_soak() {
             ));
         }
 
-        // ── in transit: the PUT that carried it ────────────────────────────
         if let Some(s3) = &world.s3_tap {
             s3.settle().await;
             let path = format!("/{}/{}", cfg.s3.bucket, key);
@@ -272,7 +246,6 @@ async fn vault_media_soak() {
             ));
         }
 
-        // ── DS rows for this file ──────────────────────────────────────────
         match &world.db_main {
             Some(db) => {
                 let obj = world::rows(db, "SELECT content_hash, r2_key FROM attachment_object WHERE content_hash = ?1", vec![libsql_text(&file_id)]).await;
@@ -303,7 +276,6 @@ async fn vault_media_soak() {
             None => run.push(Proof::skip("DS rows", "no DS database access on this target (set TURSO_URL/TURSO_TOKEN)")),
         }
 
-        // ── view: what the renderer does ───────────────────────────────────
         let scope = json!({ "kind": "vault" });
         let t = Instant::now();
         let url: Result<String, String> = alice
@@ -322,7 +294,7 @@ async fn vault_media_soak() {
                     format!("loopback {} B, sha256 matches: {}; Cache-Control: {cache_control}", body.len(), sha256(&body) == f.sha256),
                 ));
                 loopback_url = Some(u);
-                // The cache entry the view left: encrypted under this device's DB key.
+                // Encrypted under this device's DB key.
                 let cached = pollis_core::commands::r2::find_cached_file(&file_id);
                 match cached {
                     Some((path, _)) => {
@@ -349,9 +321,7 @@ async fn vault_media_soak() {
                 }
             }
             Ok(_) => {
-                // Over the per-file cache cap: the renderer falls back to the
-                // byte path (`download_media` → an in-memory blob), and nothing
-                // is cached.
+                // Over the per-file cache cap: byte path, nothing cached.
                 let bytes = pollis_core::commands::r2::download_media(
                     key.clone(),
                     file_id.clone(),
@@ -377,7 +347,6 @@ async fn vault_media_soak() {
             Err(e) => run.push(Proof::check("transient: viewing", false, format!("get_media_url: {e}"))),
         }
 
-        // ── round trip: "Save attachment as…" ──────────────────────────────
         let target = cfg.workdir.join("saved").join(&f.filename);
         std::fs::create_dir_all(target.parent().unwrap()).unwrap();
         alice.pick_save_target(&target);
@@ -399,11 +368,9 @@ async fn vault_media_soak() {
                 back == Some(f.sha256)
             ),
         ));
-        // The saved copy is a user-requested export, not something the app
-        // holds; it is the soak's to clean up.
+        // A user-requested export, so the soak cleans it up.
         let _ = std::fs::remove_file(&target);
 
-        // ── in transit: every GET the downloads made ───────────────────────
         if let Some(s3) = &world.s3_tap {
             s3.settle().await;
             let path = format!("/{}/{}", cfg.s3.bucket, key);
@@ -424,14 +391,13 @@ async fn vault_media_soak() {
 
     let mut global: Vec<Proof> = Vec::new();
 
-    // ── Checkpoint: everything stored and viewed ───────────────────────────
     world.ds_tap.settle().await;
     if let Some(s3) = &world.s3_tap {
         s3.settle().await;
     }
     sweep_checkpoint(&cfg, &world, &alice, &built, &stored, &files, started, "after upload + view", &mut global).await;
 
-    // Viewing ends: lock. The loopback URLs must stop resolving.
+    // Lock: the loopback URLs must stop resolving.
     alice.invoke::<()>("lock", json!({})).await.expect("lock");
     let mut dead = 0;
     let mut alive = Vec::new();
@@ -461,7 +427,6 @@ async fn vault_media_soak() {
         format!("{locked_cache} encrypted cache file(s) stay while locked (unreadable without the DB key); the next unlock empties the cache: {unlocked_cache} left"),
     ));
 
-    // ── Delete, and prove it ───────────────────────────────────────────────
     for s in &stored {
         let f = &files[s.idx];
         let run = &mut runs[s.idx];
@@ -518,7 +483,6 @@ async fn vault_media_soak() {
         ));
     }
 
-    // The entries are gone from a fresh pull, not just from this cache.
     let listed: Vec<serde_json::Value> =
         alice.invoke("get_vault_messages", json!({ "userId": alice.user_id })).await.unwrap_or_default();
     for s in &stored {
@@ -526,11 +490,7 @@ async fn vault_media_soak() {
         runs[s.idx].push(Proof::check("delete: entry is gone after a re-sync", !still, format!("get_vault_messages lists it: {still}")));
     }
 
-    // A sentinel the soak never deletes: stored and viewed, so its decrypted
-    // copy sits in the media cache (encrypted at rest) until the session ends —
-    // which is what the session-end proof below needs to see wiped. Viewed
-    // here, after the unlock (which empties the cache) and before the fresh
-    // device signs up (which moves the process's cache user).
+    // Viewed after the unlock (which empties the cache) and before the fresh device moves the cache user.
     let sentinel = cfg.workdir.join("sentinel.bin");
     {
         let mut b = vec![0u8; 1024 * 1024];
@@ -561,8 +521,6 @@ async fn vault_media_soak() {
     let _ = plain_get(&world.http, &sentinel_url).await;
     let _ = std::fs::remove_file(&sentinel);
 
-    // A session that never saw the files: a brand-new device and account,
-    // minting its own presigned GETs.
     let bob = Client::sign_up(&world, &format!("pollis-soak-{suffix}-fresh@example.com")).await;
     for s in &stored {
         let url = pollis_core::commands::r2::test_presign_get(&bob.state, &s.key).await;
@@ -580,13 +538,10 @@ async fn vault_media_soak() {
         ));
     }
 
-    // ── Session end ────────────────────────────────────────────────────────
     let user_cache = world.cache_root.join(&alice.user_id);
     let before = world::walk(&user_cache).len();
     let end: Result<(), String> = match cfg.target {
         Target::Local => alice.invoke("logout", json!({ "deleteData": false })).await,
-        // On dev, end the session by deleting the throwaway account, so the
-        // soak leaves nothing behind on the shared DS.
         Target::Dev => alice.invoke("delete_account", json!({ "userId": alice.user_id })).await,
     };
     let after = world::walk(&user_cache);
@@ -616,7 +571,6 @@ async fn vault_media_soak() {
         eprintln!("[vault-soak] fresh-session teardown: {e}");
     }
 
-    // ── Final sweeps ───────────────────────────────────────────────────────
     world.ds_tap.settle().await;
     if let Some(s3) = &world.s3_tap {
         s3.settle().await;
@@ -627,7 +581,6 @@ async fn vault_media_soak() {
         disk.1.is_empty(),
         format!("{} file(s) under the app data dir scanned; findings: {}", disk.0, if disk.1.is_empty() { "none".to_string() } else { disk.1.join("; ") }),
     ));
-    // DS latency per endpoint — a slow or failing call is evidence too.
     {
         let mut by: std::collections::BTreeMap<String, Vec<(u128, u16)>> = Default::default();
         for e in world.ds_tap.exchanges() {
@@ -699,7 +652,6 @@ async fn vault_media_soak() {
         }
     }
 
-    // ── Report ─────────────────────────────────────────────────────────────
     let header = vec![
         ("Target".to_string(), match cfg.target {
             Target::Local => format!("local — in-process DS + S3 at {}", cfg.s3.endpoint),
@@ -719,7 +671,6 @@ async fn vault_media_soak() {
     println!("{md}");
     eprintln!("[vault-soak] report: {}", cfg.report.display());
 
-    // The corpus can be gigabytes; keep it only when asked to.
     if std::env::var("POLLIS_SOAK_KEEP").ok().as_deref() != Some("1") {
         let _ = std::fs::remove_dir_all(cfg.workdir.join("corpus"));
     }
@@ -728,8 +679,7 @@ async fn vault_media_soak() {
     assert_eq!(failed, 0, "{failed} vault soak proof(s) failed — see {}", cfg.report.display());
 }
 
-/// Scan every file under the app's data dir (the SQLCipher DB, its WAL, the
-/// media cache, accounts.json, logs) for any needle. `(files scanned, findings)`.
+/// Scan every file under the app's data dir for any needle. `(files scanned, findings)`.
 fn disk_sweep(world: &World, scanner: &Scanner, extra: &[std::path::PathBuf]) -> (usize, Vec<String>) {
     let mut paths = world::walk(&world.app_dir);
     paths.extend(extra.iter().cloned());
@@ -744,8 +694,7 @@ fn disk_sweep(world: &World, scanner: &Scanner, extra: &[std::path::PathBuf]) ->
     (paths.len(), findings)
 }
 
-/// Every file in the system temp dir modified since the soak started — where a
-/// stray decrypted copy would most likely land. Skips the soak's own workdir.
+/// Temp-dir files modified since the soak started, excluding its own workdir.
 fn temp_sweep(cfg: &SoakConfig, scanner: &Scanner, since: SystemTime) -> (usize, u64, Vec<String>) {
     let tmp = std::env::temp_dir();
     let work = cfg.workdir.canonicalize().unwrap_or_else(|_| cfg.workdir.clone());
@@ -783,7 +732,6 @@ async fn sweep_checkpoint(
     when: &str,
     global: &mut Vec<Proof>,
 ) {
-    // The whole app data dir, while every file is stored and most are cached.
     let (n, findings) = disk_sweep(world, scanner, &[]);
     let cached = world::walk(&world.cache_root).len();
     global.push(Proof::check(
@@ -798,9 +746,7 @@ async fn sweep_checkpoint(
         format!("{tn} file(s), {} written since the soak began, scanned; findings: {}", human(tb), if tf.is_empty() { "none".to_string() } else { tf.join("; ") }),
     ));
 
-    // The SQLCipher DB: ciphertext on disk, and — the positive control that
-    // makes the needle search above mean something — the vault entries (with
-    // every file's id, name and digest) really are inside it.
+    // Positive control: the vault entries really are inside the DB.
     let db_path = world.app_dir.join(format!("pollis_{}.db", alice.user_id));
     let raw = std::fs::read(&db_path).unwrap_or_default();
     let wal = std::fs::metadata(world.app_dir.join(format!("pollis_{}.db-wal", alice.user_id))).map(|m| m.len()).unwrap_or(0);

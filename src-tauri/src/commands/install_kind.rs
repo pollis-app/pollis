@@ -1,18 +1,4 @@
-//! Detect when Pollis is running from a system package manager that owns
-//! the install (e.g. AUR / pacman). Tauri's auto-updater can't replace
-//! a package-managed binary — on Arch the AUR `PKGBUILD` extracts our `.deb`,
-//! so the binary identifies as `bundle_type=Deb`, the updater dispatches to
-//! `install_deb`, and `dpkg -i` either fails (no dpkg on Arch) or returns
-//! `InvalidUpdaterFormat` if the manifest URL points to a non-`.deb` file.
-//!
-//! When this returns `Some`, the frontend replaces the auto-updater flow
-//! with a hard-stop screen telling the user to update via their package
-//! manager. This is also the gate we'll extend for Mac App Store / Microsoft
-//! Store builds, which forbid in-app auto-updates.
-//!
-//! Detection is deliberately conservative: we only claim a managed install
-//! when we have strong evidence. False negatives fall back to the regular
-//! auto-updater (which then either succeeds or shows its own error).
+//! Detect installs owned by a system package manager (AUR), which Tauri's updater cannot replace.
 
 use serde::Serialize;
 use std::ffi::OsStr;
@@ -22,8 +8,7 @@ use tauri::utils::{config::BundleType, platform::bundle_type};
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ManagedInstallKind {
-    /// Arch User Repository — install came from `yay`/`paru`/`pacman` via
-    /// the `pollis` AUR PKGBUILD that repackages our `.deb` artifact.
+    /// The `pollis` AUR PKGBUILD, which repackages our `.deb`.
     Aur,
 }
 
@@ -34,10 +19,7 @@ impl ManagedInstallKind {
         }
     }
 
-    /// Single-package update command. Deliberately *not* `-Syu` /
-    /// `-Syyu` — those are full-system upgrades and would update the
-    /// user's kernel and every other package. The user came here to
-    /// update Pollis, nothing else.
+    /// Deliberately not `-Syu`: that is a full-system upgrade.
     pub fn update_command(self) -> &'static str {
         match self {
             ManagedInstallKind::Aur => "yay -S pollis",
@@ -62,16 +44,11 @@ impl From<ManagedInstallKind> for ManagedInstallInfo {
     }
 }
 
-/// Inspect the running binary + host to decide whether a system package
-/// manager owns this install. Returns `None` on user-installed builds
-/// (AppImage, .dmg, direct .exe) where the in-app updater is the right
-/// path.
+/// `None` on user-installed builds, where the in-app updater is right.
 pub fn detect() -> Option<ManagedInstallKind> {
     #[cfg(target_os = "linux")]
     {
-        // AUR PKGBUILD installs from our .deb, so the bundled binary's
-        // sentinel still says "Deb". Pair that with /etc/os-release to
-        // distinguish AUR-on-Arch from a regular Debian/Ubuntu .deb install.
+        // The AUR PKGBUILD installs our .deb, so pair "Deb" with /etc/os-release.
         let is_deb_bundle = matches!(bundle_type(), Some(BundleType::Deb));
         if is_deb_bundle && os_release_is_arch() {
             return Some(ManagedInstallKind::Aur);
@@ -88,8 +65,7 @@ fn os_release_is_arch() -> bool {
     };
     contents.lines().any(|line| {
         let line = line.trim();
-        // ID=arch (canonical Arch) or ID_LIKE=arch (Manjaro, EndeavourOS, etc.)
-        // Values may be quoted: ID="arch".
+        // ID=arch or ID_LIKE=arch (Manjaro etc.); values may be quoted.
         if let Some(rest) = line.strip_prefix("ID=") {
             return strip_quotes(rest) == "arch";
         }
@@ -112,27 +88,18 @@ pub fn detect_managed_install() -> Option<ManagedInstallInfo> {
     detect().map(Into::into)
 }
 
-/// Where the running app lives when the in-app updater cannot replace it.
-///
-/// Tauri's macOS updater swaps the `.app` bundle in place, so it needs the
-/// bundle's directory to be writable. Two launch locations are read-only and
-/// fail with "Read-only file system (os error 30)" partway through an update:
+/// A read-only launch location where the macOS updater fails (os error 30).
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ReadOnlyLocation {
-    /// Launched straight from the mounted disk image (`/Volumes/...`) instead
-    /// of from a copy in Applications.
+    /// Launched from the mounted disk image (`/Volumes/...`).
     DiskImage,
-    /// macOS App Translocation: a quarantined app run from a randomized,
-    /// read-only mount (`.../AppTranslocation/...`) until it is moved in Finder.
+    /// macOS App Translocation: a randomized read-only mount until moved in Finder.
     Translocated,
-    /// Translocated because an older release's updater stamped the installed
-    /// bundle itself (see [`heal_installed_copies`]); the stamp is gone and a
-    /// plain relaunch from Applications is enough.
+    /// Stamped by an older release's updater ([`heal_installed_copies`]); a relaunch fixes it.
     TranslocatedHealed,
 }
 
-/// Classify an executable path. Pure, so the rule is testable on every OS.
 fn classify_exe_path(path: &str) -> Option<ReadOnlyLocation> {
     if path.contains("/AppTranslocation/") {
         return Some(ReadOnlyLocation::Translocated);
@@ -143,9 +110,7 @@ fn classify_exe_path(path: &str) -> Option<ReadOnlyLocation> {
     None
 }
 
-/// `Some` when the running app is in a location the updater cannot write to,
-/// so the update screen can say how to fix it before attempting an install
-/// that is guaranteed to fail. `None` everywhere but macOS.
+/// `Some` when the updater cannot write here, so the UI can say so first. macOS only.
 #[tauri::command]
 pub fn detect_read_only_location() -> Option<ReadOnlyLocation> {
     if !cfg!(target_os = "macos") {
@@ -161,25 +126,15 @@ pub fn detect_read_only_location() -> Option<ReadOnlyLocation> {
     Some(location)
 }
 
-/// Releases 1.12–1.17 shipped `LSFileQuarantineEnabled`, which made macOS stamp
-/// `com.apple.quarantine` on every file the process wrote — including the
-/// bundle the in-app updater installed. Finder never moved that bundle, so the
-/// next launch translocated it, and a translocated app cannot update: every
-/// update broke the one after it. Those bundles carry Pollis's own name in the
-/// stamp's agent field; only that stamp is removed, and only from the standard
-/// install locations. A browser's stamp on a fresh download is left for
-/// Gatekeeper exactly as before.
+/// Releases 1.12–1.17 quarantine-stamped their own updated bundle; only stamps with this agent are removed.
 pub const QUARANTINE_AGENT: &str = "Pollis";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Heal {
-    /// Pollis's own stamp was removed; the next Finder launch is a normal one.
     Healed,
-    /// No stamp at all.
     AlreadyClean,
-    /// Stamped by something else (a browser, an archive utility): not ours to touch.
+    /// Stamped by something else (a browser): not ours to touch.
     ForeignStamp,
-    /// Nothing installed at that location.
     Missing,
     Failed(String),
 }
@@ -194,14 +149,12 @@ fn quarantine_agent(value: &str) -> Option<&str> {
     value.split(';').nth(2)
 }
 
-/// The `.app` an executable at `<bundle>/Contents/MacOS/<exe>` belongs to.
 fn bundle_of(exe: &Path) -> Option<&Path> {
     let bundle = exe.ancestors().nth(3)?;
     (bundle.extension() == Some(OsStr::new("app"))).then_some(bundle)
 }
 
-/// Where a Finder install of this bundle would live, plus the running bundle
-/// itself when it is a real install rather than a translocated or mounted copy.
+/// Finder install locations, plus the running bundle if it is a real install.
 fn candidate_installs(exe: &Path, home: Option<&Path>) -> Vec<PathBuf> {
     let Some(bundle) = bundle_of(exe) else {
         return Vec::new();
@@ -233,8 +186,6 @@ pub fn heal_installed_copies(exe: &Path) -> Vec<(PathBuf, Heal)> {
         .collect()
 }
 
-/// Run at startup so a bundle stamped by an older release is clean before the
-/// next update is even offered.
 pub fn heal_self_quarantine_at_startup() {
     let Ok(exe) = std::env::current_exe() else {
         return;
@@ -324,9 +275,7 @@ fn remove_quarantine(path: &Path) -> std::io::Result<()> {
     Err(err)
 }
 
-/// Every entry of the bundle, not just its root: the stamp was applied per file
-/// as each was written, so a single-level removal would leave the bundle's
-/// contents still marked. Symlinks are handled by name, never followed.
+/// Every entry, since the stamp was applied per file; symlinks are never followed.
 #[cfg(target_os = "macos")]
 fn remove_quarantine_tree(path: &Path) -> std::io::Result<()> {
     remove_quarantine(path)?;

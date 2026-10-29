@@ -1,8 +1,4 @@
 //! End-to-end integration harness for Pollis.
-//!
-//! Per-feature test modules live in `tests/flows/*.rs`; the shared
-//! `TestClient` / world setup lives in `tests/flows/harness.rs`.
-//!
 //! Run with:
 //! ```
 //! cargo test --features test-harness --test flows
@@ -35,8 +31,7 @@ mod groups;
 mod heavy_churn;
 #[path = "flows/key_package_exhaustion.rs"]
 mod key_package_exhaustion;
-// Pins what this binary's own sqlite3 is — see the module docs. It is the one
-// module here that tests the harness rather than the product.
+// Tests the harness's own sqlite3, not the product.
 #[path = "flows/linked_sqlite.rs"]
 mod linked_sqlite;
 #[path = "flows/lost_messages.rs"]
@@ -69,10 +64,7 @@ mod security;
 mod vault;
 #[path = "flows/zero_loss.rs"]
 mod zero_loss;
-// voice.rs compile-depends on the media command surface (voice_e2ee helpers +
-// the media-gated state.voice field), so it only builds with `media` on. Every
-// other flow module — MLS/adversarial/model/messaging/etc. — stays in the
-// headless build; they are the point of the headless harness.
+// Needs the media command surface.
 #[cfg(feature = "media")]
 #[path = "flows/voice.rs"]
 mod voice;
